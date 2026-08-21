@@ -1,0 +1,17 @@
+[package]
+name = "suspect-arazzo"
+description = "Arazzo 1.0 models, runtime expressions, and validation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+suspect-ref.workspace = true
+rustc-hash.workspace = true
+suspect-jsonpath.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+suspect-source.workspace = true

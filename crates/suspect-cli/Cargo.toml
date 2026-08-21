@@ -1,0 +1,31 @@
+[package]
+name = "suspect-cli"
+description = "suspect: OpenAPI/Arazzo/Overlay toolkit CLI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "suspect"
+path = "src/main.rs"
+
+[dependencies]
+suspect-source.workspace = true
+suspect-syntax.workspace = true
+suspect-low.workspace = true
+suspect-ref.workspace = true
+suspect-jsonpath.workspace = true
+suspect-schema.workspace = true
+suspect-oas.workspace = true
+suspect-overlay.workspace = true
+suspect-arazzo.workspace = true
+suspect-validate.workspace = true
+suspect-lint.workspace = true
+suspect-lsp.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+serde.workspace = true
+rayon.workspace = true
+anyhow.workspace = true

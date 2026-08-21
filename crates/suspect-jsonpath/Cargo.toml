@@ -1,0 +1,20 @@
+[package]
+name = "suspect-jsonpath"
+description = "RFC 9535 JSONPath queries over suspect-low nodes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+suspect-source.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "jsonpath"
+harness = false

@@ -1,0 +1,60 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+authors = ["Luke"]
+
+[workspace.dependencies]
+# internal crates
+suspect-source = { path = "crates/suspect-source", version = "0.1.0" }
+suspect-syntax = { path = "crates/suspect-syntax", version = "0.1.0" }
+suspect-low = { path = "crates/suspect-low", version = "0.1.0" }
+suspect-ref = { path = "crates/suspect-ref", version = "0.1.0" }
+suspect-jsonpath = { path = "crates/suspect-jsonpath", version = "0.1.0" }
+suspect-schema = { path = "crates/suspect-schema", version = "0.1.0" }
+suspect-oas = { path = "crates/suspect-oas", version = "0.1.0" }
+suspect-arazzo = { path = "crates/suspect-arazzo", version = "0.1.0" }
+suspect-overlay = { path = "crates/suspect-overlay", version = "0.1.0" }
+suspect-validate = { path = "crates/suspect-validate", version = "0.1.0" }
+suspect-lint = { path = "crates/suspect-lint", version = "0.1.0" }
+suspect-lsp = { path = "crates/suspect-lsp", version = "0.1.0" }
+
+# external
+tree-sitter = "0.26"
+memmap2 = "0.9"
+rayon = "1.12"
+rustc-hash = "2"
+dashmap = "6"
+smallvec = "1"
+thiserror = "2"
+url = "2"
+percent-encoding = "2"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
+tower-lsp = "0.20"
+criterion = "0.8"
+proptest = "1"
+anyhow = "1"
+ureq = "3"
+cc = "1"
+memchr = "2"
+tree-sitter-language = "0.1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.bench]
+inherits = "release"
+
+# keep test/dev builds usable for perf sanity checks
+[profile.dev.package."*"]
+opt-level = 1

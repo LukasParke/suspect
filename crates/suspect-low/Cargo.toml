@@ -1,0 +1,21 @@
+[package]
+name = "suspect-low"
+description = "Generic ordered document model with source maps over lossless CSTs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-source.workspace = true
+suspect-syntax.workspace = true
+smallvec.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "low"
+harness = false

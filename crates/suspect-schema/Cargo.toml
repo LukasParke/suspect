@@ -1,0 +1,17 @@
+[package]
+name = "suspect-schema"
+description = "JSON Schema 2020-12 validator with OpenAPI dialect support"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+regex.workspace = true
+rustc-hash.workspace = true
+smallvec.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+suspect-source.workspace = true

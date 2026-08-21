@@ -1,0 +1,15 @@
+[package]
+name = "suspect-source"
+description = "Document loading: mmap, encodings, line indexes, URI canonicalization"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+memmap2.workspace = true
+url.workspace = true
+memchr.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true
+percent-encoding.workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "suspect-validate"
+description = "Semantic validation for OpenAPI documents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+suspect-ref.workspace = true
+suspect-oas.workspace = true
+suspect-source.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true

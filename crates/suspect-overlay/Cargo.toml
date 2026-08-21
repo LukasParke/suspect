@@ -1,0 +1,20 @@
+[package]
+name = "suspect-overlay"
+description = "Overlay 1.0 models and apply engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-source.workspace = true
+suspect-low.workspace = true
+suspect-jsonpath.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "overlay"
+harness = false

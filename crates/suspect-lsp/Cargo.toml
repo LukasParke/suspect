@@ -1,0 +1,21 @@
+[package]
+name = "suspect-lsp"
+description = "Language server for OpenAPI, Arazzo, and Overlay documents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+suspect-ref.workspace = true
+suspect-oas.workspace = true
+suspect-validate.workspace = true
+suspect-lint.workspace = true
+suspect-source.workspace = true
+suspect-syntax.workspace = true
+suspect-arazzo.workspace = true
+suspect-overlay.workspace = true
+tower-lsp.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
+thiserror.workspace = true

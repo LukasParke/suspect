@@ -1,0 +1,16 @@
+[package]
+name = "suspect-lint"
+description = "Spectral-compatible linting engine and builtin rule packs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+suspect-source.workspace = true
+suspect-jsonpath.workspace = true
+rayon.workspace = true
+rustc-hash.workspace = true
+thiserror.workspace = true
+regex.workspace = true
