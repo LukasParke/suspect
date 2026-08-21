@@ -98,5 +98,93 @@ fn bench_duplicate_keys(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_parse, bench_pointer_lookups, bench_entries_iteration, bench_duplicate_keys);
+criterion_group!(
+    benches,
+    bench_parse,
+    bench_pointer_lookups,
+    bench_entries_iteration,
+    bench_duplicate_keys,
+    bench_corpus_low,
+    bench_corpus_traverse
+);
 criterion_main!(benches);
+
+fn corpus_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
+}
+
+/// Reads a gitignored corpus file; returns `None` (with a note) when the
+/// corpus is not checked out so benchmarks skip instead of panicking.
+fn read_corpus(name: &str) -> Option<(PathBuf, Vec<u8>)> {
+    let path = corpus_dir().join(name);
+    match std::fs::read(&path) {
+        Ok(bytes) => Some((path, bytes)),
+        Err(e) => {
+            eprintln!("skipping corpus benchmark for {}: {e}", path.display());
+            None
+        }
+    }
+}
+
+fn bench_corpus_low(c: &mut Criterion) {
+    let mut group = c.benchmark_group("corpus_low");
+    group.sample_size(10);
+
+    for (label, file) in [
+        ("stripe_yaml", "stripe.yaml"),
+        ("github_yaml", "api.github.com.yaml"),
+        ("kubernetes_yaml", "kubernetes-swagger.yaml"),
+    ] {
+        let Some((path, bytes)) = read_corpus(file) else {
+            continue;
+        };
+        let uri = Uri::from_path(&path)
+            .unwrap_or_else(|e| panic!("failed to make URI for {}: {e}", path.display()));
+        group.throughput(criterion::Throughput::Bytes(bytes.len() as u64));
+        group.bench_function(label, |b| {
+            b.iter(|| {
+                let doc = LowDoc::parse(black_box(uri.clone()), Source::from_vec(bytes.clone()));
+                black_box(doc.syntax_errors().len());
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_corpus_traverse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("corpus_traverse");
+    let Some((path, bytes)) = read_corpus("stripe.yaml") else {
+        group.finish();
+        return;
+    };
+    let uri = Uri::from_path(&path)
+        .unwrap_or_else(|e| panic!("failed to make URI for {}: {e}", path.display()));
+    let doc = LowDoc::parse(uri, Source::from_vec(bytes));
+    group.sample_size(20);
+
+    // Count component schemas and walk the first 100 schemas' properties:
+    // measures repeated mapping-entry iteration over a real spec shape.
+    group.bench_function("stripe_schemas_walk_100", |b| {
+        b.iter(|| {
+            let root = doc.root();
+            let mut visited = 0usize;
+            if let Some(schemas) = root.get("components").and_then(|c| c.get("schemas")) {
+                for entry in schemas.entries() {
+                    visited += 1;
+                    if visited > 100 {
+                        break;
+                    }
+                    if let Some(props) = entry.value.and_then(|v| v.get("properties")) {
+                        visited += props.entries().len();
+                    }
+                }
+            }
+            black_box(visited);
+        });
+    });
+
+    group.bench_function("stripe_root_duplicate_keys", |b| {
+        b.iter(|| black_box(doc.root().duplicate_keys().len()));
+    });
+    group.finish();
+}

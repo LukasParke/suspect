@@ -13,3 +13,10 @@ suspect-source.workspace = true
 suspect-ref.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "oas"
+harness = false

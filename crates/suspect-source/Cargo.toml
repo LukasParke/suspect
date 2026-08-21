@@ -13,3 +13,10 @@ memchr.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 percent-encoding.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "source"
+harness = false

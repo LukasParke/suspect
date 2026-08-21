@@ -15,3 +15,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 suspect-source.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "arazzo"
+harness = false

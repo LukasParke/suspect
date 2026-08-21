@@ -62,8 +62,52 @@ actions:
     remove: true
 "#;
 
+/// A 10-action update-only overlay aimed at real DigitalOcean API paths
+/// (targets that exist in the corpus document).
+const CORPUS_OVERLAY_TEXT: &str = r#"
+overlay: 1.0.0
+info:
+  title: bench corpus overlay
+  version: "1.0.0"
+actions:
+  - target: "$.info"
+    update:
+      summary: overlaid by corpus bench
+  - target: "$.servers[0]"
+    update:
+      description: production (overlaid)
+  - target: "$.paths['/v2/account'].get"
+    update:
+      deprecated: true
+  - target: "$.paths['/v2/actions'].get"
+    update:
+      deprecated: true
+  - target: "$.paths['/v2/1-clicks'].get"
+    update:
+      deprecated: true
+  - target: "$.paths['/v2/account/keys'].get"
+    update:
+      deprecated: true
+  - target: "$.tags"
+    update:
+      - name: overlaid-tag
+        description: added by corpus bench
+  - target: "$.info.license"
+    update:
+      name: Apache 2.0 (overlaid)
+  - target: "$.info.contact"
+    update:
+      name: Bench Overlay Team
+  - target: "$.security"
+    remove: true
+"#;
+
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures")
+}
+
+fn corpus_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
 }
 
 fn bench_all(c: &mut Criterion) {
@@ -98,5 +142,44 @@ fn bench_all(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_all);
+/// Applies the 10-action corpus overlay to `digitalocean.yaml`.
+fn bench_corpus_apply(c: &mut Criterion) {
+    let path = corpus_dir().join("digitalocean.yaml");
+    if !path.exists() {
+        eprintln!(
+            "[overlay] skipping corpus_apply: corpus file {} not found",
+            path.display()
+        );
+        return;
+    }
+    let target = LowDoc::parse(
+        Uri::from_path(&path).expect("valid corpus URI"),
+        Source::from_path(&path).expect("corpus file reads"),
+    );
+    let overlay_doc = LowDoc::parse(
+        Uri::parse("memory://bench-corpus-overlay.yaml").expect("valid URI"),
+        Source::from_vec(CORPUS_OVERLAY_TEXT.as_bytes().to_vec()),
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).expect("overlay parses");
+
+    // Sanity check before timing: apply must succeed; most actions should
+    // hit the real document.
+    let applied = apply(&overlay, target.root()).expect("apply succeeds");
+    assert_eq!(applied.applied_actions, 10, "all 10 corpus actions must match");
+    assert!(applied.unmatched_targets.is_empty());
+
+    let mut group = c.benchmark_group("overlay/corpus_apply");
+    group.sample_size(20);
+    group.bench_function("10_actions_over_digitalocean_yaml", |b| {
+        b.iter(|| {
+            let applied =
+                apply(black_box(&overlay), black_box(target.root())).expect("apply succeeds");
+            black_box(applied.output.to_json().len())
+        });
+    });
+    group.finish();
+}
+
+
+criterion_group!(benches, bench_all, bench_corpus_apply);
 criterion_main!(benches);

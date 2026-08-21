@@ -350,3 +350,30 @@ fn load_all_enforces_doc_cap() {
     }
 }
 
+
+/// Defends: `$ref` written as a folded block scalar (Stripe style) must be
+/// decoded to its pointer text, not read as the raw `>-` source.
+#[test]
+fn block_scalar_refs_resolve() {
+    let d = TempDir::new("blockref");
+    d.write(
+        "stripe-style.yaml",
+        "components:\n  schemas:\n    A:\n      $ref: >-\n        #/components/schemas/B\n    B:\n      type: object\n",
+    );
+    let w = ws(&d.path);
+    if let Err(e) = w.load_all("stripe-style.yaml") {
+        panic!("LOAD FAILED: {e:?}");
+    }
+    let content = fs::read_to_string(d.path.join("stripe-style.yaml")).unwrap();
+    eprintln!("FULL CONTENT:\n{content}");
+    let _ = content;
+    let h = w.open("stripe-style.yaml").unwrap();
+    let edges = h.edges();
+    assert_eq!(edges.len(), 1, "one edge");
+    match h.resolve_edge(0).unwrap() {
+        Resolution::Node(n) => {
+            assert_eq!(n.kind(), suspect_low::ValueKind::Object, "resolves to schema B");
+        }
+        other => panic!("expected Node, got {other:?}"),
+    }
+}

@@ -201,8 +201,14 @@ impl Workspace {
 
             match node.get("$ref") {
                 Some(rv) if rv.kind() == ValueKind::Str => {
-                    let raw = rv.as_str().unwrap_or_default();
-                    cur = self.hop(*d, p, raw)?;
+                    // Block scalars (Stripe style) must be decoded, not read
+                    // as raw source slices.
+                    let decoded = rv.decoded_scalar();
+                    let raw = std::str::from_utf8(&decoded)
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .to_owned();
+                    cur = self.hop(*d, p, &raw)?;
                 }
                 _ => {
                     // Plain landing spot: memoize it as its own shortcut so

@@ -20,6 +20,8 @@ pub struct OpenDoc {
 }
 
 impl OpenDoc {
+    /// Parses the buffer text into a [`LowDoc`] (which carries the line
+    /// index) and keeps the raw text alongside it.
     pub fn parse(uri: Uri, text: String) -> OpenDoc {
         let low = LowDoc::parse(uri.clone(), Source::from_vec(text.clone().into_bytes()));
         OpenDoc { text, low }

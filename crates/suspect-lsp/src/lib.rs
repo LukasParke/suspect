@@ -11,11 +11,11 @@
 //! Semantic tokens and rename are intentionally unsupported: the
 //! capabilities advertised in `initialize` simply omit them.
 
-mod completion;
-mod diagnostics;
-mod navigation;
-mod state;
-mod symbols;
+pub mod completion;
+pub mod diagnostics;
+pub mod navigation;
+pub mod state;
+pub mod symbols;
 
 use std::sync::Arc;
 use std::time::Duration;

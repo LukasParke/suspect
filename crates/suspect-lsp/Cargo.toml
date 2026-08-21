@@ -19,3 +19,10 @@ suspect-overlay.workspace = true
 tower-lsp.workspace = true
 tokio = { workspace = true, features = ["io-std"] }
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "lsp"
+harness = false

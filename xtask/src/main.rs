@@ -74,6 +74,24 @@ const CORPUS: &[CorpusEntry] = &[
             "https://raw.githubusercontent.com/kubernetes/kubernetes/master/api/discovery/k8s.yaml",
         ],
     },
+    CorpusEntry {
+        name: "stripe.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "stripe-sdk.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.sdk.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "gitlab.yaml",
+        urls: &[
+            "https://gitlab.com/gitlab-org/gitlab/-/raw/master/openapi/openapi.v3.yaml",
+        ],
+    },
 ];
 
 enum FetchOutcome {

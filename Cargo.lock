@@ -1112,6 +1112,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 name = "suspect-arazzo"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "rustc-hash",
  "suspect-jsonpath",
  "suspect-low",
@@ -1159,6 +1160,7 @@ dependencies = [
 name = "suspect-lint"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "rayon",
  "regex",
  "rustc-hash",
@@ -1184,6 +1186,7 @@ dependencies = [
 name = "suspect-lsp"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "suspect-arazzo",
  "suspect-lint",
  "suspect-low",
@@ -1202,6 +1205,7 @@ dependencies = [
 name = "suspect-oas"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "rustc-hash",
  "suspect-low",
  "suspect-ref",
@@ -1240,11 +1244,13 @@ dependencies = [
 name = "suspect-schema"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "regex",
  "rustc-hash",
  "smallvec",
  "suspect-low",
  "suspect-source",
+ "suspect-syntax",
  "thiserror",
 ]
 
@@ -1252,6 +1258,7 @@ dependencies = [
 name = "suspect-source"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "memchr",
  "memmap2",
  "percent-encoding",
@@ -1276,6 +1283,7 @@ dependencies = [
 name = "suspect-validate"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "rustc-hash",
  "suspect-low",
  "suspect-oas",

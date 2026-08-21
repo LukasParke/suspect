@@ -1,4 +1,4 @@
-use suspect_syntax::{Format, SyntaxKind};
+use suspect_syntax::{Format, ScalarStyle, SyntaxKind};
 
 use crate::scalar::{infer_scalar, parse_float, parse_int, ValueKind};
 use crate::Pointer;
@@ -259,6 +259,39 @@ impl<'d> NodeRef<'d> {
         self.raw.text()
     }
 
+    /// Fully decoded scalar text per YAML 1.2 / JSON:
+    ///
+    /// - plain scalars: verbatim bytes
+    /// - single-quoted: quotes stripped, `''` -> `'`
+    /// - double-quoted: quotes stripped and escape sequences decoded
+    ///   (`\n`, `\t`, `\\`, `\"`, `\uXXXX`, ...)
+    /// - block scalars (`|` / `>` with chomping indicators): header stripped,
+    ///   indentation removed, folding applied (`>` folds single breaks into
+    ///   spaces), chomping applied (clip default, strip `-`, keep `+`)
+    ///
+    /// Multi-line non-block scalars are not produced by either grammar.
+    #[must_use]
+    pub fn decoded_scalar(&self) -> std::borrow::Cow<'d, [u8]> {
+        let node = self.resolved().raw;
+        match node.scalar_style() {
+            suspect_syntax::ScalarStyle::Plain => std::borrow::Cow::Borrowed(node.scalar_bytes()),
+            ScalarStyle::SingleQuoted => {
+                let inner = strip_outer_quotes(node.text());
+                // '' collapses to '
+                if inner.windows(2).any(|w| w == b"''") {
+                    std::borrow::Cow::Owned(replace_all(inner, b"''", b"'"))
+                } else {
+                    std::borrow::Cow::Borrowed(inner)
+                }
+            }
+            ScalarStyle::DoubleQuoted => {
+                let inner = strip_outer_quotes(node.text());
+                std::borrow::Cow::Owned(unescape_double(inner))
+            }
+            ScalarStyle::Block => std::borrow::Cow::Owned(decode_block_scalar(node.text())),
+        }
+    }
+
     /// Byte range of the resolved content node.
     #[must_use]
     pub fn byte_range(&self) -> std::ops::Range<usize> {
@@ -390,6 +423,155 @@ fn find_in_merge<'d>(merge: NodeRef<'d>, key: &str) -> Option<NodeRef<'d>> {
         }
         _ => None,
     }
+}
+
+
+fn strip_outer_quotes(text: &[u8]) -> &[u8] {
+    if text.len() >= 2
+        && ((text[0] == b'"' && text[text.len() - 1] == b'"')
+            || (text[0] == b'\'' && text[text.len() - 1] == b'\''))
+    {
+        &text[1..text.len() - 1]
+    } else {
+        text
+    }
+}
+
+fn replace_all(haystack: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(haystack.len());
+    let mut i = 0;
+    while i < haystack.len() {
+        if haystack[i..].starts_with(from) {
+            out.extend_from_slice(to);
+            i += from.len();
+        } else {
+            out.push(haystack[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+fn unescape_double(bytes: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            i += 1;
+            match bytes[i] {
+                b'n' => out.push(b'\n'),
+                b't' => out.push(b'\t'),
+                b'r' => out.push(b'\r'),
+                b'b' => out.push(0x08),
+                b'f' => out.push(0x0C),
+                b'0' => out.push(0),
+                b'"' => out.push(b'"'),
+                b'\\' => out.push(b'\\'),
+                b'/' => out.push(b'/'),
+                b'u' | b'U' | b'x' => {
+                    let width = match bytes[i] {
+                        b'u' => 4,
+                        b'U' => 8,
+                        _ => 2,
+                    };
+                    if i + width < bytes.len() {
+                        let hex = std::str::from_utf8(&bytes[i + 1..i + 1 + width]).ok();
+                        if let Some(v) =
+                            hex.and_then(|h| u32::from_str_radix(h, 16).ok())
+                                .and_then(char::from_u32)
+                        {
+                            let mut buf = [0u8; 4];
+                            out.extend_from_slice(v.encode_utf8(&mut buf).as_bytes());
+                            i += width;
+                            i += 1;
+                            continue;
+                        }
+                    }
+                    out.push(bytes[i]); // invalid escape: keep literally
+                }
+                other => out.push(other),
+            }
+            i += 1;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Decodes a `|`/`>` block scalar: strips the header, removes indentation,
+/// applies folding and chomping.
+fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
+    let split = text.iter().position(|&b| b == b'\n').map_or(text.len(), |i| i + 1);
+    let header = &text[..split.min(text.len())];
+    let body = &text[split..];
+    let folded = header.first() == Some(&b'>');
+    let chomp = header.iter().skip(1).find(|b| **b == b'-' || **b == b'+');
+
+    // content indent = leading spaces of the first non-empty line
+    let mut indent = None;
+    for line in body.split_inclusive(|&b| b == b'\n') {
+        let nonspace = line.iter().take_while(|&&b| b == b' ').count();
+        if nonspace < line.len() {
+            indent = Some(nonspace);
+            break;
+        }
+    }
+    let indent = indent.unwrap_or(0);
+
+    let mut out: Vec<u8> = Vec::with_capacity(body.len());
+    let mut lines = body.split(|&b| b == b'\n').filter(|l| !l.is_empty() || false).peekable();
+    // Re-split preserving structure: iterate raw lines without dropping empties.
+    let mut raw_lines: Vec<&[u8]> = body.split_inclusive(|&b| b == b'\n').collect();
+    if raw_lines.last().is_some_and(|l| l.ends_with(b"\n"))
+        && let Some(last) = raw_lines.last_mut()
+    {
+        *last = &last[..last.len() - 1];
+    }
+    let mut prev_folded_break = false;
+    let mut wrote_any = false;
+    for line in &mut raw_lines {
+        let bare: &[u8] = if line.ends_with(b"\n") { &line[..line.len() - 1] } else { line };
+        let dedented: &[u8] = bare.get(indent..).unwrap_or(if bare.is_empty() { b"" } else { bare });
+        let is_blank = dedented.iter().all(|&b| b == b' ');
+        if folded && !is_blank && wrote_any && !prev_folded_break {
+            // fold: single break between two non-empty lines becomes a space
+            out.push(b' ');
+        } else if wrote_any {
+            out.push(b'\n');
+        }
+        if is_blank {
+            prev_folded_break = true;
+            continue;
+        }
+        prev_folded_break = false;
+        out.extend_from_slice(dedented);
+        wrote_any = true;
+        let _ = lines.next();
+    }
+
+    // chomping: clip (default) keeps exactly one trailing break if any content;
+    // strip removes all trailing breaks; keep preserves them.
+    match chomp {
+        Some(b'-') => {
+            while out.last() == Some(&b'\n') || out.last() == Some(&b' ') {
+                if out.last() == Some(&b' ') && !out.ends_with(b"\n ") && !out.iter().all(|&b| b == b' ') {
+                    break;
+                }
+                out.pop();
+            }
+        }
+        Some(b'+') => {}
+        _ => {
+            while matches!(out.last(), Some(b'\n') | Some(b' ')) {
+                out.pop();
+            }
+            out.push(b'\n');
+        }
+    }
+    let _ = lines;
+    out
 }
 
 fn append_merge<'d>(out: &mut Vec<Entry<'d>>, seen: &mut Vec<&'d str>, merge: NodeRef<'d>) {

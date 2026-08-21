@@ -13,10 +13,27 @@ use std::path::PathBuf;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use suspect_source::{Source, Uri};
-use suspect_syntax::{Format, SourceDoc};
+use suspect_syntax::{Edit, Format, SourceDoc};
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures")
+}
+
+fn corpus_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
+}
+
+/// Reads a gitignored corpus file; returns `None` (with a note) when the
+/// corpus is not checked out so benchmarks skip instead of panicking.
+fn read_corpus(name: &str) -> Option<(PathBuf, Vec<u8>)> {
+    let path = corpus_dir().join(name);
+    match std::fs::read(&path) {
+        Ok(bytes) => Some((path, bytes)),
+        Err(e) => {
+            eprintln!("skipping corpus benchmark for {}: {e}", path.display());
+            None
+        }
+    }
 }
 
 fn bench_parse(c: &mut Criterion, label: &str, fixture: &str, format: Option<Format>) {
@@ -66,5 +83,87 @@ fn bench_all(c: &mut Criterion) {
     );
 }
 
-criterion_group!(benches, bench_all);
+criterion_group!(benches, bench_all, bench_corpus_parse, bench_incremental_reparse);
 criterion_main!(benches);
+
+fn bench_corpus_parse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("corpus_parse");
+
+    // (label, file, format, sample size). Large real-world specs use a
+    // small sample size to keep suite runtime bounded.
+    let cases: &[(&str, &str, Option<Format>, usize)] = &[
+        ("stripe_yaml", "stripe.yaml", Some(Format::Yaml), 10),
+        ("stripe_sdk_yaml", "stripe-sdk.yaml", Some(Format::Yaml), 10),
+        ("github_yaml", "api.github.com.yaml", Some(Format::Yaml), 10),
+        ("kubernetes_yaml", "kubernetes-swagger.yaml", Some(Format::Yaml), 10),
+        ("stripe_yaml_autodetect", "stripe.yaml", None, 10),
+        ("kubernetes_yaml_autodetect", "kubernetes-swagger.yaml", None, 10),
+        ("petstore_expanded_yaml", "petstore-expanded.yaml", Some(Format::Yaml), 100),
+    ];
+
+    for (label, file, format, sample_size) in cases {
+        let Some((path, bytes)) = read_corpus(file) else {
+            continue;
+        };
+        let uri = Uri::from_path(&path)
+            .unwrap_or_else(|e| panic!("failed to make URI for {}: {e}", path.display()));
+        group.sample_size(*sample_size);
+        group.throughput(criterion::Throughput::Bytes(bytes.len() as u64));
+        group.bench_function(*label, |b| {
+            b.iter(|| {
+                let source = Source::from_vec(bytes.clone());
+                let doc = match format {
+                    Some(f) => SourceDoc::with_format(black_box(uri.clone()), source, *f),
+                    None => SourceDoc::parse(black_box(uri.clone()), source),
+                };
+                black_box(doc.root().byte_range());
+            });
+        });
+    }
+    group.finish();
+}
+
+fn bench_incremental_reparse(c: &mut Criterion) {
+    let mut group = c.benchmark_group("incremental_reparse");
+    let Some((path, bytes)) = read_corpus("stripe.yaml") else {
+        group.finish();
+        return;
+    };
+    let uri = Uri::from_path(&path)
+        .unwrap_or_else(|e| panic!("failed to make URI for {}: {e}", path.display()));
+    let doc = SourceDoc::with_format(uri, Source::from_vec(bytes.clone()), Format::Yaml);
+
+    // Insert 1 KB of valid YAML at 40 % of the document.
+    let offset = bytes.len() * 2 / 5;
+    let mut payload = Vec::with_capacity(1024);
+    payload.extend_from_slice(b"\n# incremental-reparse benchmark insertion\nbenchmark_note:\n");
+    while payload.len() < 1024 {
+        payload.extend_from_slice(b"  padding_key: padding value for the benchmark insertion\n");
+    }
+    payload.truncate(1024);
+    let edit = Edit::from_bytes(&doc, offset, offset, payload.len());
+
+    // The edited buffer is prepared once; reparse is idempotent given the
+    // same inputs, so every iteration replays the identical edit.
+    let mut edited = Vec::with_capacity(bytes.len() + payload.len());
+    edited.extend_from_slice(&bytes[..offset]);
+    edited.extend_from_slice(&payload);
+    edited.extend_from_slice(&bytes[offset..]);
+
+    group.sample_size(20);
+    group.throughput(criterion::Throughput::Bytes(bytes.len() as u64));
+    group.bench_function("stripe_1kb_insert", |b| {
+        b.iter(|| {
+            let reparse =
+                doc.reparse(Source::from_vec(edited.clone()), std::slice::from_ref(&edit));
+            black_box(reparse.root().byte_range());
+        });
+    });
+    group.bench_function("full_reparse_control", |b| {
+        b.iter(|| {
+            let reparse = doc.reparse(Source::from_vec(bytes.clone()), &[]);
+            black_box(reparse.root().byte_range());
+        });
+    });
+    group.finish();
+}

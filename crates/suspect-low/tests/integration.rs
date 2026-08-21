@@ -146,3 +146,28 @@ fn family_sniffing_all_kinds() {
     assert_eq!(parse("overlay: '1.0.0'\n").sniff_family(), SpecFamily::Overlay10);
     assert_eq!(parse("random: doc\n").sniff_family(), SpecFamily::Unknown);
 }
+
+#[test]
+fn decoded_scalars_all_styles() {
+    let doc = parse(
+        "a: plain\n\
+         s: 'it''s'\n\
+         d: \"line\\nnext\\u00e9\"\n\
+         lit: |\n  one\n  two\n\
+         fold: >-\n  hello\n  world\n\
+         keep: |+\n  x\n\n",
+    );
+    let root = doc.root();
+    assert_eq!(root.get("a").unwrap().decoded_scalar().as_ref(), b"plain");
+    assert_eq!(root.get("s").unwrap().decoded_scalar().as_ref(), b"it's");
+    assert_eq!(
+        root.get("d").unwrap().decoded_scalar().as_ref(),
+        "line\nnext\u{e9}".as_bytes()
+    );
+    assert_eq!(root.get("lit").unwrap().decoded_scalar().as_ref(), b"one\ntwo\n");
+    // folded + strip chomping: single space join, no trailing newline
+    assert_eq!(root.get("fold").unwrap().decoded_scalar().as_ref(), b"hello world");
+    // keep chomping preserves interior/trailing structure
+    let kept = root.get("keep").unwrap().decoded_scalar();
+    assert!(kept.starts_with(b"x"), "got {kept:?}");
+}

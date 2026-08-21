@@ -258,7 +258,10 @@ fn record_ref(
     mapping_ptr: &Pointer,
 ) {
     let range = value.byte_range();
-    let Some(raw) = value.as_str() else { return };
+    // Stripe and friends write refs as folded block scalars (`>-`); the
+    // decoded value is the pointer text, not the raw source slice.
+    let decoded = value.decoded_scalar();
+    let Some(raw) = std::str::from_utf8(&decoded).ok().map(str::trim) else { return };
     // Collapse duplicate expansions of the same physical node (aliases).
     if sc.meta.value_index.contains_key(&range) {
         return;
