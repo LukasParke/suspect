@@ -6,7 +6,8 @@ use suspect_oas::{MediaType, OpenApi};
 use super::diag;
 use crate::diagnostic::{Diagnostic, Severity};
 
-/// TypeSet bits a value of `kind` can legitimately inhabit.
+/// TypeSet bits a value of `kind` can legitimately inhabit; JSON integers
+/// satisfy both `integer` and `number`.
 fn compatible_bits(kind: ValueKind) -> u8 {
     use suspect_oas::TypeSet;
     match kind {
@@ -44,6 +45,11 @@ pub(crate) fn check_example_types(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) 
     }
 }
 
+/// Checks one media type's `example` against its schema's type set. Skipped
+/// when either side is absent, the schema is cyclic (directly or through a
+/// resolved `$ref`), it uses `oneOf`/`anyOf` (no single type set to compare
+/// against), the type set is empty, or the example reads as null (empty YAML
+/// values would produce noise).
 fn check_media_example(api: &OpenApi<'_>, media: &MediaType<'_>, out: &mut Vec<Diagnostic>) {
     let Some(example) = media.example() else { return };
     let Some(schema) = media.schema() else { return };

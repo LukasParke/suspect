@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-lint: Spectral-compatible linting engine and builtin rule packs.
 //!
 //! Rules are compiled once into a [`Linter`] and run against any

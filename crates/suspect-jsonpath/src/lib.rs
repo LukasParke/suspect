@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-jsonpath: RFC 9535 JSONPath queries over suspect-low nodes.
 //!
 //! Compile once with [`Path::parse`], evaluate many times with

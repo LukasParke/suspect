@@ -76,6 +76,13 @@ pub enum CompletionContext {
     None,
 }
 
+/// Classifies what should be completed at `offset`.
+///
+/// A `$ref` string value wins over everything ([`CompletionContext::Refs`]);
+/// otherwise, if the offset sits on the key side of a mapping pair, the
+/// pair's owning mapping is classified via [`key_context`] into an offer of
+/// operation or schema keys; anything else yields
+/// [`CompletionContext::None`].
 #[must_use]
 pub fn context_at(low: &suspect_low::LowDoc, offset: usize) -> CompletionContext {
     let Some(node) = node_at(low, offset) else { return CompletionContext::None };

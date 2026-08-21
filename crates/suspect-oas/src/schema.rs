@@ -25,6 +25,8 @@ impl<'s> SchemaView<'s> {
     }
 
     #[must_use]
+    /// True when this view kept its raw form because its `$ref` chain
+    /// cycled ([`SchemaView::resolved`] hit a [`CycleGuard`]).
     pub const fn is_cyclic(&self) -> bool {
         self.cyclic
     }
@@ -109,31 +111,38 @@ impl<'s> SchemaView<'s> {
 
 
     #[must_use]
+    /// Prose describing the schema's purpose.
     pub fn description(&self) -> Option<&'s str> {
         self.resolved().get("description").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// Default instance validating against this schema.
     pub fn default(&self) -> Option<NodeRef<'s>> {
         self.resolved().get("default")
     }
 
     #[must_use]
+    /// Single inline example value.
     pub fn example(&self) -> Option<NodeRef<'s>> {
         self.resolved().get("example")
     }
 
     #[must_use]
+    /// Inline example values from the 3.1-style array keyword; empty when
+    /// absent or not an array.
     pub fn examples(&self) -> Vec<NodeRef<'s>> {
         self.resolved().get("examples").map(|n| n.items()).unwrap_or_default()
     }
 
     #[must_use]
+    /// Allowed values from the `enum` keyword, in document order.
     pub fn enum_values(&self) -> Vec<NodeRef<'s>> {
         self.resolved().get("enum").map(|n| n.items()).unwrap_or_default()
     }
 
     #[must_use]
+    /// The single allowed value from the `const` keyword.
     pub fn const_value(&self) -> Option<NodeRef<'s>> {
         self.resolved().get("const")
     }
@@ -162,6 +171,7 @@ impl<'s> SchemaView<'s> {
     }
 
     #[must_use]
+    /// Subschema of one named property; `None` when absent.
     pub fn property(&self, name: &str) -> Option<SchemaView<'s>> {
         self.resolved()
             .get("properties")?
@@ -176,6 +186,7 @@ impl<'s> SchemaView<'s> {
     }
 
     #[must_use]
+    /// Tuple-position subschemas from the 3.1 `prefixItems` keyword.
     pub fn prefix_items(&self) -> Vec<SchemaView<'s>> {
         self.resolved()
             .get("prefixItems")
@@ -191,108 +202,133 @@ impl<'s> SchemaView<'s> {
     }
 
     #[must_use]
+    /// Conjunction branches (`allOf`), in document order.
     pub fn all_of(&self) -> Vec<SchemaView<'s>> {
         self.keyword_schemas("allOf")
     }
 
     #[must_use]
+    /// Disjunction branches (`anyOf`), in document order.
     pub fn any_of(&self) -> Vec<SchemaView<'s>> {
         self.keyword_schemas("anyOf")
     }
 
     #[must_use]
+    /// Exclusive-choice branches (`oneOf`), in document order.
     pub fn one_of(&self) -> Vec<SchemaView<'s>> {
         self.keyword_schemas("oneOf")
     }
 
     #[must_use]
+    /// Negated subschema (`not`). `None` when absent.
     pub fn not(&self) -> Option<SchemaView<'s>> {
         self.resolved().get("not").map(|v| SchemaView::new(self.session, v))
     }
 
     #[must_use]
+    /// Polymorphism discriminator attached to this schema.
     pub fn discriminator(&self) -> Option<Discriminator<'s>> {
         self.resolved().get("discriminator").map(|n| Discriminator::new(self.session, n))
     }
 
     #[must_use]
+    /// XML serialization metadata for this schema.
     pub fn xml(&self) -> Option<Xml<'s>> {
         self.resolved().get("xml").map(|n| Xml::new(self.session, n))
     }
 
     #[must_use]
+    /// External documentation reference for this schema.
     pub fn external_docs(&self) -> Option<ExternalDocumentation<'s>> {
         self.resolved().get("externalDocs").map(|n| ExternalDocumentation::new(self.session, n))
     }
 
     #[must_use]
+    /// True when explicitly marked deprecated.
     pub fn deprecated(&self) -> bool {
         self.resolved().get("deprecated").and_then(|n| n.as_bool()).unwrap_or(false)
     }
 
     #[must_use]
+    /// True for response-only properties (`readOnly`).
     pub fn read_only(&self) -> bool {
         self.resolved().get("readOnly").and_then(|n| n.as_bool()).unwrap_or(false)
     }
 
     #[must_use]
+    /// True for request-only properties (`writeOnly`).
     pub fn write_only(&self) -> bool {
         self.resolved().get("writeOnly").and_then(|n| n.as_bool()).unwrap_or(false)
     }
 
     // numeric bounds
+    /// Inclusive upper numeric bound (`maximum`).
     #[must_use]
     pub fn maximum(&self) -> Option<f64> {
         self.resolved().get("maximum").and_then(|n| n.as_f64())
     }
+    /// Strict upper numeric bound (`exclusiveMaximum`). Only the numeric
+    /// form is reported; the 3.0 boolean-modifier spelling is ignored.
     #[must_use]
     pub fn exclusive_maximum(&self) -> Option<f64> {
         self.resolved().get("exclusiveMaximum").and_then(|n| n.as_f64())
     }
+    /// Inclusive lower numeric bound (`minimum`).
     #[must_use]
     pub fn minimum(&self) -> Option<f64> {
         self.resolved().get("minimum").and_then(|n| n.as_f64())
     }
+    /// Strict lower numeric bound (`exclusiveMinimum`); see
+    /// [`SchemaView::exclusive_maximum`] for the boolean-form caveat.
     #[must_use]
     pub fn exclusive_minimum(&self) -> Option<f64> {
         self.resolved().get("exclusiveMinimum").and_then(|n| n.as_f64())
     }
+    /// Step size a valid value must be a multiple of (`multipleOf`).
     #[must_use]
     pub fn multiple_of(&self) -> Option<f64> {
         self.resolved().get("multipleOf").and_then(|n| n.as_f64())
     }
     // string bounds
+    /// Maximum string length in characters (`maxLength`).
     #[must_use]
     pub fn max_length(&self) -> Option<u64> {
         self.resolved().get("maxLength").and_then(|n| n.as_u64())
     }
     #[must_use]
+    /// Minimum string length in characters (`minLength`).
     pub fn min_length(&self) -> Option<u64> {
         self.resolved().get("minLength").and_then(|n| n.as_u64())
     }
     #[must_use]
+    /// ECMA-262 regular expression string values must match (`pattern`).
     pub fn pattern(&self) -> Option<&'s str> {
         self.resolved().get("pattern").and_then(|n| n.as_str())
     }
     // array bounds
     #[must_use]
+    /// Maximum array length (`maxItems`).
     pub fn max_items(&self) -> Option<u64> {
         self.resolved().get("maxItems").and_then(|n| n.as_u64())
     }
     #[must_use]
+    /// Minimum array length (`minItems`).
     pub fn min_items(&self) -> Option<u64> {
         self.resolved().get("minItems").and_then(|n| n.as_u64())
     }
     #[must_use]
+    /// Whether all array items must be distinct (`uniqueItems`).
     pub fn unique_items(&self) -> Option<bool> {
         self.resolved().get("uniqueItems").and_then(|n| n.as_bool())
     }
     // object bounds
     #[must_use]
+    /// Maximum object property count (`maxProperties`).
     pub fn max_properties(&self) -> Option<u64> {
         self.resolved().get("maxProperties").and_then(|n| n.as_u64())
     }
     #[must_use]
+    /// Minimum object property count (`minProperties`).
     pub fn min_properties(&self) -> Option<u64> {
         self.resolved().get("minProperties").and_then(|n| n.as_u64())
     }
@@ -310,14 +346,22 @@ impl<'s> SchemaView<'s> {
 pub struct TypeSet(u8);
 
 impl TypeSet {
+    /// Accepts `null`.
     pub const NULL: u8 = 1 << 0;
+    /// Accepts booleans.
     pub const BOOL: u8 = 1 << 1;
+    /// Accepts objects.
     pub const OBJECT: u8 = 1 << 2;
+    /// Accepts arrays.
     pub const ARRAY: u8 = 1 << 3;
+    /// Accepts numbers (integer values included).
     pub const NUMBER: u8 = 1 << 4;
+    /// Accepts integers only.
     pub const INTEGER: u8 = 1 << 5;
+    /// Accepts strings.
     pub const STRING: u8 = 1 << 6;
 
+    /// A set accepting no types.
     #[must_use]
     pub const fn empty() -> Self {
         Self(0)
@@ -340,16 +384,19 @@ impl TypeSet {
         }
     }
 
+    /// True when `bit` (one of the [`TypeSet`] constants) is accepted.
     #[must_use]
     pub const fn contains(self, bit: u8) -> bool {
         self.0 & bit != 0
     }
 
+    /// True when no type is accepted.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
+    /// Raw bitmask, for tests and diagnostics.
     #[must_use]
     pub const fn bits(self) -> u8 {
         self.0

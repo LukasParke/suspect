@@ -15,7 +15,7 @@ pub struct Config {
     ///   yields [`CompileError::TooDeep`](crate::CompileError::TooDeep);
     /// - **execution**: recursive evaluation (including `$ref` cycles driven
     ///   by deep instances) beyond this depth produces a clean
-    ///   [`SchemaError`] instead of a stack overflow.
+    ///   [`SchemaError`](crate::SchemaError) instead of a stack overflow.
     ///
     /// Keep this value moderate: execution recursion consumes native stack,
     /// roughly 2 frames per instance-nesting level. The default (512) uses a
@@ -25,7 +25,7 @@ pub struct Config {
     /// Default: `512`.
     pub max_depth: usize,
 
-    /// Maximum accumulated [`SchemaError`]s per `validate` call before
+    /// Maximum accumulated [`SchemaError`](crate::SchemaError)s per `validate` call before
     /// evaluation aborts early. `0` means unlimited.
     ///
     /// Default: `100`.

@@ -11,10 +11,16 @@ use crate::{ruleset, Severity};
 /// One lint result: a rule violation anchored to a byte range and pointer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding<'d> {
+    /// Rule code that produced this finding (e.g. `info-contact`).
     pub code: Box<str>,
+    /// Configured severity of the violated rule.
     pub severity: Severity,
+    /// Human-readable message: the rule's description, or the function's
+    /// default message prefixed by the code.
     pub message: String,
+    /// Byte range of the offending node in the source text.
     pub range: Range<usize>,
+    /// JSON pointer to the offending node within the document.
     pub path: Pointer,
     pub(crate) _marker: PhantomData<&'d ()>,
 }
@@ -106,11 +112,21 @@ impl Linter {
 pub enum RulesetError {
     /// A top-level ruleset field is malformed (e.g. an unknown extends target).
     #[error("invalid ruleset field `{field}`: {message}")]
-    InvalidRuleset { field: String, message: String },
+    InvalidRuleset {
+        /// The offending top-level field name.
+        field: String,
+        /// What exactly is wrong with it.
+        message: String,
+    },
     /// An individual rule is malformed (unknown function, bad option value,
     /// bad severity or format).
     #[error("invalid rule `{code}`: {message}")]
-    BadRule { code: String, message: String },
+    BadRule {
+        /// The code of the offending rule.
+        code: String,
+        /// What exactly is wrong with the rule.
+        message: String,
+    },
     /// A `given` query is not valid RFC 9535 JSONPath.
     #[error(transparent)]
     JsonPath(#[from] suspect_jsonpath::PathError),

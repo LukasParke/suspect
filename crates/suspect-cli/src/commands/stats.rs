@@ -29,19 +29,33 @@ const OPERATION_METHODS: &[&str] =
 /// Structural counts for one document.
 #[derive(Debug, Clone, Serialize)]
 pub struct StatsReport {
+    /// Path as given on the command line.
     pub path: String,
+    /// Display label of the detected spec family.
     pub family: String,
+    /// Size of the input file in bytes.
     pub size_bytes: usize,
+    /// Wall-clock milliseconds spent parsing.
     pub parse_ms: f64,
+    /// Number of path entries (`/paths`); 0 for non-OpenAPI families.
     pub paths: usize,
+    /// Number of HTTP operations across all path items.
     pub operations: usize,
+    /// Number of entries under `components/schemas`.
     pub schemas: usize,
+    /// Number of entries under `components/parameters`.
     pub parameters: usize,
+    /// Number of entries under `components/responses`.
     pub responses: usize,
+    /// Number of entries under `components/securitySchemes`.
     pub security_schemes: usize,
+    /// Number of top-level tags.
     pub tags: usize,
+    /// Number of top-level webhooks.
     pub webhooks: usize,
+    /// Number of Arazzo workflows; 0 for non-Arazzo families.
     pub workflows: usize,
+    /// Number of Overlay actions; 0 for non-Overlay families.
     pub actions: usize,
 }
 

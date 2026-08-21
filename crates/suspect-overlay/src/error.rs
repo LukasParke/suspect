@@ -6,13 +6,33 @@ pub enum OverlayError {
     /// The overlay document root is not an object.
     NotAnObject,
     /// A required field is missing or has the wrong type.
-    MissingField { field: &'static str },
+    MissingField {
+        /// Name of the missing or mistyped field.
+        field: &'static str,
+    },
     /// An action violates the spec.
-    InvalidAction { index: usize, reason: String },
+    InvalidAction {
+        /// Zero-based position of the offending action in `actions`.
+        index: usize,
+        /// What is wrong with it.
+        reason: String,
+    },
     /// A `target` is not a valid JSONPath expression.
-    InvalidTarget { index: usize, input: String, reason: String },
+    InvalidTarget {
+        /// Zero-based position of the offending action in `actions`.
+        index: usize,
+        /// The raw target expression text.
+        input: String,
+        /// Why the expression failed to parse.
+        reason: String,
+    },
     /// A target selected a node that cannot be updated or removed.
-    TargetNotContainer { index: usize, path: String },
+    TargetNotContainer {
+        /// Zero-based position of the offending action in `actions`.
+        index: usize,
+        /// Pointer form of the selected scalar node.
+        path: String,
+    },
     /// JSONPath engine failure.
     Path(suspect_jsonpath::PathError),
 }

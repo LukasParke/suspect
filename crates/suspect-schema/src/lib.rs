@@ -1,9 +1,15 @@
+#![deny(missing_docs)]
 //! suspect-schema: JSON Schema 2020-12 compiler and validator.
 //!
-//! [`Compiler`] turns a schema [`NodeRef`](suspect_low::NodeRef) from the
+//! [`Compiler`] turns a schema [`NodeRef`] from the
 //! `suspect-low` spine into a [`Schema`]: an eagerly compiled program of
 //! checks. `$ref` targets compile lazily on first use (memoized in a
 //! thread-local cache), so recursive schemas work out of the box.
+//!
+//! `$dynamicRef`/`$dynamicAnchor` implement RFC 3093 *basic* semantics: the
+//! dynamic scope is walked outermost-first and the first fragment declaring
+//! the anchor wins, falling back to static resolution through the document's
+//! `$dynamicAnchor` registry.
 //!
 //! ```no_run
 //! # use suspect_schema::{Compiler, Config};

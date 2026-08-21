@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-validate: semantic validation for OpenAPI 3.x documents.
 //!
 //! Runs a fixed battery of checks over a [`suspect_oas::OpenApi`] typed view
@@ -10,8 +11,15 @@ mod diagnostic;
 use suspect_oas::{ModelError, OpenApi, Session};
 
 pub use diagnostic::{Diagnostic, Severity};
-
 /// Validates one loaded OpenAPI document.
+///
+/// Runs the full check battery over `api` — operation, parameter, path,
+/// response, security, server, tag, schema, example, webhook, and info
+/// checks — and returns every finding. The result is sorted by
+/// `(doc, range, code)` so output is stable across runs.
+///
+/// Diagnostics are anchored to `api`'s source document; references resolved
+/// from other documents are still reported under that URI.
 #[must_use]
 pub fn validate_openapi(api: &OpenApi<'_>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
@@ -47,10 +55,13 @@ pub fn validate_workspace(session: &Session) -> Result<Vec<Diagnostic>, ModelErr
     Ok(finish(out))
 }
 
-/// Validates one entry document (plus whatever its `$ref` closure pulls in).
+/// Validates one entry document, plus whatever its `$ref` closure pulls
+/// into the session. The result covers only the entry document's own
+/// diagnostics, sorted like [`validate_openapi`]'s.
 ///
 /// # Errors
-/// Workspace load errors; the entry not being an OpenAPI 3.x document.
+/// Propagates [`ModelError`] if `entry`, or a document referenced from it,
+/// fails to load as an OpenAPI model.
 pub fn validate_entry(session: &Session, entry: &str) -> Result<Vec<Diagnostic>, ModelError> {
     let api = session.load(entry)?;
     Ok(validate_openapi(&api))

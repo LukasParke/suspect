@@ -8,7 +8,9 @@ use crate::model::ArazzoDoc;
 pub struct ArazzoDiagnostic {
     /// Stable machine code (`arazzo-duplicate-workflow-id`, ...).
     pub code: &'static str,
+    /// Human-readable explanation of the finding.
     pub message: String,
+    /// Byte range of the offending node in the source document.
     pub range: std::ops::Range<usize>,
 }
 
@@ -19,6 +21,25 @@ pub struct ArazzoDiagnostic {
 /// targets, operationPath, parameter values, embedded strings), goto actions
 /// referencing existing workflows/steps, and step outputs referenced by
 /// `$workflows...` expressions actually existing.
+///
+/// # Emitted codes
+///
+/// Diagnostics carry one of these stable `code` values:
+///
+/// - `arazzo-missing-version`, `arazzo-missing-info-title`,
+///   `arazzo-missing-source-descriptions` — required root fields absent.
+/// - `arazzo-duplicate-source-name` — two `sourceDescriptions` share a name.
+/// - `arazzo-missing-workflow-id`, `arazzo-duplicate-workflow-id`.
+/// - `arazzo-missing-step-id`, `arazzo-duplicate-step-id` (scoped to one
+///   workflow).
+/// - `arazzo-step-missing-operation`, `arazzo-invalid-operation-path`.
+/// - `arazzo-invalid-condition`, `arazzo-criterion-missing-condition`.
+/// - `arazzo-parameter-incomplete`, `arazzo-invalid-target`.
+/// - `arazzo-goto-missing-target`, `arazzo-goto-unknown-workflow`,
+///   `arazzo-unknown-action-type`, `arazzo-action-missing-type`.
+/// - `arazzo-output-unknown-workflow`, `arazzo-output-unknown-step`,
+///   `arazzo-output-unknown-name` — a `$workflows.…` reference does not
+///   resolve to a declared step output.
 #[must_use]
 pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
     let mut out = Vec::new();

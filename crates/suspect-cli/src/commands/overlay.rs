@@ -9,6 +9,7 @@ use suspect_overlay::{self, OverlayDoc};
 use crate::output::{self};
 use crate::DocFormat;
 
+/// Overlay subcommands.
 #[derive(Debug, Subcommand)]
 pub enum OverlayCmd {
     /// Apply an overlay document to a target document.

@@ -9,22 +9,33 @@ pub struct ArazzoDoc<'d> {
 
 /// `sourceDescriptions` entry.
 pub struct SourceDescriptionView<'d> {
+    /// The entry's `name` (referenced by `$sourceDescriptions.<name>`
+    /// expressions).
     pub name: &'d str,
+    /// The entry's `url` (where the described document lives).
     pub url: &'d str,
+    /// The entry's declared `type`; `OpenApi` when absent (the default).
     pub kind: SourceType,
     node: NodeRef<'d>,
 }
 
+/// Declared `type` of a `sourceDescriptions` entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceType {
+    /// `openapi` — the entry (and the default when `type` is absent).
     OpenApi,
+    /// `overlay` — an OpenAPI Overlay document.
     Overlay,
+    /// `arazzo` — another Arazzo document.
     Arazzo,
+    /// Any unrecognized `type` value.
     Other,
 }
 
 /// One workflow.
 pub struct WorkflowView<'d> {
+    /// The workflow's `workflowId`; empty when the field is missing or not a
+    /// string.
     pub workflow_id: &'d str,
     node: NodeRef<'d>,
     steps: Vec<StepView<'d>>,
@@ -32,6 +43,7 @@ pub struct WorkflowView<'d> {
 
 /// One step within a workflow.
 pub struct StepView<'d> {
+    /// The step's `stepId`; empty when the field is missing or not a string.
     pub step_id: &'d str,
     node: NodeRef<'d>,
 }
@@ -108,36 +120,43 @@ impl<'d> ArazzoDoc<'d> {
         Self { root, workflows, sources }
     }
 
+    /// The document root node, for fields not covered by the typed views.
     #[must_use]
     pub fn root(&self) -> NodeRef<'d> {
         self.root
     }
 
+    /// The declared Arazzo version (the `arazzo` field), e.g. `"1.0.0"`.
     #[must_use]
     pub fn version(&self) -> Option<&'d str> {
         self.root.get("arazzo").and_then(|n| n.as_str())
     }
 
+    /// `info.title` of the document.
     #[must_use]
     pub fn info_title(&self) -> Option<&'d str> {
         self.root.get("info").and_then(|i| i.get("title")).and_then(|n| n.as_str())
     }
 
+    /// `info.summary` of the document.
     #[must_use]
     pub fn info_summary(&self) -> Option<&'d str> {
         self.root.get("info").and_then(|i| i.get("summary")).and_then(|n| n.as_str())
     }
 
+    /// `info.description` of the document.
     #[must_use]
     pub fn info_description(&self) -> Option<&'d str> {
         self.root.get("info").and_then(|i| i.get("description")).and_then(|n| n.as_str())
     }
 
+    /// All top-level workflows, in document order.
     #[must_use]
     pub fn workflows(&self) -> &[WorkflowView<'d>] {
         &self.workflows
     }
 
+    /// All `sourceDescriptions` entries, in document order.
     #[must_use]
     pub fn source_descriptions(&self) -> &[SourceDescriptionView<'d>] {
         &self.sources
@@ -146,6 +165,7 @@ impl<'d> ArazzoDoc<'d> {
 
 impl SourceDescriptionView<'_> {
     #[must_use]
+    /// The raw `sourceDescriptions` entry node.
     pub fn node(&self) -> NodeRef<'_> {
         self.node
     }
@@ -153,41 +173,49 @@ impl SourceDescriptionView<'_> {
 
 impl<'d> WorkflowView<'d> {
     #[must_use]
+    /// The raw workflow node.
     pub fn node(&self) -> NodeRef<'d> {
         self.node
     }
 
     #[must_use]
+    /// The workflow's `summary`.
     pub fn summary(&self) -> Option<&'d str> {
         self.node.get("summary").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// The workflow's `description`.
     pub fn description(&self) -> Option<&'d str> {
         self.node.get("description").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// The workflow's steps, in document order.
     pub fn steps(&self) -> &[StepView<'d>] {
         &self.steps
     }
 
     #[must_use]
+    /// Workflow-level `parameters`, in document order.
     pub fn parameters(&self) -> Vec<ParameterView<'d>> {
         params_of(self.node)
     }
 
     #[must_use]
+    /// The workflow's `successActions`.
     pub fn success_actions(&self) -> Vec<ActionView<'d>> {
         actions_of(self.node, "successActions")
     }
 
     #[must_use]
+    /// The workflow's `failureActions`.
     pub fn failure_actions(&self) -> Vec<ActionView<'d>> {
         actions_of(self.node, "failureActions")
     }
 
     #[must_use]
+    /// The workflow's declared `outputs` as `(name, value-expression)` pairs.
     pub fn outputs(&self) -> Vec<(&'d str, NodeRef<'d>)> {
         outputs_of(self.node)
     }
@@ -195,11 +223,13 @@ impl<'d> WorkflowView<'d> {
 
 impl<'d> StepView<'d> {
     #[must_use]
+    /// The raw step node.
     pub fn node(&self) -> NodeRef<'d> {
         self.node
     }
 
     #[must_use]
+    /// The step's `description`.
     pub fn description(&self) -> Option<&'d str> {
         self.node.get("description").and_then(|n| n.as_str())
     }
@@ -218,31 +248,37 @@ impl<'d> StepView<'d> {
     }
 
     #[must_use]
+    /// Step-level `parameters`, in document order.
     pub fn parameters(&self) -> Vec<ParameterView<'d>> {
         params_of(self.node)
     }
 
     #[must_use]
+    /// The step's `successCriteria`.
     pub fn success_criteria(&self) -> Vec<CriterionView<'d>> {
         criteria_of(self.node, "successCriteria")
     }
 
     #[must_use]
+    /// The step's `requestBody` node, when present.
     pub fn request_body(&self) -> Option<NodeRef<'d>> {
         self.node.get("requestBody")
     }
 
     #[must_use]
+    /// The step's declared `outputs` as `(name, value-expression)` pairs.
     pub fn outputs(&self) -> Vec<(&'d str, NodeRef<'d>)> {
         outputs_of(self.node)
     }
 
     #[must_use]
+    /// The step's `onSuccess` actions.
     pub fn on_success(&self) -> Vec<ActionView<'d>> {
         actions_of(self.node, "onSuccess")
     }
 
     #[must_use]
+    /// The step's `onFailure` actions.
     pub fn on_failure(&self) -> Vec<ActionView<'d>> {
         actions_of(self.node, "onFailure")
     }
@@ -250,16 +286,19 @@ impl<'d> StepView<'d> {
 
 impl ParameterView<'_> {
     #[must_use]
+    /// The raw parameter node.
     pub fn node(&self) -> NodeRef<'_> {
         self.node
     }
 
     #[must_use]
+    /// The parameter's `name` (inline parameters only).
     pub fn name(&self) -> Option<&str> {
         self.node.get("name").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// The parameter's `in` location (`path`, `query`, `header`, `cookie`).
     pub fn location(&self) -> Option<&str> {
         self.node.get("in").and_then(|n| n.as_str())
     }
@@ -271,6 +310,8 @@ impl ParameterView<'_> {
     }
 
     #[must_use]
+    /// The parameter's `value` node (string expressions render via
+    /// [`render_embedded`](crate::render_embedded)).
     pub fn value(&self) -> Option<NodeRef<'_>> {
         self.node.get("value")
     }
@@ -284,21 +325,25 @@ impl ParameterView<'_> {
 
 impl CriterionView<'_> {
     #[must_use]
+    /// The raw criterion node.
     pub fn node(&self) -> NodeRef<'_> {
         self.node
     }
 
     #[must_use]
+    /// The criterion's `condition` (a runtime expression).
     pub fn condition(&self) -> Option<&str> {
         self.node.get("condition").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// The criterion's `context` expression binding, when present.
     pub fn context(&self) -> Option<&str> {
         self.node.get("context").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// The criterion's `type` (e.g. `regex`, `jsonpath`), when declared.
     pub fn criterion_type(&self) -> Option<&str> {
         self.node.get("type").and_then(|n| n.as_str())
     }
@@ -306,16 +351,19 @@ impl CriterionView<'_> {
 
 impl ActionView<'_> {
     #[must_use]
+    /// The raw action node.
     pub fn node(&self) -> NodeRef<'_> {
         self.node
     }
 
     #[must_use]
+    /// The action's `name`.
     pub fn name(&self) -> Option<&str> {
         self.node.get("name").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// The action's `type` (`goto`, `retry`, or `end`).
     pub fn action_type(&self) -> Option<&str> {
         self.node.get("type").and_then(|n| n.as_str())
     }
@@ -333,6 +381,7 @@ impl ActionView<'_> {
     }
 
     #[must_use]
+    /// The action's success/failure `criteria`.
     pub fn criteria(&self) -> Vec<CriterionView<'_>> {
         self.node
             .get("criteria")

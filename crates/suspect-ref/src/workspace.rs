@@ -128,6 +128,18 @@ pub struct WorkspaceStats {
 }
 
 /// The `$ref` resolution engine over a set of loaded documents.
+///
+/// Documents are loaded idempotently by canonical [`Uri`] and live for the
+/// workspace's lifetime; handles borrow from it. Three lazily-populated
+/// caches back resolution: a one-shot per-document scan (edges, anchors,
+/// `$id` bases) and a memo table keyed by `(DocId, pointer)` storing the
+/// outcome of following `$ref` chains — a final node, a whole document, or
+/// a detected [`Resolution::Cycle`]. Because memo entries are lifetime-free
+/// and chain following is deterministic, cached hits are exact, and
+/// [`WorkspaceStats`] exposes hit/miss counters.
+///
+/// Remote policy: `http:`/`https:` references are always rejected with
+/// [`RefError::RemoteDenied`] — v1 never performs network fetches.
 pub struct Workspace {
     pub(crate) root: Option<PathBuf>,
     pub(crate) max_doc_size: u64,

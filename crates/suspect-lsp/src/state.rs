@@ -13,7 +13,9 @@ use tower_lsp::lsp_types::{Position, Range};
 /// from it. The line index lives inside the parsed document
 /// (`SourceDoc::line_index`), so no separate copy is kept.
 pub struct OpenDoc {
+    /// Raw buffer text as last reported by the editor.
     pub text: String,
+    /// [`LowDoc`] parsed from [`OpenDoc::text`]; carries the line index.
     pub low: LowDoc,
 }
 

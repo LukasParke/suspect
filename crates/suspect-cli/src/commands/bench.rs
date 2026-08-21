@@ -19,12 +19,19 @@ use crate::OutputFormat;
 /// Mean wall-clock milliseconds per pipeline stage.
 #[derive(Debug, Clone, Serialize)]
 pub struct BenchReport {
+    /// Fixture path as given on the command line.
     pub fixture: String,
+    /// Iterations each stage was run; the mean over these is reported.
     pub iters: usize,
+    /// Mean milliseconds to read and parse the fixture.
     pub parse_ms: f64,
+    /// Mean milliseconds to build the low-level node model.
     pub low_model_ms: f64,
+    /// Mean milliseconds to resolve `$ref`s (workspace build).
     pub resolve_ms: f64,
+    /// Mean milliseconds to run the validator.
     pub validate_ms: f64,
+    /// Mean milliseconds to run the linter.
     pub lint_ms: f64,
 }
 

@@ -42,21 +42,29 @@ impl LowDoc {
         Self { doc: SourceDoc::with_format(uri, source, format) }
     }
 
+    /// Document identifier; same URI the syntax layer parsed with.
     #[must_use]
     pub fn uri(&self) -> &Uri {
         self.doc.uri()
     }
 
+    /// The wrapped syntax-level document (escape hatch for CST access,
+    /// anchors, and source maps).
     #[must_use]
     pub fn inner(&self) -> &SourceDoc {
         &self.doc
     }
 
+    /// Serialization format the document was parsed as.
     #[must_use]
     pub fn format(&self) -> suspect_syntax::Format {
         self.doc.format()
     }
 
+    /// Semantic root of the document.
+    ///
+    /// For YAML streams this is the stream node; use
+    /// [`NodeRef::resolved`] to descend into the first meaningful value.
     #[must_use]
     pub fn root(&self) -> NodeRef<'_> {
         NodeRef::new(self.doc.root())

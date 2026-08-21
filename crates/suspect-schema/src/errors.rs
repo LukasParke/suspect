@@ -23,7 +23,7 @@ pub struct SchemaError {
 /// Failure to compile a schema.
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum CompileError {
-    /// Schema nesting exceeded [`Config::max_depth`] during eager
+    /// Schema nesting exceeded [`Config::max_depth`](crate::Config::max_depth) during eager
     /// compilation.
     #[error("schema nesting exceeds maximum depth {cap}")]
     TooDeep {

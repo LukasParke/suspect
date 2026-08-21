@@ -40,6 +40,8 @@ pub fn map_lint_severity(s: suspect_lint::Severity) -> Option<DiagnosticSeverity
     }
 }
 
+/// Builds one [`Diagnostic`] with our [`SOURCE`], the given byte range
+/// mapped through [`lsp_range`], severity, string code, and message.
 fn make(
     bytes: &[u8],
     li: &LineIndex,

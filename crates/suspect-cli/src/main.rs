@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! The `suspect` binary: parse args, dispatch into the library, map the
 //! result onto process exit codes (0 clean, 1 findings, 2 usage/error).
 

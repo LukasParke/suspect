@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-overlay: Overlay 1.0 models and apply engine.
 //!
 //! Actions apply sequentially to an owned value tree materialized from the

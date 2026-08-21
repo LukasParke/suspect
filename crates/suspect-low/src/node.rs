@@ -13,7 +13,11 @@ pub struct NodeRef<'d> {
 /// One mapping entry with the key's unescaped scalar text.
 #[derive(Clone, Copy)]
 pub struct Entry<'d> {
+    /// The mapping key with quotes stripped and no escape processing
+    /// (what `scalar_bytes` yields for the key node).
     pub key: &'d str,
+    /// The entry's value, or `None` for an empty value (`key:` with
+    /// nothing after it).
     pub value: Option<NodeRef<'d>>,
 }
 
@@ -26,6 +30,7 @@ impl<'d> std::fmt::Debug for Entry<'d> {
 /// A duplicated mapping key with all of its occurrence ranges.
 #[derive(Debug, Clone)]
 pub struct DuplicateKey {
+    /// The key text exactly as it appears (unescaped, unquoted).
     pub key: String,
     /// Byte range of each value node under the same key, in document order.
     pub occurrences: Vec<std::ops::Range<usize>>,
@@ -53,6 +58,7 @@ impl<'d> NodeRef<'d> {
         &self.raw
     }
 
+    /// Serialization format of the underlying document.
     #[must_use]
     pub fn format(&self) -> Format {
         self.raw.doc().format()
@@ -75,6 +81,12 @@ impl<'d> NodeRef<'d> {
         self.raw.kind() == SyntaxKind::Alias
     }
 
+    /// Follows YAML aliases to the anchor target and descends through
+    /// stream/document/wrapper nodes to the semantic value.
+    ///
+    /// Cycles (an anchor resolving to itself) are cut off after 64 hops;
+    /// callers then see the [`SyntaxKind::Alias`] node itself rather than
+    /// hanging. Non-alias nodes return their content view unchanged.
     pub fn resolved(&self) -> NodeRef<'d> {
         let mut node = *self;
         for _ in 0..64 {
@@ -196,6 +208,9 @@ impl<'d> NodeRef<'d> {
         std::str::from_utf8(self.scalar_bytes()).ok()
     }
 
+    /// Scalar as a boolean, if the inferred kind is [`ValueKind::Bool`].
+    /// Accepts the YAML 1.2 spellings `true`/`True`/`TRUE` (and their
+    /// false counterparts); anything else under a bool kind is `false`.
     #[must_use]
     pub fn as_bool(&self) -> Option<bool> {
         match self.kind() {
@@ -207,6 +222,11 @@ impl<'d> NodeRef<'d> {
         }
     }
 
+    /// Scalar as a signed 64-bit integer, if the inferred kind is
+    /// [`ValueKind::Int`]. Understands decimal, `0o` octal, and `0x`
+    /// hexadecimal forms (YAML) and plain decimal (JSON).
+    ///
+    /// Returns `None` when the value does not fit in `i64`.
     #[must_use]
     pub fn as_i64(&self) -> Option<i64> {
         match self.kind() {
@@ -215,11 +235,15 @@ impl<'d> NodeRef<'d> {
         }
     }
 
+    /// Scalar as an unsigned 64-bit integer: like [`Self::as_i64`] but
+    /// `None` for negative values or values above `u64::MAX`.
     #[must_use]
     pub fn as_u64(&self) -> Option<u64> {
         self.as_i64().and_then(|v| u64::try_from(v).ok())
     }
 
+    /// Scalar as a float. Integers widen losslessly; floats accept YAML
+    /// `.inf`/`.nan` forms and exponent notation.
     #[must_use]
     pub fn as_f64(&self) -> Option<f64> {
         match self.kind() {

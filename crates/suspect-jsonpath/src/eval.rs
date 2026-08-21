@@ -10,6 +10,14 @@ use crate::ast::{
 use crate::functions;
 
 /// Compiled query: parsed once, evaluated many times.
+///
+/// Full RFC 9535 selector coverage: name, wildcard (`*`), array index
+/// (negative counts from the end), slice (`start:end:step`), and filter
+/// (`?...`) selectors, in both child (`.x`) and descendant (`..x`) segments.
+/// All five RFC 9535 function extensions are supported in filters:
+/// `length()`, `count()`, `match()`, `search()` (regexes precompiled at
+/// parse time), and `value()`. Non-singular queries are accepted anywhere a
+/// function argument allows them (`count(@..*)`).
 #[derive(Debug)]
 pub struct Path {
     pub(crate) segments: Vec<Segment>,
@@ -19,7 +27,7 @@ impl Path {
     /// Parses an RFC 9535 JSONPath query string.
     ///
     /// # Errors
-    /// Returns [`PathError`] with the offending offset for any syntactic
+    /// Returns [`crate::PathError`] with the offending offset for any syntactic
     /// violation (bad selector, zero step, unterminated bracket, trailing
     /// characters, unknown function, invalid regex literal).
     pub fn parse(input: &str) -> Result<Path, crate::PathError> {
@@ -43,26 +51,31 @@ pub struct NodeList<'d> {
 }
 
 impl<'d> NodeList<'d> {
+    /// Iterates over the matched nodes in normalized (document) order.
     pub fn iter(&self) -> impl Iterator<Item = NodeRef<'d>> + '_ {
         self.nodes.iter().copied()
     }
 
+    /// Number of matched nodes after deduplication.
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
     #[must_use]
+    /// True when the query matched nothing.
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
     #[must_use]
+    /// Returns the node at index `i` in document order.
     pub fn get(&self, i: usize) -> Option<NodeRef<'d>> {
         self.nodes.get(i).copied()
     }
 
     #[must_use]
+    /// Returns the first matched node, if any.
     pub fn first(&self) -> Option<NodeRef<'d>> {
         self.nodes.first().copied()
     }

@@ -9,7 +9,9 @@ use suspect_syntax::{SNode, SyntaxKind};
 /// A resolved target location: document URI plus byte range inside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Definition {
+    /// Document containing the target.
     pub uri: Uri,
+    /// Byte range of the target inside that document.
     pub range: std::ops::Range<usize>,
 }
 
@@ -130,6 +132,13 @@ pub fn self_definition(low: &suspect_low::LowDoc, offset: usize) -> Option<Defin
     Some(Definition { uri: low.uri().clone(), range: value.byte_range() })
 }
 
+/// Finds all `$ref` edges across the workspace whose parsed pointer targets
+/// the node at `offset` (identified by its [`value_anchor`]-derived
+/// `path_from_root`). Local (`#/...`) and external (`file.yaml#/...`)
+/// pointers into this document both match; plain-name refs never do.
+///
+/// With `include_declaration`, the node itself is returned first as the
+/// declaration. Matches are returned in workspace URI order.
 #[must_use]
 pub fn references(
     ws: &Workspace,

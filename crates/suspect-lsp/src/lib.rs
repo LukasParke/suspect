@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-lsp: language server for OpenAPI/Arazzo/Overlay documents.
 //!
 //! Built on tower-lsp over stdio. Diagnostics (syntax, semantic validation,
@@ -27,13 +28,29 @@ use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
 
-/// Backend state shared with debounce tasks.
+/// The tower-lsp [`LanguageServer`] backend.
+///
+/// All mutable server state lives in [`State`], guarded by a single async
+/// `RwLock` and shared with spawned debounce tasks via `Arc`. Request
+/// handlers take short-lived read locks; only `initialize`/open/change
+/// paths take write locks, so requests never block each other for long.
+///
+/// Lifecycle ("state machine"): `initialize` records the workspace root →
+/// each `did_open`/`did_change` reparses the document into the
+/// [`State::docs`] cache and bumps [`State::generation`] → a debounce task
+/// publishes diagnostics 150 ms later unless superseded →
+/// `did_change_watched_files` drops the cached ref workspace so the next
+/// navigation query rebuilds it from disk. There is no explicit teardown
+/// beyond what `LspService` drops on shutdown.
 struct Backend {
+    /// Client handle used to publish diagnostics back to the editor.
     client: Client,
+    /// Shared mutable server state; also captured by debounce tasks.
     state: Arc<tokio::sync::RwLock<State>>,
 }
 
 impl Backend {
+    /// Creates a backend with empty [`State`]; called by `LspService::new`.
     fn new(client: Client) -> Self {
         Self { client, state: Arc::new(tokio::sync::RwLock::new(State::default())) }
     }
@@ -83,6 +100,7 @@ impl Backend {
     }
 }
 
+/// Parses a [`Uri`] into an LSP [`Url`], or `None` when it does not parse.
 fn to_url(uri: &Uri) -> Option<Url> {
     Url::parse(uri.as_str()).ok()
 }
@@ -314,7 +332,14 @@ impl LanguageServer for Backend {
         Ok((!items.is_empty()).then_some(CompletionResponse::Array(items)))
     }
 }
-/// never returns an error (transport failures are handled by tower-lsp).
+/// Runs the language server over stdio until the client disconnects.
+///
+/// Builds an [`LspService`] wrapping the private `Backend` server
+/// implementation and serves the LSP loop on stdin/stdout.
+/// Never returns an error: transport failures are handled
+/// internally by tower-lsp, and the future completes only when the
+/// connection closes. Await from within a tokio runtime (see the
+/// `suspect-lsp` binary's `main`).
 pub async fn run_server() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

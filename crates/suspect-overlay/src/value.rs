@@ -5,11 +5,17 @@ use suspect_low::ValueKind;
 /// Scalars are owned (decoded); objects keep document order.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    /// The JSON `null` scalar.
     Null,
+    /// `true` / `false`.
     Bool(bool),
+    /// An integer scalar.
     Int(i64),
+    /// A floating-point scalar.
     Float(f64),
+    /// A decoded string scalar.
     Str(Box<str>),
+    /// An ordered sequence.
     Array(Vec<Value>),
     /// Insertion-ordered map.
     Object(Vec<(Box<str>, Value)>),
@@ -37,6 +43,8 @@ impl Value {
         }
     }
 
+    /// Borrows the value stored under `key`, preserving object order
+    /// (lookup is linear).
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
         match self {

@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-arazzo: Arazzo 1.0 models, runtime expressions, validation.
 //!
 //! The workflow *execution* engine is out of scope by design; this crate
@@ -18,6 +19,8 @@ pub use validate::{validate_arazzo, ArazzoDiagnostic};
 
 use suspect_low::NodeRef;
 
+/// The result of evaluating a runtime expression: either rendered text or a
+/// resolved payload node.
 pub enum Evaluated<'d> {
     /// A scalar rendered as text (headers, query params, statuses, outputs).
     Text(String),
@@ -37,36 +40,52 @@ impl std::fmt::Debug for Evaluated<'_> {
 /// Execution-context abstraction: production engines implement it over HTTP
 /// traffic; validation uses mocks.
 pub trait RuntimeContext<'d> {
+    /// The HTTP method of the current request (`$method`).
     fn method(&self) -> Option<&str> {
         None
     }
+    /// The fully-resolved URL of the current request (`$url`).
     fn url(&self) -> Option<&str> {
         None
     }
+    /// The response status code of the current step (`$statusCode`).
     fn status_code(&self) -> Option<i64> {
         None
     }
+    /// A header value; `_response` selects request vs. response headers
+    /// (`$request.header.#` / `$response.header.#`).
     fn header(&self, _response: bool, _name: &str) -> Option<&'d str> {
         None
     }
+    /// A query parameter value (`$request.query.#` / `$response.query.#`).
     fn query(&self, _response: bool, _name: &str) -> Option<&'d str> {
         None
     }
+    /// A path-template parameter value
+    /// (`$request.path.#` / `$response.path.#`).
     fn path_param(&self, _response: bool, _name: &str) -> Option<&'d str> {
         None
     }
+    /// The message body, optionally navigated by JSON Pointer
+    /// (`$request.body` / `$response.body#/pointer`).
     fn body(&self, _response: bool) -> Option<NodeRef<'d>> {
         None
     }
+    /// An output of the current workflow (`$outputs.<name>`).
     fn output(&self, _name: &str) -> Option<&'d str> {
         None
     }
+    /// An input of the current workflow (`$inputs.<name>`).
     fn input(&self, _name: &str) -> Option<&'d str> {
         None
     }
+    /// A reusable component's value (`$components.<kind>.<name>`); textual
+    /// components resolve to their source text.
     fn component(&self, _kind: ComponentKind, _name: &str) -> Option<&'d str> {
         None
     }
+    /// Another workflow's step output
+    /// (`$workflows.<wf>.steps.<step>.outputs.<name>`).
     fn workflow_output(&self, _workflow: &str, _step: &str, _name: &str) -> Option<&'d str> {
         None
     }

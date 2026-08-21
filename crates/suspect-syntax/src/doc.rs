@@ -12,7 +12,9 @@ use crate::{Format, SyntaxKind};
 /// within the line, matching tree-sitter points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Point {
+    /// Zero-based line number.
     pub row: usize,
+    /// Zero-based byte offset within the line.
     pub column: usize,
 }
 
@@ -25,11 +27,18 @@ impl From<tree_sitter::Point> for Point {
 /// A text edit with exact positions, used for incremental reparsing.
 #[derive(Debug, Clone, Copy)]
 pub struct Edit {
+    /// Byte offset where the replaced region begins.
     pub start_byte: usize,
+    /// Byte offset just past the replaced region in the *old* text.
     pub old_end_byte: usize,
+    /// Byte offset just past the replacement in the *new* text
+    /// (`start_byte + new_text_len`).
     pub new_end_byte: usize,
+    /// Position of `start_byte` in the old document.
     pub start_point: Point,
+    /// Position of `old_end_byte` in the old document.
     pub old_end_point: Point,
+    /// Position of `new_end_byte` in the new document.
     pub new_end_point: Point,
 }
 
@@ -90,7 +99,9 @@ pub(crate) type AnchorMap = HashMap<Box<str>, (Range<usize>, SyntaxKind)>;
 /// A syntax-level problem found by tree-sitter error recovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxError {
+    /// Half-open byte range of the offending node in the source.
     pub range: Range<usize>,
+    /// Human-readable description of the problem.
     pub message: String,
 }
 
@@ -186,16 +197,17 @@ impl SourceDoc {
             anchors: OnceLock::new(),
         }
     }
+    /// Document identifier; carried through reparses unchanged.
     #[must_use]
     pub fn uri(&self) -> &Uri {
         &self.uri
     }
-
+    /// The format this document was parsed as.
     #[must_use]
     pub fn format(&self) -> Format {
         self.format
     }
-
+    /// The full source buffer, lossless.
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         self.source.bytes()
@@ -206,7 +218,7 @@ impl SourceDoc {
     pub fn emit(&self) -> &[u8] {
         self.source.bytes()
     }
-
+    /// Line index mapping byte offsets to `(row, column)` positions and back.
     #[must_use]
     pub fn line_index(&self) -> &LineIndex {
         &self.line_index
@@ -234,7 +246,8 @@ impl SourceDoc {
             out
         })
     }
-
+    /// Cheap error check without materializing the [`SyntaxError`] list:
+    /// true when the tree contains any ERROR or MISSING node.
     #[must_use]
     pub fn has_errors(&self) -> bool {
         self.tree.root_node().has_error()

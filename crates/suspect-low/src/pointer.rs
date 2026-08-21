@@ -13,6 +13,7 @@ pub struct Pointer {
 /// Error produced when a string cannot be parsed as a JSON Pointer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PointerError {
+    /// The string that failed to parse, verbatim.
     pub input: String,
 }
 
@@ -41,7 +42,7 @@ impl Pointer {
     /// form) and `/a/b`. The empty string and `#` are the root pointer.
     ///
     /// # Errors
-    /// Returns [`PointerError`] for non-pointer fragments (e.g. plain-name
+    /// Returns a `PointerError` for non-pointer fragments (e.g. plain-name
     /// fragments like `#someAnchor`) — those are resolved by other means.
     pub fn parse(s: &str) -> Result<Self, PointerError> {
         let body = s.strip_prefix('#').unwrap_or(s);
@@ -82,11 +83,14 @@ impl Pointer {
     }
 
     #[must_use]
+    /// The unescaped tokens in order; `""` parses to an empty slice
+    /// (the root pointer).
     pub fn tokens(&self) -> &[Box<str>] {
         &self.tokens
     }
 
     #[must_use]
+    /// True when this pointer addresses the document root (no tokens).
     pub fn is_root(&self) -> bool {
         self.tokens.is_empty()
     }

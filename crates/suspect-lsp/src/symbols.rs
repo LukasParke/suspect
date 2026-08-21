@@ -9,9 +9,12 @@ use tower_lsp::lsp_types::{
 
 use crate::state::lsp_range;
 
+/// HTTP methods surfaced as one symbol each under a path item.
 const METHODS: &[&str] =
     &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
+/// Convenience constructor for a [`DocumentSymbol`] whose selection range
+/// equals its full range.
 fn symbol(
     name: String,
     kind: SymbolKind,
@@ -42,6 +45,9 @@ pub fn document_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     }
 }
 
+/// OAS 3.x symbols: one `METHOD <path>` symbol per operation, a
+/// `components` module symbol per section with its named entries as
+/// children, and one symbol per entry of the top-level `tags` sequence.
 fn oas_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     let bytes = low.inner().bytes();
     let li = low.inner().line_index();
@@ -96,6 +102,8 @@ fn oas_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     out
 }
 
+/// Arazzo 1.0 symbols: one function symbol per workflow with its steps
+/// (by `stepId`) nested as children.
 fn arazzo_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     let bytes = low.inner().bytes();
     let li = low.inner().line_index();
@@ -116,6 +124,8 @@ fn arazzo_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
         .collect()
 }
 
+/// Overlay 1.0 symbols: one symbol per action, named by its `target`
+/// (falling back to `action`) and disambiguated with its index.
 fn overlay_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     let bytes = low.inner().bytes();
     let li = low.inner().line_index();

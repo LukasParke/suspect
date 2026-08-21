@@ -3,12 +3,19 @@ use suspect_syntax::{Format, ScalarStyle};
 /// The semantic kind of a value, after YAML 1.2 core-schema inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueKind {
+    /// Empty, `~`, or `null` (any case); also JSON `null`.
     Null,
+    /// Boolean literal; YAML accepts `true`/`True`/`TRUE` spellings.
     Bool,
+    /// Integer literal (decimal, `0o` octal, or `0x` hexadecimal).
     Int,
+    /// Floating-point literal, including `.inf`/`.nan` forms and exponents.
     Float,
+    /// Any other scalar: quoted text, block scalars, or plain strings.
     Str,
+    /// Mapping / object.
     Object,
+    /// Sequence / array.
     Array,
 }
 

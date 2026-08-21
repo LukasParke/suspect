@@ -18,8 +18,11 @@ use suspect_low::Pointer;
 /// One HTTP-message part reference.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HttpPart {
+    /// `header.#` — a header value; the string is the header name (token).
     Header(String),
+    /// `query.#` — a query parameter value; the string is the parameter name.
     Query(String),
+    /// `path.#` — a path-template parameter value; the string is the name.
     Path(String),
     /// Body, with an optional JSON Pointer into the payload.
     Body(Option<Pointer>),
@@ -28,19 +31,58 @@ pub enum HttpPart {
 /// A parsed runtime expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    /// `$method` — HTTP method of the current request.
     Method,
+    /// `$url` — fully-resolved URL of the current request.
     Url,
+    /// `$statusCode` — response status code of the current step.
     StatusCode,
-    Request { part: HttpPart },
-    Response { part: HttpPart },
-    Outputs { name: String },
-    Inputs { name: String },
-    WorkflowOutput { workflow: String, step: String, name: String },
+    /// `$request.<part>` — a part of the current request message.
+    Request {
+        /// Which part of the message is referenced.
+        part: HttpPart,
+    },
+    /// `$response.<part>` — a part of the current response message.
+    Response {
+        /// Which part of the message is referenced.
+        part: HttpPart,
+    },
+    /// `$outputs.<name>` — a named output of the current workflow.
+    Outputs {
+        /// The output name after the dot.
+        name: String,
+    },
+    /// `$inputs.<name>` — a named input of the current workflow.
+    Inputs {
+        /// The input name after the dot.
+        name: String,
+    },
+    /// `$workflows.<wf>.steps.<step>.outputs.<name>` — an output produced by
+    /// another workflow's step.
+    WorkflowOutput {
+        /// The `workflowId` segment.
+        workflow: String,
+        /// The `stepId` segment.
+        step: String,
+        /// The output name segment.
+        name: String,
+    },
     /// `$components.<kind>.<name>` reusable-object reference.
-    Component { kind: ComponentKind, name: String },
+    Component {
+        /// Which component collection to look in.
+        kind: ComponentKind,
+        /// The component name after the dot.
+        name: String,
+    },
     /// `$sourceDescriptions.<name>[.<path>]` — names an entry plus an
     /// optional operation path template.
-    SourceDescription { name: String, path: String },
+    SourceDescription {
+        /// The `sourceDescriptions` entry name.
+        name: String,
+        /// Remaining path text after the name (e.g. `#/paths/~1pets` or an
+        /// operation-path template), kept verbatim.
+        path: String,
+    },
     /// Literal text (only produced by [`parse_embedded`] for non-expression
     /// spans).
     Text(String),
@@ -50,23 +92,32 @@ pub enum Expr {
 /// Which reusable-component kind a `$components` expression references.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComponentKind {
+    /// `parameters` — reusable parameter objects.
     Parameters,
+    /// `succeedOn` — reusable success-criterion collections.
     SucceedOn,
+    /// `failureOn` — reusable failure-criterion collections.
     FailureOn,
+    /// `retryOn` — reusable retry-criterion collections.
     RetryOn,
 }
 /// A piece of an embedded-expression string.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExprPart {
+    /// Literal text between expression spans.
     Text(String),
+    /// An embedded `{...}` runtime expression.
     Expr(Expr),
 }
 
 /// Expression parse failure.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExprError {
+    /// The full offending input string.
     pub input: String,
+    /// Byte offset into [`Self::input`] where parsing failed.
     pub offset: usize,
+    /// Human-readable explanation of the failure.
     pub reason: String,
 }
 

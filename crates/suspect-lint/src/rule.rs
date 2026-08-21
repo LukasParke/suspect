@@ -8,10 +8,16 @@ use suspect_low::SpecFamily;
 /// takes no part in the partial order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
+    /// Hard failure; the default for rules without an explicit severity.
     Error,
+    /// Likely problem worth fixing.
     Warn,
+    /// Informational observation.
     Info,
+    /// Stylistic suggestion.
     Hint,
+    /// Rule disabled; never matches and excluded from [`Severity`]'s
+    /// ordering (compares equal only to itself).
     Off,
 }
 

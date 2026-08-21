@@ -485,6 +485,11 @@ pub struct Compiler {
 
 impl Compiler {
     #[must_use]
+    /// Creates a compiler with the given configuration.
+    ///
+    /// The compiler borrows nothing mutable; the same value can compile any
+    /// number of schemas, and the [`Config`] is cloned into each resulting
+    /// [`Schema`](crate::Schema).
     pub fn new(config: Config) -> Self {
         Self { config }
     }

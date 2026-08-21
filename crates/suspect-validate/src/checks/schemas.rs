@@ -16,6 +16,10 @@ pub(crate) fn check_schemas(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     }
 }
 
+/// Depth-first walk over `schema`'s properties, `items`, `prefixItems`,
+/// combinators, and `not`, running the per-schema checks on each node once
+/// (byte range deduplicated so shared `$ref`s are only checked a single
+/// time).
 fn walk<'s>(
     schema: SchemaView<'s>,
     visited: &mut FxHashSet<(usize, usize)>,

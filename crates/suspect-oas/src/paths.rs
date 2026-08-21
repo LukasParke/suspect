@@ -19,6 +19,7 @@ impl<'s> Paths<'s> {
     }
 
     #[must_use]
+    /// The raw `paths` node.
     pub fn node(&self) -> NodeRef<'s> {
         self.node
     }
@@ -35,6 +36,8 @@ impl<'s> Paths<'s> {
     }
 
     #[must_use]
+    /// One path item by literal path key (`/users/{id}`); templates are
+    /// matched verbatim, not expanded.
     pub fn get(&self, path: &str) -> Option<PathItem<'s>> {
         self.node.get(path).map(|v| PathItem::new(self.session, v))
     }
@@ -49,11 +52,13 @@ impl<'s> Paths<'s> {
     }
 
     #[must_use]
+    /// Number of `/`-prefixed path entries.
     pub fn len(&self) -> usize {
         self.iter().len()
     }
 
     #[must_use]
+    /// True when the document declares no paths.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -76,6 +81,7 @@ impl<'s> PathItem<'s> {
     }
 
     #[must_use]
+    /// The raw node backing this item (before [`PathItem::resolved`]).
     pub fn node(&self) -> NodeRef<'s> {
         self.node
     }
@@ -115,11 +121,13 @@ impl<'s> PathItem<'s> {
     }
 
     #[must_use]
+    /// Short summary intended for docs UIs.
     pub fn summary(&self) -> Option<&'s str> {
         self.resolved().get("summary").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// Longer prose describing this path.
     pub fn description(&self) -> Option<&'s str> {
         self.resolved().get("description").and_then(|n| n.as_str())
     }
@@ -134,6 +142,7 @@ impl<'s> PathItem<'s> {
     }
 
     #[must_use]
+    /// Item-level `servers`, overriding the document defaults.
     pub fn servers(&self) -> Vec<Server<'s>> {
         self.resolved()
             .get("servers")
@@ -160,6 +169,7 @@ impl<'s> Operation<'s> {
     }
 
     #[must_use]
+    /// The raw node backing this operation.
     pub fn node(&self) -> NodeRef<'s> {
         self.node
     }
@@ -175,21 +185,25 @@ impl<'s> Operation<'s> {
     }
 
     #[must_use]
+    /// Unique identifier referenced by [`Link::operation_id`].
     pub fn operation_id(&self) -> Option<&'s str> {
         self.get("operationId").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// Short summary intended for docs UIs.
     pub fn summary(&self) -> Option<&'s str> {
         self.get("summary").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// Longer prose describing the operation's behavior.
     pub fn description(&self) -> Option<&'s str> {
         self.get("description").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// True when the operation is explicitly marked deprecated.
     pub fn deprecated(&self) -> bool {
         self.get("deprecated").and_then(|n| n.as_bool()).unwrap_or(false)
     }
@@ -203,26 +217,32 @@ impl<'s> Operation<'s> {
     }
 
     #[must_use]
+    /// Expected request body; `None` for body-less operations.
     pub fn request_body(&self) -> Option<RequestBody<'s>> {
         self.get("requestBody").map(|n| RequestBody::new(self.session, n))
     }
 
     #[must_use]
+    /// Declared responses; per spec effectively required, but views return
+    /// `None` rather than assuming validity.
     pub fn responses(&self) -> Option<Responses<'s>> {
         self.get("responses").map(|n| Responses::new(self.session, n))
     }
 
     #[must_use]
+    /// Client-initiated callbacks, `(expression, callback)` in document order.
     pub fn callbacks(&self) -> Vec<(&'s str, Callback<'s>)> {
         named_map(self.session, self.get("callbacks"), Callback::new)
     }
 
     #[must_use]
+    /// Operation-level security requirements, overriding the document ones.
     pub fn security(&self) -> Vec<SecurityRequirement<'s>> {
         security_list(self.session, self.get("security"))
     }
 
     #[must_use]
+    /// Operation-level `servers`, overriding enclosing scopes.
     pub fn servers(&self) -> Vec<Server<'s>> {
         self.get("servers")
             .map(|n| n.items().into_iter().map(|i| Server::new(self.session, i)).collect())
@@ -230,6 +250,7 @@ impl<'s> Operation<'s> {
     }
 
     #[must_use]
+    /// Tag names grouping this operation into categories.
     pub fn tags(&self) -> Vec<&'s str> {
         self.get("tags")
             .map(|n| n.items().into_iter().filter_map(|i| i.as_str()).collect())
@@ -237,6 +258,7 @@ impl<'s> Operation<'s> {
     }
 
     #[must_use]
+    /// External documentation reference for this operation.
     pub fn external_docs(&self) -> Option<ExternalDocumentation<'s>> {
         self.get("externalDocs").map(|n| ExternalDocumentation::new(self.session, n))
     }
@@ -254,6 +276,7 @@ impl<'s> Responses<'s> {
     }
 
     #[must_use]
+    /// The raw responses node.
     pub fn node(&self) -> NodeRef<'s> {
         self.node
     }
@@ -270,21 +293,26 @@ impl<'s> Responses<'s> {
     }
 
     #[must_use]
+    /// One entry by status key (`"200"`, `"4XX"`, ...); see
+    /// [`Responses::iter`] for key semantics.
     pub fn get(&self, status: &str) -> Option<Response<'s>> {
         self.node.get(status).map(|v| Response::new(self.session, v))
     }
 
     #[must_use]
+    /// The catch-all `default` response.
     pub fn default(&self) -> Option<Response<'s>> {
         self.get("default")
     }
 
     #[must_use]
+    /// Number of response entries including `default`.
     pub fn len(&self) -> usize {
         self.node.entries().len()
     }
 
     #[must_use]
+    /// True when no response entries exist.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

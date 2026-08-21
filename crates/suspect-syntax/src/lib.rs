@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-syntax: lossless tree-sitter CSTs for JSON and YAML.
 //!
 use tree_sitter::Language;
@@ -32,7 +33,9 @@ use std::fmt;
 /// Serialization format of a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Format {
+    /// JavaScript Object Notation documents.
     Json,
+    /// YAML Ain't Markup Language documents.
     Yaml,
 }
 
@@ -51,10 +54,15 @@ pub enum SyntaxKind {
     Pair,
     /// Any scalar leaf: plain, quoted, block, number, bool, null.
     Scalar,
+    /// `&anchor` definition attaching a name to a value.
     Anchor,
+    /// `*alias` reference resolving to an anchor's value.
     Alias,
+    /// `!!tag` type annotation on a node.
     Tag,
+    /// `# comment` trivia; never part of semantic content.
     Comment,
+    /// `%YAML`/`%TAG` directives at the head of a YAML stream.
     Directive,
     /// tree-sitter error node; downstream must tolerate these everywhere.
     Error,

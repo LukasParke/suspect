@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 use std::sync::Arc;
 
 use suspect_low::{NodeRef, SpecFamily};
@@ -8,8 +9,12 @@ use suspect_ref::{Resolution, Workspace, WorkspaceError};
 /// OpenAPI 3.x version of a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OasVersion {
+    /// OpenAPI 3.0.x (JSON-Schema-Subset dialect, `nullable` keyword).
     V30,
+    /// OpenAPI 3.1.x (JSON Schema 2020-12 dialect).
     V31,
+    /// OpenAPI 3.2.x (JSON Schema 2020-12 dialect plus tag `kind`/`parent`
+    /// and `info.summary`).
     V32,
 }
 
@@ -35,10 +40,19 @@ impl OasVersion {
 /// Model construction errors.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
+    /// The entry document sniffs as some other specification family
+    /// (AsyncAPI, Overlay, Arazzo, ...), not OpenAPI 3.x.
     #[error("document is not OpenAPI 3.x (family: {family:?})")]
-    NotOpenApi { family: SpecFamily },
+    NotOpenApi {
+        /// The detected [`SpecFamily`] of the offending entry document.
+        family: SpecFamily,
+    },
+    /// A `$ref` chain cycled while building the model. Views degrade to
+    /// their raw form via [`CycleGuard`]; this error is raised only where a
+    /// cycle cannot be degraded away.
     #[error("ref chain cycled while building the model")]
     Cycle,
+    /// The underlying workspace failed to load or resolve a document.
     #[error(transparent)]
     Workspace(#[from] WorkspaceError),
 }
@@ -108,6 +122,7 @@ impl Session {
         }
     }
 
+    /// The workspace this session resolves and loads documents through.
     #[must_use]
     pub fn workspace(&self) -> &Workspace {
         &self.ws

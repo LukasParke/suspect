@@ -7,11 +7,14 @@ use crate::components::Components;
 use crate::{OasVersion, OpenApi, Session};
 
 impl<'s> OpenApi<'s> {
+    /// The sniffed [`OasVersion`] for this document.
     #[must_use]
     pub const fn version(&self) -> OasVersion {
         self.version
     }
 
+    /// The session this view borrows; use it to load further entry
+    /// documents sharing the same workspace.
     #[must_use]
     pub fn session(&self) -> &'s Session {
         self.session
@@ -32,6 +35,8 @@ impl<'s> OpenApi<'s> {
         self.root.get(key)
     }
 
+    /// The `info` object. `None` when absent (invalid per spec, but
+    /// views never assume validity).
     #[must_use]
     pub fn info(&self) -> Option<Info<'s>> {
         self.get("info").map(|n| Info::new(self.session, n))
@@ -52,11 +57,13 @@ impl<'s> OpenApi<'s> {
         self.get("webhooks").map(|n| WebhookViews { session: self.session, node: n })
     }
 
+    /// The `components` object. `None` when the document declares none.
     #[must_use]
     pub fn components(&self) -> Option<Components<'s>> {
         self.get("components").map(|n| Components::new(self.session, n))
     }
 
+    /// Root-level `servers`; empty when absent.
     #[must_use]
     pub fn servers(&self) -> Vec<Server<'s>> {
         self.get("servers")
@@ -70,6 +77,7 @@ impl<'s> OpenApi<'s> {
         security_list(self.session, self.get("security"))
     }
 
+    /// Root-level `tags`; empty when absent.
     #[must_use]
     pub fn tags(&self) -> Vec<Tag<'s>> {
         self.get("tags")
@@ -77,6 +85,7 @@ impl<'s> OpenApi<'s> {
             .unwrap_or_default()
     }
 
+    /// Root-level `externalDocs`. `None` when absent.
     #[must_use]
     pub fn external_docs(&self) -> Option<ExternalDocumentation<'s>> {
         self.get("externalDocs").map(|n| ExternalDocumentation::new(self.session, n))
@@ -126,6 +135,9 @@ impl<'s> OpenApi<'s> {
 }
 
 /// Iteration over webhook path items (`webhooks` map).
+///
+/// Like every view, borrows the [`Session`] for its lifetime; `$ref` values
+/// resolve transparently through [`PathItem::resolved`].
 pub struct WebhookViews<'s> {
     session: &'s Session,
     node: NodeRef<'s>,
@@ -142,11 +154,13 @@ impl<'s> WebhookViews<'s> {
             .collect()
     }
 
+    /// Number of webhook entries.
     #[must_use]
     pub fn len(&self) -> usize {
         self.node.entries().len()
     }
 
+    /// True when the document declares no webhooks.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0

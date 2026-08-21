@@ -13,16 +13,22 @@ use crate::OutputFormat;
 /// One changed scalar: `from` -> `to` at `path`.
 #[derive(Debug, Clone, Serialize)]
 pub struct Changed {
+    /// Slash-delimited path to the changed scalar, tokens escaped per RFC 6901.
     pub path: String,
+    /// Compact rendering of the old value.
     pub from: String,
+    /// Compact rendering of the new value.
     pub to: String,
 }
 
 /// Collected structural differences between two documents.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DiffReport {
+    /// Paths present only in the right-hand document.
     pub added: Vec<String>,
+    /// Paths present only in the left-hand document.
     pub removed: Vec<String>,
+    /// Scalars present in both documents with different values.
     pub changed: Vec<Changed>,
 }
 

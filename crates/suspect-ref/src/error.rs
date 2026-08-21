@@ -14,17 +14,26 @@ pub enum RefError {
     /// A referenced document could not be loaded (missing file, unsupported
     /// scheme) or was re-entered while still loading.
     #[error("referenced document not available: {uri}")]
-    MissingDoc { uri: String },
+    MissingDoc {
+        /// URI that could not be loaded.
+        uri: String,
+    },
     /// Filesystem I/O failed while loading a referenced document.
     #[error(transparent)]
     Io(#[from] std::io::Error),
     /// A remote (`http:`/`https:`) reference was encountered; v1 never
     /// performs network fetches.
     #[error("remote references are denied in v1: {uri}")]
-    RemoteDenied { uri: String },
+    RemoteDenied {
+        /// The denied remote URI.
+        uri: String,
+    },
     /// A resolution chain or census walk exceeded its depth cap.
     #[error("resolution exceeded depth cap of {cap}")]
-    TooDeep { cap: usize },
+    TooDeep {
+        /// The cap that was exceeded (see [`crate::WorkspaceBuilder::depth_cap`]).
+        cap: usize,
+    },
     /// The `$ref` value itself is malformed (unparseable URI, invalid
     /// percent-escape, unknown plain-name anchor).
     #[error("invalid $ref `{raw}`: {reason}")]
@@ -35,7 +44,7 @@ pub enum RefError {
         reason: String,
     },
     /// Eager operations that must materialize a value hit a resolution
-    /// cycle. Lazy chain resolution reports [`Resolution::Cycle`] instead.
+    /// cycle. Lazy chain resolution reports [`crate::Resolution::Cycle`] instead.
     #[error("resolution cycle detected")]
     CycleDetected,
 }

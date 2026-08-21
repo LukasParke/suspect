@@ -11,7 +11,10 @@ use crate::diagnostic::{Diagnostic, Severity};
 /// Path Object itself (3.2 adds `summary`/`description` at this level).
 const NON_PATH_KEYS: [&str; 2] = ["summary", "description"];
 
-/// `oas-path-trailing-slash` (Warning) and `oas-empty-path-template` (Error).
+/// `oas-path-trailing-slash` (Warning) and `oas-empty-path-template`
+/// (Error): every `paths` key must start with `/` and must not end with a
+/// slash. Extension keys (`x-`) and the 3.2 Path Object `summary`/
+/// `description` keys are skipped.
 pub(crate) fn check_path_keys(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     let Some(paths_node) = api.root().get("paths") else { return };
     for entry in paths_node.entries() {

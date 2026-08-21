@@ -364,11 +364,17 @@ impl<'ws> Inliner<'ws> {
 /// Aggregate bundle result.
 #[derive(Debug, Clone, Serialize)]
 pub struct BundleReport {
+    /// Strategy used, `"keep"` or `"inline"`.
     pub strategy: String,
+    /// Documents loaded into the workspace closure.
     pub docs: usize,
+    /// `$ref` edges resolved across the closure.
     pub edges: usize,
+    /// Refs replaced by an inline copy of their target (inline strategy).
     pub refs_inlined: usize,
+    /// Cyclic refs emitted as `x-suspect-cyclic` markers instead of expanded.
     pub cycles_inlined: usize,
+    /// Problems encountered, as findings rather than a hard failure.
     pub errors: Vec<Finding>,
 }
 

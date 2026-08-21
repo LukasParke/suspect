@@ -65,6 +65,13 @@ pub struct Cycle {
 }
 
 /// Whether a cycle represents legitimate recursive schema structure.
+///
+/// Classification rule: a cycle is legal recursion only if **every** edge
+/// in it sits beneath a recursion-point keyword (`properties`, `items`,
+/// `$defs`, `allOf`, …) somewhere on its ancestor chain — the shape of
+/// self-referential data a validator terminates on. A loop threaded through
+/// any other position (e.g. a `required` array) can never resolve to a
+/// value and is reported as illegal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CycleKind {
     /// Every edge in the cycle nests under a recursion-point keyword.

@@ -9,9 +9,13 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, clap::ValueEnum, serde::Serialize)]
 #[value(rename_all = "lower")]
 pub enum Severity {
+    /// Stylistic or preference-level note; never affects the exit code.
     Hint,
+    /// Informational message worth surfacing but not actionable.
     Info,
+    /// Suspicious construct that likely deserves attention.
     Warning,
+    /// Definite problem; makes the command exit 1.
     Error,
 }
 
@@ -42,11 +46,17 @@ impl Severity {
 /// One reportable problem, located at a 1-based line and column.
 #[derive(Debug, Clone, Serialize)]
 pub struct Finding {
+    /// Path as given on the command line.
     pub file: String,
+    /// How severe the problem is.
     pub severity: Severity,
+    /// Stable machine identifier, e.g. `oas3-schema` or `E001`.
     pub code: String,
+    /// Human-readable description of the problem.
     pub message: String,
+    /// 1-based line of the offending span.
     pub line: u32,
+    /// 1-based column of the offending span.
     pub col: u32,
 }
 

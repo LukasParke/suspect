@@ -1,4 +1,19 @@
-//! Check battery: one module per check group.
+//! Check battery: one module per check group, all driven by [`run_all`].
+//!
+//! Groups and their modules:
+//!
+//! - [`operations`] — operationIds, required `responses`, deprecation notices
+//! - [`parameters`] — parameter `name`/`in` fields, path-param `required`,
+//!   header duplication
+//! - [`paths`] — path-key shape and path-template/parameter correspondence
+//! - [`responses`] — response descriptions
+//! - [`security`] — security requirements referencing declared schemes
+//! - [`servers`] — server-URL template variables
+//! - [`tags`] — operation tags declared in the root `tags` list
+//! - [`schemas`] — schema `type` values and discriminators
+//! - [`examples`] — media-type examples vs. schema type sets
+//! - [`webhooks`] — `webhooks` availability per OpenAPI version
+//! - [`info`] — license identification fields
 
 mod examples;
 mod info;
@@ -17,6 +32,8 @@ use suspect_oas::OpenApi;
 
 use crate::diagnostic::{Diagnostic, Severity};
 
+/// Runs every check group against `api`, appending findings to `out` in
+/// module order; the caller sorts the accumulated diagnostics.
 pub(crate) fn run_all(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     operations::check_operation_ids(api, out);
     operations::check_missing_responses(api, out);
@@ -74,7 +91,7 @@ pub(crate) fn range_of(node: Option<NodeRef<'_>>, fallback: NodeRef<'_>) -> std:
     node.map_or_else(|| fallback.byte_range(), |n| n.byte_range())
 }
 
-#[must_use]
+/// True when `s` is one of the JSON-Schema primitive type names.
 fn is_valid_type(s: &str) -> bool {
     matches!(s, "null" | "boolean" | "object" | "array" | "number" | "integer" | "string")
 }

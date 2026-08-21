@@ -11,6 +11,7 @@ pub struct SNode<'d> {
 }
 
 impl<'d> SNode<'d> {
+    /// Wraps a raw tree-sitter node together with its owning document.
     #[must_use]
     pub fn new(doc: &'d SourceDoc, raw: tree_sitter::Node<'d>) -> Self {
         Self { doc, raw }
@@ -22,6 +23,8 @@ impl<'d> SNode<'d> {
         &self.raw
     }
 
+    /// The document this node belongs to; source text and lookups resolve
+    /// against it.
     #[must_use]
     pub fn doc(&self) -> &'d SourceDoc {
         self.doc
@@ -52,26 +55,33 @@ impl<'d> SNode<'d> {
         String::from_utf8_lossy(self.text())
     }
 
+    /// Half-open byte range of this node in the document buffer, including
+    /// any attached decorations.
     #[must_use]
     pub fn byte_range(&self) -> Range<usize> {
         self.raw.byte_range()
     }
 
+    /// First byte of [`byte_range`](Self::byte_range).
     #[must_use]
     pub fn start_byte(&self) -> usize {
         self.raw.start_byte()
     }
 
+    /// One past the last byte of [`byte_range`](Self::byte_range).
     #[must_use]
     pub fn end_byte(&self) -> usize {
         self.raw.end_byte()
     }
 
+    /// Enclosing node, if any (the root returns `None`).
     #[must_use]
     pub fn parent(&self) -> Option<SNode<'d>> {
         self.raw.parent().map(|n| SNode::new(self.doc, n))
     }
 
+    /// Child occupying a named grammar field (e.g. `"key"`/`"value"` on a
+    /// pair), if that field is present for this node's grammar shape.
     #[must_use]
     pub fn child_by_field(&self, field: &str) -> Option<SNode<'d>> {
         self.raw.child_by_field_name(field).map(|n| SNode::new(self.doc, n))
@@ -118,6 +128,9 @@ impl<'d> SNode<'d> {
         })
     }
 
+    /// True for tree-sitter ERROR or MISSING nodes. Such nodes can appear
+    /// anywhere in an otherwise-parseable document; callers must tolerate
+    /// them rather than assuming a well-formed tree.
     #[must_use]
     pub fn is_error(&self) -> bool {
         self.raw.is_error() || self.raw.is_missing()

@@ -33,7 +33,11 @@ pub(crate) fn all_parameters<'s>(api: &OpenApi<'s>) -> Vec<Parameter<'s>> {
     out
 }
 
-/// `oas-parameter-missing-name` / `oas-parameter-missing-in` (Error).
+/// `oas-parameter-missing-name` / `oas-parameter-missing-in` (Error): every
+/// parameter view, resolved, must carry a `name` and an `in` location.
+/// Covers path-item, operation (paths and webhooks), and
+/// `components/parameters` parameters; nothing is skipped, so a parameter
+/// object missing either field yields one diagnostic per missing field.
 pub(crate) fn check_parameter_fields(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     for p in all_parameters(api) {
         let r = p.resolved();
@@ -79,7 +83,9 @@ pub(crate) fn check_required_path_params(api: &OpenApi<'_>, out: &mut Vec<Diagno
 }
 
 /// `oas-duplicate-header-param` (Error): same header name declared twice on
-/// one operation (path-item + operation parameters merged).
+/// one operation (path-item + operation parameters merged). Parameters that
+/// are not `in: header` or have no `name` are skipped, as are path items
+/// with no operations.
 pub(crate) fn check_duplicate_header_params(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     // The path-item/operation view types are unnameable from outside
     // suspect-oas, so flatten them into plain data first.

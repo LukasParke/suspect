@@ -1,7 +1,8 @@
+#![deny(missing_docs)]
 //! suspect-oas: typed OpenAPI 3.0/3.1/3.2 models as lazy views.
 //!
 //! Views borrow a [`Session`] which pins every loaded document in an
-//! append-only arena, so all [`NodeRef`]s derived from it stay valid for the
+//! append-only arena, so all [`suspect_low::NodeRef`]s derived from it stay valid for the
 //! session borrow — sound, allocation-light, no `Rc`/`RefCell` in the model.
 //! `$ref`s resolve transparently through the [`Workspace`](suspect_ref::Workspace);
 //! cycles surface as [`CycleGuard`] markers rather than errors or loops.

@@ -77,16 +77,19 @@ impl<'d> OverlayDoc<'d> {
     }
 
     #[must_use]
+    /// The `overlay` version string from the document root, if present.
     pub fn version(&self) -> Option<&'d str> {
         self.root.get("overlay").and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// Human-readable title from `info.title`, if present.
     pub fn title(&self) -> Option<&'d str> {
         self.root.get("info").and_then(|i| i.get("title")).and_then(|n| n.as_str())
     }
 
     #[must_use]
+    /// The overlay's own revision from `info.version`, if present.
     pub fn overlay_version(&self) -> Option<&'d str> {
         self.root.get("info").and_then(|i| i.get("version")).and_then(|n| n.as_str())
     }
@@ -98,11 +101,13 @@ impl<'d> OverlayDoc<'d> {
     }
 
     #[must_use]
+    /// The parsed actions, in document order.
     pub fn actions(&self) -> &[ActionView<'d>] {
         &self.actions
     }
 
     #[must_use]
+    /// The overlay document's root node.
     pub fn root(&self) -> NodeRef<'d> {
         self.root
     }
@@ -120,7 +125,9 @@ impl std::fmt::Debug for OverlayDoc<'_> {
 /// Non-fatal structural findings (spec-conformance linting).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverlayDiagnostic {
+    /// Stable machine-readable identifier (e.g. `empty-actions`).
     pub code: &'static str,
+    /// Human-readable explanation of the finding.
     pub message: String,
 }
 

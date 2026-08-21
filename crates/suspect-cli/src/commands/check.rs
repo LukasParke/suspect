@@ -15,14 +15,23 @@ use crate::OutputFormat;
 /// Per-file check result.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileReport {
+    /// Path as given on the command line.
     pub path: String,
+    /// Display label of the detected spec family (OpenAPI/Arazzo/Overlay/unknown).
     pub family: String,
+    /// Number of syntax errors found while parsing the document.
     pub syntax_errors: usize,
+    /// Number of `$ref` edges leaving this document.
     pub ref_edges: usize,
+    /// Cycles in the reference graph that are legal (e.g. schema recursion).
     pub legal_cycles: usize,
+    /// Cycles in the reference graph that are illegal (unresolvable expansion).
     pub illegal_cycles: usize,
+    /// Total documents in the loaded workspace closure.
     pub workspace_docs: usize,
+    /// Total `$ref` edges across the loaded workspace closure.
     pub workspace_edges: usize,
+    /// Problems found in this file, including IO/parse failures as Error findings.
     pub findings: Vec<Finding>,
 }
 

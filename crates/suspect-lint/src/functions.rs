@@ -14,10 +14,15 @@ use crate::rule::Rule;
 /// Casing conventions accepted by the `casing` function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Casing {
+    /// `camelCase`: leading lowercase, inner capitals, no separators.
     Camel,
+    /// `PascalCase`: leading capital, no separators.
     Pascal,
+    /// `kebab-case`: lowercase words joined by single hyphens.
     Kebab,
+    /// `snake_case`: lowercase words joined by single underscores.
     Snake,
+    /// `MACRO_CASE`: uppercase words joined by single underscores.
     Macro,
 }
 
@@ -84,9 +89,13 @@ impl Casing {
 /// One allowed scalar in an `enumeration` option list.
 #[derive(Debug, Clone)]
 pub(crate) enum EnumValue {
+    /// Allowed string.
     Str(Box<str>),
+    /// Allowed number (compared as `f64`).
     Num(f64),
+    /// Allowed boolean.
     Bool(bool),
+    /// Allowed `null`.
     Null,
 }
 
@@ -105,16 +114,26 @@ impl EnumValue {
 /// A compiled `then` function with its options.
 #[derive(Debug)]
 pub(crate) enum Function {
+    /// Passes when the matched node is truthy in Spectral's sense.
     Truthy,
+    /// Passes when the matched node is falsy (`null`, `false`, empty string).
     Falsy,
     /// Key must exist; the given query selects the parent object.
     Defined { property: Box<str> },
+    /// Passes when the named key does not exist on the matched object.
     Undefined { property: Box<str> },
+    /// Passes when a matched string matches the compiled regex.
     Pattern(Regex),
+    /// Passes when a matched string fits the configured casing convention.
     Casing(Casing),
+    /// Passes when the string's character count or array's item count lies
+    /// within `[min, max]` bounds; non-sized nodes always pass.
     Length { min: Option<f64>, max: Option<f64> },
+    /// Passes when the node equals one of the allowed scalar values.
     Enumeration(Vec<EnumValue>),
+    /// Passes when every key of the matched object is alphabetically sorted.
     Alphabetical,
+    /// Passes when exactly one of the named properties is truthy.
     Xor { properties: Vec<Box<str>> },
     /// Native: every `{var}` in a path key is declared as an `in: path`
     /// parameter on every operation of the path item.

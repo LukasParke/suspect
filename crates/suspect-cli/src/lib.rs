@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-cli: the `suspect` binary. Thin `main.rs` delegates here so every
 //! command is a testable library function taking plain arguments and
 //! returning an exit code (0 clean, 1 findings at/above Error, 2 usage).
@@ -17,7 +18,9 @@ use suspect_source::{Source, Uri};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum OutputFormat {
+    /// Human-readable aligned text (the default).
     Text,
+    /// One pretty-printed JSON document on stdout, machine-consumable.
     Json,
 }
 
@@ -25,7 +28,9 @@ pub enum OutputFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum DocFormat {
+    /// Pretty-printed JSON.
     Json,
+    /// YAML (block style, no anchors or aliases).
     Yaml,
 }
 
@@ -39,12 +44,16 @@ pub enum Strategy {
     Inline,
 }
 
+/// Subcommands of the `suspect` binary; each variant is one subcommand and
+/// its doc comment becomes the one-line help text shown by `--help`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats.
     Check {
         /// Documents to check.
         #[arg(required = true)]
         paths: Vec<PathBuf>,
+        /// Output format for the per-file reports.
         #[command(flatten)]
         text: TextFormat,
     },
@@ -59,11 +68,13 @@ pub enum Command {
         /// Report only findings at or above this severity.
         #[arg(long, default_value = "hint")]
         min_severity: output::Severity,
+        /// Output format for the finding list.
         #[command(flatten)]
         text: TextFormat,
     },
     /// Apply an Overlay 1.0 document to a target document.
     Overlay {
+        /// The overlay subcommand to run.
         #[command(subcommand)]
         cmd: commands::overlay::OverlayCmd,
     },
@@ -85,6 +96,7 @@ pub enum Command {
     Stats {
         /// Input document.
         path: PathBuf,
+        /// Output format for the counts table.
         #[command(flatten)]
         text: TextFormat,
     },
@@ -108,6 +120,7 @@ pub enum Command {
         a: PathBuf,
         /// Right-hand document.
         b: PathBuf,
+        /// Output format for the difference report.
         #[command(flatten)]
         text: TextFormat,
     },
@@ -118,6 +131,7 @@ pub enum Command {
         /// Iterations per stage (mean reported).
         #[arg(long, default_value_t = 3)]
         iters: usize,
+        /// Output format for the stage table.
         #[command(flatten)]
         text: TextFormat,
     },
@@ -138,6 +152,7 @@ pub struct TextFormat {
 #[derive(Debug, Parser)]
 #[command(name = "suspect", version, about = "OpenAPI/Arazzo/Overlay toolkit")]
 pub struct Cli {
+    /// The subcommand to run; see [`Command`] for the available operations.
     #[command(subcommand)]
     pub command: Command,
 }

@@ -20,6 +20,7 @@ impl<'s> Components<'s> {
     }
 
     #[must_use]
+    /// The raw `components` node.
     pub fn node(&self) -> NodeRef<'s> {
         self.node
     }
@@ -42,36 +43,43 @@ impl<'s> Components<'s> {
     }
 
     #[must_use]
+    /// One reusable schema by name; `None` when the section or entry is absent.
     pub fn schema(&self, name: &str) -> Option<SchemaView<'s>> {
         self.section("schemas")?.get(name).map(|v| SchemaView::new(self.session, v))
     }
 
     #[must_use]
+    /// `components/responses`, in document order.
     pub fn responses(&self) -> Vec<(&'s str, Response<'s>)> {
         named_map(self.session, self.section("responses"), Response::new)
     }
 
     #[must_use]
+    /// `components/parameters`, in document order.
     pub fn parameters(&self) -> Vec<(&'s str, Parameter<'s>)> {
         named_map(self.session, self.section("parameters"), Parameter::new)
     }
 
     #[must_use]
+    /// `components/requestBodies`, in document order.
     pub fn request_bodies(&self) -> Vec<(&'s str, RequestBody<'s>)> {
         named_map(self.session, self.section("requestBodies"), RequestBody::new)
     }
 
     #[must_use]
+    /// `components/examples`, in document order.
     pub fn examples(&self) -> Vec<(&'s str, Example<'s>)> {
         named_map(self.session, self.section("examples"), Example::new)
     }
 
     #[must_use]
+    /// `components/headers`, in document order.
     pub fn headers(&self) -> Vec<(&'s str, Header<'s>)> {
         named_map(self.session, self.section("headers"), Header::new)
     }
 
     #[must_use]
+    /// `components/securitySchemes`, in document order.
     pub fn security_schemes(&self) -> Vec<(&'s str, SecurityScheme<'s>)> {
         named_map(self.session, self.section("securitySchemes"), |s, n| {
             SecurityScheme::new(s, n)
@@ -79,11 +87,13 @@ impl<'s> Components<'s> {
     }
 
     #[must_use]
+    /// `components/links`, in document order.
     pub fn links(&self) -> Vec<(&'s str, Link<'s>)> {
         named_map(self.session, self.section("links"), Link::new)
     }
 
     #[must_use]
+    /// `components/callbacks`, in document order.
     pub fn callbacks(&self) -> Vec<(&'s str, Callback<'s>)> {
         named_map(self.session, self.section("callbacks"), Callback::new)
     }

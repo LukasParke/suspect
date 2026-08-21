@@ -1,3 +1,4 @@
+#![deny(missing_docs)]
 //! suspect-low: generic ordered document model with source maps.
 //!
 //! A semantic view over [`suspect_syntax`] CSTs: typed scalar access,
