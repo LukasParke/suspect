@@ -22,6 +22,7 @@ pub use model::{
 };
 mod openapi;
 
+pub use paths::{Operation, PathItem, Paths};
 pub use schema::{SchemaView, TypeSet};
 pub use session::{CycleGuard, ModelError, OasVersion, OpenApi, Session};
 

@@ -17,6 +17,7 @@
 pub mod actions;
 pub mod completion;
 pub mod diagnostics;
+pub mod hover_detail;
 pub mod navigation;
 pub mod rename;
 pub mod semantic;

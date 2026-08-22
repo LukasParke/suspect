@@ -368,6 +368,18 @@ pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) 
     if let Some(refv) = ref_value_node(low, offset) {
         let handle = ws.get(low.uri())?;
         if let Some(Resolution::Node(target)) = resolve_live_ref(&handle, &refv) {
+            // Rich hover for component targets: structured markdown tables
+            // instead of raw source excerpts.
+            let ptr = suspect_low::NodeRef::new(*target.syntax()).path_from_root();
+            let toks = ptr.tokens();
+            if toks.len() >= 3 && toks[0].as_ref() == "components" && toks[1].as_ref() == "schemas"
+            {
+                if let Some(md) =
+                    crate::hover_detail::try_rich_hover(toks[1].as_ref(), toks[2].as_ref(), low)
+                {
+                    return Some(md);
+                }
+            }
             let tdoc = target.syntax().doc();
             if *tdoc.uri() == *low.uri() {
                 // Re-express the target against the buffer and excerpt the
@@ -765,7 +777,10 @@ components:
         let low = low_buffer(&dir, "main.yaml", &dirty);
         let md = hover_markdown(&ws, &low, offset_in(&dirty, "#/components/schemas/Pet"))
             .expect("hover resolves");
-        assert!(md.contains("type: string"), "{md}");
-        assert!(!md.contains("type: object"), "{md}");
+        assert!(
+            md.contains("`string`") || md.contains("string"),
+            "must show edited type: {md}"
+        );
+        assert!(!md.contains("object"), "must not show stale type: {md}");
     }
 }
