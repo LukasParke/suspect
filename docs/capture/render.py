@@ -8,7 +8,7 @@ import os
 import sys
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "showcase_data.json")
-OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "docs", "images")
+OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "images")
 
 BASE_CSS = """
 * { margin: 0; padding: 0; box-sizing: border-box; }

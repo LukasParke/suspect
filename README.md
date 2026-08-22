@@ -46,29 +46,25 @@ Hover over a `$ref` resolves it across files and previews the target:
 Quick fixes derived from diagnostics (insert missing `operationId`,
 `responses`, `description`, contact/license skeletons, …):
 
-![Code actions](docs/images/03-code-actions.png)
+![Code actions](docs/images/lsp-code_actions.png)
 
 Problems panel:
 
-![Problems](docs/images/04-problems-panel.png)
 
 Semantic highlighting and property type hints:
 
-![Inlay hints + semantic highlighting](docs/images/lsp-inlay.png)
+![Semantic tokens + inlay hints](docs/images/lsp-semantic_tokens.png)
 
 Workspace-wide rename rewrites the declaration and every `$ref` that points
 at it (guarded by `prepareRename`; cross-file edits land in one atomic
 `WorkspaceEdit`) — shown here renaming `Pet`:
 
-![Rename input](docs/images/06-rename-input.png)
+![Workspace symbols](docs/images/lsp-workspace_symbols.png)
 
 After applying, every `$ref` is rewritten:
 
-![Rename applied](docs/images/07-rename-applied.png)
+![Go to definition](docs/images/lsp-goto_def.png)
 
-Cross-file goto definition:
-
-![Goto definition](docs/images/08-goto-definition.png)
 
 ## Crates
 
