@@ -178,7 +178,7 @@ impl<'d> NodeRef<'d> {
             });
         }
         for merge in merges {
-            append_merge(&mut out, &mut seen, merge);
+            append_merge(&mut out, &mut seen, merge, 0);
         }
         out
     }
@@ -625,7 +625,17 @@ fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
     out
 }
 
-fn append_merge<'d>(out: &mut Vec<Entry<'d>>, seen: &mut Vec<&'d str>, merge: NodeRef<'d>) {
+fn append_merge<'d>(
+    out: &mut Vec<Entry<'d>>,
+    seen: &mut Vec<&'d str>,
+    merge: NodeRef<'d>,
+    depth: usize,
+) {
+    // Guard against merge-key cycles (`<<: *self` patterns).
+    const MAX_MERGE_DEPTH: usize = 16;
+    if depth > MAX_MERGE_DEPTH {
+        return;
+    }
     let resolved = merge.resolved();
     match resolved.kind() {
         ValueKind::Object => {
@@ -638,7 +648,7 @@ fn append_merge<'d>(out: &mut Vec<Entry<'d>>, seen: &mut Vec<&'d str>, merge: No
         }
         ValueKind::Array => {
             for item in resolved.items() {
-                append_merge(out, seen, item);
+                append_merge(out, seen, item, depth + 1);
             }
         }
         _ => {}

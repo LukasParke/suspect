@@ -206,3 +206,24 @@ fn path_from_root_works_for_pair_nodes() {
     let p = suspect_low::NodeRef::new(pair).path_from_root();
     assert_eq!(p.to_path(), "/components/schemas/Pet");
 }
+
+#[test]
+fn merge_key_cycle_does_not_hang() {
+    // Regression: `<<: *self` merge-key cycles caused stack overflow
+    let doc = parse("a: &a\n  b:\n    <<: *a\n");
+    let a = doc.root().get("a").unwrap();
+    let _ = a.entries(); // must terminate without overflow
+}
+
+#[test]
+fn deep_nesting_does_not_overflow() {
+    // 10000-level nesting: tree walks and path_from_root must not overflow
+    let mut src = String::from("root:\n");
+    for i in 0..5000 {
+        src.push_str(&format!("{}  key{}:\n", " ".repeat((i % 10) + 2), i));
+        src.push_str(&format!("{}  val{}\n", " ".repeat((i % 10) + 4), i));
+    }
+    let doc = parse(&src);
+    let root = doc.root();
+    assert_eq!(root.kind(), ValueKind::Object);
+}
