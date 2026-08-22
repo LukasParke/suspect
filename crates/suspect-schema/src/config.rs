@@ -34,6 +34,10 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self { format_assertion: false, max_depth: 512, max_errors: 100 }
+        Self {
+            format_assertion: false,
+            max_depth: 512,
+            max_errors: 100,
+        }
     }
 }

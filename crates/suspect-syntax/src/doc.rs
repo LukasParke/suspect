@@ -20,7 +20,10 @@ pub struct Point {
 
 impl From<tree_sitter::Point> for Point {
     fn from(p: tree_sitter::Point) -> Self {
-        Self { row: p.row, column: p.column }
+        Self {
+            row: p.row,
+            column: p.column,
+        }
     }
 }
 
@@ -68,26 +71,46 @@ impl Edit {
     /// introduces no new lines beyond those in the removed text — callers
     /// replacing across line boundaries should supply points explicitly.
     #[must_use]
-    pub fn from_bytes(doc: &SourceDoc, start_byte: usize, old_end_byte: usize, new_text_len: usize) -> Self {
+    pub fn from_bytes(
+        doc: &SourceDoc,
+        start_byte: usize,
+        old_end_byte: usize,
+        new_text_len: usize,
+    ) -> Self {
         let bytes = doc.bytes();
         let (start_row, start_col) = doc.line_index().line_col_bytes(bytes, start_byte);
         let (old_row, old_col) = doc.line_index().line_col_bytes(bytes, old_end_byte);
         let inserted = &doc.bytes()[start_byte..old_end_byte];
         let new_lines = inserted.iter().filter(|&&b| b == b'\n').count();
         let new_end_point = if new_lines == 0 {
-            Point { row: start_row, column: start_col + new_text_len }
+            Point {
+                row: start_row,
+                column: start_col + new_text_len,
+            }
         } else {
             // last inserted line length after the final '\n'
-            let last_nl = inserted.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+            let last_nl = inserted
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(0, |i| i + 1);
             let tail = new_text_len.saturating_sub(inserted.len() - last_nl);
-            Point { row: start_row + new_lines, column: tail }
+            Point {
+                row: start_row + new_lines,
+                column: tail,
+            }
         };
         Self {
             start_byte,
             old_end_byte,
             new_end_byte: start_byte + new_text_len,
-            start_point: Point { row: start_row, column: start_col },
-            old_end_point: Point { row: old_row, column: old_col },
+            start_point: Point {
+                row: start_row,
+                column: start_col,
+            },
+            old_end_point: Point {
+                row: old_row,
+                column: old_col,
+            },
             new_end_point,
         }
     }
@@ -140,8 +163,9 @@ impl SourceDoc {
         parser
             .set_language(&language)
             .expect("vendored grammar ABI must match runtime");
-        let tree =
-            parser.parse(source.bytes(), None).expect("tree-sitter parse never returns None without a timeout");
+        let tree = parser
+            .parse(source.bytes(), None)
+            .expect("tree-sitter parse never returns None without a timeout");
         let line_index = LineIndex::new(source.bytes());
         Self {
             uri,
@@ -182,7 +206,9 @@ impl SourceDoc {
             Format::Json => crate::json_language(),
             Format::Yaml => crate::yaml_language(),
         };
-        parser.set_language(&language).expect("vendored grammar ABI must match runtime");
+        parser
+            .set_language(&language)
+            .expect("vendored grammar ABI must match runtime");
         let new_tree = parser
             .parse(new_source.bytes(), Some(&tree))
             .expect("tree-sitter parse never returns None without a timeout");
@@ -295,7 +321,10 @@ fn collect_errors(node: SNode<'_>, out: &mut Vec<SyntaxError>) {
             message: format!("syntax error near {:?}", node.text_lossy()),
         });
     } else if node.raw().is_missing() {
-        out.push(SyntaxError { range: node.byte_range(), message: "missing node".into() });
+        out.push(SyntaxError {
+            range: node.byte_range(),
+            message: "missing node".into(),
+        });
     }
     for child in node.children() {
         collect_errors(child, out);
@@ -305,9 +334,11 @@ fn collect_errors(node: SNode<'_>, out: &mut Vec<SyntaxError>) {
 fn collect_anchors(node: SNode<'_>, map: &mut AnchorMap) {
     if node.kind() == SyntaxKind::Anchor
         && let Some(name) = anchor_name(node)
-            && let Some(value) = anchored_value(node) {
-                map.entry(name).or_insert((value.byte_range(), value.kind()));
-            }
+        && let Some(value) = anchored_value(node)
+    {
+        map.entry(name)
+            .or_insert((value.byte_range(), value.kind()));
+    }
     for child in node.children() {
         collect_anchors(child, map);
     }
@@ -348,7 +379,11 @@ fn detect_format(bytes: &[u8]) -> Format {
                     return Format::Json;
                 }
                 if let Some(yaml_errors) = count_errors(bytes, Format::Yaml) {
-                    return if json_errors <= yaml_errors { Format::Json } else { Format::Yaml };
+                    return if json_errors <= yaml_errors {
+                        Format::Json
+                    } else {
+                        Format::Yaml
+                    };
                 }
             }
             Format::Json

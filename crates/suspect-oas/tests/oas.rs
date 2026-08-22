@@ -100,7 +100,10 @@ components:
     assert_eq!(limit.location(), Some(suspect_oas::ParameterIn::Query));
     let param_schema = limit.schema().unwrap();
     let ts = param_schema.type_().unwrap();
-    assert!(ts.contains(suspect_oas::TypeSet::INTEGER), "limit param must be integer-typed");
+    assert!(
+        ts.contains(suspect_oas::TypeSet::INTEGER),
+        "limit param must be integer-typed"
+    );
 
     // cross-file $ref through responses → PetList → items → Pet
     let responses = get.responses().unwrap();
@@ -109,9 +112,20 @@ components:
     let (_, media) = &content[0];
     let list_schema = media.schema().unwrap();
     let resolved_list = list_schema.resolved();
-    assert_eq!(resolved_list.type_().map(|t| t.contains(suspect_oas::TypeSet::ARRAY)), Some(true));
+    assert_eq!(
+        resolved_list
+            .type_()
+            .map(|t| t.contains(suspect_oas::TypeSet::ARRAY)),
+        Some(true)
+    );
     let item = resolved_list.items().unwrap().resolved();
-    assert_eq!(item.property("name").unwrap().type_().map(|t| t.contains(suspect_oas::TypeSet::STRING)), Some(true));
+    assert_eq!(
+        item.property("name")
+            .unwrap()
+            .type_()
+            .map(|t| t.contains(suspect_oas::TypeSet::STRING)),
+        Some(true)
+    );
     assert_eq!(item.required(), vec!["id", "name"]);
 
     // local ref with sibling-only object (default response)

@@ -45,18 +45,25 @@ fn bench_parse(c: &mut Criterion, label: &str, fixture: &str, format: Option<For
 
     let mut group = c.benchmark_group(label);
     group.throughput(criterion::Throughput::Bytes(bytes.len() as u64));
-    group.bench_function(if format.is_some() { "with_format" } else { "autodetect" }, |b| {
-        b.iter(|| {
-            let source = Source::from_vec(bytes.clone());
-            let doc = match format {
-                Some(f) => SourceDoc::with_format(black_box(uri.clone()), source, f),
-                None => SourceDoc::parse(black_box(uri.clone()), source),
-            };
-            // Touch the tree without walking it: keep the timed section
-            // limited to parsing + line-index construction.
-            black_box(doc.root().byte_range());
-        });
-    });
+    group.bench_function(
+        if format.is_some() {
+            "with_format"
+        } else {
+            "autodetect"
+        },
+        |b| {
+            b.iter(|| {
+                let source = Source::from_vec(bytes.clone());
+                let doc = match format {
+                    Some(f) => SourceDoc::with_format(black_box(uri.clone()), source, f),
+                    None => SourceDoc::parse(black_box(uri.clone()), source),
+                };
+                // Touch the tree without walking it: keep the timed section
+                // limited to parsing + line-index construction.
+                black_box(doc.root().byte_range());
+            });
+        },
+    );
     group.finish();
 }
 
@@ -83,7 +90,12 @@ fn bench_all(c: &mut Criterion) {
     );
 }
 
-criterion_group!(benches, bench_all, bench_corpus_parse, bench_incremental_reparse);
+criterion_group!(
+    benches,
+    bench_all,
+    bench_corpus_parse,
+    bench_incremental_reparse
+);
 criterion_main!(benches);
 
 fn bench_corpus_parse(c: &mut Criterion) {
@@ -95,10 +107,25 @@ fn bench_corpus_parse(c: &mut Criterion) {
         ("stripe_yaml", "stripe.yaml", Some(Format::Yaml), 10),
         ("stripe_sdk_yaml", "stripe-sdk.yaml", Some(Format::Yaml), 10),
         ("github_yaml", "api.github.com.yaml", Some(Format::Yaml), 10),
-        ("kubernetes_yaml", "kubernetes-swagger.yaml", Some(Format::Yaml), 10),
+        (
+            "kubernetes_yaml",
+            "kubernetes-swagger.yaml",
+            Some(Format::Yaml),
+            10,
+        ),
         ("stripe_yaml_autodetect", "stripe.yaml", None, 10),
-        ("kubernetes_yaml_autodetect", "kubernetes-swagger.yaml", None, 10),
-        ("petstore_expanded_yaml", "petstore-expanded.yaml", Some(Format::Yaml), 100),
+        (
+            "kubernetes_yaml_autodetect",
+            "kubernetes-swagger.yaml",
+            None,
+            10,
+        ),
+        (
+            "petstore_expanded_yaml",
+            "petstore-expanded.yaml",
+            Some(Format::Yaml),
+            100,
+        ),
     ];
 
     for (label, file, format, sample_size) in cases {
@@ -154,8 +181,10 @@ fn bench_incremental_reparse(c: &mut Criterion) {
     group.throughput(criterion::Throughput::Bytes(bytes.len() as u64));
     group.bench_function("stripe_1kb_insert", |b| {
         b.iter(|| {
-            let reparse =
-                doc.reparse(Source::from_vec(edited.clone()), std::slice::from_ref(&edit));
+            let reparse = doc.reparse(
+                Source::from_vec(edited.clone()),
+                std::slice::from_ref(&edit),
+            );
             black_box(reparse.root().byte_range());
         });
     });

@@ -66,7 +66,12 @@ impl Finding {
     pub fn to_line(&self) -> String {
         format!(
             "{}:{}:{} [{}] {}: {}",
-            self.file, self.line, self.col, self.severity.upper(), self.code, self.message
+            self.file,
+            self.line,
+            self.col,
+            self.severity.upper(),
+            self.code,
+            self.message
         )
     }
 }
@@ -112,7 +117,8 @@ pub fn pick_doc_format(
     reference: &std::path::Path,
 ) -> crate::DocFormat {
     let is_json = |p: &std::path::Path| {
-        p.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
+        p.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
     };
     if override_path.is_some_and(is_json) || (override_path.is_none() && is_json(reference)) {
         crate::DocFormat::Json

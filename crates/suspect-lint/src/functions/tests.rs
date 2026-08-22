@@ -2,7 +2,7 @@
 //! through a minimal custom ruleset so options parsing and engine wiring are
 //! covered together with the function behavior.
 
-use super::{is_2xx_key, is_truthy, template_vars, Casing};
+use super::{Casing, is_2xx_key, is_truthy, template_vars};
 use crate::engine::Linter;
 use crate::rule::Severity;
 use suspect_low::LowDoc;
@@ -67,14 +67,23 @@ fn casing_conventions() {
     assert!(Casing::Macro.matches("HTTP_200"));
     assert!(!Casing::Macro.matches("macro_case"));
     assert!(!Casing::Macro.matches("MACRO_"));
-    for casing in [Casing::Camel, Casing::Pascal, Casing::Kebab, Casing::Snake, Casing::Macro] {
+    for casing in [
+        Casing::Camel,
+        Casing::Pascal,
+        Casing::Kebab,
+        Casing::Snake,
+        Casing::Macro,
+    ] {
         assert!(!casing.matches(""), "empty string matches no casing");
     }
 }
 
 #[test]
 fn template_var_extraction() {
-    assert_eq!(template_vars("/pets/{id}/toys/{toyId}"), vec!["id", "toyId"]);
+    assert_eq!(
+        template_vars("/pets/{id}/toys/{toyId}"),
+        vec!["id", "toyId"]
+    );
     assert_eq!(template_vars("/pets"), Vec::<String>::new());
     assert_eq!(template_vars("/pets/{}"), Vec::<String>::new());
     assert_eq!(template_vars("/files/{path}"), vec!["path"]);
@@ -107,11 +116,20 @@ fn two_xx_keys() {
 
 #[test]
 fn truthy_and_falsy_functions() {
-    let hits = probe("    given: $.value\n    then:\n      function: truthy\n", "value: null\n");
+    let hits = probe(
+        "    given: $.value\n    then:\n      function: truthy\n",
+        "value: null\n",
+    );
     assert_eq!(hits.len(), 1, "null must fail truthy");
-    let clean = probe("    given: $.value\n    then:\n      function: truthy\n", "value: present\n");
+    let clean = probe(
+        "    given: $.value\n    then:\n      function: truthy\n",
+        "value: present\n",
+    );
     assert!(clean.is_empty());
-    let hits = probe("    given: $.value\n    then:\n      function: falsy\n", "value: present\n");
+    let hits = probe(
+        "    given: $.value\n    then:\n      function: falsy\n",
+        "value: present\n",
+    );
     assert_eq!(hits.len(), 1, "truthy value must fail falsy");
 }
 
@@ -182,14 +200,12 @@ fn length_function() {
 
 #[test]
 fn enumeration_function() {
-    let rule =
-        "    given: $.color\n    then:\n      function: enumeration\n      functionOptions:\n        values:\n          - red\n          - green\n";
+    let rule = "    given: $.color\n    then:\n      function: enumeration\n      functionOptions:\n        values:\n          - red\n          - green\n";
     let hits = probe(rule, "color: blue\n");
     assert_eq!(hits.len(), 1);
     let ok_str = probe(rule, "color: green\n");
     assert!(ok_str.is_empty());
-    let numbers =
-        "    given: $.code\n    then:\n      function: enumeration\n      functionOptions:\n        values:\n          - 1\n          - 2\n";
+    let numbers = "    given: $.code\n    then:\n      function: enumeration\n      functionOptions:\n        values:\n          - 1\n          - 2\n";
     let ok_num = probe(numbers, "code: 2\n");
     assert!(ok_num.is_empty());
     let hit_num = probe(numbers, "code: 3\n");
@@ -198,10 +214,16 @@ fn enumeration_function() {
 
 #[test]
 fn alphabetical_function() {
-    let unsorted = probe("    given: $.map\n    then:\n      function: alphabetical\n", "map:\n  zebra: 1\n  apple: 2\n");
+    let unsorted = probe(
+        "    given: $.map\n    then:\n      function: alphabetical\n",
+        "map:\n  zebra: 1\n  apple: 2\n",
+    );
     assert_eq!(unsorted.len(), 1);
     assert_eq!(unsorted[0].path, "/map");
-    let sorted = probe("    given: $.map\n    then:\n      function: alphabetical\n", "map:\n  apple: 1\n  zebra: 2\n");
+    let sorted = probe(
+        "    given: $.map\n    then:\n      function: alphabetical\n",
+        "map:\n  apple: 1\n  zebra: 2\n",
+    );
     assert!(sorted.is_empty());
 }
 

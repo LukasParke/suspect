@@ -9,7 +9,9 @@ use crate::diagnostic::{Diagnostic, Severity};
 /// and either `url` or `identifier` on 3.1+.
 pub(crate) fn check_license(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     let Some(info) = api.info() else { return };
-    let Some(license) = info.license() else { return };
+    let Some(license) = info.license() else {
+        return;
+    };
     let has_url = license.url().is_some();
     let has_id = license.identifier().is_some();
     let missing = match api.version() {

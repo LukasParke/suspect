@@ -23,12 +23,18 @@ fn big_yaml() -> Vec<u8> {
 #[test]
 fn large_yaml_parses() {
     let doc = LowDoc::parse(Uri::from("mem://big.yaml"), Source::from_vec(big_yaml()));
-    assert!(doc.syntax_errors().is_empty(), "large YAML must parse without syntax errors");
+    assert!(
+        doc.syntax_errors().is_empty(),
+        "large YAML must parse without syntax errors"
+    );
     assert_eq!(doc.sniff_family(), SpecFamily::Oas31);
     let schemas = doc.root().get("components").and_then(|c| c.get("schemas"));
     assert_eq!(schemas.map(|s| s.entries().len()), Some(20_000));
     let deep = doc
         .root()
         .pointer(&suspect_low::Pointer::parse("#/components/schemas/Schema12345").unwrap());
-    assert_eq!(deep.and_then(|s| s.get("type")).and_then(|t| t.as_str()), Some("object"));
+    assert_eq!(
+        deep.and_then(|s| s.get("type")).and_then(|t| t.as_str()),
+        Some("object")
+    );
 }

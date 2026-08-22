@@ -16,7 +16,12 @@ impl QueryAst {
     /// A singular query per RFC 9535 §2.3.3: every segment is a child
     /// segment consisting only of name/index selectors.
     pub fn is_singular(&self) -> bool {
-        self.segments.iter().all(|s| !s.descendant && s.selectors.iter().all(|sel| matches!(sel, Selector::Name(_) | Selector::Index(_))))
+        self.segments.iter().all(|s| {
+            !s.descendant
+                && s.selectors
+                    .iter()
+                    .all(|sel| matches!(sel, Selector::Name(_) | Selector::Index(_)))
+        })
     }
 }
 
@@ -34,7 +39,11 @@ pub(crate) enum Selector {
     Name(Box<str>),
     Wildcard,
     Index(i64),
-    Slice { start: Option<i64>, end: Option<i64>, step: i64 },
+    Slice {
+        start: Option<i64>,
+        end: Option<i64>,
+        step: i64,
+    },
     Filter(LogicalExpr),
 }
 

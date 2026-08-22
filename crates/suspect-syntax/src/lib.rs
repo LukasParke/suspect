@@ -21,7 +21,6 @@ pub fn yaml_language() -> Language {
     unsafe { LanguageFn::from_raw(tree_sitter_yaml).into() }
 }
 
-
 mod doc;
 mod node;
 

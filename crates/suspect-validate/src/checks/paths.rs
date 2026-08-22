@@ -16,7 +16,9 @@ const NON_PATH_KEYS: [&str; 2] = ["summary", "description"];
 /// slash. Extension keys (`x-`) and the 3.2 Path Object `summary`/
 /// `description` keys are skipped.
 pub(crate) fn check_path_keys(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
-    let Some(paths_node) = api.root().get("paths") else { return };
+    let Some(paths_node) = api.root().get("paths") else {
+        return;
+    };
     for entry in paths_node.entries() {
         let Some(value) = entry.value else { continue };
         let key = entry.key;
@@ -55,9 +57,10 @@ pub(crate) fn check_path_templates<'s>(api: &OpenApi<'s>, out: &mut Vec<Diagnost
             for p in params {
                 let pr = p.resolved();
                 if pr.location() == Some(ParameterIn::Path)
-                    && let Some(name) = pr.name() {
-                        declared.push((name, pr.node()));
-                    }
+                    && let Some(name) = pr.name()
+                {
+                    declared.push((name, pr.node()));
+                }
             }
         };
         collect(r.parameters());

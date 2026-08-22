@@ -1,10 +1,10 @@
 //! Recursive-descent, char-cursor parser for RFC 9535 JSONPath queries.
 
+use crate::PathError;
 use crate::ast::{
     Comparable, Comparator, FArg, FuncName, FunctionCall, Lit, LogicalExpr, QueryAst, Segment,
     Selector, Testable,
 };
-use crate::PathError;
 
 pub(crate) fn parse(input: &str) -> Result<QueryAst, PathError> {
     let mut p = Parser::new(input);
@@ -17,7 +17,10 @@ pub(crate) fn parse(input: &str) -> Result<QueryAst, PathError> {
     if p.pos != input.len() {
         return Err(p.err("trailing characters after query"));
     }
-    Ok(QueryAst { absolute: true, segments })
+    Ok(QueryAst {
+        absolute: true,
+        segments,
+    })
 }
 
 struct Parser<'a> {
@@ -28,11 +31,19 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(s: &'a str) -> Self {
-        Self { s, b: s.as_bytes(), pos: 0 }
+        Self {
+            s,
+            b: s.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn err(&self, reason: &str) -> PathError {
-        PathError { input: self.s.to_owned(), offset: self.pos, reason: reason.to_owned() }
+        PathError {
+            input: self.s.to_owned(),
+            offset: self.pos,
+            reason: reason.to_owned(),
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -89,7 +100,10 @@ impl<'a> Parser<'a> {
                         }
                         Some(c) if Self::ident_start(c) => {
                             let name = self.parse_shorthand_name()?;
-                            segments.push(Segment { descendant, selectors: vec![Selector::Name(name)] });
+                            segments.push(Segment {
+                                descendant,
+                                selectors: vec![Selector::Name(name)],
+                            });
                         }
                         Some(b'[') if descendant || in_filter => {
                             // `.[` is not RFC shorthand, but accepting it is a
@@ -138,7 +152,10 @@ impl<'a> Parser<'a> {
             }
             return Err(self.err("expected ',' or ']' in bracket selector"));
         }
-        Ok(Segment { descendant, selectors })
+        Ok(Segment {
+            descendant,
+            selectors,
+        })
     }
 
     fn parse_selector(&mut self) -> Result<Selector, PathError> {
@@ -182,7 +199,11 @@ impl<'a> Parser<'a> {
         } else {
             1
         };
-        Ok(Selector::Slice { start: first, end: second, step })
+        Ok(Selector::Slice {
+            start: first,
+            end: second,
+            step,
+        })
     }
 
     fn parse_i64(&mut self) -> Result<i64, PathError> {
@@ -196,7 +217,9 @@ impl<'a> Parser<'a> {
         if self.pos == start || (self.b[start] == b'-' && self.pos == start + 1) {
             return Err(self.err("expected number"));
         }
-        self.s[start..self.pos].parse::<i64>().map_err(|_| self.err_at(start, "number out of range"))
+        self.s[start..self.pos]
+            .parse::<i64>()
+            .map_err(|_| self.err_at(start, "number out of range"))
     }
 
     fn parse_opt_i64(&mut self) -> Result<Option<i64>, PathError> {
@@ -230,7 +253,9 @@ impl<'a> Parser<'a> {
                 }
                 Some(b'\\') => {
                     self.pos += 1;
-                    let esc = self.peek().ok_or_else(|| self.err("unterminated string literal"))?;
+                    let esc = self
+                        .peek()
+                        .ok_or_else(|| self.err("unterminated string literal"))?;
                     self.pos += 1;
                     match esc {
                         b'\'' => out.push('\''),
@@ -255,8 +280,7 @@ impl<'a> Parser<'a> {
                                 }
                                 let cp =
                                     0x10000 + (((hi - 0xD800) as u32) << 10) + (lo - 0xDC00) as u32;
-                                char::from_u32(cp)
-                                    .ok_or_else(|| self.err("invalid \\u escape"))?
+                                char::from_u32(cp).ok_or_else(|| self.err("invalid \\u escape"))?
                             } else if (0xDC00..0xE000).contains(&hi) {
                                 return Err(self.err("lone low surrogate in \\u escape"));
                             } else {
@@ -318,7 +342,11 @@ impl<'a> Parser<'a> {
     }
 
     fn err_at(&self, offset: usize, reason: &str) -> PathError {
-        PathError { input: self.s.to_owned(), offset, reason: reason.to_owned() }
+        PathError {
+            input: self.s.to_owned(),
+            offset,
+            reason: reason.to_owned(),
+        }
     }
 
     fn parse_and(&mut self) -> Result<LogicalExpr, PathError> {
@@ -520,11 +548,12 @@ impl<'a> Parser<'a> {
             }
         }
         let text = &self.s[start..self.pos];
-        if !is_float
-            && let Ok(i) = text.parse::<i64>() {
-                return Ok(Lit::Int(i));
-            }
-        text.parse::<f64>().map(Lit::Float).map_err(|_| self.err_at(start, "bad number"))
+        if !is_float && let Ok(i) = text.parse::<i64>() {
+            return Ok(Lit::Int(i));
+        }
+        text.parse::<f64>()
+            .map(Lit::Float)
+            .map_err(|_| self.err_at(start, "bad number"))
     }
 
     fn func_ident_start(c: u8) -> bool {
@@ -601,7 +630,11 @@ impl<'a> Parser<'a> {
                 regex = Some(re);
             }
         }
-        Ok(Some(FunctionCall { name: fname, args, regex }))
+        Ok(Some(FunctionCall {
+            name: fname,
+            args,
+            regex,
+        }))
     }
 
     fn parse_farg(&mut self) -> Result<FArg, PathError> {
@@ -611,9 +644,9 @@ impl<'a> Parser<'a> {
             Some(b'\'') => Ok(FArg::Comparable(Comparable::Lit(Lit::Str(
                 self.parse_quoted_string()?,
             )))),
-            Some(c) if c.is_ascii_digit() || matches!(c, b't' | b'f' | b'n' | b'-') => {
-                self.parse_literal().map(|l| FArg::Comparable(Comparable::Lit(l)))
-            }
+            Some(c) if c.is_ascii_digit() || matches!(c, b't' | b'f' | b'n' | b'-') => self
+                .parse_literal()
+                .map(|l| FArg::Comparable(Comparable::Lit(l))),
             Some(c) if Self::func_ident_start(c) => match self.try_parse_function()? {
                 Some(f) => Ok(FArg::Comparable(Comparable::Func(f))),
                 None => Err(self.err("unknown function extension")),
@@ -622,7 +655,6 @@ impl<'a> Parser<'a> {
         }
     }
 }
-
 
 fn utf8_len(first: u8) -> usize {
     match first {

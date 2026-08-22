@@ -10,10 +10,10 @@
 use smallvec::SmallVec;
 use suspect_low::{NodeRef, Pointer, ValueKind};
 
+use crate::Schema;
 use crate::compile::{Kind, Num, Prg};
 use crate::errors::SchemaError;
 use crate::keywords::{arrays, composition, formats, numeric, objects, refs, strings, types};
-use crate::Schema;
 
 /// One token of the instance location under construction.
 #[derive(Clone, Copy)]
@@ -93,7 +93,10 @@ pub(crate) struct Masks<'d> {
 
 impl<'d> Masks<'d> {
     pub(crate) fn record(&mut self, inst: NodeRef<'d>, ann: Ann<'d>) {
-        self.map.entry(inst.byte_range().start).or_default().merge(ann);
+        self.map
+            .entry(inst.byte_range().start)
+            .or_default()
+            .merge(ann);
     }
     pub(crate) fn has_prop(&self, inst: NodeRef<'d>, k: &str) -> bool {
         self.map
@@ -101,7 +104,9 @@ impl<'d> Masks<'d> {
             .is_some_and(|a| a.props.contains(&k))
     }
     pub(crate) fn has_idx(&self, inst: NodeRef<'d>, i: usize) -> bool {
-        self.map.get(&inst.byte_range().start).is_some_and(|a| a.idxs.contains(&(i as u32)))
+        self.map
+            .get(&inst.byte_range().start)
+            .is_some_and(|a| a.idxs.contains(&(i as u32)))
     }
 }
 
@@ -150,7 +155,9 @@ impl<'a, 'd> Ctx<'a, 'd> {
     }
 
     pub(crate) fn first_msg(errs: &[SchemaError]) -> String {
-        errs.first().map(|e| e.message.clone()).unwrap_or_else(|| "invalid".into())
+        errs.first()
+            .map(|e| e.message.clone())
+            .unwrap_or_else(|| "invalid".into())
     }
 }
 
@@ -162,7 +169,10 @@ pub(crate) struct Out<'d> {
 
 impl<'d> Out<'d> {
     fn fail() -> Self {
-        Self { ok: false, ann: Ann::default() }
+        Self {
+            ok: false,
+            ann: Ann::default(),
+        }
     }
 }
 
@@ -177,7 +187,10 @@ pub(crate) fn eval<'a, 'd>(
         ctx.emit(
             st,
             &prog.path,
-            format!("schema evaluation depth exceeds {}", ctx.sch.config().max_depth),
+            format!(
+                "schema evaluation depth exceeds {}",
+                ctx.sch.config().max_depth
+            ),
         );
         Out::fail()
     } else {
@@ -270,7 +283,11 @@ fn run<'a, 'd>(
             Kind::PatternProperties(subs) => {
                 ok &= objects::check_pattern_properties(ctx, st, &inst, subs, &mut ann);
             }
-            Kind::AdditionalProperties { except_keys, except_patterns, schema } => {
+            Kind::AdditionalProperties {
+                except_keys,
+                except_patterns,
+                schema,
+            } => {
                 ok &= objects::check_additional(
                     ctx,
                     st,
@@ -295,10 +312,24 @@ fn run<'a, 'd>(
                 ok &= objects::check_required(ctx, st, &chk.at, &inst, names, &mut ann);
             }
             Kind::UnevaluatedProperties(sub) => {
-                ok &= objects::check_unevaluated_props(ctx, st, &chk.at, &inst, sub.as_ref(), &mut ann);
+                ok &= objects::check_unevaluated_props(
+                    ctx,
+                    st,
+                    &chk.at,
+                    &inst,
+                    sub.as_ref(),
+                    &mut ann,
+                );
             }
             Kind::UnevaluatedItems(sub) => {
-                ok &= arrays::check_unevaluated_items(ctx, st, &chk.at, &inst, sub.as_ref(), &mut ann);
+                ok &= arrays::check_unevaluated_items(
+                    ctx,
+                    st,
+                    &chk.at,
+                    &inst,
+                    sub.as_ref(),
+                    &mut ann,
+                );
             }
             Kind::AllOf(subs) => ok &= composition::check_all_of(ctx, st, &inst, subs, &mut ann),
             Kind::AnyOf(subs) => {
@@ -346,10 +377,24 @@ fn run<'a, 'd>(
         }
         match &chk.kind {
             Kind::UnevaluatedProperties(sub) => {
-                ok &= objects::check_unevaluated_props(ctx, st, &chk.at, &inst, sub.as_ref(), &mut ann);
+                ok &= objects::check_unevaluated_props(
+                    ctx,
+                    st,
+                    &chk.at,
+                    &inst,
+                    sub.as_ref(),
+                    &mut ann,
+                );
             }
             Kind::UnevaluatedItems(sub) => {
-                ok &= arrays::check_unevaluated_items(ctx, st, &chk.at, &inst, sub.as_ref(), &mut ann);
+                ok &= arrays::check_unevaluated_items(
+                    ctx,
+                    st,
+                    &chk.at,
+                    &inst,
+                    sub.as_ref(),
+                    &mut ann,
+                );
             }
             // Tail only ever holds unevaluated* checks (compiler invariant).
             _ => {}

@@ -88,7 +88,6 @@ pub enum Expr {
     Text(String),
 }
 
-
 /// Which reusable-component kind a `$components` expression references.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComponentKind {
@@ -123,7 +122,11 @@ pub struct ExprError {
 
 impl fmt::Display for ExprError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "invalid runtime expression {:?} at offset {}: {}", self.input, self.offset, self.reason)
+        write!(
+            f,
+            "invalid runtime expression {:?} at offset {}: {}",
+            self.input, self.offset, self.reason
+        )
     }
 }
 
@@ -134,7 +137,10 @@ impl std::error::Error for ExprError {}
 /// # Errors
 /// [`ExprError`] when the string is not a well-formed expression.
 pub fn parse(input: &str) -> Result<Expr, ExprError> {
-    let mut p = Parser { input: input.as_bytes(), pos: 0 };
+    let mut p = Parser {
+        input: input.as_bytes(),
+        pos: 0,
+    };
     let expr = p.expr().map_err(|reason| ExprError {
         input: input.to_owned(),
         offset: p.pos,
@@ -158,29 +164,31 @@ pub fn parse_embedded(input: &str) -> Vec<ExprPart> {
     let mut start = 0usize;
     let mut i = 0usize;
     while i + 1 < bytes.len() {
-        if bytes[i] == b'{' && bytes[i + 1] == b'$'
-            && let Some(close) = input[i..].find('}') {
-                let close = i + close;
-                if start < i {
-                    out.push(ExprPart::Text(input[start..i].to_owned()));
-                }
-                match parse(&input[i + 1..close]) {
-                    Ok(e) => out.push(ExprPart::Expr(e)),
-                    Err(_) => {
-                        // not a valid expression: treat as literal text
-                        if let Some(last_text) = out.last_mut() {
-                            if let ExprPart::Text(t) = last_text {
-                                t.push_str(&input[i..=close]);
-                            }
-                        } else {
-                            out.push(ExprPart::Text(input[start..=close].to_owned()));
+        if bytes[i] == b'{'
+            && bytes[i + 1] == b'$'
+            && let Some(close) = input[i..].find('}')
+        {
+            let close = i + close;
+            if start < i {
+                out.push(ExprPart::Text(input[start..i].to_owned()));
+            }
+            match parse(&input[i + 1..close]) {
+                Ok(e) => out.push(ExprPart::Expr(e)),
+                Err(_) => {
+                    // not a valid expression: treat as literal text
+                    if let Some(last_text) = out.last_mut() {
+                        if let ExprPart::Text(t) = last_text {
+                            t.push_str(&input[i..=close]);
                         }
+                    } else {
+                        out.push(ExprPart::Text(input[start..=close].to_owned()));
                     }
                 }
-                i = close + 1;
-                start = i;
-                continue;
             }
+            i = close + 1;
+            start = i;
+            continue;
+        }
         i += 1;
     }
     if start < input.len() {
@@ -268,7 +276,11 @@ impl Parser<'_> {
             let step = self.segment()?;
             expect_str(self, ".outputs.")?;
             let name = self.segment()?;
-            return Ok(Expr::WorkflowOutput { workflow, step, name });
+            return Ok(Expr::WorkflowOutput {
+                workflow,
+                step,
+                name,
+            });
         }
         if head == "components" {
             self.eat(b'.')?;

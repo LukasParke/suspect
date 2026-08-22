@@ -64,7 +64,12 @@ fn rfc_store_book_authors_wildcard() {
     let d = doc();
     assert_eq!(
         strs(&query(&d, "$.store.book[*].author")),
-        ["Nigel Rees", "Evelyn Waugh", "Herman Melville", "J. R. R. Tolkien"]
+        [
+            "Nigel Rees",
+            "Evelyn Waugh",
+            "Herman Melville",
+            "J. R. R. Tolkien"
+        ]
     );
 }
 
@@ -73,7 +78,12 @@ fn rfc_all_authors_descendant() {
     let d = doc();
     assert_eq!(
         strs(&query(&d, "$..author")),
-        ["Nigel Rees", "Evelyn Waugh", "Herman Melville", "J. R. R. Tolkien"]
+        [
+            "Nigel Rees",
+            "Evelyn Waugh",
+            "Herman Melville",
+            "J. R. R. Tolkien"
+        ]
     );
 }
 
@@ -101,7 +111,10 @@ fn rfc_third_book_and_negative_index() {
     let d = doc();
     assert_eq!(strs(&query(&d, "$..book[2].title")), ["Moby Dick"]);
     // last book
-    assert_eq!(strs(&query(&d, "$..book[-1:].title")), ["The Lord of the Rings"]);
+    assert_eq!(
+        strs(&query(&d, "$..book[-1:].title")),
+        ["The Lord of the Rings"]
+    );
     // first two books (union and slice)
     assert_eq!(query(&d, "$..book[0,1]").len(), 2);
     assert_eq!(
@@ -150,7 +163,12 @@ fn slice_edge_cases() {
     // normalized into document order per RFC 9535 §2.1 (normalization)
     assert_eq!(
         titles("[::-1]"),
-        ["Sayings of the Century", "Sword of Honour", "Moby Dick", "The Lord of the Rings"]
+        [
+            "Sayings of the Century",
+            "Sword of Honour",
+            "Moby Dick",
+            "The Lord of the Rings"
+        ]
     );
     // [2:] drop first two
     assert_eq!(titles("[2:]"), ["Moby Dick", "The Lord of the Rings"]);
@@ -170,11 +188,19 @@ fn slice_edge_cases() {
     // zero-length window
     assert!(query(&d, "$..book[2:2]").is_empty());
     // omitted start
-    assert_eq!(titles("[:2]"), ["Sayings of the Century", "Sword of Honour"]);
+    assert_eq!(
+        titles("[:2]"),
+        ["Sayings of the Century", "Sword of Honour"]
+    );
     // fully omitted bounds
     assert_eq!(
         titles("[::]"),
-        ["Sayings of the Century", "Sword of Honour", "Moby Dick", "The Lord of the Rings"]
+        [
+            "Sayings of the Century",
+            "Sword of Honour",
+            "Moby Dick",
+            "The Lord of the Rings"
+        ]
     );
 }
 
@@ -186,10 +212,7 @@ fn shorthand_child_and_descendant_wildcards() {
     assert_eq!(nodes.len(), 2);
     assert_eq!(nodes.first().unwrap().kind(), ValueKind::Array);
     // chained after other segments: the suspect-overlay regression
-    assert_eq!(
-        strs(&query(&d, "$.store.bicycle.*")),
-        ["red"]
-    );
+    assert_eq!(strs(&query(&d, "$.store.bicycle.*")), ["red"]);
     // `$..*` descendant wildcard walks the whole subtree
     assert_eq!(query(&d, "$..*").len(), 28);
     // mid-query shorthand wildcards
@@ -212,7 +235,10 @@ fn shorthand_wildcard_over_openapi_shape() {
 #[test]
 fn index_edges() {
     let d = doc();
-    assert_eq!(strs(&query(&d, "$..book[-4].title")), ["Sayings of the Century"]);
+    assert_eq!(
+        strs(&query(&d, "$..book[-4].title")),
+        ["Sayings of the Century"]
+    );
     assert!(query(&d, "$..book[-5]").is_empty());
     assert!(query(&d, "$..book[4]").is_empty());
     // multi-selector union returns results in document order regardless of
@@ -320,7 +346,10 @@ fn absolute_query_inside_filter() {
     let d = doc();
     // $ refers to the root passed to query()
     assert_eq!(
-        strs(&query(&d, "$..book[?(@.price > $.store.book[0].price)].title")),
+        strs(&query(
+            &d,
+            "$..book[?(@.price > $.store.book[0].price)].title"
+        )),
         ["Sword of Honour", "Moby Dick", "The Lord of the Rings"]
     );
 }
@@ -333,7 +362,11 @@ fn logical_operators_and_parens() {
     assert_eq!(f("!@.isbn && @.price < 10"), ["Sayings of the Century"]);
     assert_eq!(
         f("@.price < 9 || @.price > 20"),
-        ["Sayings of the Century", "Moby Dick", "The Lord of the Rings"]
+        [
+            "Sayings of the Century",
+            "Moby Dick",
+            "The Lord of the Rings"
+        ]
     );
     assert_eq!(
         f("(!@.isbn || @.price < 9) && @.category == 'fiction'"),
@@ -351,15 +384,25 @@ fn regex_match_vs_search() {
     // search finds substrings anywhere
     assert_eq!(
         f("(search(@.title, 'of'))"),
-        ["Sayings of the Century", "Sword of Honour", "The Lord of the Rings"]
+        [
+            "Sayings of the Century",
+            "Sword of Honour",
+            "The Lord of the Rings"
+        ]
     );
     // match with an unanchored pattern still requires... it is a plain regex
     // search too in this engine; anchors are explicit
     assert_eq!(f("(match(@.title, 'Moby.*'))"), ["Moby Dick"]);
-    assert_eq!(f("(search(@.isbn, '\\d{5}'))"), ["Moby Dick", "The Lord of the Rings"]);
+    assert_eq!(
+        f("(search(@.isbn, '\\d{5}'))"),
+        ["Moby Dick", "The Lord of the Rings"]
+    );
     assert!(f("(match(@.title, '^of'))").is_empty());
     // case-insensitive flag passes through
-    assert_eq!(f("(search(@.author, '(?i)nigel'))"), ["Sayings of the Century"]);
+    assert_eq!(
+        f("(search(@.author, '(?i)nigel'))"),
+        ["Sayings of the Century"]
+    );
     // missing member is Nothing -> never matches
 }
 
@@ -376,7 +419,10 @@ fn existence_of_missing_is_false() {
 fn function_length_on_string_array_and_nodelist() {
     let d = doc();
     // string length (codepoints)
-    assert_eq!(strs(&query(&d, "$..book[?(length(@.title) == 9)].title")), ["Moby Dick"]);
+    assert_eq!(
+        strs(&query(&d, "$..book[?(length(@.title) == 9)].title")),
+        ["Moby Dick"]
+    );
     // array length via singular path from a filter over root children
     let hits = query(&d, "$[?(length(@.book) == 4)]");
     assert_eq!(hits.len(), 1);
@@ -447,7 +493,10 @@ fn normalization_dedupes_overlaps_and_sorts_by_document_position() {
     let mut sorted = starts.clone();
     sorted.sort_unstable();
     sorted.dedup();
-    assert_eq!(starts, sorted, "duplicate or out-of-order positions in normalized result");
+    assert_eq!(
+        starts, sorted,
+        "duplicate or out-of-order positions in normalized result"
+    );
 
     // overlapping routes hitting the same object: $..a matches both the
     // outer and inner `a`; querying $..a.v yields exactly the two values
@@ -459,28 +508,32 @@ fn normalization_dedupes_overlaps_and_sorts_by_document_position() {
 #[test]
 fn parse_errors() {
     let cases: &[(&str, usize)] = &[
-        ("$.a[", 4),                // unterminated bracket
-        ("$.a[0", 5),               // unterminated bracket (no close)
-        ("$a", 1),                  // trailing garbage after $
-        ("$.a b", 4),               // trailing garbage
-        ("", 0),                    // missing $
-        ("$..a x", 5),              // trailing garbage
-        ("$..", 3),                 // dangling descendant dot
-        ("$.a[?()]", 6),            // empty filter
-        ("$.a[?@.b", 8),            // unterminated filter/bracket
-        ("$['a", 4),                // unterminated string
-        ("$.a[?'x']", 8),           // literal alone in filter
-        ("$.a[?@..b == 1]", 12),    // non-singular comparand on lhs
-        ("$.a[?@.b == $..c]", 16),  // non-singular comparand on rhs
-        ("$.a[frobnicate(1)]", 4),  // unknown identifier in selector
-        ("$.a[count()]", 4),        // function outside filter
+        ("$.a[", 4),                 // unterminated bracket
+        ("$.a[0", 5),                // unterminated bracket (no close)
+        ("$a", 1),                   // trailing garbage after $
+        ("$.a b", 4),                // trailing garbage
+        ("", 0),                     // missing $
+        ("$..a x", 5),               // trailing garbage
+        ("$..", 3),                  // dangling descendant dot
+        ("$.a[?()]", 6),             // empty filter
+        ("$.a[?@.b", 8),             // unterminated filter/bracket
+        ("$['a", 4),                 // unterminated string
+        ("$.a[?'x']", 8),            // literal alone in filter
+        ("$.a[?@..b == 1]", 12),     // non-singular comparand on lhs
+        ("$.a[?@.b == $..c]", 16),   // non-singular comparand on rhs
+        ("$.a[frobnicate(1)]", 4),   // unknown identifier in selector
+        ("$.a[count()]", 4),         // function outside filter
         ("$.a[match(@.b, '(')]", 4), // functions only inside filters here
-        ("$.a[::0]", 7),            // zero step
-        ("$.a[1:2:0]", 9),          // zero step
+        ("$.a[::0]", 7),             // zero step
+        ("$.a[1:2:0]", 9),           // zero step
     ];
     for &(input, offset) in cases {
         match Path::parse(input) {
-            Err(PathError { input: ref inp, offset: off, reason: _ }) => {
+            Err(PathError {
+                input: ref inp,
+                offset: off,
+                reason: _,
+            }) => {
                 assert_eq!(inp, input);
                 assert_eq!(off, offset, "wrong offset for {input:?}");
             }

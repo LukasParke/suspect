@@ -36,7 +36,8 @@ impl Uri {
             std::env::current_dir()?.join(path)
         };
         let normalized = normalize_path(&abs);
-        let url = Url::from_file_path(&normalized).map_err(|_| UriError::Invalid(normalized.display().to_string()))?;
+        let url = Url::from_file_path(&normalized)
+            .map_err(|_| UriError::Invalid(normalized.display().to_string()))?;
         Ok(Self(url.as_str().into()))
     }
 
@@ -45,12 +46,15 @@ impl Uri {
     /// not a position inside it.
     pub fn parse(s: &str) -> Result<Self, UriError> {
         if s.contains('#') {
-            return Err(UriError::Invalid(format!("fragment not allowed in document URI: {s}")));
+            return Err(UriError::Invalid(format!(
+                "fragment not allowed in document URI: {s}"
+            )));
         }
         if let Ok(url) = Url::parse(s)
-            && (url.has_host() || url.scheme() == "file") {
-                return Ok(Self(url.as_str().into()));
-            }
+            && (url.has_host() || url.scheme() == "file")
+        {
+            return Ok(Self(url.as_str().into()));
+        }
         let p = Path::new(s);
         if p.is_absolute() {
             return Self::from_path(p);
@@ -70,7 +74,9 @@ impl Uri {
             return self.join(without_frag);
         }
         let base = Url::parse(self.as_str()).map_err(|_| UriError::Invalid(self.to_string()))?;
-        let joined = base.join(reference).map_err(|_| UriError::Invalid(reference.to_owned()))?;
+        let joined = base
+            .join(reference)
+            .map_err(|_| UriError::Invalid(reference.to_owned()))?;
         Ok(Self(joined.as_str().into()))
     }
 
@@ -185,7 +191,10 @@ mod tests {
 
     #[test]
     fn parse_accepts_uris_and_absolute_paths() {
-        assert_eq!(Uri::parse("file:///x/y.json").unwrap().as_str(), "file:///x/y.json");
+        assert_eq!(
+            Uri::parse("file:///x/y.json").unwrap().as_str(),
+            "file:///x/y.json"
+        );
         assert!(Uri::parse("#/components").is_err());
         assert!(Uri::parse("relative.yaml").is_err());
     }
@@ -193,7 +202,10 @@ mod tests {
     #[test]
     fn join_resolves_relative_references() {
         let base = Uri::parse("file:///api/main.yaml").unwrap();
-        assert_eq!(base.join("schemas/pet.yaml").unwrap().as_str(), "file:///api/schemas/pet.yaml");
+        assert_eq!(
+            base.join("schemas/pet.yaml").unwrap().as_str(),
+            "file:///api/schemas/pet.yaml"
+        );
         assert_eq!(
             base.join("../common/headers.yaml").unwrap().as_str(),
             "file:///common/headers.yaml"
@@ -205,7 +217,9 @@ mod tests {
     fn join_strips_fragments() {
         let base = Uri::parse("file:///api/main.yaml").unwrap();
         assert_eq!(
-            base.join("other.yaml#/components/schemas/Pet").unwrap().as_str(),
+            base.join("other.yaml#/components/schemas/Pet")
+                .unwrap()
+                .as_str(),
             "file:///api/other.yaml"
         );
     }

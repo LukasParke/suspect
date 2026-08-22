@@ -1,9 +1,9 @@
-use suspect_ref::DocId;
 use suspect_low::{NodeRef, ValueKind};
+use suspect_ref::DocId;
 
-use crate::model::{Info, SecurityRequirement, Server, Tag, ExternalDocumentation};
-use crate::paths::{Operation, Paths};
 use crate::components::Components;
+use crate::model::{ExternalDocumentation, Info, SecurityRequirement, Server, Tag};
+use crate::paths::{Operation, Paths};
 use crate::{OasVersion, OpenApi, Session};
 
 impl<'s> OpenApi<'s> {
@@ -54,20 +54,29 @@ impl<'s> OpenApi<'s> {
         if self.version < OasVersion::V31 {
             return None;
         }
-        self.get("webhooks").map(|n| WebhookViews { session: self.session, node: n })
+        self.get("webhooks").map(|n| WebhookViews {
+            session: self.session,
+            node: n,
+        })
     }
 
     /// The `components` object. `None` when the document declares none.
     #[must_use]
     pub fn components(&self) -> Option<Components<'s>> {
-        self.get("components").map(|n| Components::new(self.session, n))
+        self.get("components")
+            .map(|n| Components::new(self.session, n))
     }
 
     /// Root-level `servers`; empty when absent.
     #[must_use]
     pub fn servers(&self) -> Vec<Server<'s>> {
         self.get("servers")
-            .map(|n| n.items().into_iter().map(|i| Server::new(self.session, i)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|i| Server::new(self.session, i))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -81,14 +90,20 @@ impl<'s> OpenApi<'s> {
     #[must_use]
     pub fn tags(&self) -> Vec<Tag<'s>> {
         self.get("tags")
-            .map(|n| n.items().into_iter().map(|i| Tag::new(self.session, i)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|i| Tag::new(self.session, i))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
     /// Root-level `externalDocs`. `None` when absent.
     #[must_use]
     pub fn external_docs(&self) -> Option<ExternalDocumentation<'s>> {
-        self.get("externalDocs").map(|n| ExternalDocumentation::new(self.session, n))
+        self.get("externalDocs")
+            .map(|n| ExternalDocumentation::new(self.session, n))
     }
 
     /// `jsonSchemaDialect` (3.1+).
@@ -150,7 +165,14 @@ impl<'s> WebhookViews<'s> {
         self.node
             .entries()
             .into_iter()
-            .filter_map(|e| e.value.map(|v| (e.key.to_owned(), crate::paths::PathItem::new(self.session, v))))
+            .filter_map(|e| {
+                e.value.map(|v| {
+                    (
+                        e.key.to_owned(),
+                        crate::paths::PathItem::new(self.session, v),
+                    )
+                })
+            })
             .collect()
     }
 
@@ -172,7 +194,10 @@ pub(crate) fn security_list<'s>(
     node: Option<NodeRef<'s>>,
 ) -> Vec<SecurityRequirement<'s>> {
     node.map(|n| {
-        n.items().into_iter().map(|i| SecurityRequirement::new(session, i)).collect()
+        n.items()
+            .into_iter()
+            .map(|i| SecurityRequirement::new(session, i))
+            .collect()
     })
     .unwrap_or_default()
 }
@@ -183,4 +208,3 @@ pub(crate) fn security_list<'s>(
 pub fn looks_like_openapi(root: NodeRef<'_>) -> bool {
     root.kind() == ValueKind::Object && root.get("openapi").is_some()
 }
-

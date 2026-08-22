@@ -5,9 +5,11 @@ use std::rc::Rc;
 
 use suspect_low::{NodeRef, Pointer};
 
-use crate::compile::{base_for_pointer, compile_program, resource_root_for, Compiler, Prg, RefTarget};
-use crate::exec::{eval, Ann, Ctx};
+use crate::compile::{
+    Compiler, Prg, RefTarget, base_for_pointer, compile_program, resource_root_for,
+};
 use crate::exec::Stack;
+use crate::exec::{Ann, Ctx, eval};
 
 /// Resolves a same-document pointer to its compiled program, compiling on
 /// first use and memoizing the result (`None` = unresolvable). Because
@@ -22,9 +24,11 @@ pub(crate) fn resolve_target<'a, 'd>(ctx: &Ctx<'a, 'd>, target: &Pointer) -> Opt
     let base = base_for_pointer(scan, ctx.sch.root_base(), target);
     let res_ptr = resource_root_for(scan, target);
     let compiler = Compiler::new(ctx.sch.config().clone());
-    let compiled =
-        compile_program(&compiler, node, target, &base, scan, 0, &res_ptr).ok();
-    ctx.sch.cache.borrow_mut().insert(target.clone(), compiled.clone());
+    let compiled = compile_program(&compiler, node, target, &base, scan, 0, &res_ptr).ok();
+    ctx.sch
+        .cache
+        .borrow_mut()
+        .insert(target.clone(), compiled.clone());
     compiled
 }
 

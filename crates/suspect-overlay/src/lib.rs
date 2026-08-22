@@ -10,7 +10,7 @@ mod error;
 mod model;
 mod value;
 
-pub use apply::{apply, Applied};
+pub use apply::{Applied, apply};
 pub use error::OverlayError;
-pub use model::{validate_overlay, ActionView, OverlayDiagnostic, OverlayDoc};
+pub use model::{ActionView, OverlayDiagnostic, OverlayDoc, validate_overlay};
 pub use value::Value;

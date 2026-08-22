@@ -99,7 +99,9 @@ pub fn workspace_symbols(ws: &Workspace, query: &str) -> Vec<SymbolInformation> 
 /// Emits this document's symbols into `sink`, dispatched by spec family.
 fn collect_doc(low: &LowDoc, sink: &mut Sink) {
     match low.sniff_family() {
-        SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32 => oas_workspace_symbols(low, sink),
+        SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32 => {
+            oas_workspace_symbols(low, sink)
+        }
         SpecFamily::Arazzo10 => arazzo_workspace_symbols(low, sink),
         // Overlay actions are skipped; OAS 2.x / unknown families emit none.
         SpecFamily::Overlay10 | SpecFamily::Oas2 | SpecFamily::Unknown => {}
@@ -120,9 +122,14 @@ fn oas_workspace_symbols(low: &LowDoc, sink: &mut Sink) {
             for method in METHODS {
                 let Some(op) = item.get(method) else { continue };
                 let op_name = format!("{} {}", method.to_uppercase(), path.key);
-                let op_range = key_range(low, &["paths", path.key, method])
-                    .unwrap_or_else(|| op.byte_range());
-                sink.push(&op_name, SymbolKind::METHOD, Some(path.key.to_owned()), op_range);
+                let op_range =
+                    key_range(low, &["paths", path.key, method]).unwrap_or_else(|| op.byte_range());
+                sink.push(
+                    &op_name,
+                    SymbolKind::METHOD,
+                    Some(path.key.to_owned()),
+                    op_range,
+                );
                 if let Some(oid) = op.get("operationId").and_then(|n| n.as_str()) {
                     let oid_range = key_range(low, &["paths", path.key, method, "operationId"])
                         .unwrap_or_else(|| op.byte_range());
@@ -133,7 +140,9 @@ fn oas_workspace_symbols(low: &LowDoc, sink: &mut Sink) {
     }
     if let Some(components) = root.get("components") {
         for section in components.entries() {
-            let Some(sec_val) = section.value else { continue };
+            let Some(sec_val) = section.value else {
+                continue;
+            };
             let container = format!("components/{}", section.key);
             for entry in sec_val.entries() {
                 let Some(v) = entry.value else { continue };
@@ -145,8 +154,15 @@ fn oas_workspace_symbols(low: &LowDoc, sink: &mut Sink) {
     }
     if let Some(tags) = root.get("tags") {
         for tag in tags.items() {
-            let Some(name) = tag.get("name").and_then(|n| n.as_str()) else { continue };
-            sink.push(name, SymbolKind::CONSTANT, Some("tags".to_owned()), tag.byte_range());
+            let Some(name) = tag.get("name").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            sink.push(
+                name,
+                SymbolKind::CONSTANT,
+                Some("tags".to_owned()),
+                tag.byte_range(),
+            );
         }
     }
 }
@@ -155,7 +171,12 @@ fn oas_workspace_symbols(low: &LowDoc, sink: &mut Sink) {
 fn arazzo_workspace_symbols(low: &LowDoc, sink: &mut Sink) {
     let doc = ArazzoDoc::new(low);
     for w in doc.workflows() {
-        sink.push(w.workflow_id, SymbolKind::OBJECT, Some("workflows".to_owned()), w.node().byte_range());
+        sink.push(
+            w.workflow_id,
+            SymbolKind::OBJECT,
+            Some("workflows".to_owned()),
+            w.node().byte_range(),
+        );
     }
 }
 
@@ -172,7 +193,9 @@ fn key_range(low: &LowDoc, path: &[&str]) -> Option<std::ops::Range<usize>> {
             if child.kind() != SyntaxKind::Pair {
                 continue;
             }
-            let Some(k) = child.child_by_field("key") else { continue };
+            let Some(k) = child.child_by_field("key") else {
+                continue;
+            };
             if k.scalar_bytes() == target {
                 pair = Some(child);
                 break;
@@ -245,7 +268,10 @@ components:
         let filtered_names: Vec<&str> = filtered.iter().map(|s| s.name.as_str()).collect();
         assert!(filtered_names.contains(&"Pet"));
         assert!(filtered_names.contains(&"listPets"));
-        assert!(filtered_names.contains(&"/pets"), "\"/pets\" also matches \"pet\"");
+        assert!(
+            filtered_names.contains(&"/pets"),
+            "\"/pets\" also matches \"pet\""
+        );
         assert!(workspace_symbols(&ws, "zzz-not-there").is_empty());
     }
 
@@ -268,7 +294,16 @@ workflows:
         let ws = ws_with(&dir, "flow.yaml", text);
         {
             let h = ws.get(ws.uris().first().unwrap()).unwrap();
-            eprintln!("family={:?} keys={:?}", h.doc().sniff_family(), h.doc().root().entries().iter().map(|e| e.key).collect::<Vec<_>>());
+            eprintln!(
+                "family={:?} keys={:?}",
+                h.doc().sniff_family(),
+                h.doc()
+                    .root()
+                    .entries()
+                    .iter()
+                    .map(|e| e.key)
+                    .collect::<Vec<_>>()
+            );
         }
         let syms = workspace_symbols(&ws, "checkout");
         assert_eq!(syms[0].kind, SymbolKind::OBJECT);
@@ -278,7 +313,9 @@ workflows:
     fn results_are_capped_at_two_hundred() {
         let dir = std::env::temp_dir().join("suspect-lsp-wssym-cap");
         std::fs::create_dir_all(&dir).unwrap();
-        let mut text = String::from("openapi: 3.1.0\ninfo:\n  title: T\n  version: \"1\"\ncomponents:\n  schemas:\n");
+        let mut text = String::from(
+            "openapi: 3.1.0\ninfo:\n  title: T\n  version: \"1\"\ncomponents:\n  schemas:\n",
+        );
         for i in 0..250 {
             text.push_str(&format!("    Sym{i}:\n      type: object\n"));
         }

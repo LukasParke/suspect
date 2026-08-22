@@ -65,7 +65,6 @@ impl State {
             Err(_) => None,
         }
     }
-
 }
 
 /// Byte offset for an LSP position (UTF-16 line/column). Columns that land
@@ -92,7 +91,10 @@ pub fn offset_of_utf16(bytes: &[u8], li: &LineIndex, line: u32, col_utf16: u32) 
 pub fn lsp_range(bytes: &[u8], li: &LineIndex, range: std::ops::Range<usize>) -> Range {
     let (sl, sc) = li.line_col_utf16(bytes, range.start);
     let (el, ec) = li.line_col_utf16(bytes, range.end);
-    Range { start: Position::new(sl, sc), end: Position::new(el, ec) }
+    Range {
+        start: Position::new(sl, sc),
+        end: Position::new(el, ec),
+    }
 }
 
 #[cfg(test)]

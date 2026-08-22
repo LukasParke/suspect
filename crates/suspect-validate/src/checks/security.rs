@@ -12,10 +12,16 @@ use crate::diagnostic::{Diagnostic, Severity};
 pub(crate) fn check_security_schemes(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     let known: FxHashSet<&str> = api
         .components()
-        .map(|c| c.security_schemes().into_iter().map(|(name, _)| name).collect())
+        .map(|c| {
+            c.security_schemes()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        })
         .unwrap_or_default();
 
-    let check_requirement = |req: &suspect_oas::SecurityRequirement<'_>, out: &mut Vec<Diagnostic>| {
+    let check_requirement = |req: &suspect_oas::SecurityRequirement<'_>,
+                             out: &mut Vec<Diagnostic>| {
         for (name, _) in req.requirements() {
             if !known.contains(name) {
                 out.push(diag(

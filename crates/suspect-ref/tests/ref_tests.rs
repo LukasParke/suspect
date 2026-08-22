@@ -5,11 +5,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use suspect_low::Pointer;
-use suspect_ref::{CycleKind, Resolution, RefError, WorkspaceBuilder};
+use suspect_ref::{CycleKind, RefError, Resolution, WorkspaceBuilder};
 
 static DIR_SEQ: AtomicU32 = AtomicU32::new(0);
 
@@ -88,7 +88,9 @@ fn whole_doc_external_ref() {
     let a = w.open("a.yaml").unwrap();
     let pet = w.open("pet.yaml").unwrap();
     match a.resolve_edge(0).unwrap() {
-        Resolution::WholeDoc(id) => assert_eq!(id, pet.id(), "whole-doc ref must target pet.yaml's slot"),
+        Resolution::WholeDoc(id) => {
+            assert_eq!(id, pet.id(), "whole-doc ref must target pet.yaml's slot")
+        }
         other => panic!("expected WholeDoc, got {other:?}"),
     }
 }
@@ -164,7 +166,10 @@ fn census_illegal_loop_through_required() {
 #[test]
 fn remote_refs_denied() {
     let d = TempDir::new("remote");
-    d.write("a.yaml", "x:\n  $ref: 'https://example.com/schemas/pet.yaml#/Pet'\n");
+    d.write(
+        "a.yaml",
+        "x:\n  $ref: 'https://example.com/schemas/pet.yaml#/Pet'\n",
+    );
     let w = ws(&d.path);
     let h = w.open("a.yaml").unwrap();
     match h.resolve_edge(0) {
@@ -188,7 +193,10 @@ fn memo_hits_increase_on_repeat() {
     h.resolve_pointer(h.id(), &ptr).unwrap();
     h.resolve_pointer(h.id(), &ptr).unwrap();
     let after = w.stats().memo_hits;
-    assert!(after > before, "second resolve must be a memo hit ({before} → {after})");
+    assert!(
+        after > before,
+        "second resolve must be a memo hit ({before} → {after})"
+    );
 }
 
 /// Defends: load_all dedupes — a B→C diamond over D loads exactly 4
@@ -196,7 +204,10 @@ fn memo_hits_increase_on_repeat() {
 #[test]
 fn load_all_diamond_loads_each_doc_once() {
     let d = TempDir::new("diamond");
-    d.write("a.yaml", "toB:\n  $ref: 'b.yaml#/B'\ntoC:\n  $ref: 'c.yaml#/C'\n");
+    d.write(
+        "a.yaml",
+        "toB:\n  $ref: 'b.yaml#/B'\ntoC:\n  $ref: 'c.yaml#/C'\n",
+    );
     d.write("b.yaml", "B:\n  $ref: 'd.yaml#/D'\n");
     d.write("c.yaml", "C:\n  $ref: 'd.yaml#/D'\n");
     d.write("d.yaml", "D:\n  leaf: true\n");
@@ -224,8 +235,14 @@ fn missing_pointer_error_names_uri_and_pointer() {
         .resolve_pointer(h.id(), &Pointer::parse("#/no/such").unwrap())
         .unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("doc.yaml"), "message must contain the uri: {msg}");
-    assert!(msg.contains("/no/such"), "message must contain the pointer: {msg}");
+    assert!(
+        msg.contains("doc.yaml"),
+        "message must contain the uri: {msg}"
+    );
+    assert!(
+        msg.contains("/no/such"),
+        "message must contain the pointer: {msg}"
+    );
 }
 
 /// Defends: percent-decoding happens *before* pointer parsing inside
@@ -280,7 +297,10 @@ fn concurrent_open_same_doc_single_id() {
         }
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
-    assert!(ids.windows(2).all(|w| w[0] == w[1]), "all threads must agree: {ids:?}");
+    assert!(
+        ids.windows(2).all(|w| w[0] == w[1]),
+        "all threads must agree: {ids:?}"
+    );
     assert_eq!(w.len(), 1, "exactly one slot for one document");
 }
 
@@ -331,7 +351,8 @@ fn builder_root_resolves_relative_entries() {
     let w = WorkspaceBuilder::new().root(&d.path).build().unwrap();
     let h = w.open("entry.yaml").unwrap();
     assert!(matches!(
-        h.resolve_pointer(h.id(), &Pointer::parse("#/top").unwrap()).unwrap(),
+        h.resolve_pointer(h.id(), &Pointer::parse("#/top").unwrap())
+            .unwrap(),
         Resolution::Node(_)
     ));
 }
@@ -343,13 +364,16 @@ fn load_all_enforces_doc_cap() {
     let d = TempDir::new("cap");
     d.write("a.yaml", "toB:\n  $ref: 'b.yaml#/B'\n");
     d.write("b.yaml", "B: {}\n");
-    let w = WorkspaceBuilder::new().root(&d.path).max_docs(1).build().unwrap();
+    let w = WorkspaceBuilder::new()
+        .root(&d.path)
+        .max_docs(1)
+        .build()
+        .unwrap();
     match w.load_all("a.yaml") {
         Err(suspect_ref::WorkspaceError::TooManyDocs { max }) => assert_eq!(max, 1),
         other => panic!("expected TooManyDocs, got {other:?}"),
     }
 }
-
 
 /// Defends: `$ref` written as a folded block scalar (Stripe style) must be
 /// decoded to its pointer text, not read as the raw `>-` source.
@@ -372,7 +396,11 @@ fn block_scalar_refs_resolve() {
     assert_eq!(edges.len(), 1, "one edge");
     match h.resolve_edge(0).unwrap() {
         Resolution::Node(n) => {
-            assert_eq!(n.kind(), suspect_low::ValueKind::Object, "resolves to schema B");
+            assert_eq!(
+                n.kind(),
+                suspect_low::ValueKind::Object,
+                "resolves to schema B"
+            );
         }
         other => panic!("expected Node, got {other:?}"),
     }

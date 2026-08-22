@@ -69,7 +69,12 @@ pub fn validate_entry(session: &Session, entry: &str) -> Result<Vec<Diagnostic>,
 
 fn finish(mut out: Vec<Diagnostic>) -> Vec<Diagnostic> {
     out.sort_by(|a, b| {
-        (&a.doc, a.range.start, a.range.end, a.code).cmp(&(&b.doc, b.range.start, b.range.end, b.code))
+        (&a.doc, a.range.start, a.range.end, a.code).cmp(&(
+            &b.doc,
+            b.range.start,
+            b.range.end,
+            b.code,
+        ))
     });
     out
 }

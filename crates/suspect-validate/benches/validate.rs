@@ -31,7 +31,10 @@ fn corpus_path(name: &str) -> Option<PathBuf> {
     if p.exists() {
         Some(p)
     } else {
-        eprintln!("[validate] skipping {name}: corpus file {} not found", p.display());
+        eprintln!(
+            "[validate] skipping {name}: corpus file {} not found",
+            p.display()
+        );
         None
     }
 }
@@ -66,11 +69,8 @@ fn bench_corpus_validate(c: &mut Criterion) {
         let stem = name.strip_suffix(".yaml").unwrap_or(name);
         group.bench_function(stem.to_string(), |b| {
             b.iter(|| {
-                let diags = suspect_validate::validate_entry(
-                    black_box(&session),
-                    name,
-                )
-                .expect("validates after warmup");
+                let diags = suspect_validate::validate_entry(black_box(&session), name)
+                    .expect("validates after warmup");
                 debug_assert_eq!(diags.len(), expected, "diagnostic count is stable");
                 black_box(diags.len())
             });

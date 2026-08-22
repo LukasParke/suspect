@@ -15,14 +15,15 @@ use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::*;
 
 use crate::navigation;
-use crate::state::{lsp_range, offset_of_utf16, OpenDoc};
+use crate::state::{OpenDoc, lsp_range, offset_of_utf16};
 
 /// Upper bound on quick-fix actions returned per request.
 const MAX_ACTIONS: usize = 20;
 
 /// Operation keys recognized when anchoring operation-level fixes.
-const HTTP_METHODS: [&str; 8] =
-    ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+const HTTP_METHODS: [&str; 8] = [
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
 
 /// Computes quick-fix [`CodeAction`]s for `diagnostics` whose range
 /// intersects `range` and whose code has a known fix, capped at
@@ -48,7 +49,9 @@ pub fn code_actions(
             continue;
         }
         let Some(code) = string_code(d) else { continue };
-        let Some(fix) = fix_for(doc, &code, d) else { continue };
+        let Some(fix) = fix_for(doc, &code, d) else {
+            continue;
+        };
         let title = fix.title;
         actions.push(CodeAction {
             title,
@@ -101,7 +104,10 @@ pub fn format_document(doc: &OpenDoc, uri: &Url) -> Option<TextEdit> {
     }
     let inner = doc.low.inner();
     let range = lsp_range(inner.bytes(), inner.line_index(), 0..inner.bytes().len());
-    Some(TextEdit { range, new_text: text })
+    Some(TextEdit {
+        range,
+        new_text: text,
+    })
 }
 
 /// One computed fix: a human title, the byte span it touches (zero-width
@@ -141,7 +147,11 @@ fn fix_for(doc: &OpenDoc, code: &str, diag: &Diagnostic) -> Option<Fix> {
             doc,
             start..end,
             &["info"],
-            &["contact:", "  name: API Support", "  email: support@example.com"],
+            &[
+                "contact:",
+                "  name: API Support",
+                "  email: support@example.com",
+            ],
             "Add contact to info",
         ),
         "info-license" => pair_insert_fix(
@@ -186,8 +196,7 @@ fn anchor<'d>(low: &'d LowDoc, br: std::ops::Range<usize>) -> Option<Anchor<'d>>
     let mut cur = navigation::node_at(low, br.start)?;
     loop {
         if cur.kind() == SyntaxKind::Pair {
-            if let (Some(key), Some(val)) =
-                (cur.child_by_field("key"), cur.child_by_field("value"))
+            if let (Some(key), Some(val)) = (cur.child_by_field("key"), cur.child_by_field("value"))
             {
                 let (key, val) = (key.content(), val.content());
                 if val.byte_range() == br
@@ -198,8 +207,7 @@ fn anchor<'d>(low: &'d LowDoc, br: std::ops::Range<usize>) -> Option<Anchor<'d>>
             }
         } else if cur.kind() == SyntaxKind::Mapping
             && cur.byte_range() == br
-            && ancestor_of_kind(cur.parent()?, SyntaxKind::Sequence)
-                .is_some()
+            && ancestor_of_kind(cur.parent()?, SyntaxKind::Sequence).is_some()
         {
             let first_key = cur.mapping_entries().into_iter().next().map(|(k, _)| k)?;
             return Some(Anchor::Item { first_key });
@@ -354,7 +362,9 @@ fn pascal(word: &str) -> String {
         .filter(|w| !w.is_empty())
         .map(|w| {
             let mut cs = w.chars();
-            let Some(first) = cs.next() else { return String::new() };
+            let Some(first) = cs.next() else {
+                return String::new();
+            };
             first.to_uppercase().collect::<String>() + cs.as_str()
         })
         .collect()
@@ -369,7 +379,10 @@ fn all_edits(doc: &OpenDoc, diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
         .filter_map(|d| fix_for(doc, &string_code(d)?, d))
         .collect();
     fixes.sort_by(|a, b| {
-        b.span.start.cmp(&a.span.start).then_with(|| b.span.end.cmp(&a.span.end))
+        b.span
+            .start
+            .cmp(&a.span.start)
+            .then_with(|| b.span.end.cmp(&a.span.end))
     });
     let mut out = Vec::with_capacity(fixes.len());
     let mut limit = usize::MAX;
@@ -408,7 +421,10 @@ fn insert_after_key_line(doc: &OpenDoc, key: &SNode<'_>, lines: &[&str], title: 
 
 /// First byte offset of the line containing `offset`.
 fn line_start(bytes: &[u8], offset: usize) -> usize {
-    bytes[..offset].iter().rposition(|&b| b == b'\n').map_or(0, |p| p + 1)
+    bytes[..offset]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |p| p + 1)
 }
 
 /// Byte offset of the newline terminating the line containing `offset`
@@ -433,7 +449,11 @@ fn make_fix(doc: &OpenDoc, title: &str, span: std::ops::Range<usize>, new_text: 
         range: lsp_range(inner.bytes(), inner.line_index(), span.clone()),
         new_text,
     };
-    Fix { title: title.to_owned(), span, edit }
+    Fix {
+        title: title.to_owned(),
+        span,
+        edit,
+    }
 }
 
 /// Unquoted scalar text of a key/value node, decoded lossily.
@@ -497,7 +517,8 @@ paths:
             .descendants()
             .filter(|n| n.kind() == SyntaxKind::Pair)
             .filter(|n| {
-                n.child_by_field("key").is_some_and(|k| k.content().scalar_bytes() == key)
+                n.child_by_field("key")
+                    .is_some_and(|k| k.content().scalar_bytes() == key)
             })
             .filter_map(|n| n.child_by_field("value"))
             .map(|v| byte_diag(d, v.content().byte_range(), code))
@@ -713,7 +734,10 @@ paths:
                 "info-contact",
                 "info:\n  contact:\n    name: API Support\n    email: support@example.com\n  title: Demo\n",
             ),
-            ("info-license", "info:\n  license:\n    name: MIT\n  title: Demo\n"),
+            (
+                "info-license",
+                "info:\n  license:\n    name: MIT\n  title: Demo\n",
+            ),
         ] {
             let d = open(API);
             let diag = diag_on_value(&d, b"info", code);
@@ -734,7 +758,10 @@ paths:
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add tags to operation");
         let fixed = apply(&d, &edits_of(&acts, &uri));
-        assert!(fixed.contains("    get:\n      tags:\n        - default\n"), "{fixed}");
+        assert!(
+            fixed.contains("    get:\n      tags:\n        - default\n"),
+            "{fixed}"
+        );
     }
 
     #[test]
@@ -759,7 +786,8 @@ paths:
             let diag = byte_diag(&bad, 0..bad.text.len(), code);
             let acts = code_actions(&bad, &uri, whole_doc(&bad), &[diag]);
             assert!(
-                acts.iter().all(|a| a.kind != Some(CodeActionKind::QUICKFIX)),
+                acts.iter()
+                    .all(|a| a.kind != Some(CodeActionKind::QUICKFIX)),
                 "{code}: {acts:?}"
             );
         }
@@ -771,7 +799,12 @@ paths:
         let uri = url("api.yaml");
         let diag = diag_on_value(&d, b"get", "oas-operation-missing-operationId");
         // Line 0 only: the operation diagnostic sits far below.
-        let acts = code_actions(&d, &uri, Range::new(Position::new(0, 0), Position::new(0, 0)), &[diag]);
+        let acts = code_actions(
+            &d,
+            &uri,
+            Range::new(Position::new(0, 0), Position::new(0, 0)),
+            &[diag],
+        );
         assert!(acts.is_empty(), "{acts:?}");
     }
 
@@ -805,7 +838,11 @@ paths:
         // duplicate tags diagnostic is dropped as well.
         assert_eq!(edits.len(), 3, "{edits:?}");
         // LSP requires descending positional order.
-        assert!(edits.windows(2).all(|w| w[0].range.start > w[1].range.start));
+        assert!(
+            edits
+                .windows(2)
+                .all(|w| w[0].range.start > w[1].range.start)
+        );
         let fixed = apply(&d, &edits);
         assert!(fixed.contains("/pets:"), "{fixed}");
         assert!(fixed.contains("name: API Support"), "{fixed}");
@@ -814,7 +851,10 @@ paths:
             Uri::parse(YAML_URI).unwrap(),
             suspect_source::Source::from_vec(fixed.into_bytes()),
         );
-        assert!(reparsed.syntax_errors().is_empty(), "merged edit must stay valid YAML");
+        assert!(
+            reparsed.syntax_errors().is_empty(),
+            "merged edit must stay valid YAML"
+        );
     }
 
     #[test]
@@ -823,7 +863,10 @@ paths:
         let uri = url("api.yaml");
         let diags = vec![diag_on_value(&d, b"get", "operation-tags")];
         let acts = code_actions(&d, &uri, diags[0].range, &diags);
-        assert!(acts.iter().all(|a| a.kind == Some(CodeActionKind::QUICKFIX)));
+        assert!(
+            acts.iter()
+                .all(|a| a.kind == Some(CodeActionKind::QUICKFIX))
+        );
     }
 
     #[test]
@@ -832,7 +875,9 @@ paths:
         for i in 0..30 {
             paths.push_str(&format!("  /p{i}:\n    get:\n      summary: s\n"));
         }
-        let d = open(&format!("openapi: 3.1.0\ninfo:\n  title: T\npaths:\n{paths}"));
+        let d = open(&format!(
+            "openapi: 3.1.0\ninfo:\n  title: T\npaths:\n{paths}"
+        ));
         let diags = diags_on_values(&d, b"get", "oas-operation-missing-responses");
         assert_eq!(diags.len(), 30);
         let uri = url("api.yaml");
@@ -842,7 +887,10 @@ paths:
             .filter(|a| a.kind == Some(CodeActionKind::QUICKFIX))
             .count();
         assert_eq!(quick, 20);
-        assert!(acts.iter().any(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect"))));
+        assert!(
+            acts.iter()
+                .any(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect")))
+        );
     }
 
     #[test]
@@ -872,7 +920,11 @@ paths:
         let d = OpenDoc::parse("mem://actions-test.json".into(), text.to_owned());
         let uri = url("api.json");
         let edit = format_document(&d, &uri).expect("formats");
-        assert!(edit.new_text.starts_with("{\n  \"openapi\": \""), "{}", edit.new_text);
+        assert!(
+            edit.new_text.starts_with("{\n  \"openapi\": \""),
+            "{}",
+            edit.new_text
+        );
         let reparsed = LowDoc::parse(
             Uri::parse("mem://actions-test.json").unwrap(),
             suspect_source::Source::from_vec(edit.new_text.clone().into_bytes()),
@@ -895,11 +947,13 @@ paths:
     #[test]
     fn derived_operation_ids_follow_path_segments() {
         assert_eq!(derive_operation_id("GET", "/pets/{id}"), "getPetsById");
-        assert_eq!(derive_operation_id("post", "/users/{userId}/pets"), "postUsersByUserIdPets");
-        assert_eq!(derive_operation_id("get", "/my-page/items"), "getMyPageItems");
+        assert_eq!(
+            derive_operation_id("post", "/users/{userId}/pets"),
+            "postUsersByUserIdPets"
+        );
+        assert_eq!(
+            derive_operation_id("get", "/my-page/items"),
+            "getMyPageItems"
+        );
     }
 }
-
-
-
-

@@ -22,8 +22,7 @@ pub(crate) fn check_operation_ids(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) 
                 ));
             }
             Some(id) => {
-                let range =
-                    range_of(op.node().get("operationId"), op.node());
+                let range = range_of(op.node().get("operationId"), op.node());
                 if seen.contains_key(id) {
                     out.push(diag(
                         api,
@@ -49,7 +48,10 @@ pub(crate) fn check_missing_responses(api: &OpenApi<'_>, out: &mut Vec<Diagnosti
                 "oas-operation-missing-responses",
                 Severity::Error,
                 op.node().byte_range(),
-                format!("{} operation is missing the required `responses` field", op.method()),
+                format!(
+                    "{} operation is missing the required `responses` field",
+                    op.method()
+                ),
             ));
         }
     }

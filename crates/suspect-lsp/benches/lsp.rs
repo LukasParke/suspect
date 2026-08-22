@@ -19,12 +19,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
-use suspect_lsp::completion::{CompletionContext, context_at, key_items, ref_candidates, ref_items, SCHEMA_KEYS};
+use suspect_low::LowDoc;
+use suspect_lsp::completion::{
+    CompletionContext, SCHEMA_KEYS, context_at, key_items, ref_candidates, ref_items,
+};
 use suspect_lsp::diagnostics::compute_diagnostics;
 use suspect_lsp::navigation::{goto_definition, hover_markdown, node_at};
 use suspect_lsp::state::OpenDoc;
 use suspect_lsp::symbols::{document_symbols, folding_ranges};
-use suspect_low::LowDoc;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::{Source, Uri};
 use suspect_syntax::{Edit, Format, SourceDoc};
@@ -98,9 +100,15 @@ fn schemas_section_offset(bytes: &[u8]) -> Option<usize> {
 fn bench_did_open(c: &mut Criterion) {
     for (name, file, sample) in [
         ("did_open/stripe_yaml", "stripe.yaml", Some(10)),
-        ("did_open/petstore_expanded_yaml", "petstore-expanded.yaml", None),
+        (
+            "did_open/petstore_expanded_yaml",
+            "petstore-expanded.yaml",
+            None,
+        ),
     ] {
-        let Some((path, bytes)) = read_corpus(file) else { continue };
+        let Some((path, bytes)) = read_corpus(file) else {
+            continue;
+        };
         let uri = uri_for(&path);
         // The editor hands us UTF-8 text; clone cost (one memcpy) is paid
         // identically on every iteration and is small vs. the parse.
@@ -118,7 +126,9 @@ fn bench_did_open(c: &mut Criterion) {
 /// Inserts `payload` at mid-file of stripe.yaml; measures incremental
 /// `reparse` against a full `SourceDoc::parse` control on the same text.
 fn bench_did_change(c: &mut Criterion) {
-    let Some((path, bytes)) = read_corpus("stripe.yaml") else { return };
+    let Some((path, bytes)) = read_corpus("stripe.yaml") else {
+        return;
+    };
     let uri = uri_for(&path);
     let base = SourceDoc::with_format(uri.clone(), Source::from_vec(bytes.clone()), Format::Yaml);
     let mid = bytes.len() / 2;
@@ -144,7 +154,10 @@ fn bench_did_change(c: &mut Criterion) {
 
         g.bench_function(format!("incremental_{}", size), |b| {
             b.iter(|| {
-                let doc = base.reparse(Source::from_vec(black_box(&modified).bytes().to_vec()), &[edit]);
+                let doc = base.reparse(
+                    Source::from_vec(black_box(&modified).bytes().to_vec()),
+                    &[edit],
+                );
                 black_box(doc.root().byte_range())
             })
         });
@@ -170,7 +183,9 @@ fn bench_did_change(c: &mut Criterion) {
 // ---------------------------------------------------------------- goto_def
 
 fn bench_goto_def(c: &mut Criterion) {
-    let Some((path, bytes)) = read_corpus("stripe.yaml") else { return };
+    let Some((path, bytes)) = read_corpus("stripe.yaml") else {
+        return;
+    };
     let uri = uri_for(&path);
     let Some(offset) = first_ref_value_offset(&bytes) else {
         eprintln!("skipping goto_def: no $ref found in stripe.yaml");
@@ -199,7 +214,9 @@ fn bench_goto_def(c: &mut Criterion) {
 // ------------------------------------------------------------------- hover
 
 fn bench_hover(c: &mut Criterion) {
-    let Some((path, bytes)) = read_corpus("stripe.yaml") else { return };
+    let Some((path, bytes)) = read_corpus("stripe.yaml") else {
+        return;
+    };
     let uri = uri_for(&path);
     let Some(offset) = schemas_section_offset(&bytes) else {
         eprintln!("skipping hover: no components.schemas section in stripe.yaml");
@@ -225,7 +242,9 @@ fn bench_hover(c: &mut Criterion) {
 // --------------------------------------------------------------- completion
 
 fn bench_completion(c: &mut Criterion) {
-    let Some((path, bytes)) = read_corpus("petstore-expanded.yaml") else { return };
+    let Some((path, bytes)) = read_corpus("petstore-expanded.yaml") else {
+        return;
+    };
     let uri = uri_for(&path);
     let Some(offset) = first_ref_value_offset(&bytes) else {
         eprintln!("skipping completion: no $ref found in petstore-expanded.yaml");
@@ -262,7 +281,9 @@ fn bench_completion(c: &mut Criterion) {
 // --------------------------------------------------------- symbols_folding
 
 fn bench_symbols_folding(c: &mut Criterion) {
-    let Some((path, bytes)) = read_corpus("api.github.com.yaml") else { return };
+    let Some((path, bytes)) = read_corpus("api.github.com.yaml") else {
+        return;
+    };
     let uri = uri_for(&path);
     let low = LowDoc::parse(uri, Source::from_vec(bytes.clone()));
 
@@ -280,10 +301,16 @@ fn bench_symbols_folding(c: &mut Criterion) {
 
 fn bench_diagnostics(c: &mut Criterion) {
     for (name, file, sample) in [
-        ("diagnostics_pipeline/digitalocean", "digitalocean.yaml", Some(20)),
+        (
+            "diagnostics_pipeline/digitalocean",
+            "digitalocean.yaml",
+            Some(20),
+        ),
         ("diagnostics_pipeline/stripe_yaml", "stripe.yaml", Some(10)),
     ] {
-        let Some((path, bytes)) = read_corpus(file) else { continue };
+        let Some((path, bytes)) = read_corpus(file) else {
+            continue;
+        };
         let uri = uri_for(&path);
         let ws = Arc::new(
             WorkspaceBuilder::new()

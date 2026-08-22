@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 
 const USAGE: &str = "\
 tasks:
@@ -52,11 +52,15 @@ const CORPUS_DIR: &str = "corpus";
 const CORPUS: &[CorpusEntry] = &[
     CorpusEntry {
         name: "petstore-expanded.yaml",
-        urls: &["https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/_archive_/schemas/v3.0/pass/petstore-expanded.yaml"],
+        urls: &[
+            "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/_archive_/schemas/v3.0/pass/petstore-expanded.yaml",
+        ],
     },
     CorpusEntry {
         name: "api.github.com.yaml",
-        urls: &["https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.yaml"],
+        urls: &[
+            "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.yaml",
+        ],
     },
     CorpusEntry {
         name: "digitalocean.yaml",
@@ -76,21 +80,15 @@ const CORPUS: &[CorpusEntry] = &[
     },
     CorpusEntry {
         name: "stripe.yaml",
-        urls: &[
-            "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.yaml",
-        ],
+        urls: &["https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.yaml"],
     },
     CorpusEntry {
         name: "stripe-sdk.yaml",
-        urls: &[
-            "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.sdk.yaml",
-        ],
+        urls: &["https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.sdk.yaml"],
     },
     CorpusEntry {
         name: "gitlab.yaml",
-        urls: &[
-            "https://gitlab.com/gitlab-org/gitlab/-/raw/master/openapi/openapi.v3.yaml",
-        ],
+        urls: &["https://gitlab.com/gitlab-org/gitlab/-/raw/master/openapi/openapi.v3.yaml"],
     },
 ];
 
@@ -117,8 +115,7 @@ fn fetch_corpus(args: &[String]) -> Result<()> {
         .build()
         .new_agent();
 
-    std::fs::create_dir_all(CORPUS_DIR)
-        .with_context(|| format!("create {CORPUS_DIR}/"))?;
+    std::fs::create_dir_all(CORPUS_DIR).with_context(|| format!("create {CORPUS_DIR}/"))?;
 
     let mut ok = 0usize;
     let mut skip = 0usize;
@@ -144,7 +141,8 @@ fn fetch_corpus(args: &[String]) -> Result<()> {
                 }
                 Ok(bytes) => {
                     if let Err(e) = std::fs::write(&dest, &bytes) {
-                        outcome = Some(FetchOutcome::Fail(format!("write {}: {e}", dest.display())));
+                        outcome =
+                            Some(FetchOutcome::Fail(format!("write {}: {e}", dest.display())));
                     } else {
                         outcome = Some(FetchOutcome::Ok(bytes.len() as u64));
                     }
@@ -158,11 +156,7 @@ fn fetch_corpus(args: &[String]) -> Result<()> {
 
         match outcome.unwrap_or_else(|| FetchOutcome::Fail("no urls".into())) {
             FetchOutcome::Ok(bytes) => {
-                println!(
-                    "{:<26} {:>12}  ok",
-                    entry.name,
-                    human_bytes(bytes)
-                );
+                println!("{:<26} {:>12}  ok", entry.name, human_bytes(bytes));
                 ok += 1;
             }
             FetchOutcome::Fail(reason) => {
@@ -200,11 +194,7 @@ fn download(agent: &ureq::Agent, url: &str) -> Result<Vec<u8>> {
 
 /// Compact byte count for table display (`15.3M` style).
 fn human_bytes(n: u64) -> String {
-    const UNITS: [(u64, &str); 3] = [
-        (1 << 30, "G"),
-        (1 << 20, "M"),
-        (1 << 10, "K"),
-    ];
+    const UNITS: [(u64, &str); 3] = [(1 << 30, "G"), (1 << 20, "M"), (1 << 10, "K")];
     for (div, suffix) in UNITS {
         if n >= div {
             return format!("{:.1}{suffix}", n as f64 / div as f64);
@@ -272,8 +262,8 @@ impl SplitMix64 {
     /// Picks from a fixed word list — used to vary description text.
     fn word(&mut self) -> &'static str {
         const WORDS: &[&str] = &[
-            "alpha", "bravo", "delta", "echo", "kilo", "nova", "orbit", "pulse",
-            "quartz", "raven", "sigma", "tango", "umbra", "vortex", "willow", "zephyr",
+            "alpha", "bravo", "delta", "echo", "kilo", "nova", "orbit", "pulse", "quartz", "raven",
+            "sigma", "tango", "umbra", "vortex", "willow", "zephyr",
         ];
         WORDS[self.below(WORDS.len() as u64) as usize]
     }
@@ -290,7 +280,12 @@ enum Node {
 
 impl Node {
     fn map(entries: Vec<(&str, Node)>) -> Node {
-        Node::Map(entries.into_iter().map(|(k, v)| (k.to_string(), v)).collect())
+        Node::Map(
+            entries
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
+        )
     }
 }
 
@@ -317,7 +312,9 @@ fn build_spec(opts: &GenOptions, rng: &mut SplitMix64) -> Node {
     let prop_words: Vec<Vec<&str>> = (0..n_schemas)
         .map(|i| (0..prop_counts[i]).map(|_| rng.word()).collect())
         .collect();
-    let example_ints: Vec<i64> = (0..n_schemas * 8).map(|_| rng.below(10_000) as i64).collect();
+    let example_ints: Vec<i64> = (0..n_schemas * 8)
+        .map(|_| rng.below(10_000) as i64)
+        .collect();
     let title_word = rng.word();
 
     // --- component schemas -------------------------------------------------
@@ -527,10 +524,7 @@ fn build_spec(opts: &GenOptions, rng: &mut SplitMix64) -> Node {
         ("paths", Node::Map(path_items)),
         (
             "components",
-            Node::map(vec![(
-                "schemas",
-                Node::Map(schemas),
-            )]),
+            Node::map(vec![("schemas", Node::Map(schemas))]),
         ),
     ])
 }
@@ -690,10 +684,11 @@ fn yaml_node(node: &Node, indent: usize) -> String {
                         continue;
                     }
                 } else if let Node::Seq(s) = v
-                    && s.is_empty() {
-                        out.push_str(&format!("{pad}{key}: []\n"));
-                        continue;
-                    }
+                    && s.is_empty()
+                {
+                    out.push_str(&format!("{pad}{key}: []\n"));
+                    continue;
+                }
                 let compact = json_compact(v);
                 if compact.len() <= FLOW_MAX_BYTES {
                     out.push_str(&format!("{pad}{key}: {compact}\n"));
@@ -787,7 +782,6 @@ fn gen_fixtures(args: &[String]) -> Result<()> {
         }
     }
 
-
     if all {
         // Standard bench set: (paths, schemas, format, circular)
         const BENCH_SET: [(usize, usize, Format, bool); 5] = [
@@ -821,7 +815,8 @@ fn next_value<'a>(
     it: &mut std::iter::Peekable<std::slice::Iter<'a, String>>,
     flag: &str,
 ) -> Result<&'a String> {
-    it.next().with_context(|| format!("{flag} requires a value"))
+    it.next()
+        .with_context(|| format!("{flag} requires a value"))
 }
 
 fn default_out_path(opts: &GenOptions) -> PathBuf {
@@ -837,10 +832,10 @@ fn default_out_path(opts: &GenOptions) -> PathBuf {
 /// suspect-low as an OpenAPI 3.1 document, printing stats.
 fn write_and_validate(opts: &GenOptions, dest: &Path) -> Result<()> {
     if let Some(parent) = dest.parent()
-        && !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create {}", parent.display()))?;
-        }
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
 
     let start = Instant::now();
     let bytes = generate_spec(opts);
@@ -860,14 +855,8 @@ fn write_and_validate(opts: &GenOptions, dest: &Path) -> Result<()> {
         for e in errs.iter().take(10) {
             eprintln!("  err @ {:?}: {}", e.range, e.message);
         }
-        eprintln!(
-            "diagnostics: {} syntax errors total",
-            errs.len(),
-        );
-        bail!(
-            "{}: expected Oas31, sniffed {family:?}",
-            dest.display()
-        );
+        eprintln!("diagnostics: {} syntax errors total", errs.len(),);
+        bail!("{}: expected Oas31, sniffed {family:?}", dest.display());
     }
     let root = doc.root();
     let paths = root.get("paths").map(|p| p.entries().len()).unwrap_or(0);
@@ -984,7 +973,8 @@ mod tests {
             seed: 1,
         };
         let bytes = generate_spec(&opts);
-        let uri = suspect_source::Uri::from_path(Path::new("fixtures/generated_circ.json")).unwrap();
+        let uri =
+            suspect_source::Uri::from_path(Path::new("fixtures/generated_circ.json")).unwrap();
         let doc = suspect_low::LowDoc::parse(uri, suspect_source::Source::from_vec(bytes));
         assert_eq!(doc.sniff_family(), suspect_low::SpecFamily::Oas31);
         let schemas = doc
@@ -1028,6 +1018,9 @@ mod tests {
         let text = String::from_utf8(generate_spec(&opts)).unwrap();
         // Item2 is the tail: no `next` ref leaving it.
         assert!(text.contains("#/components/schemas/Item2"));
-        assert!(!text.contains("\"child\""), "child property requires --circular");
+        assert!(
+            !text.contains("\"child\""),
+            "child property requires --circular"
+        );
     }
 }

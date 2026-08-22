@@ -14,5 +14,5 @@ mod scalar;
 
 pub use doc::{LowDoc, SpecFamily};
 pub use node::{DuplicateKey, Entry, NodeRef};
-pub use pointer::{percent_decode_fragment, Pointer};
+pub use pointer::{Pointer, percent_decode_fragment};
 pub use scalar::ValueKind;

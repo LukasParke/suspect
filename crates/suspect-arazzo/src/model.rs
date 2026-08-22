@@ -92,7 +92,11 @@ impl<'d> ArazzoDoc<'d> {
                                     .collect::<Vec<_>>()
                             })
                             .unwrap_or_default();
-                        WorkflowView { workflow_id, node: w, steps }
+                        WorkflowView {
+                            workflow_id,
+                            node: w,
+                            steps,
+                        }
                     })
                     .collect::<Vec<_>>()
             })
@@ -117,7 +121,11 @@ impl<'d> ArazzoDoc<'d> {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        Self { root, workflows, sources }
+        Self {
+            root,
+            workflows,
+            sources,
+        }
     }
 
     /// The document root node, for fields not covered by the typed views.
@@ -135,19 +143,28 @@ impl<'d> ArazzoDoc<'d> {
     /// `info.title` of the document.
     #[must_use]
     pub fn info_title(&self) -> Option<&'d str> {
-        self.root.get("info").and_then(|i| i.get("title")).and_then(|n| n.as_str())
+        self.root
+            .get("info")
+            .and_then(|i| i.get("title"))
+            .and_then(|n| n.as_str())
     }
 
     /// `info.summary` of the document.
     #[must_use]
     pub fn info_summary(&self) -> Option<&'d str> {
-        self.root.get("info").and_then(|i| i.get("summary")).and_then(|n| n.as_str())
+        self.root
+            .get("info")
+            .and_then(|i| i.get("summary"))
+            .and_then(|n| n.as_str())
     }
 
     /// `info.description` of the document.
     #[must_use]
     pub fn info_description(&self) -> Option<&'d str> {
-        self.root.get("info").and_then(|i| i.get("description")).and_then(|n| n.as_str())
+        self.root
+            .get("info")
+            .and_then(|i| i.get("description"))
+            .and_then(|n| n.as_str())
     }
 
     /// All top-level workflows, in document order.
@@ -385,26 +402,46 @@ impl ActionView<'_> {
     pub fn criteria(&self) -> Vec<CriterionView<'_>> {
         self.node
             .get("criteria")
-            .map(|n| n.items().into_iter().map(|c| CriterionView { node: c }).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|c| CriterionView { node: c })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
 
 fn params_of<'d>(node: NodeRef<'d>) -> Vec<ParameterView<'d>> {
     node.get("parameters")
-        .map(|n| n.items().into_iter().map(|p| ParameterView { node: p }).collect())
+        .map(|n| {
+            n.items()
+                .into_iter()
+                .map(|p| ParameterView { node: p })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 fn criteria_of<'d>(node: NodeRef<'d>, key: &str) -> Vec<CriterionView<'d>> {
     node.get(key)
-        .map(|n| n.items().into_iter().map(|c| CriterionView { node: c }).collect())
+        .map(|n| {
+            n.items()
+                .into_iter()
+                .map(|c| CriterionView { node: c })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 fn actions_of<'d>(node: NodeRef<'d>, key: &str) -> Vec<ActionView<'d>> {
     node.get(key)
-        .map(|n| n.items().into_iter().map(|a| ActionView { node: a }).collect())
+        .map(|n| {
+            n.items()
+                .into_iter()
+                .map(|a| ActionView { node: a })
+                .collect()
+        })
         .unwrap_or_default()
 }
 

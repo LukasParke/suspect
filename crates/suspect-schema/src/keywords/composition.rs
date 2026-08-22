@@ -3,8 +3,8 @@
 use suspect_low::{NodeRef, Pointer};
 
 use crate::compile::Prg;
-use crate::exec::{eval, Ann, Ctx, Out};
 use crate::exec::Stack;
+use crate::exec::{Ann, Ctx, Out, eval};
 
 pub(crate) fn check_all_of<'a, 'd>(
     ctx: &mut Ctx<'a, 'd>,
@@ -112,10 +112,7 @@ pub(crate) fn check_one_of<'a, 'd>(
             false
         }
         n => {
-            let mut matched = passing
-                .iter()
-                .map(|_| String::new())
-                .collect::<Vec<_>>();
+            let mut matched = passing.iter().map(|_| String::new()).collect::<Vec<_>>();
             let _ = &mut matched;
             // Re-derive which branches passed from the reports we did NOT get:
             // simpler to list count only.

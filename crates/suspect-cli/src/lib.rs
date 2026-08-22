@@ -10,8 +10,8 @@ pub mod output;
 
 use std::path::PathBuf;
 
-pub use output::{Finding, Severity};
 use clap::{Parser, Subcommand, ValueEnum};
+pub use output::{Finding, Severity};
 use suspect_source::{Source, Uri};
 
 /// Serialization choice for commands that produce structured output.
@@ -164,21 +164,32 @@ pub struct Cli {
 pub fn execute(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
         Command::Check { paths, text } => commands::check::check(&paths, text.format),
-        Command::Lint { paths, ruleset, min_severity, text } => {
-            commands::lint::lint(&paths, ruleset.as_deref(), min_severity, text.format)
-        }
+        Command::Lint {
+            paths,
+            ruleset,
+            min_severity,
+            text,
+        } => commands::lint::lint(&paths, ruleset.as_deref(), min_severity, text.format),
         Command::Overlay { cmd } => commands::overlay::run(cmd),
-        Command::Fmt { input, output, json, yaml } => {
-            commands::fmt::fmt(&input, output.as_deref(), json, yaml)
-        }
+        Command::Fmt {
+            input,
+            output,
+            json,
+            yaml,
+        } => commands::fmt::fmt(&input, output.as_deref(), json, yaml),
         Command::Stats { path, text } => commands::stats::stats(&path, text.format),
-        Command::Bundle { input, output, strategy, out_format } => {
-            bundle::bundle(&input, output.as_deref(), strategy, out_format)
-        }
+        Command::Bundle {
+            input,
+            output,
+            strategy,
+            out_format,
+        } => bundle::bundle(&input, output.as_deref(), strategy, out_format),
         Command::Diff { a, b, text } => diff::diff_files(&a, &b, text.format),
-        Command::Bench { fixture, iters, text } => {
-            commands::bench::bench(&fixture, iters, text.format)
-        }
+        Command::Bench {
+            fixture,
+            iters,
+            text,
+        } => commands::bench::bench(&fixture, iters, text.format),
         Command::Lsp => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(suspect_lsp::run_server());

@@ -167,13 +167,19 @@ fn ref_siblings_severity_tracks_oas_version() {
         "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  schemas:\n    Pet:\n      $ref: '#/x'\n      title: extra\n",
     );
     let hits = run(&linter, &v30);
-    let hit = hits.iter().find(|f| &*f.code == "no-$ref-siblings").expect("fires on 3.0");
+    let hit = hits
+        .iter()
+        .find(|f| &*f.code == "no-$ref-siblings")
+        .expect("fires on 3.0");
     assert_eq!(hit.severity, Severity::Error);
     let v31 = doc(
         "openapi: \"3.1.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  schemas:\n    Pet:\n      $ref: '#/x'\n      title: extra\n",
     );
     let hits = run(&linter, &v31);
-    let hit = hits.iter().find(|f| &*f.code == "no-$ref-siblings").expect("fires on 3.1");
+    let hit = hits
+        .iter()
+        .find(|f| &*f.code == "no-$ref-siblings")
+        .expect("fires on 3.1");
     assert_eq!(hit.severity, Severity::Warn);
 }
 
@@ -193,7 +199,11 @@ fn findings_are_deterministic_and_sorted() {
     }
     for w in first.windows(2) {
         let key = |f: &Finding<'_>| (f.range.start, f.range.end, f.code.clone());
-        assert!(key(&w[0]) <= key(&w[1]), "findings not sorted: {:?}", codes(&first));
+        assert!(
+            key(&w[0]) <= key(&w[1]),
+            "findings not sorted: {:?}",
+            codes(&first)
+        );
     }
 }
 
@@ -215,16 +225,26 @@ fn unknown_family_documents_produce_no_builtin_findings() {
 
 #[test]
 fn petstore_corpus_lints_cleanly_with_real_ranges() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/petstore-expanded.yaml");
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../corpus/petstore-expanded.yaml"
+    );
     let bytes = std::fs::read(path).expect("corpus file readable");
     let source_len = bytes.len();
     let uri = Uri::from_path(std::path::Path::new(path)).expect("uri");
     let doc = LowDoc::parse(uri, Source::from_vec(bytes));
     assert_eq!(doc.sniff_family(), SpecFamily::Oas30);
     let findings = Linter::spectral_default().run(&doc);
-    assert!(!findings.is_empty(), "expected at least one finding on petstore");
+    assert!(
+        !findings.is_empty(),
+        "expected at least one finding on petstore"
+    );
     for f in &findings {
-        assert!(f.range.start < f.range.end && f.range.end <= source_len, "bad range {:?}", f.range);
+        assert!(
+            f.range.start < f.range.end && f.range.end <= source_len,
+            "bad range {:?}",
+            f.range
+        );
     }
     // Every petstore operation carries an operationId, so that rule stays
     // quiet while structural rules fire.
@@ -240,6 +260,10 @@ fn petstore_corpus_lints_cleanly_with_real_ranges() {
         if f.path.is_root() {
             continue;
         }
-        assert!(root.pointer(&f.path).is_some(), "finding path {} does not resolve", f.path.to_path());
+        assert!(
+            root.pointer(&f.path).is_some(),
+            "finding path {} does not resolve",
+            f.path.to_path()
+        );
     }
 }

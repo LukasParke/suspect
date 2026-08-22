@@ -114,7 +114,10 @@ fn fragment_only(frag: &str) -> Result<ParsedRef, RefError> {
 
 fn with_fragment(uri: Uri, frag: &str) -> Result<ParsedRef, RefError> {
     if frag.is_empty() {
-        return Ok(ParsedRef::External { uri, pointer: Pointer::root() });
+        return Ok(ParsedRef::External {
+            uri,
+            pointer: Pointer::root(),
+        });
     }
     if frag.starts_with('/') {
         let pointer = decode_pointer(frag)?;
@@ -193,7 +196,6 @@ pub(crate) fn scan(doc: &LowDoc) -> Scanned {
     // expansion through self-referential YAML aliases.
     let mut on_path: Vec<Range<usize>> = vec![root.byte_range()];
 
-
     while let Some(frame) = stack.last_mut() {
         let Some((key, child_node, index)) = frame.children.get(frame.next).cloned() else {
             stack.pop();
@@ -209,9 +211,10 @@ pub(crate) fn scan(doc: &LowDoc) -> Scanned {
         if child_node.kind() == ValueKind::Str {
             if key.as_deref() == Some("$ref") {
                 record_ref(&mut sc, doc, child_node, frame.range.clone(), &frame.ptr);
-            } else if let (Some(name), true) =
-                (child_node.as_str(), matches!(key.as_deref(), Some("$anchor")))
-            {
+            } else if let (Some(name), true) = (
+                child_node.as_str(),
+                matches!(key.as_deref(), Some("$anchor")),
+            ) {
                 sc.anchors.insert(name.to_owned(), frame.ptr.clone());
             } else if let Some(v) = child_node.as_str()
                 && matches!(key.as_deref(), Some("id" | "$id"))
@@ -233,7 +236,10 @@ pub(crate) fn scan(doc: &LowDoc) -> Scanned {
         match child_node.kind() {
             ValueKind::Object | ValueKind::Array => {
                 let range = child_node.byte_range();
-                if on_path.iter().any(|r| r.start == range.start && r.end == range.end) {
+                if on_path
+                    .iter()
+                    .any(|r| r.start == range.start && r.end == range.end)
+                {
                     continue;
                 }
                 on_path.push(range.clone());
@@ -261,12 +267,16 @@ fn record_ref(
     // Stripe and friends write refs as folded block scalars (`>-`); the
     // decoded value is the pointer text, not the raw source slice.
     let decoded = value.decoded_scalar();
-    let Some(raw) = std::str::from_utf8(&decoded).ok().map(str::trim) else { return };
+    let Some(raw) = std::str::from_utf8(&decoded).ok().map(str::trim) else {
+        return;
+    };
     // Collapse duplicate expansions of the same physical node (aliases).
     if sc.meta.value_index.contains_key(&range) {
         return;
     }
-    let Ok(parsed) = parse_ref(doc.uri(), raw) else { return };
+    let Ok(parsed) = parse_ref(doc.uri(), raw) else {
+        return;
+    };
     sc.meta.value_index.insert(range.clone(), sc.edges.len());
     sc.meta.mapping_ranges.push(mapping_range);
     sc.edges.push(RefEdge {
@@ -276,4 +286,3 @@ fn record_ref(
         path: mapping_ptr.clone(),
     });
 }
-

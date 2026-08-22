@@ -84,7 +84,9 @@ impl<'d> SNode<'d> {
     /// pair), if that field is present for this node's grammar shape.
     #[must_use]
     pub fn child_by_field(&self, field: &str) -> Option<SNode<'d>> {
-        self.raw.child_by_field_name(field).map(|n| SNode::new(self.doc, n))
+        self.raw
+            .child_by_field_name(field)
+            .map(|n| SNode::new(self.doc, n))
     }
 
     /// All children including anonymous tokens.
@@ -155,7 +157,8 @@ impl<'d> SNode<'d> {
     }
 
     fn first_meaningful_child(&self) -> Option<SNode<'d>> {
-        self.children().find(|c| c.raw().is_named() && !is_decoration(c.kind()))
+        self.children()
+            .find(|c| c.raw().is_named() && !is_decoration(c.kind()))
     }
 
     /// If this is a mapping, yields `(key, value)` pairs with keys resolved
@@ -193,7 +196,10 @@ impl<'d> SNode<'d> {
         let mut out = Vec::new();
         for child in node.children().filter(|c| c.raw().is_named()) {
             match child.kind() {
-                SyntaxKind::Comment | SyntaxKind::Directive | SyntaxKind::Anchor | SyntaxKind::Tag => {}
+                SyntaxKind::Comment
+                | SyntaxKind::Directive
+                | SyntaxKind::Anchor
+                | SyntaxKind::Tag => {}
                 _ if child.is_error() => {}
                 _ => out.push(child.content()),
             }
@@ -220,9 +226,7 @@ impl<'d> SNode<'d> {
         let node = self.content();
         let text = node.text();
         match node.scalar_style() {
-            ScalarStyle::DoubleQuoted | ScalarStyle::SingleQuoted => {
-                strip_quotes(text)
-            }
+            ScalarStyle::DoubleQuoted | ScalarStyle::SingleQuoted => strip_quotes(text),
             _ => text,
         }
     }
@@ -244,7 +248,6 @@ impl<'d> SNode<'d> {
             },
         }
     }
-
 
     /// S-expression dump (debugging).
     #[must_use]
@@ -279,13 +282,19 @@ fn strip_quotes(text: &[u8]) -> &[u8] {
 }
 
 fn is_wrapper(raw_kind: &str) -> bool {
-    matches!(raw_kind, "block_node" | "flow_node" | "_value" | "block_sequence_item")
+    matches!(
+        raw_kind,
+        "block_node" | "flow_node" | "_value" | "block_sequence_item"
+    )
 }
 
 /// Decorations attach to values but are not values.
 #[must_use]
 pub fn is_decoration(kind: SyntaxKind) -> bool {
-    matches!(kind, SyntaxKind::Anchor | SyntaxKind::Tag | SyntaxKind::Comment | SyntaxKind::Directive)
+    matches!(
+        kind,
+        SyntaxKind::Anchor | SyntaxKind::Tag | SyntaxKind::Comment | SyntaxKind::Directive
+    )
 }
 
 fn map_kind(format: Format, raw: &str) -> SyntaxKind {

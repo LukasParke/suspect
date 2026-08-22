@@ -57,7 +57,10 @@ fn bench_arazzo(c: &mut Criterion) {
     // without panicking.
     let parsed = ArazzoDoc::new(&doc);
     let diags = validate_arazzo(&parsed);
-    eprintln!("[arazzo] generated doc: {} diagnostics (warmup)", diags.len());
+    eprintln!(
+        "[arazzo] generated doc: {} diagnostics (warmup)",
+        diags.len()
+    );
 
     let mut group = c.benchmark_group("arazzo");
     group.bench_function("new_and_validate_2_workflows_x_5_steps", |b| {
@@ -76,7 +79,11 @@ fn bench_arazzo(c: &mut Criterion) {
         "resp={$response.body#/name}; ",
         "prev={$steps.step0_0.outputs.petId} wf={$workflows.flow0.outputs.chained}"
     );
-    assert_eq!(EMBEDDED.matches("{$").count(), 10, "ten embedded expressions");
+    assert_eq!(
+        EMBEDDED.matches("{$").count(),
+        10,
+        "ten embedded expressions"
+    );
 
     group.bench_function("parse_embedded_10_exprs_x1000", |b| {
         b.iter(|| {

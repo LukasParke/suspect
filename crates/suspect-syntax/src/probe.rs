@@ -5,11 +5,19 @@ use crate::{Format, ScalarStyle, SourceDoc, SyntaxKind};
 use suspect_source::Source;
 
 fn parse_yaml(src: &str) -> SourceDoc {
-    SourceDoc::with_format("mem://probe.yaml".into(), Source::from_vec(src.as_bytes().to_vec()), Format::Yaml)
+    SourceDoc::with_format(
+        "mem://probe.yaml".into(),
+        Source::from_vec(src.as_bytes().to_vec()),
+        Format::Yaml,
+    )
 }
 
 fn parse_json(src: &str) -> SourceDoc {
-    SourceDoc::with_format("mem://probe.json".into(), Source::from_vec(src.as_bytes().to_vec()), Format::Json)
+    SourceDoc::with_format(
+        "mem://probe.json".into(),
+        Source::from_vec(src.as_bytes().to_vec()),
+        Format::Json,
+    )
 }
 
 #[test]
@@ -18,7 +26,11 @@ fn probe_yaml_mapping_shape() {
     let root = doc.root();
     println!("YAML sexp: {}", root.to_sexp());
     let content = root.content();
-    assert_eq!(content.kind(), SyntaxKind::Mapping, "root content should be a mapping");
+    assert_eq!(
+        content.kind(),
+        SyntaxKind::Mapping,
+        "root content should be a mapping"
+    );
     let entries = content.mapping_entries();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].0.scalar_bytes(), b"openapi");
@@ -34,7 +46,11 @@ fn probe_yaml_anchors_aliases() {
     println!("ANCHORS sexp: {}", doc.root().to_sexp());
     println!("anchors map: {:?}", doc.anchors());
     let use_val = doc.root().content().get(b"use").unwrap();
-    println!("use node kind={:?} raw={}", use_val.kind(), use_val.raw_kind());
+    println!(
+        "use node kind={:?} raw={}",
+        use_val.kind(),
+        use_val.raw_kind()
+    );
     if use_val.kind() == SyntaxKind::Alias {
         let target = doc.anchor_target(use_val.alias_name().unwrap()).unwrap();
         assert_eq!(target.content().kind(), SyntaxKind::Mapping);
@@ -47,7 +63,11 @@ fn probe_yaml_merge_key() {
     let doc = parse_yaml(src);
     println!("MERGE sexp: {}", doc.root().to_sexp());
     let b = doc.root().content().get(b"b").unwrap();
-    let keys: Vec<_> = b.mapping_entries().iter().map(|(k, _)| k.scalar_bytes().to_vec()).collect();
+    let keys: Vec<_> = b
+        .mapping_entries()
+        .iter()
+        .map(|(k, _)| k.scalar_bytes().to_vec())
+        .collect();
     println!("b keys: {keys:?}");
 }
 
@@ -75,15 +95,22 @@ fn probe_yaml_quoted_and_block_scalars() {
     let doc = parse_yaml(src);
     println!("SCALARS sexp: {}", doc.root().to_sexp());
     let root = doc.root().content();
-    assert_eq!(root.get(b"s").unwrap().scalar_style(), crate::ScalarStyle::SingleQuoted);
-    assert_eq!(root.get(b"d").unwrap().scalar_style(), ScalarStyle::DoubleQuoted);
+    assert_eq!(
+        root.get(b"s").unwrap().scalar_style(),
+        crate::ScalarStyle::SingleQuoted
+    );
+    assert_eq!(
+        root.get(b"d").unwrap().scalar_style(),
+        ScalarStyle::DoubleQuoted
+    );
     assert_eq!(root.get(b"b").unwrap().scalar_style(), ScalarStyle::Block);
     assert_eq!(root.get(b"p").unwrap().scalar_style(), ScalarStyle::Plain);
 }
 
 #[test]
 fn probe_json_shape() {
-    let doc = parse_json(r#"{"openapi": "3.1.0", "n": 1, "t": true, "x": null, "a": [1, {"k": "v"}]}"#);
+    let doc =
+        parse_json(r#"{"openapi": "3.1.0", "n": 1, "t": true, "x": null, "a": [1, {"k": "v"}]}"#);
     let root = doc.root();
     println!("JSON sexp: {}", root.to_sexp());
     let content = root.content();

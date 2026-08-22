@@ -10,12 +10,12 @@ mod expr;
 mod model;
 mod validate;
 
-pub use expr::{parse, parse_embedded, ComponentKind, Expr, ExprError, ExprPart, HttpPart};
+pub use expr::{ComponentKind, Expr, ExprError, ExprPart, HttpPart, parse, parse_embedded};
 pub use model::{
     ActionView, ArazzoDoc, CriterionView, ParameterView, SourceDescriptionView, SourceType,
     StepView, WorkflowView,
 };
-pub use validate::{validate_arazzo, ArazzoDiagnostic};
+pub use validate::{ArazzoDiagnostic, validate_arazzo};
 
 use suspect_low::NodeRef;
 
@@ -114,10 +114,14 @@ pub fn evaluate<'d>(expr: &Expr, ctx: &dyn RuntimeContext<'d>) -> Option<Evaluat
         }
         Expr::Outputs { name } => ctx.output(name).map(|o| Evaluated::Text(o.to_owned())),
         Expr::Inputs { name } => ctx.input(name).map(|i| Evaluated::Text(i.to_owned())),
-        Expr::Component { kind, name } => {
-            ctx.component(*kind, name).map(|o| Evaluated::Text(o.to_owned()))
-        }
-        Expr::WorkflowOutput { workflow, step, name } => ctx
+        Expr::Component { kind, name } => ctx
+            .component(*kind, name)
+            .map(|o| Evaluated::Text(o.to_owned())),
+        Expr::WorkflowOutput {
+            workflow,
+            step,
+            name,
+        } => ctx
             .workflow_output(workflow, step, name)
             .map(|o| Evaluated::Text(o.to_owned())),
         Expr::SourceDescription { .. } => None,
@@ -131,9 +135,7 @@ pub fn render(value: &Evaluated<'_>) -> String {
     match value {
         Evaluated::Text(t) => t.clone(),
         Evaluated::Body(n) => match n.kind() {
-            suspect_low::ValueKind::Str => {
-                String::from_utf8_lossy(n.scalar_bytes()).to_string()
-            }
+            suspect_low::ValueKind::Str => String::from_utf8_lossy(n.scalar_bytes()).to_string(),
             _ => String::from_utf8_lossy(n.raw_text()).to_string(),
         },
     }

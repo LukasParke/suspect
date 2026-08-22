@@ -56,7 +56,12 @@ impl WorkspaceBuilder {
     /// `max_doc_size = 64 MiB`, `depth_cap = 256`.
     #[must_use]
     pub fn new() -> Self {
-        Self { root: None, max_doc_size: 64 << 20, max_docs: 10_000, depth_cap: 256 }
+        Self {
+            root: None,
+            max_doc_size: 64 << 20,
+            max_docs: 10_000,
+            depth_cap: 256,
+        }
     }
 
     /// Base directory against which relative CLI entries are resolved.
@@ -159,7 +164,6 @@ pub struct Workspace {
     pub(crate) memo_misses: AtomicU64,
     pub(crate) cycles_found: AtomicU64,
 }
-
 
 impl Workspace {
     /// Opens an entry (filesystem path or absolute URI) and returns a handle.
@@ -286,7 +290,8 @@ impl Workspace {
             return Ok(uri);
         }
         let base = self.root.clone().unwrap_or_else(|| PathBuf::from("."));
-        Uri::from_path(&base.join(entry)).map_err(|_| WorkspaceError::InvalidEntry(entry.to_owned()))
+        Uri::from_path(&base.join(entry))
+            .map_err(|_| WorkspaceError::InvalidEntry(entry.to_owned()))
     }
 
     /// Idempotent single-document load. Concurrent callers converge on the
@@ -302,7 +307,9 @@ impl Workspace {
         }
         if !guard.insert(uri.clone()) {
             // Mid-load on this thread's own stack; waiting would deadlock.
-            return Err(RefError::MissingDoc { uri: uri.to_string() });
+            return Err(RefError::MissingDoc {
+                uri: uri.to_string(),
+            });
         }
         let res = self.load_uncached(uri);
         guard.remove(uri);
@@ -311,18 +318,27 @@ impl Workspace {
 
     fn load_uncached(&self, uri: &Uri) -> Result<DocId, RefError> {
         if uri.is_remote() {
-            return Err(RefError::RemoteDenied { uri: uri.to_string() });
+            return Err(RefError::RemoteDenied {
+                uri: uri.to_string(),
+            });
         }
         let Some(path) = uri.as_path() else {
-            return Err(RefError::MissingDoc { uri: uri.to_string() });
+            return Err(RefError::MissingDoc {
+                uri: uri.to_string(),
+            });
         };
         if let Ok(meta) = std::fs::metadata(&path)
-            && meta.len() > self.max_doc_size {
-                return Err(RefError::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("document {} exceeds max_doc_size ({})", path.display(), self.max_doc_size),
-                )));
-            }
+            && meta.len() > self.max_doc_size
+        {
+            return Err(RefError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "document {} exceeds max_doc_size ({})",
+                    path.display(),
+                    self.max_doc_size
+                ),
+            )));
+        }
         let source = Source::from_path(&path).map_err(RefError::Io)?;
         let doc = LowDoc::parse(uri.clone(), source);
         let mut guard = match self.slots.write() {
@@ -343,7 +359,9 @@ impl Workspace {
         if self.edges_cache.contains_key(&d) {
             return;
         }
-        let Some(doc) = self.extend_doc(d) else { return };
+        let Some(doc) = self.extend_doc(d) else {
+            return;
+        };
         let scanned = crate::edges::scan(doc);
         self.edges_cache
             .entry(d)
@@ -359,7 +377,10 @@ impl Workspace {
 
     pub(crate) fn edges_of(&self, d: DocId) -> Arc<Vec<RefEdge>> {
         self.ensure_scanned(d);
-        self.edges_cache.get(&d).map(|e| e.clone()).unwrap_or_default()
+        self.edges_cache
+            .get(&d)
+            .map(|e| e.clone())
+            .unwrap_or_default()
     }
 
     pub(crate) fn meta_of(&self, d: DocId) -> Arc<EdgeMeta> {
@@ -487,7 +508,9 @@ impl<'ws> DocHandle<'ws> {
             .iter()
             .find(|e| e.key() == doc_uri)
             .map(|e| *e.value())
-            .ok_or_else(|| RefError::MissingDoc { uri: doc_uri.to_string() })?;
+            .ok_or_else(|| RefError::MissingDoc {
+                uri: doc_uri.to_string(),
+            })?;
         // The value node's own pointer is one token deeper than the
         // containing mapping; $id inheritance walks mapping prefixes.
         let full = node.path_from_root();

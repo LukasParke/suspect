@@ -27,8 +27,8 @@ pub mod workspace_symbol;
 use std::sync::Arc;
 use std::time::Duration;
 
-use suspect_source::Uri;
 use state::{OpenDoc, State, lsp_range, offset_of_utf16};
+use suspect_source::Uri;
 use tower_lsp::Client;
 use tower_lsp::async_trait;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
@@ -59,7 +59,10 @@ struct Backend {
 impl Backend {
     /// Creates a backend with empty [`State`]; called by `LspService::new`.
     fn new(client: Client) -> Self {
-        Self { client, state: Arc::new(tokio::sync::RwLock::new(State::default())) }
+        Self {
+            client,
+            state: Arc::new(tokio::sync::RwLock::new(State::default())),
+        }
     }
 
     /// Schedules a debounced diagnostics publish: 150 ms after the last
@@ -67,7 +70,9 @@ impl Backend {
     fn schedule_diagnostics(&self, uri: Uri) {
         let state = Arc::clone(&self.state);
         let client = self.client.clone();
-        let Some(url) = Url::parse(uri.as_str()).ok() else { return };
+        let Some(url) = Url::parse(uri.as_str()).ok() else {
+            return;
+        };
         tokio::spawn(async move {
             let generation = {
                 let mut st = state.write().await;
@@ -81,10 +86,7 @@ impl Backend {
                     return; // a newer edit superseded this publish
                 }
                 match st.docs.get(&uri) {
-                    Some(doc) => diagnostics::compute_diagnostics(
-                        st.workspace.as_ref(),
-                        &doc.low,
-                    ),
+                    Some(doc) => diagnostics::compute_diagnostics(st.workspace.as_ref(), &doc.low),
                     None => return,
                 }
             };
@@ -100,9 +102,10 @@ impl Backend {
             st.ensure_workspace()?
         };
         if ws.get(uri).is_none()
-            && let Some(path) = uri.as_path() {
-                let _ = ws.load_all(&path.to_string_lossy());
-            }
+            && let Some(path) = uri.as_path()
+        {
+            let _ = ws.load_all(&path.to_string_lossy());
+        }
         Some(ws)
     }
 }
@@ -128,7 +131,10 @@ fn to_location(
         let inner = handle.doc().inner();
         (inner.bytes(), inner.line_index())
     };
-    Some(Location { uri: to_url(&def.uri)?, range: lsp_range(bytes, li, def.range.clone()) })
+    Some(Location {
+        uri: to_url(&def.uri)?,
+        range: lsp_range(bytes, li, def.range.clone()),
+    })
 }
 
 #[async_trait]
@@ -156,14 +162,16 @@ impl LanguageServer for Backend {
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
-                semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
-                    SemanticTokensOptions {
-                        work_done_progress_options: WorkDoneProgressOptions::default(),
-                        legend: semantic::legend(),
-                        range: Some(false),
-                        full: Some(SemanticTokensFullOptions::Bool(true)),
-                    },
-                )),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            work_done_progress_options: WorkDoneProgressOptions::default(),
+                            legend: semantic::legend(),
+                            range: Some(false),
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                        },
+                    ),
+                ),
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
@@ -187,18 +195,21 @@ impl LanguageServer for Backend {
         let Some(doc) = st.docs.get(&uri) else {
             return Ok(None);
         };
-        Ok(Some(SemanticTokensResult::Tokens(semantic::semantic_tokens_full(doc))))
+        Ok(Some(SemanticTokensResult::Tokens(
+            semantic::semantic_tokens_full(doc),
+        )))
     }
 
-    async fn inlay_hint(
-        &self,
-        params: InlayHintParams,
-    ) -> JsonRpcResult<Option<Vec<InlayHint>>> {
+    async fn inlay_hint(&self, params: InlayHintParams) -> JsonRpcResult<Option<Vec<InlayHint>>> {
         let uri = Uri::parse(params.text_document.uri.as_str()).ok();
         let Some(uri) = uri else { return Ok(None) };
-        let Some(ws) = self.workspace_for(&uri).await else { return Ok(None) };
+        let Some(ws) = self.workspace_for(&uri).await else {
+            return Ok(None);
+        };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         Ok(Some(semantic::inlay_hints(doc, &ws, params.range)))
     }
 
@@ -207,11 +218,19 @@ impl LanguageServer for Backend {
         params: DocumentHighlightParams,
     ) -> JsonRpcResult<Option<Vec<DocumentHighlight>>> {
         let pos = params.text_document_position_params.position;
-        let Ok(uri) = Uri::parse(params.text_document_position_params.text_document.uri.as_str()) else {
+        let Ok(uri) = Uri::parse(
+            params
+                .text_document_position_params
+                .text_document
+                .uri
+                .as_str(),
+        ) else {
             return Ok(None);
         };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let inner = doc.low.inner();
         let Some(offset) =
             offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
@@ -237,7 +256,9 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let item = params.text_document;
-        let Ok(uri) = Uri::parse(item.uri.as_str()) else { return };
+        let Ok(uri) = Uri::parse(item.uri.as_str()) else {
+            return;
+        };
         {
             let mut st = self.state.write().await;
             st.open_doc(uri.clone(), item.text);
@@ -255,7 +276,9 @@ impl LanguageServer for Backend {
         else {
             return;
         };
-        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else { return };
+        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
+            return;
+        };
         {
             let mut st = self.state.write().await;
             // Skip the reparse + republish cycle when the text is unchanged.
@@ -278,14 +301,22 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> JsonRpcResult<Option<GotoDefinitionResponse>> {
         let pos = params.text_document_position_params.position;
-        let Ok(uri) =
-            Uri::parse(params.text_document_position_params.text_document.uri.as_str())
-        else {
+        let Ok(uri) = Uri::parse(
+            params
+                .text_document_position_params
+                .text_document
+                .uri
+                .as_str(),
+        ) else {
             return Ok(None);
         };
-        let Some(ws) = self.workspace_for(&uri).await else { return Ok(None) };
+        let Some(ws) = self.workspace_for(&uri).await else {
+            return Ok(None);
+        };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let inner = doc.low.inner();
         let Some(offset) =
             offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
@@ -295,34 +326,32 @@ impl LanguageServer for Backend {
         let def = navigation::goto_definition(&ws, &doc.low, offset)
             .or_else(|| navigation::self_definition(&doc.low, offset));
         let open = st.docs.get(&uri);
-        Ok(def.as_ref().and_then(|d| to_location(Some(&ws), open, d)).map(
-            GotoDefinitionResponse::Scalar,
-        ))
+        Ok(def
+            .as_ref()
+            .and_then(|d| to_location(Some(&ws), open, d))
+            .map(GotoDefinitionResponse::Scalar))
     }
 
-    async fn references(
-        &self,
-        params: ReferenceParams,
-    ) -> JsonRpcResult<Option<Vec<Location>>> {
+    async fn references(&self, params: ReferenceParams) -> JsonRpcResult<Option<Vec<Location>>> {
         let pos = params.text_document_position.position;
         let Ok(uri) = Uri::parse(params.text_document_position.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let Some(ws) = self.workspace_for(&uri).await else { return Ok(None) };
+        let Some(ws) = self.workspace_for(&uri).await else {
+            return Ok(None);
+        };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let inner = doc.low.inner();
         let Some(offset) =
             offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
         else {
             return Ok(None);
         };
-        let defs = navigation::references(
-            &ws,
-            &doc.low,
-            offset,
-            params.context.include_declaration,
-        );
+        let defs =
+            navigation::references(&ws, &doc.low, offset, params.context.include_declaration);
         let open = st.docs.get(&uri);
         let locs = defs
             .iter()
@@ -333,27 +362,37 @@ impl LanguageServer for Backend {
 
     async fn hover(&self, params: HoverParams) -> JsonRpcResult<Option<Hover>> {
         let pos = params.text_document_position_params.position;
-        let Ok(uri) =
-            Uri::parse(params.text_document_position_params.text_document.uri.as_str())
-        else {
+        let Ok(uri) = Uri::parse(
+            params
+                .text_document_position_params
+                .text_document
+                .uri
+                .as_str(),
+        ) else {
             return Ok(None);
         };
-        let Some(ws) = self.workspace_for(&uri).await else { return Ok(None) };
+        let Some(ws) = self.workspace_for(&uri).await else {
+            return Ok(None);
+        };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let inner = doc.low.inner();
         let Some(offset) =
             offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
         else {
             return Ok(None);
         };
-        Ok(navigation::hover_markdown(&ws, &doc.low, offset).map(|value| Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value,
+        Ok(
+            navigation::hover_markdown(&ws, &doc.low, offset).map(|value| Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value,
+                }),
+                range: None,
             }),
-            range: None,
-        }))
+        )
     }
 
     async fn document_symbol(
@@ -364,7 +403,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let syms = symbols::document_symbols(&doc.low);
         Ok((!syms.is_empty()).then_some(DocumentSymbolResponse::Nested(syms)))
     }
@@ -377,7 +418,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let ranges = symbols::folding_ranges(&doc.low);
         Ok((!ranges.is_empty()).then_some(ranges))
     }
@@ -390,11 +433,16 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let inner = doc.low.inner();
-        let Some(offset) =
-            offset_of_utf16(inner.bytes(), inner.line_index(), params.position.line, params.position.character)
-        else {
+        let Some(offset) = offset_of_utf16(
+            inner.bytes(),
+            inner.line_index(),
+            params.position.line,
+            params.position.character,
+        ) else {
             return Ok(None);
         };
         match rename::prepare_rename(doc, offset) {
@@ -414,11 +462,16 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document_position.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let Some(ws) = self.workspace_for(&uri).await else { return Ok(None) };
+        let Some(ws) = self.workspace_for(&uri).await else {
+            return Ok(None);
+        };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let inner = doc.low.inner();
-        let Some(offset) = offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
+        let Some(offset) =
+            offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
         else {
             return Ok(None);
         };
@@ -455,7 +508,9 @@ impl LanguageServer for Backend {
         };
         let ws = self.workspace_for(&uri).await;
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         let inner = doc.low.inner();
         let Some(offset) =
             offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
@@ -465,9 +520,7 @@ impl LanguageServer for Backend {
         let items = match completion::context_at(&doc.low, offset) {
             completion::CompletionContext::Keys(keys) => completion::key_items(keys),
             completion::CompletionContext::Refs => match ws {
-                Some(ws) => {
-                    completion::ref_items(completion::ref_candidates(&ws, doc.low.uri()))
-                }
+                Some(ws) => completion::ref_items(completion::ref_candidates(&ws, doc.low.uri())),
                 None => Vec::new(),
             },
             completion::CompletionContext::None => return Ok(None),
@@ -483,16 +536,18 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
-        let Some(url) = to_url(&uri) else { return Ok(None) };
-        let actions = actions::code_actions(
-            doc,
-            &url,
-            params.range,
-            &params.context.diagnostics,
-        );
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
+        let Some(url) = to_url(&uri) else {
+            return Ok(None);
+        };
+        let actions = actions::code_actions(doc, &url, params.range, &params.context.diagnostics);
         Ok((!actions.is_empty()).then(|| {
-            actions.into_iter().map(CodeActionOrCommand::CodeAction).collect()
+            actions
+                .into_iter()
+                .map(CodeActionOrCommand::CodeAction)
+                .collect()
         }))
     }
 
@@ -504,11 +559,15 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
         // Formatting options are ignored: the canonical form uses a
         // two-space indent regardless of editor configuration.
         let _ = &params.options;
-        let Some(url) = to_url(&uri) else { return Ok(None) };
+        let Some(url) = to_url(&uri) else {
+            return Ok(None);
+        };
         Ok(actions::format_document(doc, &url).map(|e| vec![e]))
     }
 }

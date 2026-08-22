@@ -7,8 +7,8 @@ use std::path::Path;
 use serde::Serialize;
 use suspect_overlay::Value;
 
-use crate::output;
 use crate::OutputFormat;
+use crate::output;
 
 /// One changed scalar: `from` -> `to` at `path`.
 #[derive(Debug, Clone, Serialize)]

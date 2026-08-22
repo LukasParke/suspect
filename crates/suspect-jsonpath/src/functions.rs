@@ -1,7 +1,6 @@
 //! RFC 9535 §2.4 function extensions: `length`, `count`, `match`, `search`,
 //! `value`.
 
-
 use suspect_low::{NodeRef, ValueKind};
 
 use crate::ast::{FArg, FunctionCall};
@@ -24,12 +23,14 @@ enum Arg<'d> {
 }
 
 /// Dispatches a parsed function call against the current filter node.
-pub(crate) fn call<'d>(
-    f: &FunctionCall,
-    current: NodeRef<'d>,
-    root: NodeRef<'d>,
-) -> FRes<'d> {
-    debug_assert!(f.args.len() == 1 || matches!(f.name, crate::ast::FuncName::Match | crate::ast::FuncName::Search));
+pub(crate) fn call<'d>(f: &FunctionCall, current: NodeRef<'d>, root: NodeRef<'d>) -> FRes<'d> {
+    debug_assert!(
+        f.args.len() == 1
+            || matches!(
+                f.name,
+                crate::ast::FuncName::Match | crate::ast::FuncName::Search
+            )
+    );
     match f.name {
         FuncName::Length => FRes::Value(length(arg(f, 0, current, root))),
         FuncName::Count => FRes::Value(count(arg(f, 0, current, root))),

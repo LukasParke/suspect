@@ -50,7 +50,9 @@ impl Pointer {
             return Ok(Self::root());
         }
         if !body.starts_with('/') {
-            return Err(PointerError { input: s.to_owned() });
+            return Err(PointerError {
+                input: s.to_owned(),
+            });
         }
         let mut tokens = Vec::new();
         for raw in body.split('/').skip(1) {
@@ -69,7 +71,11 @@ impl Pointer {
                             out.push('/');
                             i += 2;
                         }
-                        _ => return Err(PointerError { input: s.to_owned() }),
+                        _ => {
+                            return Err(PointerError {
+                                input: s.to_owned(),
+                            });
+                        }
                     }
                 } else {
                     out.push(bytes[i] as char);
@@ -171,7 +177,6 @@ pub fn percent_decode_fragment(frag: &str) -> Vec<u8> {
     out
 }
 
-
 /// Reassembles UTF-8 from byte-wise unescaping.
 fn fix_utf8(bytes: String) -> String {
     // out was built by pushing u8 as char — reconstruct properly
@@ -221,7 +226,10 @@ mod tests {
         assert!(Pointer::parse("/~").is_err());
         // ~1 + literal 0 is legal: unescapes to "/0"
         assert_eq!(Pointer::parse("/~10").unwrap().tokens()[0].as_ref(), "/0");
-        assert_eq!(Pointer::parse("/a~1b~0c").unwrap().tokens()[0].as_ref(), "a/b~c");
+        assert_eq!(
+            Pointer::parse("/a~1b~0c").unwrap().tokens()[0].as_ref(),
+            "a/b~c"
+        );
     }
 
     #[test]

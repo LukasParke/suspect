@@ -37,7 +37,8 @@ pub fn node_eq(a: suspect_low::NodeRef<'_>, b: suspect_low::NodeRef<'_>) -> bool
             if ae.len() != b.entries().len() {
                 return false;
             }
-            ae.iter().all(|e| b.get(e.key).is_some_and(|v| node_eq(e.value.unwrap(), v)))
+            ae.iter()
+                .all(|e| b.get(e.key).is_some_and(|v| node_eq(e.value.unwrap(), v)))
         }
         (ValueKind::Array, ValueKind::Array) => {
             let ai = a.items();
@@ -47,7 +48,8 @@ pub fn node_eq(a: suspect_low::NodeRef<'_>, b: suspect_low::NodeRef<'_>) -> bool
         (ValueKind::Null, ValueKind::Null) => true,
         (ValueKind::Bool, ValueKind::Bool) => a.as_bool() == b.as_bool(),
         (ValueKind::Int, ValueKind::Int) => a.as_i64() == b.as_i64(),
-        (ValueKind::Float, ValueKind::Float) | (ValueKind::Int, ValueKind::Float)
+        (ValueKind::Float, ValueKind::Float)
+        | (ValueKind::Int, ValueKind::Float)
         | (ValueKind::Float, ValueKind::Int) => {
             a.as_f64().zip(b.as_f64()).is_some_and(|(x, y)| x == y)
         }

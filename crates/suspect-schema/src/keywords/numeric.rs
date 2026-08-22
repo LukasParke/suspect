@@ -5,7 +5,7 @@ use std::cmp::Ordering;
 use suspect_low::{NodeRef, Pointer};
 
 use crate::compile::Num;
-use crate::exec::{inst_num, Ctx, Stack};
+use crate::exec::{Ctx, Stack, inst_num};
 
 /// Integer path uses exact modulo; the float path checks that the quotient
 /// is (near-)whole with a relative epsilon, so `0.07 / 0.01` counts as a

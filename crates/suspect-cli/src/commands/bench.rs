@@ -13,8 +13,8 @@ use suspect_oas::Session;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::{Source, Uri};
 
-use crate::output;
 use crate::OutputFormat;
+use crate::output;
 
 /// Mean wall-clock milliseconds per pipeline stage.
 #[derive(Debug, Clone, Serialize)]
@@ -139,8 +139,10 @@ pub fn bench_of(fixture: &Path, iters: usize) -> anyhow::Result<BenchReport> {
         let edit = suspect_syntax::Edit::from_bytes(&doc, at, at, insertion.len());
         mean_ms(iters, || {
             // Buffer hand-off mirrors what the server pays per didChange.
-            let reparsed =
-                doc.reparse(Source::from_vec(edited.clone()), std::slice::from_ref(&edit));
+            let reparsed = doc.reparse(
+                Source::from_vec(edited.clone()),
+                std::slice::from_ref(&edit),
+            );
             std::hint::black_box(reparsed.has_errors());
             Ok(())
         })?
@@ -155,7 +157,11 @@ pub fn bench_of(fixture: &Path, iters: usize) -> anyhow::Result<BenchReport> {
         };
         let compiler = suspect_schema::Compiler::new(suspect_schema::Config::default());
         let mut compiled = 0usize;
-        for (_name, node) in schemas.entries().into_iter().filter_map(|e| e.value.map(|v| (e.key, v))) {
+        for (_name, node) in schemas
+            .entries()
+            .into_iter()
+            .filter_map(|e| e.value.map(|v| (e.key, v)))
+        {
             if compiler.compile(node).is_ok() {
                 compiled += 1;
             }
@@ -184,8 +190,10 @@ pub fn bench_of(fixture: &Path, iters: usize) -> anyhow::Result<BenchReport> {
         actions.push_str("  - target: $.tags\n    update:\n      - name: bench\n  - target: $.servers\n    remove: true\n");
         let mut full = overlay_text;
         full.extend_from_slice(actions.as_bytes());
-        let overlay_low =
-            LowDoc::parse(Uri::from("mem://bench-overlay.yaml"), Source::from_vec(full));
+        let overlay_low = LowDoc::parse(
+            Uri::from("mem://bench-overlay.yaml"),
+            Source::from_vec(full),
+        );
         let overlay = match suspect_overlay::OverlayDoc::parse(&overlay_low) {
             Ok(o) => o,
             Err(_) => return Ok(()),

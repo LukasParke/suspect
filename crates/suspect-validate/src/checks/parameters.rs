@@ -99,7 +99,11 @@ pub(crate) fn check_duplicate_header_params(api: &OpenApi<'_>, out: &mut Vec<Dia
         for (_, item) in paths.iter() {
             items.push(Item {
                 params: item.parameters(),
-                ops: item.operations().into_iter().map(|op| (op.method(), op.parameters())).collect(),
+                ops: item
+                    .operations()
+                    .into_iter()
+                    .map(|op| (op.method(), op.parameters()))
+                    .collect(),
             });
         }
     }
@@ -107,7 +111,11 @@ pub(crate) fn check_duplicate_header_params(api: &OpenApi<'_>, out: &mut Vec<Dia
         for (_, item) in webhooks.iter() {
             items.push(Item {
                 params: item.parameters(),
-                ops: item.operations().into_iter().map(|op| (op.method(), op.parameters())).collect(),
+                ops: item
+                    .operations()
+                    .into_iter()
+                    .map(|op| (op.method(), op.parameters()))
+                    .collect(),
             });
         }
     }

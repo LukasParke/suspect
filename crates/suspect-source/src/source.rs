@@ -61,13 +61,22 @@ impl Source {
         match detect_bom(bytes) {
             Some((Encoding::Utf8, skip)) => {
                 let owned = bytes[skip..].to_vec().into_boxed_slice();
-                Source { data: Data::Owned(owned), encoding: Encoding::Utf8 }
+                Source {
+                    data: Data::Owned(owned),
+                    encoding: Encoding::Utf8,
+                }
             }
             Some((enc @ (Encoding::Utf16Le | Encoding::Utf16Be), skip)) => {
                 let transcoded = transcode_utf16(&bytes[skip..], enc);
-                Source { data: Data::Owned(transcoded.into()), encoding: enc }
+                Source {
+                    data: Data::Owned(transcoded.into()),
+                    encoding: enc,
+                }
             }
-            None => Source { data, encoding: detected },
+            None => Source {
+                data,
+                encoding: detected,
+            },
         }
     }
 

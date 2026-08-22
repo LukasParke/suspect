@@ -1,8 +1,8 @@
 use suspect_source::{Source, Uri};
 use suspect_syntax::SourceDoc;
 
-use crate::node::NodeRef;
 use crate::ValueKind;
+use crate::node::NodeRef;
 
 /// Which specification family (and version) a document declares.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,13 +33,17 @@ impl LowDoc {
     /// Parses with format auto-detection.
     #[must_use]
     pub fn parse(uri: Uri, source: Source) -> LowDoc {
-        Self { doc: SourceDoc::parse(uri, source) }
+        Self {
+            doc: SourceDoc::parse(uri, source),
+        }
     }
 
     /// Parses with an explicit serialization format.
     #[must_use]
     pub fn with_format(uri: Uri, source: Source, format: suspect_syntax::Format) -> LowDoc {
-        Self { doc: SourceDoc::with_format(uri, source, format) }
+        Self {
+            doc: SourceDoc::with_format(uri, source, format),
+        }
     }
 
     /// Document identifier; same URI the syntax layer parsed with.
@@ -94,7 +98,11 @@ impl LowDoc {
             };
         }
         if let Some(v) = root.get("swagger") {
-            return if v.as_str() == Some("2.0") { SpecFamily::Oas2 } else { SpecFamily::Unknown };
+            return if v.as_str() == Some("2.0") {
+                SpecFamily::Oas2
+            } else {
+                SpecFamily::Unknown
+            };
         }
         if let Some(v) = root.get("arazzo") {
             return if v.as_str().is_some_and(|s| s.starts_with("1.")) {

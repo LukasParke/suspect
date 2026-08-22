@@ -51,7 +51,9 @@ pub(crate) fn check_example_types(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) 
 /// against), the type set is empty, or the example reads as null (empty YAML
 /// values would produce noise).
 fn check_media_example(api: &OpenApi<'_>, media: &MediaType<'_>, out: &mut Vec<Diagnostic>) {
-    let Some(example) = media.example() else { return };
+    let Some(example) = media.example() else {
+        return;
+    };
     let Some(schema) = media.schema() else { return };
     if schema.is_cyclic() || schema.resolved().is_cyclic() {
         return;

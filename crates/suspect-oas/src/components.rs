@@ -1,8 +1,7 @@
 use suspect_low::NodeRef;
 
 use crate::model::{
-    named_map, Callback, Example, Header, Link, Parameter, RequestBody, Response,
-    SecurityScheme,
+    Callback, Example, Header, Link, Parameter, RequestBody, Response, SecurityScheme, named_map,
 };
 use crate::paths::PathItem;
 use crate::schema::SchemaView;
@@ -45,7 +44,9 @@ impl<'s> Components<'s> {
     #[must_use]
     /// One reusable schema by name; `None` when the section or entry is absent.
     pub fn schema(&self, name: &str) -> Option<SchemaView<'s>> {
-        self.section("schemas")?.get(name).map(|v| SchemaView::new(self.session, v))
+        self.section("schemas")?
+            .get(name)
+            .map(|v| SchemaView::new(self.session, v))
     }
 
     #[must_use]
@@ -63,7 +64,11 @@ impl<'s> Components<'s> {
     #[must_use]
     /// `components/requestBodies`, in document order.
     pub fn request_bodies(&self) -> Vec<(&'s str, RequestBody<'s>)> {
-        named_map(self.session, self.section("requestBodies"), RequestBody::new)
+        named_map(
+            self.session,
+            self.section("requestBodies"),
+            RequestBody::new,
+        )
     }
 
     #[must_use]

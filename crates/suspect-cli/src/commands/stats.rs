@@ -8,9 +8,9 @@ use std::time::Instant;
 use serde::Serialize;
 use suspect_low::{NodeRef, SpecFamily};
 
+use crate::OutputFormat;
 use crate::commands::check::family_label;
 use crate::output;
-use crate::OutputFormat;
 
 /// Count of a mapping node's entries (0 when absent or not an object).
 fn entries_len(node: Option<NodeRef<'_>>) -> usize {
@@ -23,8 +23,9 @@ fn items_len(node: Option<NodeRef<'_>>) -> usize {
 }
 
 /// HTTP operation methods recognized inside a path item.
-const OPERATION_METHODS: &[&str] =
-    &["get", "put", "post", "delete", "options", "head", "patch", "trace", "query"];
+const OPERATION_METHODS: &[&str] = &[
+    "get", "put", "post", "delete", "options", "head", "patch", "trace", "query",
+];
 
 /// Structural counts for one document.
 #[derive(Debug, Clone, Serialize)]

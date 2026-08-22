@@ -8,8 +8,8 @@
 use std::path::Path;
 
 use suspect_low::LowDoc;
-use suspect_source::{Source, Uri};
 use suspect_schema::{CompileError, Compiler, Config, SchemaError};
+use suspect_source::{Source, Uri};
 
 fn parse(text: &str) -> LowDoc {
     let uri = Uri::from_path(Path::new("/t/schema.json")).expect("uri");
@@ -21,8 +21,7 @@ fn parse(text: &str) -> LowDoc {
 /// both compiled validator and instance view).
 macro_rules! bind_case {
     ($cfg:expr, $schema:expr, $instance:expr, $doc:ident, $sch:ident, $ins:ident) => {
-        let $doc =
-            parse(&format!("{{\"S\": {}, \"I\": {}}}", $schema, $instance));
+        let $doc = parse(&format!("{{\"S\": {}, \"I\": {}}}", $schema, $instance));
         let $sch = Compiler::new($cfg)
             .compile($doc.root().get("S").expect("schema slot"))
             .expect("compile");
@@ -65,8 +64,14 @@ fn enum_deep_equality() {
         r##"{"enum":[1,{"a":[1,2]},"x"]}"##,
         r##"{"a":[1,2]}"##
     ));
-    assert!(!valid(r##"{"enum":[1,{"a":[1,2]},"x"]}"##, r##"{"a":[2,1]}"##));
-    assert!(!valid(r##"{"enum":[1,{"a":[1,2]},"x"]}"##, r##"{"a":[1,2],"b":3}"##));
+    assert!(!valid(
+        r##"{"enum":[1,{"a":[1,2]},"x"]}"##,
+        r##"{"a":[2,1]}"##
+    ));
+    assert!(!valid(
+        r##"{"enum":[1,{"a":[1,2]},"x"]}"##,
+        r##"{"a":[1,2],"b":3}"##
+    ));
     // numeric equality across int/float representations
     assert!(valid(r##"{"enum":[1.0]}"##, "1"));
     assert!(valid(r##"{"enum":[1]}"##, "1.0"));
@@ -76,8 +81,14 @@ fn enum_deep_equality() {
 
 #[test]
 fn const_keyword() {
-    assert!(valid(r##"{"const":{"k":[true,null]}}"##, r##"{"k":[true,null]}"##));
-    assert!(!valid(r##"{"const":{"k":[true,null]}}"##, r##"{"k":[null,true]}"##));
+    assert!(valid(
+        r##"{"const":{"k":[true,null]}}"##,
+        r##"{"k":[true,null]}"##
+    ));
+    assert!(!valid(
+        r##"{"const":{"k":[true,null]}}"##,
+        r##"{"k":[null,true]}"##
+    ));
     assert!(valid(r##"{"const":0}"##, "0.0"));
     assert!(!valid(r##"{"const":0}"##, "1"));
 }
@@ -112,8 +123,7 @@ fn numeric_bounds_and_exclusive_forms() {
     assert!(valid(r##"{"exclusiveMinimum":-3}"##, "-2.9"));
     // 2020-12 removed the boolean form entirely
     for kw in ["exclusiveMinimum", "exclusiveMaximum"] {
-        let text =
-            format!(r##"{{"S": {{"{kw}": true}}, "I": 1}}"##);
+        let text = format!(r##"{{"S": {{"{kw}": true}}, "I": 1}}"##);
         let doc = parse(&text);
         match Compiler::new(Config::default()).compile(doc.root().get("S").expect("s")) {
             Err(CompileError::Invalid { .. }) => {}
@@ -130,7 +140,10 @@ fn numeric_bounds_and_exclusive_forms() {
 fn string_length_counts_unicode_scalars() {
     // two astral-plane scalars = 2 chars, 8 bytes
     assert!(valid(r##"{"maxLength":2}"##, "\"\u{1D11E}\u{1D11E}\""));
-    assert!(!valid(r##"{"maxLength":2}"##, "\"\u{1D11E}\u{1D11E}\u{1D11E}\""));
+    assert!(!valid(
+        r##"{"maxLength":2}"##,
+        "\"\u{1D11E}\u{1D11E}\u{1D11E}\""
+    ));
     assert!(valid(r##"{"minLength":2}"##, "\"\u{1D11E}\u{1D11E}\""));
     assert!(!valid(r##"{"minLength":3}"##, "\"\u{1D11E}\u{1D11E}\""));
     // non-strings pass string keywords vacuously
@@ -179,7 +192,10 @@ fn contains_bounds() {
     assert!(valid(r##"{"contains":{"const":2}}"##, "[1,2,3]"));
     assert!(!valid(r##"{"contains":{"const":2}}"##, "[1,3]"));
     assert!(valid(r##"{"contains":{"const":2}}"##, "[2]"));
-    assert!(valid(r##"{"contains":{"const":2},"minContains":0}"##, "[1,3]"));
+    assert!(valid(
+        r##"{"contains":{"const":2},"minContains":0}"##,
+        "[1,3]"
+    ));
     assert!(!valid(
         r##"{"contains":{"const":2},"minContains":2}"##,
         "[1,2,3]"
@@ -252,8 +268,7 @@ fn dependent_required_and_dependencies() {
     assert!(!valid(dep, r##"{"credit_card":1}"##));
 
     // legacy `dependencies`: object form == dependentSchemas
-    let dep2 =
-        r##"{"dependencies":{"credit_card":{"properties":{"billing_address":{"type":"string"}},"required":["billing_address"]}}}"##;
+    let dep2 = r##"{"dependencies":{"credit_card":{"properties":{"billing_address":{"type":"string"}},"required":["billing_address"]}}}"##;
     assert!(valid(dep2, r##"{"credit_card":1,"billing_address":"y"}"##));
     assert!(!valid(dep2, r##"{"credit_card":1}"##));
 }
@@ -347,7 +362,10 @@ fn unevaluated_items_suite() {
     let s2 = r##"{"prefixItems":[{},{}],"unevaluatedItems":false}"##;
     assert!(valid(s2, "[1,2]"));
     let e = invalid(s2, "[1,2,3]");
-    assert!(e.iter().any(|x| x.schema_path.to_path().contains("unevaluatedItems")));
+    assert!(
+        e.iter()
+            .any(|x| x.schema_path.to_path().contains("unevaluatedItems"))
+    );
 
     // contains evaluates only matched indices
     let s3 = r##"{"contains":{"multipleOf":2},"unevaluatedItems":false}"##;
@@ -367,18 +385,36 @@ fn unevaluated_items_suite() {
 
 #[test]
 fn all_of_any_of_one_of_not() {
-    assert!(valid(r##"{"allOf":[{"type":"integer"},{"minimum":0}]}"##, "3"));
-    assert!(!valid(r##"{"allOf":[{"type":"integer"},{"minimum":0}]}"##, "-3"));
+    assert!(valid(
+        r##"{"allOf":[{"type":"integer"},{"minimum":0}]}"##,
+        "3"
+    ));
+    assert!(!valid(
+        r##"{"allOf":[{"type":"integer"},{"minimum":0}]}"##,
+        "-3"
+    ));
 
-    assert!(valid(r##"{"anyOf":[{"type":"string"},{"type":"integer"}]}"##, "3"));
-    assert!(!valid(r##"{"anyOf":[{"type":"string"},{"type":"boolean"}]}"##, "3"));
+    assert!(valid(
+        r##"{"anyOf":[{"type":"string"},{"type":"integer"}]}"##,
+        "3"
+    ));
+    assert!(!valid(
+        r##"{"anyOf":[{"type":"string"},{"type":"boolean"}]}"##,
+        "3"
+    ));
 
-    assert!(valid(r##"{"oneOf":[{"type":"string"},{"type":"integer"}]}"##, "3"));
+    assert!(valid(
+        r##"{"oneOf":[{"type":"string"},{"type":"integer"}]}"##,
+        "3"
+    ));
     assert!(!valid(
         r##"{"oneOf":[{"type":"number"},{"type":"integer"}]}"##,
         "3"
     )); // both match
-    assert!(!valid(r##"{"oneOf":[{"type":"string"},{"type":"boolean"}]}"##, "3"));
+    assert!(!valid(
+        r##"{"oneOf":[{"type":"string"},{"type":"boolean"}]}"##,
+        "3"
+    ));
 
     assert!(valid(r##"{"not":{"type":"string"}}"##, "3"));
     assert!(!valid(r##"{"not":{"type":"integer"}}"##, "3"));
@@ -386,21 +422,19 @@ fn all_of_any_of_one_of_not() {
 
 #[test]
 fn any_of_one_of_error_reporting_lists_branches() {
-    let e = invalid(
-        r##"{"anyOf":[{"type":"string"},{"minimum":10}]}"##,
-        "3",
-    );
+    let e = invalid(r##"{"anyOf":[{"type":"string"},{"minimum":10}]}"##, "3");
     assert_eq!(e.len(), 1);
     let msg = &e[0].message;
     assert!(msg.contains("does not match any `anyOf` branch"), "{msg}");
     assert!(msg.contains("branch 0"), "{msg}");
     assert!(msg.contains("branch 1"), "{msg}");
 
-    let e2 = invalid(
-        r##"{"oneOf":[{"type":"number"},{"type":"integer"}]}"##,
-        "3",
+    let e2 = invalid(r##"{"oneOf":[{"type":"number"},{"type":"integer"}]}"##, "3");
+    assert!(
+        e2[0].message.contains("matches 2 `oneOf` branches"),
+        "{:?}",
+        e2[0].message
     );
-    assert!(e2[0].message.contains("matches 2 `oneOf` branches"), "{:?}", e2[0].message);
 }
 
 #[test]
@@ -457,10 +491,17 @@ fn recursive_ref_validates_1000_deep_instance_inner() {
         "required": ["value", "children"]
     }"##;
     let inst = deep_tree(1000);
-    let cfg = Config { max_depth: 8192, ..Config::default() };
+    let cfg = Config {
+        max_depth: 8192,
+        ..Config::default()
+    };
     bind_case!(cfg.clone(), schema, &inst, _doc, s, i);
     let errors = s.validate(i);
-    assert!(errors.is_empty(), "deep valid tree must validate: {:?}", errors.first());
+    assert!(
+        errors.is_empty(),
+        "deep valid tree must validate: {:?}",
+        errors.first()
+    );
 
     // a bad leaf deep inside must be found
     let mut bad = String::new();
@@ -479,10 +520,12 @@ fn recursive_ref_validates_1000_deep_instance_inner() {
 
 #[test]
 fn depth_cap_returns_clean_error_not_crash() {
-    let schema =
-        r##"{"type":"object","properties":{"children":{"items":{"$ref":"#"}}}}"##;
+    let schema = r##"{"type":"object","properties":{"children":{"items":{"$ref":"#"}}}}"##;
     let inst = deep_tree(50);
-    let cfg = Config { max_depth: 8, ..Config::default() };
+    let cfg = Config {
+        max_depth: 8,
+        ..Config::default()
+    };
     bind_case!(cfg, schema, &inst, _doc, s, i);
     let errors = s.validate(i);
     assert!(!errors.is_empty());
@@ -596,8 +639,14 @@ fn dynamic_ref_basic_rfc3093() {
             }
         }
     }"##;
-    assert!(valid(s, r##"{"value":1,"children":[{"value":2,"children":[]}]}"##));
-    assert!(!valid(s, r##"{"value":1,"children":[{"value":"x","children":[]}]}"##));
+    assert!(valid(
+        s,
+        r##"{"value":1,"children":[{"value":2,"children":[]}]}"##
+    ));
+    assert!(!valid(
+        s,
+        r##"{"value":1,"children":[{"value":"x","children":[]}]}"##
+    ));
     // deep nesting still resolves through the dynamic scope to the root
     assert!(valid(
         s,
@@ -620,12 +669,17 @@ fn format_assertion_on_and_off() {
     // off (default): annotation-only
     assert!(valid(schema, "\"not a date\""));
     // on: asserted
-    let cfg = Config { format_assertion: true, ..Config::default() };
+    let cfg = Config {
+        format_assertion: true,
+        ..Config::default()
+    };
     let ok = |inst: &str| {
         let text = format!("{{\"S\": {schema}, \"I\": {inst}}}");
         let doc = parse(&text);
         let root = doc.root();
-        let s = Compiler::new(cfg.clone()).compile(root.get("S").expect("s")).expect("c");
+        let s = Compiler::new(cfg.clone())
+            .compile(root.get("S").expect("s"))
+            .expect("c");
         s.validate(root.get("I").expect("i")).is_empty()
     };
     assert!(ok("\"2020-12-31T23:59:60Z\""));
@@ -638,9 +692,12 @@ fn format_assertion_on_and_off() {
         let text = format!(r##"{{"S": {{"format":"{fmt}"}}, "I": {inst}}}"##);
         let doc = parse(&text);
         let root = doc.root();
-        let s = Compiler::new(Config { format_assertion: true, ..Config::default() })
-            .compile(root.get("S").expect("s"))
-            .expect("c");
+        let s = Compiler::new(Config {
+            format_assertion: true,
+            ..Config::default()
+        })
+        .compile(root.get("S").expect("s"))
+        .expect("c");
         s.validate(root.get("I").expect("i")).is_empty()
     };
     assert!(f("date", "\"2024-02-29\""));
@@ -698,21 +755,52 @@ fn meta_data_and_content_are_annotation_only() {
 #[test]
 fn max_errors_early_exit() {
     let s = r##"{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"},"c":{"type":"string"},"d":{"type":"string"},"e":{"type":"string"}}}"##;
-    let cfg = Config { max_errors: 2, ..Config::default() };
-    bind_case!(cfg, s, r##"{"a":1,"b":2,"c":3,"d":4,"e":5}"##, _doc, schema, inst);
+    let cfg = Config {
+        max_errors: 2,
+        ..Config::default()
+    };
+    bind_case!(
+        cfg,
+        s,
+        r##"{"a":1,"b":2,"c":3,"d":4,"e":5}"##,
+        _doc,
+        schema,
+        inst
+    );
     let errors = schema.validate(inst);
     assert_eq!(errors.len(), 2, "capped at max_errors");
 
-    bind_case!(Config::default(), s, r##"{"a":1,"b":2}"##, _doc2, schema2, inst2);
+    bind_case!(
+        Config::default(),
+        s,
+        r##"{"a":1,"b":2}"##,
+        _doc2,
+        schema2,
+        inst2
+    );
     assert_eq!(schema2.validate(inst2).len(), 2);
 }
 
 #[test]
 fn validate_first_early_exit() {
     let s = r##"{"type":"object","properties":{"a":{"type":"string"},"b":{"type":"string"}}}"##;
-    bind_case!(Config::default(), s, r##"{"a":1,"b":2}"##, _doc, schema, inst);
+    bind_case!(
+        Config::default(),
+        s,
+        r##"{"a":1,"b":2}"##,
+        _doc,
+        schema,
+        inst
+    );
     assert!(schema.validate_first(inst).is_some());
-    bind_case!(Config::default(), s, r##"{"a":"x","b":"y"}"##, _doc2, schema2, inst2);
+    bind_case!(
+        Config::default(),
+        s,
+        r##"{"a":"x","b":"y"}"##,
+        _doc2,
+        schema2,
+        inst2
+    );
     assert!(schema2.validate_first(inst2).is_none());
 }
 
@@ -737,9 +825,16 @@ fn too_deep_compile_error_inner() {
         _other => panic!("expected TooDeep {{cap:512}}"),
     }
     // a larger cap compiles the same schema
-    let cfg = Config { max_depth: 1024, ..Config::default() };
+    let cfg = Config {
+        max_depth: 1024,
+        ..Config::default()
+    };
     let doc2 = parse(&text);
-    assert!(Compiler::new(cfg).compile(doc2.root().get("S").expect("s")).is_ok());
+    assert!(
+        Compiler::new(cfg)
+            .compile(doc2.root().get("S").expect("s"))
+            .is_ok()
+    );
 }
 
 #[test]
@@ -758,10 +853,23 @@ fn error_paths_point_at_instance_and_keyword() {
 
 #[test]
 fn schema_root_accessor_and_boolean_schemas() {
-    bind_case!(Config::default(), r##"{"type":"integer"}"##, "3", _doc, s, inst);
-    assert_eq!(s.root().get("type").and_then(|t| t.as_str()), Some("integer"));
+    bind_case!(
+        Config::default(),
+        r##"{"type":"integer"}"##,
+        "3",
+        _doc,
+        s,
+        inst
+    );
+    assert_eq!(
+        s.root().get("type").and_then(|t| t.as_str()),
+        Some("integer")
+    );
     assert!(s.validate(inst).is_empty());
     assert!(valid("true", "anything"));
     assert!(!valid("false", "anything"));
-    assert_eq!(invalid("false", "1")[0].message, "value matches `false` schema");
+    assert_eq!(
+        invalid("false", "1")[0].message,
+        "value matches `false` schema"
+    );
 }

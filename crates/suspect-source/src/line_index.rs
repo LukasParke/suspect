@@ -48,7 +48,9 @@ impl LineIndex {
         let clamped = offset.min(bytes.len());
         let line = self.line_for(clamped, bytes.len());
         let start = self.line_starts[line] as usize;
-        let col = String::from_utf8_lossy(&bytes[start..clamped.max(start)]).chars().count() as u32;
+        let col = String::from_utf8_lossy(&bytes[start..clamped.max(start)])
+            .chars()
+            .count() as u32;
         (line as u32, col)
     }
 
@@ -83,9 +85,13 @@ impl LineIndex {
             return None;
         }
         let line_bytes = &bytes[start..];
-        let line_end = line_bytes.iter().position(|&b| b == b'\n').map_or(line_bytes.len(), |i| i);
-        for (scalars, (i, _)) in
-            String::from_utf8_lossy(&line_bytes[..line_end]).char_indices().enumerate()
+        let line_end = line_bytes
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(line_bytes.len(), |i| i);
+        for (scalars, (i, _)) in String::from_utf8_lossy(&line_bytes[..line_end])
+            .char_indices()
+            .enumerate()
         {
             if scalars as u32 == col {
                 return Some(start + i);
@@ -148,7 +154,11 @@ mod tests {
                 continue;
             }
             let (l, c) = idx.line_col(TEXT.as_bytes(), off);
-            assert_eq!(idx.offset_of(TEXT.as_bytes(), l, c), Some(off), "offset {off}");
+            assert_eq!(
+                idx.offset_of(TEXT.as_bytes(), l, c),
+                Some(off),
+                "offset {off}"
+            );
         }
     }
 

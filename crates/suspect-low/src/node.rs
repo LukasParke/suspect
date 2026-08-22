@@ -1,7 +1,7 @@
 use suspect_syntax::{Format, ScalarStyle, SyntaxKind};
 
-use crate::scalar::{infer_scalar, parse_float, parse_int, ValueKind};
 use crate::Pointer;
+use crate::scalar::{ValueKind, infer_scalar, parse_float, parse_int};
 
 /// A semantic view over a CST node: typed scalar access, alias-transparent
 /// navigation, and pointer evaluation. Copyable; borrows its [`LowDoc`](crate::LowDoc).
@@ -23,7 +23,9 @@ pub struct Entry<'d> {
 
 impl<'d> std::fmt::Debug for Entry<'d> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Entry").field("key", &self.key).finish_non_exhaustive()
+        f.debug_struct("Entry")
+            .field("key", &self.key)
+            .finish_non_exhaustive()
     }
 }
 
@@ -71,7 +73,11 @@ impl<'d> NodeRef<'d> {
         match node.raw.kind() {
             SyntaxKind::Mapping => ValueKind::Object,
             SyntaxKind::Sequence => ValueKind::Array,
-            _ => infer_scalar(node.raw.scalar_bytes(), node.raw.scalar_style(), node.format()),
+            _ => infer_scalar(
+                node.raw.scalar_bytes(),
+                node.raw.scalar_style(),
+                node.format(),
+            ),
         }
     }
 
@@ -126,9 +132,10 @@ impl<'d> NodeRef<'d> {
                 return v.map(NodeRef::new);
             }
             if kb == b"<<"
-                && let Some(v) = v {
-                    merges.push(NodeRef::new(v));
-                }
+                && let Some(v) = v
+            {
+                merges.push(NodeRef::new(v));
+            }
         }
         merges.into_iter().find_map(|m| find_in_merge(m, key))
     }
@@ -155,7 +162,9 @@ impl<'d> NodeRef<'d> {
         let mut merges: Vec<NodeRef<'d>> = Vec::new();
         for (key_node, value) in node.raw.mapping_entries() {
             let key_bytes = key_node.scalar_bytes();
-            let Ok(key) = std::str::from_utf8(key_bytes) else { continue };
+            let Ok(key) = std::str::from_utf8(key_bytes) else {
+                continue;
+            };
             if key == "<<" {
                 if let Some(v) = value {
                     merges.push(NodeRef::new(v));
@@ -163,7 +172,10 @@ impl<'d> NodeRef<'d> {
                 continue;
             }
             seen.push(key);
-            out.push(Entry { key, value: value.map(NodeRef::new) });
+            out.push(Entry {
+                key,
+                value: value.map(NodeRef::new),
+            });
         }
         for merge in merges {
             append_merge(&mut out, &mut seen, merge);
@@ -302,7 +314,8 @@ impl<'d> NodeRef<'d> {
     #[must_use]
     pub fn line_col(&self) -> (u32, u32) {
         let doc = self.raw.doc();
-        doc.line_index().line_col(doc.bytes(), self.byte_range().start)
+        doc.line_index()
+            .line_col(doc.bytes(), self.byte_range().start)
     }
 
     /// Pointer from the document root to this node.
@@ -329,7 +342,9 @@ impl<'d> NodeRef<'d> {
                 node.byte_range()
             };
             // climb out of wrappers (block_node/flow_node/pair/sequence-item)
-            let Some(container) = node.parent() else { break };
+            let Some(container) = node.parent() else {
+                break;
+            };
             let container = match NodeRef::new(container).structural_ancestor() {
                 Some(c) => c,
                 None => break,
@@ -337,12 +352,19 @@ impl<'d> NodeRef<'d> {
             let node_range = locate_range;
             match container.kind() {
                 ValueKind::Object => {
-                    let found = container.raw.mapping_entries().into_iter().find_map(|(k, v)| {
-                        v.filter(|v| NodeRef::new(*v).byte_range() == node_range).map(|_| k)
-                    });
+                    let found = container
+                        .raw
+                        .mapping_entries()
+                        .into_iter()
+                        .find_map(|(k, v)| {
+                            v.filter(|v| NodeRef::new(*v).byte_range() == node_range)
+                                .map(|_| k)
+                        });
                     match found {
                         Some(k) => tokens.push(
-                            String::from_utf8_lossy(k.scalar_bytes()).to_string().into_boxed_str(),
+                            String::from_utf8_lossy(k.scalar_bytes())
+                                .to_string()
+                                .into_boxed_str(),
                         ),
                         None => return done(&mut tokens),
                     }
@@ -375,7 +397,7 @@ impl<'d> NodeRef<'d> {
                 _ => {
                     let p = cur.raw.parent()?;
                     cur = NodeRef::new(p)
-                },
+                }
             }
         }
     }
@@ -392,7 +414,9 @@ impl<'d> NodeRef<'d> {
             rustc_hash::FxHashMap::default();
         for (key_node, value) in node.raw.mapping_entries() {
             let key = String::from_utf8_lossy(key_node.scalar_bytes()).to_string();
-            let range = value.as_ref().map_or(key_node.byte_range(), |v| v.byte_range());
+            let range = value
+                .as_ref()
+                .map_or(key_node.byte_range(), |v| v.byte_range());
             map.entry(key.clone()).or_default().push(range);
             if !order.contains(&key) {
                 order.push(key);
@@ -402,12 +426,14 @@ impl<'d> NodeRef<'d> {
             .into_iter()
             .filter_map(|k| {
                 let occurrences = map.get(&k)?;
-                (occurrences.len() > 1).then(|| DuplicateKey { key: k, occurrences: occurrences.clone() })
+                (occurrences.len() > 1).then(|| DuplicateKey {
+                    key: k,
+                    occurrences: occurrences.clone(),
+                })
             })
             .collect()
     }
 }
-
 
 /// Merge-aware recursive key search without building entry lists.
 fn find_in_merge<'d>(merge: NodeRef<'d>, key: &str) -> Option<NodeRef<'d>> {
@@ -421,19 +447,20 @@ fn find_in_merge<'d>(merge: NodeRef<'d>, key: &str) -> Option<NodeRef<'d>> {
                 }
                 if kb == b"<<"
                     && let Some(v) = v
-                        && let Some(found) = find_in_merge(NodeRef::new(v), key) {
-                            return Some(found);
-                        }
+                    && let Some(found) = find_in_merge(NodeRef::new(v), key)
+                {
+                    return Some(found);
+                }
             }
             None
         }
-        ValueKind::Array => {
-            r.items().into_iter().find_map(|item| find_in_merge(item, key))
-        }
+        ValueKind::Array => r
+            .items()
+            .into_iter()
+            .find_map(|item| find_in_merge(item, key)),
         _ => None,
     }
 }
-
 
 fn strip_outer_quotes(text: &[u8]) -> &[u8] {
     if text.len() >= 2
@@ -485,9 +512,9 @@ fn unescape_double(bytes: &[u8]) -> Vec<u8> {
                     };
                     if i + width < bytes.len() {
                         let hex = std::str::from_utf8(&bytes[i + 1..i + 1 + width]).ok();
-                        if let Some(v) =
-                            hex.and_then(|h| u32::from_str_radix(h, 16).ok())
-                                .and_then(char::from_u32)
+                        if let Some(v) = hex
+                            .and_then(|h| u32::from_str_radix(h, 16).ok())
+                            .and_then(char::from_u32)
                         {
                             let mut buf = [0u8; 4];
                             out.extend_from_slice(v.encode_utf8(&mut buf).as_bytes());
@@ -512,7 +539,10 @@ fn unescape_double(bytes: &[u8]) -> Vec<u8> {
 /// Decodes a `|`/`>` block scalar: strips the header, removes indentation,
 /// applies folding and chomping.
 fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
-    let split = text.iter().position(|&b| b == b'\n').map_or(text.len(), |i| i + 1);
+    let split = text
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(text.len(), |i| i + 1);
     let header = &text[..split.min(text.len())];
     let body = &text[split..];
     let folded = header.first() == Some(&b'>');
@@ -530,7 +560,10 @@ fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
     let indent = indent.unwrap_or(0);
 
     let mut out: Vec<u8> = Vec::with_capacity(body.len());
-    let mut lines = body.split(|&b| b == b'\n').filter(|l| !l.is_empty() || false).peekable();
+    let mut lines = body
+        .split(|&b| b == b'\n')
+        .filter(|l| !l.is_empty() || false)
+        .peekable();
     // Re-split preserving structure: iterate raw lines without dropping empties.
     let mut raw_lines: Vec<&[u8]> = body.split_inclusive(|&b| b == b'\n').collect();
     if raw_lines.last().is_some_and(|l| l.ends_with(b"\n"))
@@ -541,8 +574,14 @@ fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
     let mut prev_folded_break = false;
     let mut wrote_any = false;
     for line in &mut raw_lines {
-        let bare: &[u8] = if line.ends_with(b"\n") { &line[..line.len() - 1] } else { line };
-        let dedented: &[u8] = bare.get(indent..).unwrap_or(if bare.is_empty() { b"" } else { bare });
+        let bare: &[u8] = if line.ends_with(b"\n") {
+            &line[..line.len() - 1]
+        } else {
+            line
+        };
+        let dedented: &[u8] =
+            bare.get(indent..)
+                .unwrap_or(if bare.is_empty() { b"" } else { bare });
         let is_blank = dedented.iter().all(|&b| b == b' ');
         if folded && !is_blank && wrote_any && !prev_folded_break {
             // fold: single break between two non-empty lines becomes a space
@@ -565,7 +604,10 @@ fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
     match chomp {
         Some(b'-') => {
             while out.last() == Some(&b'\n') || out.last() == Some(&b' ') {
-                if out.last() == Some(&b' ') && !out.ends_with(b"\n ") && !out.iter().all(|&b| b == b' ') {
+                if out.last() == Some(&b' ')
+                    && !out.ends_with(b"\n ")
+                    && !out.iter().all(|&b| b == b' ')
+                {
                     break;
                 }
                 out.pop();

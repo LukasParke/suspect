@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use suspect_oas::{ModelError, Session};
 use suspect_ref::WorkspaceBuilder;
-use suspect_validate::{Diagnostic, Severity, validate_entry, validate_openapi, validate_workspace};
+use suspect_validate::{
+    Diagnostic, Severity, validate_entry, validate_openapi, validate_workspace,
+};
 
 fn session_with(dir: &Path, name: &str, content: &str) -> Session {
     std::fs::create_dir_all(dir).unwrap();
@@ -30,11 +32,16 @@ fn missing_operation_id_is_warning() {
     let session = session_with(
         &dir,
         "main.yaml",
-        &format!("{HEADER}paths:\n  /p:\n    get:\n      responses:\n        '200':\n          description: ok\n"),
+        &format!(
+            "{HEADER}paths:\n  /p:\n    get:\n      responses:\n        '200':\n          description: ok\n"
+        ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
     assert!(codes(&diags).contains(&"oas-operation-missing-operationId"));
-    let d = diags.iter().find(|d| d.code == "oas-operation-missing-operationId").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-operation-missing-operationId")
+        .unwrap();
     assert_eq!(d.severity, Severity::Warning);
 }
 
@@ -49,7 +56,10 @@ fn duplicate_operation_id_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let dups: Vec<_> = diags.iter().filter(|d| d.code == "oas-duplicate-operation-id").collect();
+    let dups: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "oas-duplicate-operation-id")
+        .collect();
     assert_eq!(dups.len(), 1);
     assert_eq!(dups[0].severity, Severity::Error);
     assert!(dups[0].message.contains("same"));
@@ -64,7 +74,10 @@ fn missing_responses_is_error() {
         &format!("{HEADER}paths:\n  /p:\n    get:\n      operationId: op\n"),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-operation-missing-responses").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-operation-missing-responses")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
 }
 
@@ -94,10 +107,16 @@ fn path_param_not_declared_and_unused() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let missing = diags.iter().find(|d| d.code == "oas-path-param-not-declared").unwrap();
+    let missing = diags
+        .iter()
+        .find(|d| d.code == "oas-path-param-not-declared")
+        .unwrap();
     assert_eq!(missing.severity, Severity::Error);
     assert!(missing.message.contains("petId"));
-    let unused = diags.iter().find(|d| d.code == "oas-unused-path-param").unwrap();
+    let unused = diags
+        .iter()
+        .find(|d| d.code == "oas-unused-path-param")
+        .unwrap();
     assert_eq!(unused.severity, Severity::Warning);
     assert!(unused.message.contains("extra"));
 }
@@ -113,7 +132,10 @@ fn path_param_required_false_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-parameter-required-missing").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-parameter-required-missing")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
 }
 
@@ -123,10 +145,15 @@ fn response_missing_description_is_error() {
     let session = session_with(
         &dir,
         "main.yaml",
-        &format!("{HEADER}paths:\n  /p:\n    get:\n      operationId: op\n      responses:\n        '200':\n          content:\n            application/json: {{schema: {{type: string}}}}\n"),
+        &format!(
+            "{HEADER}paths:\n  /p:\n    get:\n      operationId: op\n      responses:\n        '200':\n          content:\n            application/json: {{schema: {{type: string}}}}\n"
+        ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-response-missing-description").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-response-missing-description")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
 }
 
@@ -141,7 +168,10 @@ fn security_unknown_scheme_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let hits: Vec<_> = diags.iter().filter(|d| d.code == "oas-security-unknown-scheme").collect();
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "oas-security-unknown-scheme")
+        .collect();
     assert_eq!(hits.len(), 2);
     assert!(hits.iter().all(|d| d.severity == Severity::Error));
 }
@@ -157,7 +187,10 @@ fn server_variable_unknown_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-server-variable-unknown").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-server-variable-unknown")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
     assert!(d.message.contains("host"));
 }
@@ -173,7 +206,10 @@ fn undeclared_tag_is_warning() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-tag-undeclared").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-tag-undeclared")
+        .unwrap();
     assert_eq!(d.severity, Severity::Warning);
 
     // declared tags do not warn
@@ -200,7 +236,10 @@ fn discriminator_missing_property_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-discriminator-missing-property").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-discriminator-missing-property")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
 }
 
@@ -229,7 +268,10 @@ fn discriminator_unknown_mapping_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-discriminator-unknown-mapping").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-discriminator-unknown-mapping")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
     assert!(d.message.contains("Dog"));
 }
@@ -245,7 +287,10 @@ fn schema_unknown_type_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let hits: Vec<_> = diags.iter().filter(|d| d.code == "oas-schema-unknown-type").collect();
+    let hits: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "oas-schema-unknown-type")
+        .collect();
     assert_eq!(hits.len(), 2);
     assert!(hits.iter().all(|d| d.severity == Severity::Error));
 }
@@ -261,7 +306,10 @@ fn example_type_mismatch_is_warning() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-example-type-mismatch").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-example-type-mismatch")
+        .unwrap();
     assert_eq!(d.severity, Severity::Warning);
 
     // matching example does not warn
@@ -286,9 +334,15 @@ fn trailing_slash_and_bad_path_key() {
         &format!("{HEADER}paths:\n  /pets/: {{}}\n  pets: {{}}\n"),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let slash = diags.iter().find(|d| d.code == "oas-path-trailing-slash").unwrap();
+    let slash = diags
+        .iter()
+        .find(|d| d.code == "oas-path-trailing-slash")
+        .unwrap();
     assert_eq!(slash.severity, Severity::Warning);
-    let empty = diags.iter().find(|d| d.code == "oas-empty-path-template").unwrap();
+    let empty = diags
+        .iter()
+        .find(|d| d.code == "oas-empty-path-template")
+        .unwrap();
     assert_eq!(empty.severity, Severity::Error);
 }
 
@@ -303,7 +357,10 @@ fn duplicate_header_param_is_error() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-duplicate-header-param").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-duplicate-header-param")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
 }
 
@@ -318,7 +375,10 @@ fn deprecated_operation_is_info() {
         ),
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-deprecated-operation").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-deprecated-operation")
+        .unwrap();
     assert_eq!(d.severity, Severity::Info);
 }
 
@@ -331,7 +391,10 @@ fn webhooks_on_30_is_error() {
         "openapi: 3.0.0\ninfo: {title: t, version: \"1\"}\nwebhooks: {}\npaths: {}\n",
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-webhook-unsupported-version").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-webhook-unsupported-version")
+        .unwrap();
     assert_eq!(d.severity, Severity::Error);
 }
 
@@ -345,7 +408,10 @@ fn license_missing_url_is_warning() {
         "openapi: 3.0.0\ninfo:\n  title: t\n  version: \"1\"\n  license: {name: MIT}\npaths: {}\n",
     );
     let diags = validate_entry(&session, "main.yaml").unwrap();
-    let d = diags.iter().find(|d| d.code == "oas-license-missing-url").unwrap();
+    let d = diags
+        .iter()
+        .find(|d| d.code == "oas-license-missing-url")
+        .unwrap();
     assert_eq!(d.severity, Severity::Warning);
 
     // 3.1: identifier suffices
@@ -365,7 +431,10 @@ fn petstore_corpus_has_no_errors() {
     let ws = WorkspaceBuilder::new().root(&corpus).build().unwrap();
     let session = Session::new(Arc::new(ws));
     let diags = validate_entry(&session, "petstore-expanded.yaml").unwrap();
-    let errors: Vec<_> = diags.iter().filter(|d| d.severity == Severity::Error).collect();
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 }
 
@@ -407,8 +476,14 @@ fn severity_mapping_matches_codes() {
     let diags = validate_entry(&session, "main.yaml").unwrap();
     let by_code = |code: &str| diags.iter().find(|d| d.code == code).map(|d| d.severity);
     assert_eq!(by_code("oas-deprecated-operation"), Some(Severity::Info));
-    assert_eq!(by_code("oas-response-missing-description"), Some(Severity::Error));
-    assert_eq!(by_code("oas-operation-missing-operationId"), Some(Severity::Warning));
+    assert_eq!(
+        by_code("oas-response-missing-description"),
+        Some(Severity::Error)
+    );
+    assert_eq!(
+        by_code("oas-operation-missing-operationId"),
+        Some(Severity::Warning)
+    );
 }
 
 #[test]
@@ -417,9 +492,7 @@ fn workspace_validation_covers_loaded_docs() -> Result<(), ModelError> {
     let session = session_with(
         &dir,
         "main.yaml",
-        &format!(
-            "{HEADER}paths:\n  /p:\n    get:\n      responses: {{'200': {{}}}}\n"
-        ),
+        &format!("{HEADER}paths:\n  /p:\n    get:\n      responses: {{'200': {{}}}}\n"),
     );
     // a non-OpenAPI sibling must be skipped without error
     std::fs::write(dir.join("other.yaml"), "just: data\n").unwrap();
@@ -428,7 +501,11 @@ fn workspace_validation_covers_loaded_docs() -> Result<(), ModelError> {
     ws.load_all("main.yaml").unwrap();
     let session2 = Session::new(Arc::new(ws));
     let diags = validate_workspace(&session2)?;
-    assert!(diags.iter().any(|d| d.code == "oas-response-missing-description"));
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.code == "oas-response-missing-description")
+    );
 
     // entry-based API agrees
     let per_entry = validate_entry(&session, "main.yaml")?;

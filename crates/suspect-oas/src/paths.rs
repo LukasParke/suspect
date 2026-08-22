@@ -1,8 +1,8 @@
 use suspect_low::NodeRef;
 
 use crate::model::{
-    named_map, Callback, ExternalDocumentation, Parameter, RequestBody, Response,
-    SecurityRequirement, Server,
+    Callback, ExternalDocumentation, Parameter, RequestBody, Response, SecurityRequirement, Server,
+    named_map,
 };
 use crate::openapi::security_list;
 use crate::session::{CycleGuard, Session};
@@ -31,7 +31,10 @@ impl<'s> Paths<'s> {
             .entries()
             .into_iter()
             .filter(|e| e.key.starts_with('/'))
-            .filter_map(|e| e.value.map(|v| (e.key.to_owned(), PathItem::new(self.session, v))))
+            .filter_map(|e| {
+                e.value
+                    .map(|v| (e.key.to_owned(), PathItem::new(self.session, v)))
+            })
             .collect()
     }
 
@@ -47,7 +50,12 @@ impl<'s> Paths<'s> {
     pub fn parameters(&self) -> Vec<Parameter<'s>> {
         self.node
             .get("parameters")
-            .map(|n| n.items().into_iter().map(|i| Parameter::new(self.session, i)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|i| Parameter::new(self.session, i))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -72,8 +80,9 @@ pub struct PathItem<'s> {
 }
 
 /// HTTP method keys on a path item, in canonical order.
-pub const PATH_METHODS: [&str; 8] =
-    ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+pub const PATH_METHODS: [&str; 8] = [
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
 
 impl<'s> PathItem<'s> {
     pub(crate) fn new(session: &'s Session, node: NodeRef<'s>) -> Self {
@@ -91,9 +100,9 @@ impl<'s> PathItem<'s> {
     pub fn resolved(&self) -> Self {
         match self.node.get("$ref") {
             Some(ref_value) => match self.session.resolve(ref_value) {
-                    Ok(node) => Self::new(self.session, node),
-                    Err(CycleGuard) => *self,
-                },
+                Ok(node) => Self::new(self.session, node),
+                Err(CycleGuard) => *self,
+            },
             None => *self,
         }
     }
@@ -137,7 +146,12 @@ impl<'s> PathItem<'s> {
     pub fn parameters(&self) -> Vec<Parameter<'s>> {
         self.resolved()
             .get("parameters")
-            .map(|n| n.items().into_iter().map(|i| Parameter::new(self.session, i)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|i| Parameter::new(self.session, i))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -146,7 +160,12 @@ impl<'s> PathItem<'s> {
     pub fn servers(&self) -> Vec<Server<'s>> {
         self.resolved()
             .get("servers")
-            .map(|n| n.items().into_iter().map(|i| Server::new(self.session, i)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|i| Server::new(self.session, i))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 }
@@ -160,12 +179,12 @@ pub struct Operation<'s> {
 }
 
 impl<'s> Operation<'s> {
-    pub(crate) fn new(
-        session: &'s Session,
-        node: NodeRef<'s>,
-        method: &'static str,
-    ) -> Self {
-        Self { session, node, method }
+    pub(crate) fn new(session: &'s Session, node: NodeRef<'s>, method: &'static str) -> Self {
+        Self {
+            session,
+            node,
+            method,
+        }
     }
 
     #[must_use]
@@ -205,28 +224,37 @@ impl<'s> Operation<'s> {
     #[must_use]
     /// True when the operation is explicitly marked deprecated.
     pub fn deprecated(&self) -> bool {
-        self.get("deprecated").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.get("deprecated")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 
     /// Operation parameters; combine with path-item parameters upstream.
     #[must_use]
     pub fn parameters(&self) -> Vec<Parameter<'s>> {
         self.get("parameters")
-            .map(|n| n.items().into_iter().map(|i| Parameter::new(self.session, i)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|i| Parameter::new(self.session, i))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
     #[must_use]
     /// Expected request body; `None` for body-less operations.
     pub fn request_body(&self) -> Option<RequestBody<'s>> {
-        self.get("requestBody").map(|n| RequestBody::new(self.session, n))
+        self.get("requestBody")
+            .map(|n| RequestBody::new(self.session, n))
     }
 
     #[must_use]
     /// Declared responses; per spec effectively required, but views return
     /// `None` rather than assuming validity.
     pub fn responses(&self) -> Option<Responses<'s>> {
-        self.get("responses").map(|n| Responses::new(self.session, n))
+        self.get("responses")
+            .map(|n| Responses::new(self.session, n))
     }
 
     #[must_use]
@@ -245,7 +273,12 @@ impl<'s> Operation<'s> {
     /// Operation-level `servers`, overriding enclosing scopes.
     pub fn servers(&self) -> Vec<Server<'s>> {
         self.get("servers")
-            .map(|n| n.items().into_iter().map(|i| Server::new(self.session, i)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|i| Server::new(self.session, i))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -260,7 +293,8 @@ impl<'s> Operation<'s> {
     #[must_use]
     /// External documentation reference for this operation.
     pub fn external_docs(&self) -> Option<ExternalDocumentation<'s>> {
-        self.get("externalDocs").map(|n| ExternalDocumentation::new(self.session, n))
+        self.get("externalDocs")
+            .map(|n| ExternalDocumentation::new(self.session, n))
     }
 }
 
@@ -296,7 +330,9 @@ impl<'s> Responses<'s> {
     /// One entry by status key (`"200"`, `"4XX"`, ...); see
     /// [`Responses::iter`] for key semantics.
     pub fn get(&self, status: &str) -> Option<Response<'s>> {
-        self.node.get(status).map(|v| Response::new(self.session, v))
+        self.node
+            .get(status)
+            .map(|v| Response::new(self.session, v))
     }
 
     #[must_use]

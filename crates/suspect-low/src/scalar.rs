@@ -28,7 +28,9 @@ pub enum ValueKind {
 #[must_use]
 pub fn infer_scalar(raw: &[u8], style: ScalarStyle, format: Format) -> ValueKind {
     match style {
-        ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted | ScalarStyle::Block => ValueKind::Str,
+        ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted | ScalarStyle::Block => {
+            ValueKind::Str
+        }
         ScalarStyle::Plain => infer_plain(raw, format),
     }
 }
@@ -41,7 +43,11 @@ fn infer_plain(raw: &[u8], format: Format) -> ValueKind {
             _ => {
                 if raw.first() == Some(&b'"') {
                     ValueKind::Str
-                } else if raw.iter().all(|b| b.is_ascii_digit() || matches!(b, b'-' | b'+')) && !raw.is_empty() {
+                } else if raw
+                    .iter()
+                    .all(|b| b.is_ascii_digit() || matches!(b, b'-' | b'+'))
+                    && !raw.is_empty()
+                {
                     // integer-shaped (sign + digits only)
                     if raw.iter().filter(|&&b| b == b'-' || b == b'+').count() > 1
                         || raw.first() == Some(&b'+')
@@ -110,7 +116,9 @@ fn looks_like_float_json(raw: &[u8]) -> bool {
             let exp_ok = match exp {
                 None => true,
                 Some(e) => {
-                    let e = e.strip_prefix('+').unwrap_or(e.strip_prefix('-').unwrap_or(e));
+                    let e = e
+                        .strip_prefix('+')
+                        .unwrap_or(e.strip_prefix('-').unwrap_or(e));
                     !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit())
                 }
             };
@@ -143,7 +151,9 @@ fn is_yaml_int(raw: &[u8]) -> bool {
 }
 
 fn is_yaml_float(raw: &[u8]) -> bool {
-    let Ok(s) = std::str::from_utf8(raw) else { return false };
+    let Ok(s) = std::str::from_utf8(raw) else {
+        return false;
+    };
     let body = s.strip_prefix(['-', '+']).unwrap_or(s);
     if body.is_empty() {
         return false;
@@ -176,7 +186,9 @@ pub fn parse_int(raw: &[u8], format: Format) -> Option<i64> {
     if format == Format::Json {
         return std::str::from_utf8(raw).ok()?.parse().ok();
     }
-    let Ok(s) = std::str::from_utf8(raw) else { return None };
+    let Ok(s) = std::str::from_utf8(raw) else {
+        return None;
+    };
     let (neg, body) = match s.as_bytes().first() {
         Some(b'-') => (true, &s[1..]),
         Some(b'+') => (false, &s[1..]),
@@ -235,19 +247,46 @@ mod tests {
 
     #[test]
     fn quoted_is_always_string() {
-        assert_eq!(infer_scalar(b"true", ScalarStyle::SingleQuoted, Format::Yaml), ValueKind::Str);
-        assert_eq!(infer_scalar(b"42", ScalarStyle::DoubleQuoted, Format::Yaml), ValueKind::Str);
-        assert_eq!(infer_scalar(b"line", ScalarStyle::Block, Format::Yaml), ValueKind::Str);
+        assert_eq!(
+            infer_scalar(b"true", ScalarStyle::SingleQuoted, Format::Yaml),
+            ValueKind::Str
+        );
+        assert_eq!(
+            infer_scalar(b"42", ScalarStyle::DoubleQuoted, Format::Yaml),
+            ValueKind::Str
+        );
+        assert_eq!(
+            infer_scalar(b"line", ScalarStyle::Block, Format::Yaml),
+            ValueKind::Str
+        );
     }
 
     #[test]
     fn json_literals() {
-        assert_eq!(infer_scalar(b"true", ScalarStyle::Plain, Format::Json), ValueKind::Bool);
-        assert_eq!(infer_scalar(b"null", ScalarStyle::Plain, Format::Json), ValueKind::Null);
-        assert_eq!(infer_scalar(b"12", ScalarStyle::Plain, Format::Json), ValueKind::Int);
-        assert_eq!(infer_scalar(b"1.5", ScalarStyle::Plain, Format::Json), ValueKind::Float);
-        assert_eq!(infer_scalar(b"1e9", ScalarStyle::Plain, Format::Json), ValueKind::Float);
-        assert_eq!(infer_scalar(b"3.1", ScalarStyle::Plain, Format::Json), ValueKind::Float);
+        assert_eq!(
+            infer_scalar(b"true", ScalarStyle::Plain, Format::Json),
+            ValueKind::Bool
+        );
+        assert_eq!(
+            infer_scalar(b"null", ScalarStyle::Plain, Format::Json),
+            ValueKind::Null
+        );
+        assert_eq!(
+            infer_scalar(b"12", ScalarStyle::Plain, Format::Json),
+            ValueKind::Int
+        );
+        assert_eq!(
+            infer_scalar(b"1.5", ScalarStyle::Plain, Format::Json),
+            ValueKind::Float
+        );
+        assert_eq!(
+            infer_scalar(b"1e9", ScalarStyle::Plain, Format::Json),
+            ValueKind::Float
+        );
+        assert_eq!(
+            infer_scalar(b"3.1", ScalarStyle::Plain, Format::Json),
+            ValueKind::Float
+        );
     }
 
     #[test]

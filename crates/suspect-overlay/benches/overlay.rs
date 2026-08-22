@@ -165,7 +165,10 @@ fn bench_corpus_apply(c: &mut Criterion) {
     // Sanity check before timing: apply must succeed; most actions should
     // hit the real document.
     let applied = apply(&overlay, target.root()).expect("apply succeeds");
-    assert_eq!(applied.applied_actions, 10, "all 10 corpus actions must match");
+    assert_eq!(
+        applied.applied_actions, 10,
+        "all 10 corpus actions must match"
+    );
     assert!(applied.unmatched_targets.is_empty());
 
     let mut group = c.benchmark_group("overlay/corpus_apply");
@@ -179,7 +182,6 @@ fn bench_corpus_apply(c: &mut Criterion) {
     });
     group.finish();
 }
-
 
 criterion_group!(benches, bench_all, bench_corpus_apply);
 criterion_main!(benches);

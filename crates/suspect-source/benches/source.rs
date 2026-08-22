@@ -91,5 +91,10 @@ fn bench_uri_join(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_line_index, bench_encoding_transcode, bench_uri_join);
+criterion_group!(
+    benches,
+    bench_line_index,
+    bench_encoding_transcode,
+    bench_uri_join
+);
 criterion_main!(benches);

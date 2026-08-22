@@ -9,8 +9,8 @@ use serde::Serialize;
 use suspect_low::SpecFamily;
 use suspect_ref::{CycleKind, WorkspaceBuilder};
 
-use crate::output::{self, Finding, Severity};
 use crate::OutputFormat;
+use crate::output::{self, Finding, Severity};
 
 /// Per-file check result.
 #[derive(Debug, Clone, Serialize)]
@@ -80,7 +80,10 @@ pub fn check_file(path: &Path) -> FileReport {
         return report;
     };
     let Ok(uri) = suspect_source::Uri::from_path(path) else {
-        io(&mut report, format!("cannot canonicalize {}", path.display()));
+        io(
+            &mut report,
+            format!("cannot canonicalize {}", path.display()),
+        );
         return report;
     };
     let doc = suspect_low::LowDoc::parse(uri, source);
@@ -108,10 +111,16 @@ pub fn check_file(path: &Path) -> FileReport {
             Ok(handle) => {
                 report.ref_edges = handle.edges().len();
                 let census = handle.cycles();
-                report.legal_cycles =
-                    census.cycles.iter().filter(|c| c.kind == CycleKind::LegalRecursion).count();
-                report.illegal_cycles =
-                    census.cycles.iter().filter(|c| c.kind == CycleKind::Illegal).count();
+                report.legal_cycles = census
+                    .cycles
+                    .iter()
+                    .filter(|c| c.kind == CycleKind::LegalRecursion)
+                    .count();
+                report.illegal_cycles = census
+                    .cycles
+                    .iter()
+                    .filter(|c| c.kind == CycleKind::Illegal)
+                    .count();
                 let stats = ws.stats();
                 report.workspace_docs = stats.docs;
                 report.workspace_edges = stats.edges;
@@ -129,10 +138,7 @@ pub fn check_file(path: &Path) -> FileReport {
 /// # Errors
 /// Only propagates JSON serialization failures; per-file problems become findings.
 pub fn check(paths: &[std::path::PathBuf], format: OutputFormat) -> anyhow::Result<i32> {
-    let mut reports: Vec<FileReport> = paths
-        .par_iter()
-        .map(|p| check_file(p))
-        .collect::<Vec<_>>();
+    let mut reports: Vec<FileReport> = paths.par_iter().map(|p| check_file(p)).collect::<Vec<_>>();
     reports.sort_by(|a, b| a.path.cmp(&b.path));
 
     match format {
@@ -155,7 +161,8 @@ pub fn check(paths: &[std::path::PathBuf], format: OutputFormat) -> anyhow::Resu
         OutputFormat::Json => output::print_json(&reports)?,
     }
 
-    let has_error =
-        reports.iter().any(|r| r.findings.iter().any(|f| f.severity == Severity::Error));
+    let has_error = reports
+        .iter()
+        .any(|r| r.findings.iter().any(|f| f.severity == Severity::Error));
     Ok(i32::from(has_error))
 }

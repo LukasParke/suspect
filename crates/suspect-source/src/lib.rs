@@ -13,5 +13,5 @@ mod source;
 mod uri;
 
 pub use line_index::LineIndex;
-pub use source::{Encoding, Source, MMAP_THRESHOLD};
+pub use source::{Encoding, MMAP_THRESHOLD, Source};
 pub use uri::Uri;

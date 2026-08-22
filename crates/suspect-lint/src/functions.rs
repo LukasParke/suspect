@@ -50,7 +50,9 @@ impl Casing {
 
     fn matches(self, s: &str) -> bool {
         let mut chars = s.chars();
-        let Some(first) = chars.next() else { return false };
+        let Some(first) = chars.next() else {
+            return false;
+        };
         let mut rest = chars;
         match self {
             Self::Camel => {
@@ -103,7 +105,10 @@ impl EnumValue {
     fn matches(&self, node: &NodeRef<'_>) -> bool {
         let resolved = node.resolved();
         match self {
-            Self::Str(s) => resolved.kind() == ValueKind::Str && resolved.as_str().map(|v| v == &**s).unwrap_or(false),
+            Self::Str(s) => {
+                resolved.kind() == ValueKind::Str
+                    && resolved.as_str().map(|v| v == &**s).unwrap_or(false)
+            }
             Self::Num(n) => resolved.as_f64().is_some_and(|v| v == *n),
             Self::Bool(b) => resolved.as_bool() == Some(*b),
             Self::Null => resolved.kind() == ValueKind::Null,
@@ -190,7 +195,12 @@ pub(crate) fn is_truthy(node: &NodeRef<'_>) -> bool {
 }
 
 /// Applies `then` for one node matched by the rule's `given` query.
-pub(crate) fn apply<'d>(rule: &Rule, node: NodeRef<'d>, root: NodeRef<'d>, out: &mut Vec<Finding<'d>>) {
+pub(crate) fn apply<'d>(
+    rule: &Rule,
+    node: NodeRef<'d>,
+    root: NodeRef<'d>,
+    out: &mut Vec<Finding<'d>>,
+) {
     let message = rule
         .description
         .as_ref()
@@ -257,7 +267,10 @@ pub(crate) fn apply<'d>(rule: &Rule, node: NodeRef<'d>, root: NodeRef<'d>, out: 
         }
         Function::Alphabetical => check_alphabetical(&node, rule, &message, out),
         Function::Xor { properties } => {
-            let count = properties.iter().filter(|p| node.get(p).is_some_and(|v| is_truthy(&v))).count();
+            let count = properties
+                .iter()
+                .filter(|p| node.get(p).is_some_and(|v| is_truthy(&v)))
+                .count();
             if count != 1 {
                 push(out, rule, &message, &node);
             }
@@ -300,7 +313,12 @@ fn push_at<'d>(
     });
 }
 
-fn check_alphabetical<'d>(node: &NodeRef<'d>, rule: &Rule, message: &str, out: &mut Vec<Finding<'d>>) {
+fn check_alphabetical<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    message: &str,
+    out: &mut Vec<Finding<'d>>,
+) {
     let resolved = node.resolved();
     let sorted = match resolved.kind() {
         ValueKind::Object => {
@@ -323,14 +341,18 @@ fn check_alphabetical<'d>(node: &NodeRef<'d>, rule: &Rule, message: &str, out: &
     }
 }
 
-const HTTP_METHODS: [&str; 8] = ["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+const HTTP_METHODS: [&str; 8] = [
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
 
 /// Collects `{var}` template names from a path key.
 fn template_vars(key: &str) -> Vec<String> {
     let mut vars = Vec::new();
     let mut rest = key;
     while let Some(open) = rest.find('{') {
-        let Some(close_rel) = rest[open + 1..].find('}') else { break };
+        let Some(close_rel) = rest[open + 1..].find('}') else {
+            break;
+        };
         let var = rest[open + 1..][..close_rel].trim();
         if !var.is_empty() {
             vars.push(var.to_string());
@@ -341,7 +363,9 @@ fn template_vars(key: &str) -> Vec<String> {
 }
 
 fn declared_path_params(params: Option<NodeRef<'_>>) -> Vec<String> {
-    let Some(params) = params else { return Vec::new() };
+    let Some(params) = params else {
+        return Vec::new();
+    };
     params
         .items()
         .into_iter()
@@ -358,7 +382,9 @@ fn declared_path_params(params: Option<NodeRef<'_>>) -> Vec<String> {
 
 fn check_path_params<'d>(node: &NodeRef<'d>, rule: &Rule, out: &mut Vec<Finding<'d>>) {
     let path_ptr = node.path_from_root();
-    let Some(key_token) = path_ptr.tokens().last() else { return };
+    let Some(key_token) = path_ptr.tokens().last() else {
+        return;
+    };
     let key: &str = key_token;
     let vars = template_vars(key);
     if vars.is_empty() {
@@ -374,7 +400,9 @@ fn check_path_params<'d>(node: &NodeRef<'d>, rule: &Rule, out: &mut Vec<Finding<
                 push_at(
                     out,
                     rule,
-                    format!("Operation `{method}` of \"{key}\" does not declare path parameter {{{var}}}"),
+                    format!(
+                        "Operation `{method}` of \"{key}\" does not declare path parameter {{{var}}}"
+                    ),
                     op.byte_range(),
                     op.path_from_root(),
                 );
@@ -391,8 +419,12 @@ fn check_ref_siblings<'d>(
     out: &mut Vec<Finding<'d>>,
 ) {
     let ref_ptr = node.path_from_root();
-    let Some(parent_ptr) = ref_ptr.parent() else { return };
-    let Some(parent) = root.pointer(&parent_ptr) else { return };
+    let Some(parent_ptr) = ref_ptr.parent() else {
+        return;
+    };
+    let Some(parent) = root.pointer(&parent_ptr) else {
+        return;
+    };
     let has_bad_sibling = parent
         .entries()
         .iter()
@@ -404,7 +436,12 @@ fn check_ref_siblings<'d>(
 
 /// Groups enum members by scalar kind (`Int`/`Float` count as one `number`
 /// group); a mixed enum is reported once at the enum node.
-fn check_typed_enum<'d>(node: &NodeRef<'d>, rule: &Rule, message: &str, out: &mut Vec<Finding<'d>>) {
+fn check_typed_enum<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    message: &str,
+    out: &mut Vec<Finding<'d>>,
+) {
     let resolved = node.resolved();
     if resolved.kind() != ValueKind::Array {
         return;
@@ -417,14 +454,22 @@ fn check_typed_enum<'d>(node: &NodeRef<'d>, rule: &Rule, message: &str, out: &mu
         ValueKind::Object => 'o',
         ValueKind::Array => 'a',
     };
-    let mut kinds = resolved.items().into_iter().map(|i| group(i.resolved().kind()));
+    let mut kinds = resolved
+        .items()
+        .into_iter()
+        .map(|i| group(i.resolved().kind()));
     let Some(first) = kinds.next() else { return };
     if kinds.any(|k| k != first) {
         push(out, rule, message, node);
     }
 }
 
-fn check_duplicate_keys<'d>(node: &NodeRef<'d>, rule: &Rule, message: &str, out: &mut Vec<Finding<'d>>) {
+fn check_duplicate_keys<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    message: &str,
+    out: &mut Vec<Finding<'d>>,
+) {
     let base = node.path_from_root();
     let resolved = node.resolved();
     if resolved.kind() != ValueKind::Object {
@@ -486,16 +531,22 @@ fn check_response<'d>(
     let ok = node.get("responses").is_some_and(|responses| {
         let resolved = responses.resolved();
         resolved.kind() == ValueKind::Object
-            && resolved.entries().iter().any(|e| {
-                (e.key == "default" && allow_default) || is_2xx_key(e.key)
-            })
+            && resolved
+                .entries()
+                .iter()
+                .any(|e| (e.key == "default" && allow_default) || is_2xx_key(e.key))
     });
     if !ok {
         push(out, rule, message, node);
     }
 }
 
-fn check_no_trailing_slash<'d>(node: &NodeRef<'d>, rule: &Rule, message: &str, out: &mut Vec<Finding<'d>>) {
+fn check_no_trailing_slash<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    message: &str,
+    out: &mut Vec<Finding<'d>>,
+) {
     let ptr = node.path_from_root();
     if let Some(key) = ptr.tokens().last()
         && key.ends_with('/')

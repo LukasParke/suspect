@@ -58,8 +58,10 @@ struct KeySite {
 /// bodies, `$ref` values, path keys, or anywhere else yield `None`.
 #[must_use]
 pub fn prepare_rename(doc: &OpenDoc, offset: usize) -> Option<PlaceholderRange> {
-    key_site(&doc.low, offset)
-        .map(|site| PlaceholderRange { range: site.range, placeholder: site.name })
+    key_site(&doc.low, offset).map(|site| PlaceholderRange {
+        range: site.range,
+        placeholder: site.name,
+    })
 }
 
 /// Locates the innermost mapping pair whose **key** spans `offset` and
@@ -91,7 +93,11 @@ fn key_site(low: &suspect_low::LowDoc, offset: usize) -> Option<KeySite> {
     {
         return None;
     }
-    Some(KeySite { range: key.byte_range(), section: tokens[1].to_string(), name })
+    Some(KeySite {
+        range: key.byte_range(),
+        section: tokens[1].to_string(),
+        name,
+    })
 }
 
 /// Validates a proposed new component name: non-empty, no `/`, `~`, or `#`,
@@ -141,9 +147,12 @@ pub fn rename(
         site.section.clone().into(),
         site.name.clone().into(),
     ]);
-    let new_tail =
-        Pointer::from_tokens(vec!["components".into(), site.section.clone().into(), new_name.into()])
-            .to_path();
+    let new_tail = Pointer::from_tokens(vec![
+        "components".into(),
+        site.section.clone().into(),
+        new_name.into(),
+    ])
+    .to_path();
 
     // Byte-range edits per document URI, converted to LSP form below.
     let mut per_doc: HashMap<suspect_source::Uri, Vec<(std::ops::Range<usize>, String)>> =
@@ -157,9 +166,10 @@ pub fn rename(
         for edge in handle.edges().iter() {
             let hit = match &edge.parsed {
                 ParsedRef::Local(p) => is_home && p == &old_ptr,
-                ParsedRef::External { uri: target, pointer } => {
-                    target == &home_uri && pointer == &old_ptr
-                }
+                ParsedRef::External {
+                    uri: target,
+                    pointer,
+                } => target == &home_uri && pointer == &old_ptr,
                 ParsedRef::PlainName(_) => false,
             };
             if !hit {
@@ -167,8 +177,13 @@ pub fn rename(
             }
             // The fragment starts after the last `#`; everything before it
             // (empty for local refs) must be preserved exactly.
-            let Some(hash) = edge.raw.rfind('#') else { continue };
-            edits.push((edge.at.clone(), format!("{}#{}", &edge.raw[..hash], new_tail)));
+            let Some(hash) = edge.raw.rfind('#') else {
+                continue;
+            };
+            edits.push((
+                edge.at.clone(),
+                format!("{}#{}", &edge.raw[..hash], new_tail),
+            ));
         }
         if is_home {
             edits.push((site.range.clone(), new_name.to_owned()));
@@ -184,7 +199,9 @@ pub fn rename(
 
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for (uri, mut edits) in per_doc {
-        let Some(url) = Url::parse(uri.as_str()).ok() else { continue };
+        let Some(url) = Url::parse(uri.as_str()).ok() else {
+            continue;
+        };
         // LSP clients apply TextEdits back-to-front; sort descending.
         edits.sort_by_key(|e| std::cmp::Reverse(e.0.start));
         let inner = if uri == *home.low.uri() {
@@ -197,7 +214,10 @@ pub fn rename(
         };
         let lsp_edits = edits
             .into_iter()
-            .map(|(r, text)| TextEdit { range: lsp_range(inner.bytes(), inner.line_index(), r), new_text: text })
+            .map(|(r, text)| TextEdit {
+                range: lsp_range(inner.bytes(), inner.line_index(), r),
+                new_text: text,
+            })
             .collect();
         changes.insert(url, lsp_edits);
     }
@@ -285,8 +305,13 @@ components:
         // Key inside a schema body (pointer too deep) would also be None;
         // here: the `get` method key and the `$ref` value.
         assert!(prepare_rename(&doc, offset_of(BASE, "get:")).is_none());
-        assert!(prepare_rename(&doc, offset_of(BASE, "schemas.yaml#/components/schemas/Pet"))
-            .is_none());
+        assert!(
+            prepare_rename(
+                &doc,
+                offset_of(BASE, "schemas.yaml#/components/schemas/Pet")
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -318,15 +343,16 @@ components:
         assert_eq!(schema_edits.len(), 2, "{schema_edits:?}");
         assert!(schema_edits.iter().any(|e| e.new_text == "Cat"));
         assert!(
-            schema_edits.iter().any(|e| e.new_text == "#/components/schemas/Cat"),
+            schema_edits
+                .iter()
+                .any(|e| e.new_text == "#/components/schemas/Cat"),
             "{schema_edits:?}"
         );
 
         let base_edits = &changes[&base_url];
         assert_eq!(base_edits.len(), 1, "{base_edits:?}");
         assert_eq!(
-            base_edits[0].new_text,
-            "schemas.yaml#/components/schemas/Cat",
+            base_edits[0].new_text, "schemas.yaml#/components/schemas/Cat",
             "external ref rewritten, file prefix preserved"
         );
     }

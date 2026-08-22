@@ -5,8 +5,8 @@ use smallvec::SmallVec;
 use suspect_low::{NodeRef, Pointer, ValueKind};
 
 use crate::compile::Prg;
-use crate::exec::{eval, Ann, Ctx};
 use crate::exec::Stack;
+use crate::exec::{Ann, Ctx, eval};
 
 pub(crate) fn check_items<'a, 'd>(
     ctx: &mut Ctx<'a, 'd>,
@@ -111,7 +111,9 @@ pub(crate) fn check_contains<'a, 'd>(
         ctx.emit(
             st,
             at,
-            format!("array has {matched} item(s) matching `contains`, fewer than `minContains` {min}"),
+            format!(
+                "array has {matched} item(s) matching `contains`, fewer than `minContains` {min}"
+            ),
         );
     } else {
         ctx.emit(

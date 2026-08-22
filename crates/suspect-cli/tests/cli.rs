@@ -7,9 +7,9 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use suspect_cli::commands::check::check_file;
 use suspect_cli::commands::lint::lint_findings;
-use suspect_cli::commands::overlay::{apply_docs, OverlayCmd};
+use suspect_cli::commands::overlay::{OverlayCmd, apply_docs};
 use suspect_cli::commands::stats::stats_of;
-use suspect_cli::{bundle, diff, DocFormat, OutputFormat, Strategy, Severity};
+use suspect_cli::{DocFormat, OutputFormat, Severity, Strategy, bundle, diff};
 
 fn ws_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -27,11 +27,8 @@ struct TempDir(PathBuf);
 impl TempDir {
     fn new(tag: &str) -> Self {
         let n = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "suspect-cli-{}-{}-{tag}",
-            std::process::id(),
-            n
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("suspect-cli-{}-{}-{tag}", std::process::id(), n));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         TempDir(dir)
     }
@@ -61,7 +58,11 @@ fn check_reports_family_and_clean_syntax() {
     let report = check_file(&fixture("generated_100x100.yaml"));
     assert_eq!(report.family, "Oas31");
     assert_eq!(report.syntax_errors, 0);
-    assert!(report.findings.is_empty(), "unexpected findings: {:?}", report.findings);
+    assert!(
+        report.findings.is_empty(),
+        "unexpected findings: {:?}",
+        report.findings
+    );
     assert!(report.ref_edges > 0);
 }
 
@@ -72,7 +73,12 @@ fn check_counts_syntax_errors_on_broken_file() {
     let report = check_file(&path);
     assert!(report.syntax_errors > 0, "expected syntax errors");
     assert!(report.findings.iter().any(|f| f.code == "syntax-error"));
-    assert!(report.findings.iter().any(|f| f.severity == Severity::Error));
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.severity == Severity::Error)
+    );
 }
 
 #[test]
@@ -105,7 +111,10 @@ fn lint_flags_missing_operation_id() {
     assert!(
         findings.iter().any(|f| f.code == "operation-operationId"),
         "expected operationId finding, got {:?}",
-        findings.iter().map(|f| (&f.code, f.severity)).collect::<Vec<_>>()
+        findings
+            .iter()
+            .map(|f| (&f.code, f.severity))
+            .collect::<Vec<_>>()
     );
     // JSON shape: every finding serializes with all documented fields.
     for f in &findings {
@@ -128,7 +137,9 @@ fn lint_min_severity_filters() {
     // Every error in `all` survives in `errors_only`.
     for f in all.iter().filter(|f| f.severity == Severity::Error) {
         assert!(
-            errors_only.iter().any(|g| g.code == f.code && g.line == f.line),
+            errors_only
+                .iter()
+                .any(|g| g.code == f.code && g.line == f.line),
             "error finding {f:?} lost by filter"
         );
     }
@@ -195,7 +206,10 @@ fn overlay_apply_writes_output_and_reports_unmatched() {
     .expect("run works");
     assert_eq!(code, 0);
     let text = std::fs::read_to_string(&out).expect("output written");
-    assert!(text.contains("patched"), "output missing applied key: {text}");
+    assert!(
+        text.contains("patched"),
+        "output missing applied key: {text}"
+    );
 }
 
 // ---- fmt -------------------------------------------------------------
@@ -342,7 +356,10 @@ fn bundle_inline_resolves_acyclic_refs_and_marks_cycles() {
     // Acyclic ref resolved into a deep copy equal to the source schema.
     let plain_source = &value["components"]["schemas"]["Plain"];
     let holder_p = &value["components"]["schemas"]["Holder"]["properties"]["p"];
-    assert_eq!(holder_p, plain_source, "resolved inline schema must equal source schema");
+    assert_eq!(
+        holder_p, plain_source,
+        "resolved inline schema must equal source schema"
+    );
     assert!(holder_p.get("$ref").is_none());
 
     // Cyclic ref kept as marked marker.
@@ -359,18 +376,27 @@ fn diff_reports_added_removed_changed() {
     let a = Value::Object(vec![
         ("x".into(), Value::Int(1)),
         ("y".into(), Value::Object(vec![("z".into(), Value::Int(2))])),
-        ("list".into(), Value::Array(vec![Value::Int(1), Value::Int(2)])),
+        (
+            "list".into(),
+            Value::Array(vec![Value::Int(1), Value::Int(2)]),
+        ),
         ("gone".into(), Value::Str("bye".into())),
     ]);
     let b = Value::Object(vec![
         ("x".into(), Value::Int(2)),
         ("y".into(), Value::Object(vec![("z".into(), Value::Int(2))])),
-        ("list".into(), Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])),
+        (
+            "list".into(),
+            Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]),
+        ),
         ("new".into(), Value::Int(4)),
     ]);
     let mut report = diff::DiffReport::default();
     diff::diff_values("", &a, &b, &mut report);
-    assert_eq!(report.added, vec!["/list/2".to_string(), "/new".to_string()]);
+    assert_eq!(
+        report.added,
+        vec!["/list/2".to_string(), "/new".to_string()]
+    );
     assert_eq!(report.removed, vec!["/gone".to_string()]);
     assert_eq!(report.changed.len(), 1);
     assert_eq!(report.changed[0].path, "/x");
@@ -387,5 +413,8 @@ fn diff_identical_documents_is_empty() {
     let vb = suspect_overlay::Value::from_node(doc_b.root());
     let mut report = diff::DiffReport::default();
     diff::diff_values("", &va, &vb, &mut report);
-    assert!(report.is_empty(), "identical files must diff empty: {report:?}");
+    assert!(
+        report.is_empty(),
+        "identical files must diff empty: {report:?}"
+    );
 }

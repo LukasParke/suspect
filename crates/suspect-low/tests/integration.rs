@@ -2,7 +2,10 @@ use suspect_low::{LowDoc, SpecFamily, ValueKind};
 use suspect_source::Source;
 
 fn parse(src: &str) -> LowDoc {
-    LowDoc::parse("mem://test.yaml".into(), Source::from_vec(src.as_bytes().to_vec()))
+    LowDoc::parse(
+        "mem://test.yaml".into(),
+        Source::from_vec(src.as_bytes().to_vec()),
+    )
 }
 
 #[test]
@@ -65,9 +68,7 @@ fn pointer_navigation() {
 
 #[test]
 fn aliases_resolve_transparently() {
-    let doc = parse(
-        "base: &base\n  x: 1\n  y: 2\nuser: *base\n",
-    );
+    let doc = parse("base: &base\n  x: 1\n  y: 2\nuser: *base\n");
     let user = doc.root().get("user").unwrap();
     assert!(user.is_alias());
     assert_eq!(user.kind(), ValueKind::Object);
@@ -77,12 +78,14 @@ fn aliases_resolve_transparently() {
 
 #[test]
 fn merge_keys_expand() {
-    let doc = parse(
-        "defaults: &d\n  a: 1\n  b: 2\nmerged:\n  <<: *d\n  b: 3\n  c: 4\n",
-    );
+    let doc = parse("defaults: &d\n  a: 1\n  b: 2\nmerged:\n  <<: *d\n  b: 3\n  c: 4\n");
     let merged = doc.root().get("merged").unwrap();
     let keys: Vec<_> = merged.entries().iter().map(|e| e.key).collect();
-    assert_eq!(keys, ["b", "c", "a"], "explicit keys first, merged fill-ins after");
+    assert_eq!(
+        keys,
+        ["b", "c", "a"],
+        "explicit keys first, merged fill-ins after"
+    );
     // explicit wins over merged
     assert_eq!(merged.get("b").unwrap().as_i64(), Some(3));
     assert_eq!(merged.get("a").unwrap().as_i64(), Some(1));
@@ -142,8 +145,14 @@ fn family_sniffing_all_kinds() {
     assert_eq!(parse("swagger: '2.0'\n").sniff_family(), SpecFamily::Oas2);
     assert_eq!(parse("openapi: 3.0.3\n").sniff_family(), SpecFamily::Oas30);
     assert_eq!(parse("openapi: 3.2.0\n").sniff_family(), SpecFamily::Oas32);
-    assert_eq!(parse("arazzo: '1.0.0'\n").sniff_family(), SpecFamily::Arazzo10);
-    assert_eq!(parse("overlay: '1.0.0'\n").sniff_family(), SpecFamily::Overlay10);
+    assert_eq!(
+        parse("arazzo: '1.0.0'\n").sniff_family(),
+        SpecFamily::Arazzo10
+    );
+    assert_eq!(
+        parse("overlay: '1.0.0'\n").sniff_family(),
+        SpecFamily::Overlay10
+    );
     assert_eq!(parse("random: doc\n").sniff_family(), SpecFamily::Unknown);
 }
 
@@ -164,9 +173,15 @@ fn decoded_scalars_all_styles() {
         root.get("d").unwrap().decoded_scalar().as_ref(),
         "line\nnext\u{e9}".as_bytes()
     );
-    assert_eq!(root.get("lit").unwrap().decoded_scalar().as_ref(), b"one\ntwo\n");
+    assert_eq!(
+        root.get("lit").unwrap().decoded_scalar().as_ref(),
+        b"one\ntwo\n"
+    );
     // folded + strip chomping: single space join, no trailing newline
-    assert_eq!(root.get("fold").unwrap().decoded_scalar().as_ref(), b"hello world");
+    assert_eq!(
+        root.get("fold").unwrap().decoded_scalar().as_ref(),
+        b"hello world"
+    );
     // keep chomping preserves interior/trailing structure
     let kept = root.get("keep").unwrap().decoded_scalar();
     assert!(kept.starts_with(b"x"), "got {kept:?}");

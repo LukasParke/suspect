@@ -16,8 +16,8 @@ use suspect_ref::{Resolution, Workspace};
 use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::{
     DocumentHighlight, DocumentHighlightKind, InlayHint, InlayHintKind, InlayHintLabel,
-    InlayHintTooltip, Position, Range, SelectionRange, SemanticToken,
-    SemanticTokenModifier, SemanticTokenType, SemanticTokens,
+    InlayHintTooltip, Position, Range, SelectionRange, SemanticToken, SemanticTokenModifier,
+    SemanticTokenType, SemanticTokens,
 };
 
 use crate::navigation::{excerpt, rederive};
@@ -52,11 +52,21 @@ const COMMENT: u32 = 7;
 const DEFINITION: u32 = 1;
 
 /// Keys highlighted as keywords wherever they appear.
-const KEYWORDS: &[&str] =
-    &["$ref", "operationId", "operationPath", "webhooks", "openapi", "swagger", "arazzo", "overlay"];
+const KEYWORDS: &[&str] = &[
+    "$ref",
+    "operationId",
+    "operationPath",
+    "webhooks",
+    "openapi",
+    "swagger",
+    "arazzo",
+    "overlay",
+];
 
 /// HTTP method keys highlighted as methods.
-const METHODS: &[&str] = &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+const METHODS: &[&str] = &[
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
 
 /// Upper bound on inlay hints per document, so pathological inputs cannot
 /// flood the client.
@@ -87,7 +97,10 @@ pub fn legend() -> tower_lsp::lsp_types::SemanticTokensLegend {
 /// at all — the highlighter is tuned to OpenAPI/Arazzo/Overlay shapes.
 #[must_use]
 pub fn semantic_tokens_full(doc: &OpenDoc) -> SemanticTokens {
-    SemanticTokens { result_id: None, data: collect_tokens(doc) }
+    SemanticTokens {
+        result_id: None,
+        data: collect_tokens(doc),
+    }
 }
 
 /// Collects and delta-encodes all tokens of `doc`.
@@ -108,8 +121,14 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
 }
 
 /// Emits the key token and any scalar-value token for one mapping pair.
-fn classify_pair(raw: &mut Vec<RawToken>, bytes: &[u8], li: &suspect_source::LineIndex, pair: SNode<'_>) {
-    let (Some(key), Some(value)) = (pair.child_by_field("key"), pair.child_by_field("value")) else {
+fn classify_pair(
+    raw: &mut Vec<RawToken>,
+    bytes: &[u8],
+    li: &suspect_source::LineIndex,
+    pair: SNode<'_>,
+) {
+    let (Some(key), Some(value)) = (pair.child_by_field("key"), pair.child_by_field("value"))
+    else {
         return;
     };
     let kc = key.content();
@@ -175,7 +194,13 @@ fn push_token(
         .sum::<usize>()
         .try_into()
         .unwrap_or(u32::MAX);
-    raw.push(RawToken { line, col, len, ty, mods });
+    raw.push(RawToken {
+        line,
+        col,
+        len,
+        ty,
+        mods,
+    });
 }
 
 /// Sorts by position and delta-encodes per the LSP spec.
@@ -186,7 +211,11 @@ fn encode(raw: &mut [RawToken]) -> Vec<SemanticToken> {
     let mut prev_col = 0u32;
     for t in raw.iter() {
         let delta_line = t.line - prev_line;
-        let delta_start = if delta_line == 0 { t.col - prev_col } else { t.col };
+        let delta_start = if delta_line == 0 {
+            t.col - prev_col
+        } else {
+            t.col
+        };
         out.push(SemanticToken {
             delta_line,
             delta_start,
@@ -203,7 +232,9 @@ fn encode(raw: &mut [RawToken]) -> Vec<SemanticToken> {
 /// Inlay hints for `$ref` targets and property types within `range`.
 #[must_use]
 pub fn inlay_hints(doc: &OpenDoc, ws: &Workspace, range: Range) -> Vec<InlayHint> {
-    let Some(handle) = ws.get(doc.low.uri()) else { return Vec::new() };
+    let Some(handle) = ws.get(doc.low.uri()) else {
+        return Vec::new();
+    };
     let inner = doc.low.inner();
     let (bytes, li) = (inner.bytes(), inner.line_index());
     let mut out: Vec<InlayHint> = Vec::new();
@@ -268,15 +299,20 @@ fn ref_hint(
                 .last()
                 .map_or_else(|| "(root)".to_owned(), |t| t.to_string());
             let file = basename(target.syntax().doc().uri().as_str());
-            let excerpt =
-                excerpt(target.syntax().doc().bytes(), target.byte_range(), 10);
+            let excerpt = excerpt(target.syntax().doc().bytes(), target.byte_range(), 10);
             (format!("→ {name} ({file})"), excerpt)
         }
         Ok(Resolution::WholeDoc(id)) => {
-            let uri = ws.uris().into_iter().find(|u| ws.get(u).is_some_and(|h| h.id() == id))?;
+            let uri = ws
+                .uris()
+                .into_iter()
+                .find(|u| ws.get(u).is_some_and(|h| h.id() == id))?;
             let file = basename(uri.as_str());
             let doc_bytes = ws.get(&uri)?.doc().inner().bytes().to_vec();
-            (format!("→ {file}"), excerpt(&doc_bytes, 0..doc_bytes.len(), 10))
+            (
+                format!("→ {file}"),
+                excerpt(&doc_bytes, 0..doc_bytes.len(), 10),
+            )
         }
         Ok(Resolution::Cycle { .. }) | Err(_) => return None,
     };
@@ -311,8 +347,7 @@ fn property_type_hint(handle: &suspect_ref::DocHandle<'_>, pair: &NodeRef<'_>) -
     {
         return None;
     }
-    let value =
-        NodeRef::new(pair.syntax().child_by_field("value")?.content());
+    let value = NodeRef::new(pair.syntax().child_by_field("value")?.content());
     // Follow one `$ref` hop so the hint shows the target's declared type.
     let target = match value.get("$ref") {
         Some(_) => {
@@ -354,7 +389,11 @@ fn type_mask(schema: &NodeRef<'_>) -> u8 {
             }
         }
     }
-    if schema.get("nullable").and_then(|n| n.as_bool()).unwrap_or(false) {
+    if schema
+        .get("nullable")
+        .and_then(|n| n.as_bool())
+        .unwrap_or(false)
+    {
         set |= TypeSet::NULL;
     }
     set
@@ -385,15 +424,21 @@ fn render_types(set: u8) -> Option<String> {
         (TypeSet::ARRAY, "array"),
         (TypeSet::NULL, "null"),
     ];
-    let names: Vec<&str> =
-        ORDER.iter().filter(|(bit, _)| set & bit != 0).map(|(_, name)| *name).collect();
+    let names: Vec<&str> = ORDER
+        .iter()
+        .filter(|(bit, _)| set & bit != 0)
+        .map(|(_, name)| *name)
+        .collect();
     (!names.is_empty()).then(|| names.join("|"))
 }
 
 /// UTF-16 end position of a node.
 fn end_position(bytes: &[u8], li: &suspect_source::LineIndex, node: &SNode<'_>) -> Position {
     let (line, col) = li.line_col_utf16(bytes, node.byte_range().end);
-    Position { line, character: col }
+    Position {
+        line,
+        character: col,
+    }
 }
 
 /// True when `p` lies within `range` (inclusive bounds).
@@ -405,7 +450,6 @@ fn position_in_range(p: Position, range: &Range) -> bool {
 fn basename(uri: &str) -> &str {
     uri.rsplit('/').next().unwrap_or(uri)
 }
-
 
 /// Key node of the mapping-pair enclosing `node` (climbing through wrapper
 /// nodes like `block_node`).
@@ -439,30 +483,45 @@ pub fn document_highlights(doc: &OpenDoc, offset: usize) -> Vec<DocumentHighligh
     if wanted.is_none() {
         // position may sit on a component declaration key
         if let Some(node) = crate::navigation::node_at(&doc.low, offset)
-            && let Some(pair) = node.parent() {
-                let nr = suspect_low::NodeRef::new(pair);
-                let path = nr.path_from_root().to_path();
-                if let Some(rest) = path.strip_prefix("/components/") {
-                    wanted = Some(format!("#/{rest}"));
-                }
+            && let Some(pair) = node.parent()
+        {
+            let nr = suspect_low::NodeRef::new(pair);
+            let path = nr.path_from_root().to_path();
+            if let Some(rest) = path.strip_prefix("/components/") {
+                wanted = Some(format!("#/{rest}"));
             }
+        }
     }
-    let Some(target) = wanted else { return Vec::new() };
+    let Some(target) = wanted else {
+        return Vec::new();
+    };
     if std::env::var("SUSPECT_HLDBG").is_ok() {
         eprintln!("HLDBG target={target:?}");
     }
 
     let mut out: Vec<DocumentHighlight> = Vec::new();
-    for pair in inner.root().descendants().filter(|n| n.kind() == SyntaxKind::Pair) {
-        let Some(key) = pair.child_by_field("key") else { continue };
+    for pair in inner
+        .root()
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::Pair)
+    {
+        let Some(key) = pair.child_by_field("key") else {
+            continue;
+        };
         if key.scalar_bytes() != b"$ref" {
             continue;
         }
-        let Some(value) = pair.child_by_field("value") else { continue };
+        let Some(value) = pair.child_by_field("value") else {
+            continue;
+        };
         let value = value.content();
         if normalized_ref(&value) == target {
-            eprintln!("HLDBG ref match at {:?} norm={:?}", lsp_range(bytes, li, value.byte_range()), normalized_ref(&value));
-        out.push(DocumentHighlight {
+            eprintln!(
+                "HLDBG ref match at {:?} norm={:?}",
+                lsp_range(bytes, li, value.byte_range()),
+                normalized_ref(&value)
+            );
+            out.push(DocumentHighlight {
                 range: lsp_range(bytes, li, value.byte_range()),
                 kind: Some(DocumentHighlightKind::TEXT),
             });
@@ -497,7 +556,10 @@ pub fn selection_ranges(doc: &OpenDoc, positions: &[Position]) -> Vec<SelectionR
             let mut chain: Vec<suspect_syntax::SNode<'_>> = Vec::new();
             while let Some(n) = cur {
                 // skip zero-width duplicates
-                if chain.last().is_none_or(|l| l.byte_range() != n.byte_range()) {
+                if chain
+                    .last()
+                    .is_none_or(|l| l.byte_range() != n.byte_range())
+                {
                     chain.push(n);
                 }
                 cur = n.parent();
@@ -517,7 +579,6 @@ pub fn selection_ranges(doc: &OpenDoc, positions: &[Position]) -> Vec<SelectionR
 #[cfg(test)]
 mod tests {
     use super::*;
-    
 
     const SPEC: &str = r#"
 openapi: 3.1.0
@@ -560,7 +621,11 @@ components:
         let mut saw_number = false;
         for t in &tokens.data {
             line += t.delta_line;
-            col = if t.delta_line == 0 { col + t.delta_start } else { t.delta_start };
+            col = if t.delta_line == 0 {
+                col + t.delta_start
+            } else {
+                t.delta_start
+            };
             if t.token_type == KEYWORD {
                 saw_keyword = true;
             }
@@ -605,7 +670,10 @@ components:
         let doc = OpenDoc::parse(uri.clone(), SPEC.to_owned());
         let full = Range {
             start: Position::default(),
-            end: Position { line: u32::MAX, character: u32::MAX },
+            end: Position {
+                line: u32::MAX,
+                character: u32::MAX,
+            },
         };
         let hints = inlay_hints(&doc, &ws, full);
         assert!(!hints.is_empty(), "ref hints must fire");
@@ -613,19 +681,27 @@ components:
             InlayHintLabel::String(s) => s.clone(),
             other => panic!("string label expected, got {other:?}"),
         };
-        assert!(label.contains("\u{2192} Pet"), "target name in label: {label}");
+        assert!(
+            label.contains("\u{2192} Pet"),
+            "target name in label: {label}"
+        );
     }
 
     #[test]
     fn document_highlights_finds_refs_and_declaration() {
         let doc = open();
         // the singular-Pet ref (the Pets ref has a different target)
-        let off = SPEC.rfind("'#/components/schemas/Pet'").map(|i| i + 2).unwrap();
+        let off = SPEC
+            .rfind("'#/components/schemas/Pet'")
+            .map(|i| i + 2)
+            .unwrap();
         let highlights = document_highlights(&doc, off);
         // this $ref + the declaration key (the other $ref targets Pets)
         assert_eq!(highlights.len(), 2, "{highlights:?}");
         assert!(
-            highlights.iter().any(|h| h.kind == Some(DocumentHighlightKind::WRITE)),
+            highlights
+                .iter()
+                .any(|h| h.kind == Some(DocumentHighlightKind::WRITE)),
             "declaration must be highlighted as Write"
         );
     }
@@ -634,7 +710,10 @@ components:
     fn selection_range_chain_reaches_root() {
         let doc = open();
         let off = SPEC.find("listPets").unwrap();
-        let pos = Position { line: 5, character: 20 };
+        let pos = Position {
+            line: 5,
+            character: 20,
+        };
         let ranges = selection_ranges(&doc, &[pos]);
         assert_eq!(ranges.len(), 1);
         // walk parents to root; count > 4 for this nesting depth

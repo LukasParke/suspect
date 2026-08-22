@@ -10,8 +10,8 @@ use suspect_lint::Linter;
 use suspect_low::LowDoc;
 use suspect_source::{Source, Uri};
 
-use crate::output::{self, Finding, Severity};
 use crate::OutputFormat;
+use crate::output::{self, Finding, Severity};
 
 /// Maps the lint crate's severity into the CLI's unified model.
 #[must_use]

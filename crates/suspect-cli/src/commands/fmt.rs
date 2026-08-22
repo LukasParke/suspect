@@ -6,8 +6,8 @@ use std::path::Path;
 
 use suspect_overlay::Value;
 
-use crate::output::{self};
 use crate::DocFormat;
+use crate::output::{self};
 
 /// `suspect fmt <IN> [-o OUT] [--json|--yaml]`. Format defaults to the input
 /// extension (`.json` -> JSON, else YAML).

@@ -1,10 +1,13 @@
 use suspect_low::LowDoc;
 use suspect_source::Source;
 
-use suspect_overlay::{apply, validate_overlay, OverlayDoc};
+use suspect_overlay::{OverlayDoc, apply, validate_overlay};
 
 fn parse_yaml(src: &str) -> LowDoc {
-    LowDoc::parse("mem://t.yaml".into(), Source::from_vec(src.as_bytes().to_vec()))
+    LowDoc::parse(
+        "mem://t.yaml".into(),
+        Source::from_vec(src.as_bytes().to_vec()),
+    )
 }
 
 const TARGET: &str = r#"
@@ -54,7 +57,11 @@ fn overlay_parses_and_validates() {
     assert_eq!(overlay.actions().len(), 4);
     let diags = validate_overlay(&overlay);
     // missing descriptions are advisory only
-    assert!(diags.iter().all(|d| d.code == "overlay-action-missing-description"));
+    assert!(
+        diags
+            .iter()
+            .all(|d| d.code == "overlay-action-missing-description")
+    );
 }
 
 #[test]
@@ -68,9 +75,18 @@ fn apply_updates_merge_recursively() {
     assert!(out.contains("title: Ticked"), "info.title updated: {out}");
     assert!(out.contains("x-generated: true"), "new key appended: {out}");
     assert!(out.contains("Updated description"), "nested merge: {out}");
-    assert!(out.contains("4XX:"), "responses updated via wildcard: {out}");
-    assert!(out.contains("List pets"), "untouched content preserved: {out}");
-    assert_eq!(result.applied_actions, 3, "/gone target does not exist and counts as unmatched");
+    assert!(
+        out.contains("4XX:"),
+        "responses updated via wildcard: {out}"
+    );
+    assert!(
+        out.contains("List pets"),
+        "untouched content preserved: {out}"
+    );
+    assert_eq!(
+        result.applied_actions, 3,
+        "/gone target does not exist and counts as unmatched"
+    );
     assert_eq!(result.unmatched_targets, vec!["$.paths['/gone']"]);
 }
 
@@ -172,7 +188,12 @@ actions:
 fn invalid_overlay_rejected() {
     let doc = parse_yaml("overlay: 1.0.0\n");
     let err = OverlayDoc::parse(&doc).unwrap_err();
-    assert!(matches!(err, suspect_overlay::OverlayError::MissingField { field: "info.title" }));
+    assert!(matches!(
+        err,
+        suspect_overlay::OverlayError::MissingField {
+            field: "info.title"
+        }
+    ));
 
     let doc = parse_yaml("overlay: 1.0.0\ninfo: {title: t, version: v}\nactions: []\n");
     let overlay = OverlayDoc::parse(&doc).unwrap();
@@ -197,5 +218,8 @@ actions:
     );
     let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
     let err = apply(&overlay, target.root()).unwrap_err();
-    assert!(matches!(err, suspect_overlay::OverlayError::TargetNotContainer { .. }));
+    assert!(matches!(
+        err,
+        suspect_overlay::OverlayError::TargetNotContainer { .. }
+    ));
 }

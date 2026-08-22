@@ -1,12 +1,15 @@
 use suspect_arazzo::{
-    parse, parse_embedded, render_embedded, validate_arazzo, ArazzoDoc, ComponentKind, Expr,
-    ExprPart, HttpPart, RuntimeContext,
+    ArazzoDoc, ComponentKind, Expr, ExprPart, HttpPart, RuntimeContext, parse, parse_embedded,
+    render_embedded, validate_arazzo,
 };
 use suspect_low::{LowDoc, SpecFamily};
 use suspect_source::Source;
 
 fn parse_doc(src: &str) -> LowDoc {
-    LowDoc::parse("mem://arazzo.yaml".into(), Source::from_vec(src.as_bytes().to_vec()))
+    LowDoc::parse(
+        "mem://arazzo.yaml".into(),
+        Source::from_vec(src.as_bytes().to_vec()),
+    )
 }
 
 const DOC: &str = r#"
@@ -64,7 +67,10 @@ fn document_model_parses() {
     assert_eq!(arazzo.info_summary(), Some("Walk the pets"));
     assert_eq!(arazzo.source_descriptions().len(), 1);
     assert_eq!(arazzo.source_descriptions()[0].name, "petApi");
-    assert_eq!(arazzo.source_descriptions()[0].kind, suspect_arazzo::SourceType::OpenApi);
+    assert_eq!(
+        arazzo.source_descriptions()[0].kind,
+        suspect_arazzo::SourceType::OpenApi
+    );
 
     assert_eq!(arazzo.workflows().len(), 2);
     let wf = &arazzo.workflows()[0];
@@ -92,19 +98,27 @@ fn runtime_expression_grammar() {
         ("$statusCode", Expr::StatusCode),
         (
             "$request.header.#X-Trace",
-            Expr::Request { part: HttpPart::Header("X-Trace".into()) },
+            Expr::Request {
+                part: HttpPart::Header("X-Trace".into()),
+            },
         ),
         (
             "$response.query.#page",
-            Expr::Response { part: HttpPart::Query("page".into()) },
+            Expr::Response {
+                part: HttpPart::Query("page".into()),
+            },
         ),
         (
             "$request.path.#petId",
-            Expr::Request { part: HttpPart::Path("petId".into()) },
+            Expr::Request {
+                part: HttpPart::Path("petId".into()),
+            },
         ),
         (
             "$response.body",
-            Expr::Response { part: HttpPart::Body(None) },
+            Expr::Response {
+                part: HttpPart::Body(None),
+            },
         ),
         (
             "$request.body#/user/id",
@@ -112,27 +126,53 @@ fn runtime_expression_grammar() {
                 part: HttpPart::Body(Some(suspect_low::Pointer::parse("#/user/id").unwrap())),
             },
         ),
-        ("$outputs.token", Expr::Outputs { name: "token".into() }),
-        ("$inputs.limit", Expr::Inputs { name: "limit".into() }),
+        (
+            "$outputs.token",
+            Expr::Outputs {
+                name: "token".into(),
+            },
+        ),
+        (
+            "$inputs.limit",
+            Expr::Inputs {
+                name: "limit".into(),
+            },
+        ),
         (
             "$workflows.wf.steps.st.outputs.out",
-            Expr::WorkflowOutput { workflow: "wf".into(), step: "st".into(), name: "out".into() },
+            Expr::WorkflowOutput {
+                workflow: "wf".into(),
+                step: "st".into(),
+                name: "out".into(),
+            },
         ),
         (
             "$components.parameters.sharedKey",
-            Expr::Component { kind: ComponentKind::Parameters, name: "sharedKey".into() },
+            Expr::Component {
+                kind: ComponentKind::Parameters,
+                name: "sharedKey".into(),
+            },
         ),
         (
             "$components.succeedOn.okCriteria",
-            Expr::Component { kind: ComponentKind::SucceedOn, name: "okCriteria".into() },
+            Expr::Component {
+                kind: ComponentKind::SucceedOn,
+                name: "okCriteria".into(),
+            },
         ),
         (
             "$components.failureOn.badCriteria",
-            Expr::Component { kind: ComponentKind::FailureOn, name: "badCriteria".into() },
+            Expr::Component {
+                kind: ComponentKind::FailureOn,
+                name: "badCriteria".into(),
+            },
         ),
         (
             "$components.retryOn.retryCriteria",
-            Expr::Component { kind: ComponentKind::RetryOn, name: "retryCriteria".into() },
+            Expr::Component {
+                kind: ComponentKind::RetryOn,
+                name: "retryCriteria".into(),
+            },
         ),
     ] {
         assert_eq!(parse(input).unwrap(), expected, "parsing {input}");
@@ -143,11 +183,11 @@ fn runtime_expression_grammar() {
 fn malformed_expressions_rejected() {
     for bad in [
         "$unknownRoot",
-        "$request.body#/bad~pointer~9",   // ~9 is not a valid escape
-        "$workflows.wf.outputs.x",        // missing steps segment
-        "$components.everything.x",       // unknown components kind
-        "$statusCode extra",              // trailing garbage
-        "statusCode",                     // missing $
+        "$request.body#/bad~pointer~9", // ~9 is not a valid escape
+        "$workflows.wf.outputs.x",      // missing steps segment
+        "$components.everything.x",     // unknown components kind
+        "$statusCode extra",            // trailing garbage
+        "statusCode",                   // missing $
     ] {
         assert!(parse(bad).is_err(), "{bad} must not parse");
     }
@@ -198,11 +238,7 @@ impl<'d> RuntimeContext<'d> for MockCtx<'d> {
         }
     }
     fn path_param(&self, _response: bool, name: &str) -> Option<&'d str> {
-        if name == "petId" {
-            self.pet_id
-        } else {
-            None
-        }
+        if name == "petId" { self.pet_id } else { None }
     }
     fn body(&self, response: bool) -> Option<suspect_low::NodeRef<'d>> {
         match (self.body, response) {
@@ -211,11 +247,7 @@ impl<'d> RuntimeContext<'d> for MockCtx<'d> {
         }
     }
     fn output(&self, name: &str) -> Option<&'d str> {
-        if name == "walked" {
-            self.walked
-        } else {
-            None
-        }
+        if name == "walked" { self.walked } else { None }
     }
 }
 
@@ -297,7 +329,10 @@ workflows:
     assert!(codes.contains(&"arazzo-duplicate-step-id"), "{codes:?}");
     assert!(codes.contains(&"arazzo-invalid-condition"), "{codes:?}");
     assert!(codes.contains(&"arazzo-goto-unknown-workflow"), "{codes:?}");
-    assert!(codes.contains(&"arazzo-step-missing-operation"), "{codes:?}");
+    assert!(
+        codes.contains(&"arazzo-step-missing-operation"),
+        "{codes:?}"
+    );
 }
 
 #[test]
@@ -305,7 +340,10 @@ fn validation_passes_clean_document() {
     let doc = parse_doc(DOC);
     let arazzo = ArazzoDoc::new(&doc);
     let diags = validate_arazzo(&arazzo);
-    let errors: Vec<_> = diags.iter().filter(|d| d.code != "arazzo-invalid-condition").collect();
+    let errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code != "arazzo-invalid-condition")
+        .collect();
     assert!(errors.is_empty(), "clean doc produced: {errors:?}");
 }
 
@@ -338,5 +376,8 @@ workflows:
     let arazzo = ArazzoDoc::new(&bad);
     let codes: Vec<_> = validate_arazzo(&arazzo).iter().map(|d| d.code).collect();
     assert!(codes.contains(&"arazzo-output-unknown-name"), "{codes:?}");
-    assert!(codes.contains(&"arazzo-output-unknown-workflow"), "{codes:?}");
+    assert!(
+        codes.contains(&"arazzo-output-unknown-workflow"),
+        "{codes:?}"
+    );
 }

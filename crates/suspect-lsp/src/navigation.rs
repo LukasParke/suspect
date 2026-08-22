@@ -65,10 +65,10 @@ pub(crate) fn rederive<'ws>(
     range: std::ops::Range<usize>,
 ) -> Option<NodeRef<'ws>> {
     let inner = handle.doc().inner();
-    let mut raw = inner.root().raw().descendant_for_byte_range(
-        range.start,
-        range.end.saturating_sub(1).max(range.start),
-    )?;
+    let mut raw = inner
+        .root()
+        .raw()
+        .descendant_for_byte_range(range.start, range.end.saturating_sub(1).max(range.start))?;
     while raw.byte_range() != range {
         raw = raw.parent()?;
     }
@@ -92,7 +92,10 @@ pub fn goto_definition(
             range: target.byte_range(),
         }),
         Ok(Resolution::WholeDoc(id)) => {
-            let uri = ws.uris().into_iter().find(|u| ws.get(u).is_some_and(|h| h.id() == id))?;
+            let uri = ws
+                .uris()
+                .into_iter()
+                .find(|u| ws.get(u).is_some_and(|h| h.id() == id))?;
             Some(Definition { uri, range: 0..0 })
         }
         Ok(Resolution::Cycle { .. }) | Err(_) => None,
@@ -107,10 +110,12 @@ pub(crate) fn value_anchor<'d>(node: SNode<'d>) -> SNode<'d> {
         if n.kind() == SyntaxKind::Pair {
             if let Some(key) = n.child_by_field("key") {
                 let (kr, nr) = (key.byte_range(), node.byte_range());
-                if kr.start <= nr.start && nr.end <= kr.end
-                    && let Some(v) = n.child_by_field("value") {
-                        return v.content();
-                    }
+                if kr.start <= nr.start
+                    && nr.end <= kr.end
+                    && let Some(v) = n.child_by_field("value")
+                {
+                    return v.content();
+                }
             }
             break;
         }
@@ -129,10 +134,16 @@ pub fn self_definition(low: &suspect_low::LowDoc, offset: usize) -> Option<Defin
     if tokens.len() < 3 || tokens[0].as_ref() != "components" {
         return None;
     }
-    let named =
-        Pointer::from_tokens(vec![tokens[0].clone(), tokens[1].clone(), tokens[2].clone()]);
+    let named = Pointer::from_tokens(vec![
+        tokens[0].clone(),
+        tokens[1].clone(),
+        tokens[2].clone(),
+    ]);
     let value = low.root().pointer(&named)?;
-    Some(Definition { uri: low.uri().clone(), range: value.byte_range() })
+    Some(Definition {
+        uri: low.uri().clone(),
+        range: value.byte_range(),
+    })
 }
 
 /// Finds all `$ref` edges across the workspace whose parsed pointer targets
@@ -149,23 +160,34 @@ pub fn references(
     offset: usize,
     include_declaration: bool,
 ) -> Vec<Definition> {
-    let Some(node) = node_at(low, offset) else { return Vec::new() };
+    let Some(node) = node_at(low, offset) else {
+        return Vec::new();
+    };
     let ptr = NodeRef::new(value_anchor(node)).path_from_root();
     let doc_uri = low.uri();
     let mut out = Vec::new();
     if include_declaration {
-        out.push(Definition { uri: doc_uri.clone(), range: node.byte_range() });
+        out.push(Definition {
+            uri: doc_uri.clone(),
+            range: node.byte_range(),
+        });
     }
     for uri in ws.uris() {
         let Some(h) = ws.get(&uri) else { continue };
         for edge in h.edges().iter() {
             let hit = match &edge.parsed {
                 ParsedRef::Local(p) => uri == *doc_uri && p == &ptr,
-                ParsedRef::External { uri: target, pointer } => target == doc_uri && pointer == &ptr,
+                ParsedRef::External {
+                    uri: target,
+                    pointer,
+                } => target == doc_uri && pointer == &ptr,
                 ParsedRef::PlainName(_) => false,
             };
             if hit {
-                out.push(Definition { uri: uri.clone(), range: edge.at.clone() });
+                out.push(Definition {
+                    uri: uri.clone(),
+                    range: edge.at.clone(),
+                });
             }
         }
     }
@@ -189,35 +211,28 @@ pub fn excerpt(bytes: &[u8], range: std::ops::Range<usize>, max_lines: usize) ->
 /// Hover markdown: for `$ref` values a fenced block of the target's source
 /// (truncated to 40 lines); otherwise the node kind plus its first line.
 #[must_use]
-pub fn hover_markdown(
-    ws: &Workspace,
-    low: &suspect_low::LowDoc,
-    offset: usize,
-) -> Option<String> {
+pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) -> Option<String> {
     if let Some(refv) = ref_value_node(low, offset) {
         let handle = ws.get(low.uri())?;
         if let Some(node) = rederive(&handle, refv.byte_range())
-            && let Ok(Resolution::Node(target)) = handle.resolve_ref_value(node) {
-                let tdoc = target.syntax().doc();
-                let lang = match tdoc.format() {
-                    suspect_syntax::Format::Json => "json",
-                    suspect_syntax::Format::Yaml => "yaml",
-                };
-                return Some(format!(
-                    "```{lang}\n{}\n```",
-                    excerpt(tdoc.bytes(), target.byte_range(), 40)
-                ));
-            }
+            && let Ok(Resolution::Node(target)) = handle.resolve_ref_value(node)
+        {
+            let tdoc = target.syntax().doc();
+            let lang = match tdoc.format() {
+                suspect_syntax::Format::Json => "json",
+                suspect_syntax::Format::Yaml => "yaml",
+            };
+            return Some(format!(
+                "```{lang}\n{}\n```",
+                excerpt(tdoc.bytes(), target.byte_range(), 40)
+            ));
+        }
     }
     let node = node_at(low, offset)?;
     let semantic = NodeRef::new(node);
     let first_line = excerpt(node.doc().bytes(), node.byte_range(), 1);
-    Some(format!(
-        "`{:?}`\n\n```\n{first_line}\n```",
-        semantic.kind()
-    ))
+    Some(format!("`{:?}`\n\n```\n{first_line}\n```", semantic.kind()))
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -273,7 +288,10 @@ components:
         let path = dir.join(name);
         std::fs::write(&path, text).unwrap();
         let uri = Uri::from_path(&path).unwrap();
-        suspect_low::LowDoc::parse(uri, suspect_source::Source::from_vec(text.as_bytes().to_vec()))
+        suspect_low::LowDoc::parse(
+            uri,
+            suspect_source::Source::from_vec(text.as_bytes().to_vec()),
+        )
     }
 
     fn offset_in(text: &str, needle: &str) -> usize {
@@ -320,8 +338,11 @@ components:
         ws.load_all("entry.yaml").unwrap();
         let off = offset_in(text, "PetList");
         let def = goto_definition(&ws, &low, off).expect("resolves");
-        let target_uri =
-            ws.uris().into_iter().find(|u| u.as_str().ends_with("schemas.yaml")).unwrap();
+        let target_uri = ws
+            .uris()
+            .into_iter()
+            .find(|u| u.as_str().ends_with("schemas.yaml"))
+            .unwrap();
         assert_eq!(def.uri, target_uri);
         let handle = ws.get(&target_uri).unwrap();
         let expected = handle
@@ -365,12 +386,18 @@ components:
         // the $ref value string inside PetList.items. main.yaml's $ref is
         // local to main.yaml and does not target this document.
         assert_eq!(refs.len(), 2, "got {refs:?}");
-        assert!(refs.iter().any(|r| r.uri == *low.uri() && r.range.len() == 3));
+        assert!(
+            refs.iter()
+                .any(|r| r.uri == *low.uri() && r.range.len() == 3)
+        );
         let items_ref = low
             .root()
             .pointer(&Pointer::parse("/components/schemas/PetList/items/$ref").unwrap())
             .unwrap();
-        assert!(refs.iter().any(|r| r.uri == *low.uri() && r.range == items_ref.byte_range()));
+        assert!(
+            refs.iter()
+                .any(|r| r.uri == *low.uri() && r.range == items_ref.byte_range())
+        );
     }
 
     #[test]

@@ -41,15 +41,24 @@ impl fmt::Display for OverlayError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotAnObject => write!(f, "overlay root must be an object"),
-            Self::MissingField { field } => write!(f, "overlay is missing required field `{field}`"),
+            Self::MissingField { field } => {
+                write!(f, "overlay is missing required field `{field}`")
+            }
             Self::InvalidAction { index, reason } => {
                 write!(f, "invalid action #{index}: {reason}")
             }
-            Self::InvalidTarget { index, input, reason } => {
+            Self::InvalidTarget {
+                index,
+                input,
+                reason,
+            } => {
                 write!(f, "action #{index} has invalid target {input:?}: {reason}")
             }
             Self::TargetNotContainer { index, path } => {
-                write!(f, "action #{index} target must select objects or arrays, got scalar at {path}")
+                write!(
+                    f,
+                    "action #{index} target must select objects or arrays, got scalar at {path}"
+                )
             }
             Self::Path(e) => write!(f, "JSONPath error: {e}"),
         }

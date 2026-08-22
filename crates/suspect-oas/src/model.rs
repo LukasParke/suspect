@@ -1,7 +1,7 @@
 use suspect_low::NodeRef;
 
-use crate::session::{CycleGuard, Session};
 use crate::SchemaView;
+use crate::session::{CycleGuard, Session};
 
 /// Common view plumbing: session + home doc + raw node.
 macro_rules! view {
@@ -261,7 +261,10 @@ impl<'s> Server<'s> {
             .map(|n| {
                 n.entries()
                     .into_iter()
-                    .filter_map(|e| e.value.map(|v| (e.key, ServerVariable::new(self.session, v))))
+                    .filter_map(|e| {
+                        e.value
+                            .map(|v| (e.key, ServerVariable::new(self.session, v)))
+                    })
                     .collect()
             })
             .unwrap_or_default()
@@ -277,7 +280,9 @@ impl<'s> ServerVariable<'s> {
     #[must_use]
     /// Allowed substitutions; empty when unrestricted.
     pub fn enum_values(&self) -> Vec<&'s str> {
-        self.get("enum").map(|n| n.items().into_iter().filter_map(|i| i.as_str()).collect()).unwrap_or_default()
+        self.get("enum")
+            .map(|n| n.items().into_iter().filter_map(|i| i.as_str()).collect())
+            .unwrap_or_default()
     }
     #[must_use]
     /// Optional prose describing this variable.
@@ -300,7 +305,8 @@ impl<'s> Tag<'s> {
     #[must_use]
     /// External documentation reference for this tag.
     pub fn external_docs(&self) -> Option<ExternalDocumentation<'s>> {
-        self.get("externalDocs").map(|n| ExternalDocumentation::new(self.session, n))
+        self.get("externalDocs")
+            .map(|n| ExternalDocumentation::new(self.session, n))
     }
     /// 3.2+ parent tag.
     #[must_use]
@@ -346,12 +352,16 @@ impl<'s> Xml<'s> {
     #[must_use]
     /// True when the property serializes as an XML attribute rather than an element.
     pub fn attribute(&self) -> bool {
-        self.get("attribute").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.get("attribute")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
     #[must_use]
     /// True when array items wrap in a container element named after the property.
     pub fn wrapped(&self) -> bool {
-        self.get("wrapped").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.get("wrapped")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 }
 
@@ -396,7 +406,9 @@ impl<'s> Encoding<'s> {
     #[must_use]
     /// Serialization style for this property; defaults to `form`.
     pub fn style(&self) -> Option<ParameterStyle> {
-        self.get("style").and_then(|n| n.as_str()).and_then(ParameterStyle::parse)
+        self.get("style")
+            .and_then(|n| n.as_str())
+            .and_then(ParameterStyle::parse)
     }
     #[must_use]
     /// Whether arrays/objects generate separate parameters per item;
@@ -407,7 +419,9 @@ impl<'s> Encoding<'s> {
     #[must_use]
     /// True when `Reserved` characters in values are left unescaped.
     pub fn allow_reserved(&self) -> bool {
-        self.get("allowReserved").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.get("allowReserved")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 }
 
@@ -431,12 +445,13 @@ impl<'s> Example<'s> {
     /// URI pointing to an external example payload.
     #[must_use]
     pub fn external_value(&self) -> Option<&'s str> {
-        self.resolved().get("externalValue").and_then(|n| n.as_str())
+        self.resolved()
+            .get("externalValue")
+            .and_then(|n| n.as_str())
     }
 }
 
 impl<'s> MediaType<'s> {
-
     /// Schema the payload conforms to. `None` when only raw examples are given.
     #[must_use]
     pub fn schema(&self) -> Option<SchemaView<'s>> {
@@ -473,7 +488,10 @@ impl<'s> Parameter<'s> {
     /// `None` for a value outside the four spec locations.
     #[must_use]
     pub fn location(&self) -> Option<ParameterIn> {
-        self.resolved().get("in").and_then(|n| n.as_str()).and_then(ParameterIn::parse)
+        self.resolved()
+            .get("in")
+            .and_then(|n| n.as_str())
+            .and_then(ParameterIn::parse)
     }
 
     /// Whether the parameter must be supplied. Path parameters default to
@@ -482,13 +500,18 @@ impl<'s> Parameter<'s> {
     pub fn required(&self) -> bool {
         let r = self.resolved();
         let in_path = r.get("in").and_then(|n| n.as_str()) == Some("path");
-        r.get("required").and_then(|n| n.as_bool()).unwrap_or(in_path)
+        r.get("required")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(in_path)
     }
 
     /// True when the parameter is explicitly marked deprecated.
     #[must_use]
     pub fn deprecated(&self) -> bool {
-        self.resolved().get("deprecated").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("deprecated")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 
     /// Prose describing how the parameter is used.
@@ -501,7 +524,9 @@ impl<'s> Parameter<'s> {
     /// [`Parameter::content`] per the spec.
     #[must_use]
     pub fn schema(&self) -> Option<SchemaView<'s>> {
-        self.resolved().get("schema").map(|v| SchemaView::new(self.session, v))
+        self.resolved()
+            .get("schema")
+            .map(|v| SchemaView::new(self.session, v))
     }
 
     /// Content-style parameter payload: `(media-type, media-type-object)`.
@@ -527,7 +552,10 @@ impl<'s> Parameter<'s> {
     /// Serialization style; see the OpenAPI `style` keyword.
     #[must_use]
     pub fn style(&self) -> Option<ParameterStyle> {
-        self.resolved().get("style").and_then(|n| n.as_str()).and_then(ParameterStyle::parse)
+        self.resolved()
+            .get("style")
+            .and_then(|n| n.as_str())
+            .and_then(ParameterStyle::parse)
     }
 
     /// Explicit `explode` setting; `None` when left to the style default.
@@ -539,7 +567,10 @@ impl<'s> Parameter<'s> {
     /// True when empty values (`?flag=`) are permitted; query-only per spec.
     #[must_use]
     pub fn allow_empty_value(&self) -> bool {
-        self.resolved().get("allowEmptyValue").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("allowEmptyValue")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 }
 
@@ -552,7 +583,10 @@ impl<'s> RequestBody<'s> {
     /// True when the request body must be present.
     #[must_use]
     pub fn required(&self) -> bool {
-        self.resolved().get("required").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("required")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
     /// `(media-type, media-type-object)` payloads, in document order.
     #[must_use]
@@ -598,22 +632,33 @@ impl<'s> Header<'s> {
     /// True when the header must be present in every response/request.
     #[must_use]
     pub fn required(&self) -> bool {
-        self.resolved().get("required").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("required")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
     /// True when the header is explicitly marked deprecated.
     #[must_use]
     pub fn deprecated(&self) -> bool {
-        self.resolved().get("deprecated").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("deprecated")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
     /// Schema of the header value; headers ignore `in`-dependent styles.
     #[must_use]
     pub fn schema(&self) -> Option<SchemaView<'s>> {
-        self.resolved().get("schema").map(|v| SchemaView::new(self.session, v))
+        self.resolved()
+            .get("schema")
+            .map(|v| SchemaView::new(self.session, v))
     }
     /// Serialization style; see the OpenAPI `style` keyword.
     #[must_use]
     pub fn style(&self) -> Option<ParameterStyle> {
-        self.resolved().get("style").and_then(|n| n.as_str()).and_then(ParameterStyle::parse)
+        self.resolved()
+            .get("style")
+            .and_then(|n| n.as_str())
+            .and_then(ParameterStyle::parse)
     }
     /// Explicit `explode` setting; `None` when left to the style default.
     #[must_use]
@@ -666,7 +711,10 @@ impl<'s> Callback<'s> {
         self.node
             .entries()
             .into_iter()
-            .filter_map(|e| e.value.map(|v| (e.key, crate::paths::PathItem::new(self.session, v))))
+            .filter_map(|e| {
+                e.value
+                    .map(|v| (e.key, crate::paths::PathItem::new(self.session, v)))
+            })
             .collect()
     }
 }
@@ -688,9 +736,14 @@ impl<'s> SecurityScheme<'s> {
                 bearer_format: r.get("bearerFormat").and_then(|n| n.as_str()),
             },
             "openIdConnect" => SecuritySchemeType::OpenIdConnect {
-                open_id_connect_url: r.get("openIdConnectUrl").and_then(|n| n.as_str()).unwrap_or(""),
+                open_id_connect_url: r
+                    .get("openIdConnectUrl")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or(""),
             },
-            "oauth2" => SecuritySchemeType::Oauth2 { flows: r.get("flows").map(|n| OauthFlows::new(self.session, n)) },
+            "oauth2" => SecuritySchemeType::Oauth2 {
+                flows: r.get("flows").map(|n| OauthFlows::new(self.session, n)),
+            },
             _ => return None,
         })
     }
@@ -767,7 +820,9 @@ impl<'s> SecurityRequirement<'s> {
             .map(|e| {
                 (
                     e.key,
-                    e.value.map(|v| v.items().into_iter().filter_map(|i| i.as_str()).collect()).unwrap_or_default(),
+                    e.value
+                        .map(|v| v.items().into_iter().filter_map(|i| i.as_str()).collect())
+                        .unwrap_or_default(),
                 )
             })
             .collect()
@@ -896,4 +951,3 @@ pub enum SecuritySchemeType<'a> {
         open_id_connect_url: &'a str,
     },
 }
-

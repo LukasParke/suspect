@@ -14,9 +14,9 @@ use regex::Regex;
 use rustc_hash::FxHashMap;
 use suspect_low::{NodeRef, Pointer, ValueKind};
 
+use crate::Schema;
 use crate::config::Config;
 use crate::errors::CompileError;
-use crate::Schema;
 
 pub(crate) type Prg<'d> = Rc<Program<'d>>;
 
@@ -154,7 +154,11 @@ pub(crate) enum Kind<'d> {
     /// Applies to elements at indices >= the sibling `prefixItems` length.
     Items(Prg<'d>, usize),
     PrefixItems(Vec<Prg<'d>>),
-    Contains { schema: Prg<'d>, min: usize, max: Option<usize> },
+    Contains {
+        schema: Prg<'d>,
+        min: usize,
+        max: Option<usize>,
+    },
     /// Property names that must be present.
     Required(Vec<&'d str>),
     Properties(Vec<(&'d str, Prg<'d>)>),
@@ -173,7 +177,11 @@ pub(crate) enum Kind<'d> {
     AnyOf(Vec<Prg<'d>>),
     OneOf(Vec<Prg<'d>>),
     Not(Prg<'d>),
-    If { cond: Prg<'d>, then: Option<Prg<'d>>, alt: Option<Prg<'d>> },
+    If {
+        cond: Prg<'d>,
+        then: Option<Prg<'d>>,
+        alt: Option<Prg<'d>>,
+    },
     DependentSchemas(Vec<(&'d str, Prg<'d>)>),
     DependentRequired(Vec<(&'d str, Vec<Box<str>>)>),
     Ref(RefTarget),
@@ -207,7 +215,10 @@ struct ScanNode<'d> {
 type CompileOutputs<'d> = Result<Vec<(&'d str, Vec<Box<str>>)>, CompileError>;
 
 fn invalid(message: impl Into<String>, node: &NodeRef<'_>) -> CompileError {
-    CompileError::Invalid { message: message.into(), at: node.byte_range() }
+    CompileError::Invalid {
+        message: message.into(),
+        at: node.byte_range(),
+    }
 }
 
 /// Iteratively sweeps the whole document collecting anchors and `$id` bases
@@ -220,28 +231,36 @@ pub(crate) fn scan_doc(root: NodeRef<'_>, root_base: &str) -> Scan {
         dyn_anchors: FxHashMap::default(),
         id_bases: FxHashMap::default(),
     };
-    let mut stack = vec![ScanNode { node: root, ptr: Pointer::root(), base: root_base.to_owned() }];
+    let mut stack = vec![ScanNode {
+        node: root,
+        ptr: Pointer::root(),
+        base: root_base.to_owned(),
+    }];
     while let Some(item) = stack.pop() {
         match item.node.kind() {
             ValueKind::Object => {
                 let mut base = item.base.clone();
                 if let Some(id) = item.node.get("$id")
                     && let Some(raw) = id.as_str()
-                        && let Some(joined) = join_uri(&base, raw) {
-                            base = joined;
-                            scan.id_bases.insert(item.ptr.clone(), base.clone());
-                        }
+                    && let Some(joined) = join_uri(&base, raw)
+                {
+                    base = joined;
+                    scan.id_bases.insert(item.ptr.clone(), base.clone());
+                }
                 for entry in item.node.entries() {
                     if matches!(entry.key, "$anchor" | "$dynamicAnchor")
                         && let Some(name) = entry.value.and_then(|v| v.as_str())
-                            && !name.is_empty() {
-                                let table = if entry.key == "$anchor" {
-                                    &mut scan.anchors
-                                } else {
-                                    &mut scan.dyn_anchors
-                                };
-                                table.entry(name.to_owned()).or_insert_with(|| item.ptr.clone());
-                            }
+                        && !name.is_empty()
+                    {
+                        let table = if entry.key == "$anchor" {
+                            &mut scan.anchors
+                        } else {
+                            &mut scan.dyn_anchors
+                        };
+                        table
+                            .entry(name.to_owned())
+                            .or_insert_with(|| item.ptr.clone());
+                    }
                     let Some(v) = entry.value else { continue };
                     let child_ptr = item.ptr.push(entry.key);
                     push_children(&mut stack, v, child_ptr, &base);
@@ -264,9 +283,14 @@ pub(crate) fn scan_doc(root: NodeRef<'_>, root_base: &str) -> Scan {
     }
     // First registration wins per base (document-order duplicates are
     // pathological and undefined anyway); root base maps to `/`.
-    scan.base_ptrs.entry(root_base.to_owned()).or_insert_with(Pointer::root);
-    let mut pairs: Vec<(String, Pointer)> =
-        scan.id_bases.iter().map(|(p, b)| (b.clone(), p.clone())).collect();
+    scan.base_ptrs
+        .entry(root_base.to_owned())
+        .or_insert_with(Pointer::root);
+    let mut pairs: Vec<(String, Pointer)> = scan
+        .id_bases
+        .iter()
+        .map(|(p, b)| (b.clone(), p.clone()))
+        .collect();
     pairs.sort_by_key(|a| a.1.to_path());
     for (b, p) in pairs {
         scan.base_ptrs.entry(b).or_insert(p);
@@ -280,9 +304,10 @@ pub(crate) fn resource_root_for(scan: &Scan, ptr: &Pointer) -> Pointer {
     let mut cur = Some(ptr.clone());
     while let Some(p) = cur {
         if let Some(base) = scan.id_bases.get(&p)
-            && let Some(rp) = scan.base_ptrs.get(base) {
-                return rp.clone();
-            }
+            && let Some(rp) = scan.base_ptrs.get(base)
+        {
+            return rp.clone();
+        }
         cur = p.parent();
     }
     Pointer::root()
@@ -292,7 +317,11 @@ pub(crate) fn resource_root_for(scan: &Scan, ptr: &Pointer) -> Pointer {
 /// (`$defs` under unknown parents, schemas in arrays, …).
 fn push_children<'d>(stack: &mut Vec<ScanNode<'d>>, value: NodeRef<'d>, ptr: Pointer, base: &str) {
     if matches!(value.kind(), ValueKind::Object | ValueKind::Array) {
-        stack.push(ScanNode { node: value, ptr, base: base.to_owned() });
+        stack.push(ScanNode {
+            node: value,
+            ptr,
+            base: base.to_owned(),
+        });
     }
 }
 
@@ -332,10 +361,13 @@ fn resolve_ref_target(
             return Ok(res.join(&p));
         }
         // Plain-name fragment: `$anchor` lookup (2020-12 §8.2.3).
-        scan.anchors.get(&text).cloned().ok_or_else(|| CompileError::Invalid {
-            message: format!("unknown anchor `{text}`"),
-            at: at_node.byte_range(),
-        })
+        scan.anchors
+            .get(&text)
+            .cloned()
+            .ok_or_else(|| CompileError::Invalid {
+                message: format!("unknown anchor `{text}`"),
+                at: at_node.byte_range(),
+            })
     };
     match doc_part {
         None | Some("") => Ok(RefTarget::Local(local_frag(frag, res_ptr)?)),
@@ -345,7 +377,11 @@ fn resolve_ref_target(
             // Strip any fragment from the resolved URI before comparing.
             let joined_doc = joined.split('#').next().unwrap_or("").to_owned();
             if scan.doc_bases.iter().any(|b| b == &joined_doc) {
-                let res = scan.base_ptrs.get(&joined_doc).cloned().unwrap_or_else(Pointer::root);
+                let res = scan
+                    .base_ptrs
+                    .get(&joined_doc)
+                    .cloned()
+                    .unwrap_or_else(Pointer::root);
                 Ok(RefTarget::Local(local_frag(frag, &res)?))
             } else {
                 Ok(RefTarget::External)
@@ -507,9 +543,22 @@ impl Compiler {
             None => doc_uri,
         };
         let scan = scan_doc(schema, &root_base);
-        let program =
-            compile_program(self, schema, &Pointer::root(), &root_base, &scan, 0, &Pointer::root())?;
-        Ok(Schema::new(schema, program, scan, root_base, self.config.clone()))
+        let program = compile_program(
+            self,
+            schema,
+            &Pointer::root(),
+            &root_base,
+            &scan,
+            0,
+            &Pointer::root(),
+        )?;
+        Ok(Schema::new(
+            schema,
+            program,
+            scan,
+            root_base,
+            self.config.clone(),
+        ))
     }
 }
 
@@ -557,7 +606,6 @@ struct Slots<'d> {
     dependencies: Option<(NodeRef<'d>, NodeRef<'d>)>,
     format: Option<NodeRef<'d>>,
 }
-
 
 /// Keywords that are pure annotations (meta-data / content / identifiers /
 /// structural vocabulary). Never asserted (2020-12 §9).
@@ -610,12 +658,23 @@ fn compile_array_of_schemas<'d>(
     res_ptr: &Pointer,
 ) -> Result<Vec<Prg<'d>>, CompileError> {
     if value.kind() != ValueKind::Array {
-        return Err(invalid(format!("`{kw}` must be an array of schemas"), &value));
+        return Err(invalid(
+            format!("`{kw}` must be an array of schemas"),
+            &value,
+        ));
     }
     let kw_path = path.push(kw);
     let mut subs = Vec::new();
     for (i, item) in value.items().into_iter().enumerate() {
-        subs.push(compile_program(c, item, &kw_path.push(&i.to_string()), base, scan, depth, res_ptr)?);
+        subs.push(compile_program(
+            c,
+            item,
+            &kw_path.push(&i.to_string()),
+            base,
+            scan,
+            depth,
+            res_ptr,
+        )?);
     }
     Ok(subs)
 }
@@ -634,7 +693,9 @@ pub(crate) fn compile_program<'d>(
     res_ptr: &Pointer,
 ) -> Result<Prg<'d>, CompileError> {
     if depth > c.config.max_depth {
-        return Err(CompileError::TooDeep { cap: c.config.max_depth });
+        return Err(CompileError::TooDeep {
+            cap: c.config.max_depth,
+        });
     }
     match node.kind() {
         ValueKind::Bool => {
@@ -642,7 +703,10 @@ pub(crate) fn compile_program<'d>(
             Ok(Rc::new(Program {
                 path: path.clone(),
                 dyn_anchors: Vec::new(),
-                checks: vec![Check { at: path.clone(), kind: Kind::Always(b) }],
+                checks: vec![Check {
+                    at: path.clone(),
+                    kind: Kind::Always(b),
+                }],
                 tail: Vec::new(),
             }))
         }
@@ -681,7 +745,10 @@ fn compile_object<'d>(
 
     for entry in node.entries() {
         let Some(v) = entry.value else {
-            return Err(invalid(format!("keyword `{}` has no value", entry.key), &node));
+            return Err(invalid(
+                format!("keyword `{}` has no value", entry.key),
+                &node,
+            ));
         };
         match entry.key {
             "$id" => slots.id = v.as_str(),
@@ -731,14 +798,14 @@ fn compile_object<'d>(
     // in this object, including its own `$ref`.
     let (this_base, this_res): (std::borrow::Cow<'_, str>, Pointer) = match slots.id {
         Some(id) => (
-            std::borrow::Cow::Owned(
-                join_uri(base, id).ok_or_else(|| CompileError::Invalid {
+            std::borrow::Cow::Owned(join_uri(base, id).ok_or_else(|| {
+                CompileError::Invalid {
                     message: format!("invalid $id `{id}`"),
                     at: node
                         .get("$id")
                         .map_or_else(|| node.byte_range(), |n| n.byte_range()),
-                })?,
-            ),
+                }
+            })?),
             path.clone(),
         ),
         None => (std::borrow::Cow::Borrowed(base), res_ptr.clone()),
@@ -749,7 +816,10 @@ fn compile_object<'d>(
 
     macro_rules! emit {
         ($kw:expr, $kind:expr) => {
-            checks.push(Check { at: path.push($kw), kind: $kind });
+            checks.push(Check {
+                at: path.push($kw),
+                kind: $kind,
+            });
         };
     }
 
@@ -811,15 +881,19 @@ fn compile_object<'d>(
 
     // -- strings -------------------------------------------------------------
     if let Some(v) = slots.max_length {
-        let n = uint_of(v).ok_or_else(|| invalid("`maxLength` must be a non-negative integer", &v))?;
+        let n =
+            uint_of(v).ok_or_else(|| invalid("`maxLength` must be a non-negative integer", &v))?;
         emit!("maxLength", Kind::MaxLength(n));
     }
     if let Some(v) = slots.min_length {
-        let n = uint_of(v).ok_or_else(|| invalid("`minLength` must be a non-negative integer", &v))?;
+        let n =
+            uint_of(v).ok_or_else(|| invalid("`minLength` must be a non-negative integer", &v))?;
         emit!("minLength", Kind::MinLength(n));
     }
     if let Some(v) = slots.pattern {
-        let s = v.as_str().ok_or_else(|| invalid("`pattern` must be a string", &v))?;
+        let s = v
+            .as_str()
+            .ok_or_else(|| invalid("`pattern` must be a string", &v))?;
         let re = Regex::new(s).map_err(|e| CompileError::Regex(e.to_string()))?;
         emit!("pattern", Kind::Pattern(Rc::new(re)));
     }
@@ -841,7 +915,8 @@ fn compile_object<'d>(
         emit!("items", Kind::Items(sub, skip));
     }
     if let Some(v) = slots.prefix_items {
-        let subs = compile_array_of_schemas(c, "prefixItems", v, path, &this_base, scan, next, &this_res)?;
+        let subs =
+            compile_array_of_schemas(c, "prefixItems", v, path, &this_base, scan, next, &this_res)?;
         emit!("prefixItems", Kind::PrefixItems(subs));
     }
     if let Some(v) = slots.contains {
@@ -851,12 +926,21 @@ fn compile_object<'d>(
             None => 1,
         };
         let max = match slots.max_contains {
-            Some(m) => Some(uint_of(m)
-                .ok_or_else(|| invalid("`maxContains` must be a non-negative integer", &m))?),
+            Some(m) => Some(
+                uint_of(m)
+                    .ok_or_else(|| invalid("`maxContains` must be a non-negative integer", &m))?,
+            ),
             None => None,
         };
         let p = compile_sub(c, "contains", v, path, &this_base, scan, next, &this_res)?;
-        emit!("contains", Kind::Contains { schema: p, min, max });
+        emit!(
+            "contains",
+            Kind::Contains {
+                schema: p,
+                min,
+                max
+            }
+        );
     }
 
     // -- objects -------------------------------------------------------------
@@ -882,7 +966,15 @@ fn compile_object<'d>(
         let mut subs = Vec::new();
         for e in v.entries() {
             let Some(sv) = e.value else { continue };
-            let p = compile_program(c, sv, &kw_path.push(e.key), &this_base, scan, next, &this_res)?;
+            let p = compile_program(
+                c,
+                sv,
+                &kw_path.push(e.key),
+                &this_base,
+                scan,
+                next,
+                &this_res,
+            )?;
             subs.push((e.key, p));
         }
         emit!("properties", Kind::Properties(subs));
@@ -896,7 +988,15 @@ fn compile_object<'d>(
         for e in v.entries() {
             let Some(sv) = e.value else { continue };
             let re = Regex::new(e.key).map_err(|err| CompileError::Regex(err.to_string()))?;
-            let p = compile_program(c, sv, &kw_path.push(e.key), &this_base, scan, next, &this_res)?;
+            let p = compile_program(
+                c,
+                sv,
+                &kw_path.push(e.key),
+                &this_base,
+                scan,
+                next,
+                &this_res,
+            )?;
             subs.push((Rc::new(re), p));
         }
         emit!("patternProperties", Kind::PatternProperties(subs));
@@ -908,7 +1008,16 @@ fn compile_object<'d>(
         if !bool_true {
             let sub = match v.kind() {
                 ValueKind::Bool => None,
-                _ => Some(compile_sub(c, "additionalProperties", v, path, &this_base, scan, next, &this_res)?),
+                _ => Some(compile_sub(
+                    c,
+                    "additionalProperties",
+                    v,
+                    path,
+                    &this_base,
+                    scan,
+                    next,
+                    &this_res,
+                )?),
             };
             checks.push(Check {
                 at: path.push("additionalProperties"),
@@ -921,7 +1030,16 @@ fn compile_object<'d>(
         }
     }
     if let Some(v) = slots.property_names {
-        let p = compile_sub(c, "propertyNames", v, path, &this_base, scan, next, &this_res)?;
+        let p = compile_sub(
+            c,
+            "propertyNames",
+            v,
+            path,
+            &this_base,
+            scan,
+            next,
+            &this_res,
+        )?;
         emit!("propertyNames", Kind::PropertyNames(p));
     }
     if let Some(v) = slots.unevaluated_properties {
@@ -929,9 +1047,21 @@ fn compile_object<'d>(
         if !bool_true {
             let sub = match v.kind() {
                 ValueKind::Bool => None,
-                _ => Some(compile_sub(c, "unevaluatedProperties", v, path, &this_base, scan, next, &this_res)?),
+                _ => Some(compile_sub(
+                    c,
+                    "unevaluatedProperties",
+                    v,
+                    path,
+                    &this_base,
+                    scan,
+                    next,
+                    &this_res,
+                )?),
             };
-            tail.push(Check { at: path.push("unevaluatedProperties"), kind: Kind::UnevaluatedProperties(sub) });
+            tail.push(Check {
+                at: path.push("unevaluatedProperties"),
+                kind: Kind::UnevaluatedProperties(sub),
+            });
         }
     }
     if let Some(v) = slots.unevaluated_items {
@@ -939,23 +1069,38 @@ fn compile_object<'d>(
         if !bool_true {
             let sub = match v.kind() {
                 ValueKind::Bool => None,
-                _ => Some(compile_sub(c, "unevaluatedItems", v, path, &this_base, scan, next, &this_res)?),
+                _ => Some(compile_sub(
+                    c,
+                    "unevaluatedItems",
+                    v,
+                    path,
+                    &this_base,
+                    scan,
+                    next,
+                    &this_res,
+                )?),
             };
-            tail.push(Check { at: path.push("unevaluatedItems"), kind: Kind::UnevaluatedItems(sub) });
+            tail.push(Check {
+                at: path.push("unevaluatedItems"),
+                kind: Kind::UnevaluatedItems(sub),
+            });
         }
     }
 
     // -- composition ---------------------------------------------------------
     if let Some(v) = slots.all_of {
-        let subs = compile_array_of_schemas(c, "allOf", v, path, &this_base, scan, next, &this_res)?;
+        let subs =
+            compile_array_of_schemas(c, "allOf", v, path, &this_base, scan, next, &this_res)?;
         emit!("allOf", Kind::AllOf(subs));
     }
     if let Some(v) = slots.any_of {
-        let subs = compile_array_of_schemas(c, "anyOf", v, path, &this_base, scan, next, &this_res)?;
+        let subs =
+            compile_array_of_schemas(c, "anyOf", v, path, &this_base, scan, next, &this_res)?;
         emit!("anyOf", Kind::AnyOf(subs));
     }
     if let Some(v) = slots.one_of {
-        let subs = compile_array_of_schemas(c, "oneOf", v, path, &this_base, scan, next, &this_res)?;
+        let subs =
+            compile_array_of_schemas(c, "oneOf", v, path, &this_base, scan, next, &this_res)?;
         emit!("oneOf", Kind::OneOf(subs));
     }
     if let Some(v) = slots.not {
@@ -968,9 +1113,22 @@ fn compile_object<'d>(
         // `if` without `then`/`else` asserts nothing.
         if slots.then.is_some() || slots.else_.is_some() {
             let cond = compile_sub(c, "if", cond_v, path, &this_base, scan, next, &this_res)?;
-            let thn = slots.then.map(|t| compile_sub(c, "then", t, path, &this_base, scan, next, &this_res)).transpose()?;
-            let els = slots.else_.map(|e| compile_sub(c, "else", e, path, &this_base, scan, next, &this_res)).transpose()?;
-            checks.push(Check { at: path.push("if"), kind: Kind::If { cond, then: thn, alt: els } });
+            let thn = slots
+                .then
+                .map(|t| compile_sub(c, "then", t, path, &this_base, scan, next, &this_res))
+                .transpose()?;
+            let els = slots
+                .else_
+                .map(|e| compile_sub(c, "else", e, path, &this_base, scan, next, &this_res))
+                .transpose()?;
+            checks.push(Check {
+                at: path.push("if"),
+                kind: Kind::If {
+                    cond,
+                    then: thn,
+                    alt: els,
+                },
+            });
         }
     }
 
@@ -998,7 +1156,15 @@ fn compile_object<'d>(
         let mut subs = Vec::new();
         for e in v.entries() {
             let Some(sv) = e.value else { continue };
-            let p = compile_program(c, sv, &kw_path.push(e.key), &this_base, scan, next, &this_res)?;
+            let p = compile_program(
+                c,
+                sv,
+                &kw_path.push(e.key),
+                &this_base,
+                scan,
+                next,
+                &this_res,
+            )?;
             subs.push((e.key, p));
         }
         emit!("dependentSchemas", Kind::DependentSchemas(subs));
@@ -1020,7 +1186,15 @@ fn compile_object<'d>(
             let Some(sv) = e.value else { continue };
             match sv.kind() {
                 ValueKind::Object | ValueKind::Bool => {
-                    let p = compile_program(c, sv, &kw_path.push(e.key), &this_base, scan, next, &this_res)?;
+                    let p = compile_program(
+                        c,
+                        sv,
+                        &kw_path.push(e.key),
+                        &this_base,
+                        scan,
+                        next,
+                        &this_res,
+                    )?;
                     schemas.push((e.key, p));
                 }
                 ValueKind::Array => {
@@ -1045,10 +1219,16 @@ fn compile_object<'d>(
             }
         }
         if !schemas.is_empty() {
-            checks.push(Check { at: kw_path.clone(), kind: Kind::DependentSchemas(schemas) });
+            checks.push(Check {
+                at: kw_path.clone(),
+                kind: Kind::DependentSchemas(schemas),
+            });
         }
         if !required.is_empty() {
-            checks.push(Check { at: kw_path.clone(), kind: Kind::DependentRequired(required) });
+            checks.push(Check {
+                at: kw_path.clone(),
+                kind: Kind::DependentRequired(required),
+            });
         }
     }
 
@@ -1069,21 +1249,28 @@ fn compile_object<'d>(
 
     // -- format --------------------------------------------------------------
     if let Some(v) = slots.format
-        && c.config.format_assertion {
-            let name = v.as_str().ok_or_else(|| invalid("`format` must be a string", &v))?;
-            emit!("format", Kind::Format(Rc::from(name)));
-        }
+        && c.config.format_assertion
+    {
+        let name = v
+            .as_str()
+            .ok_or_else(|| invalid("`format` must be a string", &v))?;
+        emit!("format", Kind::Format(Rc::from(name)));
+    }
 
     // -- assemble ------------------------------------------------------------
-    let dyn_anchors = slots.dynamic_anchor.map_or(Vec::new(), |name| vec![Rc::from(name)]);
-    Ok(Rc::new(Program { path: path.clone(), dyn_anchors, checks, tail }))
+    let dyn_anchors = slots
+        .dynamic_anchor
+        .map_or(Vec::new(), |name| vec![Rc::from(name)]);
+    Ok(Rc::new(Program {
+        path: path.clone(),
+        dyn_anchors,
+        checks,
+        tail,
+    }))
 }
 
 /// Compiles a `{ name: [names…] }` map (`dependentRequired`).
-fn compile_string_map<'d>(
-    value: NodeRef<'d>,
-    kw: &str,
-) -> CompileOutputs<'d> {
+fn compile_string_map<'d>(value: NodeRef<'d>, kw: &str) -> CompileOutputs<'d> {
     if value.kind() != ValueKind::Object {
         return Err(invalid(format!("{kw} must be an object"), &value));
     }
@@ -1091,12 +1278,18 @@ fn compile_string_map<'d>(
     for e in value.entries() {
         let Some(sv) = e.value else { continue };
         if sv.kind() != ValueKind::Array {
-            return Err(invalid(format!("{kw} values must be arrays of strings"), &sv));
+            return Err(invalid(
+                format!("{kw} values must be arrays of strings"),
+                &sv,
+            ));
         }
         let mut deps = Vec::new();
         for item in sv.items() {
             let Some(s) = item.as_str() else {
-                return Err(invalid(format!("{kw} array entries must be strings"), &item));
+                return Err(invalid(
+                    format!("{kw} array entries must be strings"),
+                    &item,
+                ));
             };
             deps.push(Box::<str>::from(s));
         }

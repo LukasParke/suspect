@@ -48,7 +48,10 @@ impl Value {
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {
         match self {
-            Value::Object(entries) => entries.iter().find(|(k, _)| k.as_ref() == key).map(|(_, v)| v),
+            Value::Object(entries) => entries
+                .iter()
+                .find(|(k, _)| k.as_ref() == key)
+                .map(|(_, v)| v),
             _ => None,
         }
     }
@@ -186,9 +189,34 @@ fn needs_quoting(s: &str) -> bool {
         || s.parse::<i64>().is_ok()
         || s.parse::<f64>().is_ok()
         || matches!(s, "true" | "false" | "null" | "~")
-        || !s
-            .chars()
-            .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '$' | '+' | '(' | ')' | '?' | '=' | ':' | '\'' | '*' | '&' | '%' | '!' | '#' | '[' | ']' | '<' | '>' | '~'))
+        || !s.chars().all(|c| {
+            c.is_alphanumeric()
+                || matches!(
+                    c,
+                    '_' | '-'
+                        | '.'
+                        | '/'
+                        | '@'
+                        | '$'
+                        | '+'
+                        | '('
+                        | ')'
+                        | '?'
+                        | '='
+                        | ':'
+                        | '\''
+                        | '*'
+                        | '&'
+                        | '%'
+                        | '!'
+                        | '#'
+                        | '['
+                        | ']'
+                        | '<'
+                        | '>'
+                        | '~'
+                )
+        })
 }
 
 fn write_yaml_str(s: &str, out: &mut String) {
@@ -247,11 +275,10 @@ fn write_yaml(v: &Value, out: &mut String, depth: usize, in_flow_parent: bool) {
                 return;
             }
             for (i, (k, val)) in entries.iter().enumerate() {
-                if !(i == 0 && depth == 0 && in_flow_parent)
-                    && (i > 0 || depth > 0) {
-                        out.push('\n');
-                        pad(out, depth);
-                    }
+                if !(i == 0 && depth == 0 && in_flow_parent) && (i > 0 || depth > 0) {
+                    out.push('\n');
+                    pad(out, depth);
+                }
                 write_yaml_str(k, out);
                 out.push(':');
                 match val {
@@ -280,7 +307,10 @@ mod tests {
     fn json_emission() {
         let v = Value::Object(vec![
             ("a".into(), Value::Int(1)),
-            ("b".into(), Value::Array(vec![Value::Str("x".into()), Value::Null])),
+            (
+                "b".into(),
+                Value::Array(vec![Value::Str("x".into()), Value::Null]),
+            ),
             ("c".into(), Value::Float(1.5)),
         ]);
         assert_eq!(v.to_json(), r#"{"a":1,"b":["x",null],"c":1.5}"#);
@@ -302,7 +332,10 @@ mod tests {
     fn yaml_emission() {
         let v = Value::Object(vec![
             ("openapi".into(), Value::Str("3.1.0".into())),
-            ("info".into(), Value::Object(vec![("title".into(), Value::Str("T".into()))])),
+            (
+                "info".into(),
+                Value::Object(vec![("title".into(), Value::Str("T".into()))]),
+            ),
             ("n".into(), Value::Int(3)),
         ]);
         let yaml = v.to_yaml();
@@ -322,11 +355,17 @@ mod tests {
     fn merge_semantics() {
         let mut base = Value::Object(vec![
             ("a".into(), Value::Int(1)),
-            ("nested".into(), Value::Object(vec![("x".into(), Value::Int(1))])),
+            (
+                "nested".into(),
+                Value::Object(vec![("x".into(), Value::Int(1))]),
+            ),
         ]);
         let update = Value::Object(vec![
             ("a".into(), Value::Int(2)),
-            ("nested".into(), Value::Object(vec![("y".into(), Value::Int(9))])),
+            (
+                "nested".into(),
+                Value::Object(vec![("y".into(), Value::Int(9))]),
+            ),
             ("new".into(), Value::Bool(true)),
         ]);
         base.merge(&update);

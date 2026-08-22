@@ -14,10 +14,10 @@
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use suspect_low::{LowDoc, NodeRef, ValueKind};
-use suspect_source::{Source, Uri};
 use suspect_schema::{Compiler, Config};
+use suspect_source::{Source, Uri};
 use suspect_syntax::Format;
 
 const SCHEMA: &str = r##"{
@@ -82,8 +82,7 @@ fn bench_validate(c: &mut Criterion) {
 
 fn bench_first_error(c: &mut Criterion) {
     c.bench_function("validate_first/invalid_instance", |b| {
-        let bad =
-            format!("{{\"S\": {SCHEMA}, \"I\": {{\"pets\":[{{\"name\":3}}]}}}}");
+        let bad = format!("{{\"S\": {SCHEMA}, \"I\": {{\"pets\":[{{\"name\":3}}]}}}}");
         let doc = doc(&bad);
         let root = doc.root();
         let schema = Compiler::new(Config::default())
@@ -102,7 +101,10 @@ fn corpus_dir() -> PathBuf {
 fn load_corpus(name: &str) -> Option<LowDoc> {
     let path = corpus_dir().join(name);
     if !path.exists() {
-        eprintln!("[schema] skipping {name}: corpus file {} not found", path.display());
+        eprintln!(
+            "[schema] skipping {name}: corpus file {} not found",
+            path.display()
+        );
         return None;
     }
     match Source::from_path(&path) {
@@ -145,7 +147,10 @@ fn bench_compile_corpus(c: &mut Criterion) {
     // Warmup + sanity outside timing: compilation must succeed for at least
     // some schemas (exotic keyword combinations may legitimately fail).
     let compiler = Compiler::new(Config::default());
-    let ok = schemas.iter().filter(|(_, s)| compiler.compile(*s).is_ok()).count();
+    let ok = schemas
+        .iter()
+        .filter(|(_, s)| compiler.compile(*s).is_ok())
+        .count();
     eprintln!(
         "[schema] {NAME}: compiled {ok}/{} component schemas (warmup)",
         schemas.len()
@@ -211,16 +216,16 @@ fn value_for_type(ty: Option<&str>, wrong: bool) -> &'static str {
     }
 }
 
-fn build_inner_json(
-    schemas: &[(&str, NodeRef<'_>, Vec<&str>)],
-    wrong: bool,
-) -> String {
+fn build_inner_json(schemas: &[(&str, NodeRef<'_>, Vec<&str>)], wrong: bool) -> String {
     let mut out = String::from("{");
     for (i, (name, node, required)) in schemas.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
-        out.push_str(&format!("\"{}\":{{", name.replace('\\', "\\\\").replace('"', "\\\"")));
+        out.push_str(&format!(
+            "\"{}\":{{",
+            name.replace('\\', "\\\\").replace('"', "\\\"")
+        ));
         let props = node.get("properties");
         for (j, key) in required.iter().enumerate() {
             if j > 0 {
@@ -301,13 +306,15 @@ fn bench_validate_instances(c: &mut Criterion) {
 
     // Sanity outside timing: deliberately-wrong instances must produce
     // errors on at least one case.
-    let total_wrong_errors: usize =
-        cases.iter().map(|(s, c)| s.validate(c.wrong).len()).sum();
+    let total_wrong_errors: usize = cases.iter().map(|(s, c)| s.validate(c.wrong).len()).sum();
     eprintln!(
         "[schema] {} instance cases; wrong-instance errors total: {total_wrong_errors} (warmup)",
         cases.len()
     );
-    assert!(total_wrong_errors > 0, "deliberately-wrong instances must fail somewhere");
+    assert!(
+        total_wrong_errors > 0,
+        "deliberately-wrong instances must fail somewhere"
+    );
 
     let mut group = c.benchmark_group("validate_instances");
     group.throughput(criterion::Throughput::Elements(cases.len() as u64));
@@ -324,7 +331,12 @@ fn bench_validate_instances(c: &mut Criterion) {
     group.finish();
 }
 
-
-criterion_group!(benches, bench_compile, bench_validate, bench_first_error,
-    bench_compile_corpus, bench_validate_instances);
+criterion_group!(
+    benches,
+    bench_compile,
+    bench_validate,
+    bench_first_error,
+    bench_compile_corpus,
+    bench_validate_instances
+);
 criterion_main!(benches);

@@ -47,7 +47,11 @@ struct Inliner<'ws> {
 
 impl<'ws> Inliner<'ws> {
     fn new(ws: &'ws Workspace) -> Self {
-        let ids = ws.uris().into_iter().filter_map(|u| ws.get(&u).map(|h| (u, h.id()))).collect();
+        let ids = ws
+            .uris()
+            .into_iter()
+            .filter_map(|u| ws.get(&u).map(|h| (u, h.id())))
+            .collect();
         Self {
             ws,
             ids,
@@ -76,9 +80,10 @@ impl<'ws> Inliner<'ws> {
     fn root_of(&self, id: DocId) -> Option<NodeRef<'ws>> {
         for uri in self.ws.uris() {
             if let Some(handle) = self.ws.get(&uri)
-                && handle.id() == id {
-                    return Some(handle.doc().root());
-                }
+                && handle.id() == id
+            {
+                return Some(handle.doc().root());
+            }
         }
         None
     }
@@ -140,7 +145,9 @@ impl<'ws> Inliner<'ws> {
         let mut refs: Vec<RefRec> = Vec::new();
         let mut doc_ranges: Vec<(DocId, std::ops::Range<usize>)> = Vec::new();
         for uri in self.ws.uris() {
-            let Some(handle) = self.ws.get(&uri) else { continue };
+            let Some(handle) = self.ws.get(&uri) else {
+                continue;
+            };
             let doc = handle.id();
             let len = handle.doc().inner().bytes().len();
             doc_ranges.push((doc, 0..len.max(1)));
@@ -155,17 +162,21 @@ impl<'ws> Inliner<'ws> {
                 }
                 let target = match handle.resolve_edge(i) {
                     Ok(Resolution::Node(t)) => {
-                        let Some(d) = self.doc_id_of(t.syntax().doc().uri()) else { continue };
+                        let Some(d) = self.doc_id_of(t.syntax().doc().uri()) else {
+                            continue;
+                        };
                         Some(((d, t.path_from_root()), t.byte_range()))
                     }
-                    Ok(Resolution::WholeDoc(id)) => {
-                        Some(((id, Pointer::root()), 0..len.max(1)))
-                    }
+                    Ok(Resolution::WholeDoc(id)) => Some(((id, Pointer::root()), 0..len.max(1))),
                     // Chain loops and unresolved refs terminate via the
                     // marker/error paths in `inline_ref`; they add no edge.
                     _ => None,
                 };
-                refs.push(RefRec { doc, range: edge_at, target });
+                refs.push(RefRec {
+                    doc,
+                    range: edge_at,
+                    target,
+                });
             }
         }
 
@@ -183,9 +194,10 @@ impl<'ws> Inliner<'ws> {
         let mut seen: std::collections::HashSet<Loc> = std::collections::HashSet::new();
         for r in &refs {
             if let Some((loc, range)) = &r.target
-                && seen.insert(loc.clone()) {
-                    nodes.push((loc.clone(), range.clone()));
-                }
+                && seen.insert(loc.clone())
+            {
+                nodes.push((loc.clone(), range.clone()));
+            }
         }
         for (doc, range) in &doc_ranges {
             let loc = (*doc, Pointer::root());
@@ -202,12 +214,19 @@ impl<'ws> Inliner<'ws> {
         let adj: Vec<Vec<usize>> = nodes
             .iter()
             .map(|(loc, range)| {
-                let Some(idxs) = by_doc.get(&loc.0) else { return Vec::new() };
+                let Some(idxs) = by_doc.get(&loc.0) else {
+                    return Vec::new();
+                };
                 let lo = idxs.partition_point(|&i| refs[i].range.start < range.start);
                 idxs[lo..]
                     .iter()
                     .take_while(|&&i| refs[i].range.start < range.end)
-                    .filter_map(|&i| refs[i].target.as_ref().and_then(|t| id_of.get(&t.0).copied()))
+                    .filter_map(|&i| {
+                        refs[i]
+                            .target
+                            .as_ref()
+                            .and_then(|t| id_of.get(&t.0).copied())
+                    })
                     .collect()
             })
             .collect();
@@ -294,16 +313,19 @@ impl<'ws> Inliner<'ws> {
         if node.kind() == ValueKind::Object {
             if allow_refs
                 && let Some(ref_node) = node.get("$ref")
-                    && ref_node.kind() == ValueKind::Str
-                        && let Some(raw) = ref_node.as_str() {
-                            return self.inline_ref(node, ref_node, raw);
-                        }
+                && ref_node.kind() == ValueKind::Str
+                && let Some(raw) = ref_node.as_str()
+            {
+                return self.inline_ref(node, ref_node, raw);
+            }
             let entries = node
                 .entries()
                 .into_iter()
                 .map(|e| {
-                    let v =
-                        e.value.map(|v| self.inline_inner(v, allow_refs)).unwrap_or(Value::Null);
+                    let v = e
+                        .value
+                        .map(|v| self.inline_inner(v, allow_refs))
+                        .unwrap_or(Value::Null);
                     (e.key.into(), v)
                 })
                 .collect();
@@ -311,7 +333,10 @@ impl<'ws> Inliner<'ws> {
         }
         if node.kind() == ValueKind::Array {
             return Value::Array(
-                node.items().into_iter().map(|n| self.inline_inner(n, allow_refs)).collect(),
+                node.items()
+                    .into_iter()
+                    .map(|n| self.inline_inner(n, allow_refs))
+                    .collect(),
             );
         }
         Value::from_node(node)
@@ -408,8 +433,10 @@ fn bundle_keep(input: &Path, shown: &str, out: Option<&Path>) -> anyhow::Result<
         for (i, edge) in handle.edges().iter().enumerate() {
             edges += 1;
             if let Err(e) = handle.resolve_edge(i) {
-                let (line, col) =
-                    doc.inner().line_index().line_col(doc.inner().bytes(), edge.at.start);
+                let (line, col) = doc
+                    .inner()
+                    .line_index()
+                    .line_col(doc.inner().bytes(), edge.at.start);
                 errors.push(Finding {
                     file: uri.to_string(),
                     severity: Severity::Error,
@@ -464,7 +491,9 @@ fn bundle_inline(
 
     eprintln!(
         "inlined {} $ref(s), {} cycle(s) emitted as x-suspect-cyclic, {} unresolved",
-        inliner.refs_inlined, inliner.cycles_inlined, inliner.errors.len()
+        inliner.refs_inlined,
+        inliner.cycles_inlined,
+        inliner.errors.len()
     );
     let has_error = inliner.errors.iter().any(|f| f.severity == Severity::Error);
     Ok(i32::from(has_error))

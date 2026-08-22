@@ -32,7 +32,9 @@ impl Path {
     /// characters, unknown function, invalid regex literal).
     pub fn parse(input: &str) -> Result<Path, crate::PathError> {
         let ast = crate::parser::parse(input)?;
-        Ok(Path { segments: ast.segments })
+        Ok(Path {
+            segments: ast.segments,
+        })
     }
 
     /// Runs the query against `root` and returns the normalized node list:
@@ -40,7 +42,9 @@ impl Path {
     /// first-discovery order). `$` inside filters refers to `root`.
     #[must_use]
     pub fn query<'d>(&self, root: NodeRef<'d>) -> NodeList<'d> {
-        NodeList { nodes: run_query(&self.segments, root, root) }
+        NodeList {
+            nodes: run_query(&self.segments, root, root),
+        }
     }
 }
 
@@ -133,12 +137,7 @@ fn run_segments<'d>(
 /// Descendant segment: apply selectors at every node of the subtree rooted
 /// at `node` (inclusive), via an explicit stack — no recursion, so deeply
 /// nested documents cannot overflow the stack.
-fn descend<'d>(
-    seg: &Segment,
-    node: NodeRef<'d>,
-    root: NodeRef<'d>,
-    out: &mut Vec<NodeRef<'d>>,
-) {
+fn descend<'d>(seg: &Segment, node: NodeRef<'d>, root: NodeRef<'d>, out: &mut Vec<NodeRef<'d>>) {
     let mut stack = vec![node];
     while let Some(n) = stack.pop() {
         apply_segment(seg, n, root, out);
@@ -271,9 +270,11 @@ pub(crate) fn eval_bool(expr: &LogicalExpr, current: NodeRef<'_>, root: NodeRef<
         LogicalExpr::Or(a, b) => eval_bool(a, current, root) || eval_bool(b, current, root),
         LogicalExpr::And(a, b) => eval_bool(a, current, root) && eval_bool(b, current, root),
         LogicalExpr::Not(a) => !eval_bool(a, current, root),
-        LogicalExpr::Compare(l, op, r) => {
-            compare(*op, eval_comparable(l, current, root), eval_comparable(r, current, root))
-        }
+        LogicalExpr::Compare(l, op, r) => compare(
+            *op,
+            eval_comparable(l, current, root),
+            eval_comparable(r, current, root),
+        ),
         LogicalExpr::Test(t) => match t {
             Testable::Query(q) => test_query(q, current, root),
             Testable::Func(f) => test_function(f, current, root),
@@ -295,10 +296,7 @@ fn test_query(q: &QueryAst, current: NodeRef<'_>, root: NodeRef<'_>) -> bool {
 
 /// Resolves a singular query (all child segments of name/index selectors)
 /// to its single target, or nothing.
-pub(crate) fn resolve_singular<'d>(
-    q: &QueryAst,
-    base: NodeRef<'d>,
-) -> Option<NodeRef<'d>> {
+pub(crate) fn resolve_singular<'d>(q: &QueryAst, base: NodeRef<'d>) -> Option<NodeRef<'d>> {
     debug_assert!(q.is_singular());
     let mut node = base;
     for seg in &q.segments {

@@ -13,7 +13,9 @@ pub(crate) fn overlay_rules() -> Vec<Rule> {
             Severity::Hint,
             f,
             &["$.info"],
-            Function::Defined { property: "description".into() },
+            Function::Defined {
+                property: "description".into(),
+            },
         ),
         Rule::new(
             "overlay-action-description",
@@ -21,7 +23,9 @@ pub(crate) fn overlay_rules() -> Vec<Rule> {
             Severity::Hint,
             f,
             &["$.actions.*"],
-            Function::Defined { property: "description".into() },
+            Function::Defined {
+                property: "description".into(),
+            },
         ),
     ]
 }
@@ -36,7 +40,9 @@ pub(crate) fn arazzo_rules() -> Vec<Rule> {
             Severity::Hint,
             f,
             &["$.workflows.*"],
-            Function::Defined { property: "description".into() },
+            Function::Defined {
+                property: "description".into(),
+            },
         ),
         Rule::new(
             "arazzo-step-operation",
@@ -44,7 +50,9 @@ pub(crate) fn arazzo_rules() -> Vec<Rule> {
             Severity::Error,
             f,
             &["$.workflows.*.steps.*"],
-            Function::Xor { properties: vec!["operationId".into(), "operationPath".into()] },
+            Function::Xor {
+                properties: vec!["operationId".into(), "operationPath".into()],
+            },
         ),
     ]
 }

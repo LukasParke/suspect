@@ -14,7 +14,6 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use suspect_oas::Session;
 use suspect_ref::WorkspaceBuilder;
 
-
 fn corpus_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
 }
@@ -29,8 +28,6 @@ fn read_corpus(name: &str) -> Option<(PathBuf, Vec<u8>)> {
         }
     }
 }
-
-
 
 /// Full typed walk: operations -> operation_ids, paths, schemas,
 /// info/servers/tags. Returns aggregate counts so nothing is DCE'd.
@@ -66,9 +63,15 @@ fn walk(api: &suspect_oas::OpenApi<'_>) -> (usize, usize, usize) {
 fn bench_typed_traversal(c: &mut Criterion) {
     for (name, file, sample) in [
         ("typed_traversal/stripe_yaml", "stripe.yaml", Some(10)),
-        ("typed_traversal/github_yaml", "api.github.com.yaml", Some(10)),
+        (
+            "typed_traversal/github_yaml",
+            "api.github.com.yaml",
+            Some(10),
+        ),
     ] {
-        let Some((_, bytes)) = read_corpus(file) else { continue };
+        let Some((_, bytes)) = read_corpus(file) else {
+            continue;
+        };
         let entry = file.to_owned();
         let ws = WorkspaceBuilder::new()
             .root(corpus_dir())
@@ -90,7 +93,9 @@ fn bench_typed_traversal(c: &mut Criterion) {
         g.bench_function("load_and_walk", |b| {
             b.iter(|| {
                 let session = Session::new(Arc::clone(&ws));
-                let api = session.load(black_box(&entry)).expect("entry loads as OpenAPI");
+                let api = session
+                    .load(black_box(&entry))
+                    .expect("entry loads as OpenAPI");
                 black_box(walk(&api))
             })
         });

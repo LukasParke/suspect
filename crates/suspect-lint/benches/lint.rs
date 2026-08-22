@@ -5,9 +5,9 @@
 //! Corpus files are gitignored; each document is skipped gracefully when
 //! absent.
 
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
-use criterion::{Criterion, criterion_group, criterion_main};
 use suspect_lint::Linter;
 use suspect_low::LowDoc;
 use suspect_source::{Source, Uri};
@@ -30,7 +30,10 @@ fn corpus_dir() -> PathBuf {
 fn load_corpus(name: &str) -> Option<LowDoc> {
     let path = Path::new(&*corpus_dir()).join(name);
     if !path.exists() {
-        eprintln!("[lint] skipping {name}: corpus file {} not found", path.display());
+        eprintln!(
+            "[lint] skipping {name}: corpus file {} not found",
+            path.display()
+        );
         return None;
     }
     let bytes = match std::fs::read(&path) {
@@ -40,7 +43,8 @@ fn load_corpus(name: &str) -> Option<LowDoc> {
             return None;
         }
     };
-    let uri = Uri::from_path(&path).unwrap_or_else(|e| panic!("valid URI for {}: {e}", path.display()));
+    let uri =
+        Uri::from_path(&path).unwrap_or_else(|e| panic!("valid URI for {}: {e}", path.display()));
     Some(LowDoc::parse(uri, Source::from_vec(bytes)))
 }
 
@@ -49,7 +53,9 @@ fn bench_corpus_lint(c: &mut Criterion) {
     let linter = Linter::spectral_default();
 
     for (name, sample_size) in CORPUS_DOCS {
-        let Some(doc) = load_corpus(name) else { continue };
+        let Some(doc) = load_corpus(name) else {
+            continue;
+        };
 
         // Warmup + sanity: the default pack must produce findings without
         // panicking on any of these documents.

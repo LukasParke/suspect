@@ -46,10 +46,18 @@ pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
     let root = doc.root();
 
     if doc.version().is_none() {
-        out.push(diag(root.byte_range(), "arazzo-missing-version", "missing `arazzo` version field"));
+        out.push(diag(
+            root.byte_range(),
+            "arazzo-missing-version",
+            "missing `arazzo` version field",
+        ));
     }
     if root.get("info").and_then(|i| i.get("title")).is_none() {
-        out.push(diag(root.byte_range(), "arazzo-missing-info-title", "missing `info.title`"));
+        out.push(diag(
+            root.byte_range(),
+            "arazzo-missing-info-title",
+            "missing `info.title`",
+        ));
     }
     if root.get("sourceDescriptions").is_none() {
         out.push(diag(
@@ -84,24 +92,34 @@ pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
             ));
         }
     }
-    let workflow_ids: FxHashSet<&str> =
-        doc.workflows().iter().map(|w| w.workflow_id).collect();
+    let workflow_ids: FxHashSet<&str> = doc.workflows().iter().map(|w| w.workflow_id).collect();
 
     for wf in doc.workflows() {
         if wf.workflow_id.is_empty() {
-            out.push(diag(wf.node().byte_range(), "arazzo-missing-workflow-id", "workflow missing `workflowId`"));
+            out.push(diag(
+                wf.node().byte_range(),
+                "arazzo-missing-workflow-id",
+                "workflow missing `workflowId`",
+            ));
         }
         let mut step_ids: FxHashMap<&str, ()> = FxHashMap::default();
         for step in wf.steps() {
             if step.step_id.is_empty() {
-                out.push(diag(step.node().byte_range(), "arazzo-missing-step-id", "step missing `stepId`"));
+                out.push(diag(
+                    step.node().byte_range(),
+                    "arazzo-missing-step-id",
+                    "step missing `stepId`",
+                ));
                 continue;
             }
             if step_ids.insert(step.step_id, ()).is_some() {
                 out.push(diag(
                     step.node().byte_range(),
                     "arazzo-duplicate-step-id",
-                    format!("duplicate stepId `{}` in workflow `{}`", step.step_id, wf.workflow_id),
+                    format!(
+                        "duplicate stepId `{}` in workflow `{}`",
+                        step.step_id, wf.workflow_id
+                    ),
                 ));
             }
             validate_step(step, &workflow_ids, &mut out);
@@ -130,7 +148,10 @@ fn validate_step<'d>(
         out.push(diag(
             step.node().byte_range(),
             "arazzo-step-missing-operation",
-            format!("step `{}` must set `operationId` or `operationPath`", step.step_id),
+            format!(
+                "step `{}` must set `operationId` or `operationPath`",
+                step.step_id
+            ),
         ));
     }
     if let Some(path) = step.operation_path() {
@@ -154,7 +175,10 @@ fn validate_step<'d>(
             Some(cond) => {
                 if crate::expr::parse(cond).is_err() {
                     // criteria conditions may be embedded expressions too
-                    if parse_embedded(cond).iter().all(|p| matches!(p, crate::ExprPart::Text(_))) {
+                    if parse_embedded(cond)
+                        .iter()
+                        .all(|p| matches!(p, crate::ExprPart::Text(_)))
+                    {
                         out.push(diag(
                             c.node().byte_range(),
                             "arazzo-invalid-condition",
@@ -178,10 +202,7 @@ fn validate_step<'d>(
 }
 
 /// Checks every step output value expression across all workflows.
-fn validate_step_outputs<'d>(
-    doc: &ArazzoDoc<'d>,
-    out: &mut Vec<ArazzoDiagnostic>,
-) {
+fn validate_step_outputs<'d>(doc: &ArazzoDoc<'d>, out: &mut Vec<ArazzoDiagnostic>) {
     for wf in doc.workflows() {
         for step in wf.steps() {
             for (_key, value) in step.outputs() {
@@ -195,32 +216,34 @@ fn validate_parameter(p: &crate::ParameterView<'_>, out: &mut Vec<ArazzoDiagnost
     if p.reference().is_some() {
         return; // reusable reference; resolved elsewhere
     }
-    if (p.name().is_none() || p.location().is_none())
-        && p.target().is_none() {
-            out.push(diag(
-                p.node().byte_range(),
-                "arazzo-parameter-incomplete",
-                "parameter needs `name`+`in` (or a `target` for step parameters)",
-            ));
-        }
+    if (p.name().is_none() || p.location().is_none()) && p.target().is_none() {
+        out.push(diag(
+            p.node().byte_range(),
+            "arazzo-parameter-incomplete",
+            "parameter needs `name`+`in` (or a `target` for step parameters)",
+        ));
+    }
     if let Some(target) = p.target()
-        && !target.starts_with('$') {
-            out.push(diag(
-                p.node().byte_range(),
-                "arazzo-invalid-target",
-                format!("parameter target must be a runtime expression: {target:?}"),
-            ));
-        }
+        && !target.starts_with('$')
+    {
+        out.push(diag(
+            p.node().byte_range(),
+            "arazzo-invalid-target",
+            format!("parameter target must be a runtime expression: {target:?}"),
+        ));
+    }
     if let Some(value) = p.value()
         && value.kind() == suspect_low::ValueKind::Str
-            && let Some(s) = value.as_str() {
-                for part in parse_embedded(s) {
-                    if let crate::ExprPart::Expr(e) = part
-                        && e == crate::Expr::Text(String::new()) {
-                            continue;
-                        }
-                }
+        && let Some(s) = value.as_str()
+    {
+        for part in parse_embedded(s) {
+            if let crate::ExprPart::Expr(e) = part
+                && e == crate::Expr::Text(String::new())
+            {
+                continue;
             }
+        }
+    }
 }
 
 fn validate_actions<'d>(
@@ -241,13 +264,14 @@ fn validate_actions<'d>(
                     ));
                 }
                 if let Some(wf) = wf_ref
-                    && !workflow_ids.contains(wf) {
-                        out.push(diag(
-                            action.node().byte_range(),
-                            "arazzo-goto-unknown-workflow",
-                            format!("`goto` references unknown workflow `{wf}`"),
-                        ));
-                    }
+                    && !workflow_ids.contains(wf)
+                {
+                    out.push(diag(
+                        action.node().byte_range(),
+                        "arazzo-goto-unknown-workflow",
+                        format!("`goto` references unknown workflow `{wf}`"),
+                    ));
+                }
             }
             Some("retry") | Some("end") => {}
             Some(other) => out.push(diag(
@@ -292,7 +316,12 @@ fn check_output_expression<'d>(
             .collect(),
     };
     for e in exprs {
-        if let crate::Expr::WorkflowOutput { workflow, step, name } = &e {
+        if let crate::Expr::WorkflowOutput {
+            workflow,
+            step,
+            name,
+        } = &e
+        {
             let target_wf = doc.workflows().iter().find(|w| w.workflow_id == workflow);
             let Some(wf) = target_wf else {
                 out.push(diag(
@@ -324,6 +353,14 @@ fn check_output_expression<'d>(
     }
 }
 
-fn diag(range: std::ops::Range<usize>, code: &'static str, message: impl Into<String>) -> ArazzoDiagnostic {
-    ArazzoDiagnostic { code, message: message.into(), range }
+fn diag(
+    range: std::ops::Range<usize>,
+    code: &'static str,
+    message: impl Into<String>,
+) -> ArazzoDiagnostic {
+    ArazzoDiagnostic {
+        code,
+        message: message.into(),
+        range,
+    }
 }

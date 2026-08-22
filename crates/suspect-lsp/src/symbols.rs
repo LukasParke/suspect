@@ -3,15 +3,14 @@
 use suspect_arazzo::ArazzoDoc;
 use suspect_low::{LowDoc, NodeRef, SpecFamily};
 use suspect_syntax::SyntaxKind;
-use tower_lsp::lsp_types::{
-    DocumentSymbol, FoldingRange, SymbolKind,
-};
+use tower_lsp::lsp_types::{DocumentSymbol, FoldingRange, SymbolKind};
 
 use crate::state::lsp_range;
 
 /// HTTP methods surfaced as one symbol each under a path item.
-pub(crate) const METHODS: &[&str] =
-    &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+pub(crate) const METHODS: &[&str] = &[
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
 
 /// Convenience constructor for a [`DocumentSymbol`] whose selection range
 /// equals its full range.
@@ -20,7 +19,7 @@ fn symbol(
     kind: SymbolKind,
     range: tower_lsp::lsp_types::Range,
     children: Vec<DocumentSymbol>,
-    ) -> DocumentSymbol {
+) -> DocumentSymbol {
     #[allow(deprecated)]
     DocumentSymbol {
         name,
@@ -73,9 +72,14 @@ fn oas_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
 
     if let Some(components) = root.get("components") {
         for section in components.entries() {
-            let Some(sec_val) = section.value else { continue };
-            let kind =
-                if section.key == "schemas" { SymbolKind::CLASS } else { SymbolKind::VARIABLE };
+            let Some(sec_val) = section.value else {
+                continue;
+            };
+            let kind = if section.key == "schemas" {
+                SymbolKind::CLASS
+            } else {
+                SymbolKind::VARIABLE
+            };
             let children = sec_val
                 .entries()
                 .iter()
@@ -96,7 +100,12 @@ fn oas_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     if let Some(tags) = root.get("tags") {
         for tag in tags.items() {
             let name = tag.get("name").and_then(|n| n.as_str()).unwrap_or("tag");
-            out.push(symbol(name.to_owned(), SymbolKind::VARIABLE, rng(&tag), Vec::new()));
+            out.push(symbol(
+                name.to_owned(),
+                SymbolKind::VARIABLE,
+                rng(&tag),
+                Vec::new(),
+            ));
         }
     }
     out
@@ -116,10 +125,20 @@ fn arazzo_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
                 .steps()
                 .iter()
                 .map(|s| {
-                    symbol(s.step_id.to_owned(), SymbolKind::VARIABLE, rng(&s.node()), Vec::new())
+                    symbol(
+                        s.step_id.to_owned(),
+                        SymbolKind::VARIABLE,
+                        rng(&s.node()),
+                        Vec::new(),
+                    )
                 })
                 .collect();
-            symbol(w.workflow_id.to_owned(), SymbolKind::FUNCTION, rng(&w.node()), steps)
+            symbol(
+                w.workflow_id.to_owned(),
+                SymbolKind::FUNCTION,
+                rng(&w.node()),
+                steps,
+            )
         })
         .collect()
 }
@@ -130,7 +149,9 @@ fn overlay_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     let bytes = low.inner().bytes();
     let li = low.inner().line_index();
     let rng = |n: &NodeRef<'_>| lsp_range(bytes, li, n.byte_range());
-    let Some(actions) = low.root().get("actions") else { return Vec::new() };
+    let Some(actions) = low.root().get("actions") else {
+        return Vec::new();
+    };
     actions
         .items()
         .iter()
@@ -141,7 +162,12 @@ fn overlay_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
                 .and_then(|t| t.as_str())
                 .unwrap_or("action")
                 .to_owned();
-            symbol(format!("{name} ({i})"), SymbolKind::VARIABLE, rng(action), Vec::new())
+            symbol(
+                format!("{name} ({i})"),
+                SymbolKind::VARIABLE,
+                rng(action),
+                Vec::new(),
+            )
         })
         .collect()
 }
@@ -179,11 +205,16 @@ mod tests {
 
     fn low_of(text: &str) -> LowDoc {
         let uri = suspect_source::Uri::parse("file:///mem/doc.yaml").unwrap();
-        LowDoc::parse(uri, suspect_source::Source::from_vec(text.as_bytes().to_vec()))
+        LowDoc::parse(
+            uri,
+            suspect_source::Source::from_vec(text.as_bytes().to_vec()),
+        )
     }
 
     fn find<'a>(syms: &'a [DocumentSymbol], name: &str) -> &'a DocumentSymbol {
-        syms.iter().find(|s| s.name == name).unwrap_or_else(|| panic!("missing {name}: {syms:?}"))
+        syms.iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("missing {name}: {syms:?}"))
     }
 
     #[test]
@@ -220,7 +251,13 @@ components:
         assert_eq!(pet.kind, SymbolKind::CLASS);
         let responses = find(&syms, "responses");
         assert_eq!(responses.kind, SymbolKind::MODULE);
-        let err = responses.children.as_ref().unwrap().iter().find(|s| s.name == "Err").unwrap();
+        let err = responses
+            .children
+            .as_ref()
+            .unwrap()
+            .iter()
+            .find(|s| s.name == "Err")
+            .unwrap();
         assert_eq!(err.kind, SymbolKind::VARIABLE);
         assert_eq!(find(&syms, "pets").kind, SymbolKind::VARIABLE);
     }

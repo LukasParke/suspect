@@ -52,7 +52,13 @@ fn bench_pointer_lookups(c: &mut Criterion) {
     let keys: Vec<String> = doc
         .root()
         .get("paths")
-        .map(|paths| paths.entries().into_iter().map(|e| e.key.to_owned()).collect())
+        .map(|paths| {
+            paths
+                .entries()
+                .into_iter()
+                .map(|e| e.key.to_owned())
+                .collect()
+        })
         .unwrap_or_default();
     assert!(!keys.is_empty(), "fixture must contain paths");
     let pointers: Vec<Pointer> = keys.iter().take(100).map(|k| path_get_pointer(k)).collect();

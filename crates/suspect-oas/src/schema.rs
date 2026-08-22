@@ -15,7 +15,11 @@ pub struct SchemaView<'s> {
 
 impl<'s> SchemaView<'s> {
     pub(crate) fn new(session: &'s Session, node: NodeRef<'s>) -> Self {
-        Self { session, node, cyclic: false }
+        Self {
+            session,
+            node,
+            cyclic: false,
+        }
     }
 
     /// The raw node this view points at (before any `$ref` resolution).
@@ -52,7 +56,10 @@ impl<'s> SchemaView<'s> {
                         out
                     }
                 }
-                Err(CycleGuard) => Self { cyclic: true, ..*self },
+                Err(CycleGuard) => Self {
+                    cyclic: true,
+                    ..*self
+                },
             },
             None => *self,
         }
@@ -106,9 +113,11 @@ impl<'s> SchemaView<'s> {
     /// present.
     #[must_use]
     pub fn nullable(&self) -> bool {
-        self.resolved().get("nullable").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("nullable")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
-
 
     #[must_use]
     /// Prose describing the schema's purpose.
@@ -132,13 +141,19 @@ impl<'s> SchemaView<'s> {
     /// Inline example values from the 3.1-style array keyword; empty when
     /// absent or not an array.
     pub fn examples(&self) -> Vec<NodeRef<'s>> {
-        self.resolved().get("examples").map(|n| n.items()).unwrap_or_default()
+        self.resolved()
+            .get("examples")
+            .map(|n| n.items())
+            .unwrap_or_default()
     }
 
     #[must_use]
     /// Allowed values from the `enum` keyword, in document order.
     pub fn enum_values(&self) -> Vec<NodeRef<'s>> {
-        self.resolved().get("enum").map(|n| n.items()).unwrap_or_default()
+        self.resolved()
+            .get("enum")
+            .map(|n| n.items())
+            .unwrap_or_default()
     }
 
     #[must_use]
@@ -182,7 +197,9 @@ impl<'s> SchemaView<'s> {
     /// `items` — element subschema (3.0 object form or 3.1 subschema).
     #[must_use]
     pub fn items(&self) -> Option<SchemaView<'s>> {
-        self.resolved().get("items").map(|v| SchemaView::new(self.session, v))
+        self.resolved()
+            .get("items")
+            .map(|v| SchemaView::new(self.session, v))
     }
 
     #[must_use]
@@ -190,14 +207,24 @@ impl<'s> SchemaView<'s> {
     pub fn prefix_items(&self) -> Vec<SchemaView<'s>> {
         self.resolved()
             .get("prefixItems")
-            .map(|n| n.items().into_iter().map(|v| SchemaView::new(self.session, v)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|v| SchemaView::new(self.session, v))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
     fn keyword_schemas(&self, key: &str) -> Vec<SchemaView<'s>> {
         self.resolved()
             .get(key)
-            .map(|n| n.items().into_iter().map(|v| SchemaView::new(self.session, v)).collect())
+            .map(|n| {
+                n.items()
+                    .into_iter()
+                    .map(|v| SchemaView::new(self.session, v))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -222,43 +249,60 @@ impl<'s> SchemaView<'s> {
     #[must_use]
     /// Negated subschema (`not`). `None` when absent.
     pub fn not(&self) -> Option<SchemaView<'s>> {
-        self.resolved().get("not").map(|v| SchemaView::new(self.session, v))
+        self.resolved()
+            .get("not")
+            .map(|v| SchemaView::new(self.session, v))
     }
 
     #[must_use]
     /// Polymorphism discriminator attached to this schema.
     pub fn discriminator(&self) -> Option<Discriminator<'s>> {
-        self.resolved().get("discriminator").map(|n| Discriminator::new(self.session, n))
+        self.resolved()
+            .get("discriminator")
+            .map(|n| Discriminator::new(self.session, n))
     }
 
     #[must_use]
     /// XML serialization metadata for this schema.
     pub fn xml(&self) -> Option<Xml<'s>> {
-        self.resolved().get("xml").map(|n| Xml::new(self.session, n))
+        self.resolved()
+            .get("xml")
+            .map(|n| Xml::new(self.session, n))
     }
 
     #[must_use]
     /// External documentation reference for this schema.
     pub fn external_docs(&self) -> Option<ExternalDocumentation<'s>> {
-        self.resolved().get("externalDocs").map(|n| ExternalDocumentation::new(self.session, n))
+        self.resolved()
+            .get("externalDocs")
+            .map(|n| ExternalDocumentation::new(self.session, n))
     }
 
     #[must_use]
     /// True when explicitly marked deprecated.
     pub fn deprecated(&self) -> bool {
-        self.resolved().get("deprecated").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("deprecated")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 
     #[must_use]
     /// True for response-only properties (`readOnly`).
     pub fn read_only(&self) -> bool {
-        self.resolved().get("readOnly").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("readOnly")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 
     #[must_use]
     /// True for request-only properties (`writeOnly`).
     pub fn write_only(&self) -> bool {
-        self.resolved().get("writeOnly").and_then(|n| n.as_bool()).unwrap_or(false)
+        self.resolved()
+            .get("writeOnly")
+            .and_then(|n| n.as_bool())
+            .unwrap_or(false)
     }
 
     // numeric bounds
@@ -271,7 +315,9 @@ impl<'s> SchemaView<'s> {
     /// form is reported; the 3.0 boolean-modifier spelling is ignored.
     #[must_use]
     pub fn exclusive_maximum(&self) -> Option<f64> {
-        self.resolved().get("exclusiveMaximum").and_then(|n| n.as_f64())
+        self.resolved()
+            .get("exclusiveMaximum")
+            .and_then(|n| n.as_f64())
     }
     /// Inclusive lower numeric bound (`minimum`).
     #[must_use]
@@ -282,7 +328,9 @@ impl<'s> SchemaView<'s> {
     /// [`SchemaView::exclusive_maximum`] for the boolean-form caveat.
     #[must_use]
     pub fn exclusive_minimum(&self) -> Option<f64> {
-        self.resolved().get("exclusiveMinimum").and_then(|n| n.as_f64())
+        self.resolved()
+            .get("exclusiveMinimum")
+            .and_then(|n| n.as_f64())
     }
     /// Step size a valid value must be a multiple of (`multipleOf`).
     #[must_use]
@@ -325,12 +373,16 @@ impl<'s> SchemaView<'s> {
     #[must_use]
     /// Maximum object property count (`maxProperties`).
     pub fn max_properties(&self) -> Option<u64> {
-        self.resolved().get("maxProperties").and_then(|n| n.as_u64())
+        self.resolved()
+            .get("maxProperties")
+            .and_then(|n| n.as_u64())
     }
     #[must_use]
     /// Minimum object property count (`minProperties`).
     pub fn min_properties(&self) -> Option<u64> {
-        self.resolved().get("minProperties").and_then(|n| n.as_u64())
+        self.resolved()
+            .get("minProperties")
+            .and_then(|n| n.as_u64())
     }
 
     /// Vendor extension value (`x-*`) on the resolved schema.
@@ -338,7 +390,6 @@ impl<'s> SchemaView<'s> {
     pub fn extension(&self, name: &str) -> Option<NodeRef<'s>> {
         self.resolved().get(name)
     }
-
 }
 
 /// Bit set of JSON-Schema primitive types.

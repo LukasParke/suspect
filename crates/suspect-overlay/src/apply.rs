@@ -44,7 +44,7 @@ pub fn apply(
                 return Err(OverlayError::InvalidAction {
                     index,
                     reason: "target did not compile".into(),
-                })
+                });
             }
         };
 
@@ -52,10 +52,15 @@ pub fn apply(
         // YAML and parse it, giving NodeRefs whose pointers map 1:1 onto the
         // owned tree's structure (key order and value shapes are preserved).
         let scratch_yaml = tree.to_yaml();
-        let scratch =
-            LowDoc::parse("mem://overlay-target.yaml".into(), Source::from_vec(scratch_yaml.into_bytes()));
-        let matches: Vec<Pointer> =
-            path.query(scratch.root()).iter().map(|node| node.path_from_root()).collect();
+        let scratch = LowDoc::parse(
+            "mem://overlay-target.yaml".into(),
+            Source::from_vec(scratch_yaml.into_bytes()),
+        );
+        let matches: Vec<Pointer> = path
+            .query(scratch.root())
+            .iter()
+            .map(|node| node.path_from_root())
+            .collect();
 
         if matches.is_empty() {
             unmatched.push(action.target.to_owned());
@@ -71,13 +76,17 @@ pub fn apply(
                 remove_at(&mut tree, &ptr);
             }
         } else {
-            let update_node = action
-                .update
-                .ok_or(OverlayError::InvalidAction { index, reason: "missing `update`".into() })?;
+            let update_node = action.update.ok_or(OverlayError::InvalidAction {
+                index,
+                reason: "missing `update`".into(),
+            })?;
             let update = Value::from_node(update_node);
             for ptr in &matches {
                 let node = resolve_mut(&mut tree, ptr.tokens()).ok_or_else(|| {
-                    OverlayError::TargetNotContainer { index, path: action.target.to_owned() }
+                    OverlayError::TargetNotContainer {
+                        index,
+                        path: action.target.to_owned(),
+                    }
                 })?;
                 match node {
                     Value::Object(_) => node.merge(&update),
@@ -89,21 +98,25 @@ pub fn apply(
                             return Err(OverlayError::TargetNotContainer {
                                 index,
                                 path: action.target.to_owned(),
-                            })
+                            });
                         }
                     },
                     _ => {
                         return Err(OverlayError::TargetNotContainer {
                             index,
                             path: action.target.to_owned(),
-                        })
+                        });
                     }
                 }
             }
         }
     }
 
-    Ok(Applied { output: tree, applied_actions, unmatched_targets: unmatched })
+    Ok(Applied {
+        output: tree,
+        applied_actions,
+        unmatched_targets: unmatched,
+    })
 }
 
 fn resolve_mut<'t>(tree: &'t mut Value, tokens: &[Box<str>]) -> Option<&'t mut Value> {
@@ -111,7 +124,10 @@ fn resolve_mut<'t>(tree: &'t mut Value, tokens: &[Box<str>]) -> Option<&'t mut V
     for token in tokens {
         cur = match cur {
             Value::Object(entries) => {
-                &mut entries.iter_mut().find(|(k, _)| k.as_ref() == token.as_ref())?.1
+                &mut entries
+                    .iter_mut()
+                    .find(|(k, _)| k.as_ref() == token.as_ref())?
+                    .1
             }
             Value::Array(items) => {
                 let idx: usize = token.parse().ok()?;
@@ -124,16 +140,23 @@ fn resolve_mut<'t>(tree: &'t mut Value, tokens: &[Box<str>]) -> Option<&'t mut V
 }
 
 fn remove_at(tree: &mut Value, ptr: &Pointer) {
-    let Some(parent_ptr) = ptr.parent() else { return };
-    let Some(last) = ptr.tokens().last() else { return };
-    let Some(parent) = resolve_mut(tree, parent_ptr.tokens()) else { return };
+    let Some(parent_ptr) = ptr.parent() else {
+        return;
+    };
+    let Some(last) = ptr.tokens().last() else {
+        return;
+    };
+    let Some(parent) = resolve_mut(tree, parent_ptr.tokens()) else {
+        return;
+    };
     match parent {
         Value::Object(entries) => entries.retain(|(k, _)| k.as_ref() != last.as_ref()),
         Value::Array(items) => {
             if let Ok(idx) = last.parse::<usize>()
-                && idx < items.len() {
-                    items.remove(idx);
-                }
+                && idx < items.len()
+            {
+                items.remove(idx);
+            }
         }
         _ => {}
     }

@@ -17,8 +17,8 @@ use std::ops::Range;
 
 use suspect_low::{NodeRef, Pointer, ValueKind};
 
+use crate::edges::{ParsedRef, parse_ref};
 use crate::error::RefError;
-use crate::edges::{parse_ref, ParsedRef};
 use crate::workspace::Workspace;
 
 /// One visited location in a resolution chain or cycle.
@@ -92,13 +92,19 @@ pub(crate) enum MemoVal {
 
 impl Workspace {
     /// Memoized pointer resolution against one loaded document.
-    pub(crate) fn resolve_memo(&self, doc: crate::DocId, ptr: &Pointer) -> Result<MemoVal, RefError> {
+    pub(crate) fn resolve_memo(
+        &self,
+        doc: crate::DocId,
+        ptr: &Pointer,
+    ) -> Result<MemoVal, RefError> {
         let key = (doc, ptr.to_path().into_boxed_str());
         if let Some(mv) = self.memos.get(&key) {
-            self.memo_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.memo_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return Ok(mv.clone());
         }
-        self.memo_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.memo_misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mv = self.eval_chain(doc, ptr)?;
         self.memos.insert(key, mv.clone());
         Ok(mv)
@@ -118,10 +124,12 @@ impl Workspace {
         key_str.push_str(raw);
         let key = (doc, key_str.into_boxed_str());
         if let Some(mv) = self.memos.get(&key) {
-            self.memo_hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.memo_hits
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return Ok(mv.clone());
         }
-        self.memo_misses.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.memo_misses
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mv = self.eval_edge(doc, containing, raw)?;
         self.memos.insert(key, mv.clone());
         Ok(mv)
@@ -133,11 +141,7 @@ impl Workspace {
     /// landing as a [`Step`]. Revisiting any step yields [`MemoVal::Cycle`].
     /// Plain (non-`$ref`) landing spots are also memoized under their own
     /// keys as shortcuts.
-    pub(crate) fn eval_chain(
-        &self,
-        doc: crate::DocId,
-        ptr: &Pointer,
-    ) -> Result<MemoVal, RefError> {
+    pub(crate) fn eval_chain(&self, doc: crate::DocId, ptr: &Pointer) -> Result<MemoVal, RefError> {
         if ptr.is_root() {
             return Ok(MemoVal::Whole(doc));
         }
@@ -160,7 +164,10 @@ impl Workspace {
         let d = self.extend_doc(doc).ok_or_else(|| RefError::MissingDoc {
             uri: format!("doc #{doc}"),
         })?;
-        let seed = vec![Step { doc, at: d.root().byte_range() }];
+        let seed = vec![Step {
+            doc,
+            at: d.root().byte_range(),
+        }];
         let next = self.hop(doc, containing, raw)?;
         self.run_chain(next, seed)
     }
@@ -173,7 +180,9 @@ impl Workspace {
         let mut cur = start;
         loop {
             if steps.len() > self.depth_cap {
-                return Err(RefError::TooDeep { cap: self.depth_cap });
+                return Err(RefError::TooDeep {
+                    cap: self.depth_cap,
+                });
             }
             let (d, p) = &cur;
             if p.is_root() {
@@ -284,7 +293,10 @@ impl Workspace {
         match parsed {
             ParsedRef::Local(p) => {
                 if base != self.doc_uri(doc) {
-                    return Ok(ParsedRef::External { uri: base, pointer: p });
+                    return Ok(ParsedRef::External {
+                        uri: base,
+                        pointer: p,
+                    });
                 }
                 Ok(ParsedRef::Local(p))
             }
@@ -322,19 +334,19 @@ impl Workspace {
     }
 
     /// Materializes a memoized outcome into a borrowed [`Resolution`].
-    pub(crate) fn materialize<'ws>(
-        &'ws self,
-        mv: &MemoVal,
-    ) -> Result<Resolution<'ws>, RefError> {
+    pub(crate) fn materialize<'ws>(&'ws self, mv: &MemoVal) -> Result<Resolution<'ws>, RefError> {
         match mv {
             MemoVal::Loc { doc, ptr } => {
-                let d = self
-                    .extend_doc(*doc)
-                    .ok_or_else(|| RefError::MissingDoc { uri: format!("doc #{doc}") })?;
-                let node = d.root().pointer(ptr).ok_or_else(|| RefError::MissingPointer {
-                    doc_uri: d.uri().to_string(),
-                    pointer: ptr.to_path(),
+                let d = self.extend_doc(*doc).ok_or_else(|| RefError::MissingDoc {
+                    uri: format!("doc #{doc}"),
                 })?;
+                let node = d
+                    .root()
+                    .pointer(ptr)
+                    .ok_or_else(|| RefError::MissingPointer {
+                        doc_uri: d.uri().to_string(),
+                        pointer: ptr.to_path(),
+                    })?;
                 Ok(Resolution::Node(node))
             }
             MemoVal::Whole(d) => Ok(Resolution::WholeDoc(*d)),

@@ -71,8 +71,7 @@ fn date(s: &str) -> bool {
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
         return false;
     }
-    let (Some(y), Some(m), Some(d)) =
-        (digits(&b[0..4]), digits(&b[5..7]), digits(&b[8..10]))
+    let (Some(y), Some(m), Some(d)) = (digits(&b[0..4]), digits(&b[5..7]), digits(&b[8..10]))
     else {
         return false;
     };
@@ -94,8 +93,7 @@ fn time(s: &str) -> bool {
     if b.len() < 9 || b[2] != b':' || b[5] != b':' {
         return false;
     }
-    let (Some(h), Some(m), Some(sec)) =
-        (digits(&b[0..2]), digits(&b[3..5]), digits(&b[6..8]))
+    let (Some(h), Some(m), Some(sec)) = (digits(&b[0..2]), digits(&b[3..5]), digits(&b[6..8]))
     else {
         return false;
     };
@@ -127,7 +125,9 @@ fn time(s: &str) -> bool {
 }
 
 fn date_time(s: &str) -> bool {
-    let Some(t) = s.find(['T', 't']) else { return false };
+    let Some(t) = s.find(['T', 't']) else {
+        return false;
+    };
     date(&s[..t]) && time(&s[t + 1..])
 }
 
@@ -145,14 +145,16 @@ fn email(s: &str) -> bool {
     {
         return false;
     }
-    if domain.is_empty() || !domain.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'.') {
+    if domain.is_empty()
+        || !domain
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'.')
+    {
         return false;
     }
-    domain.split('.').all(|l| {
-        !l.is_empty()
-            && !l.starts_with('-')
-            && !l.ends_with('-')
-    })
+    domain
+        .split('.')
+        .all(|l| !l.is_empty() && !l.starts_with('-') && !l.ends_with('-'))
 }
 
 fn hostname(s: &str) -> bool {
@@ -162,7 +164,9 @@ fn hostname(s: &str) -> bool {
     s.trim_end_matches('.').split('.').all(|label| {
         !label.is_empty()
             && label.len() <= 63
-            && label.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+            && label
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || c == b'-')
             && !label.starts_with('-')
             && !label.ends_with('-')
     })
@@ -202,10 +206,7 @@ fn ipv6(s: &str) -> bool {
                 }
                 out.push(0);
                 out.push(0);
-            } else if g.is_empty()
-                || g.len() > 4
-                || !g.bytes().all(|c| c.is_ascii_hexdigit())
-            {
+            } else if g.is_empty() || g.len() > 4 || !g.bytes().all(|c| c.is_ascii_hexdigit()) {
                 return false;
             } else {
                 out.push(1);
@@ -253,8 +254,14 @@ fn uri(s: &str, require_scheme: bool) -> bool {
     };
     let _ = rest;
     // Forbidden characters anywhere in the reference.
-    !s.bytes()
-        .any(|c| c <= 0x20 || c >= 0x7f || matches!(c, b'"' | b'<' | b'>' | b'\\' | b'^' | b'`' | b'{' | b'|' | b'}'))
+    !s.bytes().any(|c| {
+        c <= 0x20
+            || c >= 0x7f
+            || matches!(
+                c,
+                b'"' | b'<' | b'>' | b'\\' | b'^' | b'`' | b'{' | b'|' | b'}'
+            )
+    })
 }
 
 fn uuid(s: &str) -> bool {
@@ -264,9 +271,9 @@ fn uuid(s: &str) -> bool {
         && b[13] == b'-'
         && b[18] == b'-'
         && b[23] == b'-'
-        && b.iter().enumerate().all(|(i, c)| {
-            i == 8 || i == 13 || i == 18 || i == 23 || c.is_ascii_hexdigit()
-        })
+        && b.iter()
+            .enumerate()
+            .all(|(i, c)| i == 8 || i == 13 || i == 18 || i == 23 || c.is_ascii_hexdigit())
 }
 
 fn json_pointer(s: &str) -> bool {

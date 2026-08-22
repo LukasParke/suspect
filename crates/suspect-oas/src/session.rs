@@ -4,8 +4,6 @@ use std::sync::Arc;
 use suspect_low::{NodeRef, SpecFamily};
 use suspect_ref::{Resolution, Workspace, WorkspaceError};
 
-
-
 /// OpenAPI 3.x version of a document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OasVersion {
@@ -95,7 +93,12 @@ impl Session {
         let version = OasVersion::sniff(handle.doc()).ok_or(ModelError::NotOpenApi {
             family: handle.doc().sniff_family(),
         })?;
-        Ok(OpenApi::new(self, version, handle.id(), handle.doc().root()))
+        Ok(OpenApi::new(
+            self,
+            version,
+            handle.id(),
+            handle.doc().root(),
+        ))
     }
 
     /// Resolves a `$ref` value node to its target node.
@@ -154,7 +157,12 @@ impl<'s> OpenApi<'s> {
         doc: suspect_ref::DocId,
         root: NodeRef<'s>,
     ) -> Self {
-        Self { session, version, doc, root }
+        Self {
+            session,
+            version,
+            doc,
+            root,
+        }
     }
 
     /// Family of this document (diagnostics).

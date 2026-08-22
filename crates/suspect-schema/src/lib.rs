@@ -64,7 +64,14 @@ impl<'d> Schema<'d> {
         root_base: String,
         config: Config,
     ) -> Self {
-        Self { root, program, scan, root_base, config, cache: RefCell::new(FxHashMap::default()) }
+        Self {
+            root,
+            program,
+            scan,
+            root_base,
+            config,
+            cache: RefCell::new(FxHashMap::default()),
+        }
     }
 
     /// Validates an instance against this schema.

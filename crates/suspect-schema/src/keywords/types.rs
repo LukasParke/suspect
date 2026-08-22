@@ -71,8 +71,7 @@ pub(crate) fn value_eq(a: NodeRef<'_>, b: NodeRef<'_>, depth: usize) -> bool {
         (ValueKind::Array, ValueKind::Array) => {
             let ai = a.items();
             let bi = b.items();
-            ai.len() == bi.len()
-                && ai.iter().zip(&bi).all(|(x, y)| value_eq(*x, *y, depth + 1))
+            ai.len() == bi.len() && ai.iter().zip(&bi).all(|(x, y)| value_eq(*x, *y, depth + 1))
         }
         (ValueKind::Object, ValueKind::Object) => {
             let ae = a.entries();

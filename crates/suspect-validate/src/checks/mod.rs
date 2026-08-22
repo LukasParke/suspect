@@ -76,7 +76,9 @@ pub(crate) fn template_vars(s: &str) -> Vec<&str> {
     let mut out: Vec<&str> = Vec::new();
     let mut rest = s;
     while let Some(open) = rest.find('{') {
-        let Some(close_rel) = rest[open + 1..].find('}') else { break };
+        let Some(close_rel) = rest[open + 1..].find('}') else {
+            break;
+        };
         let name = &rest[open + 1..open + 1 + close_rel];
         if !name.is_empty() && !out.contains(&name) {
             out.push(name);
@@ -93,5 +95,8 @@ pub(crate) fn range_of(node: Option<NodeRef<'_>>, fallback: NodeRef<'_>) -> std:
 
 /// True when `s` is one of the JSON-Schema primitive type names.
 fn is_valid_type(s: &str) -> bool {
-    matches!(s, "null" | "boolean" | "object" | "array" | "number" | "integer" | "string")
+    matches!(
+        s,
+        "null" | "boolean" | "object" | "array" | "number" | "integer" | "string"
+    )
 }

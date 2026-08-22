@@ -13,8 +13,11 @@ pub(crate) fn check_server_variables(api: &OpenApi<'_>, out: &mut Vec<Diagnostic
     let check_servers = |servers: Vec<Server<'_>>, out: &mut Vec<Diagnostic>| {
         for server in servers {
             let Some(url) = server.url() else { continue };
-            let declared: FxHashSet<&str> =
-                server.variables().into_iter().map(|(name, _)| name).collect();
+            let declared: FxHashSet<&str> = server
+                .variables()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
             for var in template_vars(url) {
                 if !declared.contains(var) {
                     out.push(diag(

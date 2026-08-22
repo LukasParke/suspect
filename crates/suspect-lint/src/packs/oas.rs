@@ -191,5 +191,7 @@ pub(crate) fn rules() -> Vec<Rule> {
 }
 
 fn property_defined(name: &str) -> Function {
-    Function::Defined { property: name.into() }
+    Function::Defined {
+        property: name.into(),
+    }
 }

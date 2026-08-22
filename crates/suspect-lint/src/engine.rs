@@ -6,7 +6,7 @@ use std::ops::Range;
 use suspect_low::{LowDoc, Pointer};
 
 use crate::rule::Rule;
-use crate::{ruleset, Severity};
+use crate::{Severity, ruleset};
 
 /// One lint result: a rule violation anchored to a byte range and pointer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +97,9 @@ impl Linter {
         findings.sort_unstable_by(|a, b| {
             (&a.range.start, &a.range.end, &a.code).cmp(&(&b.range.start, &b.range.end, &b.code))
         });
-        findings.dedup_by(|a, b| a.range == b.range && a.code == b.code && a.message == b.message && a.path == b.path);
+        findings.dedup_by(|a, b| {
+            a.range == b.range && a.code == b.code && a.message == b.message && a.path == b.path
+        });
         findings
     }
 

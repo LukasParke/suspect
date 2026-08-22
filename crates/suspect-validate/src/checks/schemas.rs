@@ -9,7 +9,9 @@ use crate::diagnostic::{Diagnostic, Severity};
 /// Walks every schema reachable from `components/schemas` (through
 /// properties, items, combinators) once each and runs the schema checks.
 pub(crate) fn check_schemas(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
-    let Some(components) = api.components() else { return };
+    let Some(components) = api.components() else {
+        return;
+    };
     let mut visited = FxHashSet::default();
     for (_, schema) in components.schemas() {
         walk(schema, &mut visited, api, out);
@@ -56,32 +58,36 @@ fn walk<'s>(
 fn check_unknown_type(api: &OpenApi<'_>, schema: SchemaView<'_>, out: &mut Vec<Diagnostic>) {
     use suspect_low::ValueKind;
 
-    let Some(t) = schema.node().get("type") else { return };
+    let Some(t) = schema.node().get("type") else {
+        return;
+    };
     match t.kind() {
         ValueKind::Str => {
             if let Some(s) = t.as_str()
-                && !is_valid_type(s) {
-                    out.push(diag(
-                        api,
-                        "oas-schema-unknown-type",
-                        Severity::Error,
-                        t.byte_range(),
-                        format!("unknown schema type `{s}`"),
-                    ));
-                }
+                && !is_valid_type(s)
+            {
+                out.push(diag(
+                    api,
+                    "oas-schema-unknown-type",
+                    Severity::Error,
+                    t.byte_range(),
+                    format!("unknown schema type `{s}`"),
+                ));
+            }
         }
         ValueKind::Array => {
             for item in t.items() {
                 if let Some(s) = item.as_str()
-                    && !is_valid_type(s) {
-                        out.push(diag(
-                            api,
-                            "oas-schema-unknown-type",
-                            Severity::Error,
-                            item.byte_range(),
-                            format!("unknown schema type `{s}` in type array"),
-                        ));
-                    }
+                    && !is_valid_type(s)
+                {
+                    out.push(diag(
+                        api,
+                        "oas-schema-unknown-type",
+                        Severity::Error,
+                        item.byte_range(),
+                        format!("unknown schema type `{s}` in type array"),
+                    ));
+                }
             }
         }
         _ => {}
@@ -91,11 +97,14 @@ fn check_unknown_type(api: &OpenApi<'_>, schema: SchemaView<'_>, out: &mut Vec<D
 /// `oas-discriminator-missing-property` (Error) and
 /// `oas-discriminator-unknown-mapping` (Error).
 fn check_discriminator(api: &OpenApi<'_>, schema: SchemaView<'_>, out: &mut Vec<Diagnostic>) {
-    let Some(d) = schema.discriminator() else { return };
+    let Some(d) = schema.discriminator() else {
+        return;
+    };
 
     if let Some(pn) = d.property_name()
-        && !property_declared(&schema, pn, 8) {
-            out.push(diag(
+        && !property_declared(&schema, pn, 8)
+    {
+        out.push(diag(
                 api,
                 "oas-discriminator-missing-property",
                 Severity::Error,
@@ -104,10 +113,12 @@ fn check_discriminator(api: &OpenApi<'_>, schema: SchemaView<'_>, out: &mut Vec<
                     "discriminator propertyName `{pn}` is neither required nor a declared property of the schema"
                 ),
             ));
-        }
+    }
 
     for (key, target) in d.mapping() {
-        let Some(name) = target.strip_prefix("#/components/schemas/") else { continue };
+        let Some(name) = target.strip_prefix("#/components/schemas/") else {
+            continue;
+        };
         let exists = api.components().is_some_and(|c| c.schema(name).is_some());
         if !exists {
             let range = d
@@ -136,5 +147,8 @@ fn property_declared(schema: &SchemaView<'_>, pn: &str, depth: usize) -> bool {
     if depth == 0 {
         return false;
     }
-    schema.all_of().iter().any(|member| property_declared(&member.resolved(), pn, depth - 1))
+    schema
+        .all_of()
+        .iter()
+        .any(|member| property_declared(&member.resolved(), pn, depth - 1))
 }

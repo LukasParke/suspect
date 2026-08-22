@@ -1,16 +1,14 @@
 //! Diagnostic production: syntax errors, semantic validation, linting, and
 //! Arazzo checks, all mapped into tower-lsp `Diagnostic`s.
 
+use std::sync::Arc;
 use suspect_arazzo::{ArazzoDoc, validate_arazzo};
 use suspect_low::{LowDoc, SpecFamily};
 use suspect_oas::Session;
+use suspect_ref::Workspace;
 use suspect_source::LineIndex;
 use suspect_validate::{self, validate_entry};
-use std::sync::Arc;
-use suspect_ref::Workspace;
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, NumberOrString,
-};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use crate::state::lsp_range;
 
@@ -70,7 +68,16 @@ pub fn syntax_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
     let li = low.inner().line_index();
     low.syntax_errors()
         .iter()
-        .map(|e| make(bytes, li, e.range.clone(), DiagnosticSeverity::ERROR, "syntax", e.message.clone()))
+        .map(|e| {
+            make(
+                bytes,
+                li,
+                e.range.clone(),
+                DiagnosticSeverity::ERROR,
+                "syntax",
+                e.message.clone(),
+            )
+        })
         .collect()
 }
 
@@ -92,7 +99,16 @@ pub fn validate_diagnostics(ws: &Arc<Workspace>, low: &LowDoc) -> Vec<Diagnostic
     let li = low.inner().line_index();
     diags
         .into_iter()
-        .map(|d| make(bytes, li, d.range, map_validate_severity(d.severity), d.code, d.message))
+        .map(|d| {
+            make(
+                bytes,
+                li,
+                d.range,
+                map_validate_severity(d.severity),
+                d.code,
+                d.message,
+            )
+        })
         .collect()
 }
 
@@ -123,7 +139,16 @@ pub fn arazzo_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
     let li = low.inner().line_index();
     validate_arazzo(&doc)
         .into_iter()
-        .map(|d| make(bytes, li, d.range, DiagnosticSeverity::ERROR, d.code, d.message))
+        .map(|d| {
+            make(
+                bytes,
+                li,
+                d.range,
+                DiagnosticSeverity::ERROR,
+                d.code,
+                d.message,
+            )
+        })
         .collect()
 }
 
@@ -150,7 +175,10 @@ mod tests {
         let path = dir.join(name);
         std::fs::write(&path, text).unwrap();
         let uri = suspect_source::Uri::from_path(&path).unwrap();
-        LowDoc::parse(uri, suspect_source::Source::from_vec(text.as_bytes().to_vec()))
+        LowDoc::parse(
+            uri,
+            suspect_source::Source::from_vec(text.as_bytes().to_vec()),
+        )
     }
 
     #[test]
@@ -174,11 +202,23 @@ mod tests {
         use suspect_lint::Severity as L;
         use suspect_validate::Severity as V;
         assert_eq!(map_validate_severity(V::Error), DiagnosticSeverity::ERROR);
-        assert_eq!(map_validate_severity(V::Warning), DiagnosticSeverity::WARNING);
-        assert_eq!(map_validate_severity(V::Info), DiagnosticSeverity::INFORMATION);
+        assert_eq!(
+            map_validate_severity(V::Warning),
+            DiagnosticSeverity::WARNING
+        );
+        assert_eq!(
+            map_validate_severity(V::Info),
+            DiagnosticSeverity::INFORMATION
+        );
         assert_eq!(map_lint_severity(L::Error), Some(DiagnosticSeverity::ERROR));
-        assert_eq!(map_lint_severity(L::Warn), Some(DiagnosticSeverity::WARNING));
-        assert_eq!(map_lint_severity(L::Info), Some(DiagnosticSeverity::INFORMATION));
+        assert_eq!(
+            map_lint_severity(L::Warn),
+            Some(DiagnosticSeverity::WARNING)
+        );
+        assert_eq!(
+            map_lint_severity(L::Info),
+            Some(DiagnosticSeverity::INFORMATION)
+        );
         assert_eq!(map_lint_severity(L::Hint), Some(DiagnosticSeverity::HINT));
         assert_eq!(map_lint_severity(L::Off), None);
     }
@@ -194,7 +234,11 @@ mod tests {
         let ws = Arc::new(ws);
         let diags = compute_diagnostics(Some(&ws), &low);
         // No syntax errors; everything else is well-formed.
-        assert!(diags.iter().all(|d| d.code != Some(NumberOrString::String("syntax".to_owned()))));
+        assert!(
+            diags
+                .iter()
+                .all(|d| d.code != Some(NumberOrString::String("syntax".to_owned())))
+        );
         assert!(diags.iter().all(|d| d.source.as_deref() == Some(SOURCE)));
         // Without a workspace only syntax + lint + arazzo run.
         let bare = compute_diagnostics(None, &low);

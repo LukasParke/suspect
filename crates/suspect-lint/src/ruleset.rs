@@ -100,7 +100,9 @@ fn parse_rule(code: &str, node: Option<NodeRef<'_>>) -> Result<Rule, RulesetErro
                         .ok_or_else(|| bad_rule(code, format!("unknown severity `{text}`")))?
                 }
                 ValueKind::Int | ValueKind::Float => {
-                    let n = sev.as_i64().ok_or_else(|| bad_rule(code, "severity must be 0-3"))?;
+                    let n = sev
+                        .as_i64()
+                        .ok_or_else(|| bad_rule(code, "severity must be 0-3"))?;
                     Severity::from_number(n)
                         .ok_or_else(|| bad_rule(code, format!("severity {n} out of range 0-3")))?
                 }
@@ -146,7 +148,12 @@ fn parse_rule(code: &str, node: Option<NodeRef<'_>>) -> Result<Rule, RulesetErro
                     }
                     paths
                 }
-                _ => return Err(bad_rule(code, "`given` must be a string or array of strings")),
+                _ => {
+                    return Err(bad_rule(
+                        code,
+                        "`given` must be a string or array of strings",
+                    ));
+                }
             }
         }
     };
@@ -179,9 +186,17 @@ fn compile_path(_code: &str, query: &str) -> Result<Path, suspect_jsonpath::Path
     Path::parse(query)
 }
 
-fn compile_function(code: &str, name: &str, options: Option<NodeRef<'_>>) -> Result<Function, RulesetError> {
+fn compile_function(
+    code: &str,
+    name: &str,
+    options: Option<NodeRef<'_>>,
+) -> Result<Function, RulesetError> {
     let opts = options.map(|o| o.resolved());
-    let opt_str = |key: &str| opts.as_ref().and_then(|o| o.get(key)).and_then(|v| v.resolved().as_str());
+    let opt_str = |key: &str| {
+        opts.as_ref()
+            .and_then(|o| o.get(key))
+            .and_then(|v| v.resolved().as_str())
+    };
 
     let function = match name {
         "truthy" => Function::Truthy,
@@ -196,14 +211,16 @@ fn compile_function(code: &str, name: &str, options: Option<NodeRef<'_>>) -> Res
             let Some(pattern) = opt_str("match") else {
                 return Err(bad_rule(code, "`pattern` requires functionOptions.match"));
             };
-            let re = regex::Regex::new(pattern).map_err(|e| bad_rule(code, format!("invalid regex `{pattern}`: {e}")))?;
+            let re = regex::Regex::new(pattern)
+                .map_err(|e| bad_rule(code, format!("invalid regex `{pattern}`: {e}")))?;
             Function::Pattern(re)
         }
         "casing" => {
             let Some(casing) = opt_str("casing") else {
                 return Err(bad_rule(code, "`casing` requires functionOptions.casing"));
             };
-            let casing = Casing::from_text(casing).ok_or_else(|| bad_rule(code, format!("unknown casing `{casing}`")))?;
+            let casing = Casing::from_text(casing)
+                .ok_or_else(|| bad_rule(code, format!("unknown casing `{casing}`")))?;
             Function::Casing(casing)
         }
         "length" => {
@@ -213,11 +230,17 @@ fn compile_function(code: &str, name: &str, options: Option<NodeRef<'_>>) -> Res
                     .and_then(|l| l.resolved().get(key))
                     .and_then(|n| n.resolved().as_f64())
             };
-            Function::Length { min: get_num("min"), max: get_num("max") }
+            Function::Length {
+                min: get_num("min"),
+                max: get_num("max"),
+            }
         }
         "enumeration" => {
             let Some(values) = opts.as_ref().and_then(|o| o.get("values")) else {
-                return Err(bad_rule(code, "`enumeration` requires functionOptions.values"));
+                return Err(bad_rule(
+                    code,
+                    "`enumeration` requires functionOptions.values",
+                ));
             };
             let resolved = values.resolved();
             if resolved.kind() != ValueKind::Array {
@@ -229,7 +252,9 @@ fn compile_function(code: &str, name: &str, options: Option<NodeRef<'_>>) -> Res
                 let value = match item.kind() {
                     ValueKind::Str => EnumValue::Str(item.as_str().unwrap_or_default().into()),
                     ValueKind::Bool => EnumValue::Bool(item.as_bool().unwrap_or_default()),
-                    ValueKind::Int | ValueKind::Float => EnumValue::Num(item.as_f64().unwrap_or_default()),
+                    ValueKind::Int | ValueKind::Float => {
+                        EnumValue::Num(item.as_f64().unwrap_or_default())
+                    }
                     ValueKind::Null => EnumValue::Null,
                     ValueKind::Object | ValueKind::Array => {
                         return Err(bad_rule(code, "`values` entries must be scalars"));

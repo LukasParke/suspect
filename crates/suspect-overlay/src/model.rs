@@ -39,31 +39,43 @@ impl<'d> OverlayDoc<'d> {
             return Err(OverlayError::MissingField { field: "overlay" });
         }
         if root.get("info").and_then(|i| i.get("title")).is_none() {
-            return Err(OverlayError::MissingField { field: "info.title" });
+            return Err(OverlayError::MissingField {
+                field: "info.title",
+            });
         }
         if root.get("info").and_then(|i| i.get("version")).is_none() {
-            return Err(OverlayError::MissingField { field: "info.version" });
+            return Err(OverlayError::MissingField {
+                field: "info.version",
+            });
         }
-        let actions_node = root.get("actions").ok_or(OverlayError::MissingField { field: "actions" })?;
+        let actions_node = root
+            .get("actions")
+            .ok_or(OverlayError::MissingField { field: "actions" })?;
         if actions_node.kind() != ValueKind::Array {
             return Err(OverlayError::MissingField { field: "actions" });
         }
         let mut actions = Vec::new();
         for (i, item) in actions_node.items().into_iter().enumerate() {
-            let target = item
-                .get("target")
-                .and_then(|n| n.as_str())
-                .ok_or(OverlayError::InvalidAction { index: i, reason: "missing `target`".into() })?;
-            let parsed = Some(
-                suspect_jsonpath::Path::parse(target).map_err(|e| OverlayError::InvalidTarget {
+            let target =
+                item.get("target")
+                    .and_then(|n| n.as_str())
+                    .ok_or(OverlayError::InvalidAction {
+                        index: i,
+                        reason: "missing `target`".into(),
+                    })?;
+            let parsed = Some(suspect_jsonpath::Path::parse(target).map_err(|e| {
+                OverlayError::InvalidTarget {
                     index: i,
                     input: target.to_owned(),
 
                     reason: e.to_string(),
-                })?,
-            );
+                }
+            })?);
             let update = item.get("update");
-            let remove = item.get("remove").and_then(|n| n.as_bool()).unwrap_or(false);
+            let remove = item
+                .get("remove")
+                .and_then(|n| n.as_bool())
+                .unwrap_or(false);
             if update.is_none() && !remove {
                 return Err(OverlayError::InvalidAction {
                     index: i,
@@ -71,7 +83,13 @@ impl<'d> OverlayDoc<'d> {
                 });
             }
             let description = item.get("description").and_then(|n| n.as_str());
-            actions.push(ActionView { target, parsed, update, remove, description });
+            actions.push(ActionView {
+                target,
+                parsed,
+                update,
+                remove,
+                description,
+            });
         }
         Ok(Self { root, actions })
     }
@@ -85,13 +103,19 @@ impl<'d> OverlayDoc<'d> {
     #[must_use]
     /// Human-readable title from `info.title`, if present.
     pub fn title(&self) -> Option<&'d str> {
-        self.root.get("info").and_then(|i| i.get("title")).and_then(|n| n.as_str())
+        self.root
+            .get("info")
+            .and_then(|i| i.get("title"))
+            .and_then(|n| n.as_str())
     }
 
     #[must_use]
     /// The overlay's own revision from `info.version`, if present.
     pub fn overlay_version(&self) -> Option<&'d str> {
-        self.root.get("info").and_then(|i| i.get("version")).and_then(|n| n.as_str())
+        self.root
+            .get("info")
+            .and_then(|i| i.get("version"))
+            .and_then(|n| n.as_str())
     }
 
     /// Target document URI from `extends`, when declared.

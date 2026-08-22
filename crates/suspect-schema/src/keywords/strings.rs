@@ -24,7 +24,11 @@ pub(crate) fn check_length<'a, 'd>(
     let ok = if is_max { len <= n } else { len >= n };
     if !ok {
         let kw = if is_max { "maxLength" } else { "minLength" };
-        ctx.emit(st, at, format!("string length {len} violates `{kw}` {n} (Unicode scalar count)"));
+        ctx.emit(
+            st,
+            at,
+            format!("string length {len} violates `{kw}` {n} (Unicode scalar count)"),
+        );
     }
     ok
 }
@@ -43,7 +47,11 @@ pub(crate) fn check_pattern<'a, 'd>(
     if re.is_match(s) {
         true
     } else {
-        ctx.emit(st, at, format!("string does not match `pattern` `{}`", re.as_str()));
+        ctx.emit(
+            st,
+            at,
+            format!("string does not match `pattern` `{}`", re.as_str()),
+        );
         false
     }
 }

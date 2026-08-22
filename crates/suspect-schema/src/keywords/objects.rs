@@ -8,9 +8,9 @@ use regex::Regex;
 use suspect_low::{NodeRef, Pointer, ValueKind};
 
 use crate::compile::{Kind, Prg, RefTarget, TypeBits};
-use crate::keywords::{formats, refs};
-use crate::exec::{eval, Ann, Ctx};
 use crate::exec::Stack;
+use crate::exec::{Ann, Ctx, eval};
+use crate::keywords::{formats, refs};
 
 pub(crate) fn check_properties<'a, 'd>(
     ctx: &mut Ctx<'a, 'd>,
@@ -25,7 +25,9 @@ pub(crate) fn check_properties<'a, 'd>(
     let mut ok = true;
     for e in inst.entries() {
         let Some(val) = e.value else { continue };
-        let Some((_, sub)) = subs.iter().find(|(k, _)| *k == e.key) else { continue };
+        let Some((_, sub)) = subs.iter().find(|(k, _)| *k == e.key) else {
+            continue;
+        };
         st.push_key(e.key);
         let o = eval(ctx, sub, val, st);
         st.pop();
@@ -86,9 +88,7 @@ pub(crate) fn check_additional<'a, 'd>(
     }
     let mut ok = true;
     for e in inst.entries() {
-        if except_keys.contains(&e.key)
-            || except_patterns.iter().any(|re| re.is_match(e.key))
-        {
+        if except_keys.contains(&e.key) || except_patterns.iter().any(|re| re.is_match(e.key)) {
             continue;
         }
         let Some(val) = e.value else { continue };
@@ -98,7 +98,10 @@ pub(crate) fn check_additional<'a, 'd>(
                 ctx.emit(
                     st,
                     at,
-                    format!("property `{}` is not allowed by `additionalProperties: false`", e.key),
+                    format!(
+                        "property `{}` is not allowed by `additionalProperties: false`",
+                        e.key
+                    ),
                 );
                 st.pop();
                 ok = false;
@@ -131,7 +134,9 @@ pub(crate) fn check_property_names<'a, 'd>(
     }
     let mut ok = true;
     for (key_node, _) in inst.resolved().syntax().mapping_entries() {
-        let Ok(key) = std::str::from_utf8(key_node.scalar_bytes()) else { continue };
+        let Ok(key) = std::str::from_utf8(key_node.scalar_bytes()) else {
+            continue;
+        };
         if !string_schema_ok(ctx, sub, key, 0) {
             ctx.emit(
                 st,
@@ -161,9 +166,11 @@ fn string_schema_ok(ctx: &mut Ctx<'_, '_>, prog: &Prg<'_>, s: &str, depth: usize
         match &chk.kind {
             Kind::Always(b) => ok &= *b,
             Kind::Type(bits) => ok &= bits.0 & TypeBits::STR != 0,
-            Kind::Enum(vals) => ok &= vals
-                .iter()
-                .any(|v| v.kind() == ValueKind::Str && v.as_str() == Some(s)),
+            Kind::Enum(vals) => {
+                ok &= vals
+                    .iter()
+                    .any(|v| v.kind() == ValueKind::Str && v.as_str() == Some(s))
+            }
             Kind::Const(v) => ok &= v.kind() == ValueKind::Str && v.as_str() == Some(s),
             Kind::MinLength(n) => ok &= s.chars().count() >= *n,
             Kind::MaxLength(n) => ok &= s.chars().count() <= *n,
@@ -176,7 +183,11 @@ fn string_schema_ok(ctx: &mut Ctx<'_, '_>, prog: &Prg<'_>, s: &str, depth: usize
                 ok &= subs.iter().any(|p| string_schema_ok(ctx, p, s, depth + 1));
             }
             Kind::OneOf(subs) => {
-                ok &= subs.iter().filter(|p| string_schema_ok(ctx, p, s, depth + 1)).count() == 1;
+                ok &= subs
+                    .iter()
+                    .filter(|p| string_schema_ok(ctx, p, s, depth + 1))
+                    .count()
+                    == 1;
             }
             Kind::Not(inner) => ok &= !string_schema_ok(ctx, inner, s, depth + 1),
             Kind::Ref(RefTarget::Local(ptr)) => {
