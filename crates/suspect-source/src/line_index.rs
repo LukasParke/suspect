@@ -88,7 +88,7 @@ impl LineIndex {
         let line_end = line_bytes
             .iter()
             .position(|&b| b == b'\n')
-            .map_or(line_bytes.len(), |i| i);
+            .unwrap_or(line_bytes.len());
         for (scalars, (i, _)) in String::from_utf8_lossy(&line_bytes[..line_end])
             .char_indices()
             .enumerate()
