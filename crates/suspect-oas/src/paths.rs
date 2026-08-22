@@ -204,7 +204,7 @@ impl<'s> Operation<'s> {
     }
 
     #[must_use]
-    /// Unique identifier referenced by [`Link::operation_id`].
+    /// Unique identifier referenced by the `Link` object.
     pub fn operation_id(&self) -> Option<&'s str> {
         self.get("operationId").and_then(|n| n.as_str())
     }
