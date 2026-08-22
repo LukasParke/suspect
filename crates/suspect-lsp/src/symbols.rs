@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{
 use crate::state::lsp_range;
 
 /// HTTP methods surfaced as one symbol each under a path item.
-const METHODS: &[&str] =
+pub(crate) const METHODS: &[&str] =
     &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
 
 /// Convenience constructor for a [`DocumentSymbol`] whose selection range

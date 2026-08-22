@@ -319,13 +319,22 @@ impl<'d> NodeRef<'d> {
         let mut node = self.resolved().raw;
         #[allow(clippy::while_let_loop)] // multiple exit points read clearer as loop/break
         loop {
+            // A pair node is located by its value (or key when valueless):
+            // parent mappings enumerate values, so compare against that range.
+            let locate_range = if node.kind() == SyntaxKind::Pair {
+                node.child_by_field("value")
+                    .or_else(|| node.child_by_field("key"))
+                    .map_or(node.byte_range(), |c| c.byte_range())
+            } else {
+                node.byte_range()
+            };
             // climb out of wrappers (block_node/flow_node/pair/sequence-item)
             let Some(container) = node.parent() else { break };
             let container = match NodeRef::new(container).structural_ancestor() {
                 Some(c) => c,
                 None => break,
             };
-            let node_range = node.byte_range();
+            let node_range = locate_range;
             match container.kind() {
                 ValueKind::Object => {
                     let found = container.raw.mapping_entries().into_iter().find_map(|(k, v)| {

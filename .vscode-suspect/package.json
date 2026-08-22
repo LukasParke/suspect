@@ -1,0 +1,67 @@
+{
+  "name": "suspect-lsp",
+  "displayName": "suspect — OpenAPI/Arazzo/Overlay",
+  "description": "Full-featured language support for OpenAPI (2/3.x), Arazzo and Overlay: semantic validation, Spectral-compatible linting, $ref-aware navigation, rename, quick fixes, inlay hints, semantic highlighting.",
+  "version": "0.1.0",
+  "publisher": "suspect",
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml",
+    "onLanguage:json",
+    "workspaceContains:**/openapi*.y*ml",
+    "workspaceContains:**/arazzo*.y*ml",
+    "workspaceContains:**/overlay*.y*ml"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "yaml",
+        "aliases": [
+          "YAML",
+          "yaml"
+        ],
+        "extensions": [
+          ".yaml",
+          ".yml"
+        ]
+      },
+      {
+        "id": "json",
+        "aliases": [
+          "JSON",
+          "json"
+        ],
+        "extensions": [
+          ".json"
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "suspect",
+      "properties": {
+        "suspect.server.path": {
+          "type": "string",
+          "default": "suspect",
+          "description": "Path to the `suspect` binary (must support `suspect lsp`)."
+        },
+        "suspect.diagnostics.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Publish validation + lint diagnostics."
+        }
+      }
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

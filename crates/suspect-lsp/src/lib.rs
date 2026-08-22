@@ -8,14 +8,21 @@
 //! key/`$ref` completion are served from the parsed open documents plus a
 //! lazily built [`suspect_ref::Workspace`].
 //!
-//! Semantic tokens and rename are intentionally unsupported: the
-//! capabilities advertised in `initialize` simply omit them.
+//! Quick fixes for known diagnostic codes (plus a `source.fixAll.suspect`
+//! action), full-document canonical formatting, rename (component keys,
+//! with workspace-wide `$ref` rewrites), and workspace symbols are served
+//! per the advertised capabilities; semantic tokens are intentionally
+//! unsupported.
 
+pub mod actions;
 pub mod completion;
 pub mod diagnostics;
 pub mod navigation;
+pub mod rename;
+pub mod semantic;
 pub mod state;
 pub mod symbols;
+pub mod workspace_symbol;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -142,6 +149,24 @@ impl LanguageServer for Backend {
                 references_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+                    SemanticTokensOptions {
+                        work_done_progress_options: WorkDoneProgressOptions::default(),
+                        legend: semantic::legend(),
+                        range: Some(false),
+                        full: Some(SemanticTokensFullOptions::Bool(true)),
+                    },
+                )),
+                inlay_hint_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
+                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -149,6 +174,65 @@ impl LanguageServer for Backend {
                 version: Some(env!("CARGO_PKG_VERSION").to_owned()),
             }),
         })
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> JsonRpcResult<Option<SemanticTokensResult>> {
+        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
+            return Ok(None);
+        };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
+        Ok(Some(SemanticTokensResult::Tokens(semantic::semantic_tokens_full(doc))))
+    }
+
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> JsonRpcResult<Option<Vec<InlayHint>>> {
+        let uri = Uri::parse(params.text_document.uri.as_str()).ok();
+        let Some(uri) = uri else { return Ok(None) };
+        let Some(ws) = self.workspace_for(&uri).await else { return Ok(None) };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        Ok(Some(semantic::inlay_hints(doc, &ws, params.range)))
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> JsonRpcResult<Option<Vec<DocumentHighlight>>> {
+        let pos = params.text_document_position_params.position;
+        let Ok(uri) = Uri::parse(params.text_document_position_params.text_document.uri.as_str()) else {
+            return Ok(None);
+        };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let inner = doc.low.inner();
+        let Some(offset) =
+            offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(semantic::document_highlights(doc, offset)))
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> JsonRpcResult<Option<Vec<SelectionRange>>> {
+        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
+            return Ok(None);
+        };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(None);
+        };
+        Ok(Some(semantic::selection_ranges(doc, &params.positions)))
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
@@ -298,6 +382,65 @@ impl LanguageServer for Backend {
         Ok((!ranges.is_empty()).then_some(ranges))
     }
 
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> JsonRpcResult<Option<PrepareRenameResponse>> {
+        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
+            return Ok(None);
+        };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let inner = doc.low.inner();
+        let Some(offset) =
+            offset_of_utf16(inner.bytes(), inner.line_index(), params.position.line, params.position.character)
+        else {
+            return Ok(None);
+        };
+        match rename::prepare_rename(doc, offset) {
+            Some(ph) => Ok(Some(PrepareRenameResponse::RangeWithPlaceholder {
+                range: lsp_range(inner.bytes(), inner.line_index(), ph.range),
+                placeholder: ph.placeholder,
+            })),
+            // Honest failure: the position is not on a renameable key.
+            None => Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "no renameable component key at this position".to_owned(),
+            )),
+        }
+    }
+
+    async fn rename(&self, params: RenameParams) -> JsonRpcResult<Option<WorkspaceEdit>> {
+        let pos = params.text_document_position.position;
+        let Ok(uri) = Uri::parse(params.text_document_position.text_document.uri.as_str()) else {
+            return Ok(None);
+        };
+        let Some(ws) = self.workspace_for(&uri).await else { return Ok(None) };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let inner = doc.low.inner();
+        let Some(offset) = offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
+        else {
+            return Ok(None);
+        };
+        match rename::rename(&ws, doc, &params.new_name, offset) {
+            Ok(edit) => Ok(Some(edit)),
+            Err(msg) => Err(tower_lsp::jsonrpc::Error::invalid_params(msg)),
+        }
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> JsonRpcResult<Option<Vec<SymbolInformation>>> {
+        let ws = {
+            let mut st = self.state.write().await;
+            st.ensure_workspace()
+        };
+        let Some(ws) = ws else { return Ok(None) };
+        let syms = workspace_symbol::workspace_symbols(&ws, &params.query);
+        Ok((!syms.is_empty()).then_some(syms))
+    }
+
     async fn shutdown(&self) -> JsonRpcResult<()> {
         Ok(())
     }
@@ -330,6 +473,43 @@ impl LanguageServer for Backend {
             completion::CompletionContext::None => return Ok(None),
         };
         Ok((!items.is_empty()).then_some(CompletionResponse::Array(items)))
+    }
+
+    async fn code_action(
+        &self,
+        params: CodeActionParams,
+    ) -> JsonRpcResult<Option<CodeActionResponse>> {
+        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
+            return Ok(None);
+        };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        let Some(url) = to_url(&uri) else { return Ok(None) };
+        let actions = actions::code_actions(
+            doc,
+            &url,
+            params.range,
+            &params.context.diagnostics,
+        );
+        Ok((!actions.is_empty()).then(|| {
+            actions.into_iter().map(CodeActionOrCommand::CodeAction).collect()
+        }))
+    }
+
+    async fn formatting(
+        &self,
+        params: DocumentFormattingParams,
+    ) -> JsonRpcResult<Option<Vec<TextEdit>>> {
+        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
+            return Ok(None);
+        };
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else { return Ok(None) };
+        // Formatting options are ignored: the canonical form uses a
+        // two-space indent regardless of editor configuration.
+        let _ = &params.options;
+        let Some(url) = to_url(&uri) else { return Ok(None) };
+        Ok(actions::format_document(doc, &url).map(|e| vec![e]))
     }
 }
 /// Runs the language server over stdio until the client disconnects.

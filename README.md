@@ -9,6 +9,51 @@ Design constraints: parse once, view many; zero-copy scalars; arena-indexed
 nodes; lazy memoized resolution. Benchmarks with honest budget verdicts live
 in [BENCHMARKS.md](BENCHMARKS.md).
 
+## LSP — full-featured editor experience
+
+`suspect lsp` is a complete language server for OpenAPI/Arazzo/Overlay files.
+The repo ships a ready-to-use VS Code extension in
+[`.vscode-suspect/`](.vscode-suspect/) (see its README for setup), and any LSP
+client works — Neovim, Helix, Zed, Emacs (lsp-mode/eglot).
+
+**Capabilities**: publishDiagnostics (syntax + 22 semantic checks + 21 lint
+rules + Arazzo validation, debounced), goto-definition and references across
+`$ref` boundaries (multi-file), hover with resolved target previews,
+context-aware completions (`$ref` candidates from the workspace), quick fixes
+and `source.fixAll.suspect`, document formatting, semantic highlighting,
+`$ref`-target inlay hints, property type hints, document highlights,
+selection ranges, rename with workspace-wide `$ref` rewriting
+(`prepareRename` guarded), workspace symbols, folding ranges.
+
+### In action (VS Code + the bundled extension)
+
+Diagnostics from the validator and linter, with `$ref` inlay hints:
+
+![Diagnostics](docs/images/lsp-diagnostics.png)
+
+Hover over a `$ref` resolves it across files and previews the target:
+
+![Hover](docs/images/lsp-hover.png)
+
+Quick fixes derived from diagnostics (insert missing `operationId`,
+`responses`, `description`, contact/license skeletons, …):
+
+![Code actions](docs/images/lsp-codeaction.png)
+
+Problems panel:
+
+![Problems](docs/images/lsp-problems.png)
+
+Semantic highlighting and property type hints:
+
+![Semantic tokens and inlay hints](docs/images/lsp-inlay-semantic.png)
+
+Workspace-wide rename rewrites the declaration and every `$ref` that points
+at it (guarded by `prepareRename`; cross-file edits land in one atomic
+`WorkspaceEdit`) — shown here renaming `Pet`:
+
+![Rename](docs/images/lsp-rename.png)
+
 ## Crates
 
 | Crate | Purpose | Tests |
@@ -52,3 +97,19 @@ $ suspect lsp                          # stdio language server
   never hangs.
 - **CI**: `.github/workflows/ci.yml` gates fmt, clippy (`-D warnings`), tests,
   and a bench smoke run.
+
+## VS Code extension
+
+```console
+# build the server once
+cargo build --release -p suspect-cli
+
+# point the extension at it (or rely on `suspect` being on PATH)
+mkdir -p ~/.vscode/extensions/suspect-lsp
+cp -r .vscode-suspect/* ~/.vscode/extensions/suspect-lsp/
+cd ~/.vscode/extensions/suspect-lsp && npm install vscode-languageclient@9
+```
+
+Then set `"suspect.server.path"` to the absolute path of the `suspect`
+binary and reload the window. The `.vscode-suspect/README.md` documents the
+full configuration surface.

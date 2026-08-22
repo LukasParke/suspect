@@ -60,7 +60,10 @@ pub fn ref_value_node<'d>(low: &'d suspect_low::LowDoc, offset: usize) -> Option
 
 /// Re-derives a node at `range` from a workspace-borrowed document so it can
 /// be handed to resolution APIs that require the workspace lifetime.
-fn rederive<'ws>(handle: &DocHandle<'ws>, range: std::ops::Range<usize>) -> Option<NodeRef<'ws>> {
+pub(crate) fn rederive<'ws>(
+    handle: &DocHandle<'ws>,
+    range: std::ops::Range<usize>,
+) -> Option<NodeRef<'ws>> {
     let inner = handle.doc().inner();
     let mut raw = inner.root().raw().descendant_for_byte_range(
         range.start,
@@ -98,7 +101,7 @@ pub fn goto_definition(
 
 /// Maps a key-side node to its owning pair's value; `path_from_root` only
 /// resolves through mapping *values*, so pointer math must anchor there.
-fn value_anchor<'d>(node: SNode<'d>) -> SNode<'d> {
+pub(crate) fn value_anchor<'d>(node: SNode<'d>) -> SNode<'d> {
     let mut cur = Some(node);
     while let Some(n) = cur {
         if n.kind() == SyntaxKind::Pair {

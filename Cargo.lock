@@ -1187,6 +1187,7 @@ name = "suspect-lsp"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "serde_json",
  "suspect-arazzo",
  "suspect-lint",
  "suspect-low",

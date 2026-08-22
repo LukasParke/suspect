@@ -171,3 +171,23 @@ fn decoded_scalars_all_styles() {
     let kept = root.get("keep").unwrap().decoded_scalar();
     assert!(kept.starts_with(b"x"), "got {kept:?}");
 }
+
+#[test]
+fn path_from_root_works_for_pair_nodes() {
+    // Regression: pair nodes used to produce empty paths because location
+    // matching compared the pair's own range against parent mapping VALUES.
+    let doc = parse("components:\n  schemas:\n    Pet:\n      type: object\n");
+    let pair = doc
+        .root()
+        .get("components")
+        .unwrap()
+        .get("schemas")
+        .unwrap()
+        .get("Pet")
+        .unwrap()
+        .syntax()
+        .parent()
+        .unwrap(); // the pair node itself
+    let p = suspect_low::NodeRef::new(pair).path_from_root();
+    assert_eq!(p.to_path(), "/components/schemas/Pet");
+}

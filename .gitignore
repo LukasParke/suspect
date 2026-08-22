@@ -2,3 +2,4 @@
 corpus/
 *.profraw
 /fixtures
+.vscode-suspect/node_modules/
