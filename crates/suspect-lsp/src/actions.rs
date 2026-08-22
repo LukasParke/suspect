@@ -245,10 +245,46 @@ fn pair_insert_fix(
             if !owner_keys.is_empty() && !owner_keys.contains(&key_text.as_str()) {
                 return None;
             }
+            if inside_flow_collection(&key) {
+                return None;
+            }
             Some(insert_after_key_line(doc, &key, lines, title))
         }
         Anchor::Item { .. } => None,
     }
+}
+
+/// True when inserting block-style entries anchored at `key` would land
+/// inside a flow-style collection and corrupt it: the owning pair is a
+/// flow pair (`{a: b}` entry), the pair's value text opens a flow
+/// collection (`{` / `[`, which also covers every JSON composite), or an
+/// ancestor mapping/sequence is itself flow-style.
+fn inside_flow_collection(key: &SNode<'_>) -> bool {
+    let Some(pair) = ancestor_of_kind(*key, SyntaxKind::Pair) else {
+        return true;
+    };
+    if pair.raw_kind() == "flow_pair" {
+        return true;
+    }
+    if let Some(val) = pair.child_by_field("value") {
+        let opens_flow = val
+            .content()
+            .text()
+            .iter()
+            .find(|&&b| !b.is_ascii_whitespace())
+            .is_some_and(|&b| b == b'{' || b == b'[');
+        if opens_flow {
+            return true;
+        }
+    }
+    let mut cur = pair.parent();
+    while let Some(node) = cur {
+        if matches!(node.raw_kind(), "flow_mapping" | "flow_sequence") {
+            return true;
+        }
+        cur = node.parent();
+    }
+    false
 }
 
 /// Like [`pair_insert_fix`] but also accepts block-sequence item mappings,
@@ -266,9 +302,15 @@ fn any_insert_fix(
             if !owner_keys.is_empty() && !owner_keys.contains(&key_text.as_str()) {
                 return None;
             }
+            if inside_flow_collection(&key) {
+                return None;
+            }
             Some(insert_after_key_line(doc, &key, lines, title))
         }
         Anchor::Item { first_key } => {
+            if inside_flow_collection(&first_key) {
+                return None;
+            }
             let bytes = doc.low.inner().bytes();
             let indent = " ".repeat(column_of(bytes, first_key.start_byte()));
             let mut new_text = lines.join(&format!("\n{indent}"));
@@ -306,9 +348,19 @@ fn trailing_slash_fix(doc: &OpenDoc, br: std::ops::Range<usize>) -> Option<Fix> 
     if raw != scalar || !scalar.ends_with('/') {
         return None;
     }
-    let trimmed = scalar.trim_end_matches('/').to_owned();
+    let trimmed = scalar.strip_suffix('/')?;
+    // `//` would trim to an empty (null) key; only a `/`-prefixed path
+    // object key is rewriteable at all.
+    if trimmed.is_empty() || !trimmed.starts_with('/') {
+        return None;
+    }
     let range = key.byte_range();
-    Some(make_fix(doc, "Remove trailing slash", range, trimmed))
+    Some(make_fix(
+        doc,
+        "Remove trailing slash",
+        range,
+        trimmed.to_owned(),
+    ))
 }
 
 /// Inserts a deterministic camelCase `operationId` under the operation.
@@ -370,14 +422,11 @@ fn pascal(word: &str) -> String {
         .collect()
 }
 
-/// Merges every applicable fix across `diagnostics` into one edit list:
-/// sorted descending by position (LSP requirement), with overlapping or
-/// coincident edits dropped.
-fn all_edits(doc: &OpenDoc, diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
-    let mut fixes: Vec<Fix> = diagnostics
-        .iter()
-        .filter_map(|d| fix_for(doc, &string_code(d)?, d))
-        .collect();
+/// Sorts fixes into descending positional order (the LSP requirement) and
+/// drops every fix whose replaced span intersects an already-accepted
+/// edit's span — overlapping or coincident — returning the surviving
+/// edits.
+fn merge_fixes(mut fixes: Vec<Fix>) -> Vec<TextEdit> {
     fixes.sort_by(|a, b| {
         b.span
             .start
@@ -387,14 +436,26 @@ fn all_edits(doc: &OpenDoc, diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
     let mut out = Vec::with_capacity(fixes.len());
     let mut limit = usize::MAX;
     for f in fixes {
-        // Reject spans touching or crossing the previously accepted region:
-        // an insert exactly at `limit` would collide with the prior edit.
-        if f.span.start < limit || f.span.end < limit {
+        // Accept only spans lying entirely below the accepted region: a
+        // span crossing `limit` would be applied at offsets the earlier
+        // (higher) edit has already shifted, corrupting the buffer. An
+        // insertion exactly at `limit` would collide with that edit too.
+        if f.span.end < limit {
             limit = limit.min(f.span.start);
             out.push(f.edit);
         }
     }
     out
+}
+
+/// Merges every applicable fix across `diagnostics` into one edit list
+/// via [`merge_fixes`].
+fn all_edits(doc: &OpenDoc, diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
+    let fixes = diagnostics
+        .iter()
+        .filter_map(|d| fix_for(doc, &string_code(d)?, d))
+        .collect();
+    merge_fixes(fixes)
 }
 
 fn workspace_edit(uri: &Url, edits: Vec<TextEdit>) -> WorkspaceEdit {
@@ -954,6 +1015,112 @@ paths:
         assert_eq!(
             derive_operation_id("get", "/my-page/items"),
             "getMyPageItems"
+        );
+    }
+    #[test]
+    fn trailing_slash_quick_fix_strips_exactly_one_slash() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  /pets//:
+    get:
+      summary: S
+";
+        let d = open(text);
+        let diag = diag_on_value(&d, b"/pets//", "oas-path-trailing-slash");
+        let uri = url("api.yaml");
+        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        // Minimal edit: `/pets//` → `/pets/`, not an over-stripped `/pets`.
+        assert_eq!(edits_of(&acts, &uri)[0].new_text, "/pets/");
+    }
+
+    #[test]
+    fn trailing_slash_quick_fix_never_empties_the_key() {
+        // `//` trims to `/` (which no longer trips the len>1 lint); the
+        // pre-fix behavior rewrote the key to nothing.
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  //:
+    get:
+      summary: S
+";
+        let d = open(text);
+        let diag = diag_on_value(&d, b"//", "oas-path-trailing-slash");
+        let uri = url("api.yaml");
+        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        assert_eq!(edits_of(&acts, &uri)[0].new_text, "/");
+    }
+
+    #[test]
+    fn insert_fixes_skip_flow_style_values() {
+        // The value of `"info"` sits on its own line (so the anchor
+        // matches) but is a flow mapping — inserting block entries after
+        // the key line would corrupt it.
+        let text =
+            "{\n  \"openapi\": \"3.1.0\",\n  \"info\":\n    {\n      \"title\": \"T\"\n    }\n}\n";
+        let d = OpenDoc::parse("mem://actions-test.json".into(), text.to_owned());
+        let diag = diag_on_value(&d, b"info", "info-contact");
+        let acts = code_actions(&d, &url("api.json"), diag.range, &[diag]);
+        assert!(acts.is_empty(), "{acts:?}");
+    }
+
+    #[test]
+    fn insert_fixes_skip_flow_style_ancestors() {
+        // The item "mapping" is a flow mapping; inserting before its first
+        // key would splice block lines inside `{…}`.
+        let text = "\
+components:
+  parameters:
+    - {name: a}
+";
+        let d = open(text);
+        let diag = diag_on_seq_item(&d, "name", "oas-parameter-missing-name");
+        let acts = code_actions(&d, &url("api.yaml"), diag.range, &[diag]);
+        assert!(acts.is_empty(), "{acts:?}");
+    }
+
+    #[test]
+    fn merge_fixes_rejects_overlapping_spans() {
+        let fix = |start: usize, end: usize| Fix {
+            title: String::new(),
+            span: start..end,
+            edit: TextEdit {
+                range: Range::default(),
+                new_text: String::new(),
+            },
+        };
+        // [10,20] crosses [15,25]'s start → only the higher span survives;
+        // the old condition accepted both and applied the second at stale
+        // offsets.
+        assert_eq!(merge_fixes(vec![fix(15, 25), fix(10, 20)]).len(), 1);
+        // Fully disjoint spans both survive.
+        assert_eq!(merge_fixes(vec![fix(15, 25), fix(0, 10)]).len(), 2);
+        // Coincident zero-width insertions collapse to one.
+        assert_eq!(merge_fixes(vec![fix(7, 7), fix(7, 7)]).len(), 1);
+    }
+
+    #[test]
+    fn formatting_preserves_empty_valued_keys() {
+        let text = "openapi: 3.1.0\ninfo:\n  title: T\ndescription:\n";
+        let d = open(text);
+        let uri = url("api.yaml");
+        let edit = format_document(&d, &uri).expect("formats");
+        assert!(edit.new_text.contains("description:"), "{}", edit.new_text);
+        let reparsed = LowDoc::parse(
+            Uri::parse(YAML_URI).unwrap(),
+            suspect_source::Source::from_vec(edit.new_text.into_bytes()),
+        );
+        // The empty-valued key survives as null on both sides.
+        assert_eq!(
+            OverlayValue::from_node(reparsed.root()),
+            OverlayValue::from_node(d.low.root())
         );
     }
 }

@@ -76,20 +76,32 @@ impl Backend {
         tokio::spawn(async move {
             let generation = {
                 let mut st = state.write().await;
-                st.generation += 1;
-                st.generation
+                let g = st.generations.entry(uri.clone()).or_insert(0);
+                *g += 1;
+                *g
             };
             tokio::time::sleep(Duration::from_millis(150)).await;
-            let diags = {
+            // Compute WITHOUT holding the state lock: clone the cheap handles
+            // (OpenDoc is small; LowDoc parse tree is Arc-shared internally).
+            let (doc, ws) = {
                 let st = state.read().await;
-                if st.generation != generation {
+                if st.generations.get(&uri) != Some(&generation) {
                     return; // a newer edit superseded this publish
                 }
                 match st.docs.get(&uri) {
-                    Some(doc) => diagnostics::compute_diagnostics(st.workspace.as_ref(), &doc.low),
+                    Some(doc) => (doc.clone(), st.workspace.clone()),
                     None => return,
                 }
             };
+            let diags = diagnostics::compute_diagnostics(ws.as_ref(), &doc.low);
+            // Superseded while computing? Drop the stale result.
+            let superseded = {
+                let st = state.read().await;
+                st.generations.get(&uri) != Some(&generation)
+            };
+            if superseded {
+                return;
+            }
             client.publish_diagnostics(url, diags, None).await;
         });
     }
@@ -265,6 +277,20 @@ impl LanguageServer for Backend {
         }
         self.schedule_diagnostics(uri);
     }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
+            return;
+        };
+        {
+            let mut st = self.state.write().await;
+            st.close_doc(&uri);
+        }
+        // Clear diagnostics for the closed document.
+        if let Ok(url) = Url::parse(uri.as_str()) {
+            self.client.publish_diagnostics(url, Vec::new(), None).await;
+        }
+    }
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         // Full sync: take the last range-less change as the new full text.
         let Some(text) = params
@@ -325,7 +351,7 @@ impl LanguageServer for Backend {
         };
         let def = navigation::goto_definition(&ws, &doc.low, offset)
             .or_else(|| navigation::self_definition(&doc.low, offset));
-        let open = st.docs.get(&uri);
+        let open = st.docs.get(&uri).map(|d| d.as_ref());
         Ok(def
             .as_ref()
             .and_then(|d| to_location(Some(&ws), open, d))
@@ -352,7 +378,7 @@ impl LanguageServer for Backend {
         };
         let defs =
             navigation::references(&ws, &doc.low, offset, params.context.include_declaration);
-        let open = st.docs.get(&uri);
+        let open = st.docs.get(&uri).map(|d| d.as_ref());
         let locs = defs
             .iter()
             .filter_map(|d| to_location(Some(&ws), open, d))
@@ -601,12 +627,18 @@ mod tests {
     // debounce generation logic shape.
 
     #[test]
-    fn debounce_generation_is_monotonic() {
+    fn debounce_generation_is_monotonic_per_document() {
         let mut st = State::default();
-        st.generation += 1;
-        let captured = st.generation;
-        st.generation += 1;
-        // A task that captured the older generation must not publish.
-        assert_ne!(st.generation, captured);
+        let a: Uri = "file:///a.yaml".into();
+        let b: Uri = "file:///b.yaml".into();
+
+        let cap_a = *st.generations.entry(a.clone()).or_insert(0);
+        *st.generations.get_mut(&a).unwrap() += 1;
+        // Editing document B must not invalidate A's pending publish.
+        assert_eq!(st.generations.get(&b), None);
+        assert_ne!(st.generations.get(&a), Some(&cap_a));
+
+        // B's first generation starts at its own counter.
+        assert_eq!(*st.generations.entry(b.clone()).or_insert(0), 0);
     }
 }

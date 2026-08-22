@@ -145,6 +145,10 @@ fn oas_workspace_symbols(low: &LowDoc, sink: &mut Sink) {
             };
             let container = format!("components/{}", section.key);
             for entry in sec_val.entries() {
+                // vendor extensions are not symbols
+                if entry.key.starts_with("x-") {
+                    continue;
+                }
                 let Some(v) = entry.value else { continue };
                 let r = key_range(low, &["components", section.key, entry.key])
                     .unwrap_or_else(|| v.byte_range());
@@ -323,5 +327,29 @@ workflows:
         let syms = workspace_symbols(&ws, "");
         assert_eq!(syms.len(), SYMBOL_CAP);
         assert_eq!(syms[0].name, "Sym0");
+    }
+}
+
+#[cfg(test)]
+mod extension_filter_tests {
+    use super::*;
+    use suspect_ref::WorkspaceBuilder;
+
+    #[test]
+    fn vendor_extensions_are_not_symbols() {
+        let dir = std::env::temp_dir().join("suspect-lsp-wsym-xfilter");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("spec.yaml"),
+            "openapi: 3.1.0\ninfo: {title: t, version: \"1\"}\npaths: {}\ncomponents:\n  schemas:\n    Real:\n      type: object\n      x-meta: not-a-symbol\n  x-extension: {}\n",
+        )
+        .unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        ws.load_all("spec.yaml").unwrap();
+        let syms = workspace_symbols(&ws, "");
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"Real"), "{names:?}");
+        assert!(!names.iter().any(|n| n.starts_with("x-")), "{names:?}");
     }
 }

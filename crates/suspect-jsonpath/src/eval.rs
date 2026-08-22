@@ -24,6 +24,15 @@ pub struct Path {
 }
 
 impl Path {
+    /// Canonical form of the query (used as a cache key). Debug formatting
+    /// is deterministic for the parsed AST, which is all a cache key needs.
+    #[must_use]
+    pub fn as_key(&self) -> String {
+        format!("{:?}", self.segments)
+    }
+}
+
+impl Path {
     /// Parses an RFC 9535 JSONPath query string.
     ///
     /// # Errors

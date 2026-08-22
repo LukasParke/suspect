@@ -13,7 +13,7 @@
 use suspect_low::{NodeRef, SpecFamily, ValueKind};
 use suspect_oas::TypeSet;
 use suspect_ref::{Resolution, Workspace};
-use suspect_syntax::{SNode, SyntaxKind};
+use suspect_syntax::{SNode, ScalarStyle, SyntaxKind};
 use tower_lsp::lsp_types::{
     DocumentHighlight, DocumentHighlightKind, InlayHint, InlayHintKind, InlayHintLabel,
     InlayHintTooltip, Position, Range, SelectionRange, SemanticToken, SemanticTokenModifier,
@@ -111,7 +111,9 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
         let (bytes, li) = (inner.bytes(), inner.line_index());
         for n in inner.root().descendants() {
             match n.kind() {
-                SyntaxKind::Comment => push_token(&mut raw, bytes, li, &n.content(), COMMENT, 0),
+                SyntaxKind::Comment => {
+                    push_token(&mut raw, bytes, li, token_range(&n.content()), COMMENT, 0)
+                }
                 SyntaxKind::Pair => classify_pair(&mut raw, bytes, li, n),
                 _ => {}
             }
@@ -137,15 +139,15 @@ fn classify_pair(
     let ty = key_type(NodeRef::new(pair).path_from_root().tokens(), &key_text);
     if let Some(ty) = ty {
         let mods = if ty == TYPE { DEFINITION } else { 0 };
-        push_token(raw, bytes, li, &kc, ty, mods);
+        push_token(raw, bytes, li, token_range(&kc), ty, mods);
     }
 
     // Scalar values: numbers and `pattern` regexes only; strings stay clean.
     let vc = value.content();
     if key_text == "pattern" {
-        push_token(raw, bytes, li, &vc, REGEXP, 0);
+        push_token(raw, bytes, li, token_range(&vc), REGEXP, 0);
     } else if matches!(NodeRef::new(vc).kind(), ValueKind::Int | ValueKind::Float) {
-        push_token(raw, bytes, li, &vc, NUMBER, 0);
+        push_token(raw, bytes, li, token_range(&vc), NUMBER, 0);
     }
 }
 
@@ -172,23 +174,46 @@ fn key_type(path_tokens: &[std::boxed::Box<str>], key_text: &str) -> Option<u32>
     None
 }
 
-/// Appends one token unless the node spans multiple lines (keys, numbers,
-/// and regexes never do; this guards against block scalars).
+/// Byte range a semantic token should cover for scalar node `node`.
+///
+/// Quoted scalars are shrunk to their unquoted interior so the quote
+/// characters are never highlighted; plain, block, and degenerate nodes
+/// keep their full byte range. The guard mirrors
+/// `suspect_syntax::node::strip_quotes`: both endpoints must carry the
+/// same quote character and at least two bytes must remain.
+fn token_range(node: &SNode<'_>) -> std::ops::Range<usize> {
+    let r = node.byte_range();
+    if !matches!(
+        node.scalar_style(),
+        ScalarStyle::DoubleQuoted | ScalarStyle::SingleQuoted
+    ) || r.end - r.start < 2
+    {
+        return r;
+    }
+    let text = node.text();
+    let (first, last) = (text[0], text[text.len() - 1]);
+    if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+        r.start + 1..r.end - 1
+    } else {
+        r
+    }
+}
+
+/// Appends one token over `span` unless it crosses a line break (keys,
+/// numbers, and regexes never do; this guards against block scalars).
 fn push_token(
     raw: &mut Vec<RawToken>,
     bytes: &[u8],
     li: &suspect_source::LineIndex,
-    node: &SNode<'_>,
+    span: std::ops::Range<usize>,
     ty: u32,
     mods: u32,
 ) {
-    let r = node.byte_range();
-    if bytes[r.start..r.end].contains(&b'\n') {
+    if bytes[span.start..span.end].contains(&b'\n') {
         return;
     }
-    let (line, col) = li.line_col_utf16(bytes, r.start);
-    let len: u32 = node
-        .text_lossy()
+    let (line, col) = li.line_col_utf16(bytes, span.start);
+    let len: u32 = String::from_utf8_lossy(&bytes[span.start..span.end])
         .chars()
         .map(char::len_utf16)
         .sum::<usize>()
@@ -543,27 +568,42 @@ pub fn document_highlights(doc: &OpenDoc, offset: usize) -> Vec<DocumentHighligh
 
 /// LSP selection ranges: the CST ancestor chain from the node at each
 /// position up to the document root.
+///
+/// The result is always one `SelectionRange` per requested position, in
+/// request order: clients (VS Code, Neovim) zip the response with the
+/// positions by index. A position that cannot be resolved to a node — past
+/// EOF, or in a gap the CST does not cover — falls back to a chain whose
+/// only entry spans the whole document, rather than being dropped.
+/// (The LSP spec permits a `null` parent on the root of every returned
+/// chain; these serverside chains always end at a root-level range.)
 #[must_use]
 pub fn selection_ranges(doc: &OpenDoc, positions: &[Position]) -> Vec<SelectionRange> {
     let inner = doc.low.inner();
     let (bytes, li) = (inner.bytes(), inner.line_index());
     positions
         .iter()
-        .filter_map(|pos| {
-            let offset = offset_of_utf16(bytes, li, pos.line, pos.character)?;
-            let start = crate::navigation::node_at(&doc.low, offset)?;
-            let mut cur = Some(start);
-            let mut chain: Vec<suspect_syntax::SNode<'_>> = Vec::new();
-            while let Some(n) = cur {
-                // skip zero-width duplicates
-                if chain
-                    .last()
-                    .is_none_or(|l| l.byte_range() != n.byte_range())
-                {
-                    chain.push(n);
-                }
-                cur = n.parent();
-            }
+        .map(|pos| {
+            let chain: Vec<suspect_syntax::SNode<'_>> =
+                offset_of_utf16(bytes, li, pos.line, pos.character)
+                    .and_then(|offset| crate::navigation::node_at(&doc.low, offset))
+                    .map(|start| {
+                        let mut chain = vec![start];
+                        let mut cur = start.parent();
+                        while let Some(n) = cur {
+                            // skip zero-width duplicates
+                            if chain
+                                .last()
+                                .is_none_or(|l| l.byte_range() != n.byte_range())
+                            {
+                                chain.push(n);
+                            }
+                            cur = n.parent();
+                        }
+                        chain
+                    })
+                    .unwrap_or_else(|| vec![inner.root()]);
+            debug_assert!(!chain.is_empty());
+
             let mut parent: Option<Box<SelectionRange>> = None;
             for n in chain.iter().rev() {
                 parent = Some(Box::new(SelectionRange {
@@ -571,7 +611,7 @@ pub fn selection_ranges(doc: &OpenDoc, positions: &[Position]) -> Vec<SelectionR
                     parent,
                 }));
             }
-            parent.map(|p| *p)
+            *parent.expect("chain is non-empty")
         })
         .collect()
 }
@@ -725,5 +765,95 @@ components:
         }
         assert!(count > 4, "chain depth {count}");
         let _ = off;
+    }
+
+    #[test]
+    fn selection_ranges_align_with_positions() {
+        let doc = open();
+        // inside the `get` scalar, so no end-of-line clamping is involved
+        let valid = Position {
+            line: 5,
+            character: 6,
+        };
+        let past_eof = Position {
+            line: 9999,
+            character: 0,
+        };
+        let positions = [valid, past_eof, valid];
+        let ranges = selection_ranges(&doc, &positions);
+        assert_eq!(ranges.len(), positions.len(), "one range per position");
+        // resolvable positions must be enclosed by their own range
+        assert!(
+            ranges[0].range.start <= valid && valid <= ranges[0].range.end,
+            "range {:?} must enclose {valid:?}",
+            ranges[0].range
+        );
+        assert!(ranges[0].parent.is_some(), "{ranges:?}");
+        assert!(
+            ranges[2].range.start <= valid && valid <= ranges[2].range.end,
+            "range {:?} must enclose {valid:?}",
+            ranges[2].range
+        );
+        // the unresolvable position falls back to a root-only chain
+        // instead of being dropped
+        let inner = doc.low.inner();
+        assert_eq!(
+            ranges[1].parent, None,
+            "fallback chain is root-only: {ranges:?}"
+        );
+        assert_eq!(
+            ranges[1].range,
+            lsp_range(inner.bytes(), inner.line_index(), inner.root().byte_range()),
+            "fallback is the document-root range"
+        );
+    }
+
+    #[test]
+    fn quoted_key_and_pattern_tokens_exclude_quotes() {
+        const QUOTED: &str = "\
+openapi: 3.1.0
+paths:
+  /pets:
+    get:
+      \"operationId\": listPets
+      x-rules:
+        pattern: \"^x$\"
+        more:
+          pattern: '^y$'
+";
+        let doc = OpenDoc::parse("file:///mem/quoted.yaml".into(), QUOTED.to_owned());
+        let inner = doc.low.inner();
+        let (bytes, li) = (inner.bytes(), inner.line_index());
+
+        // decode deltas back to absolute byte ranges (ASCII fixture, so
+        // UTF-16 lengths equal byte lengths)
+        let mut decoded: Vec<(u32, String)> = Vec::new();
+        let (mut line, mut col) = (0u32, 0u32);
+        for t in &semantic_tokens_full(&doc).data {
+            if t.delta_line == 0 {
+                col += t.delta_start;
+            } else {
+                line += t.delta_line;
+                col = t.delta_start;
+            }
+            let off = offset_of_utf16(bytes, li, line, col).unwrap();
+            let text = std::str::from_utf8(&bytes[off..off + t.length as usize])
+                .unwrap()
+                .to_owned();
+            decoded.push((t.token_type, text));
+        }
+
+        for (ty, text) in &decoded {
+            assert!(
+                !text.contains('"') && !text.contains('\''),
+                "token type {ty} covers quote characters: {text:?}"
+            );
+        }
+        assert!(
+            decoded.contains(&(KEYWORD, "operationId".to_owned())),
+            "quoted keyword key tokenized without quotes: {decoded:?}"
+        );
+        assert!(decoded.contains(&(REGEXP, "^x$".to_owned())), "{decoded:?}");
+        assert!(decoded.contains(&(REGEXP, "^y$".to_owned())), "{decoded:?}");
     }
 }

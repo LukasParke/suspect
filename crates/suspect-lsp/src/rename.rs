@@ -141,12 +141,26 @@ pub fn rename(
     validate_name(new_name)?;
     let site = key_site(&home.low, offset)
         .ok_or_else(|| "no renameable component key at this position".to_owned())?;
+    {
+        // Reject renames that would collide with an existing sibling.
+        let section_ptr = suspect_low::Pointer::from_tokens(vec![
+            "components".into(),
+            site.section.clone().into(),
+        ]);
+        if home
+            .low
+            .root()
+            .pointer(&section_ptr)
+            .and_then(|section| section.get(new_name))
+            .is_some()
+        {
+            return Err(format!(
+                "`components/{}` already contains an entry named `{new_name}`",
+                site.section
+            ));
+        }
+    }
     let home_uri = home.low.uri().clone();
-    let old_ptr = Pointer::from_tokens(vec![
-        "components".into(),
-        site.section.clone().into(),
-        site.name.clone().into(),
-    ]);
     let new_tail = Pointer::from_tokens(vec![
         "components".into(),
         site.section.clone().into(),
@@ -164,17 +178,28 @@ pub fn rename(
         home_seen |= is_home;
         let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
         for edge in handle.edges().iter() {
-            let hit = match &edge.parsed {
-                ParsedRef::Local(p) => is_home && p == &old_ptr,
+            let pointer = match &edge.parsed {
+                ParsedRef::Local(p) if is_home => Some(p),
                 ParsedRef::External {
                     uri: target,
                     pointer,
-                } => target == &home_uri && pointer == &old_ptr,
-                ParsedRef::PlainName(_) => false,
+                } if target == &home_uri => Some(pointer),
+                _ => None,
             };
-            if !hit {
-                continue;
-            }
+            let Some(p) = pointer else { continue };
+            // Exact match OR deeper path into the component (`.../A` vs
+            // `.../A/properties/x`): only the name segment is rewritten so
+            // deep refs stay intact.
+            let renamed = match p.tokens().get(2).map(|t| t.as_ref()) {
+                // deep ref: keep everything except the name segment
+                Some(n) if n == site.name && p.tokens().len() > 3 => {
+                    let mut toks: Vec<Box<str>> = p.tokens().to_vec();
+                    toks[2] = new_name.into();
+                    Pointer::from_tokens(toks).to_path()
+                }
+                Some(n) if n == site.name => new_tail.clone(),
+                _ => continue,
+            };
             // The fragment starts after the last `#`; everything before it
             // (empty for local refs) must be preserved exactly.
             let Some(hash) = edge.raw.rfind('#') else {
@@ -182,7 +207,7 @@ pub fn rename(
             };
             edits.push((
                 edge.at.clone(),
-                format!("{}#{}", &edge.raw[..hash], new_tail),
+                format!("{}#{}", &edge.raw[..hash], renamed),
             ));
         }
         if is_home {
@@ -367,6 +392,57 @@ components:
             let err = rename(&ws, &home, bad, off).expect_err("must reject");
             assert!(!err.is_empty());
         }
+    }
+
+    #[test]
+    fn rename_rewrites_deep_refs() {
+        let dir = std::env::temp_dir().join("suspect-lsp-rename-deep");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("base.yaml"),
+            "components:\n  schemas:\n    A:\n      properties:\n        x:\n          $ref: '#/components/schemas/A/properties/x'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("user.yaml"),
+            "allOf:\n  - $ref: 'base.yaml#/components/schemas/A/properties/x'\n  - $ref: 'base.yaml#/components/schemas/A'\n",
+        )
+        .unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        ws.load_all("base.yaml").unwrap();
+        let home = OpenDoc::parse(
+            Uri::from_path(&dir.join("base.yaml")).unwrap(),
+            std::fs::read_to_string(dir.join("base.yaml")).unwrap(),
+        );
+        let off = offset_of(home.text.as_str(), "A:").saturating_sub(1);
+        let edit = rename(&ws, &home, "Zed", off).expect("rename succeeds");
+        let s = serde_json::to_string(&edit.changes).unwrap();
+        assert!(s.contains("Zed/properties/x"), "deep ref tail kept: {s}");
+        assert!(
+            s.contains("#/components/schemas/Zed"),
+            "plain ref rewritten: {s}"
+        );
+    }
+
+    #[test]
+    fn rename_rejects_duplicate_sibling() {
+        let dir = std::env::temp_dir().join("suspect-lsp-rename-dup");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("dup.yaml"),
+            "components:\n  schemas:\n    A:\n      type: object\n    B:\n      type: object\n",
+        )
+        .unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        let home = OpenDoc::parse(
+            Uri::from_path(&dir.join("dup.yaml")).unwrap(),
+            std::fs::read_to_string(dir.join("dup.yaml")).unwrap(),
+        );
+        let off = offset_of(home.text.as_str(), "A:").saturating_sub(1);
+        let err = rename(&ws, &home, "B", off).unwrap_err();
+        assert!(err.contains("already contains"), "{err}");
     }
 
     #[test]

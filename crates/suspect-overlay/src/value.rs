@@ -37,7 +37,7 @@ impl Value {
             ValueKind::Object => Value::Object(
                 node.entries()
                     .into_iter()
-                    .filter_map(|e| e.value.map(|v| (e.key.into(), Value::from_node(v))))
+                    .map(|e| (e.key.into(), e.value.map_or(Value::Null, Value::from_node)))
                     .collect(),
             ),
         }

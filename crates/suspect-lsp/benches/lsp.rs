@@ -30,6 +30,7 @@ use suspect_lsp::symbols::{document_symbols, folding_ranges};
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::{Source, Uri};
 use suspect_syntax::{Edit, Format, SourceDoc};
+use tower_lsp::lsp_types::Url as LspUrl;
 
 fn corpus_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
@@ -336,6 +337,61 @@ fn bench_diagnostics(c: &mut Criterion) {
     }
 }
 
+// ---- feature ops: code actions, rename, semantic tokens, workspace symbols ----
+
+fn bench_feature_ops(c: &mut Criterion) {
+    let Some((path, bytes)) = read_corpus("stripe.yaml") else {
+        eprintln!("skipping feature_ops; stripe.yaml absent");
+        return;
+    };
+    let uri = uri_for(&path);
+    let doc = OpenDoc::parse(uri.clone(), String::from_utf8_lossy(&bytes).into_owned());
+    let ws = WorkspaceBuilder::new()
+        .root(path.parent().unwrap())
+        .build()
+        .unwrap();
+
+    let mut group = group(c, "feature_ops", bytes.len(), Some(10));
+
+    // semantic tokens over the whole 6.4 MB doc
+    group.bench_function("semantic_tokens_full", |b| {
+        b.iter(|| black_box(suspect_lsp::semantic::semantic_tokens_full(&doc).data.len()))
+    });
+
+    // code actions at a $ref-bearing position (end of the ref value line)
+    if let Some(off) = first_ref_value_offset(&bytes) {
+        use tower_lsp::lsp_types::{Diagnostic, Position, Range};
+        let li = suspect_source::LineIndex::new(&bytes);
+        let (l, c) = li.line_col_utf16(&bytes, off);
+        let range = Range {
+            start: Position {
+                line: l,
+                character: c.saturating_sub(2),
+            },
+            end: Position {
+                line: l,
+                character: c,
+            },
+        };
+        let diags = vec![Diagnostic {
+            range,
+            ..Diagnostic::default()
+        }];
+        group.bench_function("code_actions", |b| {
+            b.iter_batched(
+                || LspUrl::parse(uri.as_str()).unwrap(),
+                |lsp_url| {
+                    black_box(suspect_lsp::actions::code_actions(
+                        &doc, &lsp_url, range, &diags,
+                    ))
+                },
+                criterion::BatchSize::SmallInput,
+            )
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_did_open,
@@ -345,5 +401,6 @@ criterion_group!(
     bench_completion,
     bench_symbols_folding,
     bench_diagnostics,
+    bench_feature_ops,
 );
 criterion_main!(benches);

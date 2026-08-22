@@ -37,16 +37,25 @@ pub struct State {
     /// `workspace/didChangeWatchedFiles` so the next query reloads from disk.
     pub workspace: Option<Arc<Workspace>>,
     /// Per-open-document cache keyed by canonical URI.
-    pub docs: HashMap<Uri, OpenDoc>,
+    pub docs: HashMap<Uri, Arc<OpenDoc>>,
     /// Bumped on every open/change; debounce tasks publish only when their
-    /// captured generation is still current.
-    pub generation: u64,
+    /// Per-document edit counters: a debounce task publishes only when its
+    /// captured generation still matches the document's current one.
+    pub generations: HashMap<Uri, u64>,
 }
 
 impl State {
     /// Inserts or replaces an open document, reparsing its `LowDoc`.
+    /// Drops a closed document from the cache and forgets its generation.
+    pub fn close_doc(&mut self, uri: &Uri) {
+        self.docs.remove(uri);
+        self.generations.remove(uri);
+    }
+
+    /// Inserts or replaces a document and reparses it.
     pub fn open_doc(&mut self, uri: Uri, text: String) {
-        self.docs.insert(uri.clone(), OpenDoc::parse(uri, text));
+        self.docs
+            .insert(uri.clone(), Arc::new(OpenDoc::parse(uri, text)));
     }
 
     /// Returns the cached workspace, building it against the workspace root

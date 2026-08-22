@@ -3,6 +3,7 @@
 use std::marker::PhantomData;
 use std::ops::Range;
 
+use rustc_hash::FxHashMap;
 use suspect_low::{LowDoc, Pointer};
 
 use crate::rule::Rule;
@@ -83,13 +84,32 @@ impl Linter {
     pub fn run<'d>(&self, doc: &'d LowDoc) -> Vec<Finding<'d>> {
         let family = doc.sniff_family();
         let root = doc.root();
+
+        // Single-pass query evaluation: distinct `given` expressions are
+        // deduped and evaluated once per document, then each rule consumes
+        // its precomputed match list. Rules commonly share queries (many
+        // target `$.paths[*].get` etc.), so this collapses repeated full-tree
+        // walks into one per distinct expression.
+        let mut query_cache: FxHashMap<Box<str>, std::sync::Arc<suspect_jsonpath::NodeList>> =
+            FxHashMap::default();
         let mut findings: Vec<Finding<'d>> = Vec::new();
         for rule in &self.rules {
             if !rule.severity.is_enabled() || !rule.formats.contains(family) {
                 continue;
             }
             for path in &rule.given {
-                for node in path.query(root) {
+                // One evaluation per distinct expression, shared by every
+                // rule whose `given` uses the same query.
+                let key = path.as_key().into_boxed_str();
+                let matches = match query_cache.get(&key) {
+                    Some(m) => std::sync::Arc::clone(m),
+                    None => {
+                        let m = std::sync::Arc::new(path.query(root));
+                        query_cache.insert(key, std::sync::Arc::clone(&m));
+                        m
+                    }
+                };
+                for node in matches.iter() {
                     crate::functions::apply(rule, node, root, &mut findings);
                 }
             }

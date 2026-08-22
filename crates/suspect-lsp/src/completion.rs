@@ -56,8 +56,31 @@ pub const SCHEMA_KEYS: &[&str] = &[
     "pattern",
     "minimum",
     "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "multipleOf",
     "minItems",
     "maxItems",
+    "uniqueItems",
+    "contains",
+    "minContains",
+    "maxContains",
+    "minProperties",
+    "maxProperties",
+    "propertyNames",
+    "unevaluatedProperties",
+    "unevaluatedItems",
+    "dependentSchemas",
+    "dependentRequired",
+    "if",
+    "then",
+    "else",
+    "$schema",
+    "$id",
+    "$anchor",
+    "examples",
+    "contentMediaType",
+    "contentSchema",
 ];
 
 const METHODS: &[&str] = &[
@@ -65,9 +88,11 @@ const METHODS: &[&str] = &[
 ];
 
 /// Keys whose value is always a schema — seeing one among the ancestor keys
-/// means we are completing inside a schema.
+/// means we are completing inside a schema. Includes `schema` itself, whose
+/// value is a schema in media types and parameter objects.
 const SCHEMA_PARENT_KEYS: &[&str] = &[
     "properties",
+    "schema",
     "items",
     "prefixItems",
     "additionalProperties",
@@ -77,6 +102,24 @@ const SCHEMA_PARENT_KEYS: &[&str] = &[
     "oneOf",
     "not",
     "$defs",
+];
+
+/// Keys valid directly under a path item or webhook mapping: the HTTP
+/// methods plus the path-item-level fields.
+const PATH_ITEM_KEYS: &[&str] = &[
+    "get",
+    "put",
+    "post",
+    "delete",
+    "options",
+    "head",
+    "patch",
+    "trace",
+    "$ref",
+    "summary",
+    "description",
+    "servers",
+    "parameters",
 ];
 
 /// Component sections that hold named entries addressable via `$ref`.
@@ -169,16 +212,9 @@ fn key_context(low: &suspect_low::LowDoc, pair: suspect_syntax::SNode<'_>) -> Co
     let ptr = NodeRef::new(mapping.content()).path_from_root();
     let tokens = ptr.tokens();
 
-    if tokens.first().is_some_and(|t| t.as_ref() == "paths") && tokens.len() >= 3 {
-        let method = tokens[2].as_ref();
-        if METHODS.contains(&method) {
-            return CompletionContext::Keys(OPERATION_KEYS);
-        }
-    }
-    if tokens.len() >= 2 && tokens[0].as_ref() == "components" && tokens[1].as_ref() == "schemas" {
-        return CompletionContext::Keys(SCHEMA_KEYS);
-    }
     // Any ancestor key that is schema-valued puts us in schema context.
+    // Checked first so inline schemas under operations (e.g. under a
+    // media type's `schema` key) classify as schema keys, not operation keys.
     let mut cur = Some(pair);
     while let Some(n) = cur {
         if n.kind() == SyntaxKind::Pair
@@ -190,6 +226,22 @@ fn key_context(low: &suspect_low::LowDoc, pair: suspect_syntax::SNode<'_>) -> Co
             }
         }
         cur = n.parent();
+    }
+    // Directly under a path item or webhook mapping: methods plus the
+    // path-item-level keys.
+    if tokens.len() == 2 && matches!(tokens[0].as_ref(), "paths" | "webhooks") {
+        return CompletionContext::Keys(PATH_ITEM_KEYS);
+    }
+    // The operation object itself: paths / <path> / <method>. Deeper
+    // nesting is handled by the schema-parent scan above or yields nothing.
+    if tokens.first().is_some_and(|t| t.as_ref() == "paths") && tokens.len() == 3 {
+        let method = tokens[2].as_ref();
+        if METHODS.contains(&method) {
+            return CompletionContext::Keys(OPERATION_KEYS);
+        }
+    }
+    if tokens.len() >= 2 && tokens[0].as_ref() == "components" && tokens[1].as_ref() == "schemas" {
+        return CompletionContext::Keys(SCHEMA_KEYS);
     }
     let _ = low;
     CompletionContext::None
@@ -333,6 +385,46 @@ mod tests {
         let low = low_of(text);
         let off = text.find("title").unwrap() + 1;
         assert_eq!(context_at(&low, off), CompletionContext::None);
+    }
+
+    #[test]
+    fn inline_schema_under_operation_is_schema_context() {
+        let text = "openapi: 3.1.0\npaths:\n  /pets:\n    get:\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                type: object\n";
+        let low = low_of(text);
+        let off = text.find("type").unwrap() + 1;
+        assert_eq!(context_at(&low, off), CompletionContext::Keys(SCHEMA_KEYS));
+    }
+
+    #[test]
+    fn media_type_schema_under_request_bodies_is_schema_context() {
+        let text = "components:\n  requestBodies:\n    Pet:\n      content:\n        application/json:\n          schema:\n            required: true\n";
+        let low = low_of(text);
+        let off = text.find("required").unwrap() + 1;
+        assert_eq!(context_at(&low, off), CompletionContext::Keys(SCHEMA_KEYS));
+    }
+
+    #[test]
+    fn path_item_level_offers_methods_and_path_item_keys() {
+        let text = "openapi: 3.1.0\npaths:\n  /pets:\n    summary: x\n";
+        let low = low_of(text);
+        let off = text.find("summary").unwrap() + 1;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::Keys(PATH_ITEM_KEYS)
+        );
+        assert!(PATH_ITEM_KEYS.contains(&"get"));
+        assert!(PATH_ITEM_KEYS.contains(&"parameters"));
+    }
+
+    #[test]
+    fn webhook_level_offers_path_item_keys() {
+        let text = "openapi: 3.1.0\nwebhooks:\n  newPet:\n    description: x\n";
+        let low = low_of(text);
+        let off = text.find("description").unwrap() + 1;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::Keys(PATH_ITEM_KEYS)
+        );
     }
 
     fn workspace(dir: &std::path::Path) -> Arc<Workspace> {
