@@ -346,11 +346,6 @@ fn bench_feature_ops(c: &mut Criterion) {
     };
     let uri = uri_for(&path);
     let doc = OpenDoc::parse(uri.clone(), String::from_utf8_lossy(&bytes).into_owned());
-    let ws = WorkspaceBuilder::new()
-        .root(path.parent().unwrap())
-        .build()
-        .unwrap();
-
     let mut group = group(c, "feature_ops", bytes.len(), Some(10));
 
     // semantic tokens over the whole 6.4 MB doc
