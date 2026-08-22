@@ -25,6 +25,12 @@ and `source.fixAll.suspect`, document formatting, semantic highlighting,
 selection ranges, rename with workspace-wide `$ref` rewriting
 (`prepareRename` guarded), workspace symbols, folding ranges.
 
+## How we compare
+
+A detailed feature-by-feature comparison against **vacuum** (pb33f/daveshanley)
+and **Telescope** (sailpoint-oss) is in
+[docs/LSP_COMPARISON.md](docs/LSP_COMPARISON.md).
+
 ### In action (VS Code + the bundled extension)
 
 Screenshots are reproducible via `docs/capture/capture.sh` (requires VS Code, Xvfb, xdotool, tesseract).
