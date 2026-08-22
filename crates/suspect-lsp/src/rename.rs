@@ -54,7 +54,7 @@ struct KeySite {
 
 /// Returns the placeholder for a rename at `offset`, but only when the
 /// position sits on the **key** of a named entry under one of
-/// [`RENAMEABLE_SECTIONS`] inside `components`. Positions inside schema
+/// the renameable component sections inside `components`. Positions inside schema
 /// bodies, `$ref` values, path keys, or anywhere else yield `None`.
 #[must_use]
 pub fn prepare_rename(doc: &OpenDoc, offset: usize) -> Option<PlaceholderRange> {
@@ -124,7 +124,7 @@ fn validate_name(new_name: &str) -> Result<(), String> {
 ///
 /// # Errors
 /// When the position is not on a renameable component key or the new name
-/// is invalid (see [`validate_name`]). The caller surfaces these as JSON-RPC
+/// is invalid (see the name validation rules). The caller surfaces these as JSON-RPC
 /// `invalid_params` errors rather than silently doing nothing.
 pub fn rename(
     ws: &Workspace,
