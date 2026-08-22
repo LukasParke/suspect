@@ -26,7 +26,7 @@ const HTTP_METHODS: [&str; 8] =
 
 /// Computes quick-fix [`CodeAction`]s for `diagnostics` whose range
 /// intersects `range` and whose code has a known fix, capped at
-/// [`MAX_ACTIONS`] entries.
+/// 20 entries (server-side cap).
 ///
 /// When `range` covers the whole document, a single
 /// `source.fixAll.suspect` action (`SOURCE_ORGANIZE` kind) applying every

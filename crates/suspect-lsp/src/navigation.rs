@@ -136,7 +136,7 @@ pub fn self_definition(low: &suspect_low::LowDoc, offset: usize) -> Option<Defin
 }
 
 /// Finds all `$ref` edges across the workspace whose parsed pointer targets
-/// the node at `offset` (identified by its [`value_anchor`]-derived
+/// the node at `offset` (identified by its value-anchor-derived
 /// `path_from_root`). Local (`#/...`) and external (`file.yaml#/...`)
 /// pointers into this document both match; plain-name refs never do.
 ///

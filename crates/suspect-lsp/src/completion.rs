@@ -80,7 +80,7 @@ pub enum CompletionContext {
 ///
 /// A `$ref` string value wins over everything ([`CompletionContext::Refs`]);
 /// otherwise, if the offset sits on the key side of a mapping pair, the
-/// pair's owning mapping is classified via [`key_context`] into an offer of
+/// pair's owning mapping is classified by context into an offer of
 /// operation or schema keys; anything else yields
 /// [`CompletionContext::None`].
 #[must_use]
