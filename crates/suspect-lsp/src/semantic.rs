@@ -105,14 +105,13 @@ pub fn semantic_tokens_full(doc: &OpenDoc) -> SemanticTokens {
 /// Single DFS carrying the incremental pointer path: O(1) path updates per
 /// pair instead of an O(depth × width) `path_from_root` walk each.
 fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
-        let mut raw: Vec<RawToken> = Vec::new();
-        if !matches!(doc.low.sniff_family(), SpecFamily::Unknown) {
+    let mut raw: Vec<RawToken> = Vec::new();
+    if !matches!(doc.low.sniff_family(), SpecFamily::Unknown) {
         let inner = doc.low.inner();
         let (bytes, li) = (inner.bytes(), inner.line_index());
         // DFS with per-frame path snapshots: each stack frame owns its full
         // path so sibling iteration never corrupts another subtree's context.
-        let mut stack: Vec<(SNode<'_>, Vec<Box<str>>)> =
-            vec![(inner.root(), Vec::new())];
+        let mut stack: Vec<(SNode<'_>, Vec<Box<str>>)> = vec![(inner.root(), Vec::new())];
         while let Some((node, path)) = stack.pop() {
             match node.kind() {
                 SyntaxKind::Stream | SyntaxKind::Document => {
@@ -134,23 +133,16 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
                         if child.kind() != SyntaxKind::Pair || child.is_error() {
                             continue;
                         }
-                        let Some(key) = child.child_by_field("key") else { continue };
-                        let key_text = String::from_utf8_lossy(
-                            key.content().scalar_bytes(),
-                        )
-                        .into_owned();
+                        let Some(key) = child.child_by_field("key") else {
+                            continue;
+                        };
+                        let key_text =
+                            String::from_utf8_lossy(key.content().scalar_bytes()).into_owned();
                         let mut child_path = path.clone();
                         child_path.push(key_text.clone().into_boxed_str());
                         if let Some(ty) = key_type(&child_path, &key_text) {
                             let mods = if ty == TYPE { DEFINITION } else { 0 };
-                            push_token(
-                                &mut raw,
-                                bytes,
-                                li,
-                                token_range(&key.content()),
-                                ty,
-                                mods,
-                            );
+                            push_token(&mut raw, bytes, li, token_range(&key.content()), ty, mods);
                         }
                         if let Some(value) = child.child_by_field("value") {
                             let vc = value.content();
@@ -163,8 +155,7 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
                                 push_token(&mut raw, bytes, li, token_range(&vc), NUMBER, 0);
                             }
                             match NodeRef::new(vc).kind() {
-                                suspect_low::ValueKind::Object
-                                | suspect_low::ValueKind::Array => {
+                                suspect_low::ValueKind::Object | suspect_low::ValueKind::Array => {
                                     stack.push((vc, child_path));
                                 }
                                 _ => {}
@@ -186,44 +177,20 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
                     // emitted by the enclosing Pair handler
                 }
                 SyntaxKind::Comment => {
-                    push_token(&mut raw, bytes, li, token_range(&node.content()), COMMENT, 0);
+                    push_token(
+                        &mut raw,
+                        bytes,
+                        li,
+                        token_range(&node.content()),
+                        COMMENT,
+                        0,
+                    );
                 }
                 _ => {}
             }
         }
     }
     encode(&mut raw)
-}
-
-
-/// Emits the key token and any scalar-value token for one mapping pair.
-fn classify_pair(
-    raw: &mut Vec<RawToken>,
-    bytes: &[u8],
-    li: &suspect_source::LineIndex,
-    path: &[Box<str>],
-    pair: SNode<'_>,
-) {
-    let (Some(key), Some(value)) = (pair.child_by_field("key"), pair.child_by_field("value"))
-    else {
-        return;
-    };
-    let kc = key.content();
-    let key_text = String::from_utf8_lossy(kc.scalar_bytes()).into_owned();
-
-    let ty = key_type(path, &key_text);
-    if let Some(ty) = ty {
-        let mods = if ty == TYPE { DEFINITION } else { 0 };
-        push_token(raw, bytes, li, token_range(&kc), ty, mods);
-    }
-
-    // Scalar values: numbers and `pattern` regexes only; strings stay clean.
-    let vc = value.content();
-    if key_text == "pattern" {
-        push_token(raw, bytes, li, token_range(&vc), REGEXP, 0);
-    } else if matches!(NodeRef::new(vc).kind(), ValueKind::Int | ValueKind::Float) {
-        push_token(raw, bytes, li, token_range(&vc), NUMBER, 0);
-    }
 }
 
 /// Token type for a mapping key, given its root-pointer tokens and text.
