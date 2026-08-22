@@ -4,15 +4,15 @@
 
 use std::sync::Arc;
 
+use suspect_lint::Linter;
 use suspect_lsp::actions;
 use suspect_lsp::navigation;
 use suspect_lsp::semantic;
 use suspect_lsp::state::OpenDoc;
 use suspect_lsp::workspace_symbol;
-use suspect_lint::Linter;
 use suspect_oas::Session;
 use suspect_ref::WorkspaceBuilder;
-use suspect_source::{Source, Uri};
+use suspect_source::Uri;
 use suspect_validate::validate_entry;
 
 const SPEC: &str = include_str!("../../../docs/demo/petstore.yaml");
@@ -103,8 +103,14 @@ fn main() {
 
     // 5. Code actions at missing-operationId position
     let action_range = tower_lsp::lsp_types::Range {
-        start: tower_lsp::lsp_types::Position { line: 4, character: 4 },
-        end: tower_lsp::lsp_types::Position { line: 4, character: 8 },
+        start: tower_lsp::lsp_types::Position {
+            line: 4,
+            character: 4,
+        },
+        end: tower_lsp::lsp_types::Position {
+            line: 4,
+            character: 8,
+        },
     };
     let diag = tower_lsp::lsp_types::Diagnostic {
         range: action_range,
@@ -115,13 +121,10 @@ fn main() {
         ..Default::default()
     };
     let lsp_url = tower_lsp::lsp_types::Url::parse(file_uri.as_str()).unwrap();
-    let actions =
-        actions::code_actions(&doc, &lsp_url, action_range, &[diag]);
+    let actions = actions::code_actions(&doc, &lsp_url, action_range, &[diag]);
     let action_items: Vec<serde_json::Value> = actions
         .iter()
-        .map(|a| {
-            serde_json::json!({ "title": a.title, "kind": format!("{:?}", a.kind) })
-        })
+        .map(|a| serde_json::json!({ "title": a.title, "kind": format!("{:?}", a.kind) }))
         .collect();
     entries.push(serde_json::json!({
         "feature": "code_actions",
@@ -155,8 +158,7 @@ fn main() {
 
     // 7. Workspace symbols
     let symbols = workspace_symbol::workspace_symbols(&ws, "");
-    let sym_names: Vec<String> =
-        symbols.iter().map(|s| s.name.clone()).collect();
+    let sym_names: Vec<String> = symbols.iter().map(|s| s.name.clone()).collect();
     entries.push(serde_json::json!({
         "feature": "workspace_symbols",
         "title": "Workspace symbols",
@@ -168,5 +170,9 @@ fn main() {
     let out_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/capture/showcase_data.json");
     std::fs::write(&out_path, json).unwrap();
-    println!("Wrote {} feature entries to {}", entries.len(), out_path.display());
+    println!(
+        "Wrote {} feature entries to {}",
+        entries.len(),
+        out_path.display()
+    );
 }
