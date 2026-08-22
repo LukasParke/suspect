@@ -428,6 +428,10 @@ fn license_missing_url_is_warning() {
 #[test]
 fn petstore_corpus_has_no_errors() {
     let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus");
+    if !corpus.join("petstore-expanded.yaml").exists() {
+        eprintln!("skipping: corpus/ is gitignored and absent");
+        return;
+    }
     let ws = WorkspaceBuilder::new().root(&corpus).build().unwrap();
     let session = Session::new(Arc::new(ws));
     let diags = validate_entry(&session, "petstore-expanded.yaml").unwrap();
