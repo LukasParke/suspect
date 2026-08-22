@@ -37,11 +37,11 @@ Screenshots are reproducible via `docs/capture/capture.sh` (requires VS Code, Xv
 
 Diagnostics from the validator and linter, with `$ref` inlay hints:
 
-![Diagnostics](docs/images/01-diagnostics-overview.png)
+![Diagnostics](docs/images/lsp-diagnostics.png)
 
 Hover over a `$ref` resolves it across files and previews the target:
 
-![Hover](docs/images/02-hover-resolved-target.png)
+![Hover](docs/images/lsp-hover.png)
 
 Quick fixes derived from diagnostics (insert missing `operationId`,
 `responses`, `description`, contact/license skeletons, …):
@@ -54,7 +54,7 @@ Problems panel:
 
 Semantic highlighting and property type hints:
 
-![Semantic tokens and inlay hints](docs/images/05-semantic-tokens-inlay.png)
+![Inlay hints + semantic highlighting](docs/images/lsp-inlay.png)
 
 Workspace-wide rename rewrites the declaration and every `$ref` that points
 at it (guarded by `prepareRename`; cross-file edits land in one atomic

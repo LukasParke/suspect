@@ -1,0 +1,130 @@
+[
+  {
+    "feature": "hover",
+    "markdown": "**Pets** `array`",
+    "offset": 289,
+    "title": "Hover: resolved $ref target"
+  },
+  {
+    "feature": "diagnostics",
+    "lint": [
+      {
+        "code": "info-contact",
+        "message": "Info object should contain a contact object.",
+        "severity": "Warn",
+        "start": 23
+      },
+      {
+        "code": "info-license",
+        "message": "Info object should contain a license object.",
+        "severity": "Warn",
+        "start": 23
+      },
+      {
+        "code": "oas3-api-contact",
+        "message": "OpenAPI 3.x API description must have a contact object.",
+        "severity": "Info",
+        "start": 23
+      },
+      {
+        "code": "operation-operationId",
+        "message": "Operation must have an `operationId`.",
+        "severity": "Error",
+        "start": 94
+      },
+      {
+        "code": "operation-tags",
+        "message": "Operation should have non-empty `tags` array.",
+        "severity": "Warn",
+        "start": 94
+      },
+      {
+        "code": "operation-operationId",
+        "message": "Operation must have an `operationId`.",
+        "severity": "Error",
+        "start": 336
+      },
+      {
+        "code": "operation-tags",
+        "message": "Operation should have non-empty `tags` array.",
+        "severity": "Warn",
+        "start": 336
+      },
+      {
+        "code": "path-params",
+        "message": "Operation `get` of \"/pets/{petId}\" does not declare path parameter {petId}",
+        "severity": "Error",
+        "start": 336
+      }
+    ],
+    "title": "Diagnostics: semantic + lint",
+    "validate": [
+      {
+        "code": "oas-operation-missing-operationId",
+        "message": "get operation is missing an operationId",
+        "severity": "Warning",
+        "start": 94
+      },
+      {
+        "code": "oas-path-param-not-declared",
+        "message": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it",
+        "severity": "Error",
+        "start": 325
+      },
+      {
+        "code": "oas-operation-missing-operationId",
+        "message": "get operation is missing an operationId",
+        "severity": "Warning",
+        "start": 336
+      }
+    ]
+  },
+  {
+    "feature": "goto_def",
+    "target_line": {
+      "start": 787,
+      "uri": "file:///tmp/suspect-showcase/petstore.yaml"
+    },
+    "title": "Go to definition: $ref target"
+  },
+  {
+    "count": 14,
+    "feature": "semantic_tokens",
+    "title": "Semantic tokens"
+  },
+  {
+    "actions": [],
+    "feature": "code_actions",
+    "title": "Code actions: quick fixes"
+  },
+  {
+    "feature": "inlay_hints",
+    "hints": [
+      {
+        "label": "InlayHint { position: Position { line: 41, character: 40 }, label: String(\"→ Pet (petstore.yaml)\"), kind: Some(Type), text_edits: None, tooltip: Some(String(\"```yaml\\ntype: object\\n      required: [id, name]\\n      properties:\\n        id:\\n          type: integer\\n          format: int64\\n        name:\\n          type: string\\n        tag:\\n          type: string\\n```\")), padding_left: None, padding_right: Some(true), data: None }",
+        "line": 41
+      },
+      {
+        "label": "InlayHint { position: Position { line: 24, character: 48 }, label: String(\"→ Pet (petstore.yaml)\"), kind: Some(Type), text_edits: None, tooltip: Some(String(\"```yaml\\ntype: object\\n      required: [id, name]\\n      properties:\\n        id:\\n          type: integer\\n          format: int64\\n        name:\\n          type: string\\n        tag:\\n          type: string\\n```\")), padding_left: None, padding_right: Some(true), data: None }",
+        "line": 24
+      },
+      {
+        "label": "InlayHint { position: Position { line: 14, character: 49 }, label: String(\"→ Pets (petstore.yaml)\"), kind: Some(Type), text_edits: None, tooltip: Some(String(\"```yaml\\ntype: array\\n      items:\\n        $ref: '#/components/schemas/Pet'\\n```\")), padding_left: None, padding_right: Some(true), data: None }",
+        "line": 14
+      }
+    ],
+    "title": "Inlay hints: $ref targets + property types"
+  },
+  {
+    "feature": "workspace_symbols",
+    "names": [
+      "/pets",
+      "GET /pets",
+      "/pets/{petId}",
+      "GET /pets/{petId}",
+      "Pet",
+      "Pets"
+    ],
+    "title": "Workspace symbols"
+  }
+]

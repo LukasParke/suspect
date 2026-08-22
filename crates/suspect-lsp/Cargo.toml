@@ -22,8 +22,15 @@ thiserror.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+suspect-arazzo.workspace = true
+suspect-lint.workspace = true
+suspect-validate.workspace = true
+serde_json.workspace = true
 criterion.workspace = true
 
 [[bench]]
 name = "lsp"
 harness = false
+
+[[example]]
+name = "showcase"
