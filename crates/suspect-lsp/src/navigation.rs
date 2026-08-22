@@ -372,13 +372,13 @@ pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) 
             // instead of raw source excerpts.
             let ptr = suspect_low::NodeRef::new(*target.syntax()).path_from_root();
             let toks = ptr.tokens();
-            if toks.len() >= 3 && toks[0].as_ref() == "components" && toks[1].as_ref() == "schemas"
-            {
-                if let Some(md) =
+            if toks.len() >= 3
+                && toks[0].as_ref() == "components"
+                && toks[1].as_ref() == "schemas"
+                && let Some(md) =
                     crate::hover_detail::try_rich_hover(toks[1].as_ref(), toks[2].as_ref(), low)
-                {
-                    return Some(md);
-                }
+            {
+                return Some(md);
             }
             let tdoc = target.syntax().doc();
             if *tdoc.uri() == *low.uri() {
