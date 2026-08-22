@@ -217,13 +217,27 @@ fn merge_key_cycle_does_not_hang() {
 
 #[test]
 fn deep_nesting_does_not_overflow() {
-    // 10000-level nesting: tree walks and path_from_root must not overflow
-    let mut src = String::from("root:\n");
-    for i in 0..5000 {
-        src.push_str(&format!("{}  key{}:\n", " ".repeat((i % 10) + 2), i));
-        src.push_str(&format!("{}  val{}\n", " ".repeat((i % 10) + 4), i));
+    // Deeply nested valid YAML must parse without stack overflow
+    let depth = 200;
+    let mut src = String::new();
+    for i in 0..depth {
+        src.push_str(&format!("{}key:\n", " ".repeat(i * 2)));
     }
+    src.push_str(&format!("{}value\n", " ".repeat(depth * 2)));
+
+    // Must not panic or overflow
     let doc = parse(&src);
-    let root = doc.root();
-    assert_eq!(root.kind(), ValueKind::Object);
+    let _ = doc.sniff_family();
+    let _ = doc.root().entries();
+    // Also exercise decoded_scalar on the leaf
+    let leaf_offset = src.len().saturating_sub(10);
+    let node = suspect_syntax::SNode::new(
+        doc.inner(),
+        doc.inner()
+            .root()
+            .raw()
+            .descendant_for_byte_range(leaf_offset, leaf_offset + 1)
+            .unwrap(),
+    );
+    let _ = String::from_utf8_lossy(node.scalar_bytes());
 }
