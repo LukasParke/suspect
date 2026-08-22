@@ -441,6 +441,12 @@ fn petstore_corpus_has_no_errors() {
 #[test]
 fn generated_fixture_validates_without_panic() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+    let entry = fixtures.join("generated_100x100.json");
+    if !entry.exists() {
+        // fixtures/ is gitignored; skip on clean checkouts and CI
+        eprintln!("skipping: generated fixtures not present");
+        return;
+    }
     let ws = WorkspaceBuilder::new().root(&fixtures).build().unwrap();
     let session = Session::new(Arc::new(ws));
     let diags = validate_entry(&session, "generated_100x100.json").unwrap();

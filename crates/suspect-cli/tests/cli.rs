@@ -15,10 +15,6 @@ fn ws_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn fixture(name: &str) -> PathBuf {
-    ws_root().join("fixtures").join(name)
-}
-
 /// Writes a small deterministic OpenAPI 3.1 spec into a temp dir so tests do
 /// not depend on the gitignored generated fixtures.
 fn write_inline_spec(dir: &std::path::Path, name: &str) -> PathBuf {
