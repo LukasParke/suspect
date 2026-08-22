@@ -19,6 +19,29 @@ fn fixture(name: &str) -> PathBuf {
     ws_root().join("fixtures").join(name)
 }
 
+/// Writes a small deterministic OpenAPI 3.1 spec into a temp dir so tests do
+/// not depend on the gitignored generated fixtures.
+fn write_inline_spec(dir: &std::path::Path, name: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        "openapi: 3.1.0\ninfo:\n  title: t\n  version: \"1\"\npaths:\n  /pets:\n    get:\n      responses:\n        \"200\":\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: \'#/components/schemas/Pet\'\ncomponents:\n  schemas:\n    Pet:\n      type: object\n",
+    )
+    .unwrap();
+    path
+}
+
+/// Circular two-schema spec (A -> B -> A) for inline-bundle termination.
+fn write_circular_spec(dir: &std::path::Path, name: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        "openapi: 3.1.0\ninfo:\n  title: c\n  version: \"1\"\npaths: {}\ncomponents:\n  schemas:\n    A:\n      $ref: \'#/components/schemas/B\'\n    B:\n      properties:\n        back:\n          $ref: \'#/components/schemas/A\'\n",
+    )
+    .unwrap();
+    path
+}
+
 static TEMP_SEQ: AtomicU32 = AtomicU32::new(0);
 
 /// Unique temp directory, removed on drop.
@@ -55,7 +78,9 @@ impl Drop for TempDir {
 
 #[test]
 fn check_reports_family_and_clean_syntax() {
-    let report = check_file(&fixture("generated_100x100.yaml"));
+    let tmp = TempDir::new("check");
+    let input = write_inline_spec(&tmp.0, "spec.yaml");
+    let report = check_file(&input);
     assert_eq!(report.family, "Oas31");
     assert_eq!(report.syntax_errors, 0);
     assert!(
@@ -284,7 +309,8 @@ fn stats_matches_hand_written_spec() {
 
 #[test]
 fn bundle_keep_is_byte_identical_passthrough() {
-    let input = fixture("generated_100x100.yaml");
+    let tmpsrc = TempDir::new("keep-src");
+    let input = write_inline_spec(&tmpsrc.0, "spec.yaml");
     let tmp = TempDir::new("keep");
     let out = tmp.path("bundled.yaml");
     let code = bundle::bundle(&input, Some(&out), Strategy::Keep, None).expect("bundle");
@@ -296,7 +322,8 @@ fn bundle_keep_is_byte_identical_passthrough() {
 
 #[test]
 fn bundle_inline_terminates_on_circular_fixture() {
-    let input = fixture("generated_2000x2000.yaml");
+    let tmpsrc = TempDir::new("inline-src");
+    let input = write_circular_spec(&tmpsrc.0, "circular.yaml");
     let tmp = TempDir::new("inline");
     let out = tmp.path("bundled.json");
     let code = bundle::bundle(&input, Some(&out), Strategy::Inline, Some(DocFormat::Json))
@@ -406,6 +433,13 @@ fn diff_reports_added_removed_changed() {
 #[test]
 fn diff_identical_documents_is_empty() {
     let path = ws_root().join("corpus").join("petstore-expanded.yaml");
+    let fallback_dir = std::env::temp_dir().join("suspect-cli-diff");
+    let _ = std::fs::create_dir_all(&fallback_dir);
+    let path = if path.exists() {
+        path
+    } else {
+        write_inline_spec(&fallback_dir, "diff-spec.yaml")
+    };
 
     let doc_a = suspect_cli::load_doc(&path).expect("parse a");
     let doc_b = suspect_cli::load_doc(&path).expect("parse b");

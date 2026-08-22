@@ -13,17 +13,25 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures")
 }
 
-fn setup_doc(name: &str) -> LowDoc {
+/// Loads a fixture; `None` when the (gitignored) fixture set is absent so
+/// bench-smoke runs on clean checkouts stay green.
+fn setup_doc(name: &str) -> Option<LowDoc> {
     let path = fixtures_dir().join(name);
-    let source = Source::from_vec(
-        std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display())),
-    );
-    LowDoc::parse(Uri::from_path(&path).expect("valid fixture URI"), source)
+    let bytes = std::fs::read(&path).ok()?;
+    Some(LowDoc::parse(
+        Uri::from_path(&path).expect("valid fixture URI"),
+        Source::from_vec(bytes),
+    ))
 }
 
 fn bench_query(c: &mut Criterion, label: &str, expr: &str, fixture: &str) {
-    let doc = setup_doc(fixture);
+    let Some(doc) = setup_doc(fixture) else {
+        eprintln!(
+            "jsonpath bench: skipping {label}; fixture {} absent",
+            fixtures_dir().join(fixture).display()
+        );
+        return;
+    };
     let query = Path::parse(expr).unwrap_or_else(|e| panic!("query {expr:?} must compile: {e}"));
     // Sanity-check the query matches something before timing it.
     let hits = query.query(doc.root()).len();
