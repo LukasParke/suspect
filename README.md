@@ -27,32 +27,42 @@ selection ranges, rename with workspace-wide `$ref` rewriting
 
 ### In action (VS Code + the bundled extension)
 
+Screenshots are reproducible via `docs/capture/capture.sh` (requires VS Code, Xvfb, xdotool, tesseract).
+
 Diagnostics from the validator and linter, with `$ref` inlay hints:
 
-![Diagnostics](docs/images/lsp-diagnostics.png)
+![Diagnostics](docs/images/01-diagnostics-overview.png)
 
 Hover over a `$ref` resolves it across files and previews the target:
 
-![Hover](docs/images/lsp-hover.png)
+![Hover](docs/images/02-hover-resolved-target.png)
 
 Quick fixes derived from diagnostics (insert missing `operationId`,
 `responses`, `description`, contact/license skeletons, …):
 
-![Code actions](docs/images/lsp-codeaction.png)
+![Code actions](docs/images/03-code-actions.png)
 
 Problems panel:
 
-![Problems](docs/images/lsp-problems.png)
+![Problems](docs/images/04-problems-panel.png)
 
 Semantic highlighting and property type hints:
 
-![Semantic tokens and inlay hints](docs/images/lsp-inlay-semantic.png)
+![Semantic tokens and inlay hints](docs/images/05-semantic-tokens-inlay.png)
 
 Workspace-wide rename rewrites the declaration and every `$ref` that points
 at it (guarded by `prepareRename`; cross-file edits land in one atomic
 `WorkspaceEdit`) — shown here renaming `Pet`:
 
-![Rename](docs/images/lsp-rename.png)
+![Rename input](docs/images/06-rename-input.png)
+
+After applying, every `$ref` is rewritten:
+
+![Rename applied](docs/images/07-rename-applied.png)
+
+Cross-file goto definition:
+
+![Goto definition](docs/images/08-goto-definition.png)
 
 ## Crates
 

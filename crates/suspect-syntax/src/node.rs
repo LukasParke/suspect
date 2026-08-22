@@ -156,7 +156,9 @@ impl<'d> SNode<'d> {
         }
     }
 
-    fn first_meaningful_child(&self) -> Option<SNode<'d>> {
+    /// First meaningful (named, non-decoration) child.
+    #[must_use]
+    pub fn first_meaningful_child(&self) -> Option<SNode<'d>> {
         self.children()
             .find(|c| c.raw().is_named() && !is_decoration(c.kind()))
     }

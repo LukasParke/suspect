@@ -188,3 +188,15 @@ milestone, not an architecture problem.
   misclassified edges per Stripe doc; found by the corpus benchmarks.
 - Incremental reparse verified on real corpus: 1 KB edit into 6.4 MB doc =
   ~1.5 ms vs ~164 ms full.
+
+- Semantic tokens rewritten (single-DFS with incremental path snapshots):
+  42 s → 170 ms on stripe.yaml (250×).
+- node_at rewritten (two O(log n) byte-range probes replacing O(n) scan):
+  goto_def node_at 110 ms → 1.5 µs; full goto_definition 114 ms → 3.6 ms.
+- Diagnostics pipeline: per-document generation counters (editing doc A no
+  longer cancels pending diagnostics for doc B); compute outside the state
+  lock (no more blocking navigation during validation); did_close clears
+  stale diagnostics and frees the cached document.
+- Lint query-result cache (Arc-shared NodeList per distinct expression):
+  rules sharing `given` queries evaluate once per document instead of once
+  per rule.
