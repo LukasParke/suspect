@@ -81,7 +81,17 @@ fn sample_schema_pointers(ws: &Workspace) -> Vec<Pointer> {
         .collect()
 }
 
+/// True when the gitignored circular fixture is present; fixture benches
+/// skip otherwise so CI smoke runs stay green on clean checkouts.
+fn circular_fixture_present() -> bool {
+    fixtures_dir().join(CIRCULAR_FIXTURE).exists()
+}
+
 fn bench_cold_load(c: &mut Criterion) {
+    if !circular_fixture_present() {
+        eprintln!("ref bench: skipping fixture groups; fixtures absent");
+        return;
+    }
     let mut group = c.benchmark_group("ref/cold_load_all");
     group.bench_function("yaml_2000x2000_circular", |b| {
         b.iter(|| {
@@ -94,6 +104,9 @@ fn bench_cold_load(c: &mut Criterion) {
 }
 
 fn bench_warm_resolve(c: &mut Criterion) {
+    if !circular_fixture_present() {
+        return;
+    }
     let ws = build_workspace();
     ws.load_all(CIRCULAR_FIXTURE).expect("warmup load succeeds");
     let handle = ws.open(CIRCULAR_FIXTURE).expect("fixture opens");
@@ -118,6 +131,9 @@ fn bench_warm_resolve(c: &mut Criterion) {
 }
 
 fn bench_cycle_census(c: &mut Criterion) {
+    if !circular_fixture_present() {
+        return;
+    }
     let ws = build_workspace();
     ws.load_all(CIRCULAR_FIXTURE).expect("warmup load succeeds");
     let handle = ws.open(CIRCULAR_FIXTURE).expect("fixture opens");

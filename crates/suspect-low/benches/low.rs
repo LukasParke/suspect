@@ -13,14 +13,15 @@ fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures")
 }
 
-/// Parses a YAML fixture once for use as benchmark state.
-fn setup_doc(name: &str) -> LowDoc {
+/// Parses a YAML fixture once; `None` when the gitignored fixtures are
+/// absent (clean checkouts, CI).
+fn setup_doc(name: &str) -> Option<LowDoc> {
     let path = fixtures_dir().join(name);
-    let source = Source::from_vec(
-        std::fs::read(&path)
-            .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display())),
-    );
-    LowDoc::parse(Uri::from_path(&path).expect("valid fixture URI"), source)
+    let bytes = std::fs::read(&path).ok()?;
+    Some(LowDoc::parse(
+        Uri::from_path(&path).expect("valid fixture URI"),
+        Source::from_vec(bytes),
+    ))
 }
 
 /// RFC 6901 fragment pointer to `#/paths/<key>/get`, with `~1` escaping.
@@ -31,8 +32,10 @@ fn path_get_pointer(path_key: &str) -> Pointer {
 
 fn bench_parse(c: &mut Criterion) {
     let path = fixtures_dir().join("generated_1000x1000.yaml");
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()));
+    let Some(bytes) = std::fs::read(&path).ok() else {
+        eprintln!("low bench: skipping; {} absent", path.display());
+        return;
+    };
     let uri = Uri::from_path(&path).expect("valid fixture URI");
 
     let mut group = c.benchmark_group("low/parse");
@@ -47,7 +50,10 @@ fn bench_parse(c: &mut Criterion) {
 }
 
 fn bench_pointer_lookups(c: &mut Criterion) {
-    let doc = setup_doc("generated_100x100.yaml");
+    let Some(doc) = setup_doc("generated_100x100.yaml") else {
+        eprintln!("low bench: skipping; fixture absent");
+        return;
+    };
     // Collect real path keys at setup so pointers hit live data.
     let keys: Vec<String> = doc
         .root()
@@ -76,7 +82,10 @@ fn bench_pointer_lookups(c: &mut Criterion) {
 }
 
 fn bench_entries_iteration(c: &mut Criterion) {
-    let doc = setup_doc("generated_100x100.yaml");
+    let Some(doc) = setup_doc("generated_100x100.yaml") else {
+        eprintln!("low bench: skipping; fixture absent");
+        return;
+    };
     let schemas = doc
         .root()
         .get("components")
@@ -94,7 +103,10 @@ fn bench_entries_iteration(c: &mut Criterion) {
 }
 
 fn bench_duplicate_keys(c: &mut Criterion) {
-    let doc = setup_doc("generated_100x100.yaml");
+    let Some(doc) = setup_doc("generated_100x100.yaml") else {
+        eprintln!("low bench: skipping; fixture absent");
+        return;
+    };
     let root = doc.root();
 
     let mut group = c.benchmark_group("low/duplicate_keys");

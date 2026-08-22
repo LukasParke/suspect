@@ -38,8 +38,10 @@ fn read_corpus(name: &str) -> Option<(PathBuf, Vec<u8>)> {
 
 fn bench_parse(c: &mut Criterion, label: &str, fixture: &str, format: Option<Format>) {
     let path = fixtures_dir().join(fixture);
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()));
+    let Ok(bytes) = std::fs::read(&path) else {
+        eprintln!("syntax bench: skipping {label}; {fixture} absent");
+        return;
+    };
     let uri = Uri::from_path(&path)
         .unwrap_or_else(|e| panic!("failed to make URI for {}: {e}", path.display()));
 

@@ -49,18 +49,20 @@ fn corpus_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../corpus")
 }
 
-/// Loads a corpus document. Corpus files are gitignored but expected on
-/// dev machines; a missing file panics with the path for clarity.
-fn setup_corpus_doc(name: &str) -> LowDoc {
+/// Loads a corpus document; `None` when the gitignored corpus is absent
+/// (clean checkouts, CI) so benches skip instead of failing.
+fn setup_corpus_doc(name: &str) -> Option<LowDoc> {
     let path = corpus_dir().join(name);
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("failed to read corpus {}: {e}", path.display()));
+    let bytes = std::fs::read(&path).ok()?;
     let uri = Uri::from_path(&path).expect("valid corpus URI");
-    LowDoc::parse(uri, Source::from_vec(bytes))
+    Some(LowDoc::parse(uri, Source::from_vec(bytes)))
 }
 
 fn bench_corpus_query(c: &mut Criterion, expr: &str, doc_name: &str, sample_size: usize) {
-    let doc = setup_corpus_doc(doc_name);
+    let Some(doc) = setup_corpus_doc(doc_name) else {
+        eprintln!("jsonpath bench: skipping {expr} on {doc_name}; corpus absent");
+        return;
+    };
     let query = match Path::parse(expr) {
         Ok(q) => q,
         Err(e) => panic!("query {expr:?} must compile: {e}"),

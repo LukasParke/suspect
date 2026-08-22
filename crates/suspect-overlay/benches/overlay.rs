@@ -112,12 +112,13 @@ fn corpus_dir() -> PathBuf {
 
 fn bench_all(c: &mut Criterion) {
     let path = fixtures_dir().join("generated_100x100.yaml");
+    let Ok(bytes) = std::fs::read(&path) else {
+        eprintln!("overlay bench: skipping; fixtures absent");
+        return;
+    };
     let target = LowDoc::parse(
         Uri::from_path(&path).expect("valid fixture URI"),
-        Source::from_vec(
-            std::fs::read(&path)
-                .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display())),
-        ),
+        Source::from_vec(bytes),
     );
     let overlay_doc = LowDoc::parse(
         Uri::parse("memory://bench-overlay.yaml").expect("valid URI"),
