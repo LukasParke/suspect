@@ -1,7 +1,14 @@
 use suspect_low::{LowDoc, SpecFamily};
 use suspect_source::{Source, Uri};
+
 #[test]
 fn stripe_parses() {
+    // corpus/ is gitignored; skip on clean checkouts and CI
+    let corpus = concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus");
+    if !std::path::Path::new(corpus).join("stripe.yaml").exists() {
+        eprintln!("skipping: corpus absent");
+        return;
+    }
     for f in [
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/stripe.yaml"),
         concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus/stripe-sdk.yaml"),
