@@ -1,0 +1,19 @@
+[package]
+name = "suspect-ir"
+description = "Normalized, indexed document model shared by gen, test, gateway, and LSP"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+suspect-ref.workspace = true
+suspect-overlay.workspace = true
+suspect-source.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
