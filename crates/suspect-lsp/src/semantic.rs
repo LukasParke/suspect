@@ -350,6 +350,11 @@ pub fn inlay_hints(doc: &OpenDoc, ws: &Workspace, range: Range) -> Vec<InlayHint
 }
 
 /// Builds the `→ Target (file)` hint for one `$ref` value node.
+///
+/// The label resolves eagerly (clients need it for the first paint); the
+/// target excerpt is deferred: the hint carries the target's document URI
+/// plus byte range in `data`, and [`resolve_inlay_hint`] renders the
+/// fenced-code tooltip on `inlayHint/resolve`.
 fn ref_hint(
     handle: &suspect_ref::DocHandle<'_>,
     ws: &Workspace,
@@ -358,47 +363,96 @@ fn ref_hint(
     li: &suspect_source::LineIndex,
 ) -> Option<InlayHint> {
     let node = rederive(handle, value.byte_range())?;
-    let (label, tooltip_source) = match handle.resolve_ref_value(node) {
+    let (label, data) = match handle.resolve_ref_value(node) {
         Ok(Resolution::Node(target)) => {
             let name = target
                 .path_from_root()
                 .tokens()
                 .last()
                 .map_or_else(|| "(root)".to_owned(), |t| t.to_string());
-            let file = basename(target.syntax().doc().uri().as_str());
-            let excerpt = excerpt(target.syntax().doc().bytes(), target.byte_range(), 10);
-            (format!("→ {name} ({file})"), excerpt)
+            let file = crate::links::basename(target.syntax().doc().uri().as_str());
+            let tdoc = target.syntax().doc();
+            let range = target.byte_range();
+            (
+                format!("→ {name} ({file})"),
+                serde_json::json!({
+                    "suspect": "refHint",
+                    "uri": tdoc.uri().as_str(),
+                    "start": range.start,
+                    "end": range.end,
+                }),
+            )
         }
         Ok(Resolution::WholeDoc(id)) => {
             let uri = ws
                 .uris()
                 .into_iter()
                 .find(|u| ws.get(u).is_some_and(|h| h.id() == id))?;
-            let file = basename(uri.as_str());
-            let doc_bytes = ws.get(&uri)?.doc().inner().bytes().to_vec();
+            let low = ws.get(&uri)?.doc();
             (
-                format!("→ {file}"),
-                excerpt(&doc_bytes, 0..doc_bytes.len(), 10),
+                format!("→ {}", crate::links::basename(uri.as_str())),
+                serde_json::json!({
+                    "suspect": "refHint",
+                    "uri": uri.as_str(),
+                    "start": 0,
+                    "end": low.inner().bytes().len(),
+                }),
             )
         }
         Ok(Resolution::Cycle { .. }) | Err(_) => return None,
-    };
-    let lang = match value.doc().format() {
-        suspect_syntax::Format::Json => "json",
-        suspect_syntax::Format::Yaml => "yaml",
     };
     Some(InlayHint {
         position: end_position(bytes, li, value),
         label: InlayHintLabel::String(label),
         kind: Some(InlayHintKind::TYPE),
         text_edits: None,
-        tooltip: Some(InlayHintTooltip::String(format!(
-            "```{lang}\n{tooltip_source}\n```"
-        ))),
+        tooltip: None,
         padding_left: None,
         padding_right: Some(true),
-        data: None,
+        data: Some(data),
     })
+}
+
+/// Renders the deferred excerpt tooltip of a `$ref` inlay hint.
+///
+/// Hints without our `data` marker (property-type hints) come back
+/// unchanged; targets that vanished from the workspace since the hint was
+/// issued likewise resolve to the unchanged hint.
+#[must_use]
+pub fn resolve_inlay_hint(mut hint: InlayHint, ws: &Workspace) -> InlayHint {
+    fn ref_data(d: &serde_json::Value) -> Option<(String, usize, usize)> {
+        if d.get("suspect")?.as_str()? != "refHint" {
+            return None;
+        }
+        Some((
+            d.get("uri")?.as_str()?.to_owned(),
+            d.get("start")?.as_u64()? as usize,
+            d.get("end")?.as_u64()? as usize,
+        ))
+    }
+    let Some((uri, start, end)) = hint.data.as_ref().and_then(ref_data) else {
+        return hint;
+    };
+    let Ok(uri) = suspect_source::Uri::parse(&uri) else {
+        return hint;
+    };
+    let Some(handle) = ws.get(&uri) else {
+        return hint;
+    };
+    let inner = handle.doc().inner();
+    let doc_bytes = inner.bytes();
+    let clamped = start.min(doc_bytes.len())..end.min(doc_bytes.len()).max(start);
+    let lang = match inner.format() {
+        suspect_syntax::Format::Json => "json",
+        suspect_syntax::Format::Yaml => "yaml",
+    };
+    hint.tooltip = Some(InlayHintTooltip::MarkupContent(
+        tower_lsp::lsp_types::MarkupContent {
+            kind: tower_lsp::lsp_types::MarkupKind::Markdown,
+            value: format!("```{lang}\n{}\n```", excerpt(doc_bytes, clamped, 10)),
+        },
+    ));
+    hint
 }
 
 /// Rendered type set (e.g. `string|null`) for a property key pair, or `None`
@@ -511,11 +565,6 @@ fn end_position(bytes: &[u8], li: &suspect_source::LineIndex, node: &SNode<'_>) 
 /// True when `p` lies within `range` (inclusive bounds).
 fn position_in_range(p: Position, range: &Range) -> bool {
     p >= range.start && p <= range.end
-}
-
-/// Last path segment of a URI string.
-fn basename(uri: &str) -> &str {
-    uri.rsplit('/').next().unwrap_or(uri)
 }
 
 /// Key node of the mapping-pair enclosing `node` (climbing through wrapper
@@ -786,6 +835,62 @@ components:
                 .any(|h| h.kind == Some(DocumentHighlightKind::WRITE)),
             "declaration must be highlighted as Write"
         );
+    }
+
+    #[test]
+    fn inlay_hint_resolve_renders_deferred_excerpt() {
+        let dir = std::env::temp_dir().join("suspect-lsp-inlay-resolve");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("spec.yaml"), SPEC).unwrap();
+        let uri = suspect_source::Uri::from_path(&dir.join("spec.yaml")).unwrap();
+        let ws = suspect_ref::WorkspaceBuilder::new()
+            .root(&dir)
+            .build()
+            .unwrap();
+        ws.load_all(uri.as_str()).unwrap();
+        let doc = OpenDoc::parse(uri.clone(), SPEC.to_owned());
+        let full = Range {
+            start: Position::default(),
+            end: Position {
+                line: u32::MAX,
+                character: u32::MAX,
+            },
+        };
+        let hints = inlay_hints(&doc, &ws, full);
+        let hint = hints.first().expect("ref hint fires");
+        // Eager response carries no tooltip; the excerpt comes on resolve.
+        assert!(hint.tooltip.is_none());
+        let resolved = resolve_inlay_hint(hint.clone(), &ws);
+        let value = match resolved.tooltip {
+            Some(InlayHintTooltip::MarkupContent(m)) => m.value,
+            other => panic!("markdown tooltip expected, got {other:?}"),
+        };
+        assert!(value.contains("```yaml"), "{value}");
+    }
+
+    #[test]
+    fn inlay_hint_resolve_passthrough_for_property_hints() {
+        // A hint without our data marker must survive unchanged.
+        let plain = InlayHint {
+            position: Position::default(),
+            label: InlayHintLabel::String(": string".to_owned()),
+            kind: Some(InlayHintKind::TYPE),
+            text_edits: None,
+            tooltip: None,
+            padding_left: Some(true),
+            padding_right: None,
+            data: None,
+        };
+        let dir = std::env::temp_dir().join("suspect-lsp-inlay-passthrough");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = suspect_ref::WorkspaceBuilder::new()
+            .root(&dir)
+            .build()
+            .unwrap();
+        let out = resolve_inlay_hint(plain.clone(), &ws);
+        assert!(out.tooltip.is_none());
     }
 
     #[test]

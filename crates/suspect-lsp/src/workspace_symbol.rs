@@ -5,7 +5,7 @@ use suspect_low::{LowDoc, SpecFamily};
 use suspect_ref::Workspace;
 use suspect_source::LineIndex;
 use suspect_syntax::SyntaxKind;
-use tower_lsp::lsp_types::{Location, SymbolInformation, SymbolKind, Url};
+use tower_lsp::lsp_types::{Location, OneOf, SymbolInformation, SymbolKind, Url, WorkspaceSymbol};
 
 use crate::state::lsp_range;
 use crate::symbols::METHODS;
@@ -94,6 +94,60 @@ pub fn workspace_symbols(ws: &Workspace, query: &str) -> Vec<SymbolInformation> 
         out.append(&mut sink.out);
     }
     out
+}
+
+/// Wraps flat symbols into resolve-ready `WorkspaceSymbol`s.
+///
+/// Locations stay inline (the `lsp-types` type requires one), but each
+/// symbol carries a `data` marker naming the symbol and its container so
+/// [`resolve_workspace_symbol`] can re-derive a fresh range on
+/// `workspaceSymbol/resolve` — the buffer may have moved since the query.
+#[must_use]
+pub fn workspace_symbols_nested(ws: &Workspace, query: &str) -> Vec<WorkspaceSymbol> {
+    workspace_symbols(ws, query)
+        .into_iter()
+        .map(|si| WorkspaceSymbol {
+            name: si.name.clone(),
+            kind: si.kind,
+            tags: si.tags,
+            container_name: si.container_name.clone(),
+            location: OneOf::Left(si.location),
+            data: Some(serde_json::json!({
+                "suspect": "wsym",
+                "name": si.name,
+                "container": si.container_name,
+            })),
+        })
+        .collect()
+}
+
+/// Refreshes one symbol's location against the current workspace state.
+///
+/// Re-runs an exact-name lookup (container-aware when known); when the
+/// symbol still exists its range reflects the live buffer, otherwise the
+/// input symbol is returned untouched.
+#[must_use]
+pub fn resolve_workspace_symbol(sym: WorkspaceSymbol, ws: &Workspace) -> WorkspaceSymbol {
+    let Some(data) = sym.data.as_ref() else {
+        return sym;
+    };
+    let (Some(name), _) = (
+        data.get("name").and_then(|n| n.as_str()),
+        data.get("container").and_then(|c| c.as_str()),
+    ) else {
+        return sym;
+    };
+    // Exact-name match beats the substring filter of the original query.
+    let fresh = workspace_symbols_nested(ws, name)
+        .into_iter()
+        .find(|s| s.name == name && s.container_name == sym.container_name);
+    match fresh {
+        Some(mut found) => {
+            found.data = sym.data.clone();
+            found
+        }
+        None => sym,
+    }
 }
 
 /// Emits this document's symbols into `sink`, dispatched by spec family.
@@ -256,8 +310,8 @@ components:
         assert!(names.contains(&"Pet"), "{names:?}");
         assert!(names.contains(&"listPets"), "{names:?}");
         assert!(names.contains(&"GET /pets"), "{names:?}");
-        assert!(names.contains(&"/pets"), "{names:?}");
         assert!(names.contains(&"pets"), "tag symbol present: {names:?}");
+        assert!(names.contains(&"/pets"), "{names:?}");
 
         let pet = all.iter().find(|s| s.name == "Pet").unwrap();
         assert_eq!(pet.kind, SymbolKind::STRUCT);
@@ -277,6 +331,42 @@ components:
             "\"/pets\" also matches \"pet\""
         );
         assert!(workspace_symbols(&ws, "zzz-not-there").is_empty());
+    }
+
+    #[test]
+    fn nested_symbols_carry_data_and_resolve_refreshes_location() {
+        let dir = std::env::temp_dir().join("suspect-lsp-wssym-resolve");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = ws_with(&dir, "doc.yaml", DOC);
+        let nested = workspace_symbols_nested(&ws, "Pet");
+        let pet = nested.iter().find(|s| s.name == "Pet").expect("Pet symbol");
+        let data = pet.data.as_ref().expect("resolve marker present");
+        assert_eq!(data.get("suspect").and_then(|v| v.as_str()), Some("wsym"));
+        let OneOf::Left(Location { range: orig, .. }) = &pet.location else {
+            panic!("inline location expected");
+        };
+        // Resolve against the same workspace keeps the location stable.
+        let resolved = resolve_workspace_symbol(pet.clone(), &ws);
+        let OneOf::Left(Location { range: same, .. }) = &resolved.location else {
+            panic!("inline location expected");
+        };
+        assert_eq!(same, orig, "unchanged document keeps range");
+
+        // A workspace where Pet moved down four comment lines: resolve
+        // re-derives the fresh range instead of returning the stale one.
+        let shifted = "# s1\n# s2\n# s3\n# s4\n".to_owned() + DOC;
+        let dir2 = std::env::temp_dir().join("suspect-lsp-wssym-resolve2");
+        std::fs::create_dir_all(&dir2).unwrap();
+        let ws2 = ws_with(&dir2, "doc.yaml", &shifted);
+        let refreshed = resolve_workspace_symbol(pet.clone(), &ws2);
+        let OneOf::Left(Location { range: fresh, .. }) = &refreshed.location else {
+            panic!("inline location expected");
+        };
+        assert_ne!(
+            fresh.start, orig.start,
+            "range must track the symbol's new position"
+        );
+        assert!(fresh.start.line > orig.start.line);
     }
 
     #[test]

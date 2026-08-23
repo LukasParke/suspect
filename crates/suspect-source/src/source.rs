@@ -126,11 +126,10 @@ fn detect_bom(bytes: &[u8]) -> Option<(Encoding, usize)> {
 fn transcode_utf16(bytes: &[u8], enc: Encoding) -> Vec<u8> {
     let mut units = Vec::with_capacity(bytes.len() / 2);
     #[allow(clippy::manual_slice_size_calculation)]
-    let mut chunks = bytes.chunks_exact(2);
-    for chunk in &mut chunks {
+    for pair in bytes.as_chunks::<2>().0 {
         let u = match enc {
-            Encoding::Utf16Le => u16::from_le_bytes([chunk[0], chunk[1]]),
-            _ => u16::from_be_bytes([chunk[0], chunk[1]]),
+            Encoding::Utf16Le => u16::from_le_bytes(*pair),
+            _ => u16::from_be_bytes(*pair),
         };
         units.push(u);
     }

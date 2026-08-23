@@ -121,7 +121,7 @@ fn main() {
         ..Default::default()
     };
     let lsp_url = tower_lsp::lsp_types::Url::parse(file_uri.as_str()).unwrap();
-    let actions = actions::code_actions(&doc, &lsp_url, action_range, &[diag]);
+    let actions = actions::code_actions(&doc, &lsp_url, action_range, &[diag], false);
     let action_items: Vec<serde_json::Value> = actions
         .iter()
         .map(|a| serde_json::json!({ "title": a.title, "kind": format!("{:?}", a.kind) }))

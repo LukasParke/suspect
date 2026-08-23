@@ -266,7 +266,7 @@ fn bench_completion(c: &mut Criterion) {
         b.iter(|| {
             let ctx = context_at(&low, offset);
             let items = match ctx {
-                CompletionContext::Refs => ref_items(ref_candidates(&ws, &uri)),
+                CompletionContext::Refs => ref_items(ref_candidates(&ws, &uri), &uri),
                 CompletionContext::Keys(keys) => key_items(keys),
                 CompletionContext::None => Vec::new(),
             };
@@ -331,7 +331,7 @@ fn bench_diagnostics(c: &mut Criterion) {
 
         let mut g = group(c, name, bytes.len(), sample);
         g.bench_function("compute_diagnostics", |b| {
-            b.iter(|| black_box(compute_diagnostics(Some(&ws), &low).len()))
+            b.iter(|| black_box(compute_diagnostics(Some(&ws), &low, &Default::default()).len()))
         });
         g.finish();
     }
@@ -377,7 +377,7 @@ fn bench_feature_ops(c: &mut Criterion) {
                 || LspUrl::parse(uri.as_str()).unwrap(),
                 |lsp_url| {
                     black_box(suspect_lsp::actions::code_actions(
-                        &doc, &lsp_url, range, &diags,
+                        &doc, &lsp_url, range, &diags, false,
                     ))
                 },
                 criterion::BatchSize::SmallInput,

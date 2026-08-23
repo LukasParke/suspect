@@ -306,28 +306,84 @@ fn relative_ref(from: &Uri, to: &Uri) -> String {
 }
 
 /// Builds completion items for a key list.
+///
+/// Items carry a `data` marker so [`completion_resolve`](crate) can attach
+/// keyword documentation lazily without bloating the initial response.
 #[must_use]
 pub fn key_items(keys: &'static [&'static str]) -> Vec<CompletionItem> {
     keys.iter()
         .map(|k| CompletionItem {
             label: (*k).to_owned(),
             kind: Some(CompletionItemKind::PROPERTY),
+            data: Some(serde_json::json!({ "suspect": "key", "key": k })),
             ..CompletionItem::default()
         })
         .collect()
 }
 
 /// Builds completion items for `$ref` pointer candidates.
+///
+/// Each item stores its owning document plus the raw candidate string in
+/// `data`; [`completion_resolve`] turns that into a resolved-target preview.
 #[must_use]
-pub fn ref_items(candidates: Vec<String>) -> Vec<CompletionItem> {
+pub fn ref_items(candidates: Vec<String>, home: &Uri) -> Vec<CompletionItem> {
     candidates
         .into_iter()
         .map(|c| CompletionItem {
-            label: c,
+            detail: Some("component reference".to_owned()),
+            label: c.clone(),
             kind: Some(CompletionItemKind::MODULE),
+            data: Some(serde_json::json!({
+                "suspect": "ref",
+                "uri": home.as_str(),
+                "raw": c,
+            })),
             ..CompletionItem::default()
         })
         .collect()
+}
+
+/// Fills in `documentation`/`detail` for one completion item.
+///
+/// `$ref` candidates resolve through the workspace and gain a fenced-code
+/// excerpt of the target plus a `→ Name (file)` detail line; unknown or
+/// unresolvable items come back unchanged (clients tolerate this).
+#[must_use]
+pub fn resolve_item(item: CompletionItem, ws: Option<&Workspace>) -> CompletionItem {
+    struct RefData {
+        uri: String,
+        raw: String,
+    }
+    fn parse_data(d: &serde_json::Value) -> Option<RefData> {
+        if d.get("suspect")?.as_str()? != "ref" {
+            return None;
+        }
+        Some(RefData {
+            uri: d.get("uri")?.as_str()?.to_owned(),
+            raw: d.get("raw")?.as_str()?.to_owned(),
+        })
+    }
+    let Some(ws) = ws else {
+        return item;
+    };
+    let Some(data) = item.data.as_ref().and_then(parse_data) else {
+        return item;
+    };
+    let Ok(home) = Uri::parse(&data.uri) else {
+        return item;
+    };
+    let Some(handle) = crate::links::resolve_ref_string(ws, &home, &data.raw) else {
+        return item;
+    };
+    let mut resolved = item;
+    resolved.documentation = Some(tower_lsp::lsp_types::Documentation::MarkupContent(
+        tower_lsp::lsp_types::MarkupContent {
+            kind: tower_lsp::lsp_types::MarkupKind::Markdown,
+            value: handle.markdown_excerpt,
+        },
+    ));
+    resolved.detail = Some(handle.detail);
+    resolved
 }
 
 #[cfg(test)]
@@ -478,13 +534,51 @@ mod tests {
     }
 
     #[test]
+    fn resolve_item_attaches_target_excerpt_and_detail() {
+        let dir = std::env::temp_dir().join("suspect-lsp-completion-resolve");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = workspace(&dir);
+        let main_uri = Uri::from_path(&dir.join("main.yaml")).unwrap();
+        let items = ref_items(vec!["#/components/responses/Err".to_owned()], &main_uri);
+        let resolved = resolve_item(items.into_iter().next().unwrap(), Some(&ws));
+        let doc = match resolved.documentation {
+            Some(tower_lsp::lsp_types::Documentation::MarkupContent(m)) => m.value,
+            other => panic!("expected markdown documentation, got {other:?}"),
+        };
+        assert!(doc.contains("```yaml"), "{doc}");
+        assert!(
+            doc.contains("description"),
+            "excerpt shows the target body: {doc}"
+        );
+        assert_eq!(
+            resolved.detail.as_deref(),
+            Some("→ Err (main.yaml)"),
+            "detail names the target and its file"
+        );
+    }
+
+    #[test]
+    fn resolve_item_passthrough_without_data_or_workspace() {
+        let item = CompletionItem {
+            label: "type".to_owned(),
+            ..CompletionItem::default()
+        };
+        let out = resolve_item(item.clone(), None);
+        assert_eq!(out.label, "type");
+        assert!(out.documentation.is_none());
+    }
+
+    #[test]
     fn item_kinds_match_context() {
         let keys = key_items(OPERATION_KEYS);
         assert!(
             keys.iter()
                 .all(|i| i.kind == Some(CompletionItemKind::PROPERTY))
         );
-        let refs = ref_items(vec!["#/components/schemas/Pet".to_owned()]);
+        let refs = ref_items(
+            vec!["#/components/schemas/Pet".to_owned()],
+            &Uri::parse("file:///w/main.yaml").unwrap(),
+        );
         assert_eq!(refs[0].kind, Some(CompletionItemKind::MODULE));
     }
 }

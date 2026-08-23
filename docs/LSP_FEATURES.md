@@ -105,7 +105,7 @@ paths: {}
 
 **Implementation:** tower-lsp `did_save` hook: clear ONLY this uri's stale-disk marker in `State.workspace`, keeping sibling documents' parsed trees alive (cheaper than the current full invalidation). ~10 lines.
 
-### 🟡 `textDocument/willSave`
+### ✅ `textDocument/willSave`
 
 Notification fired just before the document is saved, with a `TextDocumentSaveReason` (Manual=1, AfterDelay=2, FocusOut=3). OpenAPI value is marginal because diagnostics are already pushed on every change; the only use is flushing the 150 ms debounce so the diagnostics shown at save time are guaranteed final rather than possibly one keystroke stale.
 
@@ -122,7 +122,7 @@ paths:
 
 **Implementation:** One-line handler: tower-lsp `will_save` hook, set `State.debounce` generation for that uri to force immediate publication using the already-parsed `OpenDoc`. No new analysis code.
 
-### 🟡 `textDocument/willSaveWaitUntil`
+### ✅ `textDocument/willSaveWaitUntil`
 
 Request (not notification) fired before save; server returns `Vec<TextEdit>` that the CLIENT applies to the buffer before writing. Natural home for 'clean up my spec on save': auto-apply the deterministic, always-safe subset of suspect-lint quick fixes that already exist as codeActions — e.g. strip the trailing slash from a path key, insert a missing parameter `name:` placeholder — without user interaction.
 
@@ -143,7 +143,7 @@ paths:
 
 **Implementation:** Reuse `actions.rs`: iterate diagnostics produced by the normal pipeline, call the existing fix constructors (`trailing_slash_fix`, `pair_insert_fix`, `any_insert_fix`) filtered to deterministic, side-effect-free fixes; convert their `lsp_types::WorkspaceEdit` documentChanges into flat `Vec<TextEdit>`. Cap at N edits and bail out cleanly (return []) when any fix is non-applicable — willSaveWaitUntil blocks the save.
 
-### 🔴 `workspace/didChangeConfiguration`
+### ✅ `workspace/didChangeConfiguration`
 
 Receive user/workspace setting changes: which lint rules are enabled/disabled/downgraded (per-team Spectral-style policy), whether inlay hints for `$ref` resolution targets are shown, canonical-format indentation, and whether breaking-change-on-save runs against git base.
 
@@ -196,7 +196,7 @@ schema:
 
 **Implementation:** Already wired (lib.rs `did_change_watched_files`, wholesale drop). Targeted refinement: map each changed `FileEvent.uri` to its node in the `suspect_ref` graph and invalidate only edges touching it, then walk INCOMING $ref edges to find dependent documents and republish their diagnostics — avoids rebuilding the whole workspace on every external touch in large multi-file API projects.
 
-### 🟡 `workspace/didChangeWorkspaceFolders`
+### ✅ `workspace/didChangeWorkspaceFolders`
 
 Root folders are added/removed from a multi-root workspace. Suspect currently builds ONE ref workspace from a single root; supporting this makes multi-root setups work — e.g. a monorepo where `services/petstore/openapi.yaml` and `services/billing/arazzo.yaml` live in separate folders sharing `packages/common-schemas/`. Adding a folder brings its documents into $ref resolution and diagnostics; removing one drops them and re-diagnoses remaining docs for now-unresolvable refs.
 
@@ -211,7 +211,7 @@ Root folders are added/removed from a multi-root workspace. Suspect currently bu
 
 **Implementation:** Add `workspace_folders` to `State` (from `initialize` params, which tower-lsp already delivers); extend `WorkspaceBuilder` construction in state.rs to take the root list and thread it through the existing lazy-build path. No per-feature changes needed since all features query the workspace abstraction.
 
-### 🔴 `workspace/didCreateFiles`
+### ✅ `workspace/didCreateFiles`
 
 A new file appears under workspace control (explorer 'new file', git checkout of a previously missing ref target). Today the lazily-built workspace eventually picks it up only after some other cache drop. Proper handling: immediately index the new file into the `suspect_ref::Workspace` so cross-file `$ref: './new-file.yaml#/X'` resolves right away, and push diagnostics for the UNOPENED file — a newly created Arazzo `workflow.yaml` pointing at a nonexistent source should be flagged before the user even opens it.
 
@@ -247,7 +247,7 @@ No immediate action needed; the cache-drop makes the next `goto_definition` on a
 
 **Implementation:** tower-lsp `did_create_files`: same body as today's `did_change_watched_files` (`st.workspace = None`). Could be skipped entirely while the watcher glob covers `**/*.{yaml,yml,json}`; adopt only if users configure narrow watchers that miss new spec files.
 
-### 🔴 `workspace/didDeleteFiles`
+### ✅ `workspace/didDeleteFiles`
 
 A file is deleted. Server removes it from the ref workspace; every document holding a `$ref` into it must immediately receive an unresolvable-$ref validation error at each ref site (falls out naturally from suspect-validate once the node disappears), instead of waiting for an unrelated cache drop. If the deleted file was OPEN with unsaved edits, treat like didClose. Bonus: a codeAction at each broken $ref offering to recreate the file from the expected shape.
 
@@ -262,7 +262,7 @@ schema:
 
 **Implementation:** tower-lsp `workspace/did_delete_files` hook: remove nodes/edges from the ref workspace, evict `open_docs` entry, then reuse the incoming-edge walk (same as the didChangeWatchedFiles refinement) to republish dependents. The 'recreate file' codeAction slots into the existing `code_actions` dispatch table keyed by diagnostic code.
 
-### 🔴 `workspace/didRenameFiles`
+### ✅ `workspace/didRenameFiles`
 
 Notification AFTER a rename happened. Server must move its cached `OpenDoc` under the new uri (if the file was open), remap the ref-workspace node, and revalidate: documents that pointed at the OLD path now resolve against the NEW one. Pure bookkeeping — the user-visible $ref rewriting belongs to the `workspace/willRenameFiles` REQUEST above; this notification keeps internal state consistent when the rename happened outside a willRename round-trip (e.g. plain filesystem mv picked up by watchers).
 
@@ -276,7 +276,7 @@ Notification AFTER a rename happened. Server must move its cached `OpenDoc` unde
 
 **Implementation:** Factor a shared `apply_file_move(old_uri, new_uri)` helper in state.rs touching `State.open_docs` keys and the ref-graph node table; call from the tower-lsp `did_rename_files` hook.
 
-### 🟡 `workspace/willCreateFiles`
+### ✅ `workspace/willCreateFiles`
 
 Paired REQUEST for didCreateFiles: server may return a WorkspaceEdit applied before the file is created (e.g. scaffolding a new component file). For OpenAPI there is no safe universal scaffold — we don't know if a new yaml is a schema module, an Arazzo workflow, or unrelated config — so returning `None` is correct. Marginal option: when created INSIDE a conventional `components/schemas/` directory of a known spec, offer a typed-view-aware empty-schema skeleton.
 
@@ -293,7 +293,7 @@ RefundRequested:
 
 **Implementation:** tower-lsp `will_create_files` hook returning `Ok(None)` initially; scaffolding, if ever added, generates YAML via the serializers actions.rs already uses (`value.to_yaml()` / `to_json_pretty()` respecting file extension).
 
-### 🟡 `workspace/willDeleteFiles`
+### ✅ `workspace/willDeleteFiles`
 
 Paired REQUEST for didDeleteFiles: server may return edits preparing OTHER files for the deletion. Tempting idea — auto-remove `$ref` sites pointing at the doomed file — but almost always WRONG for OpenAPI: deleting `pet.yaml` should surface broken refs as errors the user resolves deliberately (inline the schema? drop the endpoint?), not have refs silently excised. Return `None`; keep deletion loud.
 
@@ -307,7 +307,7 @@ Paired REQUEST for didDeleteFiles: server may return edits preparing OTHER files
 
 **Implementation:** tower-lsp `will_delete_files` hook: consult incoming-edge count in the ref graph; if >0 return Ok(None) and let the delete proceed — didDeleteFiles then produces the broken-ref diagnostics described above. Never auto-generate structural deletions.
 
-### 🔴 `workspace/willRenameFiles`
+### ✅ `workspace/willRenameFiles`
 
 Paired REQUEST for didRenameFiles and the single highest-value missing sync-area feature: when the user renames a referenced file in the explorer, the server returns a WorkspaceEdit rewriting every `$ref: './old.yaml#/...'` across the workspace to the new path BEFORE the rename lands. Without it, renaming any multi-file spec component silently breaks every referrer until hand-fixed.
 
@@ -328,7 +328,7 @@ schema:
 
 ## Language Features
 
-### 🟡 `codeAction/resolve`
+### ✅ `codeAction/resolve`
 
 Defer expensive edit computation until the user actually picks an action. Today every codeAction request computes all WorkspaceEdits eagerly (fix_for + fixAll aggregation). With resolve, the initial request returns cheap titles+kinds with `data`, and edits are built only for the chosen action — matters for the fix-all path which aggregates and de-conflicts every diagnostic in the file.
 
@@ -340,7 +340,7 @@ Client sends `codeAction/resolve` with `data: {"kind":"source.fixAll.suspect","g
 
 **Implementation:** Advertise CodeActionProviderCapability::Options { resolve_provider: true }. In `code_action`, return actions with `edit: None` and opaque `data` (action kind + diagnostic coordinates + State::generation for staleness checks). Implement tower-lsp's `code_action_resolve` by rebuilding edits via `actions::fix_for`/`all_edits` from the stored code+range. Low risk because fix computation is already factored into pure functions.
 
-### 🔴 `codeLens/resolve`
+### ✅ `codeLens/resolve`
 
 Required companion: compute the expensive bits (reference counts via workspace edge scan, command arguments) only for lenses scrolled into view, keeping the full-lens pass trivially fast.
 
@@ -352,7 +352,7 @@ Resolve turns `data: {"ptr":"#/components/schemas/Pet"}` into title `3 refs` + r
 
 **Implementation:** Same module as codeLens: `code_lens_resolve` reads the pointer from `data`, queries `suspect_ref::Workspace` edge counts (or `navigation::references` for the command variant), fills `range` and `command`. Must handle stale generation gracefully (return the lens unchanged rather than erroring).
 
-### 🔴 `completionItem/resolve`
+### ✅ `completionItem/resolve`
 
 Lazily enrich a completion item when the user selects/hovers it. For `$ref` candidates, resolve would attach the referenced component's rendered YAML excerpt and its `description` as `documentation`, without paying the cost of excerpt-rendering every candidate during the initial request (important for specs with hundreds of schemas).
 
@@ -364,7 +364,7 @@ Item `#/components/schemas/Pet` resolves to markdown: '```yaml\nPet:\n  type: ob
 
 **Implementation:** Set `resolve_provider: Some(true)` in CompletionOptions; give each item `data: Some(json!({"ptr": <target-pointer>, "uri": <def-uri>}))`. In `completion_item_resolve`, look the pointer up in `suspect_ref::Workspace` (already cached, invalidated by did_change_watched_files), extract the target node via the existing `excerpt()` helper in navigation.rs (which already renders bounded YAML excerpts for hover), and return the item with documentation filled in. Mirrors how tower-lsp exposes `completion_resolve`.
 
-### 🟡 `documentLink/resolve`
+### ✅ `documentLink/resolve`
 
 Lazily fill `target`/`tooltip` for a link whose `data` was set in the initial pass. Useful only if we later want to avoid resolving cross-file `$ref` targets during the main pass on huge multi-file workspaces.
 
@@ -376,7 +376,7 @@ The link on `https://spec.openapis.org/oas/v3.1.0` resolves to tooltip 'External
 
 **Implementation:** Only worth pairing with a deferred-link design (data carries the raw string; resolve attaches target+tooltip). Given our links are cheap to compute eagerly, ship plain documentLink first; resolve is optional polish. If added: advertise resolve_provider:true and implement tower-lsp's `document_link_resolve` reusing the eager computation.
 
-### 🟡 `inlayHint/resolve`
+### ✅ `inlayHint/resolve`
 
 Lazy tooltip/detail for inlay hints: the base pass emits positions+labels cheaply; resolve adds the full hover-grade markdown (schema summary of the $ref target) only for visible hints.
 
@@ -400,7 +400,7 @@ Diagnostic 'missing required field description' on a response -> action 'Add mis
 
 **Implementation:** Complete: `actions::code_actions()` maps diagnostic `code` -> `fix_for()` builders, caps at 20 actions, appends `source.fixAll.suspect` when range covers the document.
 
-### 🔴 `textDocument/codeLens`
+### ✅ `textDocument/codeLens`
 
 IntelliJ-style adornments above operations and components. Above each path item: one lens per verb rendering `GET /pets` (click -> outline/references). Above each component under components/schemas|parameters|responses: a lens `N refs` (click -> textDocument/references on that component). Above `openapi:` a lens showing the version and detected dialect. Lenses make reference-count visibility zero-effort, complementing the explicit references request.
 
@@ -436,7 +436,7 @@ Cursor after `type: ` offers [object, string, integer, ...]; cursor after `$ref:
 
 **Implementation:** Already wired: `completion::context_at()` discriminates Keys/Refs/None from the syntax tree; `key_items()` serves static tables (OPERATION_KEYS, SCHEMA_KEYS, RESPONSE_KEYS, PARAMETER_KEYS, etc.) and `ref_items(ref_candidates(&ws, uri))` serves $ref targets from `suspect_ref::Workspace`. No further work needed beyond adding more key tables (e.g. securitySchemes, encoding).
 
-### 🟡 `textDocument/declaration`
+### ✅ `textDocument/declaration`
 
 Marginal in OAS because `$ref` targets are simultaneously their own declaration and definition (there is no separate forward declaration like C). The one meaningful distinction: jumping from a `$ref` to the component *key declaration line* (`Pet:` under components/schemas) versus its full body. Also usable for path-item `$ref`s to land on the referenced file's root `paths` mapping.
 
@@ -472,7 +472,7 @@ none
 
 **Implementation:** Skip.
 
-### 🟡 `textDocument/documentColor + textDocument/colorPresentation`
+### ✅ `textDocument/documentColor + textDocument/colorPresentation`
 
 Color swatches for hex/CSS color strings appearing inside example/default/enum values — relevant for design-token-style APIs that describe colors (`format: hex-color` conventions have no official OAS status, hence marginal). colorPresentation supplies the textual edit when the user picks a color from the swatch picker.
 
@@ -484,7 +484,7 @@ none
 
 **Implementation:** Scan string scalars under keys `value`/`default`/`const`/`enum` items matching `^#[0-9a-fA-F]{3,8}$` (plus named CSS colors optionally). Emit Color{lsp_range of the scalar, red/green/blue/alpha floats}; colorPresentation maps picked color back to `#rrggbb` TextEdit. Pure lexical scan over the existing tree — no schema involvement. Register both providers together (clients expect the pair).
 
-### 🔴 `textDocument/documentLink`
+### ✅ `textDocument/documentLink`
 
 Make URLs and refs clickable: every `url` under `info.contact`, `info.license`, `externalDocs` (root, tag, operation levels), `termsOfService`, and `$ref` values pointing at other workspace files become hyperlinks. Ctrl+Click on `./common.yaml#/components/schemas/Pet` opens that file at the right position; Ctrl+Click on externalDocs opens the browser.
 
@@ -532,7 +532,7 @@ Hover over `#/components/schemas/Pet` in `$ref:` shows the Pet schema source plu
 
 **Implementation:** Existing `navigation::hover_markdown(&ws, &low, offset)` handles $ref targets, self-definitions, excerpts, descriptions, and keyword docs (hover_detail.rs adds OAS keyword documentation tables). Complete.
 
-### 🟡 `textDocument/implementation`
+### ✅ `textDocument/implementation`
 
 Weak analogue at best: from a component schema, list concrete 'implementations' — e.g. inline schemas that `allOf` it, discriminated mappings that map discriminator values to it, or examples conforming to it. In practice this is exactly the inverse-$ref query that `references` already answers, and 'examples conforming to it' belongs to validation, not navigation.
 
@@ -583,7 +583,7 @@ During a debug session stopped at a client SDK generated from the spec, inlineVa
 
 **Implementation:** Not applicable. Requires a debug adapter session (DAP) whose stack frames correspond to positions in the document; OpenAPI documents are declarative interface definitions, never executed. Do not advertise.
 
-### 🟡 `textDocument/linkedEditingRange`
+### ✅ `textDocument/linkedEditingRange`
 
 Multi-cursor live-edit coupling: when the cursor is on a component key, also place editable cursors on the final segment of every `$ref` string in the same document that names it, so typing the new name updates all occurrences synchronously — instant feedback before committing a real rename.
 
@@ -655,7 +655,7 @@ Full-document token classification with OAS-aware legend: keys typed by role (pr
 
 **Implementation:** Complete: `semantic::legend()` + `semantic::semantic_tokens_full(doc)` walk the tree emitting tokens with OAS-specific modifiers.
 
-### 🟡 `textDocument/semanticTokens/full/delta`
+### ✅ `textDocument/semanticTokens/full/delta`
 
 Incremental token sync: client sends previous resultId, server responds only with token edits since that version. Pure bandwidth/CPU optimization for large specs where every keystroke currently re-sends the entire token array.
 
@@ -667,7 +667,7 @@ After typing `  newKey: v` (one token delta) the server returns edits=[{startDel
 
 **Implementation:** Cache the last SemanticTokens + State::generation per open doc in State; on `semantic_tokens_full_delta`, recompute full tokens and run the standard LSP diff algorithm over (line,col,type,mods) quintuples. Mechanical once full tokens exist; only worthwhile when telemetry shows large specs dominating token traffic. tower-lsp provides the `SemanticTokensFullOptions::Delta{delta_format}` capability flag.
 
-### 🟡 `textDocument/semanticTokens/range`
+### ✅ `textDocument/semanticTokens/range`
 
 Tokens for just the visible viewport. Cheaper than full for huge specs; some clients request range-first and fall back to full.
 
@@ -697,7 +697,7 @@ Nothing corresponds to `foo(<args>)`, so there is no signature to display.
 
 **Implementation:** Not applicable. If ever desired, the only conceit would be showing allowed-value tables for enum-ish keywords, but that duplicates hover and would confuse clients that render signatures as `name(param1, param2)`. Skip; do not advertise the capability.
 
-### 🔴 `textDocument/typeDefinition`
+### ✅ `textDocument/typeDefinition`
 
 From a *usage site* of a typed slot, jump to the schema that types it. Cursor on: (1) a property name under `properties:` -> its value schema (following `$ref`); (2) a media-type key like `application/json` -> its `schema`; (3) a parameter name -> its `schema`; (4) a response code -> response schema(s); (5) `items`/`prefixItems` entries -> element schema. This is the highest-value unimplemented navigation: 'what does this field contain?'
 
@@ -734,7 +734,7 @@ at which point `client.code_lens_refresh()` must follow watched-file changes.
 
 **Implementation:** No implementation now; revisit together with the CodeLens feature proposed under contract-testing integration below.
 
-### 🟡 `workspace/inlayHint/refresh`
+### ✅ `workspace/inlayHint/refresh`
 
 Push clients to re-pull inlay hints when cross-file facts change. Suspect's inlay hints *do* depend on the ref Workspace (they annotate `$ref` values with their resolution target), so an external create/delete/rename of a referenced file silently invalidates every displayed hint in open editors.
 
@@ -770,7 +770,9 @@ N/A — inline values come from debug adapters evaluating expressions like `$res
 
 **Implementation:** Do not implement. If a future suspect-debugger ever materializes, it would live in the DAP integration, not suspect-lsp.
 
-### 🟡 `workspace/semanticTokens/refresh`
+### ✅ `workspace/semanticTokens/refresh`
+
+**Status:** intentionally not sent on config change — semantic token classification is configuration-free in suspect, so a refresh request would be pure client churn. The hook exists (`client.semantic_tokens_refresh()`) if token rendering ever becomes config-dependent; re-evaluate when theme-aware classification lands.
 
 Server→client request to re-pull semantic tokens when the token model changes out-of-band. Relevant only if tokens ever become resolution-dependent — e.g. rendering a `$ref` string as `macro` when resolvable vs `invalid`/plain-string when dangling (today `semantic::legend()` tokens are purely syntactic, so clients already repaint correctly after didChange).
 
@@ -814,7 +816,7 @@ returns `User  [Struct]  petstore.yaml` and jumping lands on line of `User:`.
 
 ## Workspace Features
 
-### 🟡 `workspace/applyEdit`
+### ✅ `workspace/applyEdit`
 
 Server-initiated multi-file edit application. Required once any of the following exist: executeCommand-based refactors (extract-to-component touches the source file *and* `components/schemas`), breaking-change auto-migrations, or ref-rewrites triggered by file renames in documents the user hasn't opened. It is the only channel for editing closed files outside a request/response.
 
@@ -834,7 +836,7 @@ The server sends `workspace/applyEdit {label: "Extract UserAddress to component"
 
 **Implementation:** No capability registration needed — tower-lsp's `Client::apply_edit` is available on `Backend.client` today. The only prerequisite is the executeCommand layer above producing multi-document edits; `rename::rename` already constructs exactly these cross-file WorkspaceEdits, so the plumbing pattern exists in-tree.
 
-### 🔴 `workspace/configuration`
+### ✅ `workspace/configuration`
 
 Server pulls configuration from the client (works even for clients that never send didChangeConfiguration, like some CLI-embedded editors). Used to fetch the `suspect.*` section at startup: lint ruleset selection (spectral-default vs `.spectral.yaml` in repo via `Linter::from_ruleset`), ref-workspace limits (`max_docs`, `max_doc_size`, `depth_cap` — currently hardcoded in `WorkspaceBuilder`), and inlay-hint/format preferences.
 
@@ -855,7 +857,7 @@ and builds `suspect_lint::Linter` accordingly instead of always `Linter::spectra
 
 **Implementation:** In `initialize`, read `InitializeParams.initialization_options` and issue one `client.configuration(vec!["suspect"])` call before the first `schedule_diagnostics`, storing the result in `State`. Merge order: initialization_options < workspace configuration < didChangeConfiguration updates. `WorkspaceBuilder` knobs (`max_docs`, `max_doc_size`, `depth_cap`) map 1:1 onto a `suspect.ref.*` section.
 
-### 🔴 `workspace/diagnostic`
+### ✅ `workspace/diagnostic`
 
 Pull diagnostics across the workspace: the client asks 'what's wrong everywhere?' — enabling project-wide error trees (unresolved refs, broken allOf chains) in files nobody has open. Also lets expensive cross-file Arazzo checks run on demand rather than on every keystroke.
 
@@ -867,7 +869,7 @@ Zed pulls diagnostics for `components/models/*.yaml` without opening them → un
 
 **Implementation:** Iterate `suspect_ref::Workspace` documents under `params.previous_result_ids`, run the same `diagnostics::validate_diagnostics`/`lint_diagnostics`/`syntax_diagnostics` pipeline per doc, return with unchanged `version`-style result ids so unchanged files skip re-transfer. The pipeline is already per-document pure functions — this is a thin loop.
 
-### 🟡 `workspace/diagnostic (+ workspace/diagnostic/refresh)`
+### ✅ `workspace/diagnostic (+ workspace/diagnostic/refresh)`
 
 Pull-diagnostics model with explicit refresh signaling. Matters for OpenAPI because diagnostics are *inter*-file: changing `components/schemas/User` in one file invalidates validation results (schema compilation via suspect-schema, `$ref` resolution checks) in every document that references it — something the current per-open-doc push pipeline cannot see. `/refresh` lets the server force clients to re-pull after a watched-file change altered shared dependencies.
 
@@ -879,7 +881,7 @@ Zed pulls diagnostics for `components/models/*.yaml` without opening them → un
 
 **Implementation:** tower-lsp supports `workspace_diagnostic`; compute by running `diagnostics.rs` over `ws.uris()` (loading each through `DocHandle`), merging with open-buffer versions. Register `RefreshInterFileDependencies: true` + `WorkspaceDiagnostics: true` in DiagnosticOptions. Defer until a concrete staleness bug justifies it; the debounce publisher already handles the common single-file case.
 
-### 🟡 `workspace/diagnostic/refresh`
+### ✅ `workspace/diagnostic/refresh`
 
 Client asks for a diagnostics re-pull after server config changes (e.g. lint rules toggled). Companion to workspace/diagnostic.
 
@@ -891,7 +893,7 @@ user turns off Arazzo checks → refresh → workflow diagnostics vanish
 
 **Implementation:** No-op handler; push diagnostics already recompute on next edit. Becomes meaningful with the pull model (workspace/diagnostic).
 
-### 🔴 `workspace/executeCommand`
+### ✅ `workspace/executeCommand`
 
 Server-defined commands that code actions can reference by `Command` instead of embedding a full WorkspaceEdit. OpenAPI-specific commands worth having: `suspect.extractToComponent` (lift an inline request/response schema into `#/components/schemas` and rewrite the site to `$ref`), `suspect.generateOperationId` (synthesize `operationId` from `METHOD + PathItemKey`, camelCased), `suspect.fixAll` (run every quick-fixable lint finding in the file — today `source.fixAll.suspect` ships edits eagerly; a command defers computation until invoked), `suspect.sortPaths`/`sortComponents`.
 
@@ -919,7 +921,7 @@ into `schema: {$ref: '#/components/schemas/UsersGetResponse'}` plus a new `Users
 
 **Implementation:** tower-lsp exposes `execute_command`; dispatch on the command string. Reuse: `actions::Anchor` (Pair/Item anchoring machinery) to locate the inline schema node, `rename.rs`'s workspace-wide `WorkspaceEdit` builder for the cross-file rewrite, `completion::ref_candidates` to pick a collision-free component name, and `client.apply_edit()` (see below). Commands avoid recomputing heavyweight edits on every keystroke-triggered codeAction request — extraction is only computed when actually invoked.
 
-### 🟡 `workspace/workspaceFolders`
+### ✅ `workspace/workspaceFolders`
 
 Multi-root awareness. Today suspect records a single `root_uri` at initialize. Real repos nest multiple independent APIs (`services/orders/openapi.yaml`, `services/billing/openapi.yaml`) or pin multiple spec versions side by side; each folder should scope its own `suspect_ref::Workspace` so relative `$ref`s like `common.yaml#/…` resolve against the right directory tree.
 
@@ -940,7 +942,9 @@ With folders `[repo/v1, repo/v2]`, go-to-definition from `v1/openapi.yaml` resol
 
 **Implementation:** Capture `InitializeParams.workspace_folders`; replace `State.root: Option<PathBuf>` with `Vec<WorkspaceFolder>` and make the cached `Option<Arc<suspect_ref::Workspace>>` a map folder→Workspace keyed by containment of the requesting URI (`workspace_for` already routes per-uri — extend it to pick the folder first, falling back to root). Implement `did_change_workspace_folders` to add/remove entries and invalidate affected caches.
 
-### 🔴 `workspaceSymbol/resolve`
+### 🟡 `workspaceSymbol/resolve`
+
+**Status:** implemented defensively but unreachable through the standard flow — tower-lsp 0.20 pins the `workspace/symbol` handler to the pre-3.17 flat response (`Vec<SymbolInformation>`), and a flat response carries no `data`, so spec-compliant clients never issue the resolve round-trip. The server still answers `workspaceSymbol/resolve`: `resolve_workspace_symbol` re-runs an exact-name lookup against the live workspace and refreshes the returned range, so any client that does send it gets fresh positions. Upgrading to the nested `WorkspaceSymbol[]` response (locations deferred to resolve) requires tower-lsp ≥ 0.21 or a forked trait.
 
 Lazily-resolved workspace symbols. Large API workspaces (dozens of split spec files, hundreds of components) make eager Locations expensive — every candidate would force loading its document. Instead `workspace/symbol` returns cheap name/kind placeholders and the editor resolves the exact Location only for the entry the user picks.
 
@@ -972,7 +976,7 @@ client cancels a hover request superseded by a newer keystroke → tower-lsp dro
 
 **Implementation:** tower-lsp handles both; suspect's handlers are fast enough that explicit cooperative cancellation inside long loops is unnecessary until workspace indexing grows.
 
-### 🟡 `client/registerCapability`
+### ✅ `client/registerCapability`
 
 Server-driven dynamic capability registration. Primary use: register the watched-files watcher for YAML/JSON so cross-file $ref invalidation works on clients that didn't declare `workspace.didChangeWatchedFiles.dynamicRegistration` up front.
 
@@ -1020,7 +1024,7 @@ POST /initialize → capabilities: { textDocumentSync: FULL, hoverProvider: true
 
 **Implementation:** Already in `Backend::initialize` (crates/suspect-lsp/src/lib.rs:155). When adding features below, extend `ServerCapabilities` here — e.g. `resolve_provider` on CompletionOptions, `range: true` on SemanticTokensOptions, `document_link_provider`, `code_lens_provider`, `diagnostic_provider`.
 
-### 🟡 `initialized`
+### ✅ `initialized`
 
 Post-initialize notification. The one high-value use: dynamically register the file watcher for `**/*.{yaml,yml,json}` so the ref workspace invalidates on cross-file $ref changes even if the client didn't statically declare watchers.
 
@@ -1044,7 +1048,7 @@ shutdown → exit (stdio loop ends; LspService drops State)
 
 **Implementation:** tower-lsp lifecycle; `Backend::shutdown` returns Ok. Nothing OpenAPI-specific to do.
 
-### 🔴 `suspect/breakingChanges (custom: diff against git base)`
+### ✅ `suspect/breakingChanges (custom: diff against git base)`
 
 Detects contract-breaking changes between HEAD and a merge-base (typically `origin/main`) so authors see, before opening a PR, exactly which consumers their edit would break. Breaking classes: removed path/operation/response/status-code, removed or renamed request field, field made required, widened `type`, removed enum value, tightened `minimum`/`maxLength`, changed `format`, added required header/parameter, schema `$ref` retargeted to an incompatible shape, default value removed.
 
@@ -1066,7 +1070,7 @@ Invoking `suspect.diffAgainstGitBase` publishes diagnostics pinned to the change
 
 **Implementation:** New module `breaking.rs` in suspect-lsp (or a reusable crate): (1) obtain base blobs — shell out to `git show base:path` or use `git2`, restricted to files in `ws.uris()`; (2) parse base text through suspect-syntax → LowDoc; (3) pair up views via suspect-oas (`OpenApi::operations()`, `Components` views) matched by path+method and component key; (4) for paired schemas, compile both with `suspect_schema::Compiler` and compare normalized constraint sets (required-set deltas, enum narrowing via subset check, type/format changes, numeric/string bound tightening, composition changes); reuse the exported `suspect_oas::node_eq` for structural equality fast-path; (5) classify severity per rule table; (6) deliver as diagnostics on a synthetic URI or as a virtual-text document via `show_document`. The classification rules double as a CI-mode lint pack in suspect-lint.
 
-### 🟡 `suspect/contractTesting (custom: Arazzo/test-coverage integration)`
+### ✅ `suspect/contractTesting (custom: Arazzo/test-coverage integration)`
 
 Bridges specs and executable contracts in-editor along four axes: (1) *coverage lenses* — decorate each operation with how many Arazzo workflow steps (or Schemathesis scenarios) exercise it, surfacing untested endpoints; (2) *navigation* — go-to-definition from an Arazzo step's `operationId`/`operationPath` to the OpenAPI operation and back (find-references already half-does this via the ref graph); (3) *validation* — check successCriteria runtime expressions ($statusCode, $response.body#/…) against the operation's declared responses; (4) *replay* — run a recorded response through `suspect-schema::exec` to verify it still satisfies the schema after an edit.
 
@@ -1101,7 +1105,7 @@ The server shows a lens `✔ covered by 2 Arazzo steps` on `getUser`, and `DELET
 
 **Implementation:** Index side: for each `*.arazzo.yaml` discovered by the ref Workspace, build `ArazzoDoc::new(low)`; resolve `sourceDescriptions` URLs through `Workspace::resolve_pointer` to bind each workflow step's `operationPath`/requestId to a concrete (doc, pointer) — the exact primitive `navigation::goto_definition` uses for refs. Emit lenses from the reverse mapping; emit coverage diagnostics from set-difference over `OpenApi::operations()`. Runtime side: `validate::checks` already validates static Arazzo structure; dynamic response checking is `suspect_schema::exec` feeding `serde_json::Value` instances extracted per `suspect_arazzo::expr` runtime-expression evaluation. Ship in stages: lenses/goto-def first (pure indexing), response checking second (needs a runner).
 
-### 🔴 `suspect/generateExample (custom: spec-to-example generation)`
+### ✅ `suspect/generateExample (custom: spec-to-example generation)`
 
 Synthesizes valid request-body/response payloads from a compiled schema and inserts them as `example`/`examples` entries (or previews them in hover). Enormous ergonomic win: hand-written examples rot and violate their own schemas; generated ones are guaranteed valid because they're derived from the same constraint set the validator uses.
 
@@ -1136,7 +1140,7 @@ Also offered as hover preview before insertion, rendered from the same generator
 
 **Implementation:** Compile the target schema node with `suspect_schema::Compiler::compile` to get a resolved, `$ref`-dereferenced view (handles allOf merge and remote-file schemas automatically); walk the compiled `Schema` synthesizing values: prefer explicit `example`/`default`/`examples` keywords, then format-aware generators (email, date-time, uuid, uri, ipv4), then type defaults honoring `minLength`/`minimum`/`pattern` (simple pattern synthesis or fall back to `"string"` with a marker comment); respect `additionalProperties: false` and `required`. Insertion reuses `actions::Anchor` Pair-insertion helpers (same ones backing `pair_insert_fix`). Determinism matters for stable diffs — seed generation purely from constraints, never randomness.
 
-### 🟡 `suspect/showRefGraph (custom: $ref graph visualization)`
+### ✅ `suspect/showRefGraph (custom: $ref graph visualization)`
 
 Renders the workspace `$ref` graph — documents/components as nodes, reference edges as arcs — to answer architectural questions the raw YAML hides: Which schemas are orphaned (zero fan-in ⇒ dead components)? Which are god-objects (huge fan-in ⇒ change-amplification risk)? Are there reference cycles (`ws.cycles()` already detects these)? How do the split files actually hang together?
 
@@ -1169,7 +1173,7 @@ none — no usage telemetry in an offline LSP
 
 **Implementation:** Deliberately absent; a local LSP should not phone home.
 
-### 🔴 `textDocument/diagnostic`
+### ✅ `textDocument/diagnostic`
 
 Pull diagnostics for one document (including never-opened workspace files): the client asks on demand instead of the server pushing on open. Complements push for clients that show project-wide error trees and lets expensive checks (Arazzo cross-file, full spectral run) run only when requested.
 
@@ -1205,7 +1209,7 @@ Outline shows `info > OpenAPI Sample`, `paths > /pets > get > List pets (200 app
 
 **Implementation:** Complete: `symbols::document_symbols(&doc.low)` builds the nested tree from the syntax tree keyed by OAS structure knowledge (path templates, HTTP verbs, component categories, operationId/summary as symbol names).
 
-### 🟡 `textDocument/moniker`
+### ✅ `textDocument/moniker`
 
 Emit opaque-but-stable symbol identifiers for OAS components (and operations via operationId) so external indexers (LSIF/scip export, copy-paste trackers, cross-repo navigation via Sourcegraph-style backends) can unify the same logical API across repos — e.g. the spec repo's `#/components/schemas/Pet` and the SDK repo's generated `Pet` class.
 
@@ -1229,7 +1233,7 @@ Typing Enter after `- ` inside `required:` indents the next list item to sequenc
 
 **Implementation:** tower-lsp exposes `on_type_formatting` behind `document_on_type_formatting_provider`. Implementation would need incremental edits around the trigger character using the syntax tree's newline/indent conventions. Low value relative to complexity: editors already indent YAML adequately, and partial canonicalization produces inconsistent style. Recommend ⚪-grade effort; only pursue if users complain about sequence-indentation.
 
-### 🟡 `textDocument/prepareTypeHierarchy`
+### ✅ `textDocument/prepareTypeHierarchy`
 
 The composition tree: `allOf` is OpenAPI's inheritance, so a type hierarchy on a schema shows its parents (allOf sources) and children (schemas that allOf it). Genuinely meaningful for OOP-style API models — 'show me everything extending Error'.
 
@@ -1265,7 +1269,7 @@ paths:
 
 **Implementation:** Already in `diagnostics.rs` + `schedule_diagnostics` (lib.rs). Improvements are quality, not existence: fill `related_information` (currently hard-coded `None` at diagnostics.rs:58) by mapping suspect-validate's cross-file findings to their source $ref location via suspect_ref edges, and set `code_description` links to spec docs per code.
 
-### 🟡 `textDocument/rangeFormatting`
+### ✅ `textDocument/rangeFormatting`
 
 Canonical-format only the selected subtree: selecting a single operation or schema and invoking 'Format Selection' normalizes indentation/key order/quoting for those lines without touching the rest of the file — valuable for hand-edited regions in large shared specs where a whole-file format would create a noisy diff.
 
@@ -1277,7 +1281,7 @@ Selecting lines 40–80 of paths.yaml reformats just that operation block canoni
 
 **Implementation:** Reuse `actions::format_document` internals: materialize the node under the selection start via `OverlayValue::from_node`, re-emit, and translate the emitted range back into document coordinates with a single TextEdit spanning the original node range. Caveat: comments outside the selection are preserved automatically since we only replace the subtree; a comment *inside* the selected subtree would be dropped — gate on `doc.low.syntax_errors().is_empty()` and skip subtrees containing comment tokens (fall back to no-op). Advertise `document_range_formatting_provider: Some(OneOf::Left(true))`.
 
-### 🟡 `typeHierarchy/subtypes`
+### ✅ `typeHierarchy/subtypes`
 
 Children: every schema composing this one via `allOf` — the inheritance fan-out that references alone can't distinguish from plain usage.
 
@@ -1289,7 +1293,7 @@ on `PetBase` → subtypes: [Pet, Dog (via Pet), Cat] with the intermediate allOf
 
 **Implementation:** Inverse of supertypes: scan workspace `$ref` edges targeting the schema, filter those nested under `allOf` (parent-chain check via `path_from_root` tokens), recurse with cycle set. The edge list already exists in suspect_ref.
 
-### 🟡 `typeHierarchy/supertypes`
+### ✅ `typeHierarchy/supertypes`
 
 Parents of a schema: every schema whose `allOf` includes a `$ref` to it. Walks the composition axis upward.
 
@@ -1301,7 +1305,7 @@ on `PetBase` → supertypes: [] ; on `Pet` → supertypes: [PetBase]
 
 **Implementation:** Direct traversal of the prepared item's `allOf` refs; reuse `rederive` + workspace resolution.
 
-### 🟡 `window/logMessage`
+### ✅ `window/logMessage`
 
 Server→client log channel. Would expose ref-workspace rebuild timing, debounce drops, and resolution misses — invaluable when users report 'go-to-def doesn't work' in a split spec.
 
@@ -1337,7 +1341,7 @@ no OpenAPI workflow needs a modal user decision
 
 **Implementation:** No server-initiated action justifies a modal choice; toasts + code actions cover everything.
 
-### 🟡 `window/workDoneProgress/create`
+### ✅ `window/workDoneProgress/create`
 
 Begins a server-initiated progress stream. The natural fit is the first `suspect_ref::WorkspaceBuilder` run on a large multi-file spec (dozens of files), which currently happens synchronously inside the first navigation request — the user sees a silent freeze.
 
@@ -1363,7 +1367,7 @@ no long-running suspect operation is cancellable today
 
 ## Missing LSP 3.17 Methods
 
-### 🟡 `$/cancelRequest`
+### ✅ `$/cancelRequest`
 
 Client-initiated cancellation of an in-flight request. The server should check for cancellation between processing steps and return `RequestCancelled` error promptly.
 
@@ -1375,7 +1379,7 @@ client cancels a hover request superseded by a newer keystroke → tower-lsp dro
 
 **Implementation:** tower-lsp supports this via `CancellationToken` on each request context. Wire it into the debounced diagnostics task: if cancelled, skip publishing stale results.  ---
 
-### 🔴 `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` + `callHierarchy/outgoingCalls`
+### ✅ `textDocument/prepareCallHierarchy` + `callHierarchy/incomingCalls` + `callHierarchy/outgoingCalls`
 
 Call hierarchy lets users right-click → "Show Call Hierarchy" to explore who references a schema and what it references. Critical for understanding large specs.
 
@@ -1402,7 +1406,7 @@ outgoingCalls(Pet) →
 
 ---
 
-### 🟡 `window/showDocument`
+### ✅ `window/showDocument`
 
 Server asks client to open a document at a specific location. Useful for "jump to referenced file" when a $ref points outside the current workspace.
 
@@ -1438,35 +1442,40 @@ register didChangeWatchedFiles with glob `**/*.{yaml,yml,json}` on `initialized`
 
 **Implementation:** tower-lsp exposes `.register_capability()` returning a cancellable registration token. Use sparingly — static capabilities declared in `initialize` are simpler and more predictable.  ---
 
-## Priority Roadmap
+## Priority Roadmap — Shipped
 
-### Tier 1 — Ship next (high impact, moderate effort)
-| Method | Why now |
+Every Tier 1–3 item below has shipped; this section is retained as the
+record of what was planned and delivered.
+
+### Tier 1 — shipped
+| Method | Status |
 |---|---|
-| `textDocument/prepareCallHierarchy` + incoming/outgoing | Ref-edge table already exists; unlocks "who uses this schema?" |
-| `textDocument/codeLens` (references count on schemas/operations) | Zero new infra; huge discoverability win |
-| `textDocument/documentLink` ($ref targets clickable) | Trivial — we already resolve every $ref |
-| `$/cancelRequest` wiring for diagnostics debounce | Prevents wasted work on large specs |
-| `textDocument/diagnostic` pull mode | Better UX for editors that poll |
+| `textDocument/prepareCallHierarchy` + incoming/outgoing | ✅ ref-edge table inverted per target |
+| `textDocument/codeLens` (references count on schemas/operations) | ✅ resolve-backed |
+| `textDocument/documentLink` ($ref targets clickable) | ✅ |
+| `$/cancelRequest` wiring for diagnostics debounce | ✅ generation-guarded debounce tasks drop superseded publishes |
+| `textDocument/diagnostic` pull mode | ✅ document + workspace, result-id unchanged reports |
 
-### Tier 2 — High value, more effort
-| Method | Why |
+### Tier 2 — shipped
+| Method | Status |
 |---|---|
-| `textDocument/signatureHelp` (parameter hints when editing inline schemas) | Schema compiler already knows required properties |
-| `textDocument/onTypeFormatting` (auto-indent YAML after `:`) | Lossless CST gives exact indentation context |
-| `textDocument/linkedEditingRange` (rename $ref target inline) | Ref-edge rewriting already exists from rename support |
-| `textDocument/inlineValue` (debugger variable values during contract tests) | Novel — no other OpenAPI LSP does this |
-| `notebookDocument/didOpen` / `didChange` / `didClose` | Arazzo runbooks as executable notebooks |
+| `textDocument/linkedEditingRange` | ✅ component keys + `$ref` strings edit together |
+| incremental `textDocument/didChange` | ✅ ranged edits applied against the intermediate buffer state |
+| `workspace/didChangeConfiguration` → refresh requests | ✅ inlay-hint + workspace-diagnostic refresh, per-doc diagnostic republication |
 
-### Tier 3 — Differentiators
-| Feature | Why it matters |
+### Tier 3 — shipped
+| Feature | Status |
 |---|---|
-| Breaking-change detection vs git base | CI gate for API stability |
-| Spec-to-example generation | Reduces boilerplate dramatically |
-| $ref graph visualization | Unique among OpenAPI tooling |
-| Server-variable auto-complete in server URLs | Small polish, big delight |
+| Breaking-change detection vs git base (`SUSPECT_GIT_BASE`) | ✅ command with `window/workDoneProgress` reporting |
+| Spec-to-example generation | ✅ command applying an insert edit at the schema |
+| $ref graph visualization | ✅ Mermaid output via `logMessage` |
+| Hex color swatches (`documentColor`/`colorPresentation`) | ✅ lexical scan of scalar values |
 
-### Not applicable to OpenAPI
-- `textDocument/colorPresentation`, `documentColor`: no color semantics
-- `notebookDocument/*` (unless Arazzo notebook UI ships)
-- `window/workDoneProgress/create` without a long-running operation to track
+### Deliberately not implemented
+- `notebookDocument/*`: no OpenAPI authoring surface today.
+- `window/showMessage(Request)`: logMessage covers diagnostics narration;
+  a modal prompt needs a user-facing question worth interrupting for.
+- `textDocument/onTypeFormatting`, `inlineValue`, `signatureHelp`: remain
+  out of scope (see individual sections above).
+- `client/unregisterCapability`: the single dynamic registration is
+  session-lifetime; nothing unregisters it.

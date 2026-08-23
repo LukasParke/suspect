@@ -7,6 +7,7 @@
 //! `$ref`-resolved targets, flow-style values — the action is silently
 //! skipped rather than misplaced.
 
+use serde_json::json;
 use std::collections::HashMap;
 
 use suspect_low::{LowDoc, ValueKind};
@@ -39,6 +40,7 @@ pub fn code_actions(
     uri: &Url,
     range: Range,
     diagnostics: &[Diagnostic],
+    defer_fix_all: bool,
 ) -> Vec<CodeAction> {
     let mut actions = Vec::new();
     for d in diagnostics {
@@ -62,18 +64,52 @@ pub fn code_actions(
         });
     }
     if covers_document(doc, range) {
-        let edits = all_edits(doc, diagnostics);
-        if !edits.is_empty() {
-            actions.push(CodeAction {
-                title: "Fix all suspect issues".to_owned(),
-                kind: Some(CodeActionKind::new("source.fixAll.suspect")),
-                data: Some(serde_json::json!("source.fixAll.suspect")),
-                edit: Some(workspace_edit(uri, edits)),
-                ..CodeAction::default()
-            });
+        // The whole-document sweep recomputes the diagnostic battery and
+        // builds an edit per fix; defer that to `codeAction/resolve` when
+        // the client supports it, so the initial action list stays cheap.
+        let mut action = CodeAction {
+            title: "Fix all suspect issues".to_owned(),
+            kind: Some(CodeActionKind::new("source.fixAll.suspect")),
+            data: Some(json!({ "suspect": "fixAll", "uri": uri.as_str() })),
+            ..CodeAction::default()
+        };
+        if !defer_fix_all {
+            let edits = all_edits(doc, diagnostics);
+            if !edits.is_empty() {
+                action.edit = Some(workspace_edit(uri, edits));
+            }
+        }
+        if action.edit.is_some() || defer_fix_all {
+            actions.push(action);
         }
     }
     actions
+}
+
+/// Fills in the deferred `edit` of a `source.fixAll.suspect` action.
+///
+/// Recomputes the current diagnostic battery server-side (fresher than the
+/// diagnostics snapshot the client holds) and applies every known fix,
+/// dropping conflicting or overlapping edits.
+#[must_use]
+pub fn resolve_code_action(
+    doc: &OpenDoc,
+    uri: &Url,
+    ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
+    cfg: &crate::config_files::SuspectConfig,
+) -> Option<CodeAction> {
+    let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg);
+    let edits = all_edits(doc, &diags);
+    if edits.is_empty() {
+        return None;
+    }
+    Some(CodeAction {
+        title: "Fix all suspect issues".to_owned(),
+        kind: Some(CodeActionKind::new("source.fixAll.suspect")),
+        data: Some(json!({ "suspect": "fixAll" })),
+        edit: Some(workspace_edit(uri, edits)),
+        ..CodeAction::default()
+    })
 }
 
 /// Full-document canonical format as a single [`TextEdit`] replacing the
@@ -665,7 +701,7 @@ paths:
         let d = open(API);
         let diag = diag_on_value(&d, b"get", "oas-operation-missing-operationId");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         assert_eq!(acts[0].kind, Some(CodeActionKind::QUICKFIX));
         assert_eq!(acts[0].title, "Add operationId `getPetsById`");
@@ -684,7 +720,7 @@ paths:
         let d = open(API);
         let diag = diag_on_value(&d, b"get", "oas-operation-missing-responses");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add default responses");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -712,7 +748,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"200", "oas-response-missing-description");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add description for `200` response");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -736,7 +772,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"/pets/", "oas-path-trailing-slash");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Remove trailing slash");
         let edits = edits_of(&acts, &uri);
@@ -760,7 +796,7 @@ components:
         let d = open(text);
         let diag = diag_on_value(&d, b"Limit", "oas-parameter-missing-name");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add parameter name");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -782,7 +818,7 @@ paths:
         let d = open(text);
         let diag = diag_on_seq_item(&d, "in:", "oas-parameter-missing-name");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         let fixed = apply(&d, &edits_of(&acts, &uri));
         assert!(fixed.contains("- name: \n          in: query\n"), "{fixed}");
@@ -803,7 +839,7 @@ paths:
             let d = open(API);
             let diag = diag_on_value(&d, b"info", code);
             let uri = url("api.yaml");
-            let acts = code_actions(&d, &uri, diag.range, &[diag]);
+            let acts = code_actions(&d, &uri, diag.range, &[diag], false);
             assert_eq!(acts.len(), 1, "{code}");
             let fixed = apply(&d, &edits_of(&acts, &uri));
             assert!(fixed.contains(expect), "{code}: {fixed}");
@@ -815,7 +851,7 @@ paths:
         let d = open(API);
         let diag = diag_on_value(&d, b"get", "operation-tags");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add tags to operation");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -831,7 +867,7 @@ paths:
         let d = open(API);
         let uri = url("api.yaml");
         let diag = byte_diag(&d, 0..5, "totally-unknown-code");
-        assert!(code_actions(&d, &uri, diag.range, &[diag]).is_empty());
+        assert!(code_actions(&d, &uri, diag.range, &[diag], false).is_empty());
         // Malformed buffer: anchors cannot be located, nothing panics.
         let bad = open("{: ::\n  - ]]\n\t: [\n");
         for code in [
@@ -845,7 +881,7 @@ paths:
             "operation-tags",
         ] {
             let diag = byte_diag(&bad, 0..bad.text.len(), code);
-            let acts = code_actions(&bad, &uri, whole_doc(&bad), &[diag]);
+            let acts = code_actions(&bad, &uri, whole_doc(&bad), &[diag], false);
             assert!(
                 acts.iter()
                     .all(|a| a.kind != Some(CodeActionKind::QUICKFIX)),
@@ -865,6 +901,7 @@ paths:
             &uri,
             Range::new(Position::new(0, 0), Position::new(0, 0)),
             &[diag],
+            false,
         );
         assert!(acts.is_empty(), "{acts:?}");
     }
@@ -889,7 +926,7 @@ paths:
         ];
         diags.push(diags[3].clone()); // exact duplicate must be skipped too
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, whole_doc(&d), &diags);
+        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, false);
         let fix_all = acts
             .iter()
             .find(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect")))
@@ -919,11 +956,57 @@ paths:
     }
 
     #[test]
+    fn fix_all_defers_edit_and_resolve_recomputes_it() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  /pets/:
+    get:
+      summary: S
+";
+        let d = open(text);
+        let uri = url("api.yaml");
+        let diags = vec![diag_on_value(
+            &d,
+            b"get",
+            "oas-operation-missing-operationId",
+        )];
+        // Deferred mode: the action is advertised without its edit.
+        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, true);
+        let deferred = acts
+            .iter()
+            .find(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect")))
+            .expect("fixAll action present");
+        assert!(deferred.edit.is_none(), "edit must be resolved lazily");
+        // Eager mode keeps the edit inline (clients without resolve support).
+        let eager = code_actions(&d, &uri, whole_doc(&d), &diags, false);
+        let inline = eager
+            .iter()
+            .find(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect")))
+            .expect("fixAll action present");
+        assert!(inline.edit.is_some());
+        // Resolve recomputes from a fresh battery and produces an edit.
+        let resolved = resolve_code_action(&d, &uri, None, &Default::default())
+            .expect("resolvable fixes exist");
+        let edit = resolved.edit.as_ref().and_then(|we| match we {
+            tower_lsp::lsp_types::WorkspaceEdit {
+                changes: Some(changes),
+                ..
+            } => changes.values().next(),
+            _ => None,
+        });
+        let edits = edit.expect("resolved action carries text edits");
+        assert!(!edits.is_empty());
+    }
+
+    #[test]
     fn fix_all_only_appears_when_the_range_covers_the_document() {
         let d = open(API);
         let uri = url("api.yaml");
         let diags = vec![diag_on_value(&d, b"get", "operation-tags")];
-        let acts = code_actions(&d, &uri, diags[0].range, &diags);
+        let acts = code_actions(&d, &uri, diags[0].range, &diags, false);
         assert!(
             acts.iter()
                 .all(|a| a.kind == Some(CodeActionKind::QUICKFIX))
@@ -942,7 +1025,7 @@ paths:
         let diags = diags_on_values(&d, b"get", "oas-operation-missing-responses");
         assert_eq!(diags.len(), 30);
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, whole_doc(&d), &diags);
+        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, false);
         let quick = acts
             .iter()
             .filter(|a| a.kind == Some(CodeActionKind::QUICKFIX))
@@ -1031,7 +1114,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"/pets//", "oas-path-trailing-slash");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         // Minimal edit: `/pets//` → `/pets/`, not an over-stripped `/pets`.
         assert_eq!(edits_of(&acts, &uri)[0].new_text, "/pets/");
@@ -1053,7 +1136,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"//", "oas-path-trailing-slash");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag]);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         assert_eq!(edits_of(&acts, &uri)[0].new_text, "/");
     }
@@ -1067,7 +1150,7 @@ paths:
             "{\n  \"openapi\": \"3.1.0\",\n  \"info\":\n    {\n      \"title\": \"T\"\n    }\n}\n";
         let d = OpenDoc::parse("mem://actions-test.json".into(), text.to_owned());
         let diag = diag_on_value(&d, b"info", "info-contact");
-        let acts = code_actions(&d, &url("api.json"), diag.range, &[diag]);
+        let acts = code_actions(&d, &url("api.json"), diag.range, &[diag], false);
         assert!(acts.is_empty(), "{acts:?}");
     }
 
@@ -1082,7 +1165,7 @@ components:
 ";
         let d = open(text);
         let diag = diag_on_seq_item(&d, "name", "oas-parameter-missing-name");
-        let acts = code_actions(&d, &url("api.yaml"), diag.range, &[diag]);
+        let acts = code_actions(&d, &url("api.yaml"), diag.range, &[diag], false);
         assert!(acts.is_empty(), "{acts:?}");
     }
 

@@ -15,6 +15,10 @@ use crate::state::lsp_range;
 /// `source` stamped on every diagnostic we publish.
 pub const SOURCE: &str = "suspect";
 
+/// `Diagnostic::source` for spectral-style lint findings; lets config gate the
+/// recommended ruleset independently of syntax/validate batteries.
+pub const SOURCE_LINT: &str = "suspect-lint";
+
 /// Maps `suspect_validate::Severity` into LSP severity.
 #[must_use]
 pub fn map_validate_severity(s: suspect_validate::Severity) -> DiagnosticSeverity {
@@ -123,7 +127,9 @@ pub fn lint_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
         .into_iter()
         .filter_map(|f| {
             let severity = map_lint_severity(f.severity)?;
-            Some(make(bytes, li, f.range, severity, &f.code, f.message))
+            let mut diag = make(bytes, li, f.range, severity, &f.code, f.message);
+            diag.source = Some(SOURCE_LINT.to_owned());
+            Some(diag)
         })
         .collect()
 }
@@ -155,7 +161,17 @@ pub fn arazzo_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
 /// Full battery for one document: syntax, semantic validation (OAS 3.x
 /// only), lint (all families), and Arazzo checks.
 #[must_use]
-pub fn compute_diagnostics(ws: Option<&Arc<Workspace>>, low: &LowDoc) -> Vec<Diagnostic> {
+pub fn compute_diagnostics(
+    ws: Option<&Arc<Workspace>>,
+    low: &LowDoc,
+    cfg: &crate::config_files::SuspectConfig,
+) -> Vec<Diagnostic> {
+    crate::config_files::apply_config(compute_diagnostics_raw(ws, low), cfg)
+}
+
+/// Unfiltered battery; [`compute_diagnostics`] applies user config on top.
+#[must_use]
+pub fn compute_diagnostics_raw(ws: Option<&Arc<Workspace>>, low: &LowDoc) -> Vec<Diagnostic> {
     let mut out = syntax_diagnostics(low);
     if let Some(ws) = ws {
         out.extend(validate_diagnostics(ws, low));
@@ -232,16 +248,20 @@ mod tests {
         let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
         ws.load_all("api.yaml").unwrap();
         let ws = Arc::new(ws);
-        let diags = compute_diagnostics(Some(&ws), &low);
+        let diags = compute_diagnostics(Some(&ws), &low, &Default::default());
         // No syntax errors; everything else is well-formed.
         assert!(
             diags
                 .iter()
                 .all(|d| d.code != Some(NumberOrString::String("syntax".to_owned())))
         );
-        assert!(diags.iter().all(|d| d.source.as_deref() == Some(SOURCE)));
+        assert!(
+            diags
+                .iter()
+                .all(|d| matches!(d.source.as_deref(), Some(SOURCE) | Some(SOURCE_LINT)))
+        );
         // Without a workspace only syntax + lint + arazzo run.
-        let bare = compute_diagnostics(None, &low);
+        let bare = compute_diagnostics(None, &low, &Default::default());
         assert!(bare.len() <= diags.len());
     }
 

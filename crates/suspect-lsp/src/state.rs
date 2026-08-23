@@ -7,7 +7,7 @@ use std::sync::Arc;
 use suspect_low::LowDoc;
 use suspect_ref::{Workspace, WorkspaceBuilder};
 use suspect_source::{LineIndex, Source, Uri};
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp::lsp_types::{Position, Range, SemanticToken};
 
 /// One editor-open document: the live buffer text plus the `LowDoc` parsed
 /// from it. The line index lives inside the parsed document
@@ -42,6 +42,17 @@ pub struct State {
     /// Per-document edit counters: a debounce task publishes only when its
     /// captured generation still matches the document's current one.
     pub generations: HashMap<Uri, u64>,
+    /// Per-document semantic-token caches for `semanticTokens/full/delta`:
+    /// the result id handed to the client plus the encoded tokens.
+    pub token_cache: HashMap<Uri, (String, Vec<SemanticToken>)>,
+    /// Raw initialization options captured in `initialize` for later merge.
+    pub pending_init_options: Option<serde_json::Value>,
+    /// Merged server configuration (initialization options < client section).
+    pub config: crate::config_files::SuspectConfig,
+    /// Client capabilities from `initialize`, consulted when a feature can
+    /// degrade (e.g. deferring work to `codeAction/resolve` needs
+    /// `codeAction.resolveSupport`).
+    pub client_caps: Option<tower_lsp::lsp_types::ClientCapabilities>,
 }
 
 impl State {
@@ -106,6 +117,38 @@ pub fn lsp_range(bytes: &[u8], li: &LineIndex, range: std::ops::Range<usize>) ->
     }
 }
 
+/// Applies LSP content changes sequentially, returning the new buffer.
+///
+/// Range-less changes replace the whole text (full-sync fallback);
+/// ranged edits splice against the *current* intermediate state per the
+/// spec — a fresh [`LineIndex`] maps each UTF-16 range to byte offsets
+/// because prior edits in the same notification shift the lines. Returns
+/// `None` when a range falls outside the document (protocol violation;
+/// callers keep the previous buffer rather than corrupting it).
+#[must_use]
+pub fn apply_content_changes(
+    current: &str,
+    changes: &[tower_lsp::lsp_types::TextDocumentContentChangeEvent],
+) -> Option<String> {
+    let mut text = current.to_owned();
+    for change in changes {
+        match change.range {
+            None => text = change.text.clone(),
+            Some(range) => {
+                let bytes = text.as_bytes();
+                let li = LineIndex::new(bytes);
+                let start = offset_of_utf16(bytes, &li, range.start.line, range.start.character)?;
+                let end = offset_of_utf16(bytes, &li, range.end.line, range.end.character)?;
+                if end < start || end > text.len() {
+                    return None;
+                }
+                text.replace_range(start..end, &change.text);
+            }
+        }
+    }
+    Some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,5 +176,92 @@ mod tests {
         let r = lsp_range(bytes, &li, 0..bytes.len() - 1);
         assert_eq!(r.start, Position::new(0, 0));
         assert_eq!(r.end, Position::new(0, 7)); // 1 + 1 + 2 + 3 UTF-16 units
+    }
+
+    #[test]
+    fn incremental_edits_insert_delete_and_replace() {
+        use tower_lsp::lsp_types::TextDocumentContentChangeEvent;
+        let r = |sl: u32, sc: u32, el: u32, ec: u32| {
+            Some(Range::new(Position::new(sl, sc), Position::new(el, ec)))
+        };
+        // Insert "world" after "hello ".
+        let out = apply_content_changes(
+            "hello \n",
+            &[TextDocumentContentChangeEvent {
+                range: r(0, 6, 0, 6),
+                range_length: None,
+                text: "world".to_owned(),
+            }],
+        );
+        assert_eq!(out.as_deref(), Some("hello world\n"));
+        // Delete " world" again (single-line delete).
+        let out = apply_content_changes(
+            "hello world\n",
+            &[TextDocumentContentChangeEvent {
+                range: r(0, 5, 0, 11),
+                range_length: None,
+                text: String::new(),
+            }],
+        );
+        assert_eq!(out.as_deref(), Some("hello\n"));
+        // Multi-line replace.
+        let out = apply_content_changes(
+            "a: 1\nb: 2\nc: 3\n",
+            &[TextDocumentContentChangeEvent {
+                range: r(0, 3, 2, 4),
+                range_length: None,
+                text: "x".to_owned(),
+            }],
+        );
+        assert_eq!(out.as_deref(), Some("a: x\n"));
+    }
+
+    #[test]
+    fn sequential_changes_apply_against_intermediate_state() {
+        use tower_lsp::lsp_types::TextDocumentContentChangeEvent;
+        let changes = vec![
+            // Insert a line at the top; every later range shifts down one.
+            TextDocumentContentChangeEvent {
+                range: Some(Range::new(Position::new(0, 0), Position::new(0, 0))),
+                range_length: None,
+                text: "# header\n".to_owned(),
+            },
+            // Replace "1" in "a: 1", which shifted from line 0 to line 1.
+            TextDocumentContentChangeEvent {
+                range: Some(Range::new(Position::new(1, 3), Position::new(1, 4))),
+                range_length: None,
+                text: "9".to_owned(),
+            },
+        ];
+        let out = apply_content_changes("a: 1\n", &changes);
+        assert_eq!(out.as_deref(), Some("# header\na: 9\n"));
+    }
+
+    #[test]
+    fn full_text_change_still_replaces_whole_buffer() {
+        use tower_lsp::lsp_types::TextDocumentContentChangeEvent;
+        let out = apply_content_changes(
+            "old\n",
+            &[TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: "brand new\n".to_owned(),
+            }],
+        );
+        assert_eq!(out.as_deref(), Some("brand new\n"));
+    }
+
+    #[test]
+    fn out_of_range_edit_is_rejected_not_corrupting() {
+        use tower_lsp::lsp_types::TextDocumentContentChangeEvent;
+        let out = apply_content_changes(
+            "tiny\n",
+            &[TextDocumentContentChangeEvent {
+                range: Some(Range::new(Position::new(0, 0), Position::new(9, 0))),
+                range_length: None,
+                text: "x".to_owned(),
+            }],
+        );
+        assert_eq!(out, None);
     }
 }
