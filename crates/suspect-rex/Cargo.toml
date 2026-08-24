@@ -1,0 +1,12 @@
+[package]
+name = "suspect-rex"
+description = "Arazzo runtime expressions (rex): grammar parsing and evaluation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+serde.workspace = true
+serde_json.workspace = true

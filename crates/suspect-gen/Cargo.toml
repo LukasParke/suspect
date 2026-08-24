@@ -1,0 +1,19 @@
+[package]
+name = "suspect-gen"
+description = "Template-driven code generator with preservation-aware output writing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+[dependencies]
+suspect-ir = { path = "../suspect-ir" }
+minijinja = "2"
+serde_json.workspace = true
+sha2 = "0.10"
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "gen"
+harness = false

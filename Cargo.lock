@@ -812,6 +812,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "memo-map"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d1115007560874e373613744c6fba374c17688327a71c1476d1a5954cc857b"
+
+[[package]]
+name = "minijinja"
+version = "2.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86886cf6dbf4e614b19c9a1eec9775f021869d7eadde0fc73921a81b90c9b4c9"
+dependencies = [
+ "memo-map",
+ "serde",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1263,6 +1279,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "suspect-gen"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "minijinja",
+ "serde_json",
+ "sha2",
+ "suspect-ir",
+]
+
+[[package]]
 name = "suspect-ir"
 version = "0.1.0"
 dependencies = [
@@ -1380,6 +1407,15 @@ dependencies = [
  "suspect-source",
  "suspect-syntax",
  "thiserror",
+]
+
+[[package]]
+name = "suspect-rex"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "suspect-low",
 ]
 
 [[package]]
