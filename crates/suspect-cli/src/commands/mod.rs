@@ -64,7 +64,7 @@ pub fn workspace_dir_all(spec: &std::path::Path) -> anyhow::Result<std::sync::Ar
 
     for path in &all_files {
         // Path relative to the workspace root.
-        let rel_str = path.strip_prefix(&root).and_then(|r| r.to_str());
+        let rel_str = path.strip_prefix(&root).ok().and_then(|r| r.to_str());
         if let Some(rel_str) = rel_str {
             match ws.load_all(rel_str) {
                 Ok(n) => eprintln!("[ws] loaded {rel_str} ({n} docs)"),
