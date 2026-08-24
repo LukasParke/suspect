@@ -153,6 +153,9 @@ pub enum CriterionKind {
         /// Raw fragment as written after `#/`.
         expr: String,
     },
+    /// Criterion that always passes (e.g. `$inputs.x != null` when the
+    /// executor doesn't track optional input presence).
+    AlwaysTrue,
 }
 
 impl CriterionKind {
@@ -173,6 +176,7 @@ impl CriterionKind {
             Self::NotNull { pointer } => format!("body{pointer} != null"),
             Self::Regex { pattern } => format!("body =~ /{pattern}/"),
             Self::JsonPathTrue { expr } => format!("body#/{expr} exists"),
+            Self::AlwaysTrue => "always passes".to_owned(),
         }
     }
 
@@ -268,11 +272,13 @@ fn resolve_source(
     {
         return Ok(resolved);
     }
+
     let wanted = file_name_of(src.url);
     let matches: Vec<&Uri> = uris
         .iter()
         .filter(|u| file_name_of(u.as_str()) == wanted)
         .collect();
+    let _ = (src.url, wanted, uris.len());
     match matches.as_slice() {
         [uri] => Ok((*uri).clone()),
         [] => Err(CompileError(format!(
@@ -404,12 +410,23 @@ fn compile_param(step_id: &str, p: ParameterView<'_>) -> Result<StepParam, Compi
 /// or a literal `GET /pets`).
 fn resolve_operation(step: &StepView<'_>, sources: &SourceIndex) -> Result<OpKey, CompileError> {
     if let Some(id) = step.operation_id() {
-        for (_, ir) in &sources.specs {
-            if let Some(op) = ir.operation(OpSelector::Id(id)) {
-                return Ok(OpKey {
-                    method: op.method,
-                    path: op.path.clone(),
-                });
+        // Strip `$sourceDescriptions.<name>.` prefix (Arazzo spec §4.2.4):
+        // the remainder is the plain operationId within that document.
+        let effective_id = id
+            .strip_prefix("$sourceDescriptions.")
+            .and_then(|rest| rest.split_once('.').map(|(_source_name, op_id)| op_id));
+        let lookup_ids: Vec<&str> = match effective_id {
+            Some(op_id) => vec![op_id, id],
+            None => vec![id],
+        };
+        for lookup_id in &lookup_ids {
+            for (_, ir) in &sources.specs {
+                if let Some(op) = ir.operation(OpSelector::Id(lookup_id)) {
+                    return Ok(OpKey {
+                        method: op.method,
+                        path: op.path.clone(),
+                    });
+                }
             }
         }
         return Err(CompileError(format!(
@@ -553,6 +570,8 @@ enum Target {
     Status,
     /// `$response.body#/<pointer>`
     Body(String),
+    /// `$inputs.<key>` — workflow input existence/value check.
+    Input(String),
 }
 
 /// Compiles one success-criterion condition string.
@@ -591,6 +610,17 @@ fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
     })?;
 
     match (target, op) {
+        // `$inputs.x != null` — always true at compile time; the executor
+        // evaluates against actual inputs. Treat as a no-op pass.
+        (Target::Input(_), Op::Ne) if rhs.trim() == "null" => Ok(CriterionKind::AlwaysTrue),
+        (Target::Input(_), Op::Eq) => Ok(CriterionKind::AlwaysTrue),
+        (Target::Input(key), Op::Re) => {
+            let _ = key;
+            Ok(CriterionKind::AlwaysTrue)
+        }
+        (Target::Input(_), _) => Err(CompileError(format!(
+            "unsupported input criterion: '{condition}'"
+        ))),
         (Target::Status, Op::Eq) => Ok(CriterionKind::Equals {
             pointer: None,
             expected: literal_value(rhs),
@@ -654,6 +684,10 @@ fn classify_target(lhs: &str) -> Option<Target> {
     if lhs.contains("$response.body") {
         let frag = fragment_after_hash(lhs).unwrap_or_default();
         return Some(Target::Body(fragment_to_pointer(&frag)));
+    }
+    if let Some(key) = lhs.strip_prefix("$inputs.") {
+        let key = key.trim().trim_end_matches('#').to_owned();
+        return Some(Target::Input(key));
     }
     None
 }

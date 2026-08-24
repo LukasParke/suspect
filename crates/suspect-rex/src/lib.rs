@@ -381,11 +381,78 @@ fn parse_exchange_part(tail: &str) -> Option<(Part, Option<&str>)> {
     if let Some(frag) = tail.strip_prefix("body#") {
         return Some((Part::Body, Some(frag)));
     }
+    // Dot-notation property access (`$response.body.MediaContainer.size`)
+    // is common in real-world Arazzo files. Return the dotted path as-is;
+    // `parse_pointer_fragment` normalises it to JSON-pointer form.
+    if let Some(dotted) = tail.strip_prefix("body.") {
+        return (!dotted.is_empty()).then_some((Part::Body, Some(dotted)));
+    }
     (tail == "body").then_some((Part::Body, None))
+}
+
+/// Splits a dot/bracket path like `MediaContainer.Playlist[0].ratingKey`
+/// into alternating key and index segments.
+enum Seg {
+    Key(String),
+    Index(String),
+}
+
+fn split_dotted_bracket(text: &str) -> Vec<Seg> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '.' => {
+                if !current.is_empty() {
+                    out.push(Seg::Key(std::mem::take(&mut current)));
+                }
+            }
+            '[' => {
+                if !current.is_empty() {
+                    out.push(Seg::Key(std::mem::take(&mut current)));
+                }
+                let idx: String = chars.by_ref().take_while(|&c| c != ']').collect();
+                out.push(Seg::Index(idx));
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        out.push(Seg::Key(current));
+    }
+    out
 }
 
 /// Parses and validates a `#/pointer` fragment body.
 fn parse_pointer_fragment(full: &str, frag: &str) -> Result<Pointer, RexError> {
+    // Dot-notation paths (`MediaContainer.Playlist`) lack the leading `/`
+    // and use `.` as separator; normalise before parsing.
+    // Normalise dot-notation and bracket-index paths to RFC 6901 pointers:
+    // `MediaContainer.Playlist[0].ratingKey` → `/MediaContainer/Playlist/0/ratingKey`.
+    // Only when the fragment doesn't already start with `/` (a proper pointer).
+    let needs_normalise =
+        !frag.starts_with('/') && (frag.contains('.') || frag.contains('[')) && !frag.is_empty();
+    let (frag_owned, frag) = if needs_normalise {
+        let mut ptr = String::with_capacity(frag.len() + 8);
+        for seg in split_dotted_bracket(frag) {
+            match seg {
+                Seg::Key(k) => {
+                    ptr.push('/');
+                    ptr.push_str(&k);
+                }
+                Seg::Index(i) => {
+                    ptr.push('/');
+                    ptr.push_str(&i);
+                }
+            }
+        }
+        let leaked: &'static str = Box::leak(ptr.into_boxed_str());
+        (String::new(), leaked)
+    } else {
+        (String::new(), frag)
+    };
+    drop(frag_owned);
     validate_fragment_chars(full, frag)?;
     // RFC 6901 §6: percent-decode the entire fragment first; the resulting
     // JSON Pointer is then ~-unescaped during parsing.

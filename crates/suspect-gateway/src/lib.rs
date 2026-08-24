@@ -267,7 +267,11 @@ fn router_for_state(state: Arc<GatewayState>) -> Router {
     paths.sort_unstable();
     paths.dedup();
 
-    let mut router = Router::new();
+    // Plex-style action paths (`/:/timeline`, `/:/prefs`) use `:` as a
+    // literal segment prefix. Axum 0.8 panics on these unless the v0.7
+    // compatibility check is disabled (matchit v0.8 treats `{param}` as
+    // captures and `:segment` as a plain path).
+    let mut router = Router::new().without_v07_checks();
     for path in paths {
         let mut method_router = axum::routing::MethodRouter::new();
         for op in &state.spec.operations {
@@ -288,10 +292,22 @@ fn router_for_state(state: Arc<GatewayState>) -> Router {
         // Undeclared methods on a known path get an explicit journaled
         // 405 instead of axum's silent default.
         let method_router = method_router.fallback(method_not_allowed);
-        // OpenAPI `{petId}` templates are byte-identical to axum 0.8
-        // syntax, so registration needs no rewriting; percent-encoded
-        // segments pass through untouched.
-        router = router.route(path, method_router);
+        // Some real-world specs have paths that matchit cannot express
+        // (e.g. `{channel}.json` mixes a capture with a literal suffix).
+        // Skip those; requests to them fall through to the 404 handler.
+        let registrable = !path.split('/').any(|seg| {
+            let inner = seg.trim_start_matches('{').trim_end_matches('}');
+            seg.starts_with('{')
+                && (inner.contains('.') || !inner.is_empty() && seg.ends_with("}"))
+                && seg.matches('{').count() != 1
+        }) && path.split('/').all(|seg| {
+            !seg.starts_with('{') || (seg.ends_with('}') && seg.matches('{').count() == 1)
+        });
+        if registrable {
+            router = router.route(path, method_router);
+        } else {
+            eprintln!("[gw] skipping unregistrable path: {path}");
+        }
     }
     router.fallback(fallback_dispatch).with_state(state)
 }

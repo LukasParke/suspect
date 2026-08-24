@@ -549,6 +549,7 @@ fn eval_criterion(
                 Some(_) => Ok(()),
             }
         }
+        CriterionKind::AlwaysTrue => Ok(()),
     }
 }
 
