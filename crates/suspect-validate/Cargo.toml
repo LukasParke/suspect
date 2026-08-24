@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+rayon.workspace = true
 suspect-low.workspace = true
 suspect-ref.workspace = true
 suspect-oas.workspace = true

@@ -1771,6 +1771,7 @@ dependencies = [
  "futures",
  "http-body-util",
  "hyper",
+ "rayon",
  "serde",
  "serde_json",
  "suspect-gen",
@@ -1790,6 +1791,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "minijinja",
+ "rayon",
  "serde_json",
  "sha2",
  "suspect-ir",
@@ -1799,12 +1801,15 @@ dependencies = [
 name = "suspect-ir"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "rayon",
  "serde",
  "serde_json",
  "suspect-low",
  "suspect-overlay",
  "suspect-ref",
  "suspect-source",
+ "suspect-syntax",
  "tempfile",
 ]
 
@@ -1840,7 +1845,9 @@ dependencies = [
  "rustc-hash",
  "suspect-jsonpath",
  "suspect-low",
+ "suspect-ref",
  "suspect-source",
+ "suspect-syntax",
  "thiserror",
 ]
 
@@ -1966,6 +1973,7 @@ version = "0.1.0"
 dependencies = [
  "cc",
  "criterion",
+ "rayon",
  "suspect-source",
  "thiserror",
  "tree-sitter",
@@ -1997,6 +2005,7 @@ name = "suspect-validate"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "rayon",
  "rustc-hash",
  "suspect-low",
  "suspect-oas",

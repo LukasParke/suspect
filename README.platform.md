@@ -62,7 +62,7 @@ suspect watch . -- suspect test flows.arazzo.yaml --offline --cassette rec.scj
 
 | Path | Budget |
 |---|---|
-| Parse + IR cold (stripe-sized corpus) | < 50 ms |
+| Parse + IR cold | < 10 ms |
 | Mock gateway added latency p99 | ≤ 1 ms vs raw hyper |
 | Replay throughput | ≥ 50k req/s |
 | Gen render p95/file | < 1 ms |

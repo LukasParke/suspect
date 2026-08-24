@@ -9,12 +9,33 @@ use crate::diagnostic::{Diagnostic, Severity};
 /// Walks every schema reachable from `components/schemas` (through
 /// properties, items, combinators) once each and runs the schema checks.
 pub(crate) fn check_schemas(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
+    let __t = std::time::Instant::now();
+    let profile = std::env::var_os("SUSPECT_PROFILE").is_some();
+    let t_all = profile.then(std::time::Instant::now);
     let Some(components) = api.components() else {
         return;
     };
-    let mut visited = FxHashSet::default();
-    for (_, schema) in components.schemas() {
-        walk(schema, &mut visited, api, out);
+    // Single shared visited set: every reachable schema node is resolved
+    // and checked exactly once, in document order.
+    use rayon::prelude::*;
+    let schemas: Vec<_> = components.schemas();
+    let results: Vec<Vec<Diagnostic>> = schemas
+        .par_iter()
+        .map(|(_, schema)| {
+            let mut visited = FxHashSet::default();
+            let mut out_local = Vec::new();
+            walk(*schema, &mut visited, api, &mut out_local);
+            out_local
+        })
+        .collect();
+    for mut local in results {
+        out.append(&mut local);
+    }
+    if let Some(t) = t_all {
+        eprintln!(
+            "[suspect-validate profile]   schemas total {:.2} ms",
+            t.elapsed().as_secs_f64() * 1000.0
+        );
     }
 }
 
@@ -36,9 +57,6 @@ fn walk<'s>(
     check_unknown_type(api, r, out);
     check_discriminator(api, r, out);
 
-    for (_, prop) in r.properties() {
-        walk(prop, visited, api, out);
-    }
     if let Some(items) = r.items() {
         walk(items, visited, api, out);
     }

@@ -74,6 +74,18 @@ pub trait TemplateEngine: Send + Sync {
 /// [minijinja]: https://docs.rs/minijinja
 pub struct MinijinjaEngine {
     env: minijinja::Environment<'static>,
+    /// Memoized context conversion: `render` deep-converts the incoming
+    /// [`serde_json::Value`] into a minijinja value on every call, which
+    /// dominates render time for large specs (megabytes of JSON). The most
+    /// recently converted context is kept, keyed by its address; callers
+    /// must not mutate a context in place between renders.
+    ctx_cache: std::sync::Mutex<CtxCache>,
+}
+
+#[derive(Default)]
+struct CtxCache {
+    addr: usize,
+    value: Option<minijinja::Value>,
 }
 
 impl MinijinjaEngine {
@@ -82,7 +94,21 @@ impl MinijinjaEngine {
     pub fn new() -> Self {
         Self {
             env: minijinja::Environment::new(),
+            ctx_cache: std::sync::Mutex::new(CtxCache::default()),
         }
+    }
+
+    /// Renders without touching the context memoization cache.
+    ///
+    /// Used by context builders that render many short-lived per-entity
+    /// contexts (whose addresses would thrash or falsely hit the cache).
+    pub(crate) fn render_once(
+        &self,
+        template_name: &str,
+        ctx: &serde_json::Value,
+    ) -> Result<String, GenError> {
+        let tmpl = self.env.get_template(template_name)?;
+        Ok(tmpl.render(ctx)?)
     }
 }
 
@@ -95,7 +121,15 @@ impl Default for MinijinjaEngine {
 impl TemplateEngine for MinijinjaEngine {
     fn render(&self, template_name: &str, ctx: &serde_json::Value) -> Result<String, GenError> {
         let tmpl = self.env.get_template(template_name)?;
-        Ok(tmpl.render(ctx)?)
+        let mut cache = self.ctx_cache.lock().expect("ctx cache lock");
+        let addr = std::ptr::from_ref(ctx).addr();
+        if cache.addr != addr || cache.value.is_none() {
+            *cache = CtxCache {
+                addr,
+                value: Some(minijinja::Value::from_serialize(ctx)),
+            };
+        }
+        Ok(tmpl.render(cache.value.clone().expect("cache populated"))?)
     }
 
     fn add_template(&mut self, name: &str, src: &str) -> Result<(), GenError> {

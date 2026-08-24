@@ -7,14 +7,14 @@
 
 > **Deprecated.**
 {% endif -%}
-{% if op.parameters %}
+{% if op.rows_params %}
 
 #### Parameters
 
 | Name | In | Required | Type |
 | ---- | -- | -------- | ---- |
-{%- for p in op.parameters %}
-| {{ p.name }} | {{ p.location }} | {{ "yes" if p.required else "no" }} | {% if p.schema %}{{ p.schema | ts_type }}{% else %}-{% endif %} |
+{%- for r in op.rows_params %}
+| {{ r[0] }} | {{ r[1] }} | {{ r[2] }} | {{ r[3] }} |
 {%- endfor %}
 {% endif -%}
 {% if op.body_schema %}

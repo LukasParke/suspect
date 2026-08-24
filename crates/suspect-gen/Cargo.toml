@@ -10,6 +10,7 @@ suspect-ir = { path = "../suspect-ir" }
 minijinja = "2"
 serde_json.workspace = true
 sha2 = "0.10"
+rayon.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

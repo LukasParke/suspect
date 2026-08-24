@@ -807,3 +807,59 @@ async fn undeclared_method_returns_journaled_405() {
         .collect();
     assert_eq!(statuses, vec![Some(405)]);
 }
+
+/// Startup must stay fast: building the mock router over a generated
+/// ~500-operation spec has to finish well under two seconds. This is a
+/// generous regression bound (debug-build test time included), not a
+/// benchmark — the release target is <1s on real corpora.
+#[tokio::test]
+async fn mock_startup_over_500_ops_stays_under_budget() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    const OPS: usize = 500;
+    let mut spec =
+        String::from("openapi: 3.1.0\ninfo:\n  title: Bulk\n  version: \"1.0\"\npaths:\n");
+    for i in 0..OPS {
+        spec.push_str(&format!(
+            concat!(
+                "  /items/item{i}:\n",
+                "    get:\n",
+                "      operationId: getItem{i}\n",
+                "      responses:\n",
+                "        '200':\n",
+                "          description: ok\n",
+                "          content:\n",
+                "            application/json:\n",
+                "              schema:\n",
+                "                $ref: '#/components/schemas/Item'\n"
+            ),
+            i = i
+        ));
+    }
+    spec.push_str(
+        "components:\n  schemas:\n    Item:\n      type: object\n      properties:\n        id: { type: integer }\n        name: { type: string }\n        tags:\n          type: array\n          items: { type: string }\n",
+    );
+    std::fs::write(dir.path().join("spec.yaml"), &spec).expect("write generated spec");
+
+    let cfg = GatewayConfig {
+        mode: Mode::Mock,
+        spec: dir.path().join("spec.yaml"),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let start = std::time::Instant::now();
+    let (journal, _sink) = journal();
+    let app = build_router(&cfg, journal).await.expect("router");
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed < std::time::Duration::from_millis(1500),
+        "mock startup over {OPS} ops took {elapsed:?}; budget is 1500ms"
+    );
+    // The router actually serves: one synthesized response proves the
+    // fast startup did not skip precompilation.
+    let base = spawn_app(app).await;
+    let (status, _, body) = request(&base, "GET", "/items/item7").await;
+    assert_eq!(status, 200);
+    let parsed: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+    assert_eq!(parsed["id"], 0);
+}

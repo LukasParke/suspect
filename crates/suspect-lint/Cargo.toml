@@ -10,13 +10,15 @@ license.workspace = true
 suspect-low.workspace = true
 suspect-source.workspace = true
 suspect-jsonpath.workspace = true
-rayon.workspace = true
+suspect-syntax.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 regex.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+suspect-ref.workspace = true
 
 [[bench]]
 name = "lint"

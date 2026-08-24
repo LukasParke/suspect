@@ -9,11 +9,14 @@ authors.workspace = true
 
 [dependencies]
 suspect-low.workspace = true
+suspect-syntax.workspace = true
 suspect-ref.workspace = true
 suspect-overlay.workspace = true
 suspect-source.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rayon.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 tempfile = "3"

@@ -124,35 +124,40 @@ pub fn synth_example(schema: &Value, refs: &SchemaRefs, depth: u8) -> Value {
 /// Precompiles every declared response of every operation.
 ///
 /// Keyed by `(method, path template)` so request dispatch is a single map
-/// hit after route matching.
+/// hit after route matching. Synthesis is pure, so operations are
+/// compiled in parallel across the rayon pool.
 #[must_use]
 pub fn compile_all(spec: &IrSpec) -> HashMap<(Method, String), Vec<CompiledResponse>> {
+    use rayon::prelude::*;
+
     let refs = schema_refs(spec);
-    let mut table = HashMap::new();
-    for op in &spec.operations {
-        let compiled = op
-            .responses
-            .iter()
-            .map(|resp| {
-                let example = match &resp.schema {
-                    // Unresolvable component names degrade to `null`, matching
-                    // the "external refs stay opaque" policy of suspect-ir.
-                    Some(name) => spec
-                        .schema(name)
-                        .map_or(Value::Null, |ir| synth_example(&ir.json, &refs, 0)),
-                    None => Value::Null,
-                };
-                let body =
-                    Bytes::from(serde_json::to_vec(&example).unwrap_or_else(|_| b"null".to_vec()));
-                CompiledResponse {
-                    status: resp.status,
-                    body,
-                }
-            })
-            .collect::<Vec<_>>();
-        table.insert((op.method, op.path.clone()), compiled);
-    }
-    table
+    spec.operations
+        .par_iter()
+        .map(|op| {
+            let compiled = op
+                .responses
+                .iter()
+                .map(|resp| {
+                    let example = match &resp.schema {
+                        // Unresolvable component names degrade to `null`, matching
+                        // the "external refs stay opaque" policy of suspect-ir.
+                        Some(name) => spec
+                            .schema(name)
+                            .map_or(Value::Null, |ir| synth_example(&ir.json, &refs, 0)),
+                        None => Value::Null,
+                    };
+                    let body = Bytes::from(
+                        serde_json::to_vec(&example).unwrap_or_else(|_| b"null".to_vec()),
+                    );
+                    CompiledResponse {
+                        status: resp.status,
+                        body,
+                    }
+                })
+                .collect::<Vec<_>>();
+            ((op.method, op.path.clone()), compiled)
+        })
+        .collect()
 }
 
 /// Picks the best mock response: lowest 2xx, else lowest numeric status,

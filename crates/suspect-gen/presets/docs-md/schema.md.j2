@@ -1,24 +1,3 @@
 # Schemas — {{ title }} {{ version }}
 {% for s in schemas %}
-{% set def = s.json %}
-
-## {{ s.name }}
-{% if def.type == "object" and def.properties %}
-{% set reqs = def.required or [] %}
-
-| Property | Type | Required | Example |
-| -------- | ---- | -------- | ------- |
-{%- for pname in def.properties %}
-{%- set prop = def.properties[pname] %}
-| {{ pname }} | {{ prop | ts_type }} | {{ "yes" if pname in reqs else "no" }} | `{{ prop | scalar_example }}` |
-{%- endfor %}
-{% elif def.type == "object" %}
-
-Opaque object schema.
-{% else %}
-
-Type: `{{ def | ts_type }}`
-
-Example: `{{ schema_examples[def.name] }}`
-{% endif %}
-{% endfor %}
+{{ s.fragment }}{% endfor %}

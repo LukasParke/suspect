@@ -1000,3 +1000,188 @@ fn rust_sdk_preset_does_not_double_wrap_nullable_optionals() {
     );
     assert!(!lib_rs.contains("Option<Option<"));
 }
+
+// --------------------------------------------------- docs-md render speed
+
+/// Builds a synthetic spec with `ops` operations (10 tags, 5 parameters,
+/// 3 responses each) and one schema per operation with 14 properties.
+///
+/// Deterministic: property names, types, and refs derive from indices so
+/// the throughput fixture needs no corpus file.
+fn synthetic_spec(ops: usize) -> IrSpec {
+    let mut spec = IrSpec {
+        title: "Synthetic".into(),
+        version: "1.0".into(),
+        servers: vec!["https://synthetic.invalid".into()],
+        ..IrSpec::default()
+    };
+    for i in 0..ops {
+        let schema_name = format!("Model{i}");
+        let mut properties = serde_json::Map::new();
+        let mut required = Vec::new();
+        for p in 0..14 {
+            let prop = match p % 4 {
+                0 => {
+                    required.push(format!("field{p}"));
+                    json!({"type": "string", "minLength": 2})
+                }
+                1 => json!({"type": "integer", "default": p}),
+                2 => json!({"type": "array", "items": {"type": "boolean"}}),
+                _ => json!({"$ref": format!("#/components/schemas/Model{}", (i + 1) % ops)}),
+            };
+            properties.insert(format!("field{p}"), prop);
+        }
+        spec.schemas.push(IrSchema {
+            name: schema_name.clone(),
+            json: json!({"type": "object", "required": required, "properties": properties}),
+        });
+        spec.operations.push(IrOperation {
+            id: Some(format!("op{i}")),
+            method: Method::Get,
+            path: format!("/v1/resource{i}/{{id}}"),
+            summary: Some(format!("Synthetic operation {i}")),
+            description: None,
+            tags: vec![format!("tag{}", i % 10)],
+            deprecated: i % 25 == 0,
+            parameters: vec![
+                IrParameter {
+                    name: "id".into(),
+                    location: ParamIn::Path,
+                    required: true,
+                    schema: Some(json!({"type": "string"})),
+                },
+                IrParameter {
+                    name: "limit".into(),
+                    location: ParamIn::Query,
+                    required: false,
+                    schema: Some(json!({"type": "integer"})),
+                },
+                IrParameter {
+                    name: "expand".into(),
+                    location: ParamIn::Query,
+                    required: false,
+                    schema: None,
+                },
+                IrParameter {
+                    name: "filter".into(),
+                    location: ParamIn::Query,
+                    required: false,
+                    schema: Some(
+                        json!({"$ref": format!("#/components/schemas/Model{}", (i + 7) % ops)}),
+                    ),
+                },
+                IrParameter {
+                    name: "X-Trace".into(),
+                    location: ParamIn::Header,
+                    required: false,
+                    schema: Some(json!({"type": "string", "minLength": 4})),
+                },
+            ],
+            body_schema: Some(schema_name.clone()),
+            responses: vec![
+                IrResponse {
+                    status: Some(200),
+                    description: Some("ok".into()),
+                    schema: Some(schema_name),
+                },
+                IrResponse {
+                    status: Some(400),
+                    description: Some("bad request".into()),
+                    schema: None,
+                },
+                IrResponse {
+                    status: None,
+                    description: Some("error".into()),
+                    schema: None,
+                },
+            ],
+        });
+    }
+    spec
+}
+
+/// The `docs-md` preset renders at memory-bandwidth-ish speed: table cells
+/// and section fragments are precomputed in Rust and the page templates
+/// are dumb printers. Guards against regressions reintroducing per-cell
+/// filter calls or per-render context conversion into the hot path.
+///
+/// The ceiling is deliberately generous (>= 400 MB/s steady-state) so a
+/// loaded CI machine still passes; the stripe measurement is ~an order of
+/// magnitude above it.
+#[test]
+fn docs_md_render_throughput_stays_above_ceiling() {
+    let spec = synthetic_spec(300);
+    let engine = engine_with(presets::get("docs-md").unwrap().templates);
+    let ctx = presets::base_context(&spec);
+
+    let outputs = ["docs-md/index.md.j2", "docs-md/schema.md.j2"];
+    let mut bytes_per_run = 0usize;
+    for name in outputs {
+        // Warmup also populates the context-conversion cache.
+        bytes_per_run += engine.render(name, &ctx).expect("renders").len();
+    }
+    assert!(bytes_per_run > 200_000, "fixture too small to measure");
+
+    let runs = 5;
+    let start = std::time::Instant::now();
+    for _ in 0..runs {
+        for name in outputs {
+            engine.render(name, &ctx).expect("renders");
+        }
+    }
+    let mb_per_s = (bytes_per_run * runs) as f64 / (1048576.0 * start.elapsed().as_secs_f64());
+    assert!(
+        mb_per_s >= 400.0,
+        "docs-md render throughput collapsed: {mb_per_s:.0} MB/s"
+    );
+}
+
+/// Precomputed `docs-md` context keys exist alongside the shared keys.
+#[test]
+fn docs_md_context_precomputes_rows_and_fragments() {
+    let spec = petstore_spec();
+    let ctx = presets::base_context(&spec);
+
+    let op = &ctx["operations_by_tag"][0]["operations"][0];
+    assert_eq!(
+        op["rows_params"][0],
+        json!(["limit", "query", "no", "number"]),
+        "parameter rows fully rendered"
+    );
+    assert!(
+        op["fragment"]
+            .as_str()
+            .is_some_and(|f| f.contains("### `GET /pets`")),
+        "operation fragment precomputed"
+    );
+
+    let pet = ctx["schemas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "Pet")
+        .expect("Pet present");
+    assert_eq!(
+        pet["rows_props"][0],
+        json!(["friend", "Pet", "no", "..."]),
+        "property rows fully rendered in document order"
+    );
+    assert!(
+        pet["fragment"]
+            .as_str()
+            .is_some_and(|f| f.contains("| friend | Pet | no |")),
+        "schema fragment precomputed"
+    );
+
+    let list = ctx["schemas"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "PetList")
+        .expect("PetList present");
+    assert!(
+        list["rows_props"].is_null(),
+        "non-object schemas have no rows"
+    );
+    assert_eq!(list["type_str"], "Pet[]", "scalar branch type precomputed");
+}

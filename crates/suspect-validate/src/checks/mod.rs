@@ -31,26 +31,91 @@ use suspect_low::NodeRef;
 use suspect_oas::OpenApi;
 
 use crate::diagnostic::{Diagnostic, Severity};
+use rayon::prelude::*;
+
+/// One validation check group.
+type CheckFn = fn(&OpenApi<'_>, &mut Vec<Diagnostic>);
+
+/// Every check group, in canonical output order. Groups are independent
+/// (read-only over the same tree), so they execute in parallel buckets and
+/// merge in this order to keep diagnostics deterministic.
+#[rustfmt::skip]
+fn check_groups() -> Vec<(&'static str, CheckFn)> {
+    vec![
+        ("operations::operation_ids",          operations::check_operation_ids),
+        ("operations::missing_responses",      operations::check_missing_responses),
+        ("operations::deprecated",             operations::check_deprecated),
+        ("parameters::fields",                 parameters::check_parameter_fields),
+        ("parameters::required_path_params",   parameters::check_required_path_params),
+        ("parameters::duplicate_header_params",parameters::check_duplicate_header_params),
+        ("paths::keys",                        paths::check_path_keys),
+        ("paths::templates",                   paths::check_path_templates),
+        ("responses::descriptions",            responses::check_response_descriptions),
+        ("security::schemes",                  security::check_security_schemes),
+        ("servers::variables",                 servers::check_server_variables),
+        ("tags::declared",                     tags::check_declared_tags),
+        ("schemas",                            schemas::check_schemas),
+        ("examples",                           examples::check_example_types),
+        ("webhooks",                           webhooks::check_webhook_version),
+        ("info::license",                      info::check_license),
+    ]
+}
 
 /// Runs every check group against `api`, appending findings to `out` in
 /// module order; the caller sorts the accumulated diagnostics.
+///
+/// Groups are executed in parallel buckets when the rayon pool has more
+/// than one thread; with `SUSPECT_PROFILE=1` the run degrades to a
+/// sequential per-check timed pass instead (profiling wants serial truth).
 pub(crate) fn run_all(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
-    operations::check_operation_ids(api, out);
-    operations::check_missing_responses(api, out);
-    operations::check_deprecated(api, out);
-    parameters::check_parameter_fields(api, out);
-    parameters::check_required_path_params(api, out);
-    parameters::check_duplicate_header_params(api, out);
-    paths::check_path_keys(api, out);
-    paths::check_path_templates(api, out);
-    responses::check_response_descriptions(api, out);
-    security::check_security_schemes(api, out);
-    servers::check_server_variables(api, out);
-    tags::check_declared_tags(api, out);
-    schemas::check_schemas(api, out);
-    examples::check_example_types(api, out);
-    webhooks::check_webhook_version(api, out);
-    info::check_license(api, out);
+    let groups = check_groups();
+    let profile = std::env::var_os("SUSPECT_PROFILE").is_some();
+
+    if profile {
+        for (name, check) in &groups {
+            let t = std::time::Instant::now();
+            check(api, out);
+            eprintln!(
+                "[suspect-validate profile] {:>9.2} ms  {}",
+                t.elapsed().as_secs_f64() * 1000.0,
+                name
+            );
+        }
+        return;
+    }
+
+    // Parallel buckets: round-robin groups across `buckets` workers so each
+    // worker appends into its own vec (no locking); merge in group order.
+    let buckets = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(groups.len());
+    let lists: Vec<Vec<Diagnostic>> = if buckets > 1 {
+        let groups_arc = &groups;
+        let api_ref = &api;
+        (0..buckets)
+            .into_par_iter()
+            .map(|b| {
+                let mut out_b = Vec::new();
+                for (idx, (_name, check)) in groups_arc.iter().enumerate() {
+                    if idx % buckets == b {
+                        check(api_ref, &mut out_b);
+                    }
+                }
+                out_b
+            })
+            .collect()
+    } else {
+        let mut all = Vec::new();
+        for (_name, check) in &groups {
+            check(api, &mut all);
+        }
+        vec![all]
+    };
+
+    for list in lists {
+        out.extend(list);
+    }
 }
 
 /// Builds a diagnostic anchored to `api`'s document.

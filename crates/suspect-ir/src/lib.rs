@@ -13,11 +13,17 @@
 //! objects. Cross-file resolution is a planned upgrade behind the same API.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use suspect_low::{NodeRef, SpecFamily};
+use suspect_low::SpecFamily;
 use suspect_ref::Workspace;
 use suspect_source::Uri;
+
+pub mod common;
+pub mod fast;
+
+pub use fast::ir_from_fast;
 
 /// HTTP method of an operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -220,106 +226,69 @@ impl IrSpec {
         ) {
             return Err("not an OpenAPI 3.x document".to_owned());
         }
-        let mut spec = IrSpec::default();
-        let root = low.root();
+        // Convert the resolved CST into the shared value tree and run the
+        // same walk the fast path uses — one set of construction rules for
+        // both pipelines.
+        let root_value = fast::value_from_node(low.root());
+        Ok(ir_from_fast(&root_value))
+    }
 
-        if let Some(info) = root.get("info") {
-            spec.title = info
-                .get("title")
-                .and_then(|n| n.as_str())
-                .unwrap_or("")
-                .to_owned();
-            spec.version = info
-                .get("version")
-                .and_then(|n| n.as_str())
-                .unwrap_or("")
-                .to_owned();
+    /// Builds the IR directly from one spec file.
+    ///
+    /// Tries the allocation-lean YAML-subset reader first; documents using
+    /// features outside that subset fall back to a full workspace load of
+    /// the file's directory (the same layout `suspect-cli` uses), so exotic
+    /// YAML still produces identical output.
+    ///
+    /// # Errors
+    /// `"not an OpenAPI 3.x document"` when the family sniff fails, or an
+    /// I/O / workspace error message.
+    pub fn from_file(path: &Path) -> Result<IrSpec, String> {
+        let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
+        if let Some(root) = suspect_syntax::try_parse_fast(&bytes) {
+            return if fast::is_oas3(&root) {
+                Ok(ir_from_fast(&root))
+            } else {
+                Err("not an OpenAPI 3.x document".to_owned())
+            };
         }
-        if let Some(servers) = root.get("servers") {
-            spec.servers = servers
-                .items()
-                .iter()
-                .filter_map(|s| s.get("url").and_then(|n| n.as_str()))
-                .map(str::to_owned)
-                .collect();
-        }
+        Self::from_file_via_workspace(path)
+    }
 
-        // Component schemas first: operations reference them by name.
-        if let Some(components) = root.get("components")
-            && let Some(schemas_node) = components.get("schemas")
-        {
-            for e in schemas_node.entries() {
-                let json = materialize(e.value);
-                let idx = spec.schemas.len() as u32;
-                spec.schemas.push(IrSchema {
-                    name: e.key.to_owned(),
-                    json,
-                });
-                spec.schema_index.insert(e.key.to_owned(), idx);
-            }
-            for s in &spec.schemas {
-                let refs = collect_local_refs(&s.json);
-                spec.schema_edges.insert(s.name.clone(), refs);
-            }
-        }
+    /// Fallback path: workspace-load the file's directory like
+    /// `commands::workspace_dir_all`, then run the standard walk.
+    fn from_file_via_workspace(path: &Path) -> Result<IrSpec, String> {
+        use suspect_ref::WorkspaceBuilder;
 
-        // Operations.
-        if let Some(paths) = root.get("paths") {
-            for e in paths.entries() {
-                let path = e.key.to_owned();
-                let Some(item) = e.value else { continue };
-                let item_params = parameters_of(item);
-                for method in Method::ALL {
-                    let Some(op) = item.get(method_key(method)) else {
-                        continue;
-                    };
-                    let mut params = item_params.clone();
-                    params.extend(parameters_of(op));
-                    let id = op.get("operationId").and_then(|n| n.as_str());
-                    let idx = spec.operations.len() as u32;
-                    spec.operations.push(IrOperation {
-                        id: id.map(str::to_owned),
-                        method,
-                        path: path.clone(),
-                        summary: op
-                            .get("summary")
-                            .and_then(|n| n.as_str())
-                            .map(str::to_owned),
-                        description: op
-                            .get("description")
-                            .and_then(|n| n.as_str())
-                            .map(str::to_owned),
-                        tags: op
-                            .get("tags")
-                            .map(|t| {
-                                t.items()
-                                    .iter()
-                                    .filter_map(|n| n.as_str())
-                                    .map(str::to_owned)
-                                    .collect()
-                            })
-                            .unwrap_or_default(),
-                        deprecated: op
-                            .get("deprecated")
-                            .and_then(|n| n.as_bool())
-                            .unwrap_or(false),
-                        parameters: params,
-                        body_schema: op.get("requestBody").and_then(|rb| {
-                            rb.get("content")
-                                .and_then(|c| c.get("application/json"))
-                                .and_then(|j| j.get("schema"))
-                                .and_then(|n| schema_ref_name(n))
-                        }),
-                        responses: responses_of(op),
-                    });
-                    if let Some(id) = id {
-                        spec.by_operation_id.insert(id.to_owned(), idx);
-                    }
-                    spec.by_method_path.insert((method, path.clone()), idx);
-                }
+        let dir = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let ws = WorkspaceBuilder::new()
+            .root(&dir)
+            .build()
+            .map_err(|e| e.to_string())?;
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .map_err(|e| e.to_string())?
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| {
+                matches!(
+                    p.extension().and_then(|e| e.to_str()),
+                    Some("yaml") | Some("yml") | Some("json")
+                )
+            })
+            .collect();
+        entries.sort();
+        for entry in entries {
+            if let Some(name) = entry.file_name().and_then(|n| n.to_str()) {
+                let _ = ws.load_all(name);
             }
         }
-        Ok(spec)
+        let ws = Arc::new(ws);
+        let uri = Uri::from_path(path).map_err(|e| e.to_string())?;
+        Self::from_workspace(&ws, &uri)
     }
 
     /// Looks up an operation by selector.
@@ -339,150 +308,6 @@ impl IrSpec {
             .get(name)
             .copied()
             .and_then(|i| self.schemas.get(usize::try_from(i).ok()?))
-    }
-}
-
-fn method_key(method: Method) -> &'static str {
-    match method {
-        Method::Get => "get",
-        Method::Put => "put",
-        Method::Post => "post",
-        Method::Delete => "delete",
-        Method::Options => "options",
-        Method::Head => "head",
-        Method::Patch => "patch",
-        Method::Trace => "trace",
-    }
-}
-
-fn parameters_of(node: NodeRef<'_>) -> Vec<IrParameter> {
-    node.get("parameters")
-        .map(|p| {
-            p.items()
-                .iter()
-                .filter_map(|param| {
-                    // $ref parameters are not followed in v1; record the name only.
-                    let name = param.get("name").and_then(|n| n.as_str())?;
-                    let location = match param.get("in").and_then(|n| n.as_str())? {
-                        "query" => ParamIn::Query,
-                        "header" => ParamIn::Header,
-                        "path" => ParamIn::Path,
-                        "cookie" => ParamIn::Cookie,
-                        _ => return None,
-                    };
-                    Some(IrParameter {
-                        name: name.to_owned(),
-                        location,
-                        required: param
-                            .get("required")
-                            .and_then(|n| n.as_bool())
-                            .unwrap_or(false),
-                        schema: param.get("schema").map(Some).map(materialize),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn responses_of(op: NodeRef<'_>) -> Vec<IrResponse> {
-    let Some(responses) = op.get("responses") else {
-        return Vec::new();
-    };
-    let mut entries: Vec<(Option<u16>, IrResponse)> = responses
-        .entries()
-        .iter()
-        .filter_map(|e| {
-            let value = e.value?;
-            let status = e.key.parse::<u16>().ok();
-            let r = IrResponse {
-                status,
-                description: value
-                    .get("description")
-                    .and_then(|n| n.as_str())
-                    .map(str::to_owned),
-                schema: value
-                    .get("content")
-                    .and_then(|c| c.get("application/json"))
-                    .and_then(|j| j.get("schema"))
-                    .and_then(|n| schema_ref_name(n)),
-            };
-            Some((status, r))
-        })
-        .collect();
-    // Numeric statuses ascending, then `default` last.
-    entries.sort_by_key(|(status, _)| status.unwrap_or(u16::MAX));
-    entries.into_iter().map(|(_, r)| r).collect()
-}
-
-/// Resolves a schema node's `$ref` to a local component name.
-fn schema_ref_name(node: NodeRef<'_>) -> Option<String> {
-    let raw = node.get("$ref").and_then(|n| n.as_str())?;
-    raw.strip_prefix("#/components/schemas/")
-        .map(percent_decode)
-        .filter(|n| !n.is_empty())
-}
-
-fn percent_decode(text: &str) -> String {
-    // ~1/~0 JSON-pointer escapes plus %XX; small enough to hand-roll.
-    let unescaped = text.replace("~1", "/").replace("~0", "~");
-    let bytes = unescaped.as_bytes();
-    let mut out = String::with_capacity(unescaped.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = &unescaped[i + 1..i + 3];
-            if let Ok(value) = u8::from_str_radix(hex, 16) {
-                out.push(value as char);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i] as char);
-        i += 1;
-    }
-    out
-}
-
-/// Materializes any node into owned JSON via the overlay value tree.
-fn materialize(node: Option<NodeRef<'_>>) -> serde_json::Value {
-    let Some(node) = node else {
-        return serde_json::Value::Null;
-    };
-    let json_string = suspect_overlay::Value::from_node(node.resolved()).to_json();
-    serde_json::from_str(&json_string).unwrap_or(serde_json::Value::Null)
-}
-
-/// Collects local `#/components/schemas/{name}` references from JSON.
-fn collect_local_refs(json: &serde_json::Value) -> Vec<String> {
-    let mut out = Vec::new();
-    walk_refs(json, &mut out);
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn walk_refs(json: &serde_json::Value, out: &mut Vec<String>) {
-    match json {
-        serde_json::Value::Object(map) => {
-            for (k, v) in map {
-                if k == "$ref"
-                    && let Some(name) = v
-                        .as_str()
-                        .and_then(|r| r.strip_prefix("#/components/schemas/"))
-                {
-                    out.push(name.to_owned());
-                } else {
-                    walk_refs(v, out);
-                }
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                walk_refs(item, out);
-            }
-        }
-        _ => {}
     }
 }
 

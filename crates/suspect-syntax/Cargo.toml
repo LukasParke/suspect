@@ -12,6 +12,7 @@ suspect-source.workspace = true
 tree-sitter.workspace = true
 tree-sitter-language.workspace = true
 thiserror.workspace = true
+rayon.workspace = true
 
 [build-dependencies]
 cc.workspace = true

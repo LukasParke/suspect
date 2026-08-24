@@ -132,19 +132,31 @@ fn parse_rule(code: &str, node: Option<NodeRef<'_>>) -> Result<Rule, RulesetErro
         }
     };
 
+    let mut given_exprs: Vec<Box<str>> = Vec::new();
     let given = match resolved.get("given") {
-        None => vec![compile_path(code, "$")?],
+        None => {
+            given_exprs.push("$".into());
+            vec![compile_path(code, "$")?]
+        }
         Some(g) => {
             let g = g.resolved();
             match g.kind() {
-                ValueKind::Str => vec![compile_path(code, g.as_str().unwrap_or_default())?],
+                ValueKind::Str => {
+                    let s = g.as_str().unwrap_or_default().to_owned();
+                    given_exprs.push(s.clone().into());
+                    vec![compile_path(code, &s)?]
+                }
                 ValueKind::Array => {
                     let mut paths = Vec::new();
                     for item in g.items() {
                         let Some(s) = item.resolved().as_str() else {
                             return Err(bad_rule(code, "`given` entries must be strings"));
                         };
-                        paths.push(compile_path(code, s)?);
+                        given_exprs.push(s.into());
+                        paths.push(compile_path(
+                            code,
+                            item.resolved().as_str().unwrap_or_default(),
+                        )?);
                     }
                     paths
                 }
@@ -175,6 +187,7 @@ fn parse_rule(code: &str, node: Option<NodeRef<'_>>) -> Result<Rule, RulesetErro
     Ok(Rule {
         code: code.into(),
         description,
+        given_exprs,
         given,
         then,
         severity,

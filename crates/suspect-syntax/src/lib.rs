@@ -22,9 +22,11 @@ pub fn yaml_language() -> Language {
 }
 
 mod doc;
+pub mod fast;
 mod node;
 
 pub use doc::{Edit, Point, SourceDoc, SyntaxError};
+pub use fast::{FastValue, try_parse_fast};
 pub use node::SNode;
 
 use std::fmt;

@@ -194,37 +194,41 @@ pub(crate) fn is_truthy(node: &NodeRef<'_>) -> bool {
     }
 }
 
+/// The rule's finding message, computed lazily (only when a finding is
+/// actually emitted) so hot no-finding loops stay allocation-free.
+fn rule_message(rule: &Rule) -> String {
+    rule.description
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| format!("{}: {}", rule.code, rule.then.default_message()))
+}
+
 /// Applies `then` for one node matched by the rule's `given` query.
 pub(crate) fn apply<'d>(
     rule: &Rule,
     node: NodeRef<'d>,
-    root: NodeRef<'d>,
+    ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
 ) {
-    let message = rule
-        .description
-        .as_ref()
-        .map(ToString::to_string)
-        .unwrap_or_else(|| format!("{}: {}", rule.code, rule.then.default_message()));
     match &rule.then {
         Function::Truthy => {
             if !is_truthy(&node) {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
         Function::Falsy => {
             if is_truthy(&node) {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
         Function::Defined { property } => {
             if node.get(property).is_none() {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
         Function::Undefined { property } => {
             if node.get(property).is_some() {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
         Function::Pattern(re) => {
@@ -233,7 +237,7 @@ pub(crate) fn apply<'d>(
                 && let Some(s) = resolved.as_str()
                 && !re.is_match(s)
             {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
         Function::Casing(casing) => {
@@ -242,7 +246,7 @@ pub(crate) fn apply<'d>(
                 && let Some(s) = resolved.as_str()
                 && !casing.matches(s)
             {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
         Function::Length { min, max } => {
@@ -256,42 +260,50 @@ pub(crate) fn apply<'d>(
                 let too_small = min.is_some_and(|m| len < m);
                 let too_large = max.is_some_and(|m| len > m);
                 if too_small || too_large {
-                    push(out, rule, &message, &node);
+                    push(out, rule, &node, ptrs);
                 }
             }
         }
         Function::Enumeration(values) => {
             if !values.iter().any(|v| v.matches(&node)) {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
-        Function::Alphabetical => check_alphabetical(&node, rule, &message, out),
+        Function::Alphabetical => check_alphabetical(&node, rule, ptrs, out),
         Function::Xor { properties } => {
             let count = properties
                 .iter()
                 .filter(|p| node.get(p).is_some_and(|v| is_truthy(&v)))
                 .count();
             if count != 1 {
-                push(out, rule, &message, &node);
+                push(out, rule, &node, ptrs);
             }
         }
-        Function::PathParams => check_path_params(&node, rule, out),
-        Function::RefSiblings => check_ref_siblings(&node, root, rule, &message, out),
-        Function::TypedEnum => check_typed_enum(&node, rule, &message, out),
-        Function::DuplicateKeys => check_duplicate_keys(&node, rule, &message, out),
-        Function::DefaultResponse => check_response(&node, rule, &message, out, true),
-        Function::SuccessResponse => check_response(&node, rule, &message, out, false),
-        Function::NoTrailingSlash => check_no_trailing_slash(&node, rule, &message, out),
+        Function::PathParams => check_path_params(&node, rule, ptrs, out),
+        Function::RefSiblings => check_ref_siblings(&node, rule, ptrs, out),
+        Function::TypedEnum => check_typed_enum(&node, rule, ptrs, out),
+        Function::DuplicateKeys => check_duplicate_keys(&node, rule, ptrs, out),
+        Function::DefaultResponse => check_response(&node, rule, ptrs, out, true),
+        Function::SuccessResponse => check_response(&node, rule, ptrs, out, false),
+        Function::NoTrailingSlash => check_no_trailing_slash(&node, rule, ptrs, out),
     }
 }
 
-fn push<'d>(out: &mut Vec<Finding<'d>>, rule: &Rule, message: &str, node: &NodeRef<'d>) {
+fn push<'d>(
+    out: &mut Vec<Finding<'d>>,
+    rule: &Rule,
+    node: &NodeRef<'d>,
+    ptrs: &super::fast::PtrMap,
+) {
+    let path = ptrs
+        .pointer_for(node)
+        .unwrap_or_else(|| node.path_from_root());
     out.push(Finding {
         code: rule.code.clone(),
         severity: rule.severity,
-        message: message.to_string(),
+        message: rule_message(rule),
         range: node.byte_range(),
-        path: node.path_from_root(),
+        path,
         _marker: std::marker::PhantomData,
     });
 }
@@ -316,7 +328,7 @@ fn push_at<'d>(
 fn check_alphabetical<'d>(
     node: &NodeRef<'d>,
     rule: &Rule,
-    message: &str,
+    ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
 ) {
     let resolved = node.resolved();
@@ -337,7 +349,7 @@ fn check_alphabetical<'d>(
         _ => return,
     };
     if !sorted {
-        push(out, rule, message, node);
+        push(out, rule, node, ptrs);
     }
 }
 
@@ -380,8 +392,15 @@ fn declared_path_params(params: Option<NodeRef<'_>>) -> Vec<String> {
         .collect()
 }
 
-fn check_path_params<'d>(node: &NodeRef<'d>, rule: &Rule, out: &mut Vec<Finding<'d>>) {
-    let path_ptr = node.path_from_root();
+fn check_path_params(
+    node: &NodeRef<'_>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'_>>,
+) {
+    let Some(path_ptr) = ptrs.pointer_for(node) else {
+        return;
+    };
     let Some(key_token) = path_ptr.tokens().last() else {
         return;
     };
@@ -413,24 +432,31 @@ fn check_path_params<'d>(node: &NodeRef<'d>, rule: &Rule, out: &mut Vec<Finding<
 
 fn check_ref_siblings<'d>(
     node: &NodeRef<'d>,
-    root: NodeRef<'d>,
     rule: &Rule,
-    message: &str,
+    ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
 ) {
-    let ref_ptr = node.path_from_root();
-    let Some(parent_ptr) = ref_ptr.parent() else {
+    // The `$ref` match is the value scalar; its parent object is the nearest
+    // strict object ancestor. Climbing the syntax tree directly avoids the
+    // O(depth x width) pointer round-trip per match, which dominated lint
+    // time on reference-heavy documents.
+    let Some(start) = node.resolved().syntax().parent() else {
         return;
     };
-    let Some(parent) = root.pointer(&parent_ptr) else {
-        return;
-    };
+    let mut cur = NodeRef::new(start);
+    while cur.kind() != ValueKind::Object {
+        let Some(parent) = cur.syntax().parent() else {
+            return;
+        };
+        cur = NodeRef::new(parent);
+    }
+    let parent = cur;
     let has_bad_sibling = parent
         .entries()
         .iter()
         .any(|e| e.key != "$ref" && e.key != "description" && e.key != "summary");
     if has_bad_sibling {
-        push(out, rule, message, &parent);
+        push(out, rule, &parent, ptrs);
     }
 }
 
@@ -439,7 +465,7 @@ fn check_ref_siblings<'d>(
 fn check_typed_enum<'d>(
     node: &NodeRef<'d>,
     rule: &Rule,
-    message: &str,
+    ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
 ) {
     let resolved = node.resolved();
@@ -460,14 +486,14 @@ fn check_typed_enum<'d>(
         .map(|i| group(i.resolved().kind()));
     let Some(first) = kinds.next() else { return };
     if kinds.any(|k| k != first) {
-        push(out, rule, message, node);
+        push(out, rule, node, ptrs);
     }
 }
 
 fn check_duplicate_keys<'d>(
     node: &NodeRef<'d>,
     rule: &Rule,
-    message: &str,
+    _ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
 ) {
     let base = node.path_from_root();
@@ -488,7 +514,12 @@ fn check_duplicate_keys<'d>(
             push_at(
                 out,
                 rule,
-                format!("{message} `{}` collides with `{}`", entry.key, first_key),
+                format!(
+                    "{} `{}` collides with `{}`",
+                    rule_message(rule),
+                    entry.key,
+                    first_key
+                ),
                 range,
                 base.push(entry.key),
             );
@@ -524,7 +555,7 @@ fn is_2xx_key(key: &str) -> bool {
 fn check_response<'d>(
     node: &NodeRef<'d>,
     rule: &Rule,
-    message: &str,
+    ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
     allow_default: bool,
 ) {
@@ -537,21 +568,28 @@ fn check_response<'d>(
                 .any(|e| (e.key == "default" && allow_default) || is_2xx_key(e.key))
     });
     if !ok {
-        push(out, rule, message, node);
+        push(out, rule, node, ptrs);
     }
 }
 
 fn check_no_trailing_slash<'d>(
     node: &NodeRef<'d>,
     rule: &Rule,
-    message: &str,
+    ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
 ) {
-    let ptr = node.path_from_root();
-    if let Some(key) = ptr.tokens().last()
-        && key.ends_with('/')
-    {
-        push(out, rule, message, node);
+    // Cheap pre-filter: the node's own addressing key from the pointer map
+    // (O(1)); fall back to the full pointer computation when unvisited.
+    let ends_with_slash = match ptrs.own_key(node) {
+        Some(k) => k.ends_with(b"/"),
+        None => node
+            .path_from_root()
+            .tokens()
+            .last()
+            .is_some_and(|k| k.ends_with('/')),
+    };
+    if ends_with_slash {
+        push(out, rule, node, ptrs);
     }
 }
 

@@ -1,7 +1,7 @@
 #![deny(missing_docs)]
 use std::sync::Arc;
 
-use suspect_low::{NodeRef, SpecFamily};
+use suspect_low::{NodeRef, Pointer, SpecFamily};
 use suspect_ref::{Resolution, Workspace, WorkspaceError};
 
 /// OpenAPI 3.x version of a document.
@@ -102,12 +102,36 @@ impl Session {
     }
 
     /// Resolves a `$ref` value node to its target node.
+    ///
+    /// Hot path: local (`#/a/b`) and same-workspace external pointers
+    /// navigate the session-owned tree by KEY (`root.get("components")
+    /// .get("schemas")...`), which is O(pointer depth) with no tree-cursor
+    /// work over the multi-megabyte document. Only anchors and exotic refs
+    /// fall back to the original byte-range derivation.
     pub(crate) fn resolve<'s>(&'s self, ref_value: NodeRef<'_>) -> Result<NodeRef<'s>, CycleGuard> {
+        use suspect_low::{Pointer, ValueKind};
+        if std::env::var_os("SUSPECT_TRACE").is_some() {
+            eprintln!(
+                "[trace] resolve enter range={:?}",
+                ref_value.syntax().byte_range()
+            );
+        }
         let uri = ref_value.syntax().doc().uri().clone();
+        let raw_text = String::from_utf8_lossy(ref_value.scalar_bytes()).into_owned();
+
+        // Fast path: parseable pointer with a doc part we can join against
+        // this document's directory (or fragment-only).
+        let ref_range = ref_value.syntax().byte_range();
+        let handle: suspect_ref::DocHandle<'s> = self.ws.get(&uri).ok_or(CycleGuard)?;
+        let _ = ref_range;
+        if let Ok(ptr) = Pointer::parse(raw_text.trim_start_matches('#')) {
+            return self.navigate(&handle, &ptr);
+        }
+        let _ = ValueKind::Null; // keep ValueKind import used on all paths
+
+        // Fallback: original byte-range derivation (anchors etc.).
         let range = ref_value.syntax().byte_range();
         let handle = self.ws.get(&uri).ok_or(CycleGuard)?;
-        // NodeRef is invariant in its lifetime, so re-derive the same node
-        // from the workspace-borrowed document to get session-lifetime output
         let mut raw = handle
             .doc()
             .inner()
@@ -122,6 +146,64 @@ impl Session {
         match handle.resolve_ref_value(node) {
             Ok(Resolution::Node(target)) => Ok(target),
             _ => Err(CycleGuard),
+        }
+    }
+
+    /// Navigates `ptr` from the document root, following top-level `$ref`
+    /// chains iteratively.
+    ///
+    /// A seen-set over landed byte ranges detects every cycle shape
+    /// (direct self-`$ref`, mutual wrappers) and degrades with
+    /// [`CycleGuard`], matching the legacy resolver's contract. Legal
+    /// recursion (`Node.next: $ref Node`) lands on a *structured* target
+    /// that has no further top-level `$ref` and terminates.
+    fn navigate<'s>(
+        &'s self,
+        handle: &suspect_ref::DocHandle<'s>,
+        ptr: &Pointer,
+    ) -> Result<NodeRef<'s>, CycleGuard> {
+        use std::collections::HashSet;
+
+        let mut seen: HashSet<(usize, usize)> = HashSet::new();
+        let mut current = ptr.clone();
+        loop {
+            let mut node: Option<NodeRef<'s>> = Some(handle.doc().root());
+            for seg in current.tokens() {
+                let cur = node.take().ok_or(CycleGuard)?;
+                let resolved = cur.resolved();
+                match resolved.kind() {
+                    suspect_low::ValueKind::Object => {
+                        let mut next = None;
+                        for e in resolved.entries() {
+                            if e.key == seg.as_ref() {
+                                next = e.value;
+                                break;
+                            }
+                        }
+                        node = next;
+                    }
+                    suspect_low::ValueKind::Array => {
+                        let idx: usize = seg.as_ref().parse().map_err(|_| CycleGuard)?;
+                        node = resolved.items().into_iter().nth(idx);
+                    }
+                    _ => return Err(CycleGuard),
+                }
+            }
+            let landed = node.ok_or(CycleGuard)?;
+            let key = (landed.byte_range().start, landed.byte_range().end);
+            if !seen.insert(key) {
+                return Err(CycleGuard);
+            }
+            match landed.get("$ref") {
+                Some(rv) => {
+                    let text = String::from_utf8_lossy(rv.scalar_bytes());
+                    let Some(rest) = text.strip_prefix('#') else {
+                        return Ok(landed);
+                    };
+                    current = Pointer::parse(rest).map_err(|_| CycleGuard)?;
+                }
+                None => return Ok(landed),
+            }
         }
     }
 

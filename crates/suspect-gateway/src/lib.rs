@@ -174,8 +174,31 @@ pub async fn build_router(
     cfg: &GatewayConfig,
     journal: Arc<tokio::sync::Mutex<Journal>>,
 ) -> Result<Router, String> {
-    let spec = load_ir(&cfg.spec)?;
-    let mocks = mock::compile_all(&spec);
+    // Phase profiler, gated like suspect-lsp's SUSPECT_HLDBG: set
+    // SUSPECT_GW_PROFILE=1 to print per-phase startup timings on stderr.
+    let profile = std::env::var_os("SUSPECT_GW_PROFILE").is_some_and(|v| !v.is_empty());
+    let t_startup = Instant::now();
+
+    let spec = {
+        let t = Instant::now();
+        let spec = load_ir(&cfg.spec)?;
+        if profile {
+            eprintln!("[gw-profile] load_ir: {:?}", t.elapsed());
+        }
+        spec
+    };
+    let mocks = {
+        let t = Instant::now();
+        let mocks = mock::compile_all(&spec);
+        if profile {
+            eprintln!(
+                "[gw-profile] mock::compile_all ({} ops): {:?}",
+                spec.operations.len(),
+                t.elapsed()
+            );
+        }
+        mocks
+    };
 
     let replay = match &cfg.mode {
         Mode::Replay { cassette } => {
@@ -215,7 +238,7 @@ pub async fn build_router(
         }),
     ));
 
-    Ok(router_for_state(Arc::new(GatewayState {
+    let router = router_for_state(Arc::new(GatewayState {
         spec: Arc::new(spec),
         mode: cfg.mode.clone(),
         faults,
@@ -225,7 +248,11 @@ pub async fn build_router(
         replay,
         recorder,
         redactor,
-    })))
+    }));
+    if profile {
+        eprintln!("[gw-profile] total startup: {:?}", t_startup.elapsed());
+    }
+    Ok(router)
 }
 
 /// Wires routes for every operation path (all declared methods per path)
@@ -667,13 +694,19 @@ pub fn problem(status: StatusCode, title: &str, detail: Option<String>) -> Respo
         .into_response()
 }
 
-/// Loads every YAML/JSON document next to `spec` into one workspace — the
-/// same directory-scan strategy as the CLI's `workspace_dir_all`, since
-/// Arazzo source descriptions may reference sibling files without `$ref`.
+/// Loads `spec` plus its transitive `$ref` closure into one workspace.
+///
+/// [`suspect_ref::Workspace::load_all`] walks the entry document's
+/// external-`$ref` frontier breadth-first, so only documents the spec can
+/// actually reach are parsed — startup cost scales with the reference
+/// closure instead of the size of the containing directory (the previous
+/// directory scan loaded every sibling YAML/JSON file, which dominated
+/// gateway startup on shared corpus directories).
 ///
 /// # Errors
-/// Workspace build failures; unreadable directory entries are skipped
-/// (matching CLI behavior).
+/// Workspace build failures; unreadable or unloadable documents degrade
+/// to a partial closure (matching the CLI's lenient behavior) — a missing
+/// *entry* document is reported precisely by [`IrSpec::from_workspace`].
 pub fn load_workspace(spec: &Path) -> Result<Arc<suspect_ref::Workspace>, String> {
     use suspect_ref::WorkspaceBuilder;
     let dir = spec
@@ -681,27 +714,18 @@ pub fn load_workspace(spec: &Path) -> Result<Arc<suspect_ref::Workspace>, String
         .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
+    let name = spec
+        .file_name()
+        .and_then(std::ffi::OsStr::to_str)
+        .ok_or_else(|| format!("spec path {} has no file name", spec.display()))?;
     let ws = WorkspaceBuilder::new()
         .root(&dir)
         .build()
         .map_err(|e| format!("workspace build failed: {e}"))?;
-    let mut entries: Vec<_> = std::fs::read_dir(&dir)
-        .map_err(|e| format!("read dir {}: {e}", dir.display()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|p| {
-            matches!(
-                p.extension().and_then(|e| e.to_str()),
-                Some("yaml") | Some("yml") | Some("json")
-            )
-        })
-        .collect();
-    entries.sort();
-    for path in entries {
-        if let Some(name) = path.file_name().and_then(std::ffi::OsStr::to_str) {
-            let _ = ws.load_all(name);
-        }
-    }
+    // Best-effort closure load: a failing *referenced* document leaves a
+    // partial workspace behind rather than aborting startup, matching the
+    // old directory scan's skip-on-error policy.
+    let _ = ws.load_all(name);
     Ok(Arc::new(ws))
 }
 

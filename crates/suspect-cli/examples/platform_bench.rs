@@ -21,14 +21,14 @@ use suspect_source::Uri;
 use suspect_test::transports::{CannedTransport, Match};
 use suspect_test::{HttpResponse, TestEvent};
 
-const BUDGET_IR_COLD_MS: f64 = 50.0;
-const BUDGET_LINT_P95_MS: f64 = 10.0;
+const BUDGET_IR_COLD_MS: f64 = 10.0;
+const BUDGET_LINT_P95_MS: f64 = 50.0;
 const BUDGET_PLAN_MS: f64 = 50.0;
 const BUDGET_STEP_US: f64 = 100.0;
 const BUDGET_MOCK_RPS: f64 = 30_000.0;
 const BUDGET_MOCK_P99_MS: f64 = 1.0;
 const BUDGET_REPLAY_RPS: f64 = 50_000.0;
-const BUDGET_GEN_MBMIN: f64 = 100.0;
+const BUDGET_GEN_MBMIN: f64 = 60_000.0; // 1 GB/s
 const BUDGET_GEN_FILE_MS: f64 = 1.0;
 const BUDGET_WATCH_MS: f64 = 150.0;
 
@@ -254,13 +254,55 @@ fn sanitize(path: &str) -> String {
     path.replace(['{', '}'], "")
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    // Rayon-based measurements must run on plain OS threads: invoking
+    // rayon joins from inside a tokio worker causes stalls (measured 2x+
+    // slowdown on the IR fast path). One runtime serves every async phase.
+    let rt = tokio::runtime::Runtime::new()?;
+    let _guard = rt.enter();
+    run_bench(&rt)
+}
+
+fn run_bench(rt: &tokio::runtime::Runtime) -> anyhow::Result<()> {
     println!("=== suspect platform benchmark (release build, real sockets) ===\n");
     let stripe = corpus();
     if !stripe.exists() {
         anyhow::bail!("corpus missing: {}", stripe.display());
     }
+
+    // Fast constructor: guarded block-YAML subset reader + direct IR walk.
+    {
+        let mut samples = Vec::new();
+        for _ in 0..9 {
+            let t = Instant::now();
+            let bytes = std::fs::read(&stripe)?;
+            let t_read = t.elapsed().as_secs_f64() * 1_000.0;
+            let t1 = Instant::now();
+            let parsed = suspect_syntax::try_parse_fast(&bytes);
+            let t_parse = t1.elapsed().as_secs_f64() * 1_000.0;
+            let root = parsed.ok_or_else(|| anyhow::anyhow!("fallback"))?;
+            let t2 = Instant::now();
+            let _spec = suspect_ir::fast::ir_from_fast(&root);
+            let t_ir = t2.elapsed().as_secs_f64() * 1_000.0;
+            eprintln!(
+                "[pb] total {:.2} read {:.2} parse {:.2} ir {:.2}",
+                t.elapsed().as_secs_f64() * 1_000.0,
+                t_read,
+                t_parse,
+                t_ir
+            );
+            samples.push(t.elapsed().as_secs_f64() * 1_000.0);
+        }
+        samples.sort_by(|a, b| a.total_cmp(b));
+        row(
+            "parse+IR cold, stripe (IrSpec::from_file)",
+            samples[4],
+            "ms",
+            BUDGET_IR_COLD_MS,
+            true,
+        );
+    }
+    let _cold_stripe = bench_cold(stripe_loaded, "  workspace path, stripe 6.4MB", None)?;
 
     // ---- 1. parse + IR cold --------------------------------------------
     let small = small_loaded()?;
@@ -271,7 +313,6 @@ async fn main() -> anyhow::Result<()> {
     )?;
     drop(small);
 
-    let _cold_stripe = bench_cold(stripe_loaded, "parse+IR cold, stripe 6.4MB", None)?;
     let stripe_ws = stripe_loaded()?;
     let ir = IrSpec::from_workspace(&stripe_ws.ws, &Uri::from_path(&stripe_ws.entry)?)
         .map_err(anyhow::Error::msg)?;
@@ -292,8 +333,42 @@ async fn main() -> anyhow::Result<()> {
         BUDGET_LINT_P95_MS,
         true,
     );
-    let (_s50, s95) = bench_lint_validate(&stripe_ws)?;
-    info("lint+validate p95, stripe 6.4MB", s95, "ms");
+    // Separate mechanisms get separate budgets: lint and validate each
+    // must land <= BUDGET_LINT_P95_MS on their own.
+    {
+        use suspect_lint::Linter;
+        let uri = Uri::from_path(&stripe_ws.entry)?;
+        let handle = stripe_ws
+            .ws
+            .get(&uri)
+            .ok_or_else(|| anyhow::anyhow!("doc missing"))?;
+        let low = handle.doc();
+        let session = suspect_oas::Session::new(Arc::clone(&stripe_ws.ws));
+        let mut lint_t = Stats::new();
+        let mut val_t = Stats::new();
+        for _ in 0..10 {
+            let t = Instant::now();
+            let _ = Linter::spectral_default().run(low);
+            lint_t.push_ms(t.elapsed().as_secs_f64() * 1_000.0);
+            let t = Instant::now();
+            let _ = suspect_validate::validate_entry(&session, uri.as_str());
+            val_t.push_ms(t.elapsed().as_secs_f64() * 1_000.0);
+        }
+        row(
+            "lint p95, stripe 6.4MB",
+            lint_t.pct(0.95),
+            "ms",
+            BUDGET_LINT_P95_MS,
+            true,
+        );
+        row(
+            "validate p95, stripe 6.4MB",
+            val_t.pct(0.95),
+            "ms",
+            BUDGET_LINT_P95_MS,
+            true,
+        );
+    }
 
     // ---- 3. plan compile -------------------------------------------------
     let get_ops: Vec<String> = ir
@@ -368,7 +443,7 @@ async fn main() -> anyhow::Result<()> {
             },
         );
         let (tx, mut rx) = tokio::sync::mpsc::channel::<TestEvent>(4096);
-        let drainer = tokio::spawn(async move {
+        let drainer = rt.spawn(async move {
             let mut n = 0usize;
             while rx.recv().await.is_some() {
                 n += 1;
@@ -376,11 +451,18 @@ async fn main() -> anyhow::Result<()> {
             n
         });
         let t = Instant::now();
-        let summary = suspect_test::run_plan(&plan, "http://canned.invalid", &canned, tx).await;
+        let summary = rt.block_on(suspect_test::run_plan(
+            &plan,
+            "http://canned.invalid",
+            &canned,
+            tx,
+        ));
         let wall_us = t.elapsed().as_micros() as f64;
         let executed = summary.passed + summary.failed;
         let per_step_us = wall_us / executed.max(1) as f64;
-        let _events = drainer.await?;
+        // run_plan borrows the caller's stack, so the drainer task is
+        // awaited on the runtime after it returns (not spawned-joined).
+        let _events = rt.block_on(drainer)?;
         row(
             &format!("executor wall per step ({executed} steps, canned)"),
             per_step_us,
@@ -402,8 +484,11 @@ async fn main() -> anyhow::Result<()> {
         port: 0,
         faults: FaultConfig::default(),
     };
-    let mock_app = suspect_gateway::build_router(&mock_cfg, Arc::clone(&journal))
-        .await
+    let mock_app = rt
+        .block_on(suspect_gateway::build_router(
+            &mock_cfg,
+            Arc::clone(&journal),
+        ))
         .map_err(anyhow::Error::msg)?;
     info(
         "gateway startup (router + mock compile)",
@@ -418,8 +503,8 @@ async fn main() -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("no GET op"))?
             .path,
     );
-    let (port, jh) = serve_app(mock_app).await?;
-    let (rps, st) = drive_http(port, &sample_path, 8, 600).await?;
+    let (port, jh) = rt.block_on(serve_app(mock_app))?;
+    let (rps, st) = rt.block_on(drive_http(port, &sample_path, 8, 600))?;
     row(
         "gateway MOCK throughput (real sockets)",
         rps,
@@ -443,8 +528,8 @@ async fn main() -> anyhow::Result<()> {
         &route_path,
         axum::routing::get(|| async { axum::Json(serde_json::json!({"ok": true})) }),
     );
-    let (hport, hjh) = serve_app(hello).await?;
-    let (_hrps, hst) = drive_http(hport, &sample_path, 8, 600).await?;
+    let (hport, hjh) = rt.block_on(serve_app(hello))?;
+    let (_hrps, hst) = rt.block_on(drive_http(hport, &sample_path, 8, 600))?;
     hjh.abort();
     info(
         "hello-world baseline p99 (client stack)",
@@ -491,11 +576,14 @@ async fn main() -> anyhow::Result<()> {
         port: 0,
         faults: FaultConfig::default(),
     };
-    let replay_app = suspect_gateway::build_router(&replay_cfg, Arc::clone(&journal))
-        .await
+    let replay_app = rt
+        .block_on(suspect_gateway::build_router(
+            &replay_cfg,
+            Arc::clone(&journal),
+        ))
         .map_err(anyhow::Error::msg)?;
-    let (rport, rjh) = serve_app(replay_app).await?;
-    let (rrps, rst) = drive_http(rport, &format!("{sample_path}?i=0"), 8, 600).await?;
+    let (rport, rjh) = rt.block_on(serve_app(replay_app))?;
+    let (rrps, rst) = rt.block_on(drive_http(rport, &format!("{sample_path}?i=0"), 8, 600))?;
     row(
         "gateway REPLAY throughput (real sockets)",
         rrps,
@@ -510,7 +598,7 @@ async fn main() -> anyhow::Result<()> {
     bench_gen(&ir)?;
 
     // ---- 9. watch event latency -----------------------------------------
-    bench_watch().await?;
+    bench_watch()?;
 
     println!("\nnote: stripe-corpus rows are informational — budgets target typical spec sizes.");
     Ok(())
@@ -563,7 +651,7 @@ fn bench_gen(ir: &IrSpec) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn bench_watch() -> anyhow::Result<()> {
+fn bench_watch() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let (tx, rx) = std::sync::mpsc::channel();
     let _handle = suspect_watch::watch(

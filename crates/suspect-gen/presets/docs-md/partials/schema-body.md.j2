@@ -1,0 +1,20 @@
+{% set def = s.json %}
+
+## {{ s.name }}
+{% if s.rows_props %}
+{% set reqs = def.required or [] %}
+
+| Property | Type | Required | Example |
+| -------- | ---- | -------- | ------- |
+{%- for r in s.rows_props %}
+| {{ r[0] }} | {{ r[1] }} | {{ r[2] }} | `{{ r[3] }}` |
+{%- endfor %}
+{% elif def.type == "object" %}
+
+Opaque object schema.
+{% else %}
+
+Type: `{{ s.type_str }}`
+
+Example: `{{ s.example_str }}`
+{% endif %}

@@ -19,6 +19,7 @@
 //! ```
 
 mod engine;
+mod fast;
 mod functions;
 mod packs;
 mod rule;

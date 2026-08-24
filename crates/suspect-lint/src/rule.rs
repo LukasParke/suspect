@@ -142,6 +142,9 @@ impl FamilySet {
 pub(crate) struct Rule {
     pub code: Box<str>,
     pub description: Option<Box<str>>,
+    /// Original `given` expression texts (parallel to `given`); the fast
+    /// path classifies queries from these.
+    pub given_exprs: Vec<Box<str>>,
     pub given: Vec<Path>,
     pub then: crate::functions::Function,
     pub severity: Severity,
@@ -169,6 +172,7 @@ impl Rule {
         Self {
             code: code.into(),
             description: Some(description.into()),
+            given_exprs: given.iter().map(|g| (*g).into()).collect(),
             given: paths,
             then,
             severity,
