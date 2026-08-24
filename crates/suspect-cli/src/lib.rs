@@ -240,6 +240,23 @@ pub enum Command {
         #[arg(long, default_value_t = 0)]
         error_pct: u8,
     },
+    /// Compile a spec to idiomatic TypeScript, Rust, and Go.
+    Codegen {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Target languages (ts, rust, go — repeatable or comma-separated).
+        #[arg(long, value_delimiter = ',', default_value = "ts,rust,go")]
+        targets: Vec<String>,
+        /// Output root directory.
+        #[arg(short, long, default_value = "codegen-out")]
+        out: PathBuf,
+        /// TypeScript only: emit Zod schema twins.
+        #[arg(long)]
+        zod: bool,
+        /// Exit 1 when any generated file would change on disk.
+        #[arg(long)]
+        check: bool,
+    },
     /// Run the language server over stdio.
     Lsp,
 }
@@ -362,6 +379,13 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             error_pct,
         ),
         Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
+        Command::Codegen {
+            spec,
+            targets,
+            out,
+            zod,
+            check,
+        } => commands::codegen_cmd::codegen(&spec, &targets, &out, zod, check),
         Command::Lsp => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(suspect_lsp::run_server());

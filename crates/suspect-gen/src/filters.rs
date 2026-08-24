@@ -122,7 +122,7 @@ fn example_filter(schema: &Value, refs: Option<&Value>) -> Result<String, miniji
 /// Splits an identifier into words on non-alphanumeric boundaries and
 /// existing camel/Pascal humps (`"foo_barBaz-qux"` → `["foo","bar","Baz","qux"]`).
 #[must_use]
-fn split_words(input: &str) -> Vec<String> {
+pub fn split_words(input: &str) -> Vec<String> {
     let chars: Vec<char> = input.chars().collect();
     let mut words = Vec::new();
     let mut cur = String::new();

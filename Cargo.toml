@@ -28,6 +28,7 @@ suspect-journal = { path = "crates/suspect-journal", version = "0.1.0" }
 suspect-rex = { path = "crates/suspect-rex", version = "0.1.0" }
 suspect-test = { path = "crates/suspect-test", version = "0.1.0" }
 suspect-gen = { path = "crates/suspect-gen", version = "0.1.0" }
+suspect-codegen = { path = "crates/suspect-codegen", version = "0.1.0" }
 suspect-gateway = { path = "crates/suspect-gateway", version = "0.1.0" }
 suspect-watch = { path = "crates/suspect-watch", version = "0.1.0" }
 
@@ -58,6 +59,11 @@ cc = "1"
 memchr = "2"
 tree-sitter-language = "0.1"
 notify = "8"
+
+[profile.dev]
+# Concurrent cargo sessions from sibling worktrees race on incremental
+# dep-graph files; disabling avoids spurious ENOSPC failures.
+incremental = false
 
 [profile.release]
 lto = "thin"

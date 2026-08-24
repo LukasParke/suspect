@@ -50,6 +50,15 @@ suspect fuzz api.yaml --base-url http://localhost:8080 --runs 50
 suspect watch . -- suspect test flows.arazzo.yaml --offline --cassette rec.scj
 ```
 
+## Feature roadmap
+
+The next ten platform features — traffic-to-contract synthesis, stateful
+property-based testing, server scaffolding with progressive mock→real
+handoff, webhooks/events first-class support, an OWASP API security ruleset,
+an auth-flow execution engine, environment parity monitoring, release
+engineering, and transactional spec codemods — are documented in
+[docs/FEATURE-ROADMAP.md](docs/FEATURE-ROADMAP.md).
+
 ## Editors
 
 - **VS Code** (`editors/vscode`): language features via the bundled LSP,

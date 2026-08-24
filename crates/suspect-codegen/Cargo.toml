@@ -1,0 +1,20 @@
+[package]
+name = "suspect-codegen"
+description = "Semantic Type Graph compiler: OpenAPI to idiomatic TypeScript, Rust, and Go"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+suspect-ir.workspace = true
+suspect-gen.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+tempfile.workspace = true
+suspect-ref.workspace = true
+suspect-source.workspace = true

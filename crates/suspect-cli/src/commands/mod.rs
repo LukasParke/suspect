@@ -3,6 +3,7 @@
 use suspect_ref::Workspace;
 pub mod bench;
 pub mod check;
+pub mod codegen_cmd;
 pub mod fmt;
 pub mod fuzz;
 pub mod gateway;

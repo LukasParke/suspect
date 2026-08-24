@@ -1740,6 +1740,7 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-arazzo",
+ "suspect-codegen",
  "suspect-gateway",
  "suspect-gen",
  "suspect-ir",
@@ -1759,6 +1760,20 @@ dependencies = [
  "suspect-watch",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "suspect-codegen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "suspect-gen",
+ "suspect-ir",
+ "suspect-ref",
+ "suspect-source",
+ "tempfile",
 ]
 
 [[package]]
