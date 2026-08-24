@@ -307,7 +307,7 @@ fn relative_ref(from: &Uri, to: &Uri) -> String {
 
 /// Builds completion items for a key list.
 ///
-/// Items carry a `data` marker so [`completion_resolve`](crate) can attach
+/// Items carry a `data` marker so `completionItem/resolve` can attach
 /// keyword documentation lazily without bloating the initial response.
 #[must_use]
 pub fn key_items(keys: &'static [&'static str]) -> Vec<CompletionItem> {
@@ -324,7 +324,7 @@ pub fn key_items(keys: &'static [&'static str]) -> Vec<CompletionItem> {
 /// Builds completion items for `$ref` pointer candidates.
 ///
 /// Each item stores its owning document plus the raw candidate string in
-/// `data`; [`completion_resolve`] turns that into a resolved-target preview.
+/// `data`; `completionItem/resolve` turns that into a resolved-target preview.
 #[must_use]
 pub fn ref_items(candidates: Vec<String>, home: &Uri) -> Vec<CompletionItem> {
     candidates

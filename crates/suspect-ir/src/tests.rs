@@ -422,13 +422,11 @@ fn from_file_handles_stripe_like_volume_quickly() {
 /// `from_file` wall time over 7 runs; asserts only in optimized builds.
 #[test]
 fn stripe_corpus_timing_report() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../corpus/stripe.yaml")
-        .ok(); // skip gracefully when corpus is absent (CI runners)
-    let Some(path) = path else {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus/stripe.yaml");
+    if !path.exists() {
         eprintln!("skipping: stripe corpus not present");
         return;
-    };
+    }
     // Correctness cross-check: fast path must match the workspace path.
     let via_fast = IrSpec::from_file(&path).unwrap();
     let via_ws = ir_via_workspace(path.parent().unwrap(), "stripe.yaml");
