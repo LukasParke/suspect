@@ -59,6 +59,27 @@ an auth-flow execution engine, environment parity monitoring, release
 engineering, and transactional spec codemods — are documented in
 [docs/FEATURE-ROADMAP.md](docs/FEATURE-ROADMAP.md).
 
+## Performance budgets (enforced by in-repo benches)
+
+See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the full profiling report,
+phase-by-phase cost attribution, and the ranked plan of attack.
+
+| Path | Budget | Achieved |
+|---|---|---|
+| Parse + IR cold | < 10 ms | **7.5 ms** |
+| Lint p95/file | ≤ 50 ms | **42 ms** |
+| Validate p95/file | ≤ 50 ms | **44 ms** |
+| Gateway startup | < 1 s | **~880 ms** |
+| Executor per step | ≤ 100 µs | **3.6 µs** |
+| Gateway MOCK throughput | ≥ 30k req/s | **95–127k** |
+| REPLAY throughput | ≥ 50k req/s | **88–146k** |
+| Gen throughput | ≥ 1 GB/s | **1.6–1.9 GB/s** |
+| Watch save→rerun | < 150ms | ~10 ms event latency |
+
+Run them: `cargo bench`.
+
+## Editors
+
 ## Editors
 
 - **VS Code** (`editors/vscode`): language features via the bundled LSP,

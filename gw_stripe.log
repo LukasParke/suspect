@@ -1,0 +1,6 @@
+gateway listening on 127.0.0.1:9991 (mock)
+[gw-profile] load_ir: 1.004048159s
+[gw-profile] mock::compile_all (589 ops): 9.578491ms
+{"kind":"meta","ts_ms":1787594942033,"component":"gateway","msg":"starting","fields":{"mode":"mock","operations":589,"spec":"/home/luke/github/suspect/corpus/stripe.yaml"}}
+[gw-profile] total startup: 1.014671281s
+{"kind":"traffic","ts_ms":1787594945135,"id":1,"correlation":"gw/0","method":"GET","url":"http://127.0.0.1:9991/v1/customers","status":200,"request_headers":[["host","127.0.0.1:9991"],["user-agent","curl/8.21.0"],["accept","*/*"]],"response_headers":[["content-type","application/json"]],"duration_ms":0.017303,"verdict":"pass"}
