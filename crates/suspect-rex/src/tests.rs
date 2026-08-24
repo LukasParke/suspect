@@ -69,12 +69,13 @@ fn parse_grammar_table() {
                 pointer: ptr(&["a~b"]),
             },
         ),
-        // Percent escapes decode per token after ~-unescaping.
+        // RFC 6901 §6: %2F decodes to `/` before pointer evaluation, so it
+        // splits; ~-unescaping then applies to the decoded text only.
         (
             "$response.body#/a%20b/c%2Fd",
             Rex::Response {
                 part: Part::Body,
-                pointer: ptr(&["a b", "c/d"]),
+                pointer: ptr(&["a b", "c", "d"]),
             },
         ),
         (
@@ -383,5 +384,39 @@ fn eval_is_deterministic() {
     let first = eval_rex(&rex, &ctx);
     for _ in 0..5 {
         assert_eq!(eval_rex(&rex, &ctx), first);
+    }
+}
+
+#[test]
+fn percent_decoding_precedes_pointer_unescaping() {
+    // RFC 6901 §6 order: percent-decode the whole fragment first, then
+    // ~-unescape. `%2F` becomes a separator; `~1` inside decoded text is
+    // still unescaped.
+    let rex = parse_rex("$response.body#/x~1y%2Fz").unwrap();
+    // Decoded `%2F` splits the pointer; the surviving `~1` then unescapes
+    // inside its own token.
+    assert_eq!(
+        rex,
+        Rex::Response {
+            part: Part::Body,
+            pointer: ptr(&["x/y", "z"]),
+        }
+    );
+}
+
+#[test]
+fn array_indices_reject_leading_zeros_and_signs() {
+    let body = r#"{"arr": ["a", "b"]}"#;
+    let ctx = fixture_ctx(body, body);
+    // Well-formed index resolves.
+    assert_eq!(
+        eval_rex(&parse_rex("$request.body#/arr/1").unwrap(), &ctx),
+        Some(serde_json::json!("b"))
+    );
+    // Non-canonical spellings must not address array elements.
+    for frag in ["/arr/01", "/arr/+1", "/arr/-0"] {
+        let expr = format!("$request.body#{frag}");
+        let rex = parse_rex(&expr).unwrap_or_else(|e| panic!("{expr}: {e}"));
+        assert_eq!(eval_rex(&rex, &ctx), None, "{expr}");
     }
 }

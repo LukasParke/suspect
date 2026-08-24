@@ -2,10 +2,11 @@
 //!
 //! [`ReplayIndex`] loads a recorded cassette at startup and answers
 //! requests from it: an exact hit on `(method, path+query)` wins; when no
-//! exchange matches with its query string, the first entry whose URL path
-//! matches ignoring the query is served instead. Misses produce `404`
-//! problem+json. Recorded bodies are replayed byte-for-byte (base64
-//! entries decode back to raw bytes), so binary payloads pass through.
+//! exchange matches with its query string, the first entry whose method
+//! matches and whose URL path matches ignoring the query is served
+//! instead. Misses produce `404` problem+json. Recorded bodies are
+//! replayed byte-for-byte (base64 entries decode back to raw bytes), so
+//! binary payloads pass through.
 
 use std::collections::HashMap;
 
@@ -16,9 +17,11 @@ use suspect_journal::{Body, CassetteEntry};
 use crate::problem;
 
 /// Strips scheme and authority from a recorded full URL, leaving
-/// path-plus-query (fragments dropped). Bare paths pass through unchanged.
+/// normalized path-plus-query (fragments dropped, percent-escape hex
+/// uppercased so `/a%2fb` and `/a%2Fb` compare equal). Bare paths pass
+/// through unchanged.
 #[must_use]
-fn url_key(url: &str) -> &str {
+fn url_key(url: &str) -> String {
     let rest = match url.find("://") {
         Some(idx) => {
             let after = &url[idx + 3..];
@@ -26,10 +29,35 @@ fn url_key(url: &str) -> &str {
         }
         None => url,
     };
-    match rest.split_once('#') {
+    let stripped = match rest.split_once('#') {
         Some((path, _)) => path,
         None => rest,
+    };
+    normalize_escapes(stripped)
+}
+
+/// Uppercases the hex digits of every `%XX` percent-escape so recorded
+/// and live URLs compare encoding-insensitively.
+fn normalize_escapes(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx] == b'%'
+            && idx + 2 < bytes.len()
+            && bytes[idx + 1].is_ascii_hexdigit()
+            && bytes[idx + 2].is_ascii_hexdigit()
+        {
+            out.push(b'%');
+            out.push(bytes[idx + 1].to_ascii_uppercase());
+            out.push(bytes[idx + 2].to_ascii_uppercase());
+            idx += 3;
+        } else {
+            out.push(bytes[idx]);
+            idx += 1;
+        }
     }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Drops the query portion of a path-plus-query string.
@@ -63,10 +91,7 @@ impl ReplayIndex {
         let mut exact = HashMap::with_capacity(entries.len());
         for (idx, entry) in entries.iter().enumerate() {
             exact.insert(
-                (
-                    entry.method.to_ascii_uppercase(),
-                    url_key(&entry.url).to_owned(),
-                ),
+                (entry.method.to_ascii_uppercase(), url_key(&entry.url)),
                 idx,
             );
         }
@@ -99,19 +124,19 @@ impl ReplayIndex {
     /// `url_path_and_query` is the request target (`/pets/42?full=1`).
     /// Exact `(method, path+query)` hits are preferred; otherwise the
     /// first entry in cassette order whose URL path matches ignoring the
-    /// query is returned.
+    /// query **and** whose method matches (case-insensitively) is
+    /// returned. Both sides are compared on normalized keys, so differing
+    /// percent-escape casing still hit exactly.
     #[must_use]
     pub fn lookup(&self, method: &str, url_path_and_query: &str) -> Option<&CassetteEntry> {
-        if let Some(&idx) = self
-            .exact
-            .get(&(method.to_ascii_uppercase(), url_path_and_query.to_owned()))
-        {
+        let key = url_key(url_path_and_query);
+        if let Some(&idx) = self.exact.get(&(method.to_ascii_uppercase(), key.clone())) {
             return self.ordered.get(idx);
         }
-        let want = path_only(url_path_and_query);
+        let want = path_only(&key);
         self.ordered
             .iter()
-            .find(|e| path_only(url_key(&e.url)) == want)
+            .find(|e| e.method.eq_ignore_ascii_case(method) && path_only(&url_key(&e.url)) == want)
     }
 }
 

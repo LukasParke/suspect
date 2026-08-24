@@ -253,7 +253,7 @@ impl Sink for VecSink {
 
 /// Credential scrubber applied before anything reaches a sink.
 ///
-/// Two denylists: exact header names (case-insensitive) and JSON body keys.
+/// Two denylists: header names and JSON body keys (both case-insensitive).
 /// Values are replaced with `[redacted]`; structure is preserved so diffs
 /// stay meaningful.
 #[derive(Debug, Clone, Default)]
@@ -290,9 +290,9 @@ impl Redactor {
         self.headers.insert(key.to_ascii_lowercase());
     }
 
-    /// Adds one JSON key to the body denylist (exact match).
+    /// Adds one JSON key to the body denylist (matched case-insensitively).
     pub fn deny_json_key(&mut self, key: &str) {
-        self.json_keys.insert(key.to_owned());
+        self.json_keys.insert(key.to_lowercase());
     }
 
     /// Redacts matching headers.
@@ -321,11 +321,16 @@ impl Redactor {
         serde_json::to_string(&value).unwrap_or_else(|_| body.to_owned())
     }
 
+    /// Redacts matching keys anywhere inside a JSON value, in place.
+    pub fn json_value(&self, value: &mut serde_json::Value) {
+        Self::redact_value(value, &self.json_keys);
+    }
+
     fn redact_value(value: &mut serde_json::Value, keys: &BTreeSet<String>) {
         match value {
             serde_json::Value::Object(map) => {
                 for (k, v) in map.iter_mut() {
-                    if keys.contains(k) {
+                    if keys.contains(&k.to_lowercase()) {
                         *v = serde_json::Value::String(REDACTED.to_owned());
                     } else {
                         Self::redact_value(v, keys);
@@ -378,14 +383,15 @@ impl Journal {
     /// Emits one arbitrary record.
     pub fn emit(&mut self, record: Record) {
         let mut record = record;
-        if let Record::Traffic(t) = &mut record {
-            t.id = self.seq;
-            t.request_headers = self.redactor.headers(&t.request_headers);
-            t.response_headers = self.redactor.headers(&t.response_headers);
-            // Verdict payloads may embed bodies-as-strings; scrub those too.
-            if let Verdict::Invalid(_) = t.verdict {
-                // Violations carry messages only; nothing to scrub.
+        match &mut record {
+            Record::Traffic(t) => {
+                t.id = self.seq;
+                t.request_headers = self.redactor.headers(&t.request_headers);
+                t.response_headers = self.redactor.headers(&t.response_headers);
             }
+            Record::Log(l) => self.redactor.json_value(&mut l.fields),
+            Record::Meta(m) => self.redactor.json_value(&mut m.fields),
+            Record::RunSummary(_) => {}
         }
         self.seq += 1;
         let line = serde_json::to_string(&record).expect("record serializes");

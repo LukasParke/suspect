@@ -108,19 +108,62 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, GenError> {
     Ok(Manifest { outputs })
 }
 
-/// Strips surrounding double/single quotes and inline comments from a
-/// TOML value token.
+/// Strips surrounding quotes and inline comments from a TOML value token.
+///
+/// The quote style is detected first: single-quoted strings are returned
+/// verbatim (backslashes included), double-quoted strings honor `\\` and
+/// `\"` escapes, and an inline `#` comment is stripped only from
+/// unquoted values — a `#` inside quotes is data (e.g. `"gen #core.rs"`
+/// or a Windows path).
 fn unquote(value: &str) -> String {
-    let value = value.split(" #").next().unwrap_or(value).trim();
-    let bytes = value.as_bytes();
-    if bytes.len() >= 2
-        && (bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"'
-            || bytes[0] == b'\'' && bytes[bytes.len() - 1] == b'\'')
-    {
-        value[1..value.len() - 1].replace("\\\"", "\"")
-    } else {
-        value.to_owned()
+    let s = value.trim();
+    let bytes = s.as_bytes();
+    if !bytes.is_empty() && (bytes[0] == b'"' || bytes[0] == b'\'') {
+        let quote = bytes[0];
+        let mut i = 1;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if quote == b'"' && b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == quote {
+                let inner = &s[1..i];
+                return if quote == b'"' {
+                    unescape_double_quoted(inner)
+                } else {
+                    inner.to_owned()
+                };
+            }
+            i += 1;
+        }
+        // Unterminated quote: fall through and treat the token as plain text.
     }
+    // Unquoted: a whitespace-preceded `#` starts an inline comment.
+    s.split(" #").next().unwrap_or(s).trim().to_owned()
+}
+
+/// Unescapes `\\` and `\"` inside a double-quoted TOML value; any other
+/// backslash sequence is kept verbatim.
+fn unescape_double_quoted(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Loads and parses a manifest from `path`.
@@ -181,7 +224,9 @@ pub struct RenderOutcome {
 /// outcome carries a unified diff in [`RenderOutcome::diff`].
 ///
 /// # Errors
-/// When template rendering fails or writing (non-diff mode) fails.
+/// When template rendering fails, a rendered target is absolute or
+/// escapes `out_root`, either file has malformed preservation markers,
+/// or writing (non-diff mode) fails.
 pub fn render_manifest(
     engine: &dyn TemplateEngine,
     manifest: &Manifest,
@@ -189,16 +234,28 @@ pub fn render_manifest(
     out_root: &Path,
     diff_only: bool,
 ) -> Result<Vec<RenderOutcome>, GenError> {
+    let out_root = normalize_lexical(out_root);
     let mut outcomes = Vec::with_capacity(manifest.outputs.len());
     for rule in &manifest.outputs {
         let rel_target = render_inline(&rule.target, ctx)?;
-        let path = out_root.join(rel_target);
+        if Path::new(&rel_target).is_absolute() {
+            return Err(GenError(format!(
+                "target {rel_target:?} must be a relative path"
+            )));
+        }
+        let path = normalize_lexical(&out_root.join(&rel_target));
+        if !path.starts_with(&out_root) {
+            return Err(GenError(format!(
+                "target {rel_target:?} escapes output root {}",
+                out_root.display()
+            )));
+        }
         let mut new_content = engine.render(&rule.template, ctx)?;
 
         let existing = fs::read_to_string(&path).ok();
         let mut preserved = false;
         if let Some(old) = &existing {
-            let (spliced, count) = splice_preserved_regions(old, &new_content);
+            let (spliced, count) = splice_preserved_regions(old, &new_content)?;
             if count > 0 {
                 new_content = spliced;
                 preserved = true;
@@ -262,6 +319,23 @@ fn write_new(path: &Path, content: &str) -> Result<(), GenError> {
     Ok(())
 }
 
+/// Lexically normalizes a path without touching the filesystem:
+/// collapses `.` components and resolves `..` against the preceding
+/// component.
+fn normalize_lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// Evaluates `{{ ... }}` expressions in a target path against `ctx`.
 fn render_inline(template: &str, ctx: &serde_json::Value) -> Result<String, GenError> {
     let mut env = minijinja::Environment::new();
@@ -269,34 +343,78 @@ fn render_inline(template: &str, ctx: &serde_json::Value) -> Result<String, GenE
     Ok(env.get_template("__target__")?.render(ctx)?)
 }
 
-/// Locates `(begin_idx, end_idx)` line pairs whose begin line contains
-/// [`BEGIN_MARK`] and whose matching later line contains [`END_MARK`].
-#[must_use]
-fn marker_pairs(lines: &[&str]) -> Vec<(usize, usize)> {
+/// Recognizes a whole-line marker: after trimming, optionally stripping
+/// leading comment tokens (`//` or `#`) and whitespace again, the line
+/// must equal `mark` exactly. A line that merely *mentions* the marker
+/// text is data, not a marker.
+fn is_marker_line(line: &str, mark: &str) -> bool {
+    let mut t = line.trim();
+    while let Some(rest) = t.strip_prefix("//").or_else(|| t.strip_prefix('#')) {
+        t = rest.trim_start();
+    }
+    t == mark
+}
+
+/// Locates `(begin_idx, end_idx)` line pairs whose begin line is a
+/// whole-line [`BEGIN_MARK`] marker and whose matching later line is a
+/// whole-line [`END_MARK`] marker (see [`is_marker_line`]).
+///
+/// # Errors
+/// When markers are malformed: an [`END_MARK`] with no open region, a
+/// [`BEGIN_MARK`] inside an already open region, or a [`BEGIN_MARK`]
+/// never closed by end of input. Errors name the offending 1-based line.
+fn marker_pairs(lines: &[&str]) -> Result<Vec<(usize, usize)>, GenError> {
     let mut pairs = Vec::new();
     let mut open: Option<usize> = None;
     for (i, line) in lines.iter().enumerate() {
-        if line.contains(BEGIN_MARK) {
+        let lineno = i + 1;
+        if is_marker_line(line, BEGIN_MARK) {
+            if open.is_some() {
+                return Err(GenError(format!(
+                    "line {lineno}: '{}' inside an already open region",
+                    BEGIN_MARK
+                )));
+            }
             open = Some(i);
-        } else if line.contains(END_MARK) && open.is_some() {
-            pairs.push((open.take().unwrap(), i));
+        } else if is_marker_line(line, END_MARK) {
+            match open.take() {
+                Some(begin) => pairs.push((begin, i)),
+                None => {
+                    return Err(GenError(format!(
+                        "line {lineno}: '{END_MARK}' without an open region"
+                    )));
+                }
+            }
         }
     }
-    pairs
+    if let Some(i) = open {
+        return Err(GenError(format!(
+            "line {}: '{BEGIN_MARK}' region is never closed",
+            i + 1
+        )));
+    }
+    Ok(pairs)
 }
 
-/// pair; marker lines themselves come from the fresh template. Pairs are
-/// matched positionally. Returns the spliced content and how many regions
-/// were applied.
-#[must_use]
-pub(crate) fn splice_preserved_regions(old: &str, new_content: &str) -> (String, usize) {
+/// Splices the user code captured between each `old` begin/end marker
+/// pair into `new_content` between the corresponding fresh pair; marker
+/// lines themselves come from the fresh template. Pairs are matched
+/// positionally. Returns the spliced content and how many regions were
+/// applied.
+///
+/// # Errors
+/// When either input has malformed markers (see [`marker_pairs`]).
+pub(crate) fn splice_preserved_regions(
+    old: &str,
+    new_content: &str,
+) -> Result<(String, usize), GenError> {
     let old_lines: Vec<&str> = old.lines().collect();
     let new_lines: Vec<&str> = new_content.lines().collect();
-    let old_pairs = marker_pairs(&old_lines);
-    let new_pairs = marker_pairs(&new_lines);
+    let old_pairs = marker_pairs(&old_lines)?;
+    let new_pairs = marker_pairs(&new_lines)?;
     let count = old_pairs.len().min(new_pairs.len());
     if count == 0 {
-        return (new_content.to_owned(), 0);
+        return Ok((new_content.to_owned(), 0));
     }
 
     let mut out = String::new();
@@ -323,7 +441,7 @@ pub(crate) fn splice_preserved_regions(old: &str, new_content: &str) -> (String,
         out.push_str(line);
         out.push('\n');
     }
-    (out, count)
+    Ok((out, count))
 }
 
 /// Computes the sha256 digest of `content`.
@@ -438,7 +556,7 @@ pub fn unified_diff(old: &str, new: &str) -> String {
     let mut hunks: Vec<(usize, usize)> = Vec::new();
     for &k in &changed {
         match hunks.last_mut() {
-            Some((_, end)) if k <= *end + 2 * CONTEXT => *end = k,
+            Some((_, end)) if k <= *end + 2 * CONTEXT => *end = k + CONTEXT,
             _ => hunks.push((k.saturating_sub(CONTEXT), k + CONTEXT)),
         }
     }
@@ -455,8 +573,17 @@ pub fn unified_diff(old: &str, new: &str) -> String {
             .iter()
             .filter(|op| !matches!(op, DiffOp::Delete(_)))
             .count();
-        let first_old = positions[start].old_line.map_or(0, |l| l + 1);
-        let first_new = positions[start].new_line.map_or(0, |l| l + 1);
+        // Derive the first shown old/new line from the slice contents:
+        // a hunk that starts on an Insert has no old line (and vice
+        // versa) at `start`, so scan for the first present position.
+        let first_old = positions[start..=end]
+            .iter()
+            .find_map(|p| p.old_line)
+            .map_or(0, |l| l + 1);
+        let first_new = positions[start..=end]
+            .iter()
+            .find_map(|p| p.new_line)
+            .map_or(0, |l| l + 1);
         out.push_str(&format!(
             "@@ -{},{} +{},{} @@\n",
             if old_count == 0 {

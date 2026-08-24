@@ -71,11 +71,14 @@ impl Body {
     }
 
     /// Raw bytes after decoding.
+    ///
+    /// Bodies obtained from [`read_cassette`] are integrity-validated at
+    /// read time; this accessor itself does not verify the hash.
     #[must_use]
     pub fn bytes(&self) -> Vec<u8> {
         match self.encoding {
             BodyEncoding::Utf8 => self.content.clone().into_bytes(),
-            BodyEncoding::Base64 => base64_decode(&self.content),
+            BodyEncoding::Base64 => base64_decode(&self.content).unwrap_or_default(),
         }
     }
 
@@ -115,7 +118,8 @@ pub struct CassetteEntry {
 /// Writes a complete cassette: header line, then one line per entry.
 ///
 /// # Errors
-/// Propagates I/O errors from the writer.
+/// `InvalidData` on non-finite `duration_ms` or a status outside
+/// `100..=599`; propagates I/O and serialization errors.
 pub fn write_cassette<W: Write>(
     w: &mut W,
     header: &CassetteHeader,
@@ -125,6 +129,21 @@ pub fn write_cassette<W: Write>(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     writeln!(w, "{header_line}")?;
     for entry in entries {
+        if !entry.duration_ms.is_finite() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("entry {}: duration_ms must be finite", entry.id),
+            ));
+        }
+        if !(100..=599).contains(&entry.status) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "entry {}: status {} outside 100..=599",
+                    entry.id, entry.status
+                ),
+            ));
+        }
         let line = serde_json::to_string(entry)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         writeln!(w, "{line}")?;
@@ -135,8 +154,11 @@ pub fn write_cassette<W: Write>(
 /// Reads a complete cassette from any reader.
 ///
 /// # Errors
-/// `InvalidData` on malformed JSON, wrong format id, unsupported version,
-/// or entry ids that are not strictly increasing; propagates I/O errors.
+/// `InvalidData` on malformed JSON, wrong format id, unsupported version
+/// (including version 0), entry ids that are not strictly increasing, a
+/// status outside `100..=599`, non-finite `duration_ms`, or a body whose
+/// declared encoding fails strict base64 decode or whose SHA-256 is not 64
+/// hex characters matching the decoded bytes; propagates I/O errors.
 pub fn read_cassette<R: std::io::Read>(
     r: R,
 ) -> std::io::Result<(CassetteHeader, Vec<CassetteEntry>)> {
@@ -168,6 +190,13 @@ pub fn read_cassette<R: std::io::Read>(
             ),
         ));
     }
+
+    if header.version == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cassette version 0 is not supported",
+        ));
+    }
     let mut entries = Vec::new();
     let mut expected_id = 0u64;
     for line in reader.lines() {
@@ -187,9 +216,59 @@ pub fn read_cassette<R: std::io::Read>(
                 ),
             ));
         }
+        if !entry.duration_ms.is_finite() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("entry {}: duration_ms must be finite", entry.id),
+            ));
+        }
+        if !(100..=599).contains(&entry.status) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "entry {}: status {} outside 100..=599",
+                    entry.id, entry.status
+                ),
+            ));
+        }
+        validate_body(
+            &format!("entry {} request_body", entry.id),
+            &entry.request_body,
+        )?;
+        validate_body(
+            &format!("entry {} response_body", entry.id),
+            &entry.response_body,
+        )?;
         entries.push(entry);
     }
     Ok((header, entries))
+}
+
+/// Validates one recorded body: strict base64 decode when applicable and a
+/// 64-hex-character SHA-256 that matches the decoded bytes.
+fn validate_body(what: &str, body: &Body) -> std::io::Result<()> {
+    if body.sha256.len() != 64 || !body.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{what}: sha256 must be 64 hex characters"),
+        ));
+    }
+    let decoded = match body.encoding {
+        BodyEncoding::Utf8 => body.content.clone().into_bytes(),
+        BodyEncoding::Base64 => base64_decode(&body.content).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{what}: content is not valid standard base64"),
+            )
+        })?,
+    };
+    if sha256_hex(&decoded) != body.sha256.to_ascii_lowercase() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("{what}: sha256 does not match content"),
+        ));
+    }
+    Ok(())
 }
 
 fn base64_encode(data: &[u8]) -> String {
@@ -197,9 +276,7 @@ fn base64_encode(data: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(data)
 }
 
-fn base64_decode(text: &str) -> Vec<u8> {
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
     use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD
-        .decode(text)
-        .unwrap_or_default()
+    base64::engine::general_purpose::STANDARD.decode(text).ok()
 }

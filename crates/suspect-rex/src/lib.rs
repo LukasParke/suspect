@@ -19,9 +19,10 @@
 //!                    | "body" [ "#" json-pointer-fragment ]
 //! ```
 //!
-//! Pointer fragments follow RFC 6901: `~1` decodes to `/`, `~0` to `~`, and
-//! percent escapes (`%XX`) are decoded within each pointer token afterwards.
-//! An empty fragment (`#`) addresses the root document.
+//! Pointer fragments follow RFC 6901 §6: percent escapes (`%XX`) are decoded
+//! across the whole fragment first, then the resulting JSON Pointer is
+//! evaluated (`~1` decodes to `/`, `~0` to `~`). An empty fragment (`#`)
+//! addresses the root document.
 //!
 //! `$url` is recognized by the Arazzo grammar but has no representation in
 //! [`Rex`] and cannot be evaluated from [`RexCtx`]; [`parse_rex`] rejects it
@@ -386,9 +387,11 @@ fn parse_exchange_part(tail: &str) -> Option<(Part, Option<&str>)> {
 /// Parses and validates a `#/pointer` fragment body.
 fn parse_pointer_fragment(full: &str, frag: &str) -> Result<Pointer, RexError> {
     validate_fragment_chars(full, frag)?;
-    let pointer = Pointer::parse(frag)
-        .map_err(|_| error(full, &format!("invalid JSON pointer `#{frag}`")))?;
-    Ok(percent_decode_tokens(&pointer))
+    // RFC 6901 §6: percent-decode the entire fragment first; the resulting
+    // JSON Pointer is then ~-unescaped during parsing.
+    let decoded_bytes = percent_decode_fragment(frag);
+    let decoded = String::from_utf8_lossy(&decoded_bytes);
+    Pointer::parse(&decoded).map_err(|_| error(full, &format!("invalid JSON pointer `#{frag}`")))
 }
 
 /// Rejects characters that cannot appear in a URI fragment / JSON pointer:
@@ -403,22 +406,6 @@ fn validate_fragment_chars(full: &str, frag: &str) -> Result<(), RexError> {
         }
     }
     Ok(())
-}
-
-/// Applies `%XX` decoding to each already-unescaped token of `pointer`.
-fn percent_decode_tokens(pointer: &Pointer) -> Pointer {
-    Pointer::from_tokens(
-        pointer
-            .tokens()
-            .iter()
-            .map(|token| {
-                let bytes = percent_decode_fragment(token);
-                String::from_utf8_lossy(&bytes)
-                    .into_owned()
-                    .into_boxed_str()
-            })
-            .collect(),
-    )
 }
 
 fn error(input: &str, reason: &str) -> RexError {
@@ -502,6 +489,23 @@ fn parse_json(text: &str) -> Option<serde_json::Value> {
     serde_json::from_str(text).ok()
 }
 
+/// Array index accepted by RFC 6901 evaluation: `"0"` or `[1-9][0-9]*` —
+/// no sign and no leading zeros.
+fn array_index(token: &str) -> Option<usize> {
+    let well_formed = match token.as_bytes() {
+        b"0" => true,
+        [first, rest @ ..] if first.is_ascii_digit() && *first != b'0' => {
+            rest.iter().all(u8::is_ascii_digit)
+        }
+        _ => false,
+    };
+    if well_formed {
+        token.parse().ok()
+    } else {
+        None
+    }
+}
+
 /// RFC 6901 resolution over a pointer parsed from a fragment.
 fn resolve_pointer<'v>(
     value: &'v serde_json::Value,
@@ -511,7 +515,7 @@ fn resolve_pointer<'v>(
     for token in pointer.tokens() {
         current = match current {
             serde_json::Value::Object(map) => map.get(token.as_ref())?,
-            serde_json::Value::Array(items) => items.get(token.parse::<usize>().ok()?)?,
+            serde_json::Value::Array(items) => items.get(array_index(token)?)?,
             _ => return None,
         };
     }
@@ -533,7 +537,7 @@ fn resolve_in_inputs(
     for token in rest {
         current = match current {
             serde_json::Value::Object(map) => map.get(token.as_ref())?,
-            serde_json::Value::Array(items) => items.get(token.parse::<usize>().ok()?)?,
+            serde_json::Value::Array(items) => items.get(array_index(token)?)?,
             _ => return None,
         };
     }

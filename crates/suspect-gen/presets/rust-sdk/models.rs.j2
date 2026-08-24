@@ -9,7 +9,8 @@
 pub struct {{ s.name | PascalCase }} {
     {%- for pname in def.properties %}
     {%- set prop = def.properties[pname] %}
-    pub {{ pname | snake_case }}: {% if pname in reqs %}{% if prop["$ref"] %}Box<{{ prop | rust_type }}>{% else %}{{ prop | rust_type }}{% endif %}{% else %}{% if prop["$ref"] %}Option<Box<{{ prop | rust_type }}>>{% else %}Option<{{ prop | rust_type }}>{% endif %}{% endif %},
+    {%- set rt = prop | rust_type %}
+    pub {{ pname | snake_case }}: {% if pname in reqs %}{% if prop["$ref"] %}Box<{{ rt }}>{% else %}{{ rt }}{% endif %}{% else %}{% if prop["$ref"] %}Option<Box<{{ rt }}>>{% else %}{{ rt if rt is startingwith("Option<") else "Option<" ~ rt ~ ">" }}{% endif %}{% endif %},
     {%- endfor %}
 }
 {%- else %}

@@ -244,9 +244,10 @@ fn is_nullable(schema: &Json) -> bool {
 /// Maps an OpenAPI schema object to a TypeScript type string.
 ///
 /// `string`→`string`, `integer`/`number`→`number`, `boolean`→`boolean`,
-/// arrays→`T[]` via `items`, `$ref`s to their target name, and objects or
-/// anything unrecognized to `Record<string, unknown>`. Nullable schemas
-/// append `| null`.
+/// arrays→`T[]` via `items` (parenthesized when the item type contains a
+/// space, e.g. `(string | null)[]`), `$ref`s to their target name, and
+/// objects or anything unrecognized to `Record<string, unknown>`.
+/// Nullable schemas append `| null`.
 #[must_use]
 pub fn ts_type(schema: &Json) -> String {
     let base = match schema.get("$ref").and_then(Json::as_str) {
@@ -257,7 +258,12 @@ pub fn ts_type(schema: &Json) -> String {
             Some("boolean") => "boolean".into(),
             Some("array") => {
                 let items = schema.get("items").cloned().unwrap_or(Json::Null);
-                format!("{}[]", ts_type(&items))
+                let item = ts_type(&items);
+                if item.contains(' ') {
+                    format!("({item})[]")
+                } else {
+                    format!("{item}[]")
+                }
             }
             _ => "Record<string, unknown>".into(),
         },
@@ -273,23 +279,33 @@ pub fn ts_type(schema: &Json) -> String {
 ///
 /// `string`→`String`, `integer`→`i64`, `number`→`f64`, `boolean`→`bool`,
 /// arrays→`Vec<T>` via `items`, `$ref`s to their target name, and objects
-/// or anything unrecognized to `serde_json::Value`. Requiredness context is
-/// not consulted here, so no `Option<T>` wrapping is applied.
+/// or anything unrecognized to `serde_json::Value`. Schema-level
+/// nullability (`nullable: true` or a type array containing `"null"`)
+/// wraps the base type in `Option<T>`, so nullable array items yield
+/// `Vec<Option<T>>`. A leading `Option<` is never doubled. Requiredness
+/// context is not consulted here; callers wrap optional fields themselves
+/// and should skip wrapping when the result is already an `Option`.
 #[must_use]
 pub fn rust_type(schema: &Json) -> String {
-    if let Some(r) = schema.get("$ref").and_then(Json::as_str) {
-        return sanitize_rust_path(&ref_name(r));
-    }
-    match base_type(schema).as_deref() {
-        Some("string") => "String".into(),
-        Some("integer") => "i64".into(),
-        Some("number") => "f64".into(),
-        Some("boolean") => "bool".into(),
-        Some("array") => {
-            let items = schema.get("items").cloned().unwrap_or(Json::Null);
-            format!("Vec<{}>", rust_type(&items))
+    let ty = if let Some(r) = schema.get("$ref").and_then(Json::as_str) {
+        sanitize_rust_path(&ref_name(r))
+    } else {
+        match base_type(schema).as_deref() {
+            Some("string") => "String".into(),
+            Some("integer") => "i64".into(),
+            Some("number") => "f64".into(),
+            Some("boolean") => "bool".into(),
+            Some("array") => {
+                let items = schema.get("items").cloned().unwrap_or(Json::Null);
+                format!("Vec<{}>", rust_type(&items))
+            }
+            _ => "serde_json::Value".into(),
         }
-        _ => "serde_json::Value".into(),
+    };
+    if is_nullable(schema) && !ty.starts_with("Option<") {
+        format!("Option<{ty}>")
+    } else {
+        ty
     }
 }
 
@@ -306,11 +322,13 @@ fn sanitize_rust_path(name: &str) -> String {
 // -------------------------------------------------------------- examples
 
 /// Resolves top-level `$ref`s in `schema` against `refs`
-/// (component name → schema), bounded by `depth` indirections.
+/// (component name → schema), bounded by `depth` indirections. When the
+/// bound is exhausted (e.g. a reference cycle), the schema is returned
+/// as-is rather than collapsed to null.
 #[must_use]
 fn resolve_ref(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usize) -> Json {
     if depth > 8 {
-        return Json::Null;
+        return schema.clone();
     }
     match schema.get("$ref").and_then(Json::as_str) {
         Some(r) => match refs.get(&ref_name(r)) {

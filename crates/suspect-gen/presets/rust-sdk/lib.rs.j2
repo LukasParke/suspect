@@ -50,7 +50,7 @@ impl Client {
         {%- endfor %}
         {%- for p in op.parameters if p.location == "query" %}
         {%- set rt = p.schema | rust_type %}
-        {{ p.name | snake_case }}: {% if p.required %}{% if rt == "String" %}&str{% else %}{{ rt }}{% endif %}{% else %}Option<{% if rt == "String" %}&str{% else %}{{ rt }}{% endif %}>{% endif %},
+        {{ p.name | snake_case }}: {% if p.required %}{% if rt == "String" %}&str{% else %}{{ rt }}{% endif %}{% else %}{% if rt == "String" %}Option<&str>{% elif rt is startingwith("Option<") %}{{ rt }}{% else %}Option<{{ rt }}>{% endif %}{% endif %},
         {%- endfor %}
         {%- if op.body_schema %}
         body: String,

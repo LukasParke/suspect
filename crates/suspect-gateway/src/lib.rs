@@ -12,15 +12,19 @@
 //!
 //! Every served exchange emits one journal traffic record with correlation
 //! id `gw/<seq>`. Fault injection (delay + error) is available in all
-//! modes except replay and uses a **counter-based pseudo-random roll**
-//! (`atomic counter % 100 < pct`) instead of an RNG: injected faults must
-//! be reproducible run-to-run so failing tests can be debugged offline.
+//! modes except replay and uses a **hash-based deterministic roll**
+//! (`hash(method, path+query) % 100 < pct`) instead of an RNG: injected
+//! faults must be reproducible run-to-run so failing tests can be
+//! debugged offline.
 //!
-//! Unknown paths get `404` problem+json `{"title":"Operation not found"}`.
-
+//! Unknown paths get `404` problem+json `{"title":"Operation not found"}`;
+//! known paths with an undeclared method get a journaled `405`
+//! problem+json.
 #![deny(missing_docs)]
 
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,7 +39,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use suspect_ir::{IrSpec, Method};
-use suspect_journal::{Journal, TrafficRecord, Verdict};
+
+use suspect_journal::{Journal, Level, Redactor, TrafficRecord, Verdict};
 
 pub mod mock;
 pub mod proxy;
@@ -98,10 +103,9 @@ impl Mode {
 }
 
 /// Deterministic fault injection knobs.
-///
-/// Percentages are evaluated against a monotonically increasing atomic
-/// counter modulo 100 rather than a random source — see the crate docs for
-/// why reproducibility beats entropy here.
+/// Percentages are evaluated against a hash of the request's method and
+/// path-plus-query modulo 100 rather than a random source — see the crate
+/// docs for why reproducibility beats entropy here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct FaultConfig {
     /// Delay applied to faulted requests, in milliseconds.
@@ -133,12 +137,12 @@ struct GatewayState {
     spec: Arc<IrSpec>,
     mode: Mode,
     faults: FaultConfig,
-    roll: AtomicU64,
     seq: AtomicU64,
     journal: Arc<tokio::sync::Mutex<Journal>>,
     mocks: HashMap<(Method, String), Vec<mock::CompiledResponse>>,
     replay: Option<ReplayIndex>,
     recorder: Option<Arc<tokio::sync::Mutex<proxy::CassetteAppender>>>,
+    redactor: Arc<Redactor>,
 }
 
 /// Serves the gateway on `127.0.0.1:<cfg.port>`, blocking until failure.
@@ -194,6 +198,13 @@ pub async fn build_router(
         _ => None,
     };
 
+    // One shared credential scrubber for the journal and cassette
+    // recording, so both sinks redact identically.
+    let mut faults = cfg.faults;
+    faults.delay_pct = faults.delay_pct.min(100);
+    faults.error_pct = faults.error_pct.min(100);
+    let redactor = Arc::new(Redactor::new());
+    *journal.lock().await.redactor_mut() = (*redactor).clone();
     journal.lock().await.emit(Journal::meta(
         "gateway",
         "starting",
@@ -207,13 +218,13 @@ pub async fn build_router(
     Ok(router_for_state(Arc::new(GatewayState {
         spec: Arc::new(spec),
         mode: cfg.mode.clone(),
-        faults: cfg.faults,
-        roll: AtomicU64::new(0),
+        faults,
         seq: AtomicU64::new(0),
         journal,
         mocks,
         replay,
         recorder,
+        redactor,
     })))
 }
 
@@ -247,6 +258,9 @@ fn router_for_state(state: Arc<GatewayState>) -> Router {
                 Method::Trace => method_router.trace(dispatch),
             };
         }
+        // Undeclared methods on a known path get an explicit journaled
+        // 405 instead of axum's silent default.
+        let method_router = method_router.fallback(method_not_allowed);
         // OpenAPI `{petId}` templates are byte-identical to axum 0.8
         // syntax, so registration needs no rewriting; percent-encoded
         // segments pass through untouched.
@@ -275,6 +289,20 @@ async fn fallback_dispatch(
     process_not_found(&state, request).await
 }
 
+/// Handler for a matched path with no declared method: journaled 405.
+async fn method_not_allowed(
+    State(state): State<Arc<GatewayState>>,
+    request: AxumRequest,
+) -> Response {
+    process_rejection(
+        &state,
+        request,
+        StatusCode::METHOD_NOT_ALLOWED,
+        "Method not allowed",
+    )
+    .await
+}
+
 /// Runs one full exchange: faults, mode dispatch, journaling.
 ///
 /// `template` is the matched route pattern (an OpenAPI path template) when
@@ -297,13 +325,48 @@ async fn process(
         .unwrap_or("localhost")
         .to_owned();
     let req_headers = collect_headers(request.headers());
-    let body = read_body(request.into_body()).await;
+    let body = match read_body(request.into_body()).await {
+        BodyRead::Ok(bytes) => bytes,
+        other => {
+            // Oversize and disconnect failures must never masquerade as
+            // empty bodies: reject before mode dispatch.
+            let (status, title, detail) = match &other {
+                BodyRead::Oversize => (
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "Payload too large",
+                    Some(format!(
+                        "request body exceeds the {} byte limit",
+                        proxy::MAX_BODY
+                    )),
+                ),
+                BodyRead::Failed(detail) => (
+                    StatusCode::BAD_REQUEST,
+                    "Request body unreadable",
+                    Some(detail.clone()),
+                ),
+                BodyRead::Ok(_) => unreachable!("handled above"),
+            };
+            let response = problem(status, title, detail);
+            let exchange = Exchange {
+                method: method.clone(),
+                host: host.clone(),
+                target: target.clone(),
+                request_headers: req_headers.clone(),
+                response_status: response.status().as_u16(),
+                response_headers: collect_headers(response.headers()),
+                started,
+            };
+            journal_exchange(state, &exchange, Verdict::Pass).await;
+            return response;
+        }
+    };
 
     // Fault middleware: skipped in replay mode (a recording replays as it
-    // was captured, warts included). The same counter value drives both
-    // rolls so delay and error patterns are stable across runs.
+    // was captured, warts included). The roll is a pure function of the
+    // request, so delay and error patterns are stable across runs and
+    // independent of concurrency.
     if !matches!(state.mode, Mode::Replay { .. }) {
-        let roll = state.roll.fetch_add(1, Ordering::Relaxed);
+        let roll = fault_roll(&method, &target);
         if state.faults.delay_ms > 0 && roll % 100 < u64::from(state.faults.delay_pct) {
             tokio::time::sleep(Duration::from_millis(state.faults.delay_ms)).await;
         }
@@ -387,22 +450,30 @@ async fn process(
                         method: method.clone(),
                         url: format!("http://{host}{target}"),
                         status: reply.status,
-                        request_headers: req_headers.clone(),
-                        request_body: suspect_journal::Body::from_bytes(&body),
-                        response_headers: reply.headers.clone(),
-                        response_body: suspect_journal::Body::from_bytes(&reply.body),
+                        request_headers: state.redactor.headers(&req_headers),
+                        request_body: redact_body(&state.redactor, &body),
+                        response_headers: state.redactor.headers(&reply.headers),
+                        response_body: redact_body(&state.redactor, &reply.body),
                         duration_ms,
                     };
                     let response = proxy::reply_to_response(&reply);
-                    if let Some(recorder) = &state.recorder
-                        && let Err(err) = recorder.lock().await.append(entry)
-                    {
-                        state.journal.lock().await.log(
-                            suspect_journal::Level::Warn,
-                            "gateway",
-                            "cassette append failed",
-                            serde_json::json!({ "error": err.to_string() }),
-                        );
+                    if let Some(recorder) = &state.recorder {
+                        let mut appender = recorder.lock().await;
+                        let first_failure = !appender.is_poisoned();
+                        if let Err(err) = appender.append(entry) {
+                            // The appender is sticky-poisoned after its
+                            // first write failure; log that failure once
+                            // at error level and stay quiet afterwards so
+                            // one bad cassette cannot flood the journal.
+                            if first_failure {
+                                state.journal.lock().await.log(
+                                    Level::Error,
+                                    "gateway",
+                                    "cassette append failed; recording stopped",
+                                    serde_json::json!({ "error": err.to_string() }),
+                                );
+                            }
+                        }
                     }
                     (response, Vec::new())
                 }
@@ -454,8 +525,14 @@ struct Exchange {
     started: Instant,
 }
 
-/// Serves the standard unknown-path 404 and journals it.
-async fn process_not_found(state: &Arc<GatewayState>, request: AxumRequest) -> Response {
+/// Serves a plain problem+json rejection (unknown-path `404`, undeclared
+/// method `405`) and journals it.
+async fn process_rejection(
+    state: &Arc<GatewayState>,
+    request: AxumRequest,
+    status: StatusCode,
+    title: &str,
+) -> Response {
     let started = Instant::now();
     let method = request.method().as_str().to_owned();
     let target = request.uri().path_and_query().map_or_else(
@@ -469,11 +546,7 @@ async fn process_not_found(state: &Arc<GatewayState>, request: AxumRequest) -> R
         .unwrap_or("localhost")
         .to_owned();
     let req_headers = collect_headers(request.headers());
-    let response = problem(
-        StatusCode::NOT_FOUND,
-        "Operation not found",
-        Some(format!("{method} {target}")),
-    );
+    let response = problem(status, title, Some(format!("{method} {target}")));
     let exchange = Exchange {
         method,
         host,
@@ -485,6 +558,11 @@ async fn process_not_found(state: &Arc<GatewayState>, request: AxumRequest) -> R
     };
     journal_exchange(state, &exchange, Verdict::Pass).await;
     response
+}
+
+/// Serves the standard unknown-path 404.
+async fn process_not_found(state: &Arc<GatewayState>, request: AxumRequest) -> Response {
+    process_rejection(state, request, StatusCode::NOT_FOUND, "Operation not found").await
 }
 
 /// Emits one traffic record for a completed exchange.
@@ -505,24 +583,69 @@ async fn journal_exchange(state: &Arc<GatewayState>, exchange: &Exchange, verdic
 }
 
 /// Collects headers into ordered `(name, value)` string pairs.
+///
+/// Header values are decoded lossily (`String::from_utf8_lossy`) so
+/// non-UTF-8 bytes are preserved as replacement characters instead of
+/// silently dropping the header from journals and cassettes.
 #[must_use]
 fn collect_headers(headers: &HeaderMap) -> Vec<(String, String)> {
     headers
         .iter()
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|v| (name.as_str().to_owned(), v.to_owned()))
+        .map(|(name, value)| {
+            (
+                name.as_str().to_owned(),
+                String::from_utf8_lossy(value.as_bytes()).into_owned(),
+            )
         })
         .collect()
 }
 
+/// Outcome of reading an inbound request body to bytes, capped at
+/// [`proxy::MAX_BODY`].
+enum BodyRead {
+    /// Body within the cap.
+    Ok(Bytes),
+    /// Body exceeded the cap (`413` for the client).
+    Oversize,
+    /// Read failed mid-body — client disconnect or malformed framing
+    /// (`400` for the client).
+    Failed(String),
+}
+
 /// Reads an axum request body to bytes, capping at [`proxy::MAX_BODY`].
-async fn read_body(body: axum::body::Body) -> Bytes {
-    axum::body::to_bytes(body, proxy::MAX_BODY)
-        .await
-        .unwrap_or_default()
+///
+/// Failures are propagated rather than swallowed: an oversize or
+/// truncated body must never silently become an empty one.
+async fn read_body(body: axum::body::Body) -> BodyRead {
+    use http_body_util::{BodyExt as _, LengthLimitError, Limited};
+    match Limited::new(body, proxy::MAX_BODY).collect().await {
+        Ok(collected) => BodyRead::Ok(collected.to_bytes()),
+        Err(err) if err.is::<LengthLimitError>() => BodyRead::Oversize,
+        Err(err) => BodyRead::Failed(err.to_string()),
+    }
+}
+
+/// Deterministic fault roll in `0..100`: a pure hash of the request's
+/// method and path-plus-query (fixed-key `DefaultHasher`). The same
+/// request faults identically no matter how many concurrent exchanges
+/// interleave — unlike a shared counter.
+#[must_use]
+pub(crate) fn fault_roll(method: &str, path_and_query: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(method.as_bytes());
+    hasher.write_u8(0);
+    hasher.write(path_and_query.as_bytes());
+    hasher.finish() % 100
+}
+
+/// Builds a cassette body, scrubbing sensitive keys from UTF-8 JSON.
+///
+/// Non-UTF-8 payloads are stored untouched (base64 in the cassette).
+fn redact_body(redactor: &Redactor, bytes: &[u8]) -> suspect_journal::Body {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => suspect_journal::Body::from_bytes(redactor.json_body(text).as_bytes()),
+        Err(_) => suspect_journal::Body::from_bytes(bytes),
+    }
 }
 
 /// Builds an RFC 7807 problem+json response.

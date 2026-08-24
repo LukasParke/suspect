@@ -14,10 +14,11 @@
 
 use std::io::Write as _;
 use std::path::Path;
+use std::time::Duration;
 
 use axum::response::IntoResponse;
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use suspect_ir::{IrOperation, ParamIn};
 use suspect_journal::{
     CASSETTE_FORMAT, CASSETTE_VERSION, CassetteEntry, CassetteHeader, Journal, Violation,
@@ -25,9 +26,11 @@ use suspect_journal::{
 use tokio::io::{AsyncRead as _, AsyncWrite as _};
 
 use crate::{mock, problem};
-
 /// Maximum proxied request/response body size (32 MiB).
 pub(crate) const MAX_BODY: usize = 32 * 1024 * 1024;
+
+/// Wall-clock budget for each upstream connect/handshake/send/read step.
+const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Headers that must not be copied onto proxied requests verbatim.
 fn is_hop_by_hop_request(name: &str) -> bool {
@@ -140,20 +143,36 @@ pub(crate) async fn fetch_upstream(
     body: Bytes,
 ) -> Result<UpstreamReply, String> {
     let (host, port) = parse_upstream(upstream)?;
-    let stream = tokio::net::TcpStream::connect((host.as_str(), port))
-        .await
-        .map_err(|e| format!("connect {host}:{port} failed: {e}"))?;
-    let (mut sender, conn) = hyper::client::conn::http1::handshake(TokioStream(stream))
-        .await
-        .map_err(|e| format!("upstream handshake failed: {e}"))?;
+    let stream = tokio::time::timeout(
+        UPSTREAM_TIMEOUT,
+        tokio::net::TcpStream::connect((host.as_str(), port)),
+    )
+    .await
+    .map_err(|_| format!("connect {host}:{port} timed out after 30s"))?
+    .map_err(|e| format!("connect {host}:{port} failed: {e}"))?;
+    let (mut sender, conn) = tokio::time::timeout(
+        UPSTREAM_TIMEOUT,
+        hyper::client::conn::http1::handshake(TokioStream(stream)),
+    )
+    .await
+    .map_err(|_| "upstream handshake timed out after 30s".to_owned())?
+    .map_err(|e| format!("upstream handshake failed: {e}"))?;
     // Drive the connection to completion alongside the request.
     tokio::spawn(async move {
         let _ = conn.await;
     });
 
+    // hyper's HTTP/1.1 client does not synthesize `Host`; the upstream
+    // needs the origin-form request target plus an explicit authority.
+    let authority = if port == 80 {
+        host.clone()
+    } else {
+        format!("{host}:{port}")
+    };
     let mut builder = hyper::http::Request::builder()
         .method(method)
-        .uri(url_path_and_query);
+        .uri(url_path_and_query)
+        .header("host", authority);
     for (name, value) in headers {
         if !is_hop_by_hop_request(name) {
             builder = builder.header(name.as_str(), value.as_str());
@@ -162,9 +181,9 @@ pub(crate) async fn fetch_upstream(
     let request = builder
         .body(Full::new(body.clone()))
         .map_err(|e| format!("build upstream request failed: {e}"))?;
-    let response = sender
-        .send_request(request)
+    let response = tokio::time::timeout(UPSTREAM_TIMEOUT, sender.send_request(request))
         .await
+        .map_err(|_| "upstream send timed out after 30s".to_owned())?
         .map_err(|e| format!("upstream send failed: {e}"))?;
 
     let status = response.status().as_u16();
@@ -179,12 +198,23 @@ pub(crate) async fn fetch_upstream(
             )
         })
         .collect::<Vec<_>>();
-    let reply_body = response
-        .into_body()
-        .collect()
-        .await
-        .map_err(|e| format!("read upstream body failed: {e}"))?
-        .to_bytes();
+    let reply_body = tokio::time::timeout(
+        UPSTREAM_TIMEOUT,
+        Limited::new(response.into_body(), MAX_BODY).collect(),
+    )
+    .await
+    .map_err(|_| "read upstream body timed out after 30s".to_owned())?
+    .map_err(|err| {
+        if err.is::<LengthLimitError>() {
+            format!(
+                "upstream response body exceeds the {} MiB limit",
+                MAX_BODY / (1024 * 1024)
+            )
+        } else {
+            format!("read upstream body failed: {err}")
+        }
+    })?
+    .to_bytes();
 
     Ok(UpstreamReply {
         status,
@@ -341,14 +371,25 @@ fn kind_of(value: &serde_json::Value) -> &'static str {
     }
 }
 
-/// Minimal percent-decoding of query components (`%XX` and `+`).
-fn percent_decode(text: &str) -> String {
+/// Minimal percent-decoding of query components (`%XX` and `+`→space).
+fn percent_decode_query(text: &str) -> String {
+    percent_decode_impl(text, true)
+}
+
+/// Percent-decoding of path segments (`%XX` only; `+` is literal in
+/// paths, only the query grammar treats it as an encoded space).
+fn percent_decode_path(text: &str) -> String {
+    percent_decode_impl(text, false)
+}
+
+/// Shared decoder core; `plus_as_space` selects the query grammar.
+fn percent_decode_impl(text: &str, plus_as_space: bool) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut idx = 0;
     while idx < bytes.len() {
         match bytes[idx] {
-            b'+' => {
+            b'+' if plus_as_space => {
                 out.push(b' ');
                 idx += 1;
             }
@@ -383,8 +424,8 @@ fn query_lookup(query: Option<&str>, name: &str) -> Option<String> {
             Some((k, v)) => (k, v),
             None => (pair, ""),
         };
-        if percent_decode(key) == name {
-            return Some(percent_decode(value));
+        if percent_decode_query(key) == name {
+            return Some(percent_decode_query(value));
         }
     }
     None
@@ -431,7 +472,7 @@ fn path_param_values<'t>(
     let a_segs: Vec<_> = actual_path.split('/').collect();
     t_segs.into_iter().zip(a_segs).filter_map(|(t, a)| {
         let name = t.strip_prefix('{').and_then(|n| n.strip_suffix('}'))?;
-        Some((name, percent_decode(a)))
+        Some((name, percent_decode_path(a)))
     })
 }
 
@@ -602,10 +643,16 @@ pub(crate) async fn validate_forward(
 /// first entry so an aborted recording leaves no misleadingly empty
 /// cassette. Entry ids are sequential starting at 1, exactly what
 /// `suspect_journal::read_cassette` validates.
+///
+/// After the first write failure the appender is **sticky-poisoned**:
+/// every subsequent [`CassetteAppender::append`] fails immediately, so a
+/// broken sink can never interleave partial entries and poison the whole
+/// file. The failed entry's id is not consumed.
 pub struct CassetteAppender {
     file: std::fs::File,
     next_id: u64,
     wrote_header: bool,
+    poisoned: bool,
     source: String,
 }
 
@@ -619,19 +666,42 @@ impl CassetteAppender {
             file: std::fs::File::create(path)?,
             next_id: 1,
             wrote_header: false,
+            poisoned: false,
             source,
         })
     }
 
+    /// Whether a previous append failed and the writer refuses further
+    /// entries.
+    #[must_use]
+    pub fn is_poisoned(&self) -> bool {
+        self.poisoned
+    }
+
     /// Appends one exchange, writing the header line first when needed.
     ///
-    /// The `id` field of `entry` is assigned sequentially here; callers
-    /// may leave it as `0`.
+    /// The entry is fully serialized (id tentatively assigned from
+    /// [`CassetteAppender`]'s sequence) before any bytes are written; the
+    /// id counter only advances after the line hits the file successfully.
     ///
     /// # Errors
-    /// Propagates serialization or I/O errors; the caller journals the
-    /// failure but keeps serving.
+    /// Propagates serialization or I/O errors. The first failure poisons
+    /// the writer; all later appends fail immediately with
+    /// [`std::io::ErrorKind::Other`] until the recorder is recreated.
     pub fn append(&mut self, mut entry: CassetteEntry) -> std::io::Result<()> {
+        if self.poisoned {
+            return Err(std::io::Error::other(
+                "cassette writer poisoned by an earlier write failure",
+            ));
+        }
+        let result = self.append_inner(&mut entry);
+        if result.is_err() {
+            self.poisoned = true;
+        }
+        result
+    }
+
+    fn append_inner(&mut self, entry: &mut CassetteEntry) -> std::io::Result<()> {
         if !self.wrote_header {
             let header = CassetteHeader {
                 format: CASSETTE_FORMAT.to_owned(),
@@ -648,10 +718,62 @@ impl CassetteAppender {
             self.wrote_header = true;
         }
         entry.id = self.next_id;
-        self.next_id += 1;
-        let line = serde_json::to_string(&entry)
+        let line = serde_json::to_string(entry)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         writeln!(self.file, "{line}")?;
-        self.file.flush()
+        self.file.flush()?;
+        // Commit the id only once the line is durably written.
+        self.next_id += 1;
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod append_tests {
+    use super::*;
+
+    fn sample_entry() -> CassetteEntry {
+        CassetteEntry {
+            id: 0,
+            method: "GET".to_owned(),
+            url: "http://x/y".to_owned(),
+            status: 200,
+            request_headers: vec![],
+            request_body: suspect_journal::Body::from_bytes(b""),
+            response_headers: vec![],
+            response_body: suspect_journal::Body::from_bytes(b"{}"),
+            duration_ms: 1.0,
+        }
+    }
+
+    #[test]
+    fn io_failure_poisons_writer_and_preserves_id_sequence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        // A read-only backing file makes every write fail (EBADF).
+        let bad_path = dir.path().join("bad.cassette");
+        let mut broken = CassetteAppender::create(&bad_path, "t".to_owned()).expect("create");
+        broken.file = std::fs::File::open(&bad_path).expect("reopen read-only");
+        assert!(!broken.is_poisoned());
+
+        assert!(broken.append(sample_entry()).is_err());
+        assert!(broken.is_poisoned(), "first write failure must poison");
+        assert_eq!(
+            broken.next_id, 1,
+            "failed append must not consume the entry id"
+        );
+
+        // Sticky: every subsequent append is refused outright, so no
+        // partial entries can interleave into the cassette.
+        assert!(broken.append(sample_entry()).is_err());
+
+        // A healthy writer keeps ids strictly sequential.
+        let ok_path = dir.path().join("ok.cassette");
+        let mut good = CassetteAppender::create(&ok_path, "t".to_owned()).expect("create");
+        good.append(sample_entry()).expect("append 1");
+        good.append(sample_entry()).expect("append 2");
+        let (_, entries) =
+            suspect_journal::read_cassette(std::fs::File::open(&ok_path).expect("open"))
+                .expect("readable");
+        assert_eq!(entries.iter().map(|e| e.id).collect::<Vec<_>>(), vec![1, 2]);
     }
 }

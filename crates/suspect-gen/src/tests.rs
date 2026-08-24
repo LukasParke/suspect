@@ -85,8 +85,8 @@ fn ts_and_rust_type_mappings() {
         "string | null"
     );
 
-    // Rust mirrors the same schema set; no Option wrapping without
-    // requiredness context.
+    // Rust mirrors the same schema set. Schema-level nullability wraps
+    // the base type (and recurses into array items) in `Option`.
     assert_eq!(crate::rust_type(&string), "String");
     assert_eq!(crate::rust_type(&int), "i64");
     assert_eq!(crate::rust_type(&num), "f64");
@@ -96,7 +96,55 @@ fn ts_and_rust_type_mappings() {
     assert_eq!(crate::rust_type(&object), "serde_json::Value");
     assert_eq!(
         crate::rust_type(&json!({"type": ["string", "null"]})),
-        "String"
+        "Option<String>"
+    );
+}
+
+#[test]
+fn ts_type_parenthesizes_nullable_array_items() {
+    // Type-array nullability in items must not leak `| null` into a
+    // suffix position: `(string | null)[]`, never `string | null[]`.
+    assert_eq!(
+        crate::ts_type(&json!({
+            "type": "array",
+            "items": {"type": ["string", "null"]}
+        })),
+        "(string | null)[]"
+    );
+
+    // OpenAPI 3.0 sibling-nullability form on items behaves the same.
+    assert_eq!(
+        crate::ts_type(&json!({
+            "type": "array",
+            "items": {"type": "integer", "nullable": true}
+        })),
+        "(number | null)[]"
+    );
+
+    // Non-nullable items stay unparenthesized.
+    assert_eq!(
+        crate::ts_type(&json!({"type": "array", "items": {"type": "string"}})),
+        "string[]"
+    );
+}
+
+#[test]
+fn rust_type_wraps_schema_level_nullability() {
+    assert_eq!(
+        crate::rust_type(&json!({"type": "string", "nullable": true})),
+        "Option<String>"
+    );
+    assert_eq!(
+        crate::rust_type(&json!({"type": ["integer", "null"]})),
+        "Option<i64>"
+    );
+    // Nullable items recurse into Vec<Option<T>>.
+    assert_eq!(
+        crate::rust_type(&json!({
+            "type": "array",
+            "items": {"type": "integer", "nullable": true}
+        })),
+        "Vec<Option<i64>>"
     );
 }
 
@@ -138,6 +186,27 @@ fn example_of_is_deterministic() {
     assert_eq!(value["tags"], json!([""]));
     // default keyword wins over "".
     assert_eq!(value["nick"], json!("spot"));
+}
+
+#[test]
+fn example_of_deep_ref_chain_yields_target_not_null() {
+    // A chain of nine indirections exhausts the resolver bound; the
+    // final target schema must still drive the example (padded "aa"),
+    // instead of the whole node collapsing to null.
+    let mut refs = serde_json::Map::new();
+    for i in 1..=8 {
+        refs.insert(
+            format!("L{i}"),
+            json!({"$ref": format!("#/components/schemas/L{}", i + 1)}),
+        );
+    }
+    refs.insert("L9".into(), json!({"type": "string", "minLength": 2}));
+
+    let out = crate::example_of(
+        r##"{"$ref": "#/components/schemas/L1"}"##,
+        &serde_json::Value::Object(refs).to_string(),
+    );
+    assert_eq!(out, r#""aa""#);
 }
 
 // ---------------------------------------------------------------- engine
@@ -194,6 +263,35 @@ ignored = true
 }
 
 #[test]
+fn manifest_quoted_values_keep_hashes_and_backslashes() {
+    // A '#' inside quotes is data, not an inline comment.
+    let manifest =
+        parse_manifest("[[output]]\ntemplate = \"t.j2\"\ntarget = \"gen #core.rs\"\n").unwrap();
+    assert_eq!(manifest.outputs[0].target, "gen #core.rs");
+
+    // Unquoted values still strip a whitespace-preceded '# comment'.
+    let manifest = parse_manifest("[[output]]\ntemplate = t.j2\ntarget = gen.rs #core\n").unwrap();
+    assert_eq!(manifest.outputs[0].target, "gen.rs");
+
+    // Double-quoted backslash escapes are honored.
+    let manifest = parse_manifest(
+        "[[output]]\ntemplate = \"t.j2\"\ntarget = \"C:\\\\tools\\\\gen.rs\" # windows\n",
+    )
+    .unwrap();
+    assert_eq!(manifest.outputs[0].target, r"C:\tools\gen.rs");
+
+    // Single-quoted strings keep backslashes verbatim.
+    let manifest =
+        parse_manifest("[[output]]\ntemplate = \"t.j2\"\ntarget = 'C:\\tools\\gen.rs'\n").unwrap();
+    assert_eq!(manifest.outputs[0].target, r"C:\tools\gen.rs");
+
+    // A trailing comment after a quoted value is stripped.
+    let manifest =
+        parse_manifest("[[output]]\ntemplate = \"t.j2\"\ntarget = \"gen.rs\" # core outputs\n")
+            .unwrap();
+    assert_eq!(manifest.outputs[0].target, "gen.rs");
+}
+#[test]
 fn render_manifest_created_changed_unchanged() {
     let dir = scratch_dir("created-changed-unchanged");
     let engine = engine_with(&[("m", "v={{ version }}")]);
@@ -226,6 +324,41 @@ fn render_manifest_created_changed_unchanged() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn render_manifest_rejects_targets_outside_out_root() {
+    let dir = scratch_dir("target-traversal");
+    let engine = engine_with(&[("m", "x")]);
+    let make = |target: &str| Manifest {
+        outputs: vec![OutputRule {
+            template: "m".into(),
+            target: target.into(),
+        }],
+    };
+    let ctx = json!({});
+
+    // Absolute targets are rejected outright.
+    assert!(render_manifest(&engine, &make("/etc/passwd"), &ctx, &dir, false).is_err());
+
+    // Relative escapes are rejected after lexical normalization.
+    assert!(render_manifest(&engine, &make("../escape.txt"), &ctx, &dir, false).is_err());
+    assert!(render_manifest(&engine, &make("a/../../escape.txt"), &ctx, &dir, false).is_err());
+
+    // Nothing was written outside the root.
+    let escape_path = dir.parent().unwrap().join("escape.txt");
+    let _ = fs::remove_file(&escape_path);
+
+    // A legitimate nested target still renders.
+    let outcomes = render_manifest(&engine, &make("nested/deep/ok.txt"), &ctx, &dir, false)
+        .expect("nested target is inside the root");
+    assert_eq!(outcomes[0].reason, WriteReason::Created);
+    assert_eq!(
+        fs::read_to_string(dir.join("nested/deep/ok.txt")).unwrap(),
+        "x"
+    );
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
 // ------------------------------------------------------- preserve regions
 
 #[test]
@@ -240,7 +373,7 @@ fn preserve_region_splice_keeps_user_code() {
         BEGIN = BEGIN_MARK,
         END = END_MARK
     );
-    let (spliced, count) = crate::orchestrate::splice_preserved_regions(&old, &new);
+    let (spliced, count) = crate::orchestrate::splice_preserved_regions(&old, &new).unwrap();
     assert_eq!(count, 1);
     assert!(spliced.contains("custom_user_line();"));
     assert!(!spliced.contains("auto_generated();"));
@@ -253,9 +386,59 @@ fn preserve_region_splice_keeps_user_code() {
         BEGIN = BEGIN_MARK,
         END = END_MARK
     );
-    let (spliced, count) = crate::orchestrate::splice_preserved_regions(&indented_old, &new);
+    let (spliced, count) =
+        crate::orchestrate::splice_preserved_regions(&indented_old, &new).unwrap();
     assert_eq!(count, 1);
     assert!(spliced.contains("keep_me();"));
+}
+
+#[test]
+fn splice_ignores_lines_that_mention_markers() {
+    // A user line that merely mentions the end marker must NOT close
+    // the region; only a whole-line marker does.
+    let old = format!(
+        "{BEGIN}\ncustom_one();\n// see {END_MARK} documentation\nmore_user_code();\n{END}\n",
+        BEGIN = BEGIN_MARK,
+        END = END_MARK
+    );
+    let new = format!(
+        "{BEGIN}\nauto_generated();\n{END}\n",
+        BEGIN = BEGIN_MARK,
+        END = END_MARK
+    );
+    let (spliced, count) = crate::orchestrate::splice_preserved_regions(&old, &new).unwrap();
+    assert_eq!(count, 1);
+    assert!(spliced.contains("custom_one();"));
+    assert!(spliced.contains("more_user_code();"));
+    assert!(!spliced.contains("auto_generated();"));
+}
+
+#[test]
+fn splice_rejects_malformed_markers_naming_the_line() {
+    let begin = BEGIN_MARK;
+    let end = END_MARK;
+
+    // END without an open region.
+    let err =
+        crate::orchestrate::splice_preserved_regions(&format!("a\n{end}\nb\n"), "").unwrap_err();
+    assert!(err.0.contains("line 2"), "error names the line: {}", err.0);
+
+    // BEGIN while a region is already open.
+    let err = crate::orchestrate::splice_preserved_regions(&format!("{begin}\nx\n{begin}\n"), "")
+        .unwrap_err();
+    assert!(err.0.contains("line 3"), "error names the line: {}", err.0);
+
+    // BEGIN never closed by end of input.
+    let err = crate::orchestrate::splice_preserved_regions(&format!("h\n{begin}\nuser();\n"), "")
+        .unwrap_err();
+    assert!(err.0.contains("line 2"), "error names the line: {}", err.0);
+
+    // Well-formed markers (comment-prefixed, indented) still parse.
+    let ok = format!("    // {begin}\ncode();\n  # {end}\n");
+    let fresh = format!("    // {begin}\nfresh();\n  # {end}\n");
+    let (spliced, count) = crate::orchestrate::splice_preserved_regions(&ok, &fresh).unwrap();
+    assert_eq!(count, 1);
+    assert!(spliced.contains("code();"));
 }
 
 #[test]
@@ -331,6 +514,48 @@ fn diff_only_produces_hunks_and_writes_nothing() {
     assert_eq!(outcomes[0].diff, None);
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn unified_diff_merged_hunks_keep_trailing_context() {
+    let old: Vec<String> = (1..=12).map(|i| format!("l{i}")).collect();
+    let mut new = old.clone();
+    new[2] = "X".into();
+    new[5] = "Y".into();
+    let diff = crate::orchestrate::unified_diff(
+        &format!("{}\n", old.join("\n")),
+        &format!("{}\n", new.join("\n")),
+    );
+
+    // Both changes land in one hunk (one header line; "@@" appears
+    // twice within a single header, so count header lines instead).
+    let headers = diff.lines().filter(|line| line.starts_with("@@ ")).count();
+    assert_eq!(headers, 1);
+
+    // ...whose trailing context survives the merge (context after the
+    // second change must include l7/l8, not stop at the last edit).
+    assert!(
+        diff.contains("\n l7\n"),
+        "missing trailing context:\n{diff}"
+    );
+    assert!(
+        diff.contains("\n l8\n"),
+        "missing trailing context:\n{diff}"
+    );
+}
+
+#[test]
+fn unified_diff_hunk_starting_on_insert_numbers_old_side() {
+    // The hunk begins with an inserted line that has no old-side
+    // position; the old start must come from the next positioned line
+    // (`a` is old line 1), not the degenerate `-0,N`.
+    let diff = crate::orchestrate::unified_diff("a\n", "X\na\n");
+    assert!(
+        diff.starts_with("@@ -1,1 +1,2 @@"),
+        "wrong hunk header: {diff}"
+    );
+    assert!(diff.contains("+X"));
+    assert!(diff.contains(" a\n"));
 }
 
 // ---------------------------------------------------------------- mermaid
@@ -709,4 +934,69 @@ fn ts_sdk_preserved_user_code_survives_rerender() {
         "generated frame refreshed"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn rust_sdk_preset_does_not_double_wrap_nullable_optionals() {
+    // An optional property that is itself schema-level nullable must
+    // render as a single `Option<String>`, never `Option<Option<..>>`.
+    let mut spec = IrSpec {
+        title: "Things".into(),
+        version: "1.0".into(),
+        ..IrSpec::default()
+    };
+    spec.schemas.push(IrSchema {
+        name: "Thing".into(),
+        json: json!({
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+                "id": {"type": "integer"},
+                "note": {"type": "string", "nullable": true}
+            }
+        }),
+    });
+
+    let engine = preset_engine("rust-sdk");
+    let ctx = (presets::get("rust-sdk").unwrap().ctx_builder)(&spec);
+    let models_rs = engine.render("rust-sdk/models.rs.j2", &ctx).unwrap();
+
+    assert!(
+        models_rs.contains("pub note: Option<String>,"),
+        "nullable optional renders one Option:\n{models_rs}"
+    );
+    assert!(
+        !models_rs.contains("Option<Option<"),
+        "no double wrap:\n{models_rs}"
+    );
+    assert!(
+        models_rs.contains("pub id: i64,"),
+        "required non-nullable stays plain"
+    );
+
+    // Optional query parameters with nullable schemas stay single-wrapped.
+    spec.operations.push(IrOperation {
+        id: Some("listThings".into()),
+        method: Method::Get,
+        path: "/things".into(),
+        summary: None,
+        description: None,
+        tags: vec![],
+        deprecated: false,
+        parameters: vec![IrParameter {
+            name: "label".into(),
+            location: ParamIn::Query,
+            required: false,
+            schema: Some(json!({"type": "string", "nullable": true})),
+        }],
+        body_schema: None,
+        responses: vec![],
+    });
+    let ctx = (presets::get("rust-sdk").unwrap().ctx_builder)(&spec);
+    let lib_rs = engine.render("rust-sdk/lib.rs.j2", &ctx).unwrap();
+    assert!(
+        lib_rs.contains("label: Option<String>") || lib_rs.contains("Option<String> label"),
+        "query param single-wrapped:\n{lib_rs}"
+    );
+    assert!(!lib_rs.contains("Option<Option<"));
 }

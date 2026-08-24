@@ -16,6 +16,7 @@ use suspect_ir::{IrSpec, Method, OpSelector, ParamIn};
 use suspect_low::{LowDoc, NodeRef, ValueKind};
 use suspect_ref::Workspace;
 use suspect_rex::{Rex, parse_rex};
+use suspect_source::Uri;
 
 /// Failure while compiling an Arazzo document into a [`Plan`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,7 +198,7 @@ impl CriterionKind {
 /// be resolved or a criterion/parameter expression cannot be parsed.
 pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, CompileError> {
     let doc = ArazzoDoc::new(arazzo);
-    let sources = SourceIndex::load(&doc, ws)?;
+    let sources = SourceIndex::load(&doc, arazzo.uri(), ws)?;
 
     let mut workflows = Vec::with_capacity(doc.workflows().len());
     for wf in doc.workflows() {
@@ -224,7 +225,7 @@ struct SourceIndex {
 }
 
 impl SourceIndex {
-    fn load(doc: &ArazzoDoc<'_>, ws: &Arc<Workspace>) -> Result<Self, CompileError> {
+    fn load(doc: &ArazzoDoc<'_>, base: &Uri, ws: &Arc<Workspace>) -> Result<Self, CompileError> {
         let uris = ws.uris();
         let mut specs = Vec::new();
         for src in doc.source_descriptions() {
@@ -232,17 +233,8 @@ impl SourceIndex {
             if !matches!(src.kind, suspect_arazzo::SourceType::OpenApi) {
                 continue;
             }
-            let wanted = file_name_of(src.url);
-            let uri = uris
-                .iter()
-                .find(|u| file_name_of(u.as_str()) == wanted)
-                .ok_or_else(|| {
-                    CompileError(format!(
-                        "source description '{}' ({}) matches no loaded document",
-                        src.name, src.url
-                    ))
-                })?;
-            let ir = IrSpec::from_workspace(ws, uri)
+            let uri = resolve_source(src, base, &uris)?;
+            let ir = IrSpec::from_workspace(ws, &uri)
                 .map_err(|e| CompileError(format!("source '{}': {e}", src.name)))?;
             specs.push((src.name.to_owned(), ir));
         }
@@ -258,6 +250,39 @@ impl SourceIndex {
                 .map(|(_, ir)| ir),
             None => self.specs.first().map(|(_, ir)| ir),
         }
+    }
+}
+
+/// Binds one `sourceDescriptions` url to a loaded workspace document.
+///
+/// The url is first resolved against the Arazzo document's own URI and
+/// matched exactly; on a miss it falls back to matching by unique file
+/// name. More than one basename match is ambiguous and fails compilation.
+fn resolve_source(
+    src: &suspect_arazzo::SourceDescriptionView<'_>,
+    base: &Uri,
+    uris: &[Uri],
+) -> Result<Uri, CompileError> {
+    if let Ok(resolved) = base.join(src.url)
+        && uris.iter().any(|u| u == &resolved)
+    {
+        return Ok(resolved);
+    }
+    let wanted = file_name_of(src.url);
+    let matches: Vec<&Uri> = uris
+        .iter()
+        .filter(|u| file_name_of(u.as_str()) == wanted)
+        .collect();
+    match matches.as_slice() {
+        [uri] => Ok((*uri).clone()),
+        [] => Err(CompileError(format!(
+            "source description '{}' ({}) matches no loaded document",
+            src.name, src.url
+        ))),
+        _ => Err(CompileError(format!(
+            "source description '{}' ({}) ambiguously matches multiple documents",
+            src.name, src.url
+        ))),
     }
 }
 
@@ -311,7 +336,7 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
             .get("condition")
             .map(|n| n.byte_range())
             .unwrap_or_else(|| c.node().byte_range());
-        let crit = parse_condition(cond, c.criterion_type())?;
+        let crit = parse_condition(cond)?;
         crit.note_pointer(&mut body_pointers);
         success.push(CriterionPlan {
             kind: crit,
@@ -420,7 +445,8 @@ fn resolve_operation(step: &StepView<'_>, sources: &SourceIndex) -> Result<OpKey
 /// Parses an `operationPath` spelling into
 /// `(source-name, Method, raw-path)`, following the accepted shapes:
 /// `$sourceDescriptions.<name>#/paths/~1pets/get`, `<name>#/users/{userId}/delete`,
-/// and literal `GET /pets`.
+/// and literal `GET /pets`. Absolute-URL targets (`GET https://...`) are
+/// rejected so compilation fails with a clear error instead of a mangled path.
 fn parse_operation_path(path: &str) -> Option<(Option<&str>, Method, String)> {
     if let Some(rest) = path.strip_prefix("$sourceDescriptions.") {
         let (name, frag) = rest.split_once('#')?;
@@ -438,6 +464,9 @@ fn parse_operation_path(path: &str) -> Option<(Option<&str>, Method, String)> {
     let method_word = parts.next()?;
     let method = Method::from_key(&method_word.to_lowercase())?;
     let target = parts.next()?;
+    if target.contains("://") {
+        return None;
+    }
     Some((None, method, format!("/{}", target.trim_matches('/'))))
 }
 
@@ -535,28 +564,31 @@ enum Target {
 /// - `'$response.body#/x == literal'` — body-pointer equality (JSON literal
 ///   or quoted/plain string).
 /// - `'$response.body#/x != null'` — not-null existence check.
-/// - `'$response.body#/x'` without operator (or `type: jsonpath`) —
-///   existence check via [`CriterionKind::JsonPathTrue`], keeping the raw
-///   fragment after `#/`.
-fn parse_condition(condition: &str, ty: Option<&str>) -> Result<CriterionKind, CompileError> {
-    let (lhs, op, rhs) = split_op(condition.trim())
-        .ok_or_else(|| CompileError(format!("unsupported success criterion: '{condition}'")))?;
+/// - `'$response.body#/x'` without any operator — existence check via
+///   [`CriterionKind::JsonPathTrue`], keeping the raw fragment after `#/`.
+///
+/// A declared `type: jsonpath` does not change the comparison shapes: with
+/// an operator present the criterion compares; only operator-less body
+/// conditions become [`CriterionKind::JsonPathTrue`].
+fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
+    let trimmed = condition.trim();
+    let Some((lhs, op, rhs)) = split_op(trimmed) else {
+        // Operator-less conditions exist only as body-existence checks.
+        return match classify_target(trimmed) {
+            Some(Target::Body(_)) => Ok(CriterionKind::JsonPathTrue {
+                expr: fragment_after_hash(trimmed).unwrap_or_default(),
+            }),
+            _ => Err(CompileError(format!(
+                "unsupported success criterion: '{condition}'"
+            ))),
+        };
+    };
 
     let target = classify_target(lhs).ok_or_else(|| {
         CompileError(format!(
             "unsupported success criterion target: '{condition}'"
         ))
     })?;
-
-    if ty.is_some_and(|t| t.eq_ignore_ascii_case("jsonpath"))
-        && let Target::Body(_) = target
-    {
-        // Keep the raw fragment; existence semantics apply.
-        let frag = fragment_after_hash(lhs);
-        return Ok(CriterionKind::JsonPathTrue {
-            expr: frag.unwrap_or_default(),
-        });
-    }
 
     match (target, op) {
         (Target::Status, Op::Eq) => Ok(CriterionKind::Equals {
@@ -583,18 +615,34 @@ fn parse_condition(condition: &str, ty: Option<&str>) -> Result<CriterionKind, C
     }
 }
 
-/// Splits `lhs op rhs` at the earliest top-level operator occurrence.
+/// Splits `lhs op rhs` at the earliest operator occurrence that lies outside
+/// the pointer text following a `#/` marker, so operators inside a
+/// `$response.body#/...` fragment never yield split points.
 fn split_op(cond: &str) -> Option<(&str, Op, &str)> {
+    let frag_start = cond.find("#/");
     let mut best: Option<(usize, Op)> = None;
     for (needle, op) in [("==", Op::Eq), ("!=", Op::Ne), ("/=", Op::Re)] {
-        if let Some(idx) = cond.find(needle)
-            && best.as_ref().is_none_or(|(i, _)| idx < *i)
-        {
-            best = Some((idx, op));
+        let mut from = 0;
+        while let Some(rel) = cond[from..].find(needle) {
+            let idx = from + rel;
+            from = idx + needle.len();
+            if in_pointer_text(frag_start, cond, idx) {
+                continue;
+            }
+            if best.as_ref().is_none_or(|(i, _)| idx < *i) {
+                best = Some((idx, op));
+                break;
+            }
         }
     }
     let (idx, op) = best?;
     Some((cond[..idx].trim(), op, cond[idx + 2..].trim()))
+}
+
+/// True when operator position `idx` sits inside the contiguous (whitespace-
+/// free) pointer text introduced by a `#/` marker.
+fn in_pointer_text(frag_start: Option<usize>, cond: &str, idx: usize) -> bool {
+    matches!(frag_start, Some(fs) if idx >= fs && !cond[fs..idx].contains(char::is_whitespace))
 }
 
 /// Classifies a condition LHS as status or body-pointer target.
@@ -617,8 +665,8 @@ fn fragment_after_hash(expr: &str) -> Option<String> {
 }
 
 /// Converts a raw fragment (`pets[0].name`, `a/b`, empty) into an RFC 6901
-/// pointer (`/pets/0/name`). Handles `~1`/`~0` escapes and `[n]` index
-/// suffixes.
+/// pointer (`/pets/0/name`). Handles `~1`/`~0` escapes, `[n]` index suffixes,
+/// and the dot separating an index from the following property.
 #[must_use]
 pub(crate) fn fragment_to_pointer(fragment: &str) -> String {
     let normalized = fragment.trim().trim_start_matches('/');
@@ -634,7 +682,10 @@ pub(crate) fn fragment_to_pointer(fragment: &str) -> String {
                 tokens.push(base);
             }
             tokens.push(current[open + 1..close].to_owned());
-            current = current[close + 1..].to_owned();
+            // Consume one dot separating an index from the next property
+            // (`pets[0].name` -> `/pets/0/name`, not `/pets/0/.name`).
+            let remainder = &current[close + 1..];
+            current = remainder.strip_prefix('.').unwrap_or(remainder).to_owned();
         }
         if !current.is_empty() {
             tokens.push(current);
@@ -686,4 +737,175 @@ fn literal_value(rhs: &str) -> serde_json::Value {
         .and_then(|s| s.strip_suffix('\''))
         .or_else(|| rhs.strip_prefix('"').and_then(|s| s.strip_suffix('"')));
     serde_json::Value::String(inner.unwrap_or(rhs).to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression: operators inside `$response.body#/...` pointer text must
+    // never yield split points (`#/a==b != null` used to compile as
+    // `Equals(/a, "b != null")`).
+    #[test]
+    fn split_op_ignores_operators_inside_pointer_fragment() {
+        let crit = parse_condition("$response.body#/a==b != null").unwrap();
+        assert_eq!(
+            crit,
+            CriterionKind::NotNull {
+                pointer: "/a==b".to_owned()
+            }
+        );
+    }
+
+    // Regression: `type: jsonpath` must not discard a comparison when an
+    // operator is present.
+    #[test]
+    fn jsonpath_type_with_operator_still_compares() {
+        let crit = parse_condition("$response.body#/count == 3").unwrap();
+        assert_eq!(
+            crit,
+            CriterionKind::Equals {
+                pointer: Some("/count".to_owned()),
+                expected: serde_json::json!(3),
+            }
+        );
+    }
+
+    // Regression: operator-less body conditions are documented and reachable.
+    #[test]
+    fn operator_less_body_condition_is_jsonpath_true() {
+        let crit = parse_condition("$response.body#/name").unwrap();
+        assert_eq!(
+            crit,
+            CriterionKind::JsonPathTrue {
+                expr: "/name".to_owned(),
+            }
+        );
+        // Operator-less status conditions remain unsupported.
+        assert!(parse_condition("{$statusCode}").is_err());
+    }
+
+    // Regression: a criterion declared `type: jsonpath` with an operator used
+    // to short-circuit to `JsonPathTrue`, discarding the comparison.
+    #[test]
+    fn typed_jsonpath_criterion_with_operator_compares() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("spec.yaml"),
+            "openapi: 3.1.0\ninfo:\n  title: t\n  version: '1'\npaths:\n  /things:\n    get:\n      operationId: listThings\n      responses:\n        '200': {description: ok}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("flow.arazzo.yaml"),
+            "arazzo: 1.0.0\ninfo:\n  title: flows\n  version: \"1\"\nsourceDescriptions:\n  - name: api\n    url: spec.yaml\nworkflows:\n  - workflowId: wf\n    steps:\n      - stepId: s\n        operationId: listThings\n        successCriteria:\n          - condition: '$response.body#/count == 3'\n            type: jsonpath\n",
+        )
+        .unwrap();
+        let ws = Arc::new(
+            suspect_ref::WorkspaceBuilder::new()
+                .root(dir.path())
+                .build()
+                .unwrap(),
+        );
+        ws.load_all("spec.yaml").unwrap();
+        let plan = compile_flow(dir.path(), &ws).expect("compiles");
+        assert_eq!(
+            plan.workflows[0].steps[0].success[0].kind,
+            CriterionKind::Equals {
+                pointer: Some("/count".to_owned()),
+                expected: serde_json::json!(3),
+            }
+        );
+    }
+
+    // Regression: one leading dot after an `[i]` cut is consumed.
+    #[test]
+    fn bracket_index_dot_is_consumed() {
+        assert_eq!(fragment_to_pointer("pets[0].name"), "/pets/0/name");
+        assert_eq!(fragment_to_pointer("pets[0]"), "/pets/0");
+        assert_eq!(fragment_to_pointer("a[0].b[1].c"), "/a/0/b/1/c");
+    }
+
+    // Regression: absolute-URL literal targets are rejected instead of
+    // mangled into `/https:/...`.
+    #[test]
+    fn literal_absolute_url_operation_path_is_rejected() {
+        assert!(parse_operation_path("GET https://api.example.com/pets").is_none());
+        assert!(parse_operation_path("GET /pets").is_some());
+    }
+
+    /// Writes two specs sharing the basename `petstore.yaml`, each declaring
+    /// its own `operationId` (`op0`, `op1`), plus an Arazzo document whose
+    /// `sourceDescriptions` reference them via `(path, url-spelling)` pairs.
+    fn two_sources_workspace(dir: &std::path::Path, urls: &[(&str, &str)]) -> Arc<Workspace> {
+        let oas = |op_id: &str| {
+            format!(
+                "openapi: 3.1.0\ninfo:\n  title: t\n  version: '1'\npaths:\n  /{op_id}:\n    get:\n      operationId: {op_id}\n      responses:\n        '200': {{description: ok}}\n"
+            )
+        };
+        let mut sources = String::new();
+        for (i, (path, spelling)) in urls.iter().enumerate() {
+            let file = dir.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(&file, oas(&format!("op{i}"))).unwrap();
+            sources.push_str(&format!("  - name: src{i}\n    url: {spelling}\n"));
+        }
+        std::fs::write(
+            dir.join("flow.arazzo.yaml"),
+            format!(
+                "arazzo: 1.0.0\ninfo:\n  title: flows\n  version: \"1\"\nsourceDescriptions:\n{sources}workflows:\n  - workflowId: wf\n    steps:\n      - stepId: s0\n        operationId: op0\n      - stepId: s1\n        operationId: op1\n"
+            ),
+        )
+        .unwrap();
+
+        let ws = suspect_ref::WorkspaceBuilder::new()
+            .root(dir)
+            .build()
+            .expect("ws");
+        for (path, _) in urls {
+            ws.load_all(path).expect("load spec");
+        }
+        Arc::new(ws)
+    }
+
+    fn compile_flow(dir: &std::path::Path, ws: &Arc<Workspace>) -> Result<Plan, CompileError> {
+        let uri = Uri::from_path(&dir.join("flow.arazzo.yaml")).expect("uri");
+        let bytes = std::fs::read(dir.join("flow.arazzo.yaml")).unwrap();
+        let doc = LowDoc::parse(uri, suspect_source::Source::from_vec(bytes));
+        compile_plan(&doc, ws)
+    }
+
+    // Regression: sources sharing a basename bind by resolved URL, not the
+    // first basename match (used to mis-bind both names to one document).
+    #[test]
+    fn shared_basename_binds_by_resolved_url_when_exact() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = two_sources_workspace(
+            dir.path(),
+            &[
+                ("alpha/petstore.yaml", "alpha/petstore.yaml"),
+                ("beta/petstore.yaml", "beta/petstore.yaml"),
+            ],
+        );
+        let plan = compile_flow(dir.path(), &ws).expect("compiles");
+        assert_eq!(plan.workflows[0].steps[0].operation.path, "/op0");
+        assert_eq!(plan.workflows[0].steps[1].operation.path, "/op1");
+    }
+
+    // Regression: same-basename docs with no exact URL match are ambiguous,
+    // not silently bound to the first match.
+    #[test]
+    fn shared_basename_without_exact_match_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // Both urls spell plain `petstore.yaml`: no exact resolved-URI match,
+        // and the basename alone matches two documents.
+        let ws = two_sources_workspace(
+            dir.path(),
+            &[
+                ("alpha/petstore.yaml", "petstore.yaml"),
+                ("beta/petstore.yaml", "petstore.yaml"),
+            ],
+        );
+        let err = compile_flow(dir.path(), &ws).expect_err("ambiguous sources must fail");
+        assert!(err.to_string().contains("ambiguously"), "{err}");
+    }
 }

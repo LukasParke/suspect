@@ -11,11 +11,14 @@ use axum::Router;
 use axum::http::StatusCode;
 use bytes::Bytes;
 use suspect_journal::{
-    Body, CassetteEntry, CassetteHeader, Journal, Record, VecSink, Verdict, read_cassette,
-    write_cassette,
+    Body, CassetteEntry, CassetteHeader, Journal, REDACTED, Record, VecSink, Verdict,
+    read_cassette, write_cassette,
 };
+use tower::ServiceExt;
 
-use crate::{FaultConfig, GatewayConfig, Mode, build_router, scenario::scenario_router};
+use crate::{
+    FaultConfig, GatewayConfig, Mode, ReplayIndex, build_router, scenario::scenario_router,
+};
 /// Spec fixture mirroring `suspect-ir`'s test spec but with fully
 /// resolvable local refs so mock synthesis has real schemas to work from.
 const SPEC: &str = r#"
@@ -54,6 +57,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Pet'
+  /breeds/{name}:
+    get:
+      operationId: showBreedByName
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: ["rex+a"]
+      responses:
+        '200':
+          description: breed
 components:
   schemas:
     Pet:
@@ -469,4 +485,325 @@ async fn validate_enforce_rejects_invalid_request_before_upstream() {
     // With a valid value the exchange goes through.
     let (status, _, _) = request(&base, "GET", "/pets?limit=5").await;
     assert_eq!(status, 200);
+}
+/// Builds a minimal cassette entry for index-level replay tests.
+fn cassette_entry(id: u64, method: &str, url: &str) -> CassetteEntry {
+    CassetteEntry {
+        id,
+        method: method.to_owned(),
+        url: url.to_owned(),
+        status: 200,
+        request_headers: vec![],
+        request_body: Body::from_bytes(b""),
+        response_headers: vec![],
+        response_body: Body::from_bytes(b"{}"),
+        duration_ms: 1.0,
+    }
+}
+
+#[test]
+fn fault_roll_is_pure_function_of_input() {
+    // Same request, same roll — no shared counter, no concurrency drift.
+    for path in ["/pets", "/pets/42?full=1", "/nowhere"] {
+        let expected = crate::fault_roll("GET", path);
+        for _ in 0..3 {
+            assert_eq!(crate::fault_roll("GET", path), expected);
+            assert_eq!(
+                crate::fault_roll("POST", path) % 100,
+                crate::fault_roll("POST", path)
+            );
+        }
+    }
+    // Rolls stay in range and spread across distinct requests.
+    let rolls: std::collections::HashSet<u64> = (0..30)
+        .map(|i| crate::fault_roll("GET", &format!("/pets/{i}")))
+        .collect();
+    assert!(rolls.iter().all(|r| *r < 100));
+    assert!(
+        rolls.len() >= 10,
+        "hash roll should vary by input: {rolls:?}"
+    );
+}
+
+#[tokio::test]
+async fn proxied_requests_carry_upstream_host_header() {
+    // Capture the Host header as received on the wire upstream.
+    let seen: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+    let seen_for_app = Arc::clone(&seen);
+    let app = Router::new().fallback(move |headers: axum::http::HeaderMap| {
+        let seen = Arc::clone(&seen_for_app);
+        async move {
+            seen.lock().expect("lock").push(
+                headers
+                    .get(axum::http::header::HOST)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default()
+                    .to_owned(),
+            );
+            (StatusCode::OK, "up")
+        }
+    });
+    let upstream = spawn_app(app).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg = GatewayConfig {
+        mode: Mode::Proxy {
+            upstream: upstream.clone(),
+        },
+        spec: write_spec(dir.path()),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let base = serve_gateway(&cfg).await;
+
+    let (status, _, _) = request(&base, "GET", "/pets/42").await;
+    assert_eq!(status, 200);
+
+    let hosts = seen.lock().expect("lock");
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(
+        hosts[0],
+        upstream.strip_prefix("http://").expect("authority"),
+        "upstream must receive the upstream authority as Host"
+    );
+}
+
+#[tokio::test]
+async fn oversized_request_body_is_rejected_with_413() {
+    let upstream = canned_upstream(200, r#"{"ok":true}"#).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg = GatewayConfig {
+        mode: Mode::Proxy { upstream },
+        spec: write_spec(dir.path()),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let base = serve_gateway(&cfg).await;
+
+    // One byte past the cap must be rejected, not silently truncated to
+    // an empty body that gets forwarded upstream.
+    let big = Bytes::from(vec![b'a'; crate::proxy::MAX_BODY + 1]);
+    let reply = crate::proxy::fetch_upstream(&base, "GET", "/pets/42", &[], big)
+        .await
+        .expect("reply");
+    assert_eq!(reply.status, 413);
+    assert_eq!(
+        header(&reply.headers, "content-type"),
+        Some("application/problem+json")
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&reply.body).expect("problem json");
+    assert_eq!(parsed["title"], "Payload too large");
+}
+
+#[tokio::test]
+async fn record_mode_redacts_credentials_in_cassette() {
+    // Upstream sets a cookie and returns a body with a secret token; the
+    // client sends Authorization and Cookie headers plus a secret body.
+    let upstream = spawn_app(Router::new().fallback(|| async move {
+        (
+            StatusCode::OK,
+            [
+                ("content-type", "application/json"),
+                ("set-cookie", "session=abc123"),
+            ],
+            r#"{"token":"s3cret","name":"pet"}"#,
+        )
+    }))
+    .await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cassette = dir.path().join("rec.cassette");
+    let cfg = GatewayConfig {
+        mode: Mode::Record {
+            upstream,
+            cassette: cassette.clone(),
+        },
+        spec: write_spec(dir.path()),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let base = serve_gateway(&cfg).await;
+
+    let reply = crate::proxy::fetch_upstream(
+        &base,
+        "GET",
+        "/pets/42",
+        &[
+            ("authorization".to_owned(), "Bearer topsecret".to_owned()),
+            ("cookie".to_owned(), "k=v".to_owned()),
+        ],
+        Bytes::from_static(br#"{"password":"hunter2"}"#),
+    )
+    .await
+    .expect("reply");
+    assert_eq!(reply.status, 200);
+
+    let (_, entries) =
+        read_cassette(std::fs::File::open(&cassette).expect("cassette exists")).expect("readable");
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    let find_header = |name: &str| {
+        entry
+            .request_headers
+            .iter()
+            .chain(entry.response_headers.iter())
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    };
+    assert_eq!(find_header("authorization"), Some(REDACTED));
+    assert_eq!(find_header("cookie"), Some(REDACTED));
+    assert_eq!(find_header("set-cookie"), Some(REDACTED));
+
+    let request_text = entry.request_body.text().expect("utf8 request body");
+    assert!(request_text.contains(REDACTED), "{request_text}");
+    assert!(!request_text.contains("hunter2"), "{request_text}");
+    let response_text = entry.response_body.text().expect("utf8 response body");
+    assert!(response_text.contains(REDACTED), "{response_text}");
+    assert!(!response_text.contains("s3cret"), "{response_text}");
+}
+
+#[tokio::test]
+async fn non_utf8_header_values_are_preserved_lossily() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg = GatewayConfig {
+        mode: Mode::Mock,
+        spec: write_spec(dir.path()),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let (journal_handle, sink) = journal();
+    let router = build_router(&cfg, journal_handle).await.expect("router");
+
+    // A header value with non-UTF-8 bytes must survive collection with a
+    // replacement character instead of being dropped entirely.
+    let mut request = axum::http::Request::builder()
+        .method("GET")
+        .uri("/pets/42")
+        .body(axum::body::Body::empty())
+        .expect("request");
+    request.headers_mut().insert(
+        "x-trace",
+        axum::http::HeaderValue::from_bytes(&[0xff, b'a']).expect("opaque header value"),
+    );
+    let response = router.oneshot(request).await.expect("response");
+    assert_eq!(response.status(), 200);
+
+    let values: Vec<Option<String>> = sink
+        .records()
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Traffic(t) => Some(
+                t.request_headers
+                    .into_iter()
+                    .find(|(n, _)| n == "x-trace")
+                    .map(|(_, v)| v),
+            ),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(values, vec![Some("\u{fffd}a".to_owned())]);
+}
+
+#[tokio::test]
+async fn validate_treats_plus_as_literal_in_path_segments() {
+    let upstream = canned_upstream(200, "{}").await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg = GatewayConfig {
+        mode: Mode::Validate {
+            upstream,
+            enforce: false,
+        },
+        spec: write_spec(dir.path()),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let (journal_handle, sink) = journal();
+    let app = build_router(&cfg, journal_handle).await.expect("router");
+    let base = spawn_app(app).await;
+
+    // `/breeds/{name}` declares enum ["rex+a"]; `+` in a path segment is
+    // literal, so `rex+a` matches the enum and no violation is reported.
+    let (status, _, _) = request(&base, "GET", "/breeds/rex+a").await;
+    assert_eq!(status, 200);
+
+    let verdicts: Vec<Verdict> = sink
+        .records()
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Traffic(t) => Some(t.verdict),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(verdicts.len(), 1);
+    assert!(
+        matches!(&verdicts[0], Verdict::Pass),
+        "`+` must not decode to space in paths: {:?}",
+        verdicts[0]
+    );
+}
+
+#[test]
+fn replay_fallback_is_method_aware() {
+    let entries = vec![
+        cassette_entry(1, "POST", "http://api.example.com/pets/1"),
+        cassette_entry(2, "GET", "http://api.example.com/pets/2"),
+    ];
+    let index = ReplayIndex::new(&entries);
+
+    assert!(index.lookup("POST", "/pets/1").is_some());
+    assert!(index.lookup("GET", "/pets/2").is_some());
+    // A GET must never fall back onto a recorded POST exchange...
+    assert!(index.lookup("GET", "/pets/1").is_none());
+    assert!(index.lookup("GET", "/pets/1?full=1").is_none());
+    // ...but same-method query-less fallback keeps working.
+    assert!(index.lookup("get", "/pets/2?full=1").is_some());
+}
+
+#[test]
+fn replay_keys_normalize_percent_escapes() {
+    let entries = vec![cassette_entry(
+        1,
+        "GET",
+        "http://api.example.com/pets/a%2fb",
+    )];
+    let index = ReplayIndex::new(&entries);
+
+    // Escape-hex casing differs between recording and live request; both
+    // must hit exactly (no fallback needed).
+    assert!(index.lookup("GET", "/pets/a%2Fb").is_some());
+    assert!(index.lookup("GET", "/pets/a%2fb").is_some());
+    assert!(index.lookup("GET", "/pets/a/b").is_none());
+}
+
+#[tokio::test]
+async fn undeclared_method_returns_journaled_405() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cfg = GatewayConfig {
+        mode: Mode::Mock,
+        spec: write_spec(dir.path()),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let (journal_handle, sink) = journal();
+    let app = build_router(&cfg, journal_handle).await.expect("router");
+    let base = spawn_app(app).await;
+
+    // /pets/{petId} only declares GET; POST must yield a problem+json 405
+    // that is journaled like every other served exchange.
+    let (status, headers, body) = request(&base, "POST", "/pets/42").await;
+    assert_eq!(status, 405);
+    assert_eq!(
+        header(&headers, "content-type"),
+        Some("application/problem+json")
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&body).expect("problem json");
+    assert_eq!(parsed["title"], "Method not allowed");
+
+    let statuses: Vec<Option<u16>> = sink
+        .records()
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Traffic(t) => Some(t.status),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(statuses, vec![Some(405)]);
 }

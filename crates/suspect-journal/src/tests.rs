@@ -215,3 +215,167 @@ fn body_hash_detects_tampering() {
     };
     assert_ne!(sha256_hex(tampered.bytes().as_slice()), tampered.sha256);
 }
+
+fn valid_entry(id: u64) -> CassetteEntry {
+    CassetteEntry {
+        id,
+        method: "GET".to_owned(),
+        url: "http://x/y".to_owned(),
+        status: 200,
+        request_headers: vec![],
+        request_body: Body::from_bytes(b"in"),
+        response_headers: vec![],
+        response_body: Body::from_bytes(b"out"),
+        duration_ms: 1.0,
+    }
+}
+
+fn header_line() -> String {
+    format!(
+        "{{\"format\":\"{CASSETTE_FORMAT}\",\"version\":{CASSETTE_VERSION},\
+         \"recorded_at_ms\":0,\"source\":\"s\"}}\n"
+    )
+}
+
+fn cassette_with_entries(entries: &[serde_json::Value]) -> Vec<u8> {
+    let mut buf = header_line().into_bytes();
+    for entry in entries {
+        buf.extend_from_slice(serde_json::to_string(entry).unwrap().as_bytes());
+        buf.push(b'\n');
+    }
+    buf
+}
+
+#[test]
+fn log_and_meta_fields_are_redacted() {
+    let sink = VecSink::default();
+    let mut journal = Journal::new(Box::new(sink.clone()));
+    journal.log(
+        Level::Info,
+        "gateway",
+        "login",
+        serde_json::json!({ "user": "a", "password": "hunter2",
+            "nested": { "api_key": "k" } }),
+    );
+    journal.emit(Journal::meta(
+        "gateway",
+        "starting",
+        serde_json::json!({ "token": "t" }),
+    ));
+    let recs = sink.records();
+    match &recs[0] {
+        Record::Log(l) => {
+            assert_eq!(l.fields["user"], "a");
+            assert_eq!(l.fields["password"], REDACTED);
+            assert_eq!(l.fields["nested"]["api_key"], REDACTED);
+        }
+        other => panic!("expected log, got {other:?}"),
+    }
+    match &recs[1] {
+        Record::Meta(m) => assert_eq!(m.fields["token"], REDACTED),
+        other => panic!("expected meta, got {other:?}"),
+    }
+    for rec in &recs {
+        let line = serde_json::to_string(rec).unwrap();
+        assert!(
+            !line.contains("hunter2") && !line.contains("\"t\""),
+            "credential leaked into sink output: {line}"
+        );
+    }
+}
+
+#[test]
+fn json_key_redaction_is_case_insensitive() {
+    let mut r = Redactor::new();
+    let body = r.json_body(r#"{"Password":"p","User":"a","NESTED":{"Token":"t"}}"#);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["Password"], REDACTED);
+    assert_eq!(v["NESTED"]["Token"], REDACTED);
+    assert_eq!(v["User"], "a");
+
+    // A denylist key added in mixed case still matches any casing.
+    r.deny_json_key("SECRET");
+    let mut value = serde_json::json!({ "secret": "s", "SeCreT": "s2", "keep": 1 });
+    r.json_value(&mut value);
+    assert_eq!(value["secret"], REDACTED);
+    assert_eq!(value["SeCreT"], REDACTED);
+    assert_eq!(value["keep"], 1);
+}
+
+#[test]
+fn read_cassette_rejects_bad_base64_and_bad_sha() {
+    // Declared base64 whose content does not decode strictly.
+    let mut corrupt = serde_json::to_value(valid_entry(1)).unwrap();
+    corrupt["response_body"]["encoding"] = serde_json::json!("base64");
+    corrupt["response_body"]["content"] = serde_json::json!("!!!not base64!!!");
+    assert!(read_cassette(cassette_with_entries(&[corrupt]).as_slice()).is_err());
+
+    // Valid base64 whose stored hash belongs to different bytes.
+    let mismatched = CassetteEntry {
+        response_body: Body {
+            encoding: BodyEncoding::Base64,
+            content: "YWJj".to_owned(), // base64 of "abc"
+            sha256: sha256_hex(b"xyz"),
+        },
+        ..valid_entry(1)
+    };
+    let line = serde_json::to_value(&mismatched).unwrap();
+    assert!(read_cassette(cassette_with_entries(&[line]).as_slice()).is_err());
+
+    // Hash that is not 64 hex characters.
+    let short_hash = CassetteEntry {
+        response_body: Body {
+            sha256: "abcd".to_owned(),
+            ..Body::from_bytes(b"out")
+        },
+        ..valid_entry(1)
+    };
+    let line = serde_json::to_value(&short_hash).unwrap();
+    assert!(read_cassette(cassette_with_entries(&[line]).as_slice()).is_err());
+}
+
+#[test]
+fn cassette_rejects_zero_version_and_out_of_range_entry_values() {
+    let zero_version = format!(
+        "{{\"format\":\"{CASSETTE_FORMAT}\",\"version\":0,\
+         \"recorded_at_ms\":0,\"source\":\"s\"}}\n"
+    );
+    assert!(read_cassette(zero_version.as_bytes()).is_err());
+
+    let header = CassetteHeader {
+        format: CASSETTE_FORMAT.to_owned(),
+        version: CASSETTE_VERSION,
+        recorded_at_ms: 0,
+        source: String::new(),
+    };
+    let low_status = CassetteEntry {
+        status: 99,
+        ..valid_entry(1)
+    };
+    let mut buf: Vec<u8> = Vec::new();
+    assert!(write_cassette(&mut buf, &header, &[low_status]).is_err());
+
+    let high_status = CassetteEntry {
+        status: 600,
+        ..valid_entry(1)
+    };
+    let mut buf: Vec<u8> = Vec::new();
+    assert!(write_cassette(&mut buf, &header, &[high_status]).is_err());
+
+    let nan_duration = CassetteEntry {
+        duration_ms: f64::NAN,
+        ..valid_entry(1)
+    };
+    let mut buf: Vec<u8> = Vec::new();
+    assert!(write_cassette(&mut buf, &header, &[nan_duration]).is_err());
+
+    // Reader enforces the same ranges against hand-written JSONL.
+    let mut bad_status = serde_json::to_value(valid_entry(1)).unwrap();
+    bad_status["status"] = serde_json::json!(42);
+    assert!(read_cassette(cassette_with_entries(&[bad_status]).as_slice()).is_err());
+
+    // NaN serializes to JSON null; the reader must reject it too.
+    let mut bad_duration = serde_json::to_value(valid_entry(1)).unwrap();
+    bad_duration["duration_ms"] = serde_json::Value::Null;
+    assert!(read_cassette(cassette_with_entries(&[bad_duration]).as_slice()).is_err());
+}
