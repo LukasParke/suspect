@@ -1,0 +1,20 @@
+[package]
+name = "suspect-zed"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Zed extension: OpenAPI/Arazzo/Overlay language support via the suspect language server"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.6"
+
+# Intentionally NOT a member of the repository workspace (its members are
+# `crates/*` and `xtask`, both outside `editors/`). This empty [workspace]
+# table marks the extension as its own standalone workspace so
+# `cargo check --manifest-path editors/zed/Cargo.toml` works without
+# touching the root lockfile.
+[workspace]

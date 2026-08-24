@@ -11,7 +11,7 @@ use std::collections::HashMap;
 
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
-use suspect_journal::CassetteEntry;
+use suspect_journal::{Body, CassetteEntry};
 
 use crate::problem;
 
@@ -165,4 +165,34 @@ fn problem_fallback() -> Response {
         r#"{"title":"Internal error"}"#,
     )
         .into_response()
+}
+
+/// Replay-drift comparison: true when `live` bytes hash to the recorded
+/// body's SHA-256 digest. Encoding-agnostic — both sides compare on raw
+/// bytes, so UTF-8 and base64-recorded bodies are treated identically.
+#[must_use]
+pub fn body_matches(recorded: &Body, live: &[u8]) -> bool {
+    suspect_journal::sha256_hex(live) == recorded.sha256
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_identical_bytes_across_encodings() {
+        let text = Body::from_bytes(b"{\"ok\":true}");
+        assert!(body_matches(&text, b"{\"ok\":true}"));
+
+        // A binary (base64-stored) body still compares on raw bytes.
+        let binary = Body::from_bytes(&[0u8, 159, 146, 150, 255]);
+        assert!(body_matches(&binary, &[0u8, 159, 146, 150, 255]));
+    }
+
+    #[test]
+    fn flags_drifted_bytes() {
+        let text = Body::from_bytes(b"alpha");
+        assert!(!body_matches(&text, b"beta"));
+        assert!(!body_matches(&text, b""));
+    }
 }

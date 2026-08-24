@@ -20,12 +20,28 @@ tower-lsp.workspace = true
 tokio = { workspace = true, features = ["io-std"] }
 thiserror.workspace = true
 serde_json.workspace = true
+serde.workspace = true
+suspect-test.workspace = true
+suspect-gen.workspace = true
+suspect-ir.workspace = true
+suspect-journal.workspace = true
+suspect-rex.workspace = true
+bytes.workspace = true
+reqwest = { version = "0.12", optional = true, default-features = false, features = [
+    "rustls-tls",
+] }
+async-trait = { workspace = true, optional = true }
+
+[features]
+default = ["live-run"]
+live-run = ["dep:reqwest", "dep:async-trait"]
 
 [dev-dependencies]
 suspect-arazzo.workspace = true
 suspect-lint.workspace = true
 suspect-validate.workspace = true
 serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 criterion.workspace = true
 
 [[bench]]

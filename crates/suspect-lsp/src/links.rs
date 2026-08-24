@@ -163,8 +163,7 @@ fn lens_data_str<'a>(data: &'a Option<Value>, field: &str) -> Option<&'a str> {
     data.as_ref()?.get(field)?.as_str()
 }
 
-/// The mapping **key** node that owns `value`'s pair.
-fn key_node_of<'d>(value: &NodeRef<'d>) -> Option<SNode<'d>> {
+pub(crate) fn key_node_of<'d>(value: &NodeRef<'d>) -> Option<SNode<'d>> {
     let mut cur = *value.syntax();
     loop {
         if cur.kind() == SyntaxKind::Pair

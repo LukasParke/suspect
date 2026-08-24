@@ -1,13 +1,14 @@
 //! End-to-end coverage for plan compilation, execution, reporters, and
 //! transports against an inline Arazzo + OpenAPI fixture.
 
-use std::sync::Arc;
-
 use crate::exec::{HttpClient, HttpRequest, HttpResponse, RunSummary, TestEvent, run_plan};
-use crate::plan::{CompileError, CriterionPlan, OpKey, compile_plan};
+use crate::fuzz;
+use crate::plan::{CompileError, CriterionKind, CriterionPlan, OpKey, compile_plan};
 use crate::reporters;
 use crate::transports::{CannedTransport, Match, ReplayTransport};
 use bytes::Bytes;
+use serde_json::Value;
+use std::sync::Arc;
 use suspect_journal::{Body, CassetteEntry};
 use suspect_low::LowDoc;
 use suspect_ref::WorkspaceBuilder;
@@ -155,11 +156,11 @@ fn compiles_operations_parameters_and_criteria() {
     // Object request body serializes to JSON text.
     assert!(matches!(&create.request_body, Some(Rex::Text(json)) if json.contains("\"name\"")));
     assert_eq!(
-        create.success,
-        vec![CriterionPlan::Equals {
+        create.success[0].kind,
+        CriterionKind::Equals {
             pointer: None,
             expected: serde_json::json!(201)
-        }]
+        }
     );
     assert!(matches!(
         create.outputs.as_slice(),
@@ -174,14 +175,12 @@ fn compiles_operations_parameters_and_criteria() {
             path: "/pets/{petId}".to_owned()
         }
     );
+    assert_eq!(show.success[0].kind, CriterionKind::StatusInRange(2, 2));
     assert_eq!(
-        show.success,
-        vec![
-            CriterionPlan::StatusInRange(2, 2),
-            CriterionPlan::NotNull {
-                pointer: "/name".to_owned()
-            }
-        ]
+        show.success[1].kind,
+        CriterionKind::NotNull {
+            pointer: "/name".to_owned()
+        }
     );
     assert_eq!(show.body_pointers, vec!["/name".to_owned()]);
     let chained = show
@@ -201,11 +200,11 @@ fn compiles_operations_parameters_and_criteria() {
         }
     );
     assert_eq!(
-        delete.success,
-        vec![CriterionPlan::Equals {
+        delete.success[0].kind,
+        CriterionKind::Equals {
             pointer: None,
             expected: serde_json::json!(204)
-        }]
+        }
     );
 }
 
@@ -368,7 +367,10 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     },
                     parameters: Vec::new(),
                     request_body: None,
-                    success: vec![CriterionPlan::StatusInRange(2, 2)],
+                    success: vec![CriterionPlan {
+                        kind: CriterionKind::StatusInRange(2, 2),
+                        range: 0..0,
+                    }],
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
                 },
@@ -531,4 +533,127 @@ async fn replay_transport_serves_entries_in_order() {
     // Exhausted cassette is a transport error regardless of the request.
     let third = transport.execute(HttpRequest::default()).await;
     assert!(third.is_err());
+}
+
+#[test]
+fn fuzz_scalar_fields_recurse_one_level() {
+    let schema = serde_json::json!({
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+            "id": {"type": "integer"},
+            "name": {"type": "string"},
+            "owner": {"type": "object", "properties": {
+                "email": {"type": "string"},
+                "deep": {"type": "object", "properties": {
+                    "hidden": {"type": "string"}
+                }}
+            }},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "meta": {"type": "array", "items": {"type": "object", "properties": {
+                "k": {"type": "string"}
+            }}}
+        }
+    });
+    let fields = fuzz::scalar_fields(&schema);
+    let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["/id", "/meta/0/k", "/name", "/owner/email", "/tags/0"]
+    );
+    let id = fields.iter().find(|f| f.name == "/id").unwrap();
+    assert!(id.required);
+    let email = fields.iter().find(|f| f.name == "/owner/email").unwrap();
+    assert!(!email.required, "nested props default to optional");
+}
+
+#[test]
+fn fuzz_mutant_values_are_deterministic_and_typed() {
+    let s = serde_json::json!({"type": "string"});
+    let n = serde_json::json!({"type": "integer"});
+    use fuzz::MutantKind as K;
+    assert_eq!(fuzz::mutant_value(&s, K::WrongType), serde_json::json!(42));
+    assert_eq!(
+        fuzz::mutant_value(&n, K::WrongType),
+        Value::String("fuzz".into())
+    );
+    assert_eq!(
+        fuzz::mutant_value(&s, K::Empty),
+        Value::String(String::new())
+    );
+    assert_eq!(fuzz::mutant_value(&n, K::Negative), serde_json::json!(-1));
+    assert_eq!(
+        fuzz::mutant_value(&s, K::Oversize),
+        Value::String("a".repeat(512))
+    );
+    assert_eq!(
+        fuzz::mutant_value(&s, K::UnicodeBomb)
+            .as_str()
+            .unwrap()
+            .chars()
+            .count(),
+        64
+    );
+    assert_eq!(fuzz::mutant_value(&s, K::NullRequired), Value::Null);
+}
+
+#[test]
+fn fuzz_generate_cycles_fields_then_kinds() {
+    let field = |name: &str| fuzz::ScalarField {
+        name: name.to_owned(),
+        schema: serde_json::json!({"type": "string"}),
+        required: true,
+    };
+    let fields = vec![field("a"), field("b")];
+    let mutants = fuzz::generate_mutants(&fields, 5);
+    // First N mutants are fully pinned by (field, kind) cycling.
+    assert_eq!(mutants[0].field, "a");
+    assert_eq!(mutants[0].kind, fuzz::MutantKind::WrongType);
+    assert_eq!(mutants[1].field, "b");
+    assert_eq!(mutants[1].kind, fuzz::MutantKind::WrongType);
+    assert_eq!(mutants[2].field, "a");
+    assert_eq!(mutants[2].kind, fuzz::MutantKind::Empty);
+    assert_eq!(mutants[3].field, "b");
+    assert_eq!(mutants[3].kind, fuzz::MutantKind::Empty);
+    assert_eq!(mutants[4].field, "a");
+    assert_eq!(mutants[4].kind, fuzz::MutantKind::Oversize);
+    // Re-running reproduces byte-identical values.
+    let again = fuzz::generate_mutants(&fields, 5);
+    assert_eq!(mutants, again);
+    assert!(fuzz::generate_mutants(&[], 10).is_empty());
+}
+
+#[test]
+fn fuzz_payload_defaults_everything_but_target() {
+    let f = |name: &str| fuzz::ScalarField {
+        name: name.to_owned(),
+        schema: serde_json::json!({"type": "string"}),
+        required: true,
+    };
+    let nested = fuzz::ScalarField {
+        name: "/owner/email".into(),
+        schema: serde_json::json!({"type": "string"}),
+        required: false,
+    };
+    let fields = vec![f("/id"), f("/tag"), nested];
+    let m = fuzz::Mutant {
+        field: "/id".into(),
+        kind: fuzz::MutantKind::NullRequired,
+        value: Value::Null,
+    };
+    let payload = fuzz::payload(&fields, &m);
+    assert_eq!(payload["id"], Value::Null);
+    assert_eq!(payload["tag"], Value::String("suspect".into()));
+    assert_eq!(payload["owner"]["email"], Value::String("suspect".into()));
+
+    // Non-targeted runs keep everything benign.
+    let benign = fuzz::payload(
+        &fields,
+        &fuzz::Mutant {
+            field: String::new(),
+            kind: fuzz::MutantKind::Empty,
+            value: Value::Null,
+        },
+    );
+    assert_eq!(benign["id"], Value::String("suspect".into()));
 }

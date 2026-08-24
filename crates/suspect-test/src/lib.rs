@@ -31,6 +31,7 @@
 //! [Arazzo 1.0]: https://spec.openapis.org/arazzo/v1.0.0
 
 pub mod exec;
+pub mod fuzz;
 pub mod plan;
 pub mod reporters;
 pub mod transports;
@@ -42,5 +43,6 @@ pub use exec::{
     HttpClient, HttpRequest, HttpResponse, RunSummary, TestEvent, TransportError, run_plan,
 };
 pub use plan::{
-    CompileError, CriterionPlan, OpKey, Plan, StepParam, StepPlan, WfPlan, compile_plan,
+    CompileError, CriterionKind, CriterionPlan, OpKey, Plan, StepParam, StepPlan, WfPlan,
+    compile_plan,
 };

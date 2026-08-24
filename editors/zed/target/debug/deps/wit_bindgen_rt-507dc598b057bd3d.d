@@ -1,0 +1,9 @@
+/home/luke/github/suspect/editors/zed/target/debug/deps/wit_bindgen_rt-507dc598b057bd3d.d: /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/lib.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/cabi_realloc.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support/future_support.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support/stream_support.rs
+
+/home/luke/github/suspect/editors/zed/target/debug/deps/libwit_bindgen_rt-507dc598b057bd3d.rmeta: /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/lib.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/cabi_realloc.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support/future_support.rs /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support/stream_support.rs
+
+/home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/lib.rs:
+/home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/cabi_realloc.rs:
+/home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support.rs:
+/home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support/future_support.rs:
+/home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wit-bindgen-rt-0.41.0/src/async_support/stream_support.rs:

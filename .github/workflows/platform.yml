@@ -1,0 +1,242 @@
+name: platform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+  platform-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+
+      - name: Build suspect CLI (release)
+        run: cargo build --release -p suspect-cli
+
+      - name: Generate petstore fixture inline
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          mkdir -p "$SMOKE"
+
+          cat > "$SMOKE/petstore.yaml" <<'YAML'
+          openapi: "3.0.0"
+          info:
+            title: Smoke Petstore
+            version: "1.0.0"
+          servers:
+            - url: http://127.0.0.1:8091
+          paths:
+            /pets/{petId}:
+              get:
+                operationId: showPetById
+                parameters:
+                  - name: petId
+                    in: path
+                    required: true
+                    schema:
+                      type: integer
+                responses:
+                  '200':
+                    description: one pet
+                    content:
+                      application/json:
+                        schema:
+                          $ref: '#/components/schemas/Pet'
+          components:
+            schemas:
+              Pet:
+                type: object
+                required: [id, name]
+                properties:
+                  id:
+                    type: integer
+                  name:
+                    type: string
+                  tag:
+                    type: string
+          YAML
+
+          cat > "$SMOKE/suite.arazzo.yaml" <<'YAML'
+          arazzo: 1.0.0
+          info:
+            title: smoke flows
+            version: "1.0"
+          sourceDescriptions:
+            - name: petstore
+              url: petstore.yaml
+          workflows:
+            - workflowId: fetch-pet
+              steps:
+                - stepId: show-pet
+                  operationId: showPetById
+                  parameters:
+                    - name: petId
+                      in: path
+                      value: 1
+                  successCriteria:
+                    - condition: '{$statusCode} == 200'
+          YAML
+
+      - name: Start gateway mock server
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          "$GITHUB_WORKSPACE/target/release/suspect" \
+            gateway "$SMOKE/petstore.yaml" --port 8091 --mode mock \
+            >"$SMOKE/gateway.log" 2>&1 &
+          echo $! > "$SMOKE/gateway.pid"
+
+      - name: Wait for gateway readiness
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o "$SMOKE/body.json" -w '%{http_code}' http://127.0.0.1:8091/pets/1 || true)
+            if [ "$code" = "200" ]; then
+              echo "gateway ready: GET /pets/1 -> 200"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "gateway did not become ready" >&2
+          cat "$SMOKE/gateway.log" >&2
+          exit 1
+
+      - name: Curl assert mock response
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          code=$(curl -s -o "$SMOKE/body.json" -w '%{http_code}' http://127.0.0.1:8091/pets/1)
+          echo "GET /pets/1 -> $code"
+          test "$code" = "200"
+
+      - name: Run Arazzo suite against the mock (live)
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          ./target/release/suspect test "$SMOKE/suite.arazzo.yaml" \
+            --base-url http://127.0.0.1:8091 --report ndjson | tee "$SMOKE/live.ndjson"
+          grep -q '"event":"run_done","passed":1,"failed":0' "$SMOKE/live.ndjson"
+
+      - name: Record cassette inline
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          python3 - "$SMOKE/smoke.cassette" <<'PY'
+          import hashlib, json, sys
+
+          body = json.dumps({"id": 1, "name": "Rex", "tag": "happy"}).encode()
+          header = {
+              "format": "suspect-cassette",
+              "version": 1,
+              "recorded_at_ms": 0,
+              "source": "platform-smoke",
+          }
+
+          def body_obj(raw: bytes) -> dict:
+              return {
+                  "encoding": "utf8",
+                  "content": raw.decode(),
+                  "sha256": hashlib.sha256(raw).hexdigest(),
+              }
+
+          entry = {
+              "id": 1,
+              "method": "GET",
+              "url": "http://127.0.0.1:8091/pets/1",
+              "status": 200,
+              "request_headers": [],
+              "request_body": body_obj(b""),
+              "response_headers": [["content-type", "application/json"]],
+              "response_body": body_obj(body),
+              "duration_ms": 1.0,
+          }
+          out = sys.argv[1]
+          with open(out, "w") as f:
+              f.write(json.dumps(header) + "\n")
+              f.write(json.dumps(entry) + "\n")
+          PY
+
+      - name: Run Arazzo suite offline against the cassette
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          ./target/release/suspect test "$SMOKE/suite.arazzo.yaml" \
+            --base-url http://127.0.0.1:8091 --offline \
+            --cassette "$SMOKE/smoke.cassette" --report ndjson \
+            | tee "$SMOKE/offline.ndjson"
+          grep -q '"event":"run_done","passed":1,"failed":0' "$SMOKE/offline.ndjson"
+
+      - name: Stop gateway
+        if: always()
+        run: |
+          SMOKE="$RUNNER_TEMP/suspect-smoke"
+          if [ -f "$SMOKE/gateway.pid" ]; then kill "$(cat "$SMOKE/gateway.pid")" || true; fi
+          tail -5 "$SMOKE/gateway.log" || true
+
+  vscode-build:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build VS Code extension (skipped without npm)
+        shell: bash
+        run: |
+          if ! command -v npm >/dev/null 2>&1; then
+            echo "npm not available on this runner; skipping vscode-build"
+            exit 0
+          fi
+          cd .vscode-suspect
+          npm install
+          node --check extension.js
+
+  zed-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            editors/zed
+
+      # The extension crate is intentionally outside the repository workspace
+      # (root members are crates/* and xtask); it carries its own [workspace]
+      # table so this host-target check never touches the root lockfile.
+      - name: Check Zed extension (host target)
+        run: cargo check --manifest-path editors/zed/Cargo.toml

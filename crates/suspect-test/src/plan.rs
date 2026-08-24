@@ -8,6 +8,7 @@
 //! criteria default to `StatusInRange(2, 2)` per the Arazzo recommendation.
 
 use std::fmt;
+use std::ops::Range;
 use std::sync::Arc;
 
 use suspect_arazzo::{ArazzoDoc, ParameterView, StepView};
@@ -84,7 +85,7 @@ pub struct StepPlan {
     pub request_body: Option<Rex>,
     /// Success criteria; all must pass for the step to pass. Empty at
     /// compile time means "defaults to 2xx" and is materialized as
-    /// [`CriterionPlan::StatusInRange(2, 2)`](CriterionPlan::StatusInRange).
+    /// [`CriterionKind::StatusInRange(2, 2)`](CriterionKind::StatusInRange).
     pub success: Vec<CriterionPlan>,
     /// Step outputs `(name, expression)` captured after a passing step.
     pub outputs: Vec<(String, Rex)>,
@@ -94,8 +95,29 @@ pub struct StepPlan {
 }
 
 /// Pragmatic success-criterion model compiled from Arazzo condition strings.
+///
+/// Carries the byte [`Range`] of the criterion's `condition` string node in
+/// the source Arazzo document so editors can anchor failure diagnostics.
 #[derive(Debug, Clone, PartialEq)]
-pub enum CriterionPlan {
+pub struct CriterionPlan {
+    /// The compiled criterion.
+    pub kind: CriterionKind,
+    /// Byte range of the `condition` string in the Arazzo document.
+    pub range: Range<usize>,
+}
+
+impl CriterionPlan {
+    /// Short human-readable rendering used in test events and reports.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        self.kind.describe()
+    }
+}
+
+/// One compiled success-criterion check (the payload of a
+/// [`CriterionPlan`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum CriterionKind {
     /// `$statusCode` falls inside an inclusive range of hundreds classes,
     /// e.g. `(2, 2)` accepts every 2xx response.
     StatusInRange(
@@ -132,7 +154,7 @@ pub enum CriterionPlan {
     },
 }
 
-impl CriterionPlan {
+impl CriterionKind {
     /// Short human-readable rendering used in test events and reports.
     #[must_use]
     pub fn describe(&self) -> String {
@@ -284,13 +306,25 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         let cond = c.condition().ok_or_else(|| {
             CompileError(format!("step '{step_id}': criterion missing condition"))
         })?;
+        let cond_range = c
+            .node()
+            .get("condition")
+            .map(|n| n.byte_range())
+            .unwrap_or_else(|| c.node().byte_range());
         let crit = parse_condition(cond, c.criterion_type())?;
         crit.note_pointer(&mut body_pointers);
-        success.push(crit);
+        success.push(CriterionPlan {
+            kind: crit,
+            range: cond_range,
+        });
     }
     if success.is_empty() {
-        // Spec-recommended default: accept any 2xx.
-        success.push(CriterionPlan::StatusInRange(2, 2));
+        // Spec-recommended default: accept any 2xx. Anchored on the step
+        // node since no condition string exists to point at.
+        success.push(CriterionPlan {
+            kind: CriterionKind::StatusInRange(2, 2),
+            range: step.node().byte_range(),
+        });
     }
 
     let mut outputs = Vec::new();
@@ -488,7 +522,7 @@ enum Op {
 enum Target {
     /// `{$statusCode}`
     Status,
-    /// `$response.body#/...` with the decoded RFC 6901 pointer.
+    /// `$response.body#/<pointer>`
     Body(String),
 }
 
@@ -502,9 +536,9 @@ enum Target {
 ///   or quoted/plain string).
 /// - `'$response.body#/x != null'` — not-null existence check.
 /// - `'$response.body#/x'` without operator (or `type: jsonpath`) —
-///   existence check via [`CriterionPlan::JsonPathTrue`], keeping the raw
+///   existence check via [`CriterionKind::JsonPathTrue`], keeping the raw
 ///   fragment after `#/`.
-fn parse_condition(condition: &str, ty: Option<&str>) -> Result<CriterionPlan, CompileError> {
+fn parse_condition(condition: &str, ty: Option<&str>) -> Result<CriterionKind, CompileError> {
     let (lhs, op, rhs) = split_op(condition.trim())
         .ok_or_else(|| CompileError(format!("unsupported success criterion: '{condition}'")))?;
 
@@ -519,13 +553,13 @@ fn parse_condition(condition: &str, ty: Option<&str>) -> Result<CriterionPlan, C
     {
         // Keep the raw fragment; existence semantics apply.
         let frag = fragment_after_hash(lhs);
-        return Ok(CriterionPlan::JsonPathTrue {
+        return Ok(CriterionKind::JsonPathTrue {
             expr: frag.unwrap_or_default(),
         });
     }
 
     match (target, op) {
-        (Target::Status, Op::Eq) => Ok(CriterionPlan::Equals {
+        (Target::Status, Op::Eq) => Ok(CriterionKind::Equals {
             pointer: None,
             expected: literal_value(rhs),
         }),
@@ -533,17 +567,17 @@ fn parse_condition(condition: &str, ty: Option<&str>) -> Result<CriterionPlan, C
         (Target::Status, Op::Ne) => Err(CompileError(format!(
             "unsupported success criterion: '{condition}'"
         ))),
-        (Target::Body(pointer), Op::Eq) => Ok(CriterionPlan::Equals {
+        (Target::Body(pointer), Op::Eq) => Ok(CriterionKind::Equals {
             pointer: Some(pointer),
             expected: literal_value(rhs),
         }),
         (Target::Body(pointer), Op::Ne) if rhs.trim() == "null" => {
-            Ok(CriterionPlan::NotNull { pointer })
+            Ok(CriterionKind::NotNull { pointer })
         }
         (Target::Body(_), Op::Ne) => Err(CompileError(format!(
             "unsupported success criterion: '{condition}'"
         ))),
-        (Target::Body(_), Op::Re) => Ok(CriterionPlan::Regex {
+        (Target::Body(_), Op::Re) => Ok(CriterionKind::Regex {
             pattern: regex_pattern(rhs),
         }),
     }
@@ -626,7 +660,7 @@ fn regex_pattern(rhs: &str) -> String {
 
 /// `^N..`-shaped patterns collapse to a status-class range; anything else is
 /// kept as a regex criterion.
-fn status_range_or_regex(pattern: String) -> CriterionPlan {
+fn status_range_or_regex(pattern: String) -> CriterionKind {
     let bytes = pattern.as_bytes();
     if bytes.len() == 4
         && bytes[0] == b'^'
@@ -635,9 +669,9 @@ fn status_range_or_regex(pattern: String) -> CriterionPlan {
         && bytes[2] == b'.'
     {
         let d = bytes[1] - b'0';
-        return CriterionPlan::StatusInRange(d, d);
+        return CriterionKind::StatusInRange(d, d);
     }
-    CriterionPlan::Regex { pattern }
+    CriterionKind::Regex { pattern }
 }
 
 /// Parses a condition RHS literal: JSON when it parses, otherwise a dequoted

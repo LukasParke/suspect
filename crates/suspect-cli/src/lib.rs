@@ -151,6 +151,34 @@ pub enum Command {
         /// Enables offline mode (requires --cassette).
         #[arg(long)]
         offline: bool,
+        /// Event stream format: human text or one-JSON-per-line ndjson.
+        #[arg(long, value_enum, default_value = "text")]
+        report: ReportFormat,
+    },
+    /// Fuzz operations with schema-mutating requests against a live server.
+    Fuzz {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Base URL prepended to operation paths.
+        #[arg(long, default_value = "http://localhost:8080")]
+        base_url: String,
+        /// Mutant requests generated per operation.
+        #[arg(long, default_value_t = 25)]
+        runs: usize,
+        /// Run only operations whose operationId contains this substring.
+        #[arg(long)]
+        filter: Option<String>,
+    },
+    /// Re-issue a recorded cassette against an upstream and report drift.
+    Replay {
+        /// Recorded Suspect Cassette to replay from.
+        cassette: PathBuf,
+        /// Upstream base URL the recorded traffic is re-issued against.
+        #[arg(long)]
+        upstream: String,
+        /// Print unified diffs of drifted UTF-8 response bodies.
+        #[arg(long)]
+        diff: bool,
     },
     /// Render documentation or SDK presets from an OpenAPI document.
     Gen {
@@ -225,6 +253,15 @@ pub struct TextFormat {
     pub format: OutputFormat,
 }
 
+/// Output style for `suspect test` event streams.
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ReportFormat {
+    /// Human-readable progress lines.
+    Text,
+    /// One JSON object per line (machine consumable).
+    Ndjson,
+}
+
 /// Top-level CLI shape (`suspect --format json <command> ...`).
 #[derive(Debug, Parser)]
 #[command(name = "suspect", version, about = "OpenAPI/Arazzo/Overlay toolkit")]
@@ -267,13 +304,31 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             iters,
             text,
         } => commands::bench::bench(&fixture, iters, text.format),
+        Command::Fuzz {
+            spec,
+            base_url,
+            runs,
+            filter,
+        } => commands::fuzz::fuzz(&spec, &base_url, runs, filter.as_deref()),
+        Command::Replay {
+            cassette,
+            upstream,
+            diff,
+        } => commands::replay::replay(&cassette, &upstream, diff),
         Command::Test {
             arazzo,
             base_url,
             filter,
             cassette,
             offline: _,
-        } => commands::test::test(&arazzo, &base_url, filter.as_deref(), cassette.as_deref()),
+            report,
+        } => commands::test::test(
+            &arazzo,
+            &base_url,
+            filter.as_deref(),
+            cassette.as_deref(),
+            matches!(report, ReportFormat::Ndjson),
+        ),
         Command::Gen {
             spec,
             preset,

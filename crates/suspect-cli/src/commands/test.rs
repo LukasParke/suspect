@@ -4,51 +4,12 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use super::http::LiveTransport;
 use suspect_journal::Journal;
 use suspect_source::Uri;
 use suspect_test::reporters;
 use suspect_test::transports::ReplayTransport;
-use suspect_test::{HttpClient, HttpRequest, HttpResponse, TestEvent, TransportError};
-
-/// Live HTTP transport backed by `reqwest`; the CLI-side implementation of
-/// [`HttpClient`] (the core crate stays dependency-free).
-struct LiveTransport {
-    client: reqwest::Client,
-}
-
-#[async_trait::async_trait]
-impl HttpClient for LiveTransport {
-    async fn execute(&self, req: HttpRequest) -> Result<HttpResponse, TransportError> {
-        let method = reqwest::Method::from_bytes(req.method.as_bytes())
-            .map_err(|e| TransportError(format!("bad method {}: {e}", req.method)))?;
-        let mut builder = self.client.request(method, &req.url);
-        for (k, v) in &req.headers {
-            builder = builder.header(k.as_str(), v.as_str());
-        }
-        if !req.body.is_empty() {
-            builder = builder.body(req.body.clone());
-        }
-        let resp = builder
-            .send()
-            .await
-            .map_err(|e| TransportError(e.to_string()))?;
-        let status = resp.status().as_u16();
-        let headers: Vec<(String, String)> = resp
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.as_str().to_owned(), v.to_str().unwrap_or("").to_owned()))
-            .collect();
-        let body = resp
-            .bytes()
-            .await
-            .map_err(|e| TransportError(e.to_string()))?;
-        Ok(HttpResponse {
-            status,
-            headers,
-            body,
-        })
-    }
-}
+use suspect_test::{HttpClient, TestEvent};
 
 /// Runs `suspect test` against one Arazzo document.
 ///
@@ -61,6 +22,7 @@ pub fn test(
     base_url: &str,
     filter: Option<&str>,
     offline_cassette: Option<&Path>,
+    ndjson: bool,
 ) -> anyhow::Result<i32> {
     let ws = super::workspace_dir_all(arazzo)?;
     let uri = Uri::from_path(arazzo)?;
@@ -77,13 +39,14 @@ pub fn test(
         return Ok(2);
     }
 
-    rt_run(&plan, base_url, offline_cassette)
+    rt_run(&plan, base_url, offline_cassette, ndjson)
 }
 
 fn rt_run(
     plan: &suspect_test::Plan,
     base_url: &str,
     offline_cassette: Option<&Path>,
+    ndjson: bool,
 ) -> anyhow::Result<i32> {
     let rt = tokio::runtime::Runtime::new()?;
     let outcome = rt.block_on(async move {
@@ -93,11 +56,7 @@ fn rt_run(
                 let (_, entries) = suspect_journal::read_cassette(file)?;
                 Arc::new(ReplayTransport::new(entries))
             }
-            None => Arc::new(LiveTransport {
-                client: reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(30))
-                    .build()?,
-            }),
+            None => Arc::new(LiveTransport::new(std::time::Duration::from_secs(30))?),
         };
         let (tx, mut rx) = tokio::sync::mpsc::channel::<TestEvent>(256);
         // Drain + print events on a side task; run_plan's cooperative
@@ -106,7 +65,14 @@ fn rt_run(
         let drainer = tokio::spawn(async move {
             let mut events = Vec::new();
             while let Some(event) = rx.recv().await {
-                println!("{}", reporters::event_line(&event));
+                if ndjson {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&event).unwrap_or_else(|_| "{}".to_owned())
+                    );
+                } else {
+                    println!("{}", reporters::event_line(&event));
+                }
                 events.push(event);
             }
             events

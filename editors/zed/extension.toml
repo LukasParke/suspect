@@ -1,0 +1,9 @@
+id = "suspect"
+name = "Suspect"
+version = "0.1.0"
+schema_version = "1"
+authors = ["Luke"]
+description = "OpenAPI/Arazzo/Overlay language support backed by the `suspect` language server."
+
+[language_servers.suspect-lsp]
+languages = ["YAML", "JSON"]

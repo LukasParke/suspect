@@ -1,0 +1,5 @@
+/home/luke/github/suspect/editors/zed/target/debug/build/serde_json-f81f1234ff00a2b4/build_script_build-f81f1234ff00a2b4.d: /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/build.rs
+
+/home/luke/github/suspect/editors/zed/target/debug/build/serde_json-f81f1234ff00a2b4/build_script_build-f81f1234ff00a2b4: /home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/build.rs
+
+/home/luke/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.151/build.rs:

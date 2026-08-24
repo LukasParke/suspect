@@ -1,0 +1,124 @@
+name: 'suspect'
+description: >
+  Build the suspect CLI in release mode and run one of its subcommands
+  (check | test | gen) with sensible defaults.
+inputs:
+  command:
+    description: 'Subcommand to run: check | test | gen.'
+    required: true
+  paths:
+    description: 'check: documents to check (space/newline separated).'
+    required: false
+    default: ''
+  arazzo:
+    description: 'test: path to the Arazzo suite document.'
+    required: false
+    default: ''
+  base-url:
+    description: 'test: base URL prepended to operation paths.'
+    required: false
+    default: 'http://127.0.0.1:8080'
+  cassette:
+    description: 'test: record a Suspect Cassette to replay offline (implies --offline).'
+    required: false
+    default: ''
+  report:
+    description: 'test: event stream format: text | ndjson.'
+    required: false
+    default: 'text'
+  filter:
+    description: 'test: only run workflows whose id contains this substring.'
+    required: false
+    default: ''
+  preset:
+    description: 'gen: shipped preset name (docs-md | ts-sdk | rust-sdk).'
+    required: false
+    default: ''
+  manifest:
+    description: 'gen: custom gen.toml manifest (conflicts with preset).'
+    required: false
+    default: ''
+  out-dir:
+    description: 'gen: output root directory.'
+    required: false
+    default: 'gen-out'
+  diff:
+    description: 'gen: print unified diffs without writing files.'
+    required: false
+    default: 'true'
+  extra-args:
+    description: 'Additional raw arguments appended to the chosen subcommand.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          .
+
+    - name: Build suspect CLI (release)
+      shell: bash
+      run: cargo build --release -p suspect-cli
+
+    - name: Run suspect ${{ inputs.command }}
+      shell: bash
+      env:
+        SUSPECT_COMMAND: ${{ inputs.command }}
+        SUSPECT_PATHS: ${{ inputs.paths }}
+        SUSPECT_ARAZZO: ${{ inputs.arazzo }}
+        SUSPECT_BASE_URL: ${{ inputs.base-url }}
+        SUSPECT_CASSETTE: ${{ inputs.cassette }}
+        SUSPECT_REPORT: ${{ inputs.report }}
+        SUSPECT_FILTER: ${{ inputs.filter }}
+        SUSPECT_PRESET: ${{ inputs.preset }}
+        SUSPECT_MANIFEST: ${{ inputs.manifest }}
+        SUSPECT_OUT_DIR: ${{ inputs.out-dir }}
+        SUSPECT_DIFF: ${{ inputs.diff }}
+        SUSPECT_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        BIN="./target/release/suspect"
+        EXTRA=()
+        if [ -n "$SUSPECT_EXTRA_ARGS" ]; then read -r -a EXTRA <<< "$SUSPECT_EXTRA_ARGS"; fi
+
+        case "$SUSPECT_COMMAND" in
+          check)
+            if [ -z "$SUSPECT_PATHS" ]; then
+              echo "input `paths` is required for the check command" >&2
+              exit 2
+            fi
+            DOCS=$(echo "$SUSPECT_PATHS" | tr '\n' ' ')
+            # shellcheck disable=SC2086
+            "$BIN" check $DOCS --format json "${EXTRA[@]}"
+            ;;
+          test)
+            if [ -z "$SUSPECT_ARAZZO" ]; then
+              echo "input `arazzo` is required for the test command" >&2
+              exit 2
+            fi
+            ARGS=(test "$SUSPECT_ARAZZO" --base-url "$SUSPECT_BASE_URL" --report "$SUSPECT_REPORT")
+            if [ -n "$SUSPECT_FILTER" ]; then ARGS+=(--filter "$SUSPECT_FILTER"); fi
+            if [ -n "$SUSPECT_CASSETTE" ]; then ARGS+=(--offline --cassette "$SUSPECT_CASSETTE"); fi
+            "$BIN" "${ARGS[@]}" "${EXTRA[@]}"
+            ;;
+          gen)
+            if [ -z "$SUSPECT_PRESET" ] && [ -z "$SUSPECT_MANIFEST" ]; then
+              echo "one of inputs `preset` or `manifest` is required for the gen command" >&2
+              exit 2
+            fi
+            ARGS=(gen)
+            if [ -n "$SUSPECT_PRESET" ]; then ARGS+=(--preset "$SUSPECT_PRESET");
+            else ARGS+=(--manifest "$SUSPECT_MANIFEST"); fi
+            ARGS+=("--out" "$SUSPECT_OUT_DIR")
+            if [ "$SUSPECT_DIFF" = "true" ]; then ARGS+=(--diff); fi
+            "$BIN" "${ARGS[@]}" "${EXTRA[@]}"
+            ;;
+          *)
+            echo "unknown command '$SUSPECT_COMMAND' (expected check | test | gen)" >&2
+            exit 2
+            ;;
+        esac

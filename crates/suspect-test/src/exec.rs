@@ -18,7 +18,7 @@ use suspect_ir::ParamIn;
 use suspect_rex::{RexCtx, eval_rex};
 use tokio::sync::mpsc;
 
-use crate::plan::{CriterionPlan, Plan, StepPlan};
+use crate::plan::{CriterionKind, Plan, StepPlan};
 
 /// An outbound HTTP request built by the executor.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -199,7 +199,7 @@ pub async fn run_plan(
 
     // One future per workflow; all borrow `http` and are driven
     // cooperatively inside this task until every workflow completes.
-    let mut running: Vec<std::pin::Pin<Box<dyn Future<Output = WfCounts> + '_>>> =
+    let mut running: Vec<std::pin::Pin<Box<dyn Future<Output = WfCounts> + Send + '_>>> =
         Vec::with_capacity(plan.workflows.len());
     for wf in &plan.workflows {
         running.push(Box::pin(run_workflow(wf, &base, http, events.clone())));
@@ -430,7 +430,7 @@ async fn run_step(
 
     let mut all_ok = true;
     for crit in &step.success {
-        match eval_criterion(crit, response.status, body_json.as_ref(), &body_text) {
+        match eval_criterion(&crit.kind, response.status, body_json.as_ref(), &body_text) {
             Ok(()) => {
                 send(
                     events,
@@ -495,13 +495,13 @@ async fn run_step(
 ///
 /// Returns `Err((expected, actual))` renderings when it fails.
 fn eval_criterion(
-    crit: &CriterionPlan,
+    crit: &CriterionKind,
     status: u16,
     body_json: Option<&serde_json::Value>,
     body_text: &str,
 ) -> Result<(), (String, String)> {
     match crit {
-        CriterionPlan::StatusInRange(lo, hi) => {
+        CriterionKind::StatusInRange(lo, hi) => {
             let class = status / 100;
             if (u16::from(*lo)..=u16::from(*hi)).contains(&class) {
                 Ok(())
@@ -509,7 +509,7 @@ fn eval_criterion(
                 Err((crit.describe(), status.to_string()))
             }
         }
-        CriterionPlan::Equals { pointer, expected } => match pointer {
+        CriterionKind::Equals { pointer, expected } => match pointer {
             None if expected.as_u64() == Some(u64::from(status)) => Ok(()),
             None => Err((expected.to_string(), status.to_string())),
             Some(pointer) => match resolve_pointer(body_json, pointer) {
@@ -524,14 +524,14 @@ fn eval_criterion(
                 )),
             },
         },
-        CriterionPlan::NotNull { pointer } => match resolve_pointer(body_json, pointer) {
+        CriterionKind::NotNull { pointer } => match resolve_pointer(body_json, pointer) {
             Some(serde_json::Value::Null) | None => Err((
                 format!("{pointer} != null"),
                 format!("{pointer} resolves to null/missing"),
             )),
             Some(_) => Ok(()),
         },
-        CriterionPlan::Regex { pattern } => match regex::Regex::new(pattern) {
+        CriterionKind::Regex { pattern } => match regex::Regex::new(pattern) {
             Ok(re) if re.is_match(body_text) => Ok(()),
             Ok(_) => Err((
                 format!("body =~ /{pattern}/"),
@@ -539,7 +539,7 @@ fn eval_criterion(
             )),
             Err(e) => Err((format!("body =~ /{pattern}/"), e.to_string())),
         },
-        CriterionPlan::JsonPathTrue { expr } => {
+        CriterionKind::JsonPathTrue { expr } => {
             let pointer = crate::plan::fragment_to_pointer(expr);
             match resolve_pointer(body_json, &pointer) {
                 Some(serde_json::Value::Null) | None => Err((

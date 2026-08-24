@@ -1,0 +1,125 @@
+{
+  "name": "suspect-vscode",
+  "displayName": "Suspect",
+  "description": "Run Arazzo workflows, drive the mock gateway, and generate docs/SDK presets from OpenAPI documents.",
+  "version": "0.1.0",
+  "publisher": "suspect",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "activationEvents": [
+    "onLanguage:yaml",
+    "onLanguage:json",
+    "workspaceContains:**/*.arazzo.yaml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Suspect",
+      "properties": {
+        "suspect.basePath": {
+          "type": "string",
+          "default": "suspect",
+          "description": "Path to the suspect CLI: a directory containing the `suspect` executable, the executable itself, or bare `suspect` to resolve from $PATH."
+        },
+        "suspect.testBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "Base URL prepended to operation paths when running workflow tests."
+        },
+        "suspect.gatewayPort": {
+          "type": "number",
+          "default": 8080,
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "TCP port bound by the mock gateway on 127.0.0.1."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "suspect.runWorkflow",
+        "title": "Suspect: Run Workflow"
+      },
+      {
+        "command": "suspect.startGateway",
+        "title": "Suspect: Start Gateway"
+      },
+      {
+        "command": "suspect.stopGateway",
+        "title": "Suspect: Stop Gateway"
+      },
+      {
+        "command": "suspect.genPreset",
+        "title": "Suspect: Generate Preset"
+      },
+      {
+        "command": "suspect.openNotebook",
+        "title": "Suspect: Open Notebook"
+      },
+      {
+        "command": "_suspect.toggleGateway",
+        "title": "Suspect: Toggle Gateway"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "suspect-explorer",
+          "title": "Suspect",
+          "icon": "media/suspect.svg"
+        }
+      ]
+    },
+    "views": {
+      "suspect-explorer": [
+        {
+          "id": "suspect.workflows",
+          "name": "Workflows"
+        }
+      ]
+    },
+    "customEditors": [
+      {
+        "viewType": "suspect.notebook",
+        "displayName": "Suspect Notebook",
+        "selector": [
+          {
+            "filenamePattern": "*.arazzo.yaml"
+          },
+          {
+            "filenamePattern": "*.arazzo.yml"
+          }
+        ]
+      }
+    ],
+    "menus": {
+      "view/item/context": [
+        {
+          "command": "suspect.runWorkflow",
+          "when": "view == suspect.workflows && viewItem == suspectWorkflow",
+          "group": "inline@1"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "_suspect.toggleGateway",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
