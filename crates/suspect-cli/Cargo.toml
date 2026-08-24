@@ -37,6 +37,8 @@ tokio.workspace = true
 serde.workspace = true
 rayon.workspace = true
 anyhow.workspace = true
+suspect-watch.workspace = true
+suspect-gateway.workspace = true
 
 [features]
 default = ["live-http"]

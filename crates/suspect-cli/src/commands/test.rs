@@ -111,7 +111,7 @@ fn rt_run(
             }
             events
         });
-        let summary = suspect_test::run_plan(&plan, base_url, http.as_ref(), tx).await;
+        let summary = suspect_test::run_plan(plan, base_url, http.as_ref(), tx).await;
         let events = drainer
             .await
             .map_err(|e| anyhow::anyhow!("drainer panicked: {e}"))?;

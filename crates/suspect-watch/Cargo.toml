@@ -1,0 +1,14 @@
+[package]
+name = "suspect-watch"
+description = "Debounced recursive filesystem watching for yaml/yml/json documents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+notify.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

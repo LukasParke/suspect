@@ -1,0 +1,33 @@
+[package]
+name = "suspect-gateway"
+description = "HTTP contract gateway: mock, proxy, validate, record, and replay serving"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+suspect-source.workspace = true
+suspect-ref.workspace = true
+suspect-ir.workspace = true
+suspect-journal.workspace = true
+suspect-gen.workspace = true
+suspect-test.workspace = true
+axum = "0.8"
+tokio = { workspace = true, features = ["net"] }
+hyper = { version = "1", features = ["client", "http1"] }
+http-body-util = "0.1"
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+criterion.workspace = true
+
+[[bench]]
+name = "gw"
+harness = false

@@ -4,11 +4,13 @@ use suspect_ref::Workspace;
 pub mod bench;
 pub mod check;
 pub mod fmt;
+pub mod gateway;
 pub mod generate;
 pub mod lint;
 pub mod overlay;
 pub mod stats;
 pub mod test;
+pub mod watch;
 
 /// Loads every YAML/JSON document in `spec`'s directory into one
 /// workspace. Arazzo source descriptions reference sibling files without

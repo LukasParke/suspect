@@ -169,6 +169,49 @@ pub enum Command {
         #[arg(long)]
         diff: bool,
     },
+    /// Re-run a command whenever documents change under the given roots.
+    Watch {
+        /// Directories (or files) watched recursively for yaml/yml/json changes.
+        #[arg(required = true)]
+        roots: Vec<PathBuf>,
+        /// Command (with arguments) to run and re-run on each change burst.
+        #[arg(last = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Serve a spec as a mock, or proxy/validate/record against an upstream,
+    /// or replay a recorded cassette.
+    Gateway {
+        /// Entry OpenAPI document (mock/validate/record) or ignored (replay).
+        spec: PathBuf,
+        /// TCP port to bind on 127.0.0.1.
+        #[arg(long, short = 'p', default_value_t = 8080)]
+        port: u16,
+        /// Operating mode: mock | proxy | validate | record | replay.
+        #[arg(long, default_value = "mock")]
+        mode: String,
+        /// Upstream base URL for proxy/validate/record modes.
+        #[arg(long)]
+        upstream: Option<PathBuf>,
+        /// Cassette path for record output.
+        #[arg(long)]
+        cassette: Option<PathBuf>,
+        /// Validate mode only: reject invalid requests with 400 instead of
+        /// forwarding them.
+        #[arg(long)]
+        enforce: bool,
+        /// Fault injection: delay in milliseconds.
+        #[arg(long, default_value_t = 0)]
+        delay_ms: u64,
+        /// Fault injection: percent of requests delayed.
+        #[arg(long, default_value_t = 0)]
+        delay_pct: u8,
+        /// Fault injection: status returned by faulted requests.
+        #[arg(long)]
+        error_status: Option<u16>,
+        /// Fault injection: percent of requests faulted.
+        #[arg(long, default_value_t = 0)]
+        error_pct: u8,
+    },
     /// Run the language server over stdio.
     Lsp,
 }
@@ -240,6 +283,30 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         } => {
             commands::generate::generate(&spec, preset.as_deref(), manifest.as_deref(), &out, diff)
         }
+        Command::Gateway {
+            spec,
+            port,
+            mode,
+            upstream,
+            cassette,
+            enforce,
+            delay_ms,
+            delay_pct,
+            error_status,
+            error_pct,
+        } => commands::gateway::gateway(
+            &spec,
+            port,
+            &mode,
+            upstream.as_ref(),
+            cassette.as_ref(),
+            enforce,
+            delay_ms,
+            delay_pct,
+            error_status,
+            error_pct,
+        ),
+        Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
         Command::Lsp => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(suspect_lsp::run_server());

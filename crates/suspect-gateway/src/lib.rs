@@ -1,0 +1,594 @@
+//! HTTP contract gateway for the suspect platform.
+//!
+//! One server, five [`Mode`]s over the same spec-driven router:
+//!
+//! - **Mock** — serves deterministic examples synthesized from the IR at
+//!   startup (see [`mock`]).
+//! - **Proxy** — forwards to an upstream unchanged (see [`proxy`]).
+//! - **Validate** — proxies plus structural request/response validation;
+//!   response violations are journaled but passed through unchanged.
+//! - **Record** — proxies and appends every exchange to a Suspect Cassette.
+//! - **Replay** — serves a cassette back (see [`replay`]).
+//!
+//! Every served exchange emits one journal traffic record with correlation
+//! id `gw/<seq>`. Fault injection (delay + error) is available in all
+//! modes except replay and uses a **counter-based pseudo-random roll**
+//! (`atomic counter % 100 < pct`) instead of an RNG: injected faults must
+//! be reproducible run-to-run so failing tests can be debugged offline.
+//!
+//! Unknown paths get `404` problem+json `{"title":"Operation not found"}`.
+
+#![deny(missing_docs)]
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use axum::Router;
+use axum::extract::{MatchedPath, Request as AxumRequest, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use bytes::Bytes;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use suspect_ir::{IrSpec, Method};
+use suspect_journal::{Journal, TrafficRecord, Verdict};
+
+pub mod mock;
+pub mod proxy;
+pub mod replay;
+pub mod scenario;
+
+#[cfg(test)]
+mod tests;
+
+pub use replay::ReplayIndex;
+
+/// Address the gateway binds.
+const HOST: &str = "127.0.0.1";
+
+/// Gateway operating mode.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mode {
+    /// Serve synthesized examples from the spec; no upstream traffic.
+    Mock,
+    /// Forward every request to `upstream` (`http://host[:port]`).
+    Proxy {
+        /// Upstream base authority.
+        upstream: String,
+    },
+    /// Forward to `upstream`, validating requests and responses against
+    /// the operation contract.
+    Validate {
+        /// Upstream base authority.
+        upstream: String,
+        /// When `true`, invalid requests are rejected with `400` before
+        /// reaching the upstream; when `false` they are only journaled.
+        enforce: bool,
+    },
+    /// Forward to `upstream` and append each exchange to `cassette`.
+    Record {
+        /// Upstream base authority.
+        upstream: String,
+        /// Cassette file to create and append to.
+        cassette: PathBuf,
+    },
+    /// Serve previously recorded exchanges from `cassette`.
+    Replay {
+        /// Cassette file to load at startup.
+        cassette: PathBuf,
+    },
+}
+
+impl Mode {
+    /// Short lowercase name used in journal metadata.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        match self {
+            Mode::Mock => "mock",
+            Mode::Proxy { .. } => "proxy",
+            Mode::Validate { .. } => "validate",
+            Mode::Record { .. } => "record",
+            Mode::Replay { .. } => "replay",
+        }
+    }
+}
+
+/// Deterministic fault injection knobs.
+///
+/// Percentages are evaluated against a monotonically increasing atomic
+/// counter modulo 100 rather than a random source — see the crate docs for
+/// why reproducibility beats entropy here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct FaultConfig {
+    /// Delay applied to faulted requests, in milliseconds.
+    pub delay_ms: u64,
+    /// Percentage of requests that receive the delay (`0..=100`).
+    pub delay_pct: u8,
+    /// Status code returned by injected errors; `None` disables them.
+    pub error_status: Option<u16>,
+    /// Percentage of requests that receive the error (`0..=100`).
+    pub error_pct: u8,
+}
+
+/// Full gateway configuration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewayConfig {
+    /// Operating mode.
+    pub mode: Mode,
+    /// Path of the OpenAPI entry document; its whole directory is loaded.
+    pub spec: PathBuf,
+    /// TCP port on `127.0.0.1` (`0` is allowed only when callers drive
+    /// [`build_router`] themselves and bind their own listener).
+    pub port: u16,
+    /// Fault injection settings.
+    pub faults: FaultConfig,
+}
+
+/// Shared per-server state handed to every handler.
+struct GatewayState {
+    spec: Arc<IrSpec>,
+    mode: Mode,
+    faults: FaultConfig,
+    roll: AtomicU64,
+    seq: AtomicU64,
+    journal: Arc<tokio::sync::Mutex<Journal>>,
+    mocks: HashMap<(Method, String), Vec<mock::CompiledResponse>>,
+    replay: Option<ReplayIndex>,
+    recorder: Option<Arc<tokio::sync::Mutex<proxy::CassetteAppender>>>,
+}
+
+/// Serves the gateway on `127.0.0.1:<cfg.port>`, blocking until failure.
+///
+/// # Errors
+/// Router construction (spec/cassette loading), bind failures, or runtime
+/// server failures, rendered as strings.
+pub async fn serve(
+    cfg: GatewayConfig,
+    journal: Arc<tokio::sync::Mutex<Journal>>,
+) -> Result<(), String> {
+    let app = build_router(&cfg, Arc::clone(&journal)).await?;
+    let listener = tokio::net::TcpListener::bind((HOST, cfg.port))
+        .await
+        .map_err(|e| format!("cannot bind {HOST}:{}: {e}", cfg.port))?;
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| format!("gateway server error: {e}"))
+}
+
+/// Builds the gateway router without binding a socket.
+///
+/// Exposed for benches and tests that drive the router in-process via
+/// `tower::ServiceExt::oneshot`.
+///
+/// # Errors
+/// Spec or cassette loading failures, rendered as strings.
+pub async fn build_router(
+    cfg: &GatewayConfig,
+    journal: Arc<tokio::sync::Mutex<Journal>>,
+) -> Result<Router, String> {
+    let spec = load_ir(&cfg.spec)?;
+    let mocks = mock::compile_all(&spec);
+
+    let replay = match &cfg.mode {
+        Mode::Replay { cassette } => {
+            let file = std::fs::File::open(cassette)
+                .map_err(|e| format!("open cassette {}: {e}", cassette.display()))?;
+            let (_header, entries) =
+                suspect_journal::read_cassette(file).map_err(|e| format!("read cassette: {e}"))?;
+            Some(ReplayIndex::new(&entries))
+        }
+        _ => None,
+    };
+    let recorder = match &cfg.mode {
+        Mode::Record { cassette, .. } => {
+            let source = format!("gateway {}", cfg.spec.display());
+            Some(Arc::new(tokio::sync::Mutex::new(
+                proxy::CassetteAppender::create(cassette, source)
+                    .map_err(|e| format!("create cassette {}: {e}", cassette.display()))?,
+            )))
+        }
+        _ => None,
+    };
+
+    journal.lock().await.emit(Journal::meta(
+        "gateway",
+        "starting",
+        serde_json::json!({
+            "mode": cfg.mode.name(),
+            "spec": cfg.spec.display().to_string(),
+            "operations": spec.operations.len(),
+        }),
+    ));
+
+    Ok(router_for_state(Arc::new(GatewayState {
+        spec: Arc::new(spec),
+        mode: cfg.mode.clone(),
+        faults: cfg.faults,
+        roll: AtomicU64::new(0),
+        seq: AtomicU64::new(0),
+        journal,
+        mocks,
+        replay,
+        recorder,
+    })))
+}
+
+/// Wires routes for every operation path (all declared methods per path)
+/// plus the fallback, all sharing one dispatch handler.
+fn router_for_state(state: Arc<GatewayState>) -> Router {
+    let mut paths: Vec<&str> = state
+        .spec
+        .operations
+        .iter()
+        .map(|op| op.path.as_str())
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+
+    let mut router = Router::new();
+    for path in paths {
+        let mut method_router = axum::routing::MethodRouter::new();
+        for op in &state.spec.operations {
+            if op.path != path {
+                continue;
+            }
+            method_router = match op.method {
+                Method::Get => method_router.get(dispatch),
+                Method::Put => method_router.put(dispatch),
+                Method::Post => method_router.post(dispatch),
+                Method::Delete => method_router.delete(dispatch),
+                Method::Options => method_router.options(dispatch),
+                Method::Head => method_router.head(dispatch),
+                Method::Patch => method_router.patch(dispatch),
+                Method::Trace => method_router.trace(dispatch),
+            };
+        }
+        // OpenAPI `{petId}` templates are byte-identical to axum 0.8
+        // syntax, so registration needs no rewriting; percent-encoded
+        // segments pass through untouched.
+        router = router.route(path, method_router);
+    }
+    router.fallback(fallback_dispatch).with_state(state)
+}
+
+/// Handler for matched operations.
+async fn dispatch(
+    State(state): State<Arc<GatewayState>>,
+    matched: MatchedPath,
+    request: AxumRequest,
+) -> Response {
+    process(&state, request, Some(matched.as_str())).await
+}
+
+/// Fallback handler: replay lookup in replay mode, else plain 404.
+async fn fallback_dispatch(
+    State(state): State<Arc<GatewayState>>,
+    request: AxumRequest,
+) -> Response {
+    if matches!(state.mode, Mode::Replay { .. }) {
+        return process(&state, request, None).await;
+    }
+    process_not_found(&state, request).await
+}
+
+/// Runs one full exchange: faults, mode dispatch, journaling.
+///
+/// `template` is the matched route pattern (an OpenAPI path template) when
+/// the request hit a registered operation.
+async fn process(
+    state: &Arc<GatewayState>,
+    request: AxumRequest,
+    template: Option<&str>,
+) -> Response {
+    let started = Instant::now();
+    let method = request.method().as_str().to_owned();
+    let target = request.uri().path_and_query().map_or_else(
+        || request.uri().path().to_owned(),
+        |pq| pq.as_str().to_owned(),
+    );
+    let host = request
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost")
+        .to_owned();
+    let req_headers = collect_headers(request.headers());
+    let body = read_body(request.into_body()).await;
+
+    // Fault middleware: skipped in replay mode (a recording replays as it
+    // was captured, warts included). The same counter value drives both
+    // rolls so delay and error patterns are stable across runs.
+    if !matches!(state.mode, Mode::Replay { .. }) {
+        let roll = state.roll.fetch_add(1, Ordering::Relaxed);
+        if state.faults.delay_ms > 0 && roll % 100 < u64::from(state.faults.delay_pct) {
+            tokio::time::sleep(Duration::from_millis(state.faults.delay_ms)).await;
+        }
+        if let Some(status) = state.faults.error_status
+            && state.faults.error_pct > 0
+            && roll % 100 < u64::from(state.faults.error_pct)
+        {
+            let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            let response = problem(status, "Injected fault", Some(format!("{method} {target}")));
+            let exchange = Exchange {
+                method: method.clone(),
+                host: host.clone(),
+                target: target.clone(),
+                request_headers: req_headers.clone(),
+                response_status: response.status().as_u16(),
+                response_headers: collect_headers(response.headers()),
+                started,
+            };
+            journal_exchange(state, &exchange, Verdict::Fault).await;
+            return response;
+        }
+    }
+
+    let (response, violations) = match &state.mode {
+        Mode::Mock => {
+            let ir_method = Method::from_key(method.to_ascii_lowercase().as_str());
+            let compiled =
+                template.and_then(|t| ir_method.and_then(|m| state.mocks.get(&(m, t.to_owned()))));
+            let response = compiled.map_or_else(
+                || {
+                    problem(
+                        StatusCode::NOT_IMPLEMENTED,
+                        "No synthesized response",
+                        Some(format!("no mock compiled for {method} {template:?}")),
+                    )
+                },
+                |c| mock::respond(c),
+            );
+            (response, Vec::new())
+        }
+        Mode::Proxy { upstream } => {
+            proxy::forward(upstream, &method, &target, &req_headers, body.clone()).await
+        }
+        Mode::Validate { upstream, enforce } => {
+            let ir_method = Method::from_key(method.to_ascii_lowercase().as_str());
+            let op = template.and_then(|t| {
+                ir_method.and_then(|m| {
+                    state
+                        .spec
+                        .operation(suspect_ir::OpSelector::MethodPath(m, t))
+                })
+            });
+            match op {
+                Some(op) => {
+                    let refs = mock::schema_refs(&state.spec);
+                    let ctx = proxy::ForwardCtx {
+                        method: &method,
+                        target: &target,
+                        headers: &req_headers,
+                    };
+                    proxy::validate_forward(upstream, op, &refs, ctx, body.clone(), *enforce).await
+                }
+                None => (
+                    problem(
+                        StatusCode::NOT_FOUND,
+                        "Operation not found",
+                        Some(format!("{method} {target}")),
+                    ),
+                    Vec::new(),
+                ),
+            }
+        }
+        Mode::Record { upstream, .. } => {
+            match proxy::fetch_upstream(upstream, &method, &target, &req_headers, body.clone())
+                .await
+            {
+                Ok(reply) => {
+                    let duration_ms = started.elapsed().as_secs_f64() * 1000.0;
+                    let entry = suspect_journal::CassetteEntry {
+                        id: 0,
+                        method: method.clone(),
+                        url: format!("http://{host}{target}"),
+                        status: reply.status,
+                        request_headers: req_headers.clone(),
+                        request_body: suspect_journal::Body::from_bytes(&body),
+                        response_headers: reply.headers.clone(),
+                        response_body: suspect_journal::Body::from_bytes(&reply.body),
+                        duration_ms,
+                    };
+                    let response = proxy::reply_to_response(&reply);
+                    if let Some(recorder) = &state.recorder
+                        && let Err(err) = recorder.lock().await.append(entry)
+                    {
+                        state.journal.lock().await.log(
+                            suspect_journal::Level::Warn,
+                            "gateway",
+                            "cassette append failed",
+                            serde_json::json!({ "error": err.to_string() }),
+                        );
+                    }
+                    (response, Vec::new())
+                }
+                Err(err) => (
+                    problem(StatusCode::BAD_GATEWAY, "Bad gateway", Some(err)),
+                    Vec::new(),
+                ),
+            }
+        }
+        Mode::Replay { .. } => {
+            let response = state.replay.as_ref().map_or_else(
+                || problem(StatusCode::NOT_FOUND, "No cassette loaded", None),
+                |index| replay::respond(index, &method, &target),
+            );
+            (response, Vec::new())
+        }
+    };
+
+    let verdict = if violations.is_empty() {
+        Verdict::Pass
+    } else {
+        Verdict::Invalid(violations)
+    };
+    let exchange = Exchange {
+        method: method.clone(),
+        host: host.clone(),
+        target: target.clone(),
+        request_headers: req_headers.clone(),
+        response_status: response.status().as_u16(),
+        response_headers: collect_headers(response.headers()),
+        started,
+    };
+    journal_exchange(state, &exchange, verdict).await;
+    response
+}
+
+/// Owned wire-level facts about one served exchange.
+///
+/// Journaling copies what it needs out of the `Response` *before*
+/// suspending: holding a `&Response` across `.await` would make handler
+/// futures non-`Send` (response bodies are not `Sync`).
+struct Exchange {
+    method: String,
+    host: String,
+    target: String,
+    request_headers: Vec<(String, String)>,
+    response_status: u16,
+    response_headers: Vec<(String, String)>,
+    started: Instant,
+}
+
+/// Serves the standard unknown-path 404 and journals it.
+async fn process_not_found(state: &Arc<GatewayState>, request: AxumRequest) -> Response {
+    let started = Instant::now();
+    let method = request.method().as_str().to_owned();
+    let target = request.uri().path_and_query().map_or_else(
+        || request.uri().path().to_owned(),
+        |pq| pq.as_str().to_owned(),
+    );
+    let host = request
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost")
+        .to_owned();
+    let req_headers = collect_headers(request.headers());
+    let response = problem(
+        StatusCode::NOT_FOUND,
+        "Operation not found",
+        Some(format!("{method} {target}")),
+    );
+    let exchange = Exchange {
+        method,
+        host,
+        target,
+        request_headers: req_headers,
+        response_status: response.status().as_u16(),
+        response_headers: collect_headers(response.headers()),
+        started,
+    };
+    journal_exchange(state, &exchange, Verdict::Pass).await;
+    response
+}
+
+/// Emits one traffic record for a completed exchange.
+async fn journal_exchange(state: &Arc<GatewayState>, exchange: &Exchange, verdict: Verdict) {
+    let record = TrafficRecord {
+        ts_ms: Journal::now_ms(),
+        id: 0,
+        correlation: format!("gw/{}", state.seq.fetch_add(1, Ordering::Relaxed)),
+        method: exchange.method.clone(),
+        url: format!("http://{}{}", exchange.host, exchange.target),
+        status: Some(exchange.response_status),
+        request_headers: exchange.request_headers.clone(),
+        response_headers: exchange.response_headers.clone(),
+        duration_ms: exchange.started.elapsed().as_secs_f64() * 1000.0,
+        verdict,
+    };
+    state.journal.lock().await.traffic(record);
+}
+
+/// Collects headers into ordered `(name, value)` string pairs.
+#[must_use]
+fn collect_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.as_str().to_owned(), v.to_owned()))
+        })
+        .collect()
+}
+
+/// Reads an axum request body to bytes, capping at [`proxy::MAX_BODY`].
+async fn read_body(body: axum::body::Body) -> Bytes {
+    axum::body::to_bytes(body, proxy::MAX_BODY)
+        .await
+        .unwrap_or_default()
+}
+
+/// Builds an RFC 7807 problem+json response.
+#[must_use]
+pub fn problem(status: StatusCode, title: &str, detail: Option<String>) -> Response {
+    let mut body = serde_json::json!({
+        "type": "about:blank",
+        "title": title,
+        "status": status.as_u16(),
+    });
+    if let Some(detail) = detail {
+        body["detail"] = Value::String(detail);
+    }
+    (
+        status,
+        [("content-type", "application/problem+json")],
+        body.to_string(),
+    )
+        .into_response()
+}
+
+/// Loads every YAML/JSON document next to `spec` into one workspace — the
+/// same directory-scan strategy as the CLI's `workspace_dir_all`, since
+/// Arazzo source descriptions may reference sibling files without `$ref`.
+///
+/// # Errors
+/// Workspace build failures; unreadable directory entries are skipped
+/// (matching CLI behavior).
+pub fn load_workspace(spec: &Path) -> Result<Arc<suspect_ref::Workspace>, String> {
+    use suspect_ref::WorkspaceBuilder;
+    let dir = spec
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let ws = WorkspaceBuilder::new()
+        .root(&dir)
+        .build()
+        .map_err(|e| format!("workspace build failed: {e}"))?;
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("read dir {}: {e}", dir.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|p| {
+            matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("yaml") | Some("yml") | Some("json")
+            )
+        })
+        .collect();
+    entries.sort();
+    for path in entries {
+        if let Some(name) = path.file_name().and_then(std::ffi::OsStr::to_str) {
+            let _ = ws.load_all(name);
+        }
+    }
+    Ok(Arc::new(ws))
+}
+
+/// Loads the IR snapshot for `spec` through [`load_workspace`].
+///
+/// # Errors
+/// Workspace/document loading or non-OAS documents.
+fn load_ir(spec: &Path) -> Result<IrSpec, String> {
+    let ws = load_workspace(spec)?;
+    let uri = suspect_source::Uri::from_path(spec)
+        .map_err(|e| format!("invalid spec path {}: {e}", spec.display()))?;
+    IrSpec::from_workspace(&ws, &uri)
+}
