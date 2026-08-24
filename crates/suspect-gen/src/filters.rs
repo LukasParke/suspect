@@ -412,13 +412,6 @@ fn synth_example(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usi
     }
 }
 
-/// Synthesizes a deterministic JSON example from serialized schema text.
-///
-/// `schema_json_str` is an OpenAPI schema object; `refs_json_str` is an
-/// object mapping component names to schema JSON used to resolve `$ref`s.
-/// Returns the example serialized as JSON text.
-#[must_use]
-
 // ------------------------------------------------------- example memoization
 //
 // `example_of` runs once per table cell in generated docs; on large specs
@@ -471,14 +464,6 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-/// Synthesizes a deterministic example for a schema JSON string,
-/// resolving `#/components/schemas/{name}` references through
-/// `refs_json_str` (a serialized `{name: schema}` map).
-///
-/// Results are memoized per `(refs payload, schema input)` pair in a
-/// thread-local cache, so large documents pay synthesis once per distinct
-/// subschema instead of once per table cell.
-#[must_use]
 /// Shallow literal for one docs-table cell: type default without
 /// recursion (`string` -> `""`, `integer` -> `0`, `boolean` -> `false`,
 /// arrays -> `[]`, objects -> `{}`, `$ref`/unknown -> ellipsis). Deep

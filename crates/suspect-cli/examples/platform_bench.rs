@@ -142,7 +142,7 @@ fn small_loaded() -> anyhow::Result<LoadedWs> {
         "openapi: 3.1.0\ninfo:\n  title: P\n  version: '1'\npaths:\n  /pets:\n    get:\n      operationId: listPets\n      responses:\n        '200':\n          description: ok\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      properties:\n        name: {type: string}\n",
     )?;
     std::mem::forget(dir); // bench-lifetime paths
-    load_spec_dir((&keep.as_path(), "petstore.yaml"))
+    load_spec_dir((keep.as_path(), "petstore.yaml"))
 }
 
 fn bench_cold<F>(factory: F, label: &str, budget: Option<f64>) -> anyhow::Result<f64>
@@ -251,7 +251,7 @@ fn build_tiny_plan(small: &LoadedWs) -> anyhow::Result<suspect_test::Plan> {
 }
 
 fn sanitize(path: &str) -> String {
-    path.replace('{', "").replace('}', "")
+    path.replace(['{', '}'], "")
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -271,15 +271,14 @@ async fn main() -> anyhow::Result<()> {
     )?;
     drop(small);
 
-    let cold_stripe = bench_cold(stripe_loaded, "parse+IR cold, stripe 6.4MB", None)?;
+    let _cold_stripe = bench_cold(stripe_loaded, "parse+IR cold, stripe 6.4MB", None)?;
     let stripe_ws = stripe_loaded()?;
     let ir = IrSpec::from_workspace(&stripe_ws.ws, &Uri::from_path(&stripe_ws.entry)?)
         .map_err(anyhow::Error::msg)?;
     println!(
-        "{:<46} {:>10} {}\n",
+        "{:<46} {:>10}\n",
         "  ir operations indexed (stripe)",
-        ir.operations.len(),
-        ""
+        ir.operations.len()
     );
     let _ = cold_small;
 
@@ -357,17 +356,6 @@ async fn main() -> anyhow::Result<()> {
         );
 
         // ---- 4. executor CPU per step (canned transport) ---------------
-        let canned = CannedTransport::new().route(
-            Match {
-                method: None,
-                path_suffix: String::new(),
-            },
-            HttpResponse {
-                status: 200,
-                headers: vec![],
-                body: bytes::Bytes::from_static(b"{}"),
-            },
-        );
         let canned = CannedTransport::new().route(
             Match {
                 method: None,
@@ -588,14 +576,8 @@ async fn bench_watch() -> anyhow::Result<()> {
         let path = dir.path().join(format!("w{i}.yaml"));
         std::fs::write(&path, "a: 1\n")?;
         let t = Instant::now();
-        loop {
-            match rx.recv_timeout(Duration::from_secs(2)) {
-                Ok(_) => {
-                    st.push_ms(t.elapsed().as_secs_f64() * 1_000.0);
-                    break;
-                }
-                Err(_) => break,
-            }
+        if rx.recv_timeout(Duration::from_secs(2)).is_ok() {
+            st.push_ms(t.elapsed().as_secs_f64() * 1_000.0);
         }
     }
     row(
