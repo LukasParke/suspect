@@ -33,7 +33,7 @@ pub fn emit_rust(graph: &Graph) -> Vec<(String, String)> {
             StgNode::Struct(s) => {
                 models.push_str(&format!(
                     "/// {}{}\n#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct {} {{\n",
-                    &crate::rust_emitter::sanitize_docs(s.docs.as_deref().unwrap_or("")),
+                    crate::rust_emitter::sanitize_docs(s.docs.as_deref().unwrap_or("")),
                     if s.deprecated { "\n/// @deprecated" } else { "" },
                     s.name.pascal
                 ));

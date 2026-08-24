@@ -183,6 +183,7 @@ fn compiles_operations_parameters_and_criteria() {
         }
     );
     assert_eq!(show.body_pointers, vec!["/name".to_owned()]);
+
     let chained = show
         .parameters
         .iter()
@@ -358,6 +359,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
         workflows: vec![crate::plan::WfPlan {
             workflow_id: "broken-flow".to_owned(),
             inputs: Default::default(),
+            input_defaults: Default::default(),
             steps: vec![
                 crate::plan::StepPlan {
                     step_id: "boom".to_owned(),
@@ -373,6 +375,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     }],
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
+                    failure_goto: None,
                 },
                 crate::plan::StepPlan {
                     step_id: "never-runs".to_owned(),
@@ -385,6 +388,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     success: Vec::new(),
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
+                    failure_goto: None,
                 },
             ],
         }],

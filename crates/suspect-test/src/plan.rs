@@ -57,6 +57,8 @@ pub struct WfPlan {
     /// Workflow-level inputs (plain-valued workflow parameters), read by
     /// `$inputs...` expressions during execution.
     pub inputs: serde_json::Map<String, serde_json::Value>,
+    /// Schema-declared default values for optional inputs, keyed by name.
+    pub input_defaults: serde_json::Map<String, serde_json::Value>,
     /// Compiled steps, in document order; executed sequentially.
     pub steps: Vec<StepPlan>,
 }
@@ -93,6 +95,8 @@ pub struct StepPlan {
     /// Response-body JSON pointers referenced by this step's criteria, so
     /// executors know which parts of parsed bodies are relevant.
     pub body_pointers: Vec<String>,
+    /// Step ID to jump to when this step fails (`onFailure` goto action).
+    pub failure_goto: Option<String>,
 }
 
 /// Pragmatic success-criterion model compiled from Arazzo condition strings.
@@ -214,9 +218,30 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
         for step in wf.steps() {
             steps.push(compile_step(step, &sources)?);
         }
+        // Extract schema-declared defaults from `inputs.properties`.
+        let mut input_defaults = serde_json::Map::new();
+        let wf_node = arazzo.root().get("workflows").and_then(|w| {
+            w.items().into_iter().find(|item| {
+                item.get("workflowId")
+                    .and_then(|n| n.as_str())
+                    .is_some_and(|s| s == wf.workflow_id)
+            })
+        });
+        if let Some(inputs_schema) = wf_node.and_then(|n| n.get("inputs"))
+            && let Some(props) = inputs_schema.get("properties")
+        {
+            for e in props.entries() {
+                if let Some(default) = e.value.and_then(|v| v.get("default")) {
+                    let json_val = materialize_json(default);
+                    input_defaults.insert(e.key.to_owned(), json_val);
+                }
+            }
+        }
+
         workflows.push(WfPlan {
             workflow_id: wf.workflow_id.to_owned(),
             inputs,
+            input_defaults,
             steps,
         });
     }
@@ -363,6 +388,22 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         outputs.push((name.to_owned(), rex_of_node(node)?));
     }
 
+    // Extract onFailure goto target (first goto action only).
+    let failure_goto = step
+        .node()
+        .get("onFailure")
+        .and_then(|n| n.items().into_iter().next())
+        .and_then(|action| {
+            if action.get("type").and_then(|t| t.as_str()) == Some("goto") {
+                action
+                    .get("stepId")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_owned)
+            } else {
+                None
+            }
+        });
+
     Ok(StepPlan {
         step_id,
         operation,
@@ -371,6 +412,7 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         success,
         outputs,
         body_pointers,
+        failure_goto,
     })
 }
 

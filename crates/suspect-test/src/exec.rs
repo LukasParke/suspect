@@ -256,6 +256,14 @@ async fn run_workflow(
 
     // Step outputs keyed by stepId; each value is that step's outputs object.
     let mut steps_outputs = serde_json::Map::<String, serde_json::Value>::new();
+
+    // Apply schema-declared defaults for inputs not explicitly provided.
+    let mut effective_inputs = wf.inputs.clone();
+    for (key, default_val) in &wf.input_defaults {
+        effective_inputs
+            .entry(key.clone())
+            .or_insert_with(|| default_val.clone());
+    }
     let mut counts = WfCounts {
         passed: 0,
         failed: 0,
@@ -263,7 +271,10 @@ async fn run_workflow(
         ok: true,
     };
 
-    'steps: for step in &wf.steps {
+    let mut idx = 0usize;
+
+    while idx < wf.steps.len() {
+        let step = &wf.steps[idx];
         send(
             &events,
             TestEvent::StepStarted {
@@ -272,15 +283,33 @@ async fn run_workflow(
             },
         )
         .await;
-        match run_step(wf, step, base, http, &wf.inputs, &steps_outputs, &events).await {
+        match run_step(
+            wf,
+            step,
+            base,
+            http,
+            &effective_inputs,
+            &steps_outputs,
+            &events,
+        )
+        .await
+        {
             StepOutcome::Passed(outputs) => {
                 steps_outputs.insert(step.step_id.clone(), serde_json::Value::Object(outputs));
                 counts.passed += 1;
+                idx += 1;
             }
             StepOutcome::Failed => {
                 counts.failed += 1;
                 counts.ok = false;
-                break 'steps;
+                // Follow onFailure goto if the target step exists.
+                if let Some(target) = &step.failure_goto
+                    && let Some(next) = wf.steps.iter().position(|s| &s.step_id == target)
+                {
+                    idx = next;
+                    continue;
+                }
+                break;
             }
         }
     }
@@ -353,6 +382,52 @@ async fn run_step(
         headers.push(("Cookie".to_owned(), cookies.join("; ")));
     }
 
+    // Template-literal substitution: resolve `${$inputs.x}`, `${$steps.y.outputs.z}`,
+    // etc. inside parameter values that contain embedded expressions.
+    let resolve_templates = |text: &str| -> String {
+        if !text.contains("${") {
+            return text.to_owned();
+        }
+        let mut result = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(start) = rest.find("${") {
+            result.push_str(&rest[..start]);
+            let after = &rest[start + 2..];
+            match after.find('}') {
+                Some(end) => {
+                    let expr_text = &after[..end];
+                    match suspect_rex::parse_rex(expr_text) {
+                        Ok(rex) => {
+                            let val = eval_rex(&rex, &state_ctx());
+                            match val {
+                                Some(serde_json::Value::String(v)) => result.push_str(&v),
+                                Some(other) => result.push_str(&other.to_string()),
+                                None => {} // unresolved → empty
+                            }
+                        }
+                        Err(_) => result.push_str(&rest[start..start + end + 1]), // keep literal
+                    }
+                    rest = &after[end + 1..];
+                }
+                None => {
+                    result.push_str(rest);
+                    break;
+                }
+            }
+        }
+        result.push_str(rest);
+        result
+    };
+    query = query
+        .into_iter()
+        .map(|(k, v)| (k, resolve_templates(&v)))
+        .collect();
+    headers = headers
+        .into_iter()
+        .map(|(k, v)| (k, resolve_templates(&v)))
+        .collect();
+    path = resolve_templates(&path);
+
     let method = step.operation.method.as_str();
 
     let mut body: Option<Vec<u8>> = None;
@@ -373,6 +448,14 @@ async fn run_step(
             .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
     {
         request_headers.push(("content-type".to_owned(), "application/json".to_owned()));
+    }
+    // Ask for JSON responses so JSONPath criteria work against APIs that
+    // support content negotiation (Plex returns XML by default).
+    if !request_headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("accept"))
+    {
+        request_headers.push(("Accept".to_owned(), "application/json".to_owned()));
     }
 
     let url = join_url(base, &path, &query);

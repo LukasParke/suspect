@@ -69,6 +69,7 @@ fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
     WfPlan {
         workflow_id: "create-and-fetch".to_owned(),
         inputs: Default::default(),
+        input_defaults: Default::default(),
         steps: vec![suspect_test::StepPlan {
             step_id: "create-pet".to_owned(),
             operation: OpKey {
@@ -85,6 +86,7 @@ fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
                 range,
             }],
             outputs: Vec::new(),
+            failure_goto: None,
             body_pointers: Vec::new(),
         }],
     }
