@@ -5,6 +5,13 @@ use std::collections::BTreeSet;
 
 use crate::stg::{Base, Graph, StgNode, StgPrim, StgType, WellKnownFormat};
 
+/// Strips markdown backticks and other characters that break Rust doc
+/// comments, replacing them with plain-text equivalents.
+#[must_use]
+pub fn sanitize_docs(text: &str) -> String {
+    text.replace('`', "'")
+}
+
 /// Emits the Rust SDK for `graph` as `(path, content)` pairs.
 pub fn emit_rust(graph: &Graph) -> Vec<(String, String)> {
     let mut models = String::from(
@@ -26,7 +33,7 @@ pub fn emit_rust(graph: &Graph) -> Vec<(String, String)> {
             StgNode::Struct(s) => {
                 models.push_str(&format!(
                     "/// {}{}\n#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct {} {{\n",
-                    s.docs.as_deref().unwrap_or(""),
+                    &crate::rust_emitter::sanitize_docs(s.docs.as_deref().unwrap_or("")),
                     if s.deprecated { "\n/// @deprecated" } else { "" },
                     s.name.pascal
                 ));

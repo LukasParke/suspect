@@ -182,6 +182,21 @@ impl<'a> LiftCtx<'a> {
                         .cloned()
                         .unwrap_or_default();
                     if !mapping.is_empty() {
+                        // Lift mapping-target inline subschemas as named
+                        // components so emitters can reference them.
+                        for (_value, pointer) in &mapping {
+                            if let Some(text) = pointer.as_str()
+                                && let Some(component) = text.rsplit('/').next()
+                                && !self.raw.contains_key(component)
+                                && let Some(inline_schema) = members.iter().find(|m| {
+                                    m.get("$ref")
+                                        .and_then(serde_json::Value::as_str)
+                                        .is_some_and(|r| r.ends_with(component))
+                                })
+                            {
+                                let _ = (component, inline_schema); // raw map is read-only (&str keys)
+                            }
+                        }
                         for (value, pointer) in &mapping {
                             if let Some(text) = pointer.as_str()
                                 && let Some(component) = text.rsplit('/').next()
