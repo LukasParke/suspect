@@ -63,6 +63,9 @@ impl FilterRegistry {
             });
         engine
             .env
+            .add_filter("scalar_example", |v: Value| json_filter(&v, scalar_example));
+        engine
+            .env
             .add_filter("mermaid_refs", |v: Value| json_filter(&v, mermaid_of_spec));
     }
 }
@@ -350,6 +353,28 @@ fn synth_example(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usi
     if depth > 8 {
         return Json::Null;
     }
+    // Named `$ref`: memoize one synthesis per component per refs payload.
+    // `component_start` marks the slot before recursing so cycles resolve
+    // to null (depth-capped as before) without poisoning the cache, and no
+    // borrow is held across the recursive call.
+    if let Some(name) = schema.get("$ref").and_then(Json::as_str).map(ref_name) {
+        let cached = EXAMPLE_CACHE.with(|c| c.borrow().component_hit(&name));
+        match cached {
+            Some(Some(example)) => return example,
+            Some(None) => return Json::Null, // in flight: cycle
+            None => {}
+        }
+        if refs.contains_key(&name) {
+            EXAMPLE_CACHE.with(|c| c.borrow_mut().component_start(&name));
+            let target = &refs[&name];
+            // Same depth: cycle safety comes from the in-flight marker;
+            // pure chain length must not eat the synthesis-depth budget.
+            let example = synth_example(target, refs, depth);
+            EXAMPLE_CACHE.with(|c| c.borrow_mut().component_finish(&name, &example));
+            return example;
+        }
+        return schema.clone();
+    }
     let schema = resolve_ref(schema, refs, 0);
     if let Some(v) = schema.get("example") {
         return v.clone();
@@ -393,11 +418,156 @@ fn synth_example(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usi
 /// object mapping component names to schema JSON used to resolve `$ref`s.
 /// Returns the example serialized as JSON text.
 #[must_use]
+
+// ------------------------------------------------------- example memoization
+//
+// `example_of` runs once per table cell in generated docs; on large specs
+// the same component schemas resolve thousands of times. A thread-local
+// cache keyed by the refs payload (invalidated when it changes) stores the
+// synthesized example for every distinct schema input and every resolved
+// component, turning repeated property rows into hash lookups.
+
+thread_local! {
+    static EXAMPLE_CACHE: std::cell::RefCell<ExampleCache> =
+        std::cell::RefCell::new(ExampleCache::default());
+}
+
+#[derive(Default)]
+struct ExampleCache {
+    /// Hash of the refs payload the cache is valid for.
+    refs_key: u64,
+    /// Synthesized examples by hash of the schema input.
+    by_input: std::collections::HashMap<u64, Json>,
+    /// Synthesized component examples by name; `None` while a computation
+    /// for that name is in flight (cycle guard).
+    components: std::collections::HashMap<String, Option<Json>>,
+}
+
+impl ExampleCache {
+    fn component_hit(&self, name: &str) -> Option<Option<Json>> {
+        // Borrow is dropped before any recursion can re-enter.
+        self.components.get(name).cloned()
+    }
+    fn component_start(&mut self, name: &str) {
+        self.components.insert(name.to_owned(), None);
+    }
+    /// Stores a completed example unless it is null (nulls stay uncached so
+    /// cyclic/depth-capped paths never poison later lookups).
+    fn component_finish(&mut self, name: &str, value: &Json) {
+        if !value.is_null() {
+            self.components.insert(name.to_owned(), Some(value.clone()));
+        } else {
+            self.components.remove(name);
+        }
+    }
+}
+
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Synthesizes a deterministic example for a schema JSON string,
+/// resolving `#/components/schemas/{name}` references through
+/// `refs_json_str` (a serialized `{name: schema}` map).
+///
+/// Results are memoized per `(refs payload, schema input)` pair in a
+/// thread-local cache, so large documents pay synthesis once per distinct
+/// subschema instead of once per table cell.
+#[must_use]
+/// Shallow literal for one docs-table cell: type default without
+/// recursion (`string` -> `""`, `integer` -> `0`, `boolean` -> `false`,
+/// arrays -> `[]`, objects -> `{}`, `$ref`/unknown -> ellipsis). Deep
+/// component examples live in the context map instead.
+#[must_use]
+pub fn scalar_example(schema: &Json) -> String {
+    if schema.get("$ref").is_some() {
+        return "...".to_owned();
+    }
+    if let Some(v) = schema.get("example") {
+        return v.to_string();
+    }
+    match base_type(schema).as_deref() {
+        Some("string") => "\"\"".to_owned(),
+        Some("integer") | Some("number") => "0".to_owned(),
+        Some("boolean") => "false".to_owned(),
+        Some("array") => "[]".to_owned(),
+        Some("object") => "{}".to_owned(),
+        _ => "null".to_owned(),
+    }
+}
+
+/// Computes deep examples for every component in one pass.
+///
+/// Context builders call this once instead of templates calling
+/// [`example_of`] per table cell: the thread-local cache makes each
+/// distinct component synthesize exactly once, and `$ref` chains share
+/// results across components.
+#[must_use]
+pub fn examples_for_components(
+    components: &serde_json::Map<String, Json>,
+) -> serde_json::Map<String, Json> {
+    let mut out = serde_json::Map::new();
+    EXAMPLE_CACHE.with(|cache| {
+        let refs_text =
+            serde_json::to_string(&Json::Object(components.clone())).unwrap_or_default();
+        let key = fnv1a(refs_text.as_bytes());
+        if cache.borrow().refs_key != key {
+            cache.borrow_mut().refs_key = key;
+            cache.borrow_mut().by_input.clear();
+            cache.borrow_mut().components.clear();
+        }
+    });
+    for (name, schema) in components {
+        let ex = synth_example(schema, components, 0);
+        out.insert(name.clone(), Json::String(ex.to_string()));
+    }
+    out
+}
+
+/// Synthesizes a deterministic example for a serialized schema,
+/// resolving component references through the serialized refs map.
+///
+/// Memoized per `(refs payload, schema input)` in a thread-local cache.
+#[must_use]
 pub fn example_of(schema_json_str: &str, refs_json_str: &str) -> String {
     let schema: Json = serde_json::from_str(schema_json_str).unwrap_or(Json::Null);
     let refs: Json = serde_json::from_str(refs_json_str).unwrap_or(Json::Null);
+    let refs_key = fnv1a(refs_json_str.as_bytes());
+    let schema_key = fnv1a(schema_json_str.as_bytes());
     let empty = serde_json::Map::new();
-    let example = synth_example(&schema, refs.as_object().unwrap_or(&empty), 0);
+    let refs_map = refs.as_object().unwrap_or(&empty);
+
+    // Phase 1: invalidate + lookup. The borrow is dropped before
+    // synthesis so recursive component lookups cannot double-borrow.
+    let hit = EXAMPLE_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.refs_key != refs_key {
+            *cache = ExampleCache {
+                refs_key,
+                ..ExampleCache::default()
+            };
+        }
+        cache.by_input.get(&schema_key).cloned()
+    });
+    if let Some(example) = hit {
+        return serde_json::to_string(&example).unwrap_or_else(|_| "null".into());
+    }
+
+    // Phase 2: synthesize with only short-lived internal borrows.
+    let example = synth_example(&schema, refs_map, 0);
+
+    // Phase 3: store.
+    EXAMPLE_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .by_input
+            .insert(schema_key, example.clone());
+    });
     serde_json::to_string(&example).unwrap_or_else(|_| "null".into())
 }
 

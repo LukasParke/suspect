@@ -10,7 +10,7 @@
 | -------- | ---- | -------- | ------- |
 {%- for pname in def.properties %}
 {%- set prop = def.properties[pname] %}
-| {{ pname }} | {{ prop | ts_type }} | {{ "yes" if pname in reqs else "no" }} | `{{ prop | example_of(schema_refs) }}` |
+| {{ pname }} | {{ prop | ts_type }} | {{ "yes" if pname in reqs else "no" }} | `{{ prop | scalar_example }}` |
 {%- endfor %}
 {% elif def.type == "object" %}
 
@@ -19,6 +19,6 @@ Opaque object schema.
 
 Type: `{{ def | ts_type }}`
 
-Example: `{{ def | example_of(schema_refs) }}`
+Example: `{{ schema_examples[def.name] }}`
 {% endif %}
 {% endfor %}

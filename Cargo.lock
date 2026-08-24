@@ -1732,6 +1732,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "bytes",
  "clap",
  "rayon",
@@ -1756,6 +1757,7 @@ dependencies = [
  "suspect-test",
  "suspect-validate",
  "suspect-watch",
+ "tempfile",
  "tokio",
 ]
 

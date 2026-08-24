@@ -125,7 +125,18 @@ fn common_context(spec: &IrSpec) -> serde_json::Value {
     for s in &spec.schemas {
         refs.insert(s.name.clone(), s.json.clone());
     }
-    obj.insert("schema_refs".to_owned(), serde_json::Value::Object(refs));
+    obj.insert(
+        "schema_refs".to_owned(),
+        serde_json::Value::Object(refs.clone()),
+    );
+
+    // One-pass deep examples per component; property rows use the shallow
+    // scalar_example filter so large specs never recurse per cell.
+    let examples = crate::examples_for_components(&refs);
+    obj.insert(
+        "schema_examples".to_owned(),
+        serde_json::Value::Object(examples),
+    );
 
     ctx
 }

@@ -16,6 +16,7 @@ suspect-gen.workspace = true
 suspect-ir.workspace = true
 suspect-journal.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"], optional = true }
+axum = { version = "0.8", optional = true }
 async-trait.workspace = true
 bytes.workspace = true
 
@@ -42,4 +43,7 @@ suspect-gateway.workspace = true
 
 [features]
 default = ["live-http"]
-live-http = ["dep:reqwest"]
+live-http = ["dep:reqwest", "dep:axum"]
+
+[dev-dependencies]
+tempfile.workspace = true
