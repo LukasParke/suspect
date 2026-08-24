@@ -1,0 +1,96 @@
+// Generated API client for {{ title }} {{ version }}.
+// Companion models live in ./models; user-owned code between the
+// suspect:begin/end:user-code markers survives regeneration.
+
+import type {
+{%- for n in schema_names %}
+  {{ n | PascalCase }},
+{%- endfor %}
+} from "./models";
+
+export type FetchLike = typeof fetch;
+
+/** Options accepted by {@link ApiClient}. */
+export interface ApiClientOptions {
+  /** Overrides the default base URL. */
+  baseUrl?: string;
+  /** Custom fetch implementation (tests, middleware). */
+  fetchImpl?: FetchLike;
+}
+
+export class ApiClient {
+  readonly baseUrl: string;
+  readonly fetchImpl: FetchLike;
+
+  constructor(options: ApiClientOptions = {}) {
+    this.baseUrl = (options.baseUrl ?? "{{ base_url }}").replace(/\/+$/, "");
+    this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+{%- for group in operations_by_tag %}
+{%- for op in group.operations %}
+{%- set mname = op.id or ((op.method | lower) ~ op.path) %}
+{%- set rtype = "" %}
+{%- set ns = namespace(rtype="", has_query=false) %}
+{%- for r in op.responses if r.schema %}
+{%- set ns.rtype = r.schema | PascalCase %}
+{%- endfor %}
+{%- set rtype = ns.rtype %}
+{%- for p in op.parameters if p.location == "query" %}
+{%- set ns.has_query = true %}
+{%- endfor %}
+
+  /** `{{ op.method }} {{ op.path }}`{% if op.summary %} — {{ op.summary }}{% endif %}*/
+  public async {{ mname | camelCase }}(
+      {%- for p in op.parameters if p.location == "path" %}
+      {{ p.name | camelCase }}: string,
+      {%- endfor %}
+      {%- for p in op.parameters if p.location == "query" %}
+      {{ p.name | camelCase }}{% if not p.required %}?{% endif %}: {{ p.schema | ts_type }},
+      {%- endfor %}
+      {%- if op.body_schema %}
+      body: {{ op.body_schema | PascalCase }},
+      {%- endif %}
+  ){% if rtype %}: Promise<{{ rtype }}>{% else %}: Promise<void>{% endif %} {
+    let path = "{{ op.path }}";
+    {%- for p in op.parameters if p.location == "path" %}
+    path = path.replace("{{ '{' ~ p.name ~ '}' }}", encodeURIComponent({{ p.name | camelCase }}));
+    {%- endfor %}
+    {%- if ns.has_query %}
+    const query = new URLSearchParams();
+    {%- for p in op.parameters if p.location == "query" %}
+    if ({{ p.name | camelCase }} !== undefined) {
+      query.set("{{ p.name }}", String({{ p.name | camelCase }}));
+    }
+    {%- endfor %}
+    const qs = query.toString();
+    const url = qs ? this.baseUrl + path + "?" + qs : this.baseUrl + path;
+    {%- else %}
+    const url = this.baseUrl + path;
+    {%- endif %}
+    const init: RequestInit = {
+      method: "{{ op.method }}",
+      headers: {
+        Accept: "application/json",
+        {%- if op.body_schema %}
+        "Content-Type": "application/json",
+        {%- endif %}
+      },
+      {%- if op.body_schema %}
+      body: JSON.stringify(body),
+      {%- endif %}
+    };
+    {%- if rtype %}
+    const response = await this.fetchImpl(url, init);
+    return response.json() as Promise<{{ rtype }}>;
+    {%- else %}
+    await this.fetchImpl(url, init);
+    {%- endif %}
+  }
+{%- endfor %}
+{%- endfor %}
+
+  // suspect:begin:user-code
+  // Add custom helpers, interceptors, or endpoint overrides below.
+  // Everything between the markers is preserved across regeneration.
+  // suspect:end:user-code
+}

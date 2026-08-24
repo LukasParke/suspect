@@ -186,11 +186,17 @@ pub struct IrSpec {
     pub operations: Vec<IrOperation>,
     /// Component schemas, document order.
     pub schemas: Vec<IrSchema>,
-    /// `operationId` -> index into [`IrSpec::operations`].
+    /// `operationId` -> index into [`IrSpec::operations`] (derived; not
+    /// serialized).
+    #[serde(skip)]
     pub by_operation_id: HashMap<String, u32>,
-    /// `(method, path)` -> index.
+    /// `(method, path)` -> index (tuple keys are not valid JSON map keys,
+    /// so this is skipped when serializing).
+    #[serde(skip)]
     pub by_method_path: HashMap<(Method, String), u32>,
-    /// Schema name -> index into [`IrSpec::schemas`].
+    /// Schema name -> index into [`IrSpec::schemas`] (derived; not
+    /// serialized).
+    #[serde(skip)]
     pub schema_index: HashMap<String, u32>,
     /// Schema name -> locally-resolved referenced names (dependency graph).
     pub schema_edges: HashMap<String, Vec<String>>,

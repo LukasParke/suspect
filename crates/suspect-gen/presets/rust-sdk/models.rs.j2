@@ -1,0 +1,19 @@
+// Generated model structs for {{ title }} {{ version }}.
+// Included from lib.rs; compiled together by a single rustc invocation.
+{%- for s in schemas %}
+{% set def = s.json %}
+
+{%- if def.type == "object" %}
+{% set reqs = def.required or [] %}
+
+pub struct {{ s.name | PascalCase }} {
+    {%- for pname in def.properties %}
+    {%- set prop = def.properties[pname] %}
+    pub {{ pname | snake_case }}: {% if pname in reqs %}{% if prop["$ref"] %}Box<{{ prop | rust_type }}>{% else %}{{ prop | rust_type }}{% endif %}{% else %}{% if prop["$ref"] %}Option<Box<{{ prop | rust_type }}>>{% else %}Option<{{ prop | rust_type }}>{% endif %}{% endif %},
+    {%- endfor %}
+}
+{%- else %}
+
+pub type {{ s.name | PascalCase }} = {{ def | rust_type }};
+{%- endif %}
+{%- endfor %}

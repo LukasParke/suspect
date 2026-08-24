@@ -23,6 +23,11 @@ suspect-overlay = { path = "crates/suspect-overlay", version = "0.1.0" }
 suspect-validate = { path = "crates/suspect-validate", version = "0.1.0" }
 suspect-lint = { path = "crates/suspect-lint", version = "0.1.0" }
 suspect-lsp = { path = "crates/suspect-lsp", version = "0.1.0" }
+suspect-ir = { path = "crates/suspect-ir", version = "0.1.0" }
+suspect-journal = { path = "crates/suspect-journal", version = "0.1.0" }
+suspect-rex = { path = "crates/suspect-rex", version = "0.1.0" }
+suspect-test = { path = "crates/suspect-test", version = "0.1.0" }
+suspect-gen = { path = "crates/suspect-gen", version = "0.1.0" }
 
 # external
 tree-sitter = "0.26"
@@ -40,6 +45,8 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
 tower-lsp = "0.20"
+async-trait = "0.1"
+bytes = "1"
 criterion = "0.8"
 proptest = "1"
 anyhow = "1"

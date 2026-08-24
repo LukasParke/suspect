@@ -358,3 +358,355 @@ fn mermaid_refs_reuses_edges_and_walks_fallback() {
     assert!(mermaid.contains("PetList --> Pet"));
     assert!(!mermaid.contains("Pet --> Pet")); // self edges dropped
 }
+// ---------------------------------------------------------------- presets
+
+use suspect_ir::{IrOperation, IrParameter, IrResponse, IrSchema, IrSpec, Method, ParamIn};
+
+use crate::presets;
+
+/// Builds a petstore-like spec mirroring the `suspect-ir` SPEC fixture.
+fn petstore_spec() -> IrSpec {
+    let mut spec = IrSpec {
+        title: "Pets".into(),
+        version: "2.1".into(),
+        servers: vec!["https://api.example.com/v1".into()],
+        ..IrSpec::default()
+    };
+    let pet_json = json!({
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+            "name": {"type": "string"},
+            "tag": {"type": "string"},
+            "friend": {"$ref": "#/components/schemas/Pet"}
+        }
+    });
+    spec.operations.push(IrOperation {
+        id: Some("listPets".into()),
+        method: Method::Get,
+        path: "/pets".into(),
+        summary: Some("list all pets".into()),
+        description: None,
+        tags: vec!["pets".into()],
+        deprecated: false,
+        parameters: vec![IrParameter {
+            name: "limit".into(),
+            location: ParamIn::Query,
+            required: false,
+            schema: Some(json!({"type": "integer"})),
+        }],
+        body_schema: None,
+        responses: vec![
+            IrResponse {
+                status: Some(200),
+                description: Some("page of pets".into()),
+                schema: Some("PetList".into()),
+            },
+            IrResponse {
+                status: None,
+                description: Some("error".into()),
+                schema: None,
+            },
+        ],
+    });
+    spec.operations.push(IrOperation {
+        id: Some("createPet".into()),
+        method: Method::Post,
+        path: "/pets".into(),
+        summary: Some("create a pet".into()),
+        description: None,
+        tags: vec!["pets".into()],
+        deprecated: false,
+        parameters: vec![],
+        body_schema: Some("Pet".into()),
+        responses: vec![IrResponse {
+            status: Some(201),
+            description: Some("created".into()),
+            schema: None,
+        }],
+    });
+    spec.operations.push(IrOperation {
+        id: Some("showPetById".into()),
+        method: Method::Get,
+        path: "/pets/{petId}".into(),
+        summary: Some("one pet".into()),
+        description: None,
+        tags: vec!["pets".into()],
+        deprecated: false,
+        parameters: vec![IrParameter {
+            name: "petId".into(),
+            location: ParamIn::Path,
+            required: true,
+            schema: Some(json!({"type": "string"})),
+        }],
+        body_schema: None,
+        responses: vec![IrResponse {
+            status: Some(200),
+            description: Some("one pet".into()),
+            schema: Some("Pet".into()),
+        }],
+    });
+    spec.schemas.push(IrSchema {
+        name: "Pet".into(),
+        json: pet_json,
+    });
+    spec.schemas.push(IrSchema {
+        name: "PetList".into(),
+        json: json!({"type": "array", "items": {"$ref": "#/components/schemas/Pet"}}),
+    });
+    spec
+}
+
+/// Installs a preset's templates (with filters) into a fresh engine.
+fn preset_engine(name: &str) -> MinijinjaEngine {
+    let preset = presets::get(name).expect("preset exists");
+    engine_with(preset.templates)
+}
+
+/// Renders every manifest output of `name` under `dir`.
+fn render_preset_into(
+    name: &str,
+    dir: &std::path::Path,
+    spec: &IrSpec,
+) -> Vec<crate::orchestrate::RenderOutcome> {
+    let preset = presets::get(name).expect("preset exists");
+    let engine = preset_engine(name);
+    let manifest = parse_manifest(preset.manifest_toml).expect("preset manifest parses");
+    let ctx = (preset.ctx_builder)(spec);
+    render_manifest(&engine, &manifest, &ctx, dir, false).expect("preset renders")
+}
+
+/// Counts opening and closing braces of `text`.
+fn brace_balance(text: &str) -> (usize, usize) {
+    (
+        text.chars().filter(|c| *c == '{').count(),
+        text.chars().filter(|c| *c == '}').count(),
+    )
+}
+
+#[test]
+fn presets_lookup_all_three_and_unknown_is_none() {
+    for name in ["docs-md", "ts-sdk", "rust-sdk"] {
+        let preset = presets::get(name).unwrap_or_else(|| panic!("{name} missing"));
+        assert!(!preset.templates.is_empty(), "{name} must bundle templates");
+        // Every bundled template compiles with filters registered.
+        let _engine = preset_engine(name);
+        assert!(
+            parse_manifest(preset.manifest_toml).is_ok(),
+            "{name} manifest parses"
+        );
+    }
+    assert!(presets::get("nope").is_none());
+    assert!(presets::get("").is_none());
+}
+
+#[test]
+fn docs_md_renders_petstore_docs() {
+    let spec = petstore_spec();
+    let engine = preset_engine("docs-md");
+    let ctx = presets::base_context(&spec);
+
+    // Context augmentations required by the contract.
+    assert_eq!(ctx["base_url"], "https://api.example.com/v1");
+    assert_eq!(ctx["operations_by_tag"][0]["tag"], "pets");
+    assert_eq!(
+        ctx["operations_by_tag"][0]["operations"]
+            .as_array()
+            .map(Vec::len),
+        Some(3)
+    );
+    assert_eq!(ctx["schema_names"][0], "Pet");
+
+    let index = engine.render("docs-md/index.md.j2", &ctx).unwrap();
+    assert!(index.contains("# Pets 2.1"), "title heading present");
+    assert!(
+        index.contains("https://api.example.com/v1"),
+        "base url present"
+    );
+    for id in ["listPets", "createPet", "showPetById"] {
+        assert!(
+            index.contains(&format!("— {id}\n")) || index.contains(&format!("— {id}")),
+            "operation id {id} appears in a section heading"
+        );
+    }
+    assert!(index.contains("`GET /pets`"), "method+path headings");
+    assert!(index.contains("| limit | query | no |"), "parameters table");
+    assert!(
+        index.contains("**Request body:** `Pet`"),
+        "request schema name"
+    );
+    assert!(
+        index.contains("`200` — page of pets → `PetList`"),
+        "response schemas"
+    );
+
+    let schemas = engine.render("docs-md/schema.md.j2", &ctx).unwrap();
+    assert!(schemas.contains("## Pet\n"), "Pet section");
+    for prop in ["name", "tag", "friend"] {
+        assert!(schemas.contains(prop), "Pet property {prop} documented");
+    }
+    assert!(schemas.contains("## PetList\n"), "PetList section");
+}
+
+#[test]
+fn ts_sdk_renders_client_models_deterministically() {
+    let spec = petstore_spec();
+    let engine = preset_engine("ts-sdk");
+    let ctx = (presets::get("ts-sdk").unwrap().ctx_builder)(&spec);
+
+    let client = engine.render("ts-sdk/client.ts.j2", &ctx).unwrap();
+    let models = engine.render("ts-sdk/models.ts.j2", &ctx).unwrap();
+
+    assert!(client.contains("class ApiClient"));
+    for op in ["listPets", "createPet", "showPetById"] {
+        assert!(
+            client.contains(&format!("async {op}(")),
+            "one method per operation ({op})"
+        );
+    }
+    assert!(
+        client.contains("URLSearchParams"),
+        "query params via URLSearchParams"
+    );
+    assert!(
+        client.contains("JSON.stringify(body)"),
+        "body serialized when body_schema"
+    );
+    assert!(
+        client.contains("import type"),
+        "models referenced from client"
+    );
+    assert!(models.contains("export interface Pet {"));
+    assert!(models.contains("name: string;"));
+    assert!(models.contains("tag?: string;"), "optional property marked");
+    assert!(
+        models.contains("friend?: Pet;"),
+        "$ref field typed as class name"
+    );
+    assert!(
+        models.contains("export type PetList = Pet[];"),
+        "array schema as T[]"
+    );
+
+    // No unresolved Jinja leftovers in either output.
+    for out in [&client, &models] {
+        assert!(!out.contains("{{"), "unresolved '{{' leftover: {out}");
+        let (open, close) = brace_balance(out);
+        assert_eq!(open, close, "brace balance violated");
+    }
+
+    // Deterministic re-render.
+    let client2 = engine.render("ts-sdk/client.ts.j2", &ctx).unwrap();
+    let models2 = engine.render("ts-sdk/models.ts.j2", &ctx).unwrap();
+    assert_eq!(client, client2);
+    assert_eq!(models, models2);
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn rust_sdk_renders_and_compiles_standalone() {
+    let spec = petstore_spec();
+    let engine = preset_engine("rust-sdk");
+    let ctx = (presets::get("rust-sdk").unwrap().ctx_builder)(&spec);
+
+    let lib_rs = engine.render("rust-sdk/lib.rs.j2", &ctx).unwrap();
+    let models_rs = engine.render("rust-sdk/models.rs.j2", &ctx).unwrap();
+
+    assert!(lib_rs.contains("pub struct Client"));
+    assert!(lib_rs.contains("pub base_url: String"));
+    assert!(lib_rs.contains("pub struct HttpRequest"));
+    assert!(lib_rs.contains("pub headers: Vec<(String, String)>"));
+    assert!(lib_rs.contains("pub body: Option<String>"));
+    assert!(
+        lib_rs.contains("include!(\"models.rs\");"),
+        "single-crate include"
+    );
+    for op in ["list_pets", "create_pet", "show_pet_by_id"] {
+        assert!(lib_rs.contains(&format!("pub fn {op}(")), "builder fn {op}");
+    }
+    assert!(
+        lib_rs.contains(BEGIN_MARK) && lib_rs.contains(END_MARK),
+        "user-code markers"
+    );
+    assert!(models_rs.contains("pub struct Pet {"));
+    assert!(
+        models_rs.contains("pub name: String,"),
+        "required field plain"
+    );
+    assert!(
+        models_rs.contains("pub tag: Option<String>,"),
+        "optional field Option<T>"
+    );
+    assert!(
+        models_rs.contains("pub friend: Option<Box<Pet>>,"),
+        "$ref via rust_type boxed"
+    );
+    assert!(
+        models_rs.contains("pub type PetList = Vec<Pet>;"),
+        "array schema as Vec<T>"
+    );
+
+    // Compile the generated SDK with a bare rustc invocation.
+    let dir = scratch_dir("rust-sdk-compile");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("Cargo.toml"),
+        engine.render("rust-sdk/Cargo.toml.j2", &ctx).unwrap(),
+    )
+    .unwrap();
+    fs::write(dir.join("src/lib.rs"), &lib_rs).unwrap();
+    fs::write(dir.join("src/models.rs"), &models_rs).unwrap();
+    let output = std::process::Command::new("rustc")
+        .args([
+            "--edition",
+            "2021",
+            "--crate-type",
+            "lib",
+            "-o",
+            dir.join("lib.rlib").to_str().unwrap(),
+            dir.join("src/lib.rs").to_str().unwrap(),
+        ])
+        .output()
+        .expect("rustc runs");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && !stderr.contains("error"),
+        "generated rust SDK failed to compile:\n{stderr}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn ts_sdk_preserved_user_code_survives_rerender() {
+    let spec = petstore_spec();
+    let dir = scratch_dir("ts-preserve");
+    render_preset_into("ts-sdk", &dir, &spec);
+
+    let client_path = dir.join("sdk/typescript/client.ts");
+    let first = fs::read_to_string(&client_path).unwrap();
+    // Simulate the user editing inside the preserved region.
+    let edited = first.replace(
+        "// suspect:begin:user-code",
+        "// suspect:begin:user-code\ncustomUserHelper();",
+    );
+    assert_ne!(edited, first, "fresh client carries user-code markers");
+    fs::write(&client_path, edited).unwrap();
+
+    let outcomes = render_preset_into("ts-sdk", &dir, &spec);
+    let client_outcome = outcomes
+        .iter()
+        .find(|o| o.path == client_path)
+        .expect("client outcome reported");
+    assert_eq!(client_outcome.reason, WriteReason::PreservedRegionsApplied);
+
+    let rerendered = fs::read_to_string(&client_path).unwrap();
+    assert!(
+        rerendered.contains("customUserHelper();"),
+        "user code survives regeneration verbatim"
+    );
+    assert!(
+        rerendered.contains("class ApiClient"),
+        "generated frame refreshed"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}

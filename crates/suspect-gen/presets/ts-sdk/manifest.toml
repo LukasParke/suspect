@@ -1,0 +1,8 @@
+# Output rules for the `ts-sdk` preset.
+[output]
+template = "ts-sdk/models.ts.j2"
+target = "sdk/typescript/models.ts"
+
+[[output]]
+template = "ts-sdk/client.ts.j2"
+target = "sdk/typescript/client.ts"

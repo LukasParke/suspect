@@ -1,0 +1,99 @@
+//! Generated zero-dependency SDK client for {{ title }} {{ version }}.
+//!
+//! [`Client`] builds one [`HttpRequest`] per spec operation; executing the
+//! request is left to the caller (user-code section below), keeping this
+//! crate free of external dependencies.
+
+include!("models.rs");
+
+/// A prepared HTTP request produced by the client builders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HttpRequest {
+    /// HTTP verb (`GET`, `POST`, ...).
+    pub method: String,
+    /// Fully qualified URL including the query string.
+    pub url: String,
+    /// Request headers in emission order.
+    pub headers: Vec<(String, String)>,
+    /// Pre-serialized JSON request body, when the operation takes one.
+    pub body: Option<String>,
+}
+
+/// Entry-point client holding the API base URL.
+#[derive(Debug, Clone)]
+pub struct Client {
+    /// Base URL every request is resolved against.
+    pub base_url: String,
+}
+
+impl Client {
+    /// Creates a client targeting `base_url`.
+    #[must_use]
+    pub fn new(base_url: impl Into<String>) -> Self {
+        Self {
+            base_url: base_url.into(),
+        }
+    }
+{%- for group in operations_by_tag %}
+{%- for op in group.operations %}
+{%- set ns = namespace(has_query=false) %}
+{%- for p in op.parameters if p.location == "query" %}
+{%- set ns.has_query = true %}
+{%- endfor %}
+{%- set fname = op.id or ((op.method | lower) ~ op.path) %}
+
+    /// `{{ op.method }} {{ op.path }}`{% if op.summary %} — {{ op.summary }}{% endif %}{% if op.body_schema %} (body: pre-serialized JSON){% endif %}
+    #[must_use]
+    pub fn {{ fname | snake_case }}(&self,
+        {%- for p in op.parameters if p.location == "path" %}
+        {{ p.name | snake_case }}: &str,
+        {%- endfor %}
+        {%- for p in op.parameters if p.location == "query" %}
+        {%- set rt = p.schema | rust_type %}
+        {{ p.name | snake_case }}: {% if p.required %}{% if rt == "String" %}&str{% else %}{{ rt }}{% endif %}{% else %}Option<{% if rt == "String" %}&str{% else %}{{ rt }}{% endif %}>{% endif %},
+        {%- endfor %}
+        {%- if op.body_schema %}
+        body: String,
+        {%- endif %}
+    ) -> HttpRequest {
+        let mut url = self.base_url.clone();
+        url.push_str("{{ op.path }}");
+        {%- for p in op.parameters if p.location == "path" %}
+        url = url.replace("{{ '{' ~ p.name ~ '}' }}", {{ p.name | snake_case }});
+        {%- endfor %}
+        {%- if ns.has_query %}
+        let mut parts: Vec<String> = Vec::new();
+        {%- for p in op.parameters if p.location == "query" %}
+        {%- if p.required %}
+            parts.push(format!("{}={}", "{{ p.name }}", {{ p.name | snake_case }}));
+        {%- else %}
+        if let Some({{ p.name | snake_case }}) = {{ p.name | snake_case }} {
+            parts.push(format!("{}={}", "{{ p.name }}", {{ p.name | snake_case }}));
+        }
+        {%- endif %}
+        {%- endfor %}
+        if !parts.is_empty() {
+            url.push('?');
+            url.push_str(&parts.join("&"));
+        }
+        {%- endif %}
+        HttpRequest {
+            method: "{{ op.method }}".to_string(),
+            url,
+            headers: vec![
+                ("Accept".to_string(), "application/json".to_string()),
+                {%- if op.body_schema %}
+                ("Content-Type".to_string(), "application/json".to_string()),
+                {%- endif %}
+            ],
+            body: {% if op.body_schema %}Some(body){% else %}None{% endif %},
+        }
+    }
+{%- endfor %}
+{%- endfor %}
+
+    // suspect:begin:user-code
+    // Add execution helpers (send/await glue, retries, auth headers)
+    // between these markers; they are preserved across regeneration.
+    // suspect:end:user-code
+}

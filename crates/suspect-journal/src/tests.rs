@@ -1,4 +1,3 @@
-
 use crate::{
     Body, BodyEncoding, CASSETTE_FORMAT, CASSETTE_VERSION, CassetteEntry, CassetteHeader, Journal,
     Level, REDACTED, Record, Redactor, TrafficRecord, VecSink, Verdict, read_cassette, sha256_hex,

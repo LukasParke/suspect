@@ -1,0 +1,20 @@
+// Generated model types for {{ title }} {{ version }}.
+// Edit freely only outside generated sections; this file has no
+// preserved regions, so regeneration replaces it wholesale.
+{%- for s in schemas %}
+{% set def = s.json %}
+
+{%- if def.type == "object" and def.properties %}
+{% set reqs = def.required or [] %}
+
+export interface {{ s.name | PascalCase }} {
+  {%- for pname in def.properties %}
+  {%- set prop = def.properties[pname] %}
+  {{ pname }}{% if pname not in reqs %}?{% endif %}: {{ prop | ts_type }};
+  {%- endfor %}
+}
+{%- else %}
+
+export type {{ s.name | PascalCase }} = {{ def | ts_type }};
+{%- endif %}
+{%- endfor %}

@@ -1,0 +1,31 @@
+### `{{ op.method }} {{ op.path }}`{% if op.id %} — {{ op.id }}{% endif %}
+{% if op.summary %}
+
+{{ op.summary }}
+{% endif -%}
+{% if op.deprecated %}
+
+> **Deprecated.**
+{% endif -%}
+{% if op.parameters %}
+
+#### Parameters
+
+| Name | In | Required | Type |
+| ---- | -- | -------- | ---- |
+{%- for p in op.parameters %}
+| {{ p.name }} | {{ p.location }} | {{ "yes" if p.required else "no" }} | {% if p.schema %}{{ p.schema | ts_type }}{% else %}-{% endif %} |
+{%- endfor %}
+{% endif -%}
+{% if op.body_schema %}
+
+**Request body:** `{{ op.body_schema }}`
+{% endif -%}
+{% if op.responses %}
+
+#### Responses
+
+{%- for r in op.responses %}
+- `{{ r.status or "default" }}`{% if r.description %} — {{ r.description }}{% endif %}{% if r.schema %} → `{{ r.schema }}`{% endif %}
+{%- endfor %}
+{% endif %}

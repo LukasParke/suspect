@@ -108,5 +108,5 @@ impl TemplateEngine for MinijinjaEngine {
 pub use filters::{FilterRegistry, example_of, mermaid_refs, rust_type, ts_type};
 pub use orchestrate::{
     BEGIN_MARK, END_MARK, Manifest, OutputRule, RenderOutcome, WriteReason, load_manifest,
-    parse_manifest, render_manifest,
+    parse_manifest, parse_manifest_str, render_manifest,
 };

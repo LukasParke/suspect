@@ -135,6 +135,40 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
+    /// Compile an Arazzo document into an executable suite and run it.
+    Test {
+        /// Arazzo document describing the workflows.
+        arazzo: PathBuf,
+        /// Base URL prepended to operation paths.
+        #[arg(long, default_value = "http://localhost:8080")]
+        base_url: String,
+        /// Run only workflows whose id contains this substring.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Run offline against a recorded Suspect Cassette instead of live HTTP.
+        #[arg(long, requires = "offline")]
+        cassette: Option<PathBuf>,
+        /// Enables offline mode (requires --cassette).
+        #[arg(long)]
+        offline: bool,
+    },
+    /// Render documentation or SDK presets from an OpenAPI document.
+    Gen {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Shipped preset: docs-md | ts-sdk | rust-sdk.
+        #[arg(long, conflicts_with = "manifest")]
+        preset: Option<String>,
+        /// Custom gen.toml manifest (templates resolved relative to it).
+        #[arg(long, conflicts_with = "preset")]
+        manifest: Option<PathBuf>,
+        /// Output root directory.
+        #[arg(short, long, default_value = "gen-out")]
+        out: PathBuf,
+        /// Print unified diffs without writing files.
+        #[arg(long)]
+        diff: bool,
+    },
     /// Run the language server over stdio.
     Lsp,
 }
@@ -190,6 +224,22 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             iters,
             text,
         } => commands::bench::bench(&fixture, iters, text.format),
+        Command::Test {
+            arazzo,
+            base_url,
+            filter,
+            cassette,
+            offline: _,
+        } => commands::test::test(&arazzo, &base_url, filter.as_deref(), cassette.as_deref()),
+        Command::Gen {
+            spec,
+            preset,
+            manifest,
+            out,
+            diff,
+        } => {
+            commands::generate::generate(&spec, preset.as_deref(), manifest.as_deref(), &out, diff)
+        }
         Command::Lsp => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(suspect_lsp::run_server());

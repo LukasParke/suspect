@@ -11,6 +11,14 @@ name = "suspect"
 path = "src/main.rs"
 
 [dependencies]
+suspect-test.workspace = true
+suspect-gen.workspace = true
+suspect-ir.workspace = true
+suspect-journal.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"], optional = true }
+async-trait.workspace = true
+bytes.workspace = true
+
 suspect-source.workspace = true
 suspect-syntax.workspace = true
 suspect-low.workspace = true
@@ -29,3 +37,7 @@ tokio.workspace = true
 serde.workspace = true
 rayon.workspace = true
 anyhow.workspace = true
+
+[features]
+default = ["live-http"]
+live-http = ["dep:reqwest"]

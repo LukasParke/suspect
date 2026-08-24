@@ -1,0 +1,12 @@
+# Output rules for the `rust-sdk` preset.
+[output]
+template = "rust-sdk/Cargo.toml.j2"
+target = "sdk/rust/Cargo.toml"
+
+[[output]]
+template = "rust-sdk/lib.rs.j2"
+target = "sdk/rust/src/lib.rs"
+
+[[output]]
+template = "rust-sdk/models.rs.j2"
+target = "sdk/rust/src/models.rs"

@@ -127,6 +127,18 @@ fn unquote(value: &str) -> String {
 ///
 /// # Errors
 /// On I/O failure or malformed manifest content.
+/// Parses a manifest from raw TOML text (embedded preset manifests).
+///
+/// # Errors
+/// Same as [`parse_manifest`].
+pub fn parse_manifest_str(text: &str) -> Result<Manifest, GenError> {
+    parse_manifest(text)
+}
+
+/// Loads and parses a manifest file from disk.
+///
+/// # Errors
+/// Propagates read errors and manifest parse errors.
 pub fn load_manifest(path: &Path) -> Result<Manifest, GenError> {
     let text = fs::read_to_string(path)?;
     parse_manifest(&text)

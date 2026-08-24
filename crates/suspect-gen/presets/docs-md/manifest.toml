@@ -1,0 +1,8 @@
+# Output rules for the `docs-md` preset.
+[output]
+template = "docs-md/index.md.j2"
+target = "docs/api/index.md"
+
+[[output]]
+template = "docs-md/schema.md.j2"
+target = "docs/api/schemas.md"

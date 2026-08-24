@@ -1,0 +1,19 @@
+# {{ title }} {{ version }}
+
+Base URL: `{% if base_url %}{{ base_url }}{% else %}_(none declared)_{% endif %}`
+
+## Contents
+{% for group in operations_by_tag %}
+
+### {{ group.tag }}
+{% for op in group.operations %}
+- `{{ op.method }} {{ op.path }}`{% if op.id %} — {{ op.id }}{% endif %}
+{% endfor %}
+{% endfor %}
+{% for group in operations_by_tag %}
+
+## {{ group.tag }}
+{% for op in group.operations %}
+{% include "docs-md/partials/op.md.j2" %}
+{% endfor %}
+{% endfor %}
