@@ -1,7 +1,7 @@
 //! Pure helpers shared by the workspace and fast IR construction paths.
 //!
 //! Everything here is input-shape agnostic: the CST-based walk in
-//! the CST walk (`lib`) and the [`FastValue`]-based walk in `fast` both
+//! the CST walk (`lib`) and the `FastValue`-based walk in `fast` both
 //! route through these functions so naming, decoding, and scalar semantics
 //! cannot drift between the two pipelines.
 

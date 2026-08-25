@@ -1,11 +1,11 @@
 //! IR construction from the fast YAML-subset tree.
 //!
-//! [`ir_from_fast`] walks a [`FastValue`] tree with exactly the same rules
+//! [`ir_from_fast`] walks a `FastValue` tree with exactly the same rules
 //! as [`IrSpec::from_workspace`] applied to a
 //! CST: component schemas first, then operations in document order, with
 //! identical parameter merging, response ordering, `$ref` naming (including
-//! percent-decoding), and index-map population. [`value_from_node`] adapts
-//! resolved CST nodes into [`FastValue`] so both pipelines share one walk.
+//! percent-decoding), and index-map population. the `value_from_node` adapter
+//! resolved CST nodes into `FastValue` so both pipelines share one walk.
 
 use rayon::prelude::*;
 
