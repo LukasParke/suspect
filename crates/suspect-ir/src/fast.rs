@@ -1,7 +1,7 @@
 //! IR construction from the fast YAML-subset tree.
 //!
 //! [`ir_from_fast`] walks a [`FastValue`] tree with exactly the same rules
-//! as [`IrSpec::from_workspace`](crate::IrSpec::from_workspace) applied to a
+//! as [`IrSpec::from_workspace`] applied to a
 //! CST: component schemas first, then operations in document order, with
 //! identical parameter merging, response ordering, `$ref` naming (including
 //! percent-decoding), and index-map population. [`value_from_node`] adapts

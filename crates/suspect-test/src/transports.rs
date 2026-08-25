@@ -1,4 +1,4 @@
-//! Deterministic in-process [`HttpClient`](crate::exec::HttpClient)
+//! Deterministic in-process [`HttpClient`]
 //! transports used for testing and offline runs.
 //!
 //! No real network transport ships in this crate: HTTP clients arrive with

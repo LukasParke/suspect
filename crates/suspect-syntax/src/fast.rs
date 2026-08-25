@@ -4,7 +4,7 @@
 //! the shape of virtually every real-world OpenAPI document: nested block
 //! mappings and sequences driven by indentation, plain / single-quoted /
 //! double-quoted scalars, block scalars (`|` / `>` with chomping and
-//! indentation behaviour matching [`suspect_low`]'s CST decoder), single-line
+//! indentation behaviour matching suspect_low's CST decoder), single-line
 //! flow collections (`{}` / `[]`), comments, and core-schema null / bool /
 //! int / float tokens.
 //!

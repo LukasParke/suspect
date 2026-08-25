@@ -1,4 +1,4 @@
-//! Lifts [`IrSpec`](suspect_ir::IrSpec) into the
+//! Lifts [`IrSpec`] into the
 //! [`stg::Graph`](crate::stg::Graph).
 
 use std::collections::{BTreeMap, HashMap, HashSet};

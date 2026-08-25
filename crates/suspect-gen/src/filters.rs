@@ -1,7 +1,7 @@
 //! Built-in template filters for code generation.
 //!
 //! [`FilterRegistry`] installs a small set of pure, deterministic filters
-//! onto a [`MinijinjaEngine`](crate::MinijinjaEngine): identifier case
+//! onto a `MinijinjaEngine`: identifier case
 //! conversion, OpenAPI-schema-to-type mappings for TypeScript and Rust,
 //! deterministic example synthesis, and Mermaid dependency graphs.
 //!
