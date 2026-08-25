@@ -1,0 +1,11 @@
+[package]
+name = "suspect-reverse"
+version.workspace = true
+edition.workspace = true
+description = "Handler-to-spec reverse engineering: extract routes from server code"
+license.workspace = true
+
+[dependencies]
+suspect-ir.path = "../suspect-ir"
+serde.workspace = true
+regex.workspace = true

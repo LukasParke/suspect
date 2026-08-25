@@ -21,6 +21,7 @@ use suspect_ref::Workspace;
 use suspect_source::Uri;
 
 pub mod common;
+pub mod evolution;
 pub mod fast;
 
 pub use fast::ir_from_fast;

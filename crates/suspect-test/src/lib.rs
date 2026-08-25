@@ -30,10 +30,12 @@
 //!
 //! [Arazzo 1.0]: https://spec.openapis.org/arazzo/v1.0.0
 
+pub mod evolved_fuzz;
 pub mod exec;
 pub mod fuzz;
 pub mod plan;
 pub mod reporters;
+pub mod stateful;
 pub mod transports;
 
 #[cfg(test)]

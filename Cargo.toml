@@ -25,6 +25,7 @@ suspect-lint = { path = "crates/suspect-lint", version = "0.1.0" }
 suspect-lsp = { path = "crates/suspect-lsp", version = "0.1.0" }
 suspect-ir = { path = "crates/suspect-ir", version = "0.1.0" }
 suspect-journal = { path = "crates/suspect-journal", version = "0.1.0" }
+suspect-reverse = { path = "crates/suspect-reverse", version = "0.1.0" }
 suspect-rex = { path = "crates/suspect-rex", version = "0.1.0" }
 suspect-test = { path = "crates/suspect-test", version = "0.1.0" }
 suspect-gen = { path = "crates/suspect-gen", version = "0.1.0" }

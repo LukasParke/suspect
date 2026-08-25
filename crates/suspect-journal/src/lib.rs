@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub mod cassette;
+pub mod causal;
 #[cfg(test)]
 mod tests;
 pub use cassette::{

@@ -42,7 +42,9 @@ use suspect_ir::{IrSpec, Method};
 
 use suspect_journal::{Journal, Level, Redactor, TrafficRecord, Verdict};
 
+pub mod bridge;
 pub mod mock;
+pub mod playground;
 pub mod proxy;
 pub mod replay;
 pub mod scenario;
@@ -309,6 +311,14 @@ fn router_for_state(state: Arc<GatewayState>) -> Router {
             eprintln!("[gw] skipping unregistrable path: {path}");
         }
     }
+    let pg_state = Arc::clone(&state);
+    let router = router.route(
+        "/playground",
+        axum::routing::get(move || {
+            let state = Arc::clone(&pg_state);
+            async move { axum::response::Html(playground::playground_html(&state)).into_response() }
+        }),
+    );
     router.fallback(fallback_dispatch).with_state(state)
 }
 

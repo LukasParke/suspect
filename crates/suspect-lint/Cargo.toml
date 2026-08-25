@@ -15,8 +15,11 @@ rustc-hash.workspace = true
 thiserror.workspace = true
 regex.workspace = true
 rayon.workspace = true
+serde.workspace = true
+suspect-ir.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 criterion.workspace = true
 suspect-ref.workspace = true
 

@@ -6,6 +6,8 @@
 //! plans per-language representations; layer 3 emits idiomatic source with
 //! deterministic ordering and built-in drift checking.
 
+pub mod consumer_impact;
+pub mod diff;
 pub mod go_emitter;
 pub mod idents;
 pub mod lift;

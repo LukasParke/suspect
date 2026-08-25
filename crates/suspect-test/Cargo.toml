@@ -20,6 +20,7 @@ serde_json.workspace = true
 bytes = "1"
 async-trait = "0.1"
 regex.workspace = true
+rand = "0.8"
 tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
