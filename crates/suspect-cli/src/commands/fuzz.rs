@@ -5,9 +5,9 @@
 //! reduced to scalar fields ([`suspect_test::fuzz::scalar_fields`]); a
 //! deterministic run counter cycles pathological values through those fields
 //! ([`suspect_test::fuzz::generate_mutants`]). Mutants execute concurrently,
-//! at most [`IN_FLIGHT`] requests in flight. A mutant **survives** when the
+//! at most `IN_FLIGHT` requests in flight. A mutant **survives** when the
 //! server answers 4xx or any ok-style response; a **crash** is a 5xx or a
-//! transport failure/timeout (the client times out at [`TIMEOUT`]). Any
+//! transport failure/timeout (the client times out at `TIMEOUT`). Any
 //! crash exits 1.
 
 use std::path::Path;
