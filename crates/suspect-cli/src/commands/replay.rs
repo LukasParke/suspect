@@ -1,7 +1,7 @@
 //! `suspect replay` — re-issues a recorded cassette's requests against a
 //! live upstream and reports drift.
 //!
-//! For every [`CassetteEntry`] the recorded request (method, URL retargeted
+//! For every `CassetteEntry` the recorded request (method, URL retargeted
 //! onto `--upstream`, headers, body) is re-sent; drift is reported per
 //! exchange as `<status-match ok|DRIFT> <body ok|DRIFT> <url>`. With
 //! `--diff`, UTF-8 response bodies that drifted get a unified diff of
