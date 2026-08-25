@@ -311,12 +311,12 @@ fn router_for_state(state: Arc<GatewayState>) -> Router {
             eprintln!("[gw] skipping unregistrable path: {path}");
         }
     }
-    let pg_state = Arc::clone(&state);
+    let pg_spec = Arc::clone(&state.spec);
     let router = router.route(
         "/playground",
         axum::routing::get(move || {
-            let state = Arc::clone(&pg_state);
-            async move { axum::response::Html(playground::playground_html(&state)).into_response() }
+            let spec = Arc::clone(&pg_spec);
+            async move { axum::response::Html(playground::playground_html(&spec)).into_response() }
         }),
     );
     router.fallback(fallback_dispatch).with_state(state)

@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use regex::Regex;
+use std::sync::LazyLock;
 
 /// One route extracted from server source code.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -52,15 +53,37 @@ pub struct ReverseReport {
     pub method_mismatches: Vec<Mismatch>,
 }
 
+/// Framework route patterns, compiled once.
+static AXUM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\.route\(\s*"([^"]+)"\s*,\s*(get|post|put|delete|patch|head|options)\("#)
+        .expect("valid regex")
+});
+static ACTIX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"#\[(get|post|put|delete|patch|head|options)\("([^"]+)"\)\]"#)
+        .expect("valid regex")
+});
+static EXPRESS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"\b(?:app|router|api)\.(get|post|put|delete|patch|head|options)\s*\(\s*['"`]([^'"`]+)['"`]"#,
+    )
+    .expect("valid regex")
+});
+static GO_HTTP: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"\.HandleFunc\(\s*"([^"]+)"\s*,"#).expect("valid regex"));
+static GIN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\.\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any)\(\s*"([^"]+)""#)
+        .expect("valid regex")
+});
+static PATH_PARAM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[:*]([a-zA-Z_][a-zA-Z0-9_]*)").expect("valid regex"));
+
 /// Extracts routes from a source file by framework pattern matching.
 #[must_use]
 pub fn extract_routes(source: &str, file: &str) -> Vec<ExtractedRoute> {
     let mut routes = Vec::new();
 
     // --- Rust axum: .route("/path", get(handler)) or routing DSL ---
-    let axum =
-        Regex::new(r#"\.route\(\s*"([^"]+)"\s*,\s*(get|post|put|delete|patch|head|options)\("#)
-            .expect("valid regex");
+    let axum = &*AXUM;
     for cap in axum.captures_iter(source) {
         let line = line_of(source, cap.get(0).map(|m| m.start()).unwrap_or(0));
         routes.push(ExtractedRoute {
@@ -73,8 +96,7 @@ pub fn extract_routes(source: &str, file: &str) -> Vec<ExtractedRoute> {
     }
 
     // --- Rust actix: #[get("/path")] attribute macros ---
-    let actix = Regex::new(r#"#\[(get|post|put|delete|patch|head|options)\("([^"]+)"\)\]"#)
-        .expect("valid regex");
+    let actix = &*ACTIX;
     for cap in actix.captures_iter(source) {
         let line = line_of(source, cap.get(0).map(|m| m.start()).unwrap_or(0));
         routes.push(ExtractedRoute {
@@ -87,10 +109,7 @@ pub fn extract_routes(source: &str, file: &str) -> Vec<ExtractedRoute> {
     }
 
     // --- TypeScript Express: app.get('/path', ...) / router.post(...) ---
-    let express = Regex::new(
-        r#"\b(?:app|router|api)\.(get|post|put|delete|patch|head|options)\s*\(\s*['"`]([^'"`]+)['"`]"#,
-    )
-    .expect("valid regex");
+    let express = &*EXPRESS;
     for cap in express.captures_iter(source) {
         let line = line_of(source, cap.get(0).map(|m| m.start()).unwrap_or(0));
         routes.push(ExtractedRoute {
@@ -103,7 +122,7 @@ pub fn extract_routes(source: &str, file: &str) -> Vec<ExtractedRoute> {
     }
 
     // --- Go net/http: r.HandleFunc("/path", handler).Methods("GET") ---
-    let go_http = Regex::new(r#"\.HandleFunc\(\s*"([^"]+)"\s*,"#).expect("valid regex");
+    let go_http = &*GO_HTTP;
     for cap in go_http.captures_iter(source) {
         let line = line_of(source, cap.get(0).map(|m| m.start()).unwrap_or(0));
         // net/http without Methods() handles all methods; record as ANY
@@ -117,8 +136,7 @@ pub fn extract_routes(source: &str, file: &str) -> Vec<ExtractedRoute> {
     }
 
     // --- Go Gin: r.GET("/path", handler) ---
-    let gin = Regex::new(r#"\.\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|Any)\(\s*"([^"]+)""#)
-        .expect("valid regex");
+    let gin = &*GIN;
     for cap in gin.captures_iter(source) {
         let line = line_of(source, cap.get(0).map(|m| m.start()).unwrap_or(0));
         let method = if &cap[1] == "Any" {
@@ -251,8 +269,7 @@ pub fn cross_reference(spec: &suspect_ir::IrSpec, routes: &[ExtractedRoute]) -> 
 /// Normalizes framework path syntax to OpenAPI `{param}` style.
 fn normalize_path(p: &str) -> String {
     // axum: :param → {param}; express: :param → {param}
-    let colon = Regex::new(r"[:*]([a-zA-Z_][a-zA-Z0-9_]*)").expect("valid regex");
-    colon.replace_all(p, "{$1}").to_string()
+    PATH_PARAM.replace_all(p, "{$1}").to_string()
 }
 
 /// Normalizes an OAS path for comparison (trailing slashes, etc.).

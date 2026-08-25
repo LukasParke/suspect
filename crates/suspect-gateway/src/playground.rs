@@ -6,52 +6,48 @@
 //! page dispatches requests through the gateway itself, so responses are
 //! validated and journaled exactly like live traffic.
 
-use std::sync::Arc;
-
-use super::GatewayState;
+use suspect_ir::IrSpec;
 
 /// The single-file playground HTML app.
 #[must_use]
-pub(crate) fn playground_html(state: &Arc<GatewayState>) -> String {
-    let ops: Vec<String> = state
-        .spec
-        .operations
-        .iter()
-        .map(|op| {
-            let id = op
-                .id
-                .clone()
-                .unwrap_or_else(|| format!("{} {}", op.method.as_str().to_uppercase(), op.path));
-            let summary = op.summary.clone().unwrap_or_default();
-            let params: Vec<String> = op
-                .parameters
-                .iter()
-                .map(|p| {
-                    format!(
-                        r#"{{"name":{},"in":{},"required":{}}}"#,
-                        json_str(&p.name),
-                        json_str(match p.location {
-                            suspect_ir::ParamIn::Query => "query",
-                            suspect_ir::ParamIn::Header => "header",
-                            suspect_ir::ParamIn::Path => "path",
-                            suspect_ir::ParamIn::Cookie => "cookie",
-                        }),
-                        p.required
-                    )
-                })
-                .collect();
-            format!(
-                r#"{{"id":{},"method":{},"path":{},"summary":{},"params":[{}]}}"#,
-                json_str(&id),
-                json_str(op.method.as_str()),
-                json_str(&op.path),
-                json_str(&summary),
-                params.join(",")
-            )
-        })
-        .collect();
+pub fn playground_html(spec: &IrSpec) -> String {
+    let ops: Vec<String> =
+        spec.operations
+            .iter()
+            .map(|op| {
+                let id = op.id.clone().unwrap_or_else(|| {
+                    format!("{} {}", op.method.as_str().to_uppercase(), op.path)
+                });
+                let summary = op.summary.clone().unwrap_or_default();
+                let params: Vec<String> = op
+                    .parameters
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            r#"{{"name":{},"in":{},"required":{}}}"#,
+                            json_str(&p.name),
+                            json_str(match p.location {
+                                suspect_ir::ParamIn::Query => "query",
+                                suspect_ir::ParamIn::Header => "header",
+                                suspect_ir::ParamIn::Path => "path",
+                                suspect_ir::ParamIn::Cookie => "cookie",
+                            }),
+                            p.required
+                        )
+                    })
+                    .collect();
+                format!(
+                    r#"{{"id":{},"method":{},"path":{},"summary":{},"params":[{}]}}"#,
+                    json_str(&id),
+                    json_str(op.method.as_str()),
+                    json_str(&op.path),
+                    json_str(&summary),
+                    params.join(",")
+                )
+            })
+            .collect();
 
-    let title = json_str(&state.spec.title);
+    let title = json_str(&spec.title);
     let ops_json = ops.join(",");
 
     format!(
