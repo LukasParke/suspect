@@ -2,8 +2,8 @@
 //! suspect-test: Arazzo-driven contract test planning and execution.
 //!
 //! The crate turns an [Arazzo 1.0] description plus a loaded OpenAPI
-//! workspace into an executable [`Plan`](plan::Plan), runs the plan against
-//! an [`HttpClient`](exec::HttpClient) transport, and reports results as
+//! workspace into an executable [`Plan`], runs the plan against
+//! an [`HttpClient`] transport, and reports results as
 //! console text, JUnit XML, or NDJSON events.
 //!
 //! Pipeline:
