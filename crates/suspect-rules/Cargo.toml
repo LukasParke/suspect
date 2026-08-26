@@ -1,0 +1,20 @@
+[package]
+name = "suspect-rules"
+version.workspace = true
+edition.workspace = true
+description = "TS/JS custom rule runtime: Bun sidecar worker, protocol host, selector evaluation"
+license.workspace = true
+
+[dependencies]
+suspect-low.workspace = true
+suspect-source.workspace = true
+suspect-jsonpath.workspace = true
+suspect-syntax.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["process", "io-util", "time", "sync", "macros", "rt"] }
+thiserror.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

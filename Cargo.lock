@@ -1792,6 +1792,7 @@ dependencies = [
  "suspect-overlay",
  "suspect-ref",
  "suspect-reverse",
+ "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",
@@ -2005,6 +2006,22 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-low",
+]
+
+[[package]]
+name = "suspect-rules"
+version = "0.1.0"
+dependencies = [
+ "regex",
+ "serde",
+ "serde_json",
+ "suspect-jsonpath",
+ "suspect-low",
+ "suspect-source",
+ "suspect-syntax",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

@@ -33,6 +33,7 @@ suspect-overlay.workspace = true
 suspect-arazzo.workspace = true
 suspect-validate.workspace = true
 suspect-lint.workspace = true
+suspect-rules.workspace = true
 suspect-lsp.workspace = true
 clap.workspace = true
 serde_json.workspace = true

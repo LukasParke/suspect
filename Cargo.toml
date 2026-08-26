@@ -26,6 +26,7 @@ suspect-lsp = { path = "crates/suspect-lsp", version = "0.1.0" }
 suspect-ir = { path = "crates/suspect-ir", version = "0.1.0" }
 suspect-journal = { path = "crates/suspect-journal", version = "0.1.0" }
 suspect-reverse = { path = "crates/suspect-reverse", version = "0.1.0" }
+suspect-rules = { path = "crates/suspect-rules", version = "0.1.0" }
 suspect-rex = { path = "crates/suspect-rex", version = "0.1.0" }
 suspect-test = { path = "crates/suspect-test", version = "0.1.0" }
 suspect-gen = { path = "crates/suspect-gen", version = "0.1.0" }
@@ -45,7 +46,7 @@ url = "2"
 percent-encoding = "2"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "signal"] }
 tower-lsp = "0.20"

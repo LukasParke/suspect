@@ -57,6 +57,12 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
+    /// Run TS/JS custom rules (Bun sidecar) over documents.
+    Rules {
+        /// The rules subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::rules::RulesCmd,
+    },
     /// Run spectral-style lint rules over documents.
     Lint {
         /// Documents to lint.
@@ -295,6 +301,7 @@ pub struct Cli {
 pub fn execute(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
         Command::Check { paths, text } => commands::check::check(&paths, text.format),
+        Command::Rules { cmd } => cmd.run().map(|_| 0),
         Command::Lint {
             paths,
             ruleset,

@@ -183,6 +183,33 @@ impl<'d> NodeRef<'d> {
         out
     }
 
+    /// Mapping pairs in document order, **no merge-key expansion and no
+    /// duplicate-key dedup** (last key wins when converted to JSON — the
+    /// same semantics JSON consumers apply; duplicate keys are reported by
+    /// validation separately).
+    ///
+    /// Lean compared to [`NodeRef::entries`]: no per-object `Vec` of seen
+    /// keys (quadratic on wide mappings) — built for serialization paths
+    /// like `suspect-rules::node_json`.
+    #[must_use]
+    pub fn mapping_pairs(&self) -> Vec<(String, Option<NodeRef<'d>>)> {
+        let node = self.resolved();
+        if node.kind() != ValueKind::Object {
+            return Vec::new();
+        }
+        node.raw
+            .mapping_entries()
+            .into_iter()
+            .filter_map(|(key_node, value)| {
+                let key = std::str::from_utf8(key_node.scalar_bytes()).ok()?;
+                if key == "<<" {
+                    return None;
+                }
+                Some((key.to_owned(), value.map(NodeRef::new)))
+            })
+            .collect()
+    }
+
     /// Sequence items in order.
     #[must_use]
     pub fn items(&self) -> Vec<NodeRef<'d>> {

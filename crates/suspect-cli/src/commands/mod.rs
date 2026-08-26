@@ -12,6 +12,7 @@ pub mod http;
 pub mod lint;
 pub mod overlay;
 pub mod replay;
+pub mod rules;
 pub mod stats;
 pub mod test;
 pub mod watch;

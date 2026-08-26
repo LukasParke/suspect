@@ -1,0 +1,15 @@
+{
+  "name": "@suspect/rules-sdk",
+  "version": "0.1.0",
+  "description": "Author custom suspect lint rules in TypeScript; executed by the Bun rule worker",
+  "type": "module",
+  "main": "src/sdk.ts",
+  "exports": {
+    ".": "./src/sdk.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {}
+}
