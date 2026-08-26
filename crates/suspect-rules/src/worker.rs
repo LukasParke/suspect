@@ -171,12 +171,10 @@ impl TsWorker {
     /// Runs one evaluate round: selections (point rules) + walks (walk
     /// rules). Returns findings, per-rule errors, and the done frame.
     /// Enforces `deadline`; on breach the worker is killed and
-    /// [`WorkerError::Timeout`] is returned (caller restarts).
+    /// [`WorkerError::Timeout`] is returned (the caller restarts).
     ///
     /// # Errors
-    /// [`Error`] variants from protocol/IO failures; timeouts surface as
-    /// [`WorkerError::Timeout`] inside [`Error::Worker`]-adjacent paths —
-    /// see [`evaluate_round`].
+    /// [`WorkerError::Fatal`] on protocol/IO failures mid-run.
     pub async fn evaluate(
         &mut self,
         doc_kind: crate::protocol::TargetKind,

@@ -2,7 +2,8 @@
 //!
 //! Host side of the Bun rule worker (see `docs/TS-RULE-RUNTIME.md`): spawns
 //! a long-lived `bun` sidecar, negotiates the NDJSON protocol, evaluates
-//! each rule's `given` selector natively against the [`LowDoc`] CST, ships
+//! each rule's `given` selector natively against the [`suspect_low::LowDoc`]
+//! CST, ships
 //! only the selected nodes, enforces per-run deadlines with kill-and-restart
 //! semantics, and resolves finding spans back to byte ranges.
 //!
