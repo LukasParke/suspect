@@ -260,6 +260,7 @@ lookup O(1).
 | P0 | `suspect-code` skeleton: span/confidence/facts/parser/workspace + axum + actix adapters, lowering, provenance | charte axum+actix goldens byte-identical; `suspect code gen` on suspect's own gateway source round-trips; bench: extraction ≤3ms/file; clippy clean |
 | P1 | CLI `code gen|check|sync`; `diff_specs(spec_ir, code_ir)` drift report | sync on a deliberately drifted fixture reports exact BREAKING set; corpus bench updated |
 | P2 | Lint projection: RuleTarget::Facts, union evaluation, ProvenanceIndex projection | every existing spectral-default rule produces projected findings on a fixture repo; union rules fire on both sides of drift |
+| P2.5 | TS/JS custom rules on a Bun sidecar worker — see `docs/TS-RULE-RUNTIME.md` | protocol bench budgets met; conformance suite green; union TS rules report at handler spans |
 | P3 | LSP: CodeWorkspace, projected diagnostics, hover/def/links, code actions | driven verification: edit handler → diagnostic appears in editor at handler span within debounce window; navigation round-trips |
 | P4 | validate `--with-code`; test-engine provenance + handler coverage; gateway projection | `check --with-code` catches seeded spec/code lies in fixtures; failing step reports handler span |
 | P5 | Remaining adapter waves (express/fastapi/flask → TS breadth → go → java/csharp) | each: goldens byte-identical + fixture README |
