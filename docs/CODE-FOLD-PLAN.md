@@ -1,5 +1,9 @@
 # Folding charte.rs into suspect — Architecture Plan
 
+> Sibling plans: `docs/ARBITER-FOLD-PLAN.md` (traffic plane: capture,
+> replay, TLS, credentials, inference) and `docs/TS-RULE-RUNTIME.md`
+> (TS custom rules on a Bun sidecar).
+
 ## 0. Goal
 
 Merge charte.rs (tree-sitter fact extraction from 14 web-framework sources
