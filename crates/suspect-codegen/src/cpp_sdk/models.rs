@@ -187,6 +187,9 @@ pub(crate) fn plan(
     names.extend(reserved.iter().cloned());
     let mut symbols = BTreeMap::new();
     let mut errors = Vec::new();
+    let scoped = program.version == OwnedProgram::V2_VERSION
+        || program.version == OwnedProgram::V3_VERSION
+        || crate::schema_view::has_intersections(contract, &closure);
     for id in &closure {
         let name = allocate(&symbol_base(id, &seeds), &mut names);
         let definition = allocate(&format!("{name}Value"), &mut names);
@@ -195,8 +198,6 @@ pub(crate) fn plan(
             continue;
         };
         let raw = crate::schema_view::raw(schema);
-        let scoped = program.version == OwnedProgram::V2_VERSION
-            || program.version == OwnedProgram::V3_VERSION;
         let shaped = shape(contract, id, &raw, scoped).or_else(|error| {
             if scoped {
                 Ok((Shape::ValidatedJson, false))

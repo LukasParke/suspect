@@ -59,9 +59,9 @@ internal data class ProtocolResponse(val responseIndex: Int, val mediaIndex: Int
 
 internal object ProtocolData {
     val operations: List<JsonObject> by lazy {
-        val bytes = ProtocolData::class.java.getResourceAsStream("protocol.json")?.use { it.readNBytes(Json.MAX_BYTES + 1) }
+        val bytes = ProtocolData::class.java.getResourceAsStream("protocol.json")?.use { it.readNBytes(Json.MAX_PROGRAM_BYTES + 1) }
             ?: error("generated protocol metadata is missing")
-        val value = Json.parse(bytes) as JsonObject
+        val value = Json.parseProgram(bytes) as JsonObject
         check(value.number("version") == 1) { "unsupported protocol descriptor version" }
         value.array("operations").map { it as JsonObject }
     }

@@ -449,17 +449,26 @@ fn response_expression(
 
 pub(super) fn examples(plan: &Plan, samples: &Samples<'_>) -> String {
     let mut out = header(plan);
-    out.push_str("import kotlinx.coroutines.runBlocking\nimport kotlinx.coroutines.flow.toList\n\n/** Executable native constructors and protocol calls from validated source values. */\npublic object GeneratedExamples {\n    /** Run the packaged source examples. */\n    @JvmStatic public fun main(args: Array<String>) = runBlocking {\n");
+    out.push_str("import kotlinx.coroutines.runBlocking\nimport kotlinx.coroutines.flow.toList\n\n/** Executable native constructors and protocol calls from validated source values. */\npublic object GeneratedExamples {\n");
     for (i, v) in samples.values.iter().enumerate() {
-        writeln!(out,"        val value{i} = {}\n        check(Json.parse(Codecs.{}.encode(value{i})) == Json.parse({}))",v.expression.replace('\n',"\n        "),v.codec,quote(&v.json)).unwrap();
+        writeln!(out,"    private fun value{i}() {{\n        val value = {}\n        check(Json.parse(Codecs.{}.encode(value)) == Json.parse({}))\n    }}",v.expression.replace('\n',"\n        "),v.codec,quote(&v.json)).unwrap();
     }
     let mut count = 0;
     for (c, call) in samples.calls.iter().enumerate() {
         if let Some(response) = &call.response {
             let op = &plan.operations[call.operation];
             let credentials = fixture_credentials(plan);
-            writeln!(out,"        Client({credentials}, Transport {{ {response} }}, ClientOptions(serverUrl = java.net.URI(\"http://127.0.0.1/api\"))).use {{ client ->\n            {}{}\n        }}",if op.flow{"check("}else{""},if op.flow{format!("{}.toList().isNotEmpty())",if samples.first==Some(c){"Quickstart.firstRequest(client)".into()}else{call.invocation.clone()})}else if samples.first==Some(c){"Quickstart.firstRequest(client)".into()}else{call.invocation.clone()}).unwrap();
+            writeln!(out,"    private suspend fun call{c}() {{\n        Client({credentials}, Transport {{ {response} }}, ClientOptions(serverUrl = java.net.URI(\"http://127.0.0.1/api\"))).use {{ client ->\n            {}{}\n        }}\n    }}",if op.flow{"check("}else{""},if op.flow{format!("{}.toList().isNotEmpty())",if samples.first==Some(c){"Quickstart.firstRequest(client)".into()}else{call.invocation.clone()})}else if samples.first==Some(c){"Quickstart.firstRequest(client)".into()}else{call.invocation.clone()}).unwrap();
             count += 1;
+        }
+    }
+    out.push_str("    /** Run every example through independently bounded JVM methods. */\n    @JvmStatic public fun main(args: Array<String>) = runBlocking {\n");
+    for i in 0..samples.values.len() {
+        writeln!(out, "        value{i}()").unwrap();
+    }
+    for (i, call) in samples.calls.iter().enumerate() {
+        if call.response.is_some() {
+            writeln!(out, "        call{i}()").unwrap();
         }
     }
     writeln!(out,"        println(\"Kotlin protocol constructor examples passed: {count} calls\")\n    }}\n}}").unwrap();

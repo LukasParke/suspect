@@ -985,11 +985,6 @@ fn unsupported_native_shapes_and_dialects_never_become_json_fallbacks() {
             "/components/schemas/Root/prefixItems",
         ),
         (
-            json!({"type":"object","allOf":[{"type":"object"},{"type":"object"}]}),
-            "php-allof-native-unsupported",
-            "/components/schemas/Root/allOf",
-        ),
-        (
             json!({"properties":{"typed":{"type":"string"}}}),
             "php-conditional-shape-unsupported",
             "/components/schemas/Root",

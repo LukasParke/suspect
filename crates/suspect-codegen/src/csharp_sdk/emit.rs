@@ -77,12 +77,12 @@ pub(super) fn package(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic
         ));
     }
     files.extend(super::docs::render(plan));
-    if files.iter().map(|file| file.content.len()).sum::<usize>() > 64 * 1024 * 1024 {
+    if files.iter().map(|file| file.content.len()).sum::<usize>() > 256 * 1024 * 1024 {
         return Err(vec![super::diagnostic(
             &plan.contract,
             plan.operations[0].source.clone(),
             "csharp-artifact-size",
-            "the complete C# source package exceeds the 64 MiB artifact ceiling",
+            "the complete C# source package exceeds the 256 MiB artifact ceiling",
         )]);
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));

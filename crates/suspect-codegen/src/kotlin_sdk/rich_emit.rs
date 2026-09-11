@@ -70,22 +70,21 @@ pub(super) fn package(plan: &Plan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> 
         format!("src/main/kotlin/{prefix}/Models.kt"),
         emit::models(plan),
     );
-    add(
-        format!("src/main/kotlin/{prefix}/Codecs.kt"),
-        emit::codecs(plan),
-    );
+    for file in codec_files::files(plan) {
+        add(file.path.strip_prefix("kotlin/").expect("Kotlin artifact").into(), file.content);
+    }
     add(format!("src/main/kotlin/{prefix}/Client.kt"), client(plan));
     add(
         format!("src/main/resources/{prefix}/validation.json"),
         serde_json::to_string(&plan.program).unwrap(),
     );
     let protocol = serde_json::to_string(plan.protocol()).unwrap();
-    if protocol.len() > 4 * 1024 * 1024 {
+    if protocol.len() > 16 * 1024 * 1024 {
         return Err(vec![diagnostic(
             &plan.contract,
             plan.operations[0].source.clone(),
             "kotlin-protocol-size",
-            "protocol metadata exceeds 4 MiB",
+            "protocol metadata exceeds the 16 MiB program budget",
         )]);
     }
     add(

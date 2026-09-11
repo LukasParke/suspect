@@ -694,7 +694,18 @@ pub(super) fn emit(
         writeln!(code,"const {}Descriptor = {{ operationId: {}, source: {}Source, wire: {}Wire, limits: {}, inputMembers: {}, parameterMembers: {}, requestCodecs: {{{}}}, responseCodecs: {{{}}}, objectExtras: {}, taggedBody: {} }} as const;",op.function_name,q(&op.operation_id),op.function_name,op.function_name,literal(&limits),serde_json::to_string(&inputs).unwrap(),serde_json::to_string(&names).unwrap(),binding(&request),binding(&response),serde_json::to_string(&extras).unwrap(),wire.body().is_some_and(tagged_body)).unwrap();
         writeln!(code,"/** Source description: {}\n * @param client Explicit credentials, transport, server choice and limits.\n * @param input Native operation input; omit when every member is optional.\n * @param call Per-call cancellation and server/security selection.\n * @returns The declared success union; streams expose native AsyncIterable items.\n * @throws A branded declared API error or source-linked SDK failure.\n * @remarks OpenAPI source: {}\n */\nexport function {}(client: ClientOptions{}, input: {input}{}, call?: CallOptions): Promise<{}> {{ return executeOperation({}Descriptor, input, client, call); }}\n/** Tests a branded error for this exact operation.\n * @param error Unknown caught value.\n * @returns Whether the value is a declared error of this operation.\n */\nexport function {}(error: unknown): error is {} {{ return isDeclaredApiError(error, {}Source); }}\n",crate::typescript::escape_prose(&op.description),crate::typescript::escape_prose(&src(&op.source)),op.function_name,if requirements.is_empty() && op.input_optional() {" = {}"} else {""},if op.input_optional() {" = {}"} else {""},op.success_type,op.function_name,op.error_guard,op.error_type,op.function_name).unwrap();
     }
-    writeln!(code,"/** Source-backed metadata for server choices, credentials, responses and links. */\nexport const operationMetadata = /* @__PURE__ */ freezeMetadata({{ {} }});",ops.iter().map(|op|format!("{}: {}Wire",q(&op.function_name),op.function_name)).collect::<Vec<_>>().join(",")).unwrap();
+    let metadata_type = ops
+        .iter()
+        .map(|op| {
+            format!(
+                "readonly {}: typeof {}Wire;",
+                q(&op.function_name),
+                op.function_name
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    writeln!(code,"/** Source-backed metadata for server choices, credentials, responses and links. */\nexport const operationMetadata: {{ {metadata_type} }} = /* @__PURE__ */ freezeMetadata({{ {} }});",ops.iter().map(|op|format!("{}: {}Wire",q(&op.function_name),op.function_name)).collect::<Vec<_>>().join(",")).unwrap();
     if let Some(policy) = credential_env {
         let bindings = policy
             .bindings()

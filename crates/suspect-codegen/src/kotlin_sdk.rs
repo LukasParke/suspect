@@ -6,6 +6,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use suspect_ir::contract::{Contract, SchemaId, SourceId};
 use suspect_schema::OwnedProgram;
 
+mod codec_files;
 mod emit;
 mod environment;
 pub mod models;

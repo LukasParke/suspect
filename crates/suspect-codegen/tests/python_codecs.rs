@@ -24,7 +24,9 @@ fn fixture() -> Arc<Contract> {
         "Flag":{"type":"object","required":["kind","enabled"],"properties":{"kind":{"type":"string","const":"flag"},"enabled":{"type":"boolean"}}},
         "Lookup":{"type":"object","additionalProperties":{"type":"integer"}},
         "Ambiguous":{"oneOf":[{"type":"integer"},{"type":"number"}]},
-        "Colour":{"type":"string","enum":["red","green"]}
+        "Colour":{"type":"string","enum":["red","green"]},
+        "Model":{"type":"string","minLength":1},
+        "ModelAliasTarget":{"type":"integer"}
     }}}).to_string()).unwrap();
     load(&path)
 }
@@ -107,7 +109,11 @@ fn exact_presence_union_recursive_and_mutated_models_are_checked() {
 import model_codecs as C
 import models as M
 from codec_runtime import CodecError
+from codec_runtime import ModelCodec
 from json_runtime import JsonNumber, parse_json
+assert isinstance(C.ModelCodec, ModelCodec)
+assert C.ModelCodec.decode('"model"') == 'model'
+assert C.ModelAliasTargetCodec.decode('9007199254740993') == 9007199254740993
 text='{"key":"a","big":9007199254740993,"precise":1e-400,"nullable":null,"payload":{"kind":"text","text":"hi"},"extra":7}'
 account=C.AccountCodec.decode(text)
 assert account.big==9007199254740993 and account.precise.token=='1e-400'

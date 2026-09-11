@@ -19,6 +19,8 @@ mod emit;
 mod environment;
 mod http_emit;
 mod models;
+#[cfg(test)]
+mod mixed_stream_tests;
 mod protocol;
 #[cfg(test)]
 mod sdk_v2_tests;

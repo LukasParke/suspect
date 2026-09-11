@@ -139,7 +139,8 @@ fn no_policy_emission_is_byte_stable() {
     let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&hashes).unwrap()));
     assert_eq!(
         hash,
-        "13760d64e941d7f3dd6179e290e2ee22885ef17a446df5c2d7b541456efb1034"
+        // Refreshed for the independently bounded generated-metadata loader.
+        "2d2018da730ca4a55d5ca4fc4b019ce95d550ac37981df6499cf9dd077c0c149"
     );
     assert!(
         !files

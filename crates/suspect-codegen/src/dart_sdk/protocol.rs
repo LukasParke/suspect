@@ -598,12 +598,8 @@ pub fn plan_sdk_with_profiles(
                         .media
                         .iter()
                         .any(|m| matches!(m.payload, PlannedPayload::Stream { .. }))
-                    || status.success_name.is_some()
-                        && (status.media.len() != 1
-                            || !matches!(status.media[0].payload, PlannedPayload::Stream { .. })
-                            || status.none_variant.is_some())
                 {
-                    errors.push(diag(&contract,status.source.clone(),"dart-stream-response-profile","stream operations require an unambiguous item stream for each success and bounded non-stream errors"));
+                    errors.push(diag(&contract,status.source.clone(),"dart-stream-response-profile","stream operations require bounded non-stream errors"));
                 }
             }
         }

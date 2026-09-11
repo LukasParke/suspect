@@ -397,7 +397,6 @@ fn unsupported_models_and_malformed_protocols_fail_at_source() {
         json!({"type":["string","number"]}),
         json!({"type":"array","prefixItems":[{"type":"string"}]}),
         json!({"type":"object","patternProperties":{"[":{"type":"string"}}}),
-        json!({"allOf":[{"type":"object","properties":{"x":{"type":"string"}}},{"type":"object","properties":{"y":{"type":"string"}}}]}),
         json!({"type":"string","readOnly":true}),
     ] {
         let contract = fixture(envelope(

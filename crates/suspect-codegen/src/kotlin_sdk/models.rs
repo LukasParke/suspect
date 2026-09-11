@@ -107,7 +107,8 @@ pub(crate) fn plan(
     program: &OwnedProgram,
     mut used: BTreeSet<String>,
 ) -> Result<ModelPlan, Vec<HttpDiagnostic>> {
-    let scoped = program.version != OwnedProgram::V1_VERSION;
+    let scoped = program.version != OwnedProgram::V1_VERSION
+        || crate::schema_view::has_intersections(contract, roots);
     if scoped {
         used.extend(
             ["ScopedProgram", "ScopedMarks", "ScopedResult"]

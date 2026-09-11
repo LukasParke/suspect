@@ -290,8 +290,9 @@ abstract class _ClientBase {
         response=await _send(call,op,prepare(),limit,server,alternative);
         final(capture,index,media,forbidden)=_inspect(call,op,response,true);
         input=StreamIterator(response.body);
-        if(index<0||response.status<200||response.status>=300||forbidden){
-          // Errors are finite complete bodies, not an invented item stream.
+        if(index<0||response.status<200||response.status>=300||forbidden||media<0||
+            !const {_MediaKind.sse,_MediaKind.jsonl}.contains(op.responses[index].media[media].kind)){
+          // Finite alternatives produce one complete result; stream media produce items.
           final errors=_Capture(response.status,_maxResponseBytes,_maxCaptureBytes,store:true)..headers=capture.headers;
           call.capture=errors;
           final received=await _collect(call,response,input,errors,index,media,forbidden,op);

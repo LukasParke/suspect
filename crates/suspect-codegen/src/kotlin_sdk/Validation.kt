@@ -221,12 +221,13 @@ internal object ValidationProgram {
     val roots: Map<SourceLocation, Int>
     val limits: JsonObject
     init {
-        val bytes = ValidationProgram::class.java.getResourceAsStream("validation.json")?.use { it.readNBytes(Json.MAX_BYTES + 1) }
+        val bytes = ValidationProgram::class.java.getResourceAsStream("validation.json")?.use { it.readNBytes(Json.MAX_PROGRAM_BYTES + 1) }
             ?: error("generated validation program is missing")
-        val program = Json.parse(bytes) as JsonObject
+        val program = Json.parseProgram(bytes) as JsonObject
         check(program.text("version") == "suspect.validation.experimental.v1") { "unknown validation program version" }
         check(program.text("profile") == "oas31-jsonschema202012-static-subset") { "unknown validation profile" }
         nodes = program.array("nodes").map { it as JsonObject }
+        check(nodes.size <= 16_384) { "program node limit exceeded" }
         roots = program.array("roots").associate { entry -> (entry as JsonObject).source() to entry.number("target") }
         limits = program.obj("limits")
         val supported = setOf("always", "type", "ref", "properties", "additionalProperties", "required", "items", "prefixItems", "allOf", "anyOf", "oneOf", "not", "bound", "multipleOf", "count", "enum", "const", "uniqueItems", "pattern")

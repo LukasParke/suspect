@@ -312,14 +312,14 @@ pub(super) fn definitions(plan: &HttpPlan, payload: &Payload, media: &wire::Medi
         }
     }
     if let Some(extra) = &a.additional {
-        code.push_str(&format!("        let extra_spec=spec.additional.expect(\"planned additional part\");\n        for {} in &self.{} {{\n",if a.positional{"value"}else{"(name,value)"},extra.name));
+        code.push_str(&format!("        let _extra_spec=spec.additional.expect(\"planned additional part\");\n        for {} in &self.{} {{\n",if a.positional{"value"}else{"(name,value)"},extra.name));
         let repeated = extra.wire.multiplicity() == PartMultiplicity::RepeatedArrayItems;
         if repeated {
             code.push_str("        for value in value {\n");
         }
         code.push_str(&encode_part(
             extra,
-            "extra_spec",
+            "_extra_spec",
             "value",
             if a.positional {
                 "std::option::Option::None"
@@ -357,12 +357,12 @@ pub(super) fn definitions(plan: &HttpPlan, payload: &Payload, media: &wire::Medi
     }
     if let Some(extra) = &a.additional {
         code.push_str(
-            "        let extra_spec=spec.additional.expect(\"planned additional part\");\n",
+            "        let _extra_spec=spec.additional.expect(\"planned additional part\");\n",
         );
         if a.positional {
-            code.push_str(&format!("        let {}=parsed.items.into_iter().map(|part|{{{}}}).collect::<std::result::Result<std::vec::Vec<_>,crate::http::SdkError>>()?;\n",extra.name,decode_part(extra,"extra_spec",a.multipart)));
+            code.push_str(&format!("        let {}=parsed.items.into_iter().map(|part|{{{}}}).collect::<std::result::Result<std::vec::Vec<_>,crate::http::SdkError>>()?;\n",extra.name,decode_part(extra,"_extra_spec",a.multipart)));
         } else {
-            code.push_str(&format!("        let mut {}=std::collections::BTreeMap::new();\n        for (key,mut values) in parsed.additional {{\n            let value={};\n            {}.insert(key,value);\n        }}\n",extra.name,decode_field(extra,"extra_spec","values",a.multipart,true),extra.name));
+            code.push_str(&format!("        let mut {}=std::collections::BTreeMap::new();\n        for (key,mut values) in parsed.additional {{\n            let value={};\n            {}.insert(key,value);\n        }}\n",extra.name,decode_field(extra,"_extra_spec","values",a.multipart,true),extra.name));
         }
     }
     code.push_str(&format!(

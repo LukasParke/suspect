@@ -250,7 +250,6 @@ fn unsupported_native_shapes_and_packaging_fail_before_artifacts() {
     for schema in [
         json!({"type":"object","properties":{"secret":{"type":"string","writeOnly":true}}}),
         json!({"type":"array","prefixItems":[{"type":"string"}]}),
-        json!({"allOf":[{"type":"object"},{"type":"object"}]}),
         json!({"type":"object","patternProperties":{"(?<=x)y":{"type":"string"}}}),
     ] {
         let contract = fixture(envelope(json!({"Value":schema})));

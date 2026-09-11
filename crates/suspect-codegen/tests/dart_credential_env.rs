@@ -120,6 +120,16 @@ fn no_policy_output_bytes_are_preserved() {
         ),
         Some("35a54a8b727fc28213f9e6dd39860f042ee4ebb60dadce8f45c443d94507dfd3".into())
     );
+    // The mixed-response native witness covers this separate runtime repair.
+    assert_eq!(
+        expected.insert(
+            "dart/lib/src/transport.dart".into(),
+            include_str!("fixtures/dart-mixed-response-transport.sha256")
+                .trim()
+                .into(),
+        ),
+        Some("d214477fedb6bedead498b4f7e9116dc4390999951685bf37e2f7b9ec6adbe27".into()),
+    );
     assert_eq!(hashes, expected);
     if let Some(path) = std::env::var_os("SUSPECT_DART_ENV_RECORD_NO_POLICY") {
         let path = PathBuf::from(path);

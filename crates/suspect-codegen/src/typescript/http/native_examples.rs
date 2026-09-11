@@ -206,6 +206,7 @@ fn any_value(value: &Value) -> String {
 fn field<'a>(
     expression: &'a Expr,
     key: &str,
+    value: &Value,
     definitions: &BTreeMap<&str, &'a Expr>,
     depth: usize,
 ) -> Option<Expr> {
@@ -213,9 +214,19 @@ fn field<'a>(
         return None;
     }
     match expression {
-        Expr::At(_, expression) => field(expression, key, definitions, depth + 1),
-        Expr::Reference(name) => {
-            field(definitions.get(name.as_str())?, key, definitions, depth + 1)
+        Expr::At(_, expression) => field(expression, key, value, definitions, depth + 1),
+        Expr::Reference(name) => field(
+            definitions.get(name.as_str())?,
+            key,
+            value,
+            definitions,
+            depth + 1,
+        ),
+        Expr::Union(members) => {
+            let selected = members
+                .iter()
+                .find(|member| native_value(value, member, definitions, depth + 1).is_some())?;
+            field(selected, key, value, definitions, depth + 1)
         }
         Expr::Object(fields, extra) => fields
             .iter()
@@ -225,7 +236,7 @@ fn field<'a>(
         Expr::Intersection(members) => Some(Expr::Intersection(
             members
                 .iter()
-                .filter_map(|member| field(member, key, definitions, depth + 1))
+                .filter_map(|member| field(member, key, value, definitions, depth + 1))
                 .collect(),
         )),
         _ => None,
@@ -313,26 +324,43 @@ fn native_value(
             .find_map(|member| native_value(value, member, definitions, depth + 1)),
         Expr::Intersection(members) if value.is_object() => {
             let mut result = Vec::new();
-            for (key, value) in value.as_object()? {
+            for (key, member_value) in value.as_object()? {
                 let expression = Expr::Intersection(
                     members
                         .iter()
-                        .filter_map(|member| field(member, key, definitions, depth + 1))
+                        .filter_map(|member| field(member, key, value, definitions, depth + 1))
                         .collect(),
                 );
                 result.push(format!(
                     "{}: {}",
                     self::key(key),
-                    native_value(value, &expression, definitions, depth + 1)?
+                    native_value(member_value, &expression, definitions, depth + 1)?
                 ));
             }
             Some(format!("{{ {} }}", result.join(", ")))
         }
         Expr::Intersection(members) => members
             .iter()
-            .filter(|member| !matches!(member, Expr::Any))
+            .filter(|member| !unconstrained(member, definitions, depth + 1))
             .find_map(|member| native_value(value, member, definitions, depth + 1))
             .or_else(|| Some(any_value(value))),
         _ => None,
+    }
+}
+
+fn unconstrained(expression: &Expr, definitions: &BTreeMap<&str, &Expr>, depth: usize) -> bool {
+    if depth > 128 {
+        return false;
+    }
+    match expression {
+        Expr::Any => true,
+        Expr::At(_, inner) => unconstrained(inner, definitions, depth + 1),
+        Expr::Reference(name) => definitions
+            .get(name.as_str())
+            .is_some_and(|inner| unconstrained(inner, definitions, depth + 1)),
+        Expr::Intersection(members) => members
+            .iter()
+            .all(|member| unconstrained(member, definitions, depth + 1)),
+        _ => false,
     }
 }

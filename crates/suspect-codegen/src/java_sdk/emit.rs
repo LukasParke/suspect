@@ -76,7 +76,7 @@ pub(crate) fn render(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>
         serde_json::to_string(plan.program()).expect("checked program"),
     );
     let protocol = serde_json::to_string(plan.protocol()).expect("protocol data");
-    if protocol.len() > 8 * 1024 * 1024 {
+    if protocol.len() > 32 * 1024 * 1024 {
         return Err(vec![super::plan_diag(
             plan.contract(),
             "java-protocol-resource-limit",
@@ -158,11 +158,11 @@ pub(crate) fn render(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>
     if !quickstart.is_empty() {
         files.insert("java/examples/GettingStarted.java".into(), quickstart);
     }
-    if files.values().map(String::len).sum::<usize>() > 64 * 1024 * 1024 {
+    if files.values().map(String::len).sum::<usize>() > 256 * 1024 * 1024 {
         return Err(vec![super::plan_diag(
             plan.contract(),
             "java-artifact-resource-limit",
-            "Java package exceeds the 64 MiB emitted-text ceiling",
+            "Java package exceeds the 256 MiB emitted-text ceiling",
         )]);
     }
     Ok(files

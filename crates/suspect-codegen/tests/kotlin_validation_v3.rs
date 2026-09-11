@@ -228,14 +228,15 @@ fn original_44_resource_cases_compile_from_closed_source_documents() {
 }
 
 #[test]
-fn frozen_v2_runtime_template_is_unchanged() {
+fn v2_runtime_template_matches_the_recorded_baseline() {
     use sha2::{Digest, Sha256};
     assert_eq!(
         format!(
             "{:x}",
             Sha256::digest(include_bytes!("../src/kotlin_sdk/ValidationV2.kt"))
         ),
-        "02b09c74f07df09f258ec52adaba14b973d1874e03ccdd0dbe9ffdf5c7201646"
+        // Includes the separately verified large-program metadata loader.
+        "c433750e3214fdbe2f795df99fc73127846e959d3b70fa7740fb9eb22753ce98"
     );
 }
 

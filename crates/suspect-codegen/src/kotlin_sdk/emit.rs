@@ -175,15 +175,19 @@ pub(super) fn models(plan: &Plan) -> String {
 }
 
 pub(super) fn codecs(plan: &Plan) -> String {
+    codec_group(plan, plan.models.symbols(), "public object Codecs")
+}
+
+pub(super) fn codec_group(plan: &Plan, symbols: &[Symbol], declaration: &str) -> String {
     let mut out = header(plan);
-    out.push_str(
-        "/** Source-validating codecs for actual JSON/text roots. */\npublic object Codecs {\n",
-    );
-    for s in plan.models.symbols() {
+    out.push_str(&format!(
+        "/** Source-validating codecs for actual JSON/text roots. */\n{declaration} {{\n"
+    ));
+    for s in symbols {
         writeln!(out,"    /** Source: {} */\n    public val {}: ModelCodec<{}> get() = ModelCodec({}, source{}(), ::read{}, ::write{})",source(&s.source),s.codec_name,s.kotlin_type,s.index,s.index,s.index,s.index).unwrap();
     }
     out.push_str("}\n");
-    for s in plan.models.symbols() {
+    for s in symbols {
         writeln!(
             out,
             "internal fun source{}(): SourceLocation = {}",

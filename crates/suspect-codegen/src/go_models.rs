@@ -159,6 +159,7 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
     let reachable = schema_view::closure(contract, roots);
     let resources = requires_resources(contract, &reachable);
     let scoped = resources
+        || schema_view::has_intersections(contract, &reachable)
         || reachable
             .iter()
             .filter_map(|id| contract.schema(id))
@@ -176,6 +177,11 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
                 ]
                 .iter()
                 .any(|keyword| raw.get(*keyword).is_some())
+                    || raw.get("const").is_some_and(Value::is_number)
+                    || raw
+                        .get("enum")
+                        .and_then(Value::as_array)
+                        .is_some_and(|values| values.iter().any(Value::is_number))
             });
     let transparent: BTreeMap<_, _> = reachable
         .iter()

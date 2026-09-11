@@ -423,7 +423,7 @@ pub(super) fn plan_with_capabilities(
     let scoped = matches!(
         program.version,
         suspect_schema::OwnedProgram::V2_VERSION | suspect_schema::OwnedProgram::V3_VERSION
-    );
+    ) || crate::schema_view::has_intersections(&contract, &reachable);
     let mut models = models::plan(
         &contract,
         wire.codec_roots(),

@@ -77,6 +77,8 @@ exact source IDs; omission attempts every outgoing operation. The
 [session guide](SDK-INCREMENTAL-GENERATION.md) documents multi-target JSON,
 bounded reuse, watch/check/preview and editor integration.
 
+[Large contract generation](SDK-LARGE-CONTRACTS.md) covers checked model carriers, native compiler size boundaries, and their regression witnesses.
+
 This replaces the earlier `suspect-codegen` STG/lift/standalone emitter APIs and
 their prototype consumer-impact and semantic-diff implementations. Library
 users should migrate to `Contract`, `backend` and `compatibility`.
