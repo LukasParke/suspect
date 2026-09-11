@@ -11,6 +11,8 @@ use suspect_low::{NodeRef, Pointer, ValueKind};
 use crate::engine::Finding;
 use crate::rule::Rule;
 
+mod typed_enum;
+
 /// Casing conventions accepted by the `casing` function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Casing {
@@ -145,7 +147,7 @@ pub(crate) enum Function {
     PathParams,
     /// Native: `$ref` values carry no siblings besides description/summary.
     RefSiblings,
-    /// Native: all members of an `enum` array share one scalar kind.
+    /// Native: enum members agree with the schema's explicit type constraint.
     TypedEnum,
     /// Native: no duplicate keys under the selected object.
     DuplicateKeys,
@@ -173,7 +175,7 @@ impl Function {
             Self::Xor { .. } => "exactly one of the properties must be present",
             Self::PathParams => "path template variable is not declared",
             Self::RefSiblings => "$ref must not have siblings other than description/summary",
-            Self::TypedEnum => "enum members must share a single scalar type",
+            Self::TypedEnum => "enum member does not match the schema's declared type",
             Self::DuplicateKeys => "duplicate key",
             Self::DefaultResponse => "operation must define a default or 2XX response",
             Self::SuccessResponse => "operation must define at least one 2XX response",
@@ -281,7 +283,7 @@ pub(crate) fn apply<'d>(
         }
         Function::PathParams => check_path_params(&node, rule, ptrs, out),
         Function::RefSiblings => check_ref_siblings(&node, rule, ptrs, out),
-        Function::TypedEnum => check_typed_enum(&node, rule, ptrs, out),
+        Function::TypedEnum => typed_enum::check(&node, rule, ptrs, out),
         Function::DuplicateKeys => check_duplicate_keys(&node, rule, ptrs, out),
         Function::DefaultResponse => check_response(&node, rule, ptrs, out, true),
         Function::SuccessResponse => check_response(&node, rule, ptrs, out, false),
@@ -457,36 +459,6 @@ fn check_ref_siblings<'d>(
         .any(|e| e.key != "$ref" && e.key != "description" && e.key != "summary");
     if has_bad_sibling {
         push(out, rule, &parent, ptrs);
-    }
-}
-
-/// Groups enum members by scalar kind (`Int`/`Float` count as one `number`
-/// group); a mixed enum is reported once at the enum node.
-fn check_typed_enum<'d>(
-    node: &NodeRef<'d>,
-    rule: &Rule,
-    ptrs: &super::fast::PtrMap,
-    out: &mut Vec<Finding<'d>>,
-) {
-    let resolved = node.resolved();
-    if resolved.kind() != ValueKind::Array {
-        return;
-    }
-    let group = |kind: ValueKind| match kind {
-        ValueKind::Int | ValueKind::Float => 'n',
-        ValueKind::Null => '0',
-        ValueKind::Bool => 'b',
-        ValueKind::Str => 's',
-        ValueKind::Object => 'o',
-        ValueKind::Array => 'a',
-    };
-    let mut kinds = resolved
-        .items()
-        .into_iter()
-        .map(|i| group(i.resolved().kind()));
-    let Some(first) = kinds.next() else { return };
-    if kinds.any(|k| k != first) {
-        push(out, rule, node, ptrs);
     }
 }
 

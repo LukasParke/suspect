@@ -48,12 +48,26 @@ pub enum Strategy {
 /// its doc comment becomes the one-line help text shown by `--help`.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Acquire a hash-pinned document closure or verify its offline cache.
+    Acquire(commands::acquire_cmd::AcquireArgs),
     /// Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats.
     Check {
         /// Documents to check.
         #[arg(required = true)]
         paths: Vec<PathBuf>,
         /// Output format for the per-file reports.
+        #[command(flatten)]
+        text: TextFormat,
+    },
+    /// Validate OpenAPI syntax and semantic requirements, reporting located findings.
+    Validate {
+        /// OpenAPI documents to validate.
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// JSON array of absolute document paths; deny every unlisted reference load.
+        #[arg(long)]
+        reference_allowlist: Option<PathBuf>,
+        /// Output format for the finding list.
         #[command(flatten)]
         text: TextFormat,
     },
@@ -186,12 +200,12 @@ pub enum Command {
         #[arg(long)]
         diff: bool,
     },
-    /// Render documentation or SDK presets from an OpenAPI document.
+    /// Render documentation or custom template manifests from an OpenAPI document.
     Gen {
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// Shipped preset: docs-md | ts-sdk | rust-sdk.
-        #[arg(long, conflicts_with = "manifest")]
+        /// Shipped documentation preset.
+        #[arg(long, conflicts_with = "manifest", value_parser=["docs-md"])]
         preset: Option<String>,
         /// Custom gen.toml manifest (templates resolved relative to it).
         #[arg(long, conflicts_with = "preset")]
@@ -199,9 +213,15 @@ pub enum Command {
         /// Output root directory.
         #[arg(short, long, default_value = "gen-out")]
         out: PathBuf,
-        /// Print unified diffs without writing files.
+        /// Print unified diffs without writing files; exit 1 when output or ownership drifts.
         #[arg(long)]
         diff: bool,
+        /// Stable logical owner when sharing an output root across generation streams.
+        #[arg(long)]
+        owner: Option<String>,
+        /// Explicitly adopt only byte-identical unowned output.
+        #[arg(long)]
+        adopt_identical: bool,
     },
     /// Re-run a command whenever documents change under the given roots.
     Watch {
@@ -246,23 +266,20 @@ pub enum Command {
         #[arg(long, default_value_t = 0)]
         error_pct: u8,
     },
-    /// Compile a spec to idiomatic TypeScript, Rust, and Go.
-    Codegen {
-        /// Entry OpenAPI document.
-        spec: PathBuf,
-        /// Target languages (ts, rust, go — repeatable or comma-separated).
-        #[arg(long, value_delimiter = ',', default_value = "ts,rust,go")]
-        targets: Vec<String>,
-        /// Output root directory.
-        #[arg(short, long, default_value = "codegen-out")]
-        out: PathBuf,
-        /// TypeScript only: emit Zod schema twins.
-        #[arg(long)]
-        zod: bool,
-        /// Exit 1 when any generated file would change on disk.
-        #[arg(long)]
-        check: bool,
+    /// Generate a source-selected native SDK package.
+    Codegen(commands::codegen_cmd::CodegenArgs),
+    /// Generate a Terraform provider through explicit lifecycle mappings and the generated Go SDK.
+    CodegenTerraform(commands::terraform_cmd::TerraformArgs),
+    /// List the native SDK profiles available in this CLI build.
+    CodegenProfiles {
+        /// Human-readable inventory or versioned JSON for editor integration.
+        #[command(flatten)]
+        text: TextFormat,
     },
+    /// Persistent canonical SDK generation with readonly preview and watch mode.
+    CodegenSession(commands::codegen_session::SessionArgs),
+    /// Compare wire contracts and native SDK interfaces with migration notes.
+    CodegenCompare(commands::codegen_compare::CompareArgs),
     /// Run the language server over stdio.
     Lsp,
 }
@@ -301,6 +318,11 @@ pub struct Cli {
 pub fn execute(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
         Command::Check { paths, text } => commands::check::check(&paths, text.format),
+        Command::Validate {
+            paths,
+            reference_allowlist,
+            text,
+        } => commands::validate::validate(&paths, text.format, reference_allowlist.as_deref()),
         Command::Rules { cmd } => cmd.run().map(|_| 0),
         Command::Lint {
             paths,
@@ -359,9 +381,17 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             manifest,
             out,
             diff,
-        } => {
-            commands::generate::generate(&spec, preset.as_deref(), manifest.as_deref(), &out, diff)
-        }
+            owner,
+            adopt_identical,
+        } => commands::generate::generate(
+            &spec,
+            preset.as_deref(),
+            manifest.as_deref(),
+            &out,
+            diff,
+            owner.as_deref(),
+            adopt_identical,
+        ),
         Command::Gateway {
             spec,
             port,
@@ -386,13 +416,12 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             error_pct,
         ),
         Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
-        Command::Codegen {
-            spec,
-            targets,
-            out,
-            zod,
-            check,
-        } => commands::codegen_cmd::codegen(&spec, &targets, &out, zod, check),
+        Command::Acquire(args) => commands::acquire_cmd::acquire(args),
+        Command::Codegen(args) => commands::codegen_cmd::codegen(args),
+        Command::CodegenTerraform(args) => commands::terraform_cmd::generate(args),
+        Command::CodegenProfiles { text } => commands::sdk_profiles::list(text.format),
+        Command::CodegenSession(args) => commands::codegen_session::generate(args),
+        Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
         Command::Lsp => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(suspect_lsp::run_server());

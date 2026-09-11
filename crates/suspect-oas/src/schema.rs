@@ -1,7 +1,7 @@
 use suspect_low::{NodeRef, ValueKind};
 
 use crate::model::{Discriminator, ExternalDocumentation, Xml};
-use crate::session::{CycleGuard, Session};
+use crate::session::{CycleGuard, OasVersion, Session};
 
 /// A Schema Object view (3.0 dialect or 3.1+ JSON Schema), resolving `$ref`
 /// transparently.
@@ -11,6 +11,7 @@ pub struct SchemaView<'s> {
     node: NodeRef<'s>,
     /// Set when a `$ref` chain cycled and we kept the raw view.
     cyclic: bool,
+    missing_value: bool,
 }
 
 impl<'s> SchemaView<'s> {
@@ -19,13 +20,62 @@ impl<'s> SchemaView<'s> {
             session,
             node,
             cyclic: false,
+            missing_value: false,
+        }
+    }
+
+    pub(crate) fn missing(session: &'s Session, key: NodeRef<'s>) -> Self {
+        Self {
+            missing_value: true,
+            ..Self::new(session, key)
         }
     }
 
     /// The raw node this view points at (before any `$ref` resolution).
+    /// For a declared YAML schema with an absent value, this is its key node
+    /// so the invalid schema still has a precise source location.
     #[must_use]
     pub fn node(&self) -> NodeRef<'s> {
         self.node
+    }
+
+    /// Whether this is a declared schema slot without a YAML value, such as
+    /// `items:` or `Model:`. This is invalid, distinct from an absent keyword.
+    #[must_use]
+    pub const fn is_missing_value(&self) -> bool {
+        self.missing_value
+    }
+
+    /// The actual schema-position ancestors from outermost to innermost,
+    /// including this schema. Transport objects, schema maps, and instance data
+    /// are excluded, so their similarly named metadata cannot change vocabulary.
+    #[must_use]
+    pub fn lexical_ancestors(&self) -> Vec<Self> {
+        self.session
+            .schema_ancestors(self.node)
+            .into_iter()
+            .map(|node| Self::new(self.session, node))
+            .collect()
+    }
+
+    /// The direct `$ref` target, without following its own reference. Returns
+    /// `None` when this schema has no reference value. Unlike [`Self::resolved`],
+    /// this preserves intermediate nodes and their sibling keywords.
+    ///
+    /// # Errors
+    /// Returns [`CycleGuard`] if the reference cannot be resolved. Call the
+    /// session's `reference_target` method for detailed source-linked errors.
+    pub fn reference_target(&self) -> Result<Option<Self>, CycleGuard> {
+        self.session.register_schema(self.node);
+        self.node
+            .get("$ref")
+            .map(|reference| {
+                self.session.resolve_target(reference).map(|node| {
+                    self.session.register_schema(node);
+                    Self::new(self.session, node)
+                })
+            })
+            .transpose()
     }
 
     #[must_use]
@@ -46,21 +96,24 @@ impl<'s> SchemaView<'s> {
             return *self;
         }
         match self.get("$ref") {
-            Some(ref_value) => match self.session.resolve(ref_value) {
-                Ok(node) => {
-                    let out = Self::new(self.session, node);
-                    // target may itself be a ref object; callers chain resolved()
-                    if out.has_own_ref() && !out.cyclic {
-                        out.resolved()
-                    } else {
-                        out
+            Some(ref_value) => {
+                self.session.register_schema(self.node);
+                match self.session.resolve_scoped(ref_value, true) {
+                    Ok(node) => {
+                        let out = Self::new(self.session, node);
+                        // target may itself be a ref object; callers chain resolved()
+                        if out.has_own_ref() && !out.cyclic {
+                            out.resolved()
+                        } else {
+                            out
+                        }
                     }
+                    Err(CycleGuard) => Self {
+                        cyclic: true,
+                        ..*self
+                    },
                 }
-                Err(CycleGuard) => Self {
-                    cyclic: true,
-                    ..*self
-                },
-            },
+            }
             None => *self,
         }
     }
@@ -69,48 +122,53 @@ impl<'s> SchemaView<'s> {
         self.get("$ref").is_some()
     }
 
-    /// Declared type set. 3.0 `type` is a single string; 3.1 allows arrays;
-    /// 3.0 `nullable: true` folds into the set as NULL.
+    /// Explicit primitive `type` declaration after reference resolution.
+    /// Applicability keywords such as `properties` and `items` do not impose
+    /// an implicit type. Raw `nullable` annotations are not folded here; use
+    /// [`Self::type_set_for`] when interpreting an OpenAPI version.
+    ///
+    /// This accessor does not evaluate composition or `$ref` sibling
+    /// constraints and is not a complete accepted-value calculation.
     #[must_use]
     pub fn type_(&self) -> Option<TypeSet> {
         let r = self.resolved();
         let mut set = TypeSet::empty();
-        match r.get("type") {
-            Some(t) => match t.kind() {
-                ValueKind::Str => {
-                    set.insert_str(t.as_str()?);
-                }
-                ValueKind::Array => {
-                    for item in t.items() {
-                        if let Some(s) = item.as_str() {
-                            set.insert_str(s);
-                        }
+        let declared = r.get("type")?;
+        match declared.kind() {
+            ValueKind::Str => {
+                let bytes = declared.try_decoded_scalar()?;
+                set.insert_str(std::str::from_utf8(&bytes).ok()?);
+            }
+            ValueKind::Array => {
+                for item in declared.items() {
+                    if item.kind() == ValueKind::Str
+                        && let Some(bytes) = item.try_decoded_scalar()
+                        && let Ok(name) = std::str::from_utf8(&bytes)
+                    {
+                        set.insert_str(name);
                     }
                 }
-                _ => {}
-            },
-            None => {
-                // infer from sibling keywords
-                if r.get("properties").is_some()
-                    || r.get("additionalProperties").is_some()
-                    || r.get("required").is_some()
-                    || r.get("patternProperties").is_some()
-                {
-                    set.insert(TypeSet::OBJECT);
-                }
-                if r.get("items").is_some() || r.get("prefixItems").is_some() {
-                    set.insert(TypeSet::ARRAY);
-                }
             }
-        }
-        if r.nullable() {
-            set.insert(TypeSet::NULL);
+            _ => {}
         }
         (!set.is_empty()).then_some(set)
     }
-    /// 3.0 `nullable` flag. On 3.1 documents the keyword does not occur
-    /// (nullability lives in `type`), so this reads harmlessly wherever
-    /// present.
+
+    /// Explicit primitive type set interpreted for the caller's OpenAPI
+    /// version. In 3.0, `nullable: true` adds null only alongside an explicit
+    /// type declaration; in 3.1+ it is an annotation with no such effect.
+    /// Version is explicit because a shared external schema can be viewed
+    /// through more than one OpenAPI entry document.
+    #[must_use]
+    pub fn type_set_for(&self, version: OasVersion) -> Option<TypeSet> {
+        let mut set = self.type_()?;
+        if version == OasVersion::V30 && self.nullable() {
+            set.insert(TypeSet::NULL);
+        }
+        Some(set)
+    }
+    /// Raw `nullable` flag, including when retained as an annotation in a
+    /// 3.1+ document. This alone does not prove the schema accepts null.
     #[must_use]
     pub fn nullable(&self) -> bool {
         self.resolved()
@@ -183,6 +241,61 @@ impl<'s> SchemaView<'s> {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Direct subschemas under standard schema applicators on this raw node,
+    /// before `$ref` resolution, in source order within each keyword.
+    /// Instance-valued annotations such as `default` and `examples` are never
+    /// traversed. This method does not recurse.
+    #[must_use]
+    pub fn subschemas(&self) -> Vec<SchemaView<'s>> {
+        let mut out = Vec::new();
+        for entry in self.node.entries() {
+            let Some(bytes) = entry.key_node.try_decoded_scalar() else {
+                continue;
+            };
+            let Ok(key) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
+            match key {
+                "properties" | "patternProperties" | "dependentSchemas" | "$defs" => {
+                    if let Some(value) = entry.value {
+                        out.extend(value.entries().into_iter().map(|entry| {
+                            entry.value.map_or_else(
+                                || Self::missing(self.session, entry.key_node),
+                                |value| Self::new(self.session, value),
+                            )
+                        }));
+                    }
+                }
+                "allOf" | "anyOf" | "oneOf" | "prefixItems" => {
+                    if let Some(value) = entry.value {
+                        out.extend(
+                            value
+                                .items()
+                                .into_iter()
+                                .map(|node| Self::new(self.session, node)),
+                        );
+                    }
+                }
+                "items"
+                | "contains"
+                | "additionalProperties"
+                | "unevaluatedProperties"
+                | "unevaluatedItems"
+                | "propertyNames"
+                | "not"
+                | "if"
+                | "then"
+                | "else"
+                | "contentSchema" => out.push(entry.value.map_or_else(
+                    || Self::missing(self.session, entry.key_node),
+                    |value| Self::new(self.session, value),
+                )),
+                _ => {}
+            }
+        }
+        out
     }
 
     #[must_use]

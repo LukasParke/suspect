@@ -614,6 +614,7 @@ fn bench_gen(ir: &IrSpec) -> anyhow::Result<()> {
     for (name, src) in preset.templates {
         engine.add_template(name, src)?;
     }
+    let prepared = engine.prepare_context(&ctx);
     // Render exactly what the manifest outputs (never bare partials).
     let manifest = suspect_gen::parse_manifest_str(preset.manifest_toml)?;
     let outputs: Vec<String> = manifest
@@ -628,7 +629,7 @@ fn bench_gen(ir: &IrSpec) -> anyhow::Result<()> {
     for _ in 0..runs {
         for name in &outputs {
             let tt = Instant::now();
-            let out = engine.render(name, &ctx)?;
+            let out = engine.render_prepared(name, &prepared)?;
             total_bytes += out.len();
             per_file.push_us(tt.elapsed().as_micros() as u64);
         }

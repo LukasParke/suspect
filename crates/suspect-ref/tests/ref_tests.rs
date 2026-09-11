@@ -95,6 +95,99 @@ fn whole_doc_external_ref() {
     }
 }
 
+#[test]
+fn root_reference_cycles_terminate_across_documents() {
+    let d = TempDir::new("root-cycle");
+    d.write("a.yaml", "$ref: 'b.yaml'\n");
+    d.write("b.yaml", "$ref: 'a.yaml'\n");
+    for entrypoint in [0, 1, 2] {
+        let w = ws(&d.path);
+        let a = w.open("a.yaml").unwrap();
+        let result = match entrypoint {
+            0 => a.resolve_edge(0),
+            1 => a.resolve_pointer(a.id(), &Pointer::root()),
+            _ => a.resolve_ref_value(a.doc().root().get("$ref").unwrap()),
+        };
+        match result.unwrap() {
+            Resolution::Cycle { path } => {
+                assert_eq!(path.len(), 2);
+                assert_ne!(
+                    path[0].doc, path[1].doc,
+                    "byte ranges alone cannot identify cross-file steps"
+                );
+            }
+            other => panic!("entrypoint {entrypoint}: expected Cycle, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn direct_reference_targets_preserve_each_hop_in_a_cycle() {
+    let d = TempDir::new("direct-target");
+    d.write("a.yaml", "$ref: 'b.yaml'\n");
+    d.write("b.yaml", "$ref: 'a.yaml'\n");
+    let w = ws(&d.path);
+    let a = w.open("a.yaml").unwrap();
+    let target = a.ref_target(a.doc().root().get("$ref").unwrap()).unwrap();
+    let b = w.get_by_id(target.doc).unwrap();
+    assert!(b.uri().to_string().ends_with("b.yaml"));
+    assert!(target.pointer.is_root());
+    let back = b.ref_target(b.doc().root().get("$ref").unwrap()).unwrap();
+    assert_eq!(back.doc, a.id());
+}
+
+#[test]
+fn direct_pointer_reads_preserve_unfollowed_refs_aliases_and_source_identity() {
+    let d = TempDir::new("direct-pointer");
+    d.write(
+        "a.yaml",
+        "target: &target {type: string}\nalias: *target\nref: {$ref: '#/target'}\n",
+    );
+    d.write(
+        "b.yaml",
+        "target: &target {type: number}\nalias: *target\nref: {$ref: '#/target'}\n",
+    );
+    let w = ws(&d.path);
+    for (name, kind) in [("a.yaml", "string"), ("b.yaml", "number")] {
+        let h = w.open(name).unwrap();
+        for _ in 0..2 {
+            for pointer in ["/target", "/alias"] {
+                let node = h
+                    .node_at_pointer(&Pointer::parse(pointer).unwrap())
+                    .unwrap();
+                assert_eq!(node.get("type").unwrap().as_str(), Some(kind));
+                assert_eq!(node.syntax().doc().uri(), h.uri());
+            }
+            let reference = h.node_at_pointer(&Pointer::parse("/ref").unwrap()).unwrap();
+            assert!(reference.get("$ref").is_some());
+            assert!(reference.get("type").is_none());
+        }
+    }
+}
+
+#[test]
+fn cached_pointer_keeps_the_semantic_container_when_ranges_are_shared() {
+    let d = TempDir::new("same-range");
+    d.write(
+        "doc.yaml",
+        "target:\n  type: string\nsequence:\n  - value\n",
+    );
+    let w = ws(&d.path);
+    let h = w.open("doc.yaml").unwrap();
+    for _ in 0..2 {
+        let target = h
+            .node_at_pointer(&Pointer::parse("/target").unwrap())
+            .unwrap();
+        assert_eq!(target.kind(), suspect_low::ValueKind::Object);
+        assert_eq!(target.get("type").unwrap().as_str(), Some("string"));
+        let sequence = h
+            .node_at_pointer(&Pointer::parse("/sequence").unwrap())
+            .unwrap();
+        assert_eq!(sequence.kind(), suspect_low::ValueKind::Array);
+        assert_eq!(sequence.items()[0].as_str(), Some("value"));
+    }
+}
+
 /// Defends: chains of refs (A→B→C→value) resolve fully to the terminal
 /// node, not to an intermediate ref object.
 #[test]
@@ -280,6 +373,33 @@ fn plain_name_fragment_resolves_anchor() {
     }
 }
 
+#[test]
+fn external_plain_name_fragment_keeps_its_target_document() {
+    let d = TempDir::new("external-anchor");
+    d.write(
+        "a.yaml",
+        "use: {$ref: 'b.json#P%65t'}\nwrong: {$anchor: Pet, type: integer}\n",
+    );
+    d.write(
+        "b.json",
+        r#"{"defs":{"Pet":{"$anchor":"P\u0065t","type":"string"}}}"#,
+    );
+    let w = ws(&d.path);
+    assert_eq!(
+        w.load_all("a.yaml").unwrap(),
+        2,
+        "anchor target must join load closure"
+    );
+    let h = w.open("a.yaml").unwrap();
+    match h.resolve_edge(0).unwrap() {
+        Resolution::Node(n) => {
+            assert_eq!(n.get("type").unwrap().as_str(), Some("string"));
+            assert!(n.syntax().doc().uri().to_string().ends_with("b.json"));
+        }
+        other => panic!("expected external anchor target, got {other:?}"),
+    }
+}
+
 /// Defends: concurrent opens of the same document converge on one DocId —
 /// the load path is idempotent under thread contention.
 #[test]
@@ -339,6 +459,88 @@ fn resolve_ref_value_works_directly() {
         Resolution::Node(n) => assert_eq!(n.get("ok").unwrap().as_str(), Some("yes")),
         other => panic!("expected Node, got {other:?}"),
     }
+}
+
+#[test]
+fn reference_strings_and_fragments_decode_before_pointer_lookup() {
+    let d = TempDir::new("decoded-ref");
+    for raw in [
+        r##""#\/caf\u00e9""##,
+        r##""#%2Fcaf%C3%A9""##,
+        r##""#/caf%C3%A9""##,
+    ] {
+        d.write(
+            "doc.json",
+            &format!(r#"{{"caf\u00e9":{{"type":"string"}},"use":{{"$ref":{raw}}}}}"#),
+        );
+        for direct in [true, false] {
+            let w = ws(&d.path);
+            let h = w.open("doc.json").unwrap();
+            let result = if direct {
+                h.resolve_ref_value(h.doc().root().get("use").unwrap().get("$ref").unwrap())
+            } else {
+                h.resolve_edge(0)
+            };
+            match result.unwrap_or_else(|e| panic!("{raw}, direct={direct}: {e}")) {
+                Resolution::Node(n) => {
+                    assert_eq!(n.get("type").unwrap().as_str(), Some("string"));
+                }
+                other => panic!("{raw}, direct={direct}: expected Node, got {other:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn malformed_references_remain_observable_with_source_locations() {
+    let d = TempDir::new("invalid-ref-diagnostics");
+    let source = r##"{
+      "good":{"$ref":"#/target"}, "target":{"type":"string"},
+      "badPercent":{"$ref":"#/bad%GG"},
+      "badUtf8":{"$ref":"#/%FF"},
+      "badPointer":{"$ref":"#/bad~2"},
+      "nonString":{"$ref":42},
+      "nullValue":{"$ref":null},
+      "objectValue":{"$ref":{}},
+      "escapedKey":{"\u0024ref":false}
+    }"##;
+    d.write("doc.json", source);
+    let w = ws(&d.path);
+    let h = w.open("doc.json").unwrap();
+    assert_eq!(h.edges().len(), 1);
+    let diagnostics = h.ref_diagnostics();
+    assert_eq!(diagnostics.len(), 7);
+    for diagnostic in diagnostics.iter() {
+        assert!(!diagnostic.reason.is_empty());
+        assert!(!diagnostic.at.is_empty());
+        let value = h
+            .doc()
+            .root()
+            .pointer(&diagnostic.path)
+            .unwrap()
+            .get("$ref")
+            .unwrap();
+        assert_eq!(diagnostic.at, value.byte_range());
+        assert!(matches!(
+            h.resolve_ref_value(value),
+            Err(RefError::InvalidRef { .. })
+        ));
+    }
+}
+
+#[test]
+fn empty_yaml_reference_values_are_diagnosed_at_the_key() {
+    let d = TempDir::new("empty-ref");
+    d.write("doc.yaml", "empty:\n  $ref:\nexample:\n  $ref: false\n");
+    let w = ws(&d.path);
+    let h = w.open("doc.yaml").unwrap();
+    let diagnostics = h.ref_diagnostics();
+    // The generic scanner includes arbitrary data; OpenAPI consumers must
+    // scope this evidence themselves instead of globally skipping key names.
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics[0].path.to_path(), "/empty");
+    assert_eq!(&h.doc().inner().bytes()[diagnostics[0].at.clone()], b"$ref");
+    assert!(diagnostics[0].raw.is_none());
 }
 
 /// Defends: relative entries resolve against the builder root (CLI

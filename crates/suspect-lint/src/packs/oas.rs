@@ -173,7 +173,7 @@ pub(crate) fn rules() -> Vec<Rule> {
         ),
         Rule::new(
             "typed-enum",
-            "Enum members must all share a single scalar type.",
+            "Enum member does not match the schema's declared type.",
             Severity::Error,
             oas23,
             &["$..enum"],

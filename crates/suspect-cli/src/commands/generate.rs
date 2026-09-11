@@ -1,4 +1,4 @@
-//! `suspect gen` subcommand — render documentation/SDK presets or custom manifests.
+//! `suspect gen` subcommand — render documentation or custom manifests.
 
 use std::path::Path;
 
@@ -7,7 +7,7 @@ use suspect_ir::IrSpec;
 use suspect_source::Uri;
 
 fn ir_for(spec: &Path) -> anyhow::Result<IrSpec> {
-    let ws = super::workspace_dir_all(spec)?;
+    let ws = super::workspace_for_entry(spec)?;
     let uri = Uri::from_path(spec)?;
     IrSpec::from_workspace(&ws, &uri).map_err(anyhow::Error::msg)
 }
@@ -22,6 +22,8 @@ pub fn generate(
     manifest: Option<&Path>,
     out: &Path,
     diff: bool,
+    selected_owner: Option<&str>,
+    adopt_identical: bool,
 ) -> anyhow::Result<i32> {
     let ir = ir_for(spec)?;
 
@@ -29,7 +31,7 @@ pub fn generate(
     let mut engine = MinijinjaEngine::new();
     FilterRegistry::register(&mut engine);
 
-    let (manifest_obj, ctx) = match (preset, manifest) {
+    let (manifest_obj, ctx, owner) = match (preset, manifest) {
         (Some(name), _) => {
             let Some(p) = suspect_gen::presets::get(name) else {
                 anyhow::bail!("unknown preset {name:?}");
@@ -38,7 +40,11 @@ pub fn generate(
                 engine.add_template(tpl_name, tpl_src)?;
             }
             let parsed = suspect_gen::parse_manifest_str(p.manifest_toml)?;
-            (parsed, (p.ctx_builder)(&ir))
+            (
+                parsed,
+                (p.ctx_builder)(&ir),
+                format!("suspect-gen:preset:{name}"),
+            )
         }
         (None, Some(path)) => {
             let parsed = suspect_gen::load_manifest(path)?;
@@ -51,13 +57,28 @@ pub fn generate(
                     .map_err(|e| anyhow::anyhow!("template {}: {e}", tpl_path.display()))?;
                 engine.add_template(&rule.template, &src)?;
             }
-            (parsed, serde_json::to_value(&ir)?)
+            (
+                parsed,
+                serde_json::to_value(&ir)?,
+                "suspect-gen:custom".into(),
+            )
         }
         (None, None) => anyhow::bail!("provide --preset <name> or --manifest <gen.toml>"),
     };
 
-    std::fs::create_dir_all(out)?;
-    let outcomes = suspect_gen::render_manifest(&engine, &manifest_obj, &ctx, out, diff)?;
+    let outcomes = suspect_gen::render_manifest_owned(
+        &engine,
+        &manifest_obj,
+        &ctx,
+        out,
+        diff,
+        selected_owner.unwrap_or(&owner),
+        if adopt_identical {
+            suspect_gen::Adoption::Identical
+        } else {
+            suspect_gen::Adoption::Refuse
+        },
+    )?;
     for o in &outcomes {
         let status = if diff {
             "diff"
@@ -67,13 +88,23 @@ pub fn generate(
                 suspect_gen::WriteReason::Changed => "changed",
                 suspect_gen::WriteReason::Unchanged => "unchanged",
                 suspect_gen::WriteReason::PreservedRegionsApplied => "preserved",
+                suspect_gen::WriteReason::Removed => "removed",
+                suspect_gen::WriteReason::ObsoleteMissing => "absent",
+                suspect_gen::WriteReason::OwnershipConflict => "conflict",
             }
         };
+        if let Some(conflict) = &o.conflict {
+            println!(" conflict  {}: {conflict}", o.path.display());
+        }
         if let Some(d) = &o.diff {
             println!("--- {}\n{d}", o.path.display());
         } else {
             println!("{status:>9}  {}", o.path.display());
         }
     }
-    Ok(0)
+    Ok(i32::from(
+        diff && outcomes
+            .iter()
+            .any(|outcome| outcome.reason != suspect_gen::WriteReason::Unchanged),
+    ))
 }

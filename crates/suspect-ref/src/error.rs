@@ -21,12 +21,32 @@ pub enum RefError {
     /// Filesystem I/O failed while loading a referenced document.
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    /// A remote (`http:`/`https:`) reference was encountered; v1 never
-    /// performs network fetches.
-    #[error("remote references are denied in v1: {uri}")]
+    /// A remote reference was encountered without an explicit byte provider.
+    /// Ordinary workspace loads never perform network fetches.
+    #[error("remote reference requires explicitly acquired pinned bytes: {uri}")]
     RemoteDenied {
         /// The denied remote URI.
         uri: String,
+    },
+    /// The retrieval URI was not admitted by the workspace's explicit allowlist.
+    #[error("referenced document is outside the allowed source manifest: {uri}")]
+    OutsideAllowlist {
+        /// The denied retrieval URI; no document I/O was performed for it.
+        uri: String,
+    },
+    /// A lazy or direct load would exceed the workspace's document cap.
+    #[error("workspace exceeded maximum document count ({max})")]
+    TooManyDocs {
+        /// Configured maximum number of distinct documents (aliases do not count).
+        max: usize,
+    },
+    /// Source bytes exceed the workspace's per-document limit.
+    #[error("document {uri} exceeds max_doc_size ({limit})")]
+    TooLarge {
+        /// Logical URI of the oversized document.
+        uri: String,
+        /// Maximum permitted byte length.
+        limit: u64,
     },
     /// A resolution chain or census walk exceeded its depth cap.
     #[error("resolution exceeded depth cap of {cap}")]

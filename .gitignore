@@ -3,3 +3,6 @@ corpus/
 *.profraw
 /fixtures
 .vscode-suspect/node_modules/
+__pycache__/
+*.py[cod]
+.suspect-cache/

@@ -186,8 +186,8 @@ export default defineSchema("Pet", (z) =>
 );
 ```
 
-Registered schemas validate: (a) spec component schemas structurally
-(STG→JSON-Schema lowering fed to zod), (b) **fact-space inferred shapes** —
+Registered schemas validate: (a) owned source component-schema values
+structurally, (b) **fact-space inferred shapes** —
 code truth vs the zod contract produces drift findings at handler spans,
 (c) example payloads in the spec. Zod issues map to findings with pointer
 paths and configurable severity.
@@ -201,14 +201,14 @@ One semantic source, two runtimes, conformance-gated:
 | Class | Implementation | Call path | Examples |
 |---|---|---|---|
 | **Leaf functions** (pure, per-node) | Rust (suspect-lint `functions`) **and** TS mirror in the SDK | in-process TS sync calls | `casing`, `matches`, `defined`, `truthy`, `lengthBetween`, `isDateTime`, `enumValues` |
-| **Native-only functions** (stateful/heavy — Rust-authoritative) | Rust only, behind `bun:ffi` (dlopen `libsuspect_rules_sdk`) with protocol fallback | `ctx.*` async calls, O(rule) not O(node) | `ctx.resolveRef`, `ctx.provenance(op)` (spec↔code spans), `ctx.workspaceSchema(name)`, `ctx.stgTypeOf(node)`, `ctx.locateRange`, `ctx.validateAgainstMetaSchema` |
+| **Native-only functions** (stateful/heavy — Rust-authoritative) | Rust only, behind `bun:ffi` (dlopen `libsuspect_rules_sdk`) with protocol fallback | `ctx.*` async calls, O(rule) not O(node) | `ctx.resolveRef`, `ctx.provenance(op)` (spec↔code spans), `ctx.workspaceSchema(name)`, `ctx.locateRange`, `ctx.validateAgainstMetaSchema` |
 
 Why mirror the leaf functions instead of FFI-everything: an FFI call costs
 ~1–3µs; the leaf function bodies cost ~100ns. FFI-per-node would make the
 bindings the bottleneck. Mirrors keep the hot loop pure TS; the conformance
 suite (shared fixture corpus, CI asserts Rust and TS outputs are identical)
 keeps the mirror honest. Native-only functions need Rust state (workspace IR,
-provenance index, STG) and are called rarely — FFI/protocol cost amortizes
+provenance index, Contract) and are called rarely — FFI/protocol cost amortizes
 to noise.
 
 Every function has one doc table: rustdoc ↔ TSDoc generated from the same

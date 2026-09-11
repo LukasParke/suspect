@@ -15,9 +15,16 @@ rustc-hash.workspace = true
 percent-encoding.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10.9"
+url.workspace = true
+iri-string = { version = "0.7.14", default-features = false, features = ["alloc"] }
 
 [dev-dependencies]
 criterion.workspace = true
+suspect-ir.workspace = true
+tempfile.workspace = true
 
 [[bench]]
 name = "ref_engine"

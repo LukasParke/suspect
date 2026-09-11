@@ -39,6 +39,65 @@ fn invalid(schema: &str, instance: &str) -> Vec<SchemaError> {
     s.validate(inst)
 }
 
+#[test]
+fn portable_patterns_use_ecma_unicode_scalar_semantics() {
+    assert!(valid(r#"{"pattern":"^[\\w-]+$"}"#, r#""sess_abc-123""#));
+    assert!(!valid(r#"{"pattern":"^\\w+$"}"#, r#""é""#));
+    assert!(!valid(r#"{"pattern":"^\\d+$"}"#, r#""١""#));
+    assert!(valid(r#"{"pattern":"^\\s$"}"#, r#""\ufeff""#));
+    assert!(valid(r#"{"pattern":"^.$"}"#, r#""💩""#));
+    for line_break in [r#""\n""#, r#""\r""#, r#""\u2028""#, r#""\u2029""#] {
+        assert!(!valid(r#"{"pattern":"^.$"}"#, line_break));
+    }
+    for (schema, accepted, rejected) in [
+        (
+            r#"{"pattern":"^[a-zA-Z0-9 _-]+$"}"#,
+            r#""reviewer""#,
+            r#""name\n""#,
+        ),
+        (
+            r#"{"pattern":"^[a-z0-9*]([a-z0-9*-]{0,61}[a-z0-9*])?(\\.[a-z0-9*]([a-z0-9*-]{0,61}[a-z0-9*])?)*$"}"#,
+            r#""files.pythonhosted.org""#,
+            r#""pypi\\xorg""#,
+        ),
+        (r#"{"pattern":"^[\\w-]+$"}"#, r#""sess_abc123""#, r#""\\w""#),
+        (
+            r#"{"pattern":"^[a-zA-Z0-9 _-]+$"}"#,
+            r#""summarizer""#,
+            r#""é""#,
+        ),
+    ] {
+        assert!(valid(schema, accepted));
+        assert!(!valid(schema, rejected));
+    }
+}
+
+#[test]
+fn pattern_properties_and_additional_exclusions_share_portable_matching() {
+    let schema = r#"{
+        "patternProperties":{"^[\\w-]+$":{"type":"integer"}},
+        "additionalProperties":false
+    }"#;
+    assert!(valid(schema, r#"{"ascii_key":1}"#));
+    let errors = invalid(schema, r#"{"é":1}"#);
+    assert!(errors.iter().any(|error| {
+        error
+            .schema_path
+            .to_path()
+            .ends_with("/additionalProperties")
+    }));
+    assert!(!valid(schema, r#"{"ascii_key":"wrong"}"#));
+}
+
+#[test]
+fn unsupported_portable_pattern_features_fail_compilation_explicitly() {
+    let doc = parse(r#"{"pattern":"^\\p{Letter}+$"}"#);
+    assert!(matches!(
+        Compiler::new(Config::default()).compile(doc.root()),
+        Err(CompileError::Unsupported { .. })
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // type / enum / const
 // ---------------------------------------------------------------------------
@@ -208,8 +267,8 @@ fn contains_bounds() {
         r##"{"contains":{"const":2},"maxContains":2}"##,
         "[2,2,3]"
     ));
-    // minContains > 0 fails for non-arrays too
-    assert!(!valid(r##"{"contains":{"const":1}}"##, "{}"));
+    // JSON Schema 2020-12: contains applies only to array instances.
+    assert!(valid(r##"{"contains":{"const":1}}"##, "{}"));
 }
 
 // ---------------------------------------------------------------------------
@@ -618,7 +677,7 @@ fn id_base_registration() {
 }
 
 #[test]
-fn dynamic_ref_basic_rfc3093() {
+fn dynamic_ref_uses_outermost_schema_resource() {
     // Outermost dynamic scope wins: the root declares the anchor, so both
     // leaves validate against the ROOT schema (extensible trees).
     let s = r##"{
@@ -630,6 +689,7 @@ fn dynamic_ref_basic_rfc3093() {
         },
         "$defs": {
             "leaf": {
+                "$id": "leaf",
                 "$dynamicAnchor": "node",
                 "type": "object",
                 "properties": {
@@ -653,10 +713,12 @@ fn dynamic_ref_basic_rfc3093() {
         r##"{"value":1,"children":[{"value":2,"children":[{"value":3}]}]}"##
     ));
 
-    // $dynamicRef with no dynamic scope and no registry entry errors cleanly
-    let s2 = r##"{"properties": {"x": {"$dynamicRef": "#nowhere"}}}"##;
-    let e = invalid(s2, r##"{"x":1}"##);
-    assert!(!e.is_empty() && e[0].message.contains("unresolvable $dynamicRef"));
+    // The required static target must exist before dynamic scope is searched.
+    let missing = parse(r##"{"properties":{"x":{"$dynamicRef":"#nowhere"}}}"##);
+    assert!(matches!(
+        Compiler::new(Config::default()).compile(missing.root()),
+        Err(CompileError::Invalid { .. })
+    ));
 }
 
 // ---------------------------------------------------------------------------

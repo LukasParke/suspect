@@ -1,0 +1,60 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Python runtime regression seams", "version": "1"},
+  "servers": [{"url": "https://runtime.example.test/api"}],
+  "security": [{"apiKey": []}],
+  "paths": {
+    "/value": {
+      "get": {
+        "operationId": "getValue",
+        "responses": {
+          "200": {
+            "description": "A typed value",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Config"}}}
+          }
+        }
+      }
+    },
+    "/tagged": {
+      "get": {
+        "operationId": "getTagged",
+        "responses": {
+          "200": {
+            "description": "A value with a source literal",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Tagged"}}}
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {"apiKey": {"type": "http", "scheme": "bearer"}},
+    "schemas": {
+      "Config": {
+        "type": "object", "required": ["name"],
+        "properties": {"name": {"type": "string", "minLength": 1}}
+      },
+      "LiteralOrObject": {
+        "oneOf": [{"type": "string", "const": "auto"}, {"$ref": "#/components/schemas/Config"}]
+      },
+      "JsonOrObject": {
+        "anyOf": [true, {"$ref": "#/components/schemas/Config"}]
+      },
+      "LiteralOrStrings": {
+        "oneOf": [{"type": "string", "const": "auto"}, {"type": "array", "items": {"type": "string"}}]
+      },
+      "CopyBox": {
+        "type": "object", "required": ["name"],
+        "properties": {"name": {"type": "string"}}
+      },
+      "Tagged": {
+        "type": "object", "required": ["kind", "text"],
+        "properties": {"kind": {"type": "string", "const": "tag"}, "text": {"type": "string"}}
+      },
+      "IntegerBox": {
+        "type": "object", "required": ["count"],
+        "properties": {"count": {"type": "integer"}}
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "Controlled lifecycle fixture", "version": "1.0.0"},
+  "servers": [{"url": "http://127.0.0.1:1/v1"}],
+  "security": [{"NewClient": []}],
+  "paths": {
+    "/records": {
+      "post": {
+        "operationId": "read-item",
+        "description": "Create a record. The operation ID deliberately does not identify a CRUD role.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "schemas.json#/Create"}}}},
+        "responses": {
+          "201": {"description": "Created", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Record"}}}},
+          "409": {"description": "No mutation", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Problem"}}}},
+          "503": {"description": "Partial creation with authoritative identity and state", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Record"}}}}
+        }
+      }
+    },
+    "/records/{record-id}": {
+      "parameters": [{"name": "record-id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}}],
+      "get": {
+        "operationId": "read_item",
+        "description": "Read authoritative remote state. A missing record returns 404.",
+        "responses": {
+          "200": {"description": "Found", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Record"}}}},
+          "404": {"description": "Missing", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Problem"}}}}
+        }
+      },
+      "put": {
+        "operationId": "erase",
+        "description": "Update configured mutable fields. Omitted memo clears it; absent secret preserves the credential. Region is immutable. 503 returns only actually applied remote fields.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "schemas.json#/Update"}}}},
+        "responses": {
+          "200": {"description": "Updated", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Record"}}}},
+          "409": {"description": "No mutation", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Problem"}}}},
+          "503": {"description": "Partial update with authoritative state", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Record"}}}}
+        }
+      },
+      "delete": {
+        "operationId": "observe",
+        "description": "Delete a record; 404 means it is already absent.",
+        "responses": {
+          "204": {"description": "Deleted"},
+          "404": {"description": "Missing", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Problem"}}}},
+          "409": {"description": "Delete rejected; retain state", "content": {"application/json": {"schema": {"$ref": "schemas.json#/Problem"}}}}
+        }
+      }
+    }
+  },
+  "components": {"securitySchemes": {"NewClient": {"type": "http", "scheme": "bearer"}}}
+}

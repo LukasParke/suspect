@@ -1,7 +1,7 @@
 {
   "name": "suspect-vscode",
   "displayName": "Suspect",
-  "description": "Run Arazzo workflows, drive the mock gateway, and generate docs/SDK presets from OpenAPI documents.",
+  "description": "Run Arazzo workflows, drive the mock gateway, and generate canonical SDKs, documentation or custom templates from OpenAPI documents.",
   "version": "0.1.0",
   "publisher": "suspect",
   "private": true,
@@ -18,10 +18,49 @@
     "configuration": {
       "title": "Suspect",
       "properties": {
+        "suspect.sdk.compatibilityProfiles": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["legacy-binary-string-v1"] },
+          "uniqueItems": true,
+          "default": [],
+          "description": "Explicit versioned source interpretation for single-package generation. Empty preserves ordinary OpenAPI semantics. legacy-binary-string-v1 opts into string/binary markers as bytes in binary contexts. Session actions use only compatibility_profiles from their saved JSON config."
+        },
+        "suspect.sdk.importNames": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": { "type": "string" },
+          "description": "Explicit native import/module/namespace overrides by SDK profile, for example {\"python-http\":\"widgets_sdk\",\"ruby-http\":\"WidgetsSDK\"}."
+        },
         "suspect.basePath": {
           "type": "string",
           "default": "suspect",
           "description": "Path to the suspect CLI: a directory containing the `suspect` executable, the executable itself, or bare `suspect` to resolve from $PATH."
+        },
+        "suspect.sdk.packageName": {
+          "type": "string",
+          "default": "",
+          "description": "Initial explicit native package identity for a canonical SDK profile advertised by the selected CLI. The command prompts with the selected ecosystem's naming requirements before generation."
+        },
+        "suspect.sdk.packageVersion": {
+          "type": "string",
+          "default": "",
+          "description": "Initial explicit package SemVer for canonical SDK generation, independent of OpenAPI info.version. Swift requires stable SemVer without prerelease or build metadata."
+        },
+        "suspect.sdk.operationIds": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Exact operationId selectors for canonical SDK generation. Empty attempts every outgoing operation; unsupported operations fail rather than being dropped."
+        },
+        "suspect.sdk.sessionConfig": {
+          "type": "string",
+          "default": "",
+          "description": "JSON config for canonical SDK preview/watch using targets registered in the selected CLI. Absolute or relative to the selected workspace folder; empty opens a file picker. The config's spec is relative to its own directory; import_name sets a native import/module/namespace, and compatibility_profiles explicitly selects source interpretation."
+        },
+        "suspect.sdk.sessionOutput": {
+          "type": "string",
+          "default": "sdk-out",
+          "description": "Initial output root for SDK preview/watch/drift checks. Relative paths resolve from the session config directory. Each action prompts for this directory and reads saved files."
         },
         "suspect.testBaseUrl": {
           "type": "string",
@@ -52,7 +91,27 @@
       },
       {
         "command": "suspect.genPreset",
-        "title": "Suspect: Generate Preset"
+        "title": "Suspect: Generate SDK, Docs or Custom Templates"
+      },
+      {
+        "command": "suspect.previewSdk",
+        "title": "Suspect: Preview SDK Changes"
+      },
+      {
+        "command": "suspect.checkSdk",
+        "title": "Suspect: Check SDK Drift"
+      },
+      {
+        "command": "suspect.watchSdk",
+        "title": "Suspect: Watch SDK Preview"
+      },
+      {
+        "command": "suspect.stopSdkWatch",
+        "title": "Suspect: Stop SDK Watch"
+      },
+      {
+        "command": "suspect.showSdkPreview",
+        "title": "Suspect: Show Latest SDK Preview"
       },
       {
         "command": "suspect.openNotebook",
@@ -112,7 +171,11 @@
   },
   "scripts": {
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "tsc -watch -p ./",
+    "test:generation": "node --test test/generation*.cjs",
+    "test:generation:protocol": "node --test test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs",
+    "test:generation:host": "node test/native-host/run.cjs",
+    "test:generation:host:inputs": "node --test test/native-host/contract.test.cjs"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.0"

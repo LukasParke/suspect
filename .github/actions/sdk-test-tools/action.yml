@@ -1,0 +1,16 @@
+name: SDK test tools
+description: Install the pinned Node and TypeScript tools used by workspace tests.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: crates/suspect-codegen/tools/typescript-docs/.node-version
+        cache: npm
+        cache-dependency-path: crates/suspect-codegen/tools/typescript-docs/package-lock.json
+    - name: Install pinned TypeScript toolchain
+      shell: bash
+      run: npm ci --prefix crates/suspect-codegen/tools/typescript-docs --ignore-scripts --no-audit --no-fund
+    - name: Expose the pinned TypeScript compiler
+      shell: bash
+      run: echo "$GITHUB_WORKSPACE/crates/suspect-codegen/tools/typescript-docs/node_modules/.bin" >> "$GITHUB_PATH"

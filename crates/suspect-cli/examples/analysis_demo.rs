@@ -94,18 +94,6 @@ fn main() -> Result<(), String> {
         xref.method_mismatches.len()
     );
 
-    // --- R5: semantic diff — plex spec against itself is clean ---
-    let diff = suspect_codegen::diff::diff_specs(&ir, &ir);
-    println!(
-        "self-diff: {} deltas, semver {}",
-        diff.deltas.len(),
-        diff.semver
-    );
-
-    // --- R7: consumer impact — no-op version bump is safe ---
-    let impact = suspect_codegen::consumer_impact::analyze_impact(&ir, &ir, &[]);
-    println!("impact: {}", impact.summary);
-
     // --- R4: stateful dependency graph on the real spec ---
     let graph = suspect_test::stateful::build_graph(&ir);
     println!(

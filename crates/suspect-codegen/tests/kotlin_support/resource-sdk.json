@@ -1,0 +1,23 @@
+{
+  "openapi":"3.2.0",
+  "$self":"https://logical.example/catalog/api.json",
+  "info":{"title":"Native resource SDK","version":"1"},
+  "servers":[{"url":"https://example.test/api"}],"security":[],
+  "components":{"schemas":{
+    "Tree":{"$id":"tree","$dynamicAnchor":"node","type":"object","properties":{"data":true,"children":{"type":"array","items":{"$dynamicRef":"#node"}}},"example":{"data":"root","children":[{"data":"child"}]}},
+    "Strict":{"$id":"strict","$dynamicAnchor":"node","$ref":"tree","unevaluatedProperties":false,"example":{"data":"root","children":[{"data":"child"}]}},
+    "Numbers":{"$id":"numbers","type":"array","items":{"$dynamicRef":"#slot"},"$defs":{"Integer":{"$dynamicAnchor":"slot","type":"integer"}},"example":[1,2]},
+    "Strings":{"$id":"strings","$defs":{"String":{"$dynamicAnchor":"slot","type":"string"}},"$ref":"numbers","example":["alpha","beta"]},
+    "Counter":{"$id":"scalars/count","type":"integer","minimum":9007199254740993,"example":9007199254740993},
+    "Poly":{"$id":"poly","if":{"type":"string"},"then":{"minLength":2},"else":{"type":"integer","minimum":0},"example":"source"},
+    "Unused":{"$id":"unused","$dynamicAnchor":"node","not":{}}
+  }},
+  "paths":{
+    "/tree":{"post":{"operationId":"tree","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"tree"}}}},"responses":{"200":{"description":"tree","content":{"application/json":{"schema":{"$ref":"tree"}}}}}}},
+    "/strict":{"post":{"operationId":"strict","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"strict"}}}},"responses":{"200":{"description":"strict tree","content":{"application/json":{"schema":{"$ref":"strict"}}}}}}},
+    "/numbers":{"post":{"operationId":"numbers","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"numbers"}}}},"responses":{"200":{"description":"numbers","content":{"application/json":{"schema":{"$ref":"numbers"}}}}}}},
+    "/strings":{"post":{"operationId":"strings","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"strings"}}}},"responses":{"200":{"description":"strings","content":{"application/json":{"schema":{"$ref":"strings"}}}}}}},
+    "/counter":{"post":{"operationId":"counter","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"scalars/count"}}}},"responses":{"200":{"description":"exact counter","content":{"application/json":{"schema":{"$ref":"scalars/count"}}}}}}},
+    "/poly":{"post":{"operationId":"poly","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"poly"}}}},"responses":{"200":{"description":"polymorphic resource","content":{"application/json":{"schema":{"$ref":"poly"}}}}}}}
+  }
+}

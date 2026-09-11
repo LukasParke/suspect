@@ -13,7 +13,7 @@
 //! objects. Cross-file resolution is a planned upgrade behind the same API.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use suspect_low::SpecFamily;
@@ -21,6 +21,7 @@ use suspect_ref::Workspace;
 use suspect_source::Uri;
 
 pub mod common;
+pub mod contract;
 pub mod evolution;
 pub mod fast;
 
@@ -221,6 +222,20 @@ impl IrSpec {
             .get(entry_uri)
             .ok_or_else(|| format!("document not loaded: {entry_uri}"))?;
         let low = handle.doc();
+        if entry_uri.as_path().is_some_and(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        }) {
+            // Generic syntax auto-detection permits flow-style YAML. A
+            // declared JSON input must not use that fallback to repair an
+            // invalid JSON escape or other JSON syntax.
+            serde_json::from_slice::<&serde_json::value::RawValue>(low.inner().bytes())
+                .map_err(|error| format!("invalid JSON in {entry_uri}: {error}"))?;
+        }
+        if let Some(error) = low.syntax_errors().first() {
+            return Err(format!("syntax error in {entry_uri}: {error:?}"));
+        }
         if !matches!(
             low.sniff_family(),
             SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32
@@ -230,21 +245,30 @@ impl IrSpec {
         // Convert the resolved CST into the shared value tree and run the
         // same walk the fast path uses — one set of construction rules for
         // both pipelines.
-        let root_value = fast::value_from_node(low.root());
+        let root_value = fast::value_from_node(low.root())?;
         Ok(ir_from_fast(&root_value))
     }
 
     /// Builds the IR directly from one spec file.
     ///
     /// Tries the allocation-lean YAML-subset reader first; documents using
-    /// features outside that subset fall back to a full workspace load of
-    /// the file's directory (the same layout `suspect-cli` uses), so exotic
-    /// YAML still produces identical output.
+    /// features outside that subset fall back to a workspace load of the
+    /// entry file, so exotic YAML still produces identical output. Neither
+    /// path implicitly loads unrelated neighboring documents. This reporting IR
+    /// retains reference values without expanding external schemas; native SDK
+    /// planning uses [`contract::Contract`]'s source-addressed semantic graph.
     ///
     /// # Errors
     /// `"not an OpenAPI 3.x document"` when the family sniff fails, or an
     /// I/O / workspace error message.
     pub fn from_file(path: &Path) -> Result<IrSpec, String> {
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        {
+            return Self::from_file_via_workspace(path);
+        }
         let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
         if let Some(root) = suspect_syntax::try_parse_fast(&bytes) {
             return if fast::is_oas3(&root) {
@@ -256,40 +280,15 @@ impl IrSpec {
         Self::from_file_via_workspace(path)
     }
 
-    /// Fallback path: workspace-load the file's directory like
-    /// `commands::workspace_dir_all`, then run the standard walk.
+    /// Fallback path: open the entry using its retrieval URI, then run the
+    /// standard walk. Referencing a document is distinct from sharing a folder.
     fn from_file_via_workspace(path: &Path) -> Result<IrSpec, String> {
         use suspect_ref::WorkspaceBuilder;
 
-        let dir = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-        let ws = WorkspaceBuilder::new()
-            .root(&dir)
-            .build()
-            .map_err(|e| e.to_string())?;
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
-            .map_err(|e| e.to_string())?
-            .filter_map(Result::ok)
-            .map(|e| e.path())
-            .filter(|p| {
-                matches!(
-                    p.extension().and_then(|e| e.to_str()),
-                    Some("yaml") | Some("yml") | Some("json")
-                )
-            })
-            .collect();
-        entries.sort();
-        for entry in entries {
-            if let Some(name) = entry.file_name().and_then(|n| n.to_str()) {
-                let _ = ws.load_all(name);
-            }
-        }
-        let ws = Arc::new(ws);
+        let ws = WorkspaceBuilder::new().build().map_err(|e| e.to_string())?;
         let uri = Uri::from_path(path).map_err(|e| e.to_string())?;
-        Self::from_workspace(&ws, &uri)
+        ws.open(uri.as_str()).map_err(|e| e.to_string())?;
+        Self::from_workspace(&Arc::new(ws), &uri)
     }
 
     /// Looks up an operation by selector.

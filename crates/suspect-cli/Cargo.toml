@@ -50,3 +50,4 @@ live-http = ["dep:reqwest", "dep:axum"]
 
 [dev-dependencies]
 tempfile.workspace = true
+sha2 = "0.10.9"

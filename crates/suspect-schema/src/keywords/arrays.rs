@@ -7,11 +7,12 @@ use suspect_low::{NodeRef, Pointer, ValueKind};
 use crate::compile::Prg;
 use crate::exec::Stack;
 use crate::exec::{Ann, Ctx, eval};
+use crate::keywords::cardinality::CountBound;
 
 pub(crate) fn check_items<'a, 'd>(
     ctx: &mut Ctx<'a, 'd>,
     st: &mut Stack<'d>,
-    _at: &Pointer,
+    at: &Pointer,
     inst: &NodeRef<'d>,
     sub: &Prg<'d>,
     skip: usize,
@@ -21,12 +22,17 @@ pub(crate) fn check_items<'a, 'd>(
         return true;
     }
     let mut ok = true;
-    for (i, el) in inst.items().into_iter().enumerate().skip(skip) {
+    for (i, el) in inst.items().into_iter().enumerate() {
+        if !ctx.step(st, at) {
+            return false;
+        }
+        if i < skip {
+            continue;
+        }
         st.push_idx(i);
         let o = eval(ctx, sub, el, st);
         st.pop();
         if o.ok {
-            ctx.masks.record(el, o.ann);
             ann.idx(i);
         } else {
             ok = false;
@@ -38,7 +44,7 @@ pub(crate) fn check_items<'a, 'd>(
 pub(crate) fn check_prefix_items<'a, 'd>(
     ctx: &mut Ctx<'a, 'd>,
     st: &mut Stack<'d>,
-    _at: &Pointer,
+    at: &Pointer,
     inst: &NodeRef<'d>,
     subs: &[Prg<'d>],
     ann: &mut Ann<'d>,
@@ -51,11 +57,13 @@ pub(crate) fn check_prefix_items<'a, 'd>(
         if i >= subs.len() {
             break;
         }
+        if !ctx.step(st, at) {
+            return false;
+        }
         st.push_idx(i);
         let o = eval(ctx, &subs[i], el, st);
         st.pop();
         if o.ok {
-            ctx.masks.record(el, o.ann);
             ann.idx(i);
         } else {
             ok = false;
@@ -71,43 +79,44 @@ pub(crate) fn check_contains<'a, 'd>(
     at: &Pointer,
     inst: &NodeRef<'d>,
     schema: &Prg<'d>,
-    min: usize,
-    max: Option<usize>,
+    min: CountBound,
+    max: Option<CountBound>,
     ann: &mut Ann<'d>,
 ) -> bool {
     if inst.kind() != ValueKind::Array {
-        // minContains > 0 with no array present still fails.
-        if min == 0 {
-            return true;
-        }
-        ctx.emit(
-            st,
-            at,
-            format!("instance is not an array but `minContains` requires {min} match(es)"),
-        );
-        return false;
+        // Applicability is independent from an explicit type constraint.
+        // contains/minContains/maxContains do not constrain non-arrays.
+        return true;
     }
     let mut matched = 0usize;
     let mut matched_idxs = SmallVec::<[usize; 8]>::new();
     for (i, el) in inst.items().into_iter().enumerate() {
-        if max.is_some_and(|mx| matched > mx) {
+        if max.is_some_and(|mx| !mx.allows_max(matched)) {
             break; // already too many; fail fast below
+        }
+        if !ctx.step(st, at) {
+            return false;
         }
         st.push_idx(i);
         let (o, _errs) = ctx.divert(|c| eval(c, schema, el, st));
         st.pop();
+        if ctx.aborted {
+            return false;
+        }
         if o.ok {
             matched += 1;
             matched_idxs.push(i);
-            ctx.masks.record(el, o.ann);
         }
     }
-    let ok = matched >= min && max.is_none_or(|mx| matched <= mx);
+    let ok = min.allows_min(matched) && max.is_none_or(|mx| mx.allows_max(matched));
     if ok {
         for i in matched_idxs {
+            if !ctx.step(st, at) {
+                return false;
+            }
             ann.idx(i);
         }
-    } else if matched < min {
+    } else if !min.allows_min(matched) {
         ctx.emit(
             st,
             at,
@@ -121,7 +130,7 @@ pub(crate) fn check_contains<'a, 'd>(
             at,
             format!(
                 "array has {matched} item(s) matching `contains`, more than `maxContains` {}",
-                max.unwrap_or_default()
+                max.expect("failure with a satisfied minimum requires a maximum")
             ),
         );
     }
@@ -141,7 +150,10 @@ pub(crate) fn check_unevaluated_items<'a, 'd>(
     }
     let mut ok = true;
     for (i, el) in inst.items().into_iter().enumerate() {
-        if ctx.masks.has_idx(*inst, i) {
+        if !ctx.step(st, at) {
+            return false;
+        }
+        if ann.has_idx(i) {
             continue;
         }
         st.push_idx(i);
@@ -153,7 +165,6 @@ pub(crate) fn check_unevaluated_items<'a, 'd>(
             Some(p) => {
                 let o = eval(ctx, p, el, st);
                 if o.ok {
-                    ctx.masks.record(el, o.ann);
                     ann.idx(i);
                 } else {
                     ok = false;

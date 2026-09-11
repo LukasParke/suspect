@@ -2,7 +2,7 @@
 
 use suspect_oas::OpenApi;
 
-use super::diag;
+use super::diag_at;
 use crate::diagnostic::{Diagnostic, Severity};
 
 /// `oas-response-missing-description` (Error): every response, resolved,
@@ -13,11 +13,23 @@ pub(crate) fn check_response_descriptions(api: &OpenApi<'_>, out: &mut Vec<Diagn
         let Some(responses) = op.responses() else {
             continue;
         };
-        for (status, response) in responses.iter() {
+        for entry in responses.node().entries() {
+            let Some(status) = entry.key_node.try_decoded_scalar() else {
+                continue;
+            };
+            let Ok(status) = std::str::from_utf8(&status) else {
+                continue;
+            };
+            if status.starts_with("x-") {
+                continue;
+            }
+            let Some(response) = responses.get(status) else {
+                continue;
+            };
             let r = response.resolved();
             if r.description().is_none() {
-                out.push(diag(
-                    api,
+                out.push(diag_at(
+                    r.node(),
                     "oas-response-missing-description",
                     Severity::Error,
                     r.node().byte_range(),
@@ -35,8 +47,8 @@ pub(crate) fn check_response_descriptions(api: &OpenApi<'_>, out: &mut Vec<Diagn
     for (name, response) in components.responses() {
         let r = response.resolved();
         if r.description().is_none() {
-            out.push(diag(
-                api,
+            out.push(diag_at(
+                r.node(),
                 "oas-response-missing-description",
                 Severity::Error,
                 r.node().byte_range(),

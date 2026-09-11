@@ -1,0 +1,19 @@
+{
+  "openapi":"3.2.0","$self":"https://logical.example/catalog/api.json",
+  "info":{"title":"Native resource and dynamic binding SDK","version":"1"},
+  "servers":[{"url":"https://example.test/api"}],
+  "components":{"schemas":{
+    "Tree":{"$id":"https://logical.example/tree","$dynamicAnchor":"node","type":"object","required":["data"],"properties":{"data":{"type":"integer"},"children":{"type":"array","items":{"$dynamicRef":"#node"}}},"example":{"data":1,"children":[{"data":2}]}},
+    "Strict":{"$id":"https://logical.example/strict","$dynamicAnchor":"node","$ref":"tree","unevaluatedProperties":false,"example":{"data":1,"children":[{"data":2}]}},
+    "Fallback":{"$id":"urn:cpp:fallback","$defs":{"value":{"$dynamicAnchor":"value","type":"string"}}},
+    "Switch":{"$id":"urn:cpp:switch","type":"object","required":["value"],"properties":{"value":{"$dynamicRef":"urn:cpp:fallback#value"}},"$defs":{"override":{"$dynamicAnchor":"value","type":"integer"}},"example":{"value":7}},
+    "Detached":{"$id":"urn:cpp:detached-sdk","const":false,"$defs":{"override":{"$dynamicAnchor":"value","type":"integer"},"start":{"$dynamicRef":"urn:cpp:fallback#value","example":9}}}
+  }},
+  "paths":{
+    "/strict/{mode}":{"post":{"operationId":"strict","parameters":[{"name":"mode","in":"path","required":true,"schema":{"type":"string","example":"ok"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://logical.example/strict"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"https://logical.example/strict"}}}}}}},
+    "/tree":{"post":{"operationId":"tree","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://logical.example/tree"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"https://logical.example/tree"}}}}}}},
+    "/switch":{"post":{"operationId":"switchValue","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"urn:cpp:switch"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"urn:cpp:switch"}}}}}}},
+    "/detached":{"post":{"operationId":"detached","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"urn:cpp:detached-sdk#/$defs/start"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"urn:cpp:detached-sdk#/$defs/start"}}}}}}},
+    "/items":{"get":{"operationId":"items","responses":{"200":{"content":{"application/x-ndjson":{"itemSchema":{"$ref":"https://logical.example/strict"}}}}}}}
+  }
+}

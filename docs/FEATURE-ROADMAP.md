@@ -55,7 +55,7 @@ example pair without any handwritten workflow.
 
 ## 4. Server scaffolding + progressive mock→real handoff `planned`
 
-**Builds on:** codegen compiler (part 1), gateway mock synthesis, executor.
+**Builds on:** Contract-backed native model/example plans, gateway mock synthesis, executor.
 
 Generate *server* skeletons (axum / gin / express) with fully typed handlers
 that return synthesized examples until implemented — the same shapes the
@@ -68,15 +68,15 @@ and passes the same Arazzo suite the gateway mock passes.
 
 ## 5. Webhooks & events first-class `planned`
 
-**Builds on:** IR lift (webhooks/callbacks nodes), codegen emitters.
+**Builds on:** Contract webhook/callback metadata and typed native backends.
 
-OpenAPI 3.1 `webhooks`/callbacks lifted in the IR like paths: consumer-side
+OpenAPI 3.1 `webhooks`/callbacks retain identities distinct from outgoing paths: consumer-side
 handler stubs, producer-side dispatch helpers, and JSON-Schema artifacts for
 message buses per target language. Event-driven API developers are
 underserved everywhere; this makes them first-class here.
 
 **Acceptance:** spec declaring two webhooks emits typed handler interfaces +
-dispatch helpers in all three SDK targets.
+dispatch helpers in each admitted SDK profile, with native wire/docs gates.
 
 ## 6. OWASP API security ruleset `planned`
 
@@ -119,24 +119,24 @@ with the exact pointer.
 
 ## 9. Release engineering `planned`
 
-**Builds on:** breaking-change detection, codegen hashing/diff.
+**Builds on:** source-aware native/wire compatibility reports and artifact ownership.
 
-Semantic spec diff → human changelog, semver recommendation (breaking ⇒
-major, additive ⇒ minor), and per-SDK release notes ("`Pet.tag` added;
-`listPets.limit` now capped"), ready for a release PR. The breaking-change
-detector grows into the whole ship step.
+Compatibility report → human changelog, reviewed SemVer recommendation and
+per-SDK release notes ("`Pet.tag` added; `listPets.limit` now capped"), ready for
+a release PR. Unknown semantic/native changes require review rather than an
+automatic safe-version recommendation.
 
 **Acceptance:** diff of two fixture versions produces changelog + correct
 semver bump + per-SDK notes sections.
 
 ## 10. Transactional spec codemods `planned`
 
-**Builds on:** IrSpec, codegen orchestration, watch/journal.
+**Builds on:** source edits, Contract compilation, generation sessions and watch/journal.
 
 Rename/deprecate/move a field as one atomic operation that rewrites the
 spec, regenerates affected docs/SDK sections, flags affected Arazzo
 criteria, and emits the migration note. Codemods for the source of truth —
 with every derived artifact updated or flagged in the same transaction.
 
-**Acceptance:** renaming `Pet.tag` updates spec + regenerated TS/Rust/Go +
+**Acceptance:** renaming `Pet.tag` updates spec + the selected native SDKs +
 flags the workflow asserting on it, all in one command.

@@ -72,6 +72,7 @@ pub fn check_file(path: &Path) -> FileReport {
             message: msg,
             line: 1,
             col: 1,
+            range: None,
         });
     };
 
@@ -99,8 +100,9 @@ pub fn check_file(path: &Path) -> FileReport {
             severity: Severity::Error,
             code: "syntax-error".into(),
             message: err.message.clone(),
-            line,
+            line: line + 1,
             col: col + 1,
+            range: Some(err.range.clone()),
         });
     }
 

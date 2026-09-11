@@ -1,0 +1,28 @@
+{
+  "openapi":"3.1.2","info":{"title":"Native scoped-schema SDK","version":"1"},
+  "servers":[{"url":"https://scoped.example.test/v1"}],
+  "components":{"schemas":{
+    "Settings":{
+      "type":"object","required":["mode","name"],
+      "properties":{"mode":{"enum":["simple","advanced"]},"name":{"type":"string","minLength":1},"note":{"type":["string","null"]},"trigger":{"type":["string","null"]},"peer":{"type":"string"}},
+      "patternProperties":{"^x-":{"type":"number","minimum":0},"count$":{"type":"integer"}},
+      "additionalProperties":false,
+      "propertyNames":{"pattern":"^[a-z][a-z0-9-]*$"},
+      "if":{"properties":{"mode":{"const":"advanced"}},"required":["mode"]},
+      "then":{"required":["x-count"]},
+      "dependentRequired":{"note":["name"]},
+      "dependentSchemas":{"trigger":{"required":["peer"],"properties":{"peer":{"minLength":1}}}},
+      "unevaluatedProperties":false,
+      "description":"Named fields and overlapping numeric pattern extras remain distinct."
+    },
+    "Batch":{"type":"array","prefixItems":[{"type":"string"}],"contains":{"type":"integer"},"minContains":1,"maxContains":2,"unevaluatedItems":{"type":"string"}},
+    "Nested":{"type":"object","properties":{"outer":{"type":"object","properties":{"inner":{"type":"number"}},"unevaluatedProperties":false}},"unevaluatedProperties":false},
+    "Either":{"anyOf":[{"type":"object","required":["a"],"properties":{"a":{"type":"string"}}},{"type":"object","required":["b"],"properties":{"b":{"type":"integer"}}}],"unevaluatedProperties":false}
+  }},
+  "paths":{
+    "/settings":{"post":{"operationId":"saveSettings","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Settings"},"examples":{"valid":{"value":{"mode":"advanced","name":"sample","note":null,"x-count":1.0,"x-rate":9007199254740993.000000000000000001}},"invalid":{"value":{"mode":"advanced","name":"bad","x-count":1.5}}}}}},"responses":{"200":{"description":"Saved","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Settings"},"example":{"mode":"simple","name":"saved","x-count":2}}}}}}},
+    "/batch":{"post":{"operationId":"checkBatch","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Batch"},"example":["head",1.0,"tail"]}}},"responses":{"200":{"description":"Checked","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Batch"},"example":["head",1.0,"tail"]}}}}}},
+    "/nested":{"post":{"operationId":"checkNested","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Nested"},"example":{"outer":{"inner":0.3000000000000000000001}}}}},"responses":{"200":{"description":"Checked","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Nested"},"example":{"outer":{"inner":0.3000000000000000000001}}}}}}}},
+    "/either":{"post":{"operationId":"checkEither","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Either"},"example":{"a":"a","b":1}}}},"responses":{"200":{"description":"Checked","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Either"},"example":{"a":"a","b":1}}}}}}}
+  }
+}

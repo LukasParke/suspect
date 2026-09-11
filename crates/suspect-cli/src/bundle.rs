@@ -97,8 +97,9 @@ impl<'ws> Inliner<'ws> {
             severity: Severity::Error,
             code: "unresolved-ref".into(),
             message: format!("{raw}: {message}"),
-            line,
+            line: line + 1,
             col: col + 1,
+            range: Some(node.byte_range()),
         });
     }
 
@@ -442,8 +443,9 @@ fn bundle_keep(input: &Path, shown: &str, out: Option<&Path>) -> anyhow::Result<
                     severity: Severity::Error,
                     code: "unresolved-ref".into(),
                     message: format!("{}: {e}", edge.raw),
-                    line,
+                    line: line + 1,
                     col: col + 1,
+                    range: Some(edge.at.clone()),
                 });
             }
         }

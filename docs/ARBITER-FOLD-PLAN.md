@@ -6,14 +6,18 @@ traffic plane (exact capture, replay, TLS interception, credential gateway,
 traffic→spec inference) into suspect, under the same alignment rule —
 **suspect primitives win**.
 
+This is a future integration proposal. SDK-related integration uses the
+source-addressed `Contract` and native compatibility pipeline described in
+[SDK-GENERATION-PLAN.md](SDK-GENERATION-PLAN.md).
+
 ## 0. What each side contributes
 
 | Arbiter brings | suspect brings |
 |---|---|
-| Byte-exact capture (sha256-addressed bodies, spill-to-disk, redaction-before-persistence, fail-closed secret scan) | The semantic core: IrSpec, STG, validate, lint, semantic diff |
+| Byte-exact capture (sha256-addressed bodies, spill-to-disk, redaction-before-persistence, fail-closed secret scan) | The semantic core: Contract, validation/lint and source-aware SDK compatibility |
 | SSE terminal-state evidence + WebSocket stream capture | Contract evaluation in the data path (verdicts per exchange) |
 | TLS interception (CA + per-host leaf certs + CONNECT MITM) | Arazzo executor, stateful test generation, evolved fuzzing |
-| Credential gateway (opaque tokens, server-side injection) | Consumer-impact analysis, causal debugger, evolution engine |
+| Credential gateway (opaque tokens, server-side injection) | Source provenance and evolution primitives |
 | Traffic→spec synthesis (schema inference, path-param detection, security detection) | TS rule runtime, LSP, deterministic codegen |
 | Replay verdicts: exact-byte / semantic-JSON / semantic-SSE | Quality scoring, playground, docs |
 | HAR export, LLM provider fingerprinting | 22-crate workspace discipline: benches, goldens, clippy −D |
@@ -67,9 +71,8 @@ Consumers:
 2. **Bundles** (content-addressed, sha256 digests) — read/write unchanged;
    suspect-authored bundles load in Arbiter/TS and vice versa. This is the
    interoperability anchor and the OpenRouter CI contract.
-3. **Analysis engines** — consumer impact, evolution, causal debugger,
-   semantic replay all consume `Exchange` instead of `RecordedExchange`
-   (the placeholder type in `consumer_impact` is deleted).
+3. **Analysis engines** — proposed traffic impact, evolution, causal debugging
+   and semantic replay consume `Exchange` directly, with captured-byte provenance.
 
 ---
 
@@ -92,14 +95,13 @@ Consumers:
 |---|---|---|
 | `mock/` (example gen, capture-replay matcher, fault injector, template) | `suspect-gateway::mock` | Fault injection becomes available in mock AND proxy modes; capture-replay (byte-exact strongest-match) joins spec-driven mock as a second mock source |
 | `validation/` | `suspect-gateway::validate` | suspect-validate stays the rule authority; Arbiter's violation keywords (`unknown-path`, `method-not-defined`, `schema-violation`…) merge into the verdict model |
-| `diff.rs` (presence-level) | `suspect-codegen::diff` | Kept as the presence pre-filter feeding the semantic diff |
+| `diff.rs` (presence-level) | Proposed capture-to-Contract adapter | Feed canonical wire comparison with explicit uncertainty and exchange provenance |
 | `storage/` (SQLite) | dropped | Bundles are the interchange; journal JSONL streams; SQLite only if a consumer demands it later |
 | `server/`, `tui/`, `cli/`, `config/` | dropped (suspect surfaces) | Gateway gains a `/flows` API only if the TUI phase lands |
 
 ### Discarded from suspect
 
 - `suspect-gateway`'s hand-rolled recorder (replaced by `CaptureSession`)
-- `consumer_impact::RecordedExchange` (replaced by `Exchange`)
 - journal `TrafficRecord` v1 write path (read-adapter kept)
 
 ---
@@ -133,7 +135,7 @@ Mode matrix after convergence (all existing suspect flags keep working):
 
 ---
 
-## 4. Traffic→spec synthesis (the evolution engine, completed)
+## 4. Proposed traffic→spec synthesis
 
 The R1 feature (traffic-informed spec evolution) currently detects
 *undocumented fields*. With `suspect-infer` it becomes full synthesis:
@@ -145,8 +147,8 @@ suspect spec sync --from-bundle ./captures --spec openapi.yaml
      (per-value types, enums, formats, required-ness), security schemes
   3. suspect-ir::evolution folds in undocumented-field observations
      (frequency-ranked, confidence-scored)
-  4. lower both sides to IrSpec; suspect-codegen::diff computes the
-     BREAKING/ADDITIVE/COSMETIC delta between spec-truth and traffic-truth
+   4. compile source and proposed OpenAPI into Contract snapshots;
+      suspect_codegen::compatibility reports wire changes and uncertainty
   5. output: a reviewable spec patch + drift report (semver recommendation)
 ```
 
@@ -158,8 +160,8 @@ causal debugger (git blame).
 
 ## 5. Consumer impact + replay convergence
 
-`analyze_impact(old_ir, new_ir, &[Exchange])` replaces the synthetic
-`RecordedExchange`:
+The proposed traffic-impact engine consumes two Contract snapshots and captured
+`Exchange` values:
 
 - request bodies are the **actual bytes** consumers sent (not synthesized)
 - consumer fingerprints from real headers (user-agent, client-id, source IP)
@@ -209,7 +211,7 @@ change is evaluated against weeks of real traffic before merge.
 | Phase | Deliverable | Gate |
 |---|---|---|
 | A | `suspect-capture`: Exchange, CaptureSession, bundle I/O + validation + sanitize, redaction, secret scan, SSE, WS, HAR derivation | Arbiter's unit tests ported green (409-test contract); roundtrip vs Arbiter-written fixture bundles byte-identical; clippy −D |
-| B | `suspect-replay` + journal v2 `Exchange` + v1 read-adapter; `consumer_impact` on real exchanges | replay verdict modes green; old journal fixtures load; impact test rewritten against captured bytes |
+| B | `suspect-replay` + journal v2 `Exchange` + v1 read-adapter; Contract-based traffic-impact analysis | replay verdict modes green; old journal fixtures load; impact tests use captured bytes |
 | C | Gateway convergence: CaptureSession as record engine, verdicts in `Exchange.contract`, fault injection (mock+proxy), capture-replay mock source | gateway integration matrix (mode × feature) green; byte-exact echo test through proxy; validate-mode violations carry unified keywords |
 | D | `suspect-infer` + `suspect spec sync --from-bundle` (evolution + inference + semantic diff) | synthesized spec from a recorded Plex bundle diffs against the real spec with only known gaps flagged; proposals carry exchange provenance |
 | E | `suspect-tls` + `suspect-credential` (feature-gated `tls`, `credentials`) | curl through MITM proxy with generated CA: intercepted exchange captured byte-exact; untrusted client with opaque token reaches upstream, real credential never in capture |

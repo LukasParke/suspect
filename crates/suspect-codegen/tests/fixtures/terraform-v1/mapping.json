@@ -1,0 +1,84 @@
+{
+  "format": "suspect.terraform.lifecycle.v1",
+  "authentication": {"kind": "bearer", "scheme": "NewClient"},
+  "resources": {
+    "record": {
+      "description": "An explicitly mapped record with authoritative refresh, replacement and write-only credential rotation.",
+      "attributes": {
+        "id": {"type": "string", "mode": "computed", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Stable opaque identity; import uses this exact string."},
+        "name": {"type": "string", "mode": "required", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Remote display name."},
+        "region": {"type": "string", "mode": "required", "sensitive": false, "write_only": false, "requires_replace": true, "state_only": false, "description": "Immutable region; changes replace the record."},
+        "enabled": {"type": "bool", "mode": "required", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Whether the record is enabled."},
+        "description": {"type": "string", "mode": "optional", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Terraform null sends an explicit API null."},
+        "memo": {"type": "string", "mode": "optional", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Terraform null omits this optional API property."},
+        "fingerprint": {"type": "string", "mode": "computed", "sensitive": true, "write_only": false, "requires_replace": false, "state_only": false, "description": "Sensitive derived credential fingerprint, retained in state."},
+        "secret": {"type": "string", "mode": "optional", "sensitive": true, "write_only": true, "requires_replace": false, "state_only": false, "description": "Write-only credential; no value is retained in plan or state."},
+        "secret_version": {"type": "string", "mode": "optional", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": true, "description": "Explicit credential rotation trigger; change it with a non-null secret."}
+      },
+      "identity": {"attribute": "id", "import": "opaque_string"},
+      "create": {
+        "operation_id": "read-item",
+        "inputs": [
+          {"attribute": "name", "target": {"kind": "body", "path": ["SetExtra"]}, "null": "reject", "when": {"kind": "always"}},
+          {"attribute": "region", "target": {"kind": "body", "path": ["region"]}, "null": "reject", "when": {"kind": "always"}},
+          {"attribute": "enabled", "target": {"kind": "body", "path": ["enabled"]}, "null": "reject", "when": {"kind": "always"}},
+          {"attribute": "description", "target": {"kind": "body", "path": ["description"]}, "null": "send_null", "when": {"kind": "always"}},
+          {"attribute": "memo", "target": {"kind": "body", "path": ["memo"]}, "null": "omit", "when": {"kind": "always"}},
+          {"attribute": "secret", "target": {"kind": "body", "path": ["secret"]}, "null": "omit", "when": {"kind": "always"}}
+        ],
+        "success": {"status": 201, "state": {"id": ["id"], "name": ["SetExtra"], "region": ["region"], "enabled": ["enabled"], "description": ["description"], "memo": ["memo"], "fingerprint": ["credential-fingerprint"]}},
+        "partial": [{"status": 503, "state": {"id": ["id"], "name": ["SetExtra"], "region": ["region"], "enabled": ["enabled"], "description": ["description"], "memo": ["memo"], "fingerprint": ["credential-fingerprint"]}}]
+      },
+      "read": {
+        "operation_id": "read_item",
+        "inputs": [{"attribute": "id", "target": {"kind": "parameter", "location": "path", "name": "record-id"}, "null": "reject", "when": {"kind": "always"}}],
+        "success": {"status": 200, "state": {"id": ["id"], "name": ["SetExtra"], "region": ["region"], "enabled": ["enabled"], "description": ["description"], "memo": ["memo"], "fingerprint": ["credential-fingerprint"]}},
+        "missing": [404]
+      },
+      "update": {
+        "operation_id": "erase",
+        "inputs": [
+          {"attribute": "id", "target": {"kind": "parameter", "location": "path", "name": "record-id"}, "null": "reject", "when": {"kind": "always"}},
+          {"attribute": "name", "target": {"kind": "body", "path": ["SetExtra"]}, "null": "reject", "when": {"kind": "always"}},
+          {"attribute": "enabled", "target": {"kind": "body", "path": ["enabled"]}, "null": "reject", "when": {"kind": "always"}},
+          {"attribute": "description", "target": {"kind": "body", "path": ["description"]}, "null": "send_null", "when": {"kind": "always"}},
+          {"attribute": "memo", "target": {"kind": "body", "path": ["memo"]}, "null": "omit", "when": {"kind": "always"}},
+          {"attribute": "secret", "target": {"kind": "body", "path": ["secret"]}, "null": "reject", "when": {"kind": "trigger_changed", "attribute": "secret_version"}}
+        ],
+        "success": {"status": 200, "state": {"id": ["id"], "name": ["SetExtra"], "region": ["region"], "enabled": ["enabled"], "description": ["description"], "memo": ["memo"], "fingerprint": ["credential-fingerprint"]}},
+        "partial": [{"status": 503, "state": {"id": ["id"], "name": ["SetExtra"], "region": ["region"], "enabled": ["enabled"], "description": ["description"], "memo": ["memo"], "fingerprint": ["credential-fingerprint"]}}]
+      },
+      "delete": {
+        "operation_id": "observe",
+        "inputs": [{"attribute": "id", "target": {"kind": "parameter", "location": "path", "name": "record-id"}, "null": "reject", "when": {"kind": "always"}}],
+        "success_status": 204,
+        "missing": [404]
+      },
+      "refresh": "authoritative_read",
+      "retry": "none",
+      "polling": "none",
+      "failure": "mapped_partial_otherwise_preserve"
+    }
+  },
+  "data_sources": {
+    "record": {
+      "description": "Read a record through the mapped generated SDK operation.",
+      "attributes": {
+        "id": {"type": "string", "mode": "required", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Exact opaque record ID."},
+        "name": {"type": "string", "mode": "computed", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Remote display name."},
+        "region": {"type": "string", "mode": "computed", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Remote region."},
+        "enabled": {"type": "bool", "mode": "computed", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Remote enabled flag."},
+        "description": {"type": "string", "mode": "computed", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Remote nullable description."},
+        "memo": {"type": "string", "mode": "computed", "sensitive": false, "write_only": false, "requires_replace": false, "state_only": false, "description": "Optional remote memo."},
+        "fingerprint": {"type": "string", "mode": "computed", "sensitive": true, "write_only": false, "requires_replace": false, "state_only": false, "description": "Sensitive remote credential fingerprint."}
+      },
+      "read": {
+        "operation_id": "read_item",
+        "inputs": [{"attribute": "id", "target": {"kind": "parameter", "location": "path", "name": "record-id"}, "null": "reject", "when": {"kind": "always"}}],
+        "success": {"status": 200, "state": {"id": ["id"], "name": ["SetExtra"], "region": ["region"], "enabled": ["enabled"], "description": ["description"], "memo": ["memo"], "fingerprint": ["credential-fingerprint"]}},
+        "missing": [404]
+      },
+      "retry": "none"
+    }
+  }
+}
