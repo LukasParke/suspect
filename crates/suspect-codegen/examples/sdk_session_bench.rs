@@ -439,6 +439,9 @@ fn json_without_docs(text: &str, source: &SourceId, examples: bool) -> Result<Va
                 object.remove("description");
                 object.remove("descriptionText");
                 object.remove("hasSourceDescription");
+                object.remove("provenance");
+                object.remove("source");
+                object.remove("sourceOperationId");
                 count += 1;
             }
         }
