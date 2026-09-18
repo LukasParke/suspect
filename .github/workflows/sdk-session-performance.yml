@@ -62,6 +62,8 @@ jobs:
         with:
           workspaces: ". -> target/sdk-session-perf-build"
           shared-key: sdk-session-perf-1.97.1
+      - name: Build session runner example
+        run: cargo build --locked -p suspect-codegen --example sdk_session_bench --target-dir target/sdk-session-perf-build
       - name: Comparator adversarial and exit-code tests
         run: python3 -m unittest discover -s tools/sdk-session-perf -p 'test_*.py' -v
       - name: Compact five-target Session functional gates (untimed)

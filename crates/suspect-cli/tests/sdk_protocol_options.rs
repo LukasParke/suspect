@@ -271,6 +271,6 @@ fn session_preview_and_comparison_retain_and_compare_explicit_interpretation() {
     let discovery = command(root.path(), &["codegen-profiles", "--format", "json"], 0);
     assert_eq!(
         discovery["compatibilityProfiles"],
-        json!(["legacy-binary-string-v1"])
+        json!(["legacy-binary-string-v1", "oas30-nullable-in-3.1-v1", "colon-path-parameters-v1", "schemaless-stream-events-v1"])
     );
 }
