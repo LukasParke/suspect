@@ -485,6 +485,7 @@ fn write_report(report: &Value) {
     .unwrap();
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn kotlin_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();

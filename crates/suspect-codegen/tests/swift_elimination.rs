@@ -485,6 +485,7 @@ fn write_report(report: &Value) {
     .unwrap();
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn swift_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();

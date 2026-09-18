@@ -397,6 +397,7 @@ fn write_report(report: &Value) {
     .unwrap();
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn php_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();

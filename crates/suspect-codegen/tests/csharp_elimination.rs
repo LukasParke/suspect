@@ -521,6 +521,7 @@ fn write_report(report: &Value) {
     .unwrap();
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn csharp_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();

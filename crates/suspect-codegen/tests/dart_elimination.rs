@@ -882,6 +882,7 @@ fn unrelated_marker_summary(markers: &BTreeMap<String, bool>) -> String {
         .join(" ")
 }
 
+#[ignore = "requires the Dart SDK on the test host"]
 #[test]
 fn dart_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();
