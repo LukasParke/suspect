@@ -156,10 +156,19 @@ pub(crate) fn requires_resources(contract: &Contract, closure: &[SchemaId]) -> b
 /// Plan native representations and retain their codec obligations.
 #[must_use]
 pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
+    plan_models_with_policy(contract, roots, schema_view::DialectPolicy::default())
+}
+
+/// The same plan under explicit versioned dialect interpretation choices.
+#[must_use]
+pub fn plan_models_with_policy(
+    contract: &Contract,
+    roots: &[SchemaId],
+    policy: schema_view::DialectPolicy,
+) -> ModelPlan {
     let reachable = schema_view::closure(contract, roots);
     let resources = requires_resources(contract, &reachable);
     let scoped = resources
-        || schema_view::has_intersections(contract, &reachable)
         || reachable
             .iter()
             .filter_map(|id| contract.schema(id))
@@ -177,11 +186,6 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
                 ]
                 .iter()
                 .any(|keyword| raw.get(*keyword).is_some())
-                    || raw.get("const").is_some_and(Value::is_number)
-                    || raw
-                        .get("enum")
-                        .and_then(Value::as_array)
-                        .is_some_and(|values| values.iter().any(Value::is_number))
             });
     let transparent: BTreeMap<_, _> = reachable
         .iter()
@@ -215,6 +219,7 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
         transparent,
         scoped,
         resources,
+        policy,
     };
     for root in roots {
         if contract.schema(root).is_none() {
@@ -264,22 +269,29 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
                 declared.insert(target.clone());
             }
         }
-        let nullable = schema_view::null_allowed(contract, id).unwrap_or_else(|problem| {
-            if scoped {
-                // Conditions can constrain null dynamically. Keep a distinct
-                // nullable state unless a local type/literal already excludes
-                // it; the complete source codec decides whether it is valid.
-                return scoped_nullability(contract, id, &mut BTreeSet::new(), &mut 100_000)
+        let nullable =
+            schema_view::null_allowed(contract, id, planner.policy).unwrap_or_else(|problem| {
+                if scoped {
+                    // Conditions can constrain null dynamically. Keep a distinct
+                    // nullable state unless a local type/literal already excludes
+                    // it; the complete source codec decides whether it is valid.
+                    return scoped_nullability(
+                        contract,
+                        id,
+                        &mut BTreeSet::new(),
+                        &mut 100_000,
+                        planner.policy,
+                    )
                     .unwrap_or(true);
-            }
-            planner.report(
-                &problem.source,
-                problem.code,
-                DiagnosticKind::Error,
-                problem.message,
-            );
-            false
-        });
+                }
+                planner.report(
+                    &problem.source,
+                    problem.code,
+                    DiagnosticKind::Error,
+                    problem.message,
+                );
+                false
+            });
         planner.nullable.insert(id.clone(), nullable);
         if !overlays.contains(id) {
             planner.check_shape(id);
@@ -398,6 +410,7 @@ struct Planner<'a> {
     transparent: BTreeMap<SchemaId, SchemaId>,
     scoped: bool,
     resources: bool,
+    policy: schema_view::DialectPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -1073,6 +1086,7 @@ fn scoped_nullability(
     id: &SchemaId,
     active: &mut BTreeSet<SchemaId>,
     work: &mut usize,
+    policy: schema_view::DialectPolicy,
 ) -> Option<bool> {
     *work = work.checked_sub(1)?;
     if active.len() >= 256 || !active.insert(id.clone()) {
@@ -1085,7 +1099,7 @@ fn scoped_nullability(
             return Some(value);
         }
         let raw = value.as_object()?;
-        if !schema_view::accepts_literal(schema, &Value::Null) {
+        if !schema_view::accepts_literal(schema, &Value::Null, policy) {
             return Some(false);
         }
         if raw.contains_key("$dynamicRef") || raw.contains_key("$recursiveRef") {
@@ -1099,7 +1113,8 @@ fn scoped_nullability(
             accepts &= values.iter().any(Value::is_null);
         }
         for reference in schema.references() {
-            accepts &= scoped_nullability(contract, reference.target.as_ref()?, active, work)?;
+            accepts &=
+                scoped_nullability(contract, reference.target.as_ref()?, active, work, policy)?;
         }
         for keyword in ["allOf", "anyOf", "oneOf"] {
             if let Some(values) = raw.get(keyword).and_then(Value::as_array) {
@@ -1110,6 +1125,7 @@ fn scoped_nullability(
                         &id.child(keyword).child(&i.to_string()),
                         active,
                         work,
+                        policy,
                     )?);
                 }
                 accepts &= match keyword {
@@ -1120,16 +1136,16 @@ fn scoped_nullability(
             }
         }
         if raw.contains_key("not") {
-            accepts &= !scoped_nullability(contract, &id.child("not"), active, work)?;
+            accepts &= !scoped_nullability(contract, &id.child("not"), active, work, policy)?;
         }
         if raw.contains_key("if") {
-            let selected = if scoped_nullability(contract, &id.child("if"), active, work)? {
+            let selected = if scoped_nullability(contract, &id.child("if"), active, work, policy)? {
                 "then"
             } else {
                 "else"
             };
             if raw.contains_key(selected) {
-                accepts &= scoped_nullability(contract, &id.child(selected), active, work)?;
+                accepts &= scoped_nullability(contract, &id.child(selected), active, work, policy)?;
             }
         }
         Some(accepts)

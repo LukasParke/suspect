@@ -140,6 +140,14 @@ fn one_of_ref_branches_plan_as_sealed_unions() {
 #[test]
 fn unsupported_shapes_reject_with_located_findings() {
     let cases = [
+        // allOf intersection with an inline member has no faithful shape.
+        (
+            "Nope",
+            json!({"Nope": {"allOf": [
+                {"$ref": "#/components/schemas/A"},
+                {"type": "object", "properties": {"z": {"type": "string"}}}
+            ]}, "A": {"type": "object", "properties": {}, "additionalProperties": false}}),
+        ),
         // Mixed literal kinds have no single underlying C# type.
         ("Mixed", json!({"Mixed": {"enum": ["a", 1]}})),
         // Multiple non-null type alternatives are not invented unions.

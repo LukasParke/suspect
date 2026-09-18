@@ -162,6 +162,16 @@ impl ModelPlan {
 /// Unknown roots and unsupported shapes are ordinary source-linked errors.
 #[must_use]
 pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
+    plan_models_with_policy(contract, roots, schema_view::DialectPolicy::default())
+}
+
+/// The same plan under explicit versioned dialect interpretation choices.
+#[must_use]
+pub fn plan_models_with_policy(
+    contract: &Contract,
+    roots: &[SchemaId],
+    policy: schema_view::DialectPolicy,
+) -> ModelPlan {
     let reachable = schema_view::closure(contract, roots);
     let mut planner = Planner {
         contract,
@@ -169,6 +179,7 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
         names: BTreeMap::new(),
         nullable: BTreeMap::new(),
         diagnostics: Vec::new(),
+        policy,
     };
     for root in roots {
         if contract.schema(root).is_none() {
@@ -227,14 +238,15 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
                 declared.insert(target.clone());
             }
         }
-        let value = schema_view::null_allowed(contract, id).unwrap_or_else(|problem| {
+        let value =
+            schema_view::null_allowed(contract, id, planner.policy).unwrap_or_else(|problem| {
             planner.report(
                 &problem.source,
                 "python-runtime-nullability",
                 DiagnosticKind::Annotation,
                 "conditional nullability is retained by the source codec; the native carrier conservatively includes every locally admitted value",
             );
-            may_allow_null(contract, id)
+            may_allow_null(contract, id, planner.policy)
         });
         planner.nullable.insert(id.clone(), value);
     }
@@ -298,6 +310,7 @@ struct Planner<'a> {
     names: BTreeMap<SchemaId, String>,
     nullable: BTreeMap<SchemaId, bool>,
     diagnostics: Vec<ModelDiagnostic>,
+    policy: schema_view::DialectPolicy,
 }
 
 /// Select the resource profile from indexed effective schema context. Ordinary
@@ -320,7 +333,11 @@ pub(crate) fn requires_resources(contract: &Contract, closure: &[SchemaId]) -> b
 // restrictions and unconditional static references/allOf still exclude null.
 // Other applicators remain runtime-checked. This bounded overapproximation never
 // turns a possibly valid null into an unrepresentable native value.
-fn may_allow_null(contract: &Contract, root: &SchemaId) -> bool {
+fn may_allow_null(
+    contract: &Contract,
+    root: &SchemaId,
+    policy: schema_view::DialectPolicy,
+) -> bool {
     let mut pending = vec![root.clone()];
     let mut seen = BTreeSet::new();
     while let Some(id) = pending.pop() {
@@ -333,7 +350,7 @@ fn may_allow_null(contract: &Contract, root: &SchemaId) -> bool {
         let Some(schema) = contract.schema(&id) else {
             continue;
         };
-        if !schema_view::accepts_literal(schema, &Value::Null) {
+        if !schema_view::accepts_literal(schema, &Value::Null, policy) {
             return false;
         }
         pending.extend(
@@ -585,7 +602,7 @@ impl Planner<'_> {
             .map(|value| vec![value.clone()])
             .or_else(|| raw.get("enum").and_then(Value::as_array).cloned());
         if let Some(mut values) = literals {
-            values.retain(|value| schema_view::accepts_literal(schema, value));
+            values.retain(|value| schema_view::accepts_literal(schema, value, self.policy));
             if values.is_empty() {
                 return PyDecl::Alias(PyType::Primitive("typing.Never"));
             }

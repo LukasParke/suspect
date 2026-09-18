@@ -664,7 +664,7 @@ pub(super) fn capture(
         package,
         &[],
         maven,
-        backend::java_options(&snapshot.generation),
+        backend::java_options(&snapshot.generation, None),
     )
     .map_err(errors)?;
     plan.render().map_err(errors)?;

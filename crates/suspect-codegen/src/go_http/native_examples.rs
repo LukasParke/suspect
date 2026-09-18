@@ -323,15 +323,20 @@ fn media_example(
             entry_expression(plan, entry)
         }
         Representation::Stream { stream } => {
+            let Some(codec) = stream.item_codec() else {
+                // A schemaless request stream has no declared item codec, so no
+                // validated native item example can be constructed.
+                return None;
+            };
             let entry = entries.iter().find(|e| {
                 matches!(e.role, crate::examples::ExampleRole::RequestItem)
-                    && &e.schema == stream.item_codec().schema().id()
+                    && &e.schema == codec.schema().id()
             })?;
             let value = entry_expression(plan, entry)?;
             records.push(json!({"container":location(at),"schema":location(&entry.schema),"construction":"finite-native-item-slice","origin":http_examples::origin(&entry.origin)}));
             Some(format!(
                 "[]sdk.{}{{{value}}}",
-                plan.symbols[stream.item_codec().schema().id()]
+                plan.symbols[codec.schema().id()]
             ))
         }
         Representation::Form { .. } | Representation::Multipart { .. } => {

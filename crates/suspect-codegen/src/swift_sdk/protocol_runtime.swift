@@ -360,6 +360,35 @@ extension HTTPBuild {
         guard value.utf8.count <= limit - used else { throw JsonError(.resourceLimit, "query credential byte ceiling exceeded") }
         query.append(value)
     }
+    /// Runtime-discovered platform version, compact. `operatingSystemVersionString`
+    /// is too verbose for the ua/v1 comment; `unknown` degrades without omission.
+    static let languageVersion: String = {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        guard version.majorVersion != 0 || version.minorVersion != 0 || version.patchVersion != 0 else { return "unknown" }
+        var compact = "\(version.majorVersion).\(version.minorVersion)"
+        if version.patchVersion != 0 { compact += ".\(version.patchVersion)" }
+        return compact
+    }()
+    /// ua/v1 application identity: `<name>` or `<name>/<version>` of RFC 9110 tokens.
+    static func applicationIdentity(_ value: String) -> Bool {
+        guard value.utf8.count <= 128 else { return false }
+        let parts = value.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count <= 2 && parts.allSatisfy { HTTPWire.token(String($0)) }
+    }
+    /// ua/v1 attribution: an explicit non-empty caller User-Agent wins entirely, an
+    /// explicit empty value suppresses the header, and the default identifies
+    /// suspect as the generator and the SDK package or a caller-supplied
+    /// application as the client. An invalid application identity produces no header.
+    static func resolveUserAgent(_ options: ClientOptions) -> String? {
+        if let userAgent = options.userAgent { return userAgent.isEmpty ? nil : userAgent }
+        guard !Attribution.suspectVersion.isEmpty else { return nil }
+        var identity = Attribution.sdkName + "/" + Attribution.sdkVersion
+        if let applicationId = options.applicationId, !applicationId.isEmpty {
+            guard applicationIdentity(applicationId) else { return nil }
+            identity = applicationId
+        }
+        return "suspect/\(Attribution.suspectVersion) \(identity) (\(Attribution.language)/\(languageVersion); openapi/\(Attribution.specVersion))"
+    }
     static func makeProtocolRequest(method: String, path: String, query: [String], headers: [HTTPHeader], cookies: [String], body: HTTPBody?,
                                     server: String, options: ClientOptions, request: RequestOptions, maxRequest: Int, maxResponse: Int) throws -> HTTPRequest {
         let timeout = request.timeout ?? options.timeout
@@ -373,6 +402,11 @@ extension HTTPBuild {
         guard let target = URL(string: text.string), target.absoluteString == text.string else { throw JsonError(.representation, "URL cannot preserve the planned wire spelling") }
         var headers = headers
         if !cookies.isEmpty { try attach(HTTPHeader("Cookie", cookies.joined(separator: "; ")), to: &headers) }
+        // ua/v1 attribution is applied after declared parameters so an explicit
+        // caller-supplied User-Agent header keeps precedence over the default.
+        if !headers.contains(where: { $0.name.lowercased() == "user-agent" }) {
+            if let userAgent = resolveUserAgent(options) { try attach(HTTPHeader("User-Agent", userAgent), to: &headers) }
+        }
         if let body { try attach(HTTPHeader("Content-Type", body.contentType), to: &headers) }
         do { try checkHeaders(headers) } catch { throw JsonError(.resourceLimit, "request header ceiling exceeded") }
         return HTTPRequest(method: method, url: target, headers: headers, body: body?.bytes, timeout: timeout, maxResponseBytes: limit)

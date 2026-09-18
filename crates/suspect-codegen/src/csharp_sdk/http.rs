@@ -1,6 +1,6 @@
 //! Native HTTP declarations and codecs from the admitted C# protocol projection.
 use super::{
-    PlannedResponse, SdkPlan,
+    PlannedOperation, PlannedResponse, SdkPlan,
     emit::{header, quote, source, xml},
     protocol::{PlannedHeader, PlannedMedia, PlannedPart, PlannedParts},
 };
@@ -106,93 +106,12 @@ pub(super) fn render(plan: &SdkPlan) -> String {
     out.push_str(&super::credential_env::factory(plan));
     for (i, op) in plan.operations.iter().enumerate() {
         out.push_str(&format!("    /// <summary>{} Source: {}.</summary>\n    public Task<{}> {}({} input, RequestOptions? requestOptions = null, CancellationToken cancellationToken = default)\n    {{\n        return _runtime.CallAsync<{}>({i}, requestOptions, cancellationToken, () =>\n        {{\n            if (input is null) throw new SdkException(SdkErrorKind.RequestRepresentation);\n            var operation = ProtocolData.Operation({i});\n            var request = new WireRequest();\n",xml(&op.description),xml(&source(&op.source)),op.result_type,op.method_name,op.input_type,op.result_type));
-        for (j, p) in op.parameters.iter().enumerate() {
-            out.push_str(&format!("            {}request.Add(operation.GetProperty(\"parameters\")[{j}], Codecs.Encode{}(input.{}{}));\n",if p.required{String::new()}else{format!("if (input.{}.HasValue) ",p.property_name)},plan.models.codec_name(&p.schema),p.property_name,if p.required{""}else{".Value"}));
-        }
-        if let Some(body) = &op.body {
-            if !body.required {
-                out.push_str("            if (input.Body.HasValue)\n            {\n");
-            }
-            let value = if body.required {
-                "input.Body"
-            } else {
-                "input.Body.Value"
-            };
-            if body.union {
-                out.push_str(&format!("            switch ({value})\n            {{\n"));
-                for (j, m) in body.media.iter().enumerate() {
-                    out.push_str(&format!(
-                        "                case {}.{} value{j}: request.SetBody({}); break;\n",
-                        body.native_type,
-                        m.variant_name,
-                        encode_media(
-                            plan,
-                            m,
-                            &format!("value{j}.Value"),
-                            &format!("operation.GetProperty(\"body\").GetProperty(\"media\")[{j}]"),
-                            j,
-                            &format!("value{j}.ContentType")
-                        )
-                    ));
-                }
-                out.push_str("                default: throw new SdkException(SdkErrorKind.RequestRepresentation);\n            }\n");
-            } else {
-                out.push_str(&format!(
-                    "            request.SetBody({});\n",
-                    encode_media(
-                        plan,
-                        &body.media[0],
-                        value,
-                        "operation.GetProperty(\"body\").GetProperty(\"media\")[0]",
-                        0,
-                        "requestOptions?.ContentType"
-                    )
-                ));
-            }
-            if !body.required {
-                out.push_str("            }\n");
-            }
-        }
+        out.push_str(&request_preparation(plan, op));
         out.push_str("            return request;\n        }, static raw =>\n        {\n            switch (raw.ResponseIndex)\n            {\n");
         for (j, r) in op.responses.iter().enumerate() {
             out.push_str(&format!("                case {j}:\n                {{\n"));
-            if let Some(header_type) = &r.header_type {
-                out.push_str(&format!("                    var headers = HttpCodecs.Read{header_type}(raw.Response.GetProperty(\"headers\"), raw.Metadata.Headers);\n"));
-            }
-            out.push_str(&format!("                    {} data;\n", r.native_type));
-            if r.always_empty {
-                out.push_str("                    data = default;\n");
-            } else if r.union {
-                if r.may_be_empty {
-                    out.push_str(&format!("                    if (raw.Forbidden) data = new {}.NoContent(default);\n                    else\n",r.native_type));
-                }
-                if r.media.is_empty() {
-                    out.push_str(&format!(
-                        "                    data = new {}.UndeclaredBytes(raw.Body);\n",
-                        r.native_type
-                    ));
-                } else {
-                    out.push_str(
-                        "                    data = raw.MediaIndex switch\n                    {\n",
-                    );
-                    for (k, m) in r.media.iter().enumerate() {
-                        out.push_str(&format!(
-                            "                        {k} => new {}.{}({}),\n",
-                            r.native_type,
-                            m.variant_name,
-                            decode_media(plan, m, "raw")
-                        ));
-                    }
-                    out.push_str("                        _ => throw new UnexpectedResponseException(raw)\n                    };\n");
-                }
-            } else if r.media.is_empty() {
-                out.push_str("                    data = raw.Body;\n");
-            } else {
-                out.push_str(&format!(
-                    "                    data = {};\n",
-                    decode_media(plan, &r.media[0], "raw")
-                ));
-            }
+            out.push_str(&response_headers_local(r));
+            out.push_str(&response_data_assignment(plan, r));
             let headers = if r.headers.is_empty() {
                 ""
             } else {
@@ -227,7 +146,8 @@ pub(super) fn render(plan: &SdkPlan) -> String {
             out.push_str(&format!("    /// <summary>Call with optional inputs absent.</summary>\n    public Task<{}> {}(CancellationToken cancellationToken = default) => {}(new {}(), cancellationToken: cancellationToken);\n",op.result_type,op.method_name,op.method_name,op.input_type));
         }
     }
-    out.push_str("}\n\ninternal static class HttpCodecs\n{\n");
+    out.push_str(&super::pagination::client_methods(plan));
+    out.push_str(&super::stream_events::client_methods(plan));    out.push_str("}\n\ninternal static class HttpCodecs\n{\n");
     for op in &plan.operations {
         for media in op
             .body
@@ -249,6 +169,108 @@ pub(super) fn render(plan: &SdkPlan) -> String {
         }
     }
     out.push_str("}\n");
+    out
+}
+/// The request-building closure body shared by the direct method and the
+/// generated typed events wire call: parameter and body encoding only.
+pub(super) fn request_preparation(plan: &SdkPlan, op: &PlannedOperation) -> String {
+    let mut out = String::new();
+    for (j, p) in op.parameters.iter().enumerate() {
+        out.push_str(&format!("            {}request.Add(operation.GetProperty(\"parameters\")[{j}], Codecs.Encode{}(input.{}{}));\n",if p.required{String::new()}else{format!("if (input.{}.HasValue) ",p.property_name)},plan.models.codec_name(&p.schema),p.property_name,if p.required{""}else{".Value"}));
+    }
+    if let Some(body) = &op.body {
+        if !body.required {
+            out.push_str("            if (input.Body.HasValue)\n            {\n");
+        }
+        let value = if body.required {
+            "input.Body"
+        } else {
+            "input.Body.Value"
+        };
+        if body.union {
+            out.push_str(&format!("            switch ({value})\n            {{\n"));
+            for (j, m) in body.media.iter().enumerate() {
+                out.push_str(&format!(
+                    "                case {}.{} value{j}: request.SetBody({}); break;\n",
+                    body.native_type,
+                    m.variant_name,
+                    encode_media(
+                        plan,
+                        m,
+                        &format!("value{j}.Value"),
+                        &format!("operation.GetProperty(\"body\").GetProperty(\"media\")[{j}]"),
+                        j,
+                        &format!("value{j}.ContentType")
+                    )
+                ));
+            }
+            out.push_str("                default: throw new SdkException(SdkErrorKind.RequestRepresentation);\n            }\n");
+        } else {
+            out.push_str(&format!(
+                "            request.SetBody({});\n",
+                encode_media(
+                    plan,
+                    &body.media[0],
+                    value,
+                    "operation.GetProperty(\"body\").GetProperty(\"media\")[0]",
+                    0,
+                    "requestOptions?.ContentType"
+                )
+            ));
+        }
+        if !body.required {
+            out.push_str("            }\n");
+        }
+    }
+    out
+}
+/// The decoded-headers local of one response dispatch case.
+pub(super) fn response_headers_local(r: &PlannedResponse) -> String {
+    r.header_type
+        .as_ref()
+        .map(|header_type| {
+            format!(
+                "                    var headers = HttpCodecs.Read{header_type}(raw.Response.GetProperty(\"headers\"), raw.Metadata.Headers);\n"
+            )
+        })
+        .unwrap_or_default()
+}
+/// The `data` declaration and assignment of one response dispatch case.
+pub(super) fn response_data_assignment(plan: &SdkPlan, r: &PlannedResponse) -> String {
+    let mut out = format!("                    {} data;\n", r.native_type);
+    if r.always_empty {
+        out.push_str("                    data = default;\n");
+    } else if r.union {
+        if r.may_be_empty {
+            out.push_str(&format!("                    if (raw.Forbidden) data = new {}.NoContent(default);\n                    else\n",r.native_type));
+        }
+        if r.media.is_empty() {
+            out.push_str(&format!(
+                "                    data = new {}.UndeclaredBytes(raw.Body);\n",
+                r.native_type
+            ));
+        } else {
+            out.push_str(
+                "                    data = raw.MediaIndex switch\n                    {\n",
+            );
+            for (k, m) in r.media.iter().enumerate() {
+                out.push_str(&format!(
+                    "                        {k} => new {}.{}({}),\n",
+                    r.native_type,
+                    m.variant_name,
+                    decode_media(plan, m, "raw")
+                ));
+            }
+            out.push_str("                        _ => throw new UnexpectedResponseException(raw)\n                    };\n");
+        }
+    } else if r.media.is_empty() {
+        out.push_str("                    data = raw.Body;\n");
+    } else {
+        out.push_str(&format!(
+            "                    data = {};\n",
+            decode_media(plan, &r.media[0], "raw")
+        ));
+    }
     out
 }
 fn field(out: &mut String, name: &str, ty: &str, required: bool, description: &str) {
@@ -479,10 +501,14 @@ fn decode_media(plan: &SdkPlan, m: &PlannedMedia, raw: &str) -> String {
                 }
             }),
         p::Representation::Binary { .. } => format!("{raw}.Body"),
-        p::Representation::Stream { stream } => format!(
-            "{raw}.Stream(static bytes => Codecs.Decode{}(bytes))",
-            plan.models.codec_name(stream.item_codec().schema().id())
-        ),
+        p::Representation::Stream { stream } => match stream.item_codec() {
+            Some(codec) => format!(
+                "{raw}.Stream(static bytes => Codecs.Decode{}(bytes))",
+                plan.models.codec_name(codec.schema().id())
+            ),
+            // A schemaless stream surfaces untyped parsed envelope values.
+            None => format!("{raw}.Stream(static bytes => JsonRuntime.Parse(bytes))"),
+        },
         _ => unreachable!(),
     }
 }

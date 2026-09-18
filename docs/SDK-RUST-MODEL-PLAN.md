@@ -66,8 +66,8 @@ Directional request/response models are not implemented in this slice.
 ## Exact-number runtime
 
 The generated model package has no external dependencies. It declares Rust 2024
-and Rust 1.88 as its minimum compiler version. Native checks can select the
-compiler explicitly with `SUSPECT_NATIVE_RUST_TOOLCHAIN`.
+and Rust 1.88 as its minimum compiler version. Native floor/current evidence is
+recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md) and the linked milestone reports.
 
 The runtime scanner implements JSON numeric grammar directly. It rejects
 whitespace, leading plus signs/zeroes, incomplete fractions or exponents, NaN,

@@ -1,0 +1,17 @@
+{
+  "format": "suspect-sdk-session-policy-v1",
+  "policy_status": "candidate",
+  "statistic": "nearest-rank-p95",
+  "minimum_runs": 5,
+  "minimum_samples": 100,
+  "minimum_warmups": 1,
+  "noise_multiplier": 2.0,
+  "metrics": {
+    "refresh_ms": { "relative": 0.10, "absolute": 0.5, "maximum_noise_relative": 0.05 },
+    "generate_ms": { "relative": 0.10, "absolute": 0.25, "maximum_noise_relative": 0.05 },
+    "write_ms": { "relative": 0.10, "absolute": 0.25, "maximum_noise_relative": 0.05 },
+    "allocation_calls": { "relative": 0.10, "absolute": 100, "maximum_noise_relative": 0.02 },
+    "allocated_bytes": { "relative": 0.10, "absolute": 16384, "maximum_noise_relative": 0.02 },
+    "artifact_bytes": { "relative": 0.10, "absolute": 1024, "maximum_noise_relative": 0.0 }
+  }
+}

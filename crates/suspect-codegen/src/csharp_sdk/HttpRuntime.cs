@@ -103,6 +103,10 @@ public sealed record ClientOptions
     public int MaxHeaderBytes { get; init; } = 65_536;
     /// <summary>Response header value ceiling, at most 1024.</summary>
     public int MaxHeaderValues { get; init; } = 256;
+    /// <summary>Full User-Agent override. A non-null empty string suppresses the automatic attribution header entirely.</summary>
+    public string? UserAgent { get; init; }
+    /// <summary>Replaces the SDK identity token in the automatic attribution header: `&lt;name&gt;` or `&lt;name&gt;/&lt;version&gt;` (RFC 9110 tokens).</summary>
+    public string? ApplicationId { get; init; }
 }
 /// <summary>Explicit per-call choices. Defaults do not infer service behavior.</summary>
 public sealed record RequestOptions
@@ -206,7 +210,7 @@ internal sealed class HttpRuntime : IDisposable
     {
         _options=options??new ClientOptions();
         if(_options.Timeout<=TimeSpan.Zero||_options.Timeout>TimeSpan.FromMinutes(10)||_options.MaxResponseBytes<1||_options.MaxResponseBytes>JsonRuntime.MaxBytes||_options.MaxCaptureBytes<0||_options.MaxCaptureBytes>65_536||_options.MaxHeaderBytes<1||_options.MaxHeaderBytes>65_536||_options.MaxHeaderValues<1||_options.MaxHeaderValues>1024)throw new SdkException(SdkErrorKind.RequestRepresentation);
-        if(_options.ServerUrl is not null)ValidateServer(_options.ServerUrl);
+        if(_options.ServerUrl is not null)ServerRuntime.Explicit(_options.ServerUrl);
         _lifetimeToken=_lifetime.Token;_owned=http is null;
         _http=http??new HttpClient(new SocketsHttpHandler {AllowAutoRedirect=false,UseCookies=false,UseProxy=false,AutomaticDecompression=DecompressionMethods.None,Credentials=null,PreAuthenticate=false,MaxConnectionsPerServer=16,MaxResponseDrainSize=0,MaxResponseHeadersLength=Math.Max(1,(_options.MaxHeaderBytes+1023)/1024)},true){Timeout=global::System.Threading.Timeout.InfiniteTimeSpan};
     }
@@ -231,6 +235,9 @@ internal sealed class HttpRuntime : IDisposable
             foreach(var header in prepared.Headers)if(!request.Headers.TryAddWithoutValidation(header.Key,header.Value))throw new SdkException(SdkErrorKind.RequestRepresentation);
             if(prepared.Cookies.Count!=0)request.Headers.TryAddWithoutValidation("Cookie",string.Join("; ",prepared.Cookies));
             AddHeaders(request,options);
+            // ua/v1 attribution is applied last so an explicit caller-supplied
+            // User-Agent header parameter keeps precedence over the automatic value.
+            if(!request.Headers.Contains("User-Agent")&&ResolveUserAgent() is { } userAgent)request.Headers.TryAddWithoutValidation("User-Agent",userAgent);
             var accept=options?.Accept;
             if(accept is not null) { MediaRuntime.Parse(accept);request.Headers.Accept.ParseAdd(accept); }
             else { var types=operation.GetProperty("responses").EnumerateArray().SelectMany(r=>r.GetProperty("media").EnumerateArray()).Select(m=>m.GetProperty("media_type").GetProperty("declared").GetString()!).Distinct(StringComparer.OrdinalIgnoreCase);foreach(var type in types)request.Headers.Accept.ParseAdd(type); }
@@ -348,6 +355,28 @@ internal sealed class HttpRuntime : IDisposable
         foreach(var c in token){if(c=='='){padding=true;continue;}if(padding||!(c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9'||"-._~+/".Contains(c)))throw new SdkException(SdkErrorKind.Authentication);count++;}if(count==0)throw new SdkException(SdkErrorKind.Authentication);
     }
     internal static bool HeaderName(string? value)=>!string.IsNullOrEmpty(value)&&value.All(c=>c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9'||"!#$%&'*+-.^_`|~".Contains(c));
+    /// <summary>ua/v1 application identity: one or two `/`-separated RFC 9110 tokens, at most 128 bytes.</summary>
+    internal static bool ApplicationIdentity(string? value)
+    {
+        if(value is null||value.Length>128)return false;
+        var parts=value.Split('/');
+        return parts.Length<=2&&parts.All(HeaderName);
+    }
+    /// <summary>ua/v1 attribution: explicit overrides win, an explicit empty string suppresses, and
+    /// the default identifies suspect as the generator and the SDK package or a caller-supplied
+    /// application as the client. An invalid application identifier emits no header.</summary>
+    internal string? ResolveUserAgent()
+    {
+        if(_options.UserAgent is not null)return _options.UserAgent.Length==0?null:_options.UserAgent;
+        if(Attribution.SuspectVersion.Length==0)return null;
+        var identity=Attribution.SdkName+"/"+Attribution.SdkVersion;
+        if(_options.ApplicationId is { Length: > 0 } application)
+        {
+            if(!ApplicationIdentity(application))return null;
+            identity=application;
+        }
+        return "suspect/"+Attribution.SuspectVersion+" "+identity+" ("+Attribution.Language+"/"+Environment.Version.ToString()+"; openapi/"+Attribution.SpecVersion+")";
+    }
     internal static bool FramingHeader(string name)=>new[]{"Host","Content-Length","Transfer-Encoding","Connection","TE","Trailer","Upgrade","Expect","Proxy-Authorization","Proxy-Connection"}.Contains(name,StringComparer.OrdinalIgnoreCase);
     private static void AddHeaders(HttpRequestMessage request,RequestOptions? options)
     {

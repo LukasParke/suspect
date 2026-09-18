@@ -156,6 +156,7 @@ fn validation_uses_checked_instructions_and_reports_unsupported_schema_assertion
 fn unsupported_shapes_and_wire_modes_fail_at_original_sources() {
     for schema in [
         json!({"type":["string","number"]}),
+        json!({"allOf":[{"type":"string"},{"minLength":1}]}),
         json!({"type":"array","prefixItems":[{"type":"string"}]}),
         json!({"type":"string","anyOf":[{"const":"x"},{"const":"y"}]}),
     ] {

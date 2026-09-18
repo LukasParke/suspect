@@ -24,7 +24,10 @@ pub(super) fn serialize_source_id<S: Serializer>(
     out.serialize_field("pointer", id.pointer())?;
     out.end()
 }
-fn serialize_roots<S: Serializer>(ids: &[SchemaId], serializer: S) -> Result<S::Ok, S::Error> {
+pub(super) fn serialize_roots<S: Serializer>(
+    ids: &[SchemaId],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     use serde::ser::SerializeSeq;
     struct Id<'a>(&'a SourceId);
     impl Serialize for Id<'_> {
@@ -1128,16 +1131,22 @@ pub enum StreamFraming {
 
 /// OAS 3.2 `itemSchema` describes the parsed item. For SSE this is the event
 /// envelope, with string `data` and integer `retry`. No sentinel or nested JSON
-/// decode is inferred, including from a `contentSchema` annotation.
+/// decode is inferred, including from a `contentSchema` annotation. Under
+/// `SchemalessStreamEventsV1` a schemaless SSE stream carries no item codec at
+/// all: frames surface as untyped parsed envelope values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StreamPlan {
     pub(super) source: SourceLocation,
     pub(super) framing: StreamFraming,
-    pub(super) item_codec: CodecRef,
+    pub(super) item_codec: Option<CodecRef>,
     pub(super) max_item_bytes: u64,
 }
 impl StreamPlan {
-    getters!(source: SourceLocation, item_codec: CodecRef);
+    getters!(source: SourceLocation);
+    #[must_use]
+    pub fn item_codec(&self) -> Option<&CodecRef> {
+        self.item_codec.as_ref()
+    }
     #[must_use]
     pub fn framing(&self) -> StreamFraming {
         self.framing

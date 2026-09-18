@@ -387,8 +387,10 @@ fn media_slots<'a>(
         Representation::Binary { .. } => diagnostics.push(diagnostic(contract,container,"examples-native-bytes-required",
             "binary payload examples require an explicit native byte fixture; no JSON null or filename is substituted for bytes")),
         Representation::Stream { stream } => {
-            let role=status.map_or(ExampleRole::RequestItem,|status|ExampleRole::ResponseItem { status:status.into() });
-            slots.push(slot(contract,role,stream.item_codec(),container,stream.item_codec().schema().id(),media_name,true));
+            if let Some(codec) = stream.item_codec() {
+                let role=status.map_or(ExampleRole::RequestItem,|status|ExampleRole::ResponseItem { status:status.into() });
+                slots.push(slot(contract,role,codec,container,codec.schema().id(),media_name,true));
+            }
         }
         Representation::Form { form } => {
             for part in form.fields() { part_slots(contract,part,status,None,slots,diagnostics); }

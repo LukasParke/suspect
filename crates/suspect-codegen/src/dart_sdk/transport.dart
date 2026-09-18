@@ -197,7 +197,7 @@ final class _StreamRecord {
 abstract class _ClientBase {
   _ClientBase(this._transport,this._credentials,this._server,this._timeout,this._maxRequestBytes,
       this._maxResponseBytes,this._maxCaptureBytes,this._maxHeaderBytes,this._maxStreamBufferBytes,
-      List<int> ceilings) {
+      String? userAgent,String? applicationId,List<int> ceilings): _userAgent=userAgent,_applicationId=applicationId {
     final values=[_maxRequestBytes,_maxResponseBytes,_maxCaptureBytes,_maxHeaderBytes,_maxStreamBufferBytes];
     for(var i=0;i<values.length;i++){if(values[i]<1||values[i]>ceilings[i]){throw const ConfigurationException('resource ceilings must be positive and may only be lowered');}}
     if(_maxCaptureBytes>_maxResponseBytes){throw const ConfigurationException('capture must fit response');}
@@ -206,6 +206,12 @@ abstract class _ClientBase {
   final HttpTransport _transport; final Credentials _credentials; final ServerSelection _server;
   final Duration _timeout; final int _maxRequestBytes; final int _maxResponseBytes;
   final int _maxCaptureBytes; final int _maxHeaderBytes; final int _maxStreamBufferBytes;
+  /// Full ua/v1 User-Agent override; a non-empty value wins entirely and an
+  /// explicit empty string suppresses the attribution header.
+  final String? _userAgent;
+  /// Replaces the SDK identity token in the automatic attribution header:
+  /// `<name>` or `<name>/<version>` of RFC 9110 tokens.
+  final String? _applicationId;
   final Set<_Call> _calls={}; bool _closed=false; Future<void>? _closing;
   Future<void> close(){
     final previous=_closing;if(previous!=null){return previous;}
@@ -226,11 +232,34 @@ abstract class _ClientBase {
     try{try{await input?.cancel();}finally{await response?.close();}}
     finally{_calls.remove(call);call.done.complete();}
   }
+  /// ua/v1 application identity: `<name>` or `<name>/<version>` of RFC 9110 tokens.
+  static final RegExp _userAgentIdentity=RegExp(r"^[A-Za-z0-9!#$%&'*+.^`|~-]+(?:/[A-Za-z0-9!#$%&'*+.^`|~-]+)?$");
+  /// ua/v1 attribution: an explicit caller User-Agent wins entirely, an explicit
+  /// empty string suppresses the header, and the default identifies suspect as
+  /// the generator and the SDK package or a caller-supplied application as the
+  /// client. Dart exposes no stable runtime version API, so v1 records the
+  /// language version as `unknown` instead of omitting the comment segment.
+  String? _resolveUserAgent(){
+    final override=_userAgent;
+    if(override!=null){return override.isEmpty?null:override;}
+    if(userAgentSuspectVersion.isEmpty){return null;}
+    var identity='$userAgentSdkName/$userAgentSdkVersion';
+    final application=_applicationId;
+    if(application!=null&&application.isNotEmpty){
+      if(application.length>128||!_userAgentIdentity.hasMatch(application)){return null;}
+      identity=application;
+    }
+    return 'suspect/$userAgentSuspectVersion $identity (dart/unknown; openapi/$userAgentSpecVersion)';
+  }
   Future<TransportResponse> _send(_Call call,_WireOperation op,_RequestInput values,Duration timeout,ServerSelection? server,int? alternative) async {
     final builder=_RequestBuilder(op,server??_server,_maxRequestBytes);
     for(final value in values.parameters){builder.parameter(value.parameter,value.value);}
     if(values.body!=null){builder.body(values.body!);}
     await call.race(_attachCredentials(_credentials,op,builder,call.token,alternative));
+    // ua/v1 attribution applies after declared parameters and credentials so a
+    // source-declared user-agent header keeps precedence.
+    final userAgent=_resolveUserAgent();
+    if(userAgent!=null&&!builder.headers.containsKey('user-agent')){builder.header('user-agent',userAgent);}
     return call.race<TransportResponse>(Future.sync(()=>_transport.send(
         TransportRequest._(op.method,builder.url(),builder.headers,values.body?.bytes,call.token,timeout,_maxHeaderBytes,_maxResponseBytes))),late:(value)=>value.close());
   }
@@ -290,9 +319,8 @@ abstract class _ClientBase {
         response=await _send(call,op,prepare(),limit,server,alternative);
         final(capture,index,media,forbidden)=_inspect(call,op,response,true);
         input=StreamIterator(response.body);
-        if(index<0||response.status<200||response.status>=300||forbidden||media<0||
-            !const {_MediaKind.sse,_MediaKind.jsonl}.contains(op.responses[index].media[media].kind)){
-          // Finite alternatives produce one complete result; stream media produce items.
+        if(index<0||response.status<200||response.status>=300||forbidden){
+          // Errors are finite complete bodies, not an invented item stream.
           final errors=_Capture(response.status,_maxResponseBytes,_maxCaptureBytes,store:true)..headers=capture.headers;
           call.capture=errors;
           final received=await _collect(call,response,input,errors,index,media,forbidden,op);

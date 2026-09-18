@@ -14,7 +14,10 @@ mod credential_env_tests;
 mod docs;
 mod emit;
 mod http;
+mod incoming;
 pub mod models;
+mod oauth;
+mod pagination;
 mod positional;
 pub mod protocol;
 mod resources;
@@ -24,6 +27,7 @@ mod samples;
 mod scoped_examples;
 #[cfg(test)]
 mod server_tests;
+mod stream_events;
 mod validation;
 #[cfg(test)]
 mod validation_tests;
@@ -132,11 +136,16 @@ impl PlannedResponse {
 pub struct SdkPlan {
     contract: Arc<Contract>,
     config: SdkConfig,
+    attribution: Option<crate::attribution::AttributionDescriptor>,
     operations: Vec<PlannedOperation>,
     models: models::ModelPlan,
     credentials: BTreeMap<String, String>,
     credential_bindings: Vec<protocol::PlannedCredential>,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    pagination: Option<http_protocol::PaginationOutcome>,
+    oauth: Option<http_protocol::OAuthPlan>,
+    stream_semantics: http_protocol::StreamSemanticsPlan,
+    incoming: http_protocol::IncomingPlan,
     protocol: http_protocol::ProtocolPlan,
     program: OwnedProgram,
     indices: BTreeMap<SchemaId, usize>,
@@ -176,9 +185,40 @@ impl SdkPlan {
     pub const fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
     }
+    /// Compiled pagination selection over the admitted protocol plan, retained
+    /// only when a client-default policy is configured.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&http_protocol::PaginationOutcome> {
+        self.pagination.as_ref()
+    }
+    /// Compiled OAuth lifecycle plan over the used source schemes, retained
+    /// only when a client-default policy is configured.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&http_protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// Compiled typed-stream semantics over the admitted protocol plan. The
+    /// planner is infallible and every entry carries its own evidence; only
+    /// discriminated SSE operations lower into emitted typed events members.
+    #[must_use]
+    pub fn stream_semantics(&self) -> &http_protocol::StreamSemanticsPlan {
+        &self.stream_semantics
+    }
+    /// Compiled incoming webhook/callback receipts over the whole contract.
+    /// Their declared codec roots already extend the codec table; a plan
+    /// without any declared receipt emits nothing at all.
+    #[must_use]
+    pub fn incoming(&self) -> &http_protocol::IncomingPlan {
+        &self.incoming
+    }
     #[must_use]
     pub const fn package(&self) -> &SdkConfig {
         &self.config
+    }
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.attribution.as_ref()
     }
     #[must_use]
     pub const fn config(&self) -> &SdkConfig {
@@ -237,7 +277,7 @@ fn allocate(base: &str, used: &mut BTreeSet<String>) -> String {
     name
 }
 fn reserved_types() -> Vec<&'static str> {
-    "Client Credentials ClientOptions RequestOptions Codecs JsonNumber JsonInteger JsonNull Never Optional Quickstart ExampleHandler CodecException CodecErrorKind CodecRuntime ConversionContext ValidationSession ValidationProgram ExactNumber JsonRuntime LimitedStream ResponseMetadata WireRequest ApiException UnexpectedResponseException SdkException SdkErrorKind HttpRuntime WireResponse System Task CancellationToken HttpClient HttpRequestMessage HttpResponseMessage Uri String Object Array Enum Exception Math Convert Encoding JsonElement Utf8JsonWriter JsonValueKind BigInteger CultureInfo NumberStyles TimeSpan Stream MemoryStream List Dictionary HashSet ReadOnlyMemory Span ReadOnlySpan Action Func IDisposable StringComparer StringComparison InvalidOperationException ArgumentException ArgumentNullException ArgumentOutOfRangeException FormatException OverflowException ObjectDisposedException NotSupportedException IOException OperationCanceledException CancellationTokenSource Timeout HttpMethod HttpStatusCode HttpContent HttpMessageHandler HttpCompletionOption HttpRequestException HttpRequestError TimeoutException SocketsHttpHandler DecompressionMethods MediaTypeHeaderValue MediaTypeWithQualityHeaderValue AuthenticationHeaderValue ByteArrayContent ReadOnlyDictionary StringBuilder UriKind UriCreationOptions TaskContinuationOptions TaskScheduler TaskStatus ReferenceEqualityComparer JsonDocument JsonDocumentOptions JsonReaderOptions Utf8JsonReader JsonTokenType JsonWriterOptions UTF8Encoding DecoderFallbackException EncoderFallbackException IReadOnlyDictionary IReadOnlyList IEquatable IComparable IEnumerable Enumerable Stack Interlocked Volatile Console ValueTask IAsyncDisposable IAsyncEnumerable IAsyncEnumerator EnumeratorCancellationAttribute ProtocolData ProtocolRuntime WireEncoding MediaRuntime PartsRuntime HttpNoContent HttpStream StreamLease BasicCredential AuthorizationValue AuthorizationProvider CredentialContext OAuthFlowInfo ServerInfo ServerVariableInfo OperationInfo ResponseLinkInfo MultipartValue EncodedBody PartBag RawPart NativeProtocolPlan Rune Guid ReadOnlyCollection JsonNode JsonObject JsonArray JsonValue NullabilityInfoContext".split_whitespace().collect()
+    "Client Credentials ClientOptions RequestOptions Codecs JsonNumber JsonInteger JsonNull Never Optional Quickstart ExampleHandler CodecException CodecErrorKind CodecRuntime ConversionContext ValidationSession ValidationProgram ExactNumber JsonRuntime LimitedStream ResponseMetadata WireRequest ApiException UnexpectedResponseException SdkException SdkErrorKind HttpRuntime WireResponse System Task CancellationToken HttpClient HttpRequestMessage HttpResponseMessage Uri String Object Array Enum Exception Math Convert Encoding JsonElement Utf8JsonWriter JsonValueKind BigInteger CultureInfo NumberStyles TimeSpan Stream MemoryStream List Dictionary HashSet ReadOnlyMemory Span ReadOnlySpan Action Func IDisposable StringComparer StringComparison InvalidOperationException ArgumentException ArgumentNullException ArgumentOutOfRangeException FormatException OverflowException ObjectDisposedException NotSupportedException IOException OperationCanceledException CancellationTokenSource Timeout HttpMethod HttpStatusCode HttpContent HttpMessageHandler HttpCompletionOption HttpRequestException HttpRequestError TimeoutException SocketsHttpHandler DecompressionMethods MediaTypeHeaderValue MediaTypeWithQualityHeaderValue AuthenticationHeaderValue ByteArrayContent ReadOnlyDictionary StringBuilder UriKind UriCreationOptions TaskContinuationOptions TaskScheduler TaskStatus ReferenceEqualityComparer JsonDocument JsonDocumentOptions JsonReaderOptions Utf8JsonReader JsonTokenType JsonWriterOptions UTF8Encoding DecoderFallbackException EncoderFallbackException IReadOnlyDictionary IReadOnlyList IEquatable IComparable IEnumerable Enumerable Stack Interlocked Volatile Console ValueTask IAsyncDisposable IAsyncEnumerable IAsyncEnumerator EnumeratorCancellationAttribute ProtocolData ProtocolRuntime WireEncoding MediaRuntime PartsRuntime HttpNoContent HttpStream StreamLease BasicCredential AuthorizationValue AuthorizationProvider CredentialContext OAuthFlowInfo ServerInfo ServerVariableInfo OperationInfo ResponseLinkInfo MultipartValue EncodedBody PartBag RawPart NativeProtocolPlan Rune Guid ReadOnlyCollection JsonNode JsonObject JsonArray JsonValue NullabilityInfoContext Pagination PaginationException PaginationDescriptor PaginationDescriptors".split_whitespace().collect()
 }
 fn valid_package(name: &str) -> bool {
     !name.is_empty()

@@ -45,6 +45,10 @@ pub struct PhpConfig {
     pub namespace: String,
     /// Explicit source-scheme to runtime environment-variable names; never values.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
     /// Maximum request-body and assembled-URL bytes.
     pub max_request_bytes: usize,
     /// Maximum response-body bytes (also enforced during the default transport read).
@@ -70,6 +74,8 @@ impl Default for PhpConfig {
             package_version: "0.0.0".into(),
             namespace: "GeneratedSdk".into(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
             max_request_bytes: 8 * 1024 * 1024,
             max_response_bytes: 8 * 1024 * 1024,
             max_capture_bytes: 16 * 1024,

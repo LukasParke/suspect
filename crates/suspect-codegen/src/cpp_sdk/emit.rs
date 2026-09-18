@@ -11,9 +11,14 @@ use suspect_schema::{
 
 mod aggregates;
 mod credential_env;
-mod http;
+pub(in crate::cpp_sdk) mod http;
 mod native_example;
 mod wire;
+
+use super::pagination;
+use super::oauth;
+use super::stream_events;
+use super::incoming;
 
 pub(super) fn package(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> {
     let native_example = native_example::example(plan);
@@ -61,6 +66,10 @@ pub(super) fn package(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic
     ] {
         add(path, expand(plan, source));
     }
+    add(
+        format!("include/{name}/attribution.hpp"),
+        attribution_header(plan),
+    );
     add(format!("include/{name}/models.hpp"), model_header(plan));
     add("src/models.cpp".into(), model_source(plan));
     add(
@@ -69,6 +78,27 @@ pub(super) fn package(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic
     );
     add(format!("include/{name}/client.hpp"), http::header(plan));
     add("src/client.cpp".into(), http::source(plan));
+    if let Some(paginated) = plan.pagination().filter(|plan| plan.emits()) {
+        add(
+            format!("include/{name}/pagination.hpp"),
+            pagination::header(plan, paginated),
+        );
+    }
+    if plan.stream_events().emits() {
+        add(
+            format!("include/{name}/stream_events.hpp"),
+            stream_events::header(plan, plan.stream_events()),
+        );
+    }
+    if let Some(incoming) = plan.incoming() {
+        add(
+            format!("include/{name}/incoming.hpp"),
+            incoming::header(plan, incoming),
+        );
+    }
+    if let Some(oauth) = plan.oauth().filter(|plan| plan.emits()) {
+        add(format!("include/{name}/oauth.hpp"), oauth::header(plan, oauth));
+    }
     add(
         format!("include/{name}/sdk.hpp"),
         format!(
@@ -179,6 +209,61 @@ fn expand_config(c: &SdkConfig, source: &str) -> String {
             "@STREAM_BUFFER_BYTES@",
             &c.max_stream_buffer_bytes.to_string(),
         )
+}
+
+/// ua/v1 attribution constants compiled at generation time into one emitted
+/// header; the absent descriptor lowers to the disabled sentinel so the runtime
+/// keeps one resolution path. The suspect version is the enable bit.
+fn attribution_header(plan: &SdkPlan) -> String {
+    let (comment, constants): (&str, Vec<(&str, String)>) = match &plan.config.attribution {
+        Some(attribution) => (
+            "// ua/v1 attribution: every request identifies suspect as the generator and the\n// SDK or a caller-supplied application as the client.\n",
+            vec![
+                ("attribution_template_version", "\"v1\"".into()),
+                ("attribution_suspect_version", constexpr_string(&attribution.suspect_version)),
+                ("attribution_sdk_name", constexpr_string(&attribution.sdk_name)),
+                ("attribution_sdk_version", constexpr_string(&attribution.sdk_version)),
+                ("attribution_spec_version", constexpr_string(&attribution.spec_version)),
+                ("attribution_language", constexpr_string(&attribution.language)),
+            ],
+        ),
+        None => (
+            "// An empty suspect version disables the automatic attribution header.\n",
+            vec![
+                ("attribution_template_version", "\"\"".into()),
+                ("attribution_suspect_version", "\"\"".into()),
+                ("attribution_sdk_name", "\"\"".into()),
+                ("attribution_sdk_version", "\"\"".into()),
+                ("attribution_spec_version", "\"\"".into()),
+                ("attribution_language", "\"\"".into()),
+            ],
+        ),
+    };
+    let mut out = format!(
+        "#pragma once\n/** @file attribution.hpp ua/v1 attribution constants compiled at generation time. */\n#include <string_view>\n\n{comment}namespace {}::detail {{\n",
+        plan.config.namespace
+    );
+    for (name, value) in constants {
+        let _ = writeln!(out, "inline constexpr std::string_view {name} = {value};");
+    }
+    let _ = writeln!(out, "}} // namespace {}::detail", plan.config.namespace);
+    out
+}
+
+/// Quoted C++ string literal bytes; every escape denotes exactly one byte, so a
+/// `std::string_view` carries the exact length including embedded NUL bytes.
+/// Three-digit octal escapes cannot absorb adjacent digits.
+fn constexpr_string(value: &str) -> String {
+    let mut literal = String::new();
+    for byte in value.bytes() {
+        match byte {
+            b'"' => literal.push_str("\\\""),
+            b'\\' => literal.push_str("\\\\"),
+            32..=126 => literal.push(byte as char),
+            _ => write!(literal, "\\{byte:03o}").unwrap(),
+        }
+    }
+    format!("std::string_view(\"{literal}\", {})", value.len())
 }
 
 /// C++ string expression with explicit UTF-8 length. Three-digit octal escapes

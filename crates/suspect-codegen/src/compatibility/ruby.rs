@@ -192,7 +192,7 @@ pub(super) fn capture(
     let plan = ruby_sdk::plan_sdk(
         contract.clone(),
         selected,
-        crate::backend::ruby_options(&snapshot.generation),
+        crate::backend::ruby_options(&snapshot.generation, None),
     )
     .map_err(|errors| {
         errors

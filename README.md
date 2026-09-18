@@ -9,12 +9,14 @@ Design constraints: parse once, view many; zero-copy scalars; arena-indexed
 nodes; lazy memoized resolution. Benchmarks with honest budget verdicts live
 in [BENCHMARKS.md](BENCHMARKS.md).
 
-SDK generation uses one source-addressed contract pipeline for **Python, Go,
-Swift, Rust, TypeScript/JavaScript, Java, C#, Kotlin, Ruby, PHP, Dart and C++**.
-Each experimental profile produces native models, checked codecs, HTTP
-operations, packages and documentation. See
-[SDK capabilities](docs/SDK-CAPABILITIES.md) and the
-[compiler architecture](docs/SDK-GENERATION-PLAN.md).
+SDK generation uses one source-addressed contract pipeline for twelve native
+backends — **TypeScript/JavaScript, Python, Go, Rust, Swift, Java, Kotlin, C#,
+Ruby, PHP, Dart and C++** — producing native models, checked codecs, HTTP
+operations, packages, golden-defaults behavior (attribution, pagination,
+OAuth, env-credential defaults) and documentation.
+The [hackathon demo](docs/SDK-DEMO.md) generates SDKs from the real
+OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
+[verified demo scope](docs/SDK-PROGRESS.md).
 
 ## LSP — full-featured editor experience
 
@@ -120,8 +122,11 @@ suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml 
   --package-version 0.1.0 --out generated
 ```
 
-Run `suspect codegen-profiles --format json` to discover the profiles available
-in your build. Package identity is explicit configuration. Repeat
+Profiles are the twelve registered backends listed by `suspect
+codegen-profiles` (`typescript-http`, `python-http`, `go-http`, `rust-http`,
+`swift-http`, `java-http`, `kotlin-http`, `csharp-http`, `ruby-http`,
+`php-http`, `dart-http`, `cpp-http`). Package identity is explicit
+configuration. Repeat
 `--operation-id NAME` to select exact source operations; omitting it attempts
 all outgoing operations. Unsupported selected contracts produce source-linked
 diagnostics before output. Add `--check --format json` for read-only drift checks.

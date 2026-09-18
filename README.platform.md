@@ -4,10 +4,12 @@ OpenAPI/Arazzo/Overlay toolkit: language server, contract testing engine,
 template generator, and a local API gateway — one binary, one lossless
 parser core, everything observable through structured journals.
 
-SDK generation has one contract pipeline with twelve native language profiles.
-Native models, checked codecs, HTTP clients, packages and docs share typed
-language plans. See [SDK capabilities](docs/SDK-CAPABILITIES.md) for the
-experimental profiles and their supported contract boundaries.
+SDK generation has one contract pipeline with Python, Go, Swift, Rust and
+TypeScript/JavaScript profiles. Native models, checked codecs, HTTP clients,
+packages and docs share typed language plans. See
+[SDK capabilities](docs/SDK-CAPABILITIES.md) and
+[current verification](docs/SDK-PROGRESS.md) for the experimental profiles and
+pending post-cleanup acceptance.
 
 ## Crates
 
@@ -20,7 +22,7 @@ experimental profiles and their supported contract boundaries.
 | `suspect-rex` | Arazzo runtime-expression parser/evaluator |
 | `suspect-test` | Plan compiler + concurrent workflow executor + reporters |
 | `suspect-gateway` | Local server: mock / proxy / validate / record / replay |
-| `suspect-codegen` | Twelve native SDK backends, codecs/docs, incremental sessions and compatibility reports |
+| `suspect-codegen` | Five native SDK backends, codecs/docs, incremental sessions and compatibility reports |
 | `suspect-gen` | Template engine (minijinja), docs-md preset and custom manifests |
 | `suspect-artifact` | Ownership-aware output and read-only drift checking |
 | `suspect-watch` | Debounced file watcher driving `--watch` modes |
@@ -62,8 +64,8 @@ suspect fuzz api.yaml --base-url http://localhost:8080 --runs 50
 suspect watch . -- suspect test flows.arazzo.yaml --offline --cassette rec.scj
 ```
 
-Run `suspect codegen-profiles --format json` for the compiled SDK inventory.
-Repeat `--operation-id NAME` to select exact operations;
+The SDK profiles are `python-http`, `go-http`, `swift-http`, `rust-http` and
+`typescript-http`. Repeat `--operation-id NAME` to select exact operations;
 omitting selectors attempts the whole outgoing API and reports unsupported
 contracts. Add `--check --format json` for read-only ownership/drift inspection.
 [`codegen-session`](docs/SDK-INCREMENTAL-GENERATION.md) shares one Contract across
@@ -83,9 +85,9 @@ engineering, and transactional spec codemods — are documented in
 
 See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the full profiling report,
 phase-by-phase cost attribution, and the ranked plan of attack.
-These measurements are fixture-specific; they do not establish complete
+These measurements are fixture-specific; they do not establish OpenRouter
 end-to-end SDK generation or emitted-SDK performance.
-Session measurement boundaries and functional checks are documented in
+Current session measurements and pending Mac calibration are documented in
 [SDK session performance](docs/SDK-SESSION-PERFORMANCE.md).
 
 | Path | Budget | Achieved |

@@ -510,7 +510,9 @@ fn oas32_streams_bind_parsed_item_schemas_without_inferring_data_json_or_sentine
         panic!("SSE")
     };
     assert_eq!(stream.framing(), http::StreamFraming::ServerSentEvents);
-    let schema = contract.schema(stream.item_codec().schema().id()).unwrap();
+    let schema = contract
+        .schema(stream.item_codec().unwrap().schema().id())
+        .unwrap();
     assert_eq!(schema.raw()["properties"]["data"]["type"], "string");
     assert_eq!(schema.raw()["properties"]["retry"]["type"], "integer");
     let expected = fixture["streamCodecRoots"]
@@ -1245,12 +1247,13 @@ fn oas32_media_references_stream_items_and_positional_headers_keep_actual_indexe
         panic!("SSE item stream")
     };
     assert_eq!(
-        stream.item_codec().schema().id().pointer(),
+        stream.item_codec().unwrap().schema().id().pointer(),
         "/Sse/itemSchema"
     );
     assert_eq!(
         stream
             .item_codec()
+            .unwrap()
             .schema()
             .source()
             .terminal()
@@ -1260,7 +1263,7 @@ fn oas32_media_references_stream_items_and_positional_headers_keep_actual_indexe
     );
     assert_eq!(
         contract
-            .schema(stream.item_codec().schema().id())
+            .schema(stream.item_codec().unwrap().schema().id())
             .unwrap()
             .raw()["maxProperties"],
         4,
@@ -1273,11 +1276,11 @@ fn oas32_media_references_stream_items_and_positional_headers_keep_actual_indexe
         .unwrap();
     assert_eq!(
         indexed_sse.item_schema().unwrap().id(),
-        stream.item_codec().schema().id()
+        stream.item_codec().unwrap().schema().id()
     );
     assert_eq!(
         indexed_sse.schema_roots(),
-        [stream.item_codec().schema().id().clone()]
+        [stream.item_codec().unwrap().schema().id().clone()]
     );
     assert_eq!(
         Some(media.source().terminal().source().clone()),

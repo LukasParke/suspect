@@ -119,22 +119,51 @@ impl Capability {
 
 /// Explicit, versioned departures from ordinary OpenAPI semantics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum CompatibilityProfile {
     /// Interpret the legacy `type: string, format: binary` marker as raw bytes
     /// in OAS 3.1/3.2 *binary* media/parts. No JSON null stand-in is constructed.
     /// This does not affect JSON media, base64 strings, or streaming semantics.
+    #[serde(rename = "legacy-binary-string-v1")]
     LegacyBinaryStringV1,
+    /// Interpret the OAS 3.0 `nullable` keyword on OAS 3.1/3.2 schema nodes with
+    /// its 3.0 semantics: `nullable: true` appends `"null"` to the same-object
+    /// type for wire decode/encode purposes, and `nullable: false` removes
+    /// `"null"` from a type array. This does not affect OAS 3.0 documents
+    /// (whose dialect already gives `nullable` that meaning) and does not
+    /// change enum/composition nullability.
+    #[serde(rename = "oas30-nullable-in-3.1-v1")]
+    Oas30NullableIn31V1,
+    /// Normalize legacy colon path-template segments (`/keys/:hash`) to OAS
+    /// brace expressions (`/keys/{hash}`) when the path item declares a
+    /// required path parameter of that exact name. A colon segment without a
+    /// matching declared parameter is still refused, never guessed.
+    #[serde(rename = "colon-path-parameters-v1")]
+    ColonPathParametersV1,
+    /// Admit a schemaless `text/event-stream` response — one whose media object
+    /// declares no schema, or only a plain free-form schema that does not
+    /// declare event structure — as an untyped frame stream. Declared
+    /// structured item schemas and JSON-lines framing keep their ordinary
+    /// strict admission, and non-stream media are unaffected.
+    #[serde(rename = "schemaless-stream-events-v1")]
+    SchemalessStreamEventsV1,
 }
 
 impl CompatibilityProfile {
     /// Closed, versioned interpretation choices advertised by the canonical CLI.
-    pub const ALL: &'static [Self] = &[Self::LegacyBinaryStringV1];
+    pub const ALL: &'static [Self] = &[
+        Self::LegacyBinaryStringV1,
+        Self::Oas30NullableIn31V1,
+        Self::ColonPathParametersV1,
+        Self::SchemalessStreamEventsV1,
+    ];
 
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::LegacyBinaryStringV1 => "legacy-binary-string-v1",
+            Self::Oas30NullableIn31V1 => "oas30-nullable-in-3.1-v1",
+            Self::ColonPathParametersV1 => "colon-path-parameters-v1",
+            Self::SchemalessStreamEventsV1 => "schemaless-stream-events-v1",
         }
     }
 }

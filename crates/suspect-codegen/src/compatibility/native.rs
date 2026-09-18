@@ -78,6 +78,12 @@ pub struct NativeSnapshot {
     /// Source-bound runtime defaults, captured from the actual native plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_env: Option<crate::credential_env::CredentialEnvDescriptor>,
+    /// Compiled `ua/v1` package attribution, captured from the actual native plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
+    /// Typed client-default policy, captured from the actual native plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaultsDescriptor>,
     pub status: PlanStatus,
     pub runtime: RuntimeProvenance,
     pub operations: Vec<NativeOperation>,
@@ -96,6 +102,8 @@ pub(super) fn capture(
         target: target.clone(),
         generation: generation.clone(),
         credential_env: None,
+        attribution: None,
+        sdk_defaults: None,
         status: PlanStatus::Planned,
         runtime: provenance::capture(target.backend.name()),
         operations: Vec::new(),
@@ -204,6 +212,36 @@ fn package_error(error: impl std::fmt::Display) -> Vec<PlanFinding> {
         message: error.to_string(),
     }]
 }
+/// Compile the same `ua/v1` attribution that canonical generation records for
+/// one target, so compatibility capture describes the emitted package identity.
+fn compiled_attribution(
+    contract: &Contract,
+    target: &TargetConfig,
+) -> crate::attribution::AttributionDescriptor {
+    crate::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        &target.package_name,
+        &target.package_version,
+        contract.openapi_version(),
+        target.backend.language_tag(),
+    )
+}
+/// Attribution semantics without the generator and package versions: those
+/// bump constantly and are recorded separately as runtime provenance and
+/// package metadata. Grammar version, package identity, language and the
+/// source document version participate in interface equality.
+fn native_attribution_semantic(
+    descriptor: &crate::attribution::AttributionDescriptor,
+) -> crate::attribution::AttributionDescriptor {
+    crate::attribution::AttributionDescriptor {
+        template_version: descriptor.template_version,
+        suspect_version: String::new(),
+        sdk_name: descriptor.sdk_name.clone(),
+        sdk_version: String::new(),
+        spec_version: descriptor.spec_version.clone(),
+        language: descriptor.language.clone(),
+    }
+}
 fn gap(snapshot: &mut NativeSnapshot, code: &str, message: &str) {
     snapshot.findings.push(PlanFinding {
         code: code.into(),
@@ -224,13 +262,18 @@ fn typescript(
     snapshot: &mut NativeSnapshot,
 ) -> ResultPlan {
     use crate::typescript;
-    let config = crate::backend::typescript_options(&snapshot.generation);
+    let attribution = compiled_attribution(&contract, &snapshot.target);
+    let config = crate::backend::typescript_options(&snapshot.generation, Some(&attribution));
     snapshot.runtime.profile = config.capabilities().adapter().into();
     let plan = typescript::http::plan_http(contract.clone(), selected, config)
         .map_err(|e| errors(&contract, e))?;
     snapshot.credential_env = plan
         .credential_env()
         .map(crate::credential_env::CredentialEnvPlan::semantic_descriptor);
+    snapshot.attribution = plan.attribution().cloned();
+    snapshot.sdk_defaults = plan
+        .sdk_defaults()
+        .map(|defaults| defaults.semantic_descriptor());
     typescript::package::emit_http(
         &plan,
         &typescript::package::PackageConfig {
@@ -270,16 +313,21 @@ fn rust(
     snapshot: &mut NativeSnapshot,
 ) -> ResultPlan {
     snapshot.runtime.profile = crate::rust_http::native_capabilities().adapter().into();
+    let attribution = compiled_attribution(&contract, &snapshot.target);
     let plan = crate::rust_http::plan_http_v3(
         contract.clone(),
         selected,
-        crate::backend::rust_options(&snapshot.generation),
+        crate::backend::rust_options(&snapshot.generation, Some(&attribution)),
     )
     .map_err(|e| errors(&contract, e))?;
     snapshot.runtime.profile = plan.protocol().capabilities().adapter().into();
     snapshot.credential_env = plan
         .credential_env()
         .map(|policy| policy.semantic_descriptor());
+    snapshot.attribution = plan.attribution().cloned();
+    snapshot.sdk_defaults = plan
+        .sdk_defaults()
+        .map(|defaults| defaults.semantic_descriptor());
     let files = crate::rust_http::emit_http(
         &plan,
         &crate::rust_http::PackageConfig {
@@ -316,15 +364,20 @@ fn python(
     snapshot: &mut NativeSnapshot,
 ) -> ResultPlan {
     snapshot.runtime.profile = crate::python_http::capabilities().adapter().into();
+    let attribution = compiled_attribution(&contract, &snapshot.target);
     let plan = crate::python_http::plan_http(
         contract.clone(),
         selected,
-        crate::backend::python_options(&snapshot.generation),
+        crate::backend::python_options(&snapshot.generation, Some(&attribution)),
     )
     .map_err(|e| errors(&contract, e))?;
     snapshot.credential_env = plan
         .credential_env()
         .map(crate::credential_env::CredentialEnvPlan::semantic_descriptor);
+    snapshot.attribution = plan.attribution().cloned();
+    snapshot.sdk_defaults = plan
+        .sdk_defaults()
+        .map(|defaults| defaults.semantic_descriptor());
     let import = snapshot
         .target
         .import_name
@@ -420,15 +473,20 @@ fn go(contract: Arc<Contract>, selected: &[SourceId], snapshot: &mut NativeSnaps
             crate::http_protocol::ResponseStatus::Default => json!("default"),
         }
     }
+    let attribution = compiled_attribution(&contract, &snapshot.target);
     let plan = crate::go_http::plan_http(
         contract.clone(),
         selected,
-        crate::backend::go_options(&snapshot.generation),
+        crate::backend::go_options(&snapshot.generation, Some(&attribution)),
     )
     .map_err(|e| errors(&contract, e))?;
     snapshot.credential_env = plan
         .credential_env()
         .map(crate::credential_env::CredentialEnvPlan::semantic_descriptor);
+    snapshot.attribution = plan.attribution().cloned();
+    snapshot.sdk_defaults = plan
+        .sdk_defaults()
+        .map(|defaults| defaults.semantic_descriptor());
     crate::go_http::emit_http(
         &plan,
         &crate::go_http::PackageConfig {
@@ -592,7 +650,7 @@ fn swift(
     let plan = crate::swift_sdk::plan_sdk(
         contract.clone(),
         selected,
-        crate::backend::swift_options(&snapshot.generation),
+        crate::backend::swift_options(&snapshot.generation, None),
     )
     .map_err(|e| errors(&contract, e))?;
     // V1 uses Swift's fixed 8192-UTF-8-byte bearer/API-key value ceiling
@@ -622,7 +680,7 @@ fn swift(
                     codec.as_ref().map(|c| c.schema().id().clone())
                 }
                 crate::http_protocol::Representation::Stream { stream } => {
-                    Some(stream.item_codec().schema().id().clone())
+                    stream.item_codec().map(|codec| codec.schema().id().clone())
                 }
                 _ => None,
             };
@@ -707,6 +765,46 @@ pub(super) fn compare(
                     c.before = Some(json!({"configuration":a.generation.credential_env,"binding":a.credential_env}));
                     c.after = Some(json!({"configuration":b.generation.credential_env,"binding":b.credential_env}));
                     c.migration = "Supply the mapped variables before creating clients, or keep explicit credentials to retain caller-selected setup. No credential values are recorded in this report.".into();
+                    changes.push(c);
+                }
+                if a.attribution.as_ref().map(native_attribution_semantic)
+                    != b.attribution.as_ref().map(native_attribution_semantic)
+                {
+                    let mut c = change(
+                        "native-attribution-changed",
+                        Impact::Unknown,
+                        backend.name(),
+                        format!(
+                            "The generated package attribution changed for {}; the recorded User-Agent identity or source document version no longer matches the compared target.",
+                            backend.name()
+                        ),
+                    );
+                    c.before = a
+                        .attribution
+                        .as_ref()
+                        .map(|descriptor| json!(native_attribution_semantic(descriptor)));
+                    c.after = b
+                        .attribution
+                        .as_ref()
+                        .map(|descriptor| json!(native_attribution_semantic(descriptor)));
+                    c.migration = "Review the attribution identity change and rerun User-Agent-sensitive traffic classification before accepting this transition; generator and package versions are recorded separately as provenance and package metadata.".into();
+                    changes.push(c);
+                }
+                if a.generation.sdk_defaults != b.generation.sdk_defaults
+                    || a.sdk_defaults != b.sdk_defaults
+                {
+                    let mut c = change(
+                        "native-sdk-defaults-changed",
+                        Impact::PotentiallyBreaking,
+                        backend.name(),
+                        format!(
+                            "The configured client behavior defaults changed for {}; automatic pagination policy, the proposed page size or the automatic API-key environment prefix may now differ for existing consumers.",
+                            backend.name()
+                        ),
+                    );
+                    c.before = Some(json!({"configuration":a.generation.sdk_defaults,"binding":a.sdk_defaults}));
+                    c.after = Some(json!({"configuration":b.generation.sdk_defaults,"binding":b.sdk_defaults}));
+                    c.migration = "Regenerate with the intended defaults and review pagination accessors, proposed page size and automatic credential environment setup in existing consumers.".into();
                     changes.push(c);
                 }
                 if a.runtime != b.runtime {

@@ -72,6 +72,8 @@ fn controls_config(env: Option<CredentialEnv>) -> SdkConfig {
         version: "0.1.0".into(),
         package_name: "example.credentialenv".into(),
         credential_env: env,
+        sdk_defaults: None,
+        attribution: None,
     }
 }
 fn control_plan(env: Option<CredentialEnv>) -> Plan {
@@ -80,7 +82,18 @@ fn control_plan(env: Option<CredentialEnv>) -> Plan {
         .operations()
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
-    kotlin_sdk::plan_sdk(contract, &selected, controls_config(env)).unwrap()
+    let mut config = controls_config(env);
+    // The shared backend registry plans this exact ua/v1 attribution descriptor
+    // from the same target identity, so both paths must emit identical bytes.
+    let target = target();
+    config.attribution = Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        &target.package_name,
+        &target.package_version,
+        contract.openapi_version(),
+        target.backend.language_tag(),
+    ));
+    kotlin_sdk::plan_sdk(contract, &selected, config).unwrap()
 }
 
 #[test]
@@ -384,6 +397,8 @@ fn openrouter() -> Plan {
             credential_env: Some(CredentialEnv::v1(
                 [("apiKey".into(), "OPENROUTER_API_KEY".into())].into(),
             )),
+            sdk_defaults: None,
+            attribution: None,
         },
     )
     .unwrap()

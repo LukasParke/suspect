@@ -161,6 +161,9 @@ fn public_backend_uses_maven_coordinates_and_real_kotlin_package_identity() {
     assert!(Backend::ALL.contains(&Backend::KotlinHttp));
     assert_eq!(Backend::KotlinHttp.name(), "kotlin-http");
     assert_eq!(Backend::KotlinHttp.artifact_directory(), "kotlin");
+    // The shared backend registry plans this exact ua/v1 attribution descriptor
+    // from the same target identity, so both paths must emit identical bytes.
+    let shared = target();
     let direct = kotlin_sdk::plan_sdk(
         contract.clone(),
         &selected,
@@ -170,6 +173,14 @@ fn public_backend_uses_maven_coordinates_and_real_kotlin_package_identity() {
             version: "1.0.0".into(),
             package_name: "example.sdk".into(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+                env!("CARGO_PKG_VERSION"),
+                &shared.package_name,
+                &shared.package_version,
+                contract.openapi_version(),
+                shared.backend.language_tag(),
+            )),
         },
     )
     .unwrap()

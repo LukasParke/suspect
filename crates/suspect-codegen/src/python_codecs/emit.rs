@@ -58,17 +58,12 @@ pub(crate) fn package(
         descriptors.insert(name, Value::Object(value));
     }
     let metadata = json!({"models":descriptors,"maxDepth":config.max_conversion_depth,"maxSteps":config.max_conversion_steps,"json":{"max_input_bytes":config.json_limits.max_input_bytes,"max_output_bytes":config.json_limits.max_output_bytes,"max_depth":config.json_limits.max_depth,"max_work":config.json_limits.max_work}});
-    let (codec_type, import_alias) = if names.values().any(|name| name == "Model") {
-        ("_ModelCodec", " as _ModelCodec")
-    } else {
-        ("ModelCodec", "")
-    };
-    let mut code = format!(
-        "\"\"\"Source-bound model codecs; numeric/presence/union semantics are validated.\"\"\"\nfrom __future__ import annotations\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING or __package__:\n    from . import models\n    from .codec_runtime import ModelCodec{import_alias}\nelse:\n    import models\n    from codec_runtime import ModelCodec{import_alias}\n\n",
+    let mut code = String::from(
+        "\"\"\"Source-bound model codecs; numeric/presence/union semantics are validated.\"\"\"\nfrom __future__ import annotations\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING or __package__:\n    from . import models\n    from .codec_runtime import ModelCodec\nelse:\n    import models\n    from codec_runtime import ModelCodec\n\n",
     );
     for symbol in models.symbols() {
         code.push_str(&format!(
-            "{}Codec: {codec_type}[models.{}] = {codec_type}({:?})\n",
+            "{}Codec: ModelCodec[models.{}] = ModelCodec({:?})\n",
             symbol.name(),
             symbol.name(),
             symbol.name()

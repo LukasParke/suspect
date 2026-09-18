@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +67,12 @@ type ClientOptions struct {
 	MaxResponseBytes, MaxCaptureBytes, MaxPartBytes, MaxStreamItemBytes int
 	// Timeout includes headers, complete body reading and stream iteration.
 	Timeout time.Duration
+	// UserAgent overrides the automatic ua/v1 attribution header. A non-nil
+	// empty string suppresses the header entirely.
+	UserAgent *string
+	// ApplicationID replaces the SDK identity token in the automatic
+	// attribution header: "<name>" or "<name>/<version>" (RFC 9110 tokens).
+	ApplicationID string
 }
 
 // Client is reusable concurrently when its supplied transport and hooks are.
@@ -72,6 +80,32 @@ type Client struct {
 	transport   Doer
 	credentials Credentials
 	options     ClientOptions
+}
+
+// ua/v1 application identity: `<name>` or `<name>/<version>` of RFC 9110 tokens.
+var userAgentIdentityPattern = regexp.MustCompile("^[A-Za-z0-9!#$%&'*+.^`|~-]+(?:/[A-Za-z0-9!#$%&'*+.^`|~-]+)?$")
+
+// resolveUserAgent assembles the ua/v1 attribution header. Explicit overrides
+// win; a non-nil empty string suppresses; the default identifies suspect as the
+// generator and the SDK package or a caller-supplied application as the client.
+func (c *Client) resolveUserAgent() (string, bool) {
+	if c.options.UserAgent != nil {
+		if *c.options.UserAgent == "" {
+			return "", false
+		}
+		return *c.options.UserAgent, true
+	}
+	if userAgentSuspectVersion == "" {
+		return "", false
+	}
+	identity := userAgentSDKName + "/" + userAgentSDKVersion
+	if c.options.ApplicationID != "" {
+		if len(c.options.ApplicationID) > 128 || !userAgentIdentityPattern.MatchString(c.options.ApplicationID) {
+			return "", false
+		}
+		identity = c.options.ApplicationID
+	}
+	return "suspect/" + userAgentSuspectVersion + " " + identity + " (go/" + strings.TrimPrefix(runtime.Version(), "go") + "; openapi/" + userAgentSpecVersion + ")", true
 }
 
 func NewClient(credentials Credentials, options ClientOptions) (*Client, error) {
@@ -653,6 +687,11 @@ func (c *Client) exchange(ctx context.Context, op httpOperation, parameters []ht
 		request.Header.Set("Accept", strings.Join(accept, ", "))
 	}
 	request.Header.Set("Accept-Encoding", "identity")
+	// ua/v1 attribution is applied after declared parameters so an explicit
+	// caller-supplied User-Agent header keeps precedence over the default.
+	if userAgent, ok := c.resolveUserAgent(); ok && len(httpHeaderValues(headers, "User-Agent")) == 0 {
+		request.Header.Set("User-Agent", userAgent)
+	}
 	if body.present {
 		request.Header.Set("Content-Type", body.contentType)
 	}

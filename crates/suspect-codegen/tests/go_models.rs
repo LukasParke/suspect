@@ -54,9 +54,9 @@ fn native(plan: &ModelPlan, source: &str) {
 fn unimplemented_go_shapes_block_artifacts_with_source_locations() {
     for (schema, code, pointer) in [
         (
-            json!({"type":["string","boolean"]}),
-            "type-union-representation",
-            "/components/schemas/Rejected/type",
+            json!({"allOf":[{"type":"string"},{"type":"number"}]}),
+            "unsupported-go-representation",
+            "/components/schemas/Rejected/allOf",
         ),
         (
             json!({"type":"object","required":["missing"],"additionalProperties":false}),

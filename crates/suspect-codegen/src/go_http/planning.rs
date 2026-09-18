@@ -109,8 +109,29 @@ pub(super) fn plan(
                 })
                 .collect::<Vec<_>>()
         })?;
-    let credential_env =
-        crate::credential_env::plan(&contract, &wire, config.credential_env.as_ref())?;
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = protocol::plan_incoming(&contract)?;
+    // Incoming receipts extend the codec table only when declared: their body
+    // schemas become actual codec inputs beside the selected operations'.
+    let mut codec_roots: Vec<SchemaId> = wire.codec_roots().to_vec();
+    if !incoming.is_empty() {
+        codec_roots.extend(incoming.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+    }
+    let credential_env = crate::credential_env::plan_with_defaults(
+        &contract,
+        &wire,
+        config.credential_env.as_ref(),
+        config.sdk_defaults.as_ref(),
+    )?;
+    // Compiled OAuth lifecycle planning follows the configured policy, like
+    // pagination helpers; helpers are emitted only for usable schemes, so
+    // no-policy output stays byte-identical.
+    let oauth = super::oauth::plan(&contract, &wire, config.sdk_defaults.as_ref())?;
+    let oauth_emits = oauth.as_ref().is_some_and(super::oauth::emits);
     let mut errors = Vec::new();
     for operation in wire.operations() {
         for parameter in operation.parameters() {
@@ -122,7 +143,13 @@ pub(super) fn plan(
             }
         }
     }
-    for id in wire.codec_schema_closure() {
+    // Incoming receipts widen the checked closure exactly as their codec roots
+    // widen the codec table; receipt-less plans keep the selected closure.
+    let mut directional: BTreeSet<SchemaId> = wire.codec_schema_closure().iter().cloned().collect();
+    if !incoming.is_empty() {
+        directional.extend(incoming.codec_schema_closure().iter().cloned());
+    }
+    for id in &directional {
         if let Some(raw) = contract.source(id) {
             for keyword in ["readOnly", "writeOnly"] {
                 if raw
@@ -137,19 +164,22 @@ pub(super) fn plan(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let codecs =
-        crate::go_codecs::plan_codecs(contract.clone(), wire.codec_roots(), config.codecs.clone())
-            .map_err(|errors| {
-                errors
-                    .into_iter()
-                    .map(|e| HttpDiagnostic {
-                        source: e.source,
-                        at: e.at,
-                        code: e.code,
-                        message: e.message,
-                    })
-                    .collect::<Vec<_>>()
-            })?;
+    let mut codec_config = config.codecs.clone();
+    codec_config.dialect = crate::schema_view::DialectPolicy::from_profiles(
+        config.compatibility_profiles.iter().copied(),
+    );
+    let codecs = crate::go_codecs::plan_codecs(contract.clone(), &codec_roots, codec_config)
+        .map_err(|errors| {
+            errors
+                .into_iter()
+                .map(|e| HttpDiagnostic {
+                    source: e.source,
+                    at: e.at,
+                    code: e.code,
+                    message: e.message,
+                })
+                .collect::<Vec<_>>()
+        })?;
     let symbols: BTreeMap<SchemaId, String> = codecs
         .models()
         .symbols()
@@ -157,8 +187,34 @@ pub(super) fn plan(
         .filter(|s| s.role() == crate::rust_models::RepresentationRole::Model)
         .map(|s| (s.source().clone(), s.name().to_owned()))
         .collect();
-    let mut names = model_package_names(&contract, codecs.models())?;
+    let mut emitted: Vec<&'static str> = Vec::new();
+    if oauth_emits {
+        emitted.extend_from_slice(super::oauth::PACKAGE_NAMES);
+        // The replaying credential wrapper joins only with an executable
+        // client-credentials endpoint, mirroring its conditional emission.
+        if oauth
+            .as_ref()
+            .is_some_and(super::oauth::has_client_credentials)
+        {
+            emitted.extend_from_slice(super::oauth::REPLAY_PACKAGE_NAMES);
+        }
+    }
+    // The emitted incoming receipt helpers own fixed package-level names only
+    // when receipts are declared; receipt-less plans reserve nothing.
+    if !incoming.is_empty() {
+        emitted.extend_from_slice(super::incoming::PACKAGE_NAMES);
+    }
+    let mut names = model_package_names(&contract, codecs.models(), &emitted)?;
     let mut methods = BTreeSet::from(["CloseIdleConnections".into()]);
+    // The emitted OAuth lifecycle methods are fixed API, so source operations
+    // that would collide allocate suffixed names instead.
+    if oauth_emits {
+        methods.extend(
+            super::oauth::CLIENT_METHODS
+                .iter()
+                .map(|name| (*name).to_owned()),
+        );
+    }
     // Reserve all real operation methods before allocating convenience methods.
     let method_names = wire
         .operations()
@@ -350,6 +406,44 @@ pub(super) fn plan(
     let credential_env_factory = credential_env
         .as_ref()
         .map(|_| allocate("NewClientFromEnv", &mut names));
+    // Emission-ready incoming receipt helpers. Receipts the Go v1 helpers
+    // cannot express surface as the shared plan errors; allocated receipt
+    // names join the model namespace so nothing else can take them.
+    let mut incoming_errors = Vec::new();
+    let incoming_receipts = incoming::prepare(
+        &contract,
+        &incoming,
+        &symbols,
+        &mut names,
+        &mut incoming_errors,
+    );
+    if !incoming_errors.is_empty() {
+        return Err(incoming_errors);
+    }
+    let pagination = super::pagination::plan(
+        &contract,
+        &wire,
+        config.sdk_defaults.as_ref(),
+        &operations,
+        &symbols,
+        &codecs,
+        &mut names,
+        &mut methods,
+    )?;
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission — and the names it
+    // reserves — stay conditional on a discriminated SSE event set, so plans
+    // without one keep every artifact byte-identical.
+    let stream_semantics = protocol::plan_stream_semantics(&contract, &wire);
+    let stream_events = super::stream_events::plan(
+        &stream_semantics,
+        &operations,
+        &symbols,
+        codecs.models(),
+        &mut names,
+        &mut methods,
+    );
     let examples =
         if codecs.validation_program().version == suspect_schema::OwnedProgram::V3_VERSION {
             crate::examples::plan_protocol_examples_v3(contract.clone(), &wire, Default::default())
@@ -369,6 +463,11 @@ pub(super) fn plan(
         protocol: wire,
         credential_env,
         credential_env_factory,
+        pagination,
+        oauth,
+        stream_events,
+        incoming,
+        incoming_receipts,
     })
 }
 
@@ -434,10 +533,14 @@ fn media(
             .map_or_else(|| "string".into(), |c| symbols[c.schema().id()].clone()),
         Representation::Binary { .. } => "[]byte".into(),
         Representation::Stream { stream } => {
+            let item = stream.item_codec().map_or_else(
+                || "Value".to_owned(),
+                |codec| symbols[codec.schema().id()].clone(),
+            );
             if request {
-                format!("[]{}", symbols[stream.item_codec().schema().id()])
+                format!("[]{item}")
             } else {
-                format!("*Stream[{}]", symbols[stream.item_codec().schema().id()])
+                format!("*Stream[{item}]")
             }
         }
         _ => aggregate.as_ref().unwrap().type_name.clone(),

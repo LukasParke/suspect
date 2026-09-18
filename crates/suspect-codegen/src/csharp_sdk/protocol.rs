@@ -17,6 +17,10 @@ pub struct ProtocolOptions {
     pub compatibility_profiles: Vec<p::CompatibilityProfile>,
     /// Source scheme names mapped to runtime environment-variable names only.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,7 +79,7 @@ impl PlannedMedia {
             p::Representation::Json { codec } | p::Representation::Text { codec, .. } => {
                 codec.as_ref().map(|c| c.schema().id())
             }
-            p::Representation::Stream { stream } => Some(stream.item_codec().schema().id()),
+            p::Representation::Stream { stream } => stream.item_codec().map(|c| c.schema().id()),
             _ => None,
         }
     }
@@ -212,7 +216,37 @@ pub(super) fn plan_with_capabilities(
                 .collect::<Vec<_>>()
         })?;
     let credential_env =
-        crate::credential_env::plan(&contract, &wire, options.credential_env.as_ref())?;
+        crate::credential_env::plan_with_defaults(&contract, &wire, options.credential_env.as_ref(), options.sdk_defaults.as_ref())?;
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = p::plan_incoming(&contract)?;
+    // Incoming receipts extend the codec table only when declared: their body
+    // schemas become actual codec inputs beside the selected operations'.
+    let mut codec_roots: Vec<SchemaId> = wire.codec_roots().to_vec();
+    if !incoming.is_empty() {
+        codec_roots.extend(incoming.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+    }
+    let mut schema_closure = wire.codec_schema_closure().to_vec();
+    if !incoming.is_empty() {
+        // The effective closure is recomputed over the merged roots once, so
+        // the resource gate, the compiled program and the native models all
+        // agree on exactly the same schema closure.
+        schema_closure = contract.effective_schema_closure(&codec_roots);
+    }
+    let pagination = if options.sdk_defaults.is_some() {
+        Some(p::plan_pagination(&contract, &wire, options.sdk_defaults.as_ref())?)
+    } else {
+        None
+    };
+    let oauth = if options.sdk_defaults.is_some() {
+        Some(p::plan_oauth(&contract, &wire, options.sdk_defaults.as_ref())?)
+    } else {
+        None
+    };
+    let stream_semantics = p::plan_stream_semantics(&contract, &wire);
     let mut errors = Vec::new();
     for op in wire.operations() {
         if op.method().is_custom()
@@ -336,11 +370,11 @@ pub(super) fn plan_with_capabilities(
             }
         }
     }
-    let resources = scoped && super::resources::required(&contract, wire.codec_schema_closure());
+    let resources = scoped && super::resources::required(&contract, &schema_closure);
     let reachable = if resources {
-        wire.codec_schema_closure().to_vec()
+        schema_closure
     } else {
-        contract.reachable_from(wire.codec_roots())
+        contract.reachable_from(&codec_roots)
     };
     for id in &reachable {
         if let Some(raw) = contract.source(id) {
@@ -423,10 +457,10 @@ pub(super) fn plan_with_capabilities(
     let scoped = matches!(
         program.version,
         suspect_schema::OwnedProgram::V2_VERSION | suspect_schema::OwnedProgram::V3_VERSION
-    ) || crate::schema_view::has_intersections(&contract, &reachable);
+    );
     let mut models = models::plan(
         &contract,
-        wire.codec_roots(),
+        &codec_roots,
         nullable,
         scoped,
         resources,
@@ -442,6 +476,7 @@ pub(super) fn plan_with_capabilities(
         "ServerRuntime",
         "ResourceInfo",
         "ApiUrlBase",
+        "Attribution",
     ];
     if scoped {
         runtime_names.extend([
@@ -457,6 +492,44 @@ pub(super) fn plan_with_capabilities(
     }
     if credential_env.is_some() {
         runtime_names.push("CredentialEnvironment");
+    }
+    if pagination
+        .as_ref()
+        .is_some_and(|outcome| !outcome.paginated.is_empty())
+    {
+        // Reserve the emitted pagination helper names against model and
+        // operation allocations, only while helpers are actually emitted.
+        runtime_names.extend(["Pagination", "PaginationException", "PaginationDescriptor", "PaginationDescriptors"]);
+    }
+    if oauth
+        .as_ref()
+        .is_some_and(super::oauth::has_usable)
+    {
+        // Reserve the emitted OAuth lifecycle names against model and
+        // operation allocations, only while OAuth.g.cs is actually emitted.
+        runtime_names.extend([
+            "TokenSet",
+            "ITokenStore",
+            "MemoryTokenStore",
+            "OAuth",
+            "AuthException",
+            "OAuthClientOptions",
+            "OAuthSchemeDescriptor",
+            "OAuthFlowDescriptor",
+            "AuthorizationTransaction",
+            "AuthorizationBegin",
+        ]);
+    }
+    if !incoming.is_empty() {
+        // Reserve the emitted incoming receipt names against model and
+        // operation allocations, only while receipts are actually emitted.
+        runtime_names.extend([
+            "Incoming",
+            "IncomingRequestException",
+            "IncomingRoute",
+            "IncomingSource",
+            "IncomingDescriptor",
+        ]);
     }
     let mut allocated: BTreeSet<String> = models
         .names
@@ -657,14 +730,22 @@ pub(super) fn plan_with_capabilities(
         examples::plan_protocol_examples(contract.clone(), &wire, Default::default())
     };
     let samples = super::samples::plan(&models, &examples, &compiled)?;
+    // Receipts the emitted helpers cannot express surface as shared plan
+    // errors; emission itself recomputes the admitted set deterministically.
+    super::incoming::prepare(&contract, &incoming, &models)?;
     Ok(SdkPlan {
         contract,
         config,
+        attribution: options.attribution,
         operations,
         models,
         credentials,
         credential_bindings,
         credential_env,
+        pagination,
+        oauth,
+        stream_semantics,
+        incoming,
         protocol: wire,
         program,
         indices,
@@ -808,7 +889,11 @@ fn media(
                 p::Representation::Binary { .. } => "byte[]".into(),
                 p::Representation::Stream { stream } => format!(
                     "HttpStream<{}>",
-                    models.native_type(stream.item_codec().schema().id())
+                    stream.item_codec().map_or_else(
+                        // A schemaless stream surfaces untyped parsed envelope values.
+                        || "System.Text.Json.JsonElement".to_owned(),
+                        |codec| models.native_type(codec.schema().id()),
+                    )
                 ),
                 _ => parts
                     .as_ref()

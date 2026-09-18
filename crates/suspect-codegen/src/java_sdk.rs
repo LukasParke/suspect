@@ -18,11 +18,15 @@ mod docs;
 mod emit;
 pub mod http;
 mod http_emit;
+mod incoming;
 pub mod json_runtime;
 mod model_emit;
 pub mod models;
+mod oauth;
+mod pagination;
 pub mod protocol;
 pub mod validation;
+mod stream;
 mod wire_emit;
 
 pub use docs::{JavaExample, JavaOperationExample};
@@ -34,6 +38,10 @@ pub struct ProtocolConfig {
     pub compatibility_profiles: BTreeSet<crate::http_protocol::CompatibilityProfile>,
     /// Explicit runtime variable names, bound after protocol admission.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 
 /// Maven/Java naming identity. No option adds service semantics.
@@ -91,6 +99,11 @@ pub struct SdkPlan {
     native_examples: Vec<JavaOperationExample>,
     protocol: crate::http_protocol::ProtocolPlan,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    attribution: Option<crate::attribution::AttributionDescriptor>,
+    pagination: Option<crate::http_protocol::PaginationOutcome>,
+    oauth: Option<crate::http_protocol::OAuthPlan>,
+    stream_semantics: crate::http_protocol::StreamSemanticsPlan,
+    incoming: crate::http_protocol::IncomingPlan,
 }
 impl SdkPlan {
     /// Retained rich source-backed HTTP decisions and actual codec roots.
@@ -102,6 +115,33 @@ impl SdkPlan {
     #[must_use]
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
+    }
+    /// Compiled `ua/v1` attribution constants; `None` keeps the disabled sentinel.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.attribution.as_ref()
+    }
+    /// Compiled pagination selection carried from the configured SDK defaults.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&crate::http_protocol::PaginationOutcome> {
+        self.pagination.as_ref()
+    }
+    /// Compiled OAuth lifecycle selection carried from the configured SDK defaults.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&crate::http_protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// Compiled typed-stream semantics for every operation stream media,
+    /// carried from the infallible shared planner.
+    #[must_use]
+    pub fn stream_semantics(&self) -> &crate::http_protocol::StreamSemanticsPlan {
+        &self.stream_semantics
+    }
+    /// Compiled incoming webhook/callback receipts over the whole contract,
+    /// selection-independent.
+    #[must_use]
+    pub fn incoming(&self) -> &crate::http_protocol::IncomingPlan {
+        &self.incoming
     }
     /// Exact retained native model/declaration/codec graph.
     #[must_use]
@@ -366,9 +406,46 @@ fn plan_sdk_internal(
         protocol::plan(&contract, selected, &protocol_config)?
     };
     let credential_env =
-        crate::credential_env::plan(&contract, &wire, protocol_config.credential_env.as_ref())?;
+        crate::credential_env::plan_with_defaults(&contract, &wire, protocol_config.credential_env.as_ref(), protocol_config.sdk_defaults.as_ref())?;
+    let attribution = protocol_config.attribution;
+    // Compiled pagination policy: SDK defaults are required, and a policy
+    // failure is a plan failure like every other diagnostic.
+    let pagination = match protocol_config.sdk_defaults.as_ref() {
+        Some(defaults) => Some(crate::http_protocol::plan_pagination(
+            &contract,
+            &wire,
+            Some(defaults),
+        )?),
+        None => None,
+    };
+    // Compiled OAuth lifecycle policy, mirrored from pagination: SDK defaults
+    // are required, and a policy failure is a plan failure like every other
+    // diagnostic.
+    let oauth = match protocol_config.sdk_defaults.as_ref() {
+        Some(defaults) => Some(crate::http_protocol::plan_oauth(
+            &contract,
+            &wire,
+            Some(defaults),
+        )?),
+        None => None,
+    };
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = crate::http_protocol::plan_incoming(&contract)?;
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission stays conditional on
+    // discriminated SSE operations and is never gated on SDK defaults.
+    let stream_semantics = crate::http_protocol::plan_stream_semantics(&contract, &wire);
     let mut roots = roots.to_vec();
     roots.extend(wire.codec_roots().iter().cloned());
+    if !incoming.is_empty() {
+        // Incoming receipts extend the codec table only when declared: their
+        // body schemas become actual codec inputs beside the selected
+        // operations'.
+        roots.extend(incoming.codec_roots().iter().cloned());
+    }
     roots.sort();
     roots.dedup();
     for root in &roots {
@@ -398,6 +475,9 @@ fn plan_sdk_internal(
     }
     let compiler = OwnedCompiler::new(Config {
         max_depth: 128,
+        oas30_nullable_in_31: protocol_config
+            .compatibility_profiles
+            .contains(&crate::http_protocol::CompatibilityProfile::Oas30NullableIn31V1),
         ..Config::default()
     });
     let compiled = if resources {
@@ -418,7 +498,22 @@ fn plan_sdk_internal(
     })?;
     let program = compiled.program();
     validation::check(&contract, &program)?;
-    let models = models::plan_models(&contract, &roots, &config, &compiled, &program)?;
+    // The emitted OAuth class name shares the package namespace with native
+    // models; reserve it only while OAuth emission participates, so no-policy
+    // allocation behavior is unchanged.
+    let mut reserved = BTreeSet::new();
+    if let Some(oauth) = &oauth
+        && oauth::emittable(oauth)
+    {
+        reserved.extend(oauth::TOP_LEVEL_NAMES.iter().map(|name| (*name).to_string()));
+    }
+    if !incoming.is_empty() {
+        // The emitted Incoming class name shares the package namespace with
+        // native models; reserve it only while receipt emission participates,
+        // so receipt-less allocation behavior is unchanged.
+        reserved.extend(incoming::TOP_LEVEL_NAMES.iter().map(|name| (*name).to_string()));
+    }
+    let models = models::plan_models(&contract, &roots, &config, &compiled, &program, reserved)?;
     let operations = http::plan_operations(&wire, &models, &config, credential_env.is_some());
     let examples = if resources {
         crate::examples::plan_protocol_examples_v3(contract.clone(), &wire, Default::default())
@@ -426,6 +521,9 @@ fn plan_sdk_internal(
         crate::examples::plan_protocol_examples_v2(contract.clone(), &wire, Default::default())
     };
     let native_examples = docs::plan_examples(&examples, &operations, &models, &compiled);
+    // Receipts the emitted incoming helpers cannot express surface as shared
+    // plan errors; emission recomputes the admitted set deterministically.
+    incoming::prepare(&contract, &incoming, &models)?;
     Ok(SdkPlan {
         contract,
         config,
@@ -437,6 +535,11 @@ fn plan_sdk_internal(
         native_examples,
         protocol: wire,
         credential_env,
+        attribution,
+        pagination,
+        oauth,
+        stream_semantics,
+        incoming,
     })
 }
 

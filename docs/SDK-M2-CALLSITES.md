@@ -1,14 +1,16 @@
 # M2 native slice call sites
 
 Callsites and coverage of the shared TS/JS–Rust installed-package gate.
-The gate uses a self-contained create/update/list/get contract and independent
-native consumers. See [SDK capabilities](SDK-CAPABILITIES.md) for other profiles.
+The original execution and Rust 1.88 floor evidence are archived in
+[SDK-M0-M2-EXIT.md](SDK-M0-M2-EXIT.md); current integrated status is in
+[SDK-PROGRESS.md](SDK-PROGRESS.md).
 
 ## Gate
 
 - Test: `crates/suspect-codegen/tests/m2_vertical.rs`
   `m2_vertical_canonical_contract_drives_both_native_packages`.
 - Focused gate: `cargo test --locked -p suspect-codegen --test m2_vertical -- --include-ignored`.
+- Integrated native matrix: [SDK-M3-M6-EXIT.md](SDK-M3-M6-EXIT.md).
 
 ## Source contract
 
@@ -83,6 +85,8 @@ native consumers. See [SDK capabilities](SDK-CAPABILITIES.md) for other profiles
   (mapped to `RUSTUP_TOOLCHAIN`), matching the existing native gates.
 - All network traffic is loopback (`127.0.0.1` recording server /
   in-process transport); no real external API calls are made.
+- The five actual OpenRouter operation consumers remain separate
+  (`rust_http_openrouter.rs`, `typescript_package.rs` `#[ignore]` tests).
 
 ## Approved native call style
 

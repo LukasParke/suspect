@@ -142,6 +142,12 @@ struct ClientOptions {
     std::size_t max_parts = @PARTS@;
     std::size_t max_stream_item_bytes = @STREAM_ITEM_BYTES@;
     std::size_t max_stream_buffer_bytes = @STREAM_BUFFER_BYTES@;
+    /** ua/v1 attribution: full User-Agent override; an explicit empty value
+     * suppresses the automatic attribution header entirely. */
+    Presence<std::string> user_agent;
+    /** ua/v1 attribution identity replacing the SDK token in the automatic
+     * header: "<name>" or "<name>/<version>" of RFC 9110 tokens. */
+    Presence<std::string> application_id;
 };
 struct CallOptions {
     std::stop_token stop;

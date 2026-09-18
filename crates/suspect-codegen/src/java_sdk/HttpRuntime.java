@@ -53,10 +53,13 @@ public final class HttpRuntime implements AutoCloseable {
         final int maxResponseBytes,maxRequestBytes,maxCaptureBytes,maxUrlBytes,maxHeaderBytes,maxStreamBufferBytes;
         final HttpClient httpClient;
         final ModelCodec.Limits codecLimits;
+        /** Explicit ua/v1 policy: null keeps the automatic attribution header and an empty string suppresses it. */
+        final String userAgent, applicationId;
         private Options(Builder b){
             credentials=Map.copyOf(b.credentials);choices=b.choices.build();timeout=b.timeout;
             maxResponseBytes=b.maxResponseBytes;maxRequestBytes=b.maxRequestBytes;maxCaptureBytes=b.maxCaptureBytes;maxUrlBytes=b.maxUrlBytes;
             maxHeaderBytes=b.maxHeaderBytes;maxStreamBufferBytes=b.maxStreamBufferBytes;httpClient=b.httpClient;codecLimits=b.codecLimits;
+            userAgent=b.userAgent;applicationId=b.applicationId;
             if(timeout.isZero()||timeout.isNegative()||timeout.compareTo(Duration.ofDays(1))>0||maxResponseBytes<0||maxResponseBytes>MAX_BYTES||maxRequestBytes<0||maxRequestBytes>MAX_BYTES
                     ||maxCaptureBytes<0||maxCaptureBytes>MAX_BYTES||maxUrlBytes<1||maxUrlBytes>65536||maxHeaderBytes<1||maxHeaderBytes>MAX_BYTES||maxStreamBufferBytes<1||maxStreamBufferBytes>MAX_BYTES)
                 throw new IllegalArgumentException("invalid HTTP resource policy");
@@ -73,6 +76,7 @@ public final class HttpRuntime implements AutoCloseable {
             private int maxResponseBytes=MAX_BYTES,maxRequestBytes=MAX_BYTES,maxCaptureBytes=4096,maxUrlBytes=65536,maxHeaderBytes=65536,maxStreamBufferBytes=1024*1024;
             private HttpClient httpClient;
             private ModelCodec.Limits codecLimits=ModelCodec.Limits.defaults();
+            private String userAgent, applicationId;
             private Builder(){}
             /** Supply a bearer credential for the exact source name. @param scheme source scheme @param token token @return builder */
             public Builder credential(String scheme,String token){Objects.requireNonNull(token);if(token.length()>16384||!token.matches("[A-Za-z0-9._~+/-]+=*"))throw new IllegalArgumentException("invalid bearer token");credentials.put(scheme(scheme),new Bearer(token));return this;}
@@ -115,6 +119,10 @@ public final class HttpRuntime implements AutoCloseable {
             public Builder httpClient(HttpClient value){httpClient=Objects.requireNonNull(value);return this;}
             /** Shared per-phase codec policy. @param value limits @return builder */
             public Builder codecLimits(ModelCodec.Limits value){codecLimits=Objects.requireNonNull(value);return this;}
+            /** Full override of the automatic ua/v1 attribution header; an empty string suppresses the header entirely. @param value header value or null for automatic @return builder */
+            public Builder userAgent(String value){userAgent=value;return this;}
+            /** Replaces the SDK identity token in the automatic attribution header: {@code <name>} or {@code <name>/<version>} of RFC 9110 tokens. An invalid identifier omits the automatic header. @param value application identifier or null @return builder */
+            public Builder applicationId(String value){applicationId=value;return this;}
             /** Check and snapshot. @return options */
             public Options build(){return new Options(this);}
         }
@@ -323,10 +331,34 @@ public final class HttpRuntime implements AutoCloseable {
             else{if(media.size()!=1)throw new IllegalArgumentException("request media choice required");selected=media.getFirst();actual=text(get(selected,"media_type"),"declared");HttpWire.chooseMedia(media,actual);}
             int ceiling=(int)Math.min(options.maxRequestBytes,number(get(get(bodyPlan,"limits"),"body")));HttpWire.Encoded encoded=HttpWire.encodeBody(selected,value,actual,ceiling,c);body=encoded.bytes();headers.put("Content-Type",encoded.contentType());
         }else if(bodyPlan!=JsonNull.INSTANCE&&flag(bodyPlan,"required"))throw new IllegalArgumentException("missing request body");
+        // ua/v1 attribution is applied after declared parameters so an explicit
+        // caller-supplied User-Agent header keeps precedence over the default.
+        String userAgent=resolveUserAgent();
+        if(userAgent!=null)headers.putIfAbsent("User-Agent",userAgent);
         long count=url.value().size()+body.size(),headerBytes=0;for(var header:headers.entrySet()){if(!HttpWire.token(header.getKey()))throw new IllegalArgumentException("invalid header name");HttpWire.headerValue(header.getValue());headerBytes+=header.getKey().length()+header.getValue().length();}
         if(count+headerBytes>options.maxRequestBytes||headerBytes>options.maxHeaderBytes)throw new SdkException("resource-limit",op.source(),0,new byte[0],false);
         HttpRequest.Builder builder=HttpRequest.newBuilder(URI.create(url.text())).timeout(timeout);headers.forEach(builder::header);
         return builder.method(op.method(),prepared.body()==null?HttpRequest.BodyPublishers.noBody():HttpRequest.BodyPublishers.ofByteArray(body.internal())).build();
+    }
+    /** ua/v1 application identity: {@code <name>} or {@code <name>/<version>} of RFC 9110 tokens. */
+    static boolean applicationIdentity(String value){
+        if(value.isEmpty()||value.length()>128)return false;
+        int slash=value.indexOf('/');
+        if(slash<0)return HttpWire.token(value);
+        return value.indexOf('/',slash+1)<0&&HttpWire.token(value.substring(0,slash))&&HttpWire.token(value.substring(slash+1));
+    }
+    /** ua/v1 attribution: an explicit caller value wins entirely, an explicit empty value suppresses the header, and the automatic value identifies suspect as the generator and the SDK or a caller-supplied application as the client. @return header value or null for no header */
+    String resolveUserAgent(){
+        if(options.userAgent!=null)return options.userAgent.isEmpty()?null:options.userAgent;
+        if(Attribution.SUSPECT_VERSION.isEmpty())return null;
+        String identity=Attribution.SDK_NAME+"/"+Attribution.SDK_VERSION;
+        if(options.applicationId!=null&&!options.applicationId.isEmpty()){
+            if(!applicationIdentity(options.applicationId))return null;
+            identity=options.applicationId;
+        }
+        String languageVersion=System.getProperty("java.version");
+        if(languageVersion==null||languageVersion.isEmpty())languageVersion="unknown";
+        return "suspect/"+Attribution.SUSPECT_VERSION+" "+identity+" ("+Attribution.LANGUAGE+"/"+languageVersion+"; openapi/"+Attribution.SPEC_VERSION+")";
     }
     private void attachCredentials(Operation op,RequestOptions request,Map<String,String> headers,List<String> query,List<String> cookies,ModelCodec.Context c){
         JsonValue security=get(op.wire(),"security");if(!text(security,"kind").equals("alternatives"))return;

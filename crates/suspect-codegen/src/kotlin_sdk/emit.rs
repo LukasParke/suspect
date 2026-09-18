@@ -175,19 +175,15 @@ pub(super) fn models(plan: &Plan) -> String {
 }
 
 pub(super) fn codecs(plan: &Plan) -> String {
-    codec_group(plan, plan.models.symbols(), "public object Codecs")
-}
-
-pub(super) fn codec_group(plan: &Plan, symbols: &[Symbol], declaration: &str) -> String {
     let mut out = header(plan);
-    out.push_str(&format!(
-        "/** Source-validating codecs for actual JSON/text roots. */\n{declaration} {{\n"
-    ));
-    for s in symbols {
+    out.push_str(
+        "/** Source-validating codecs for actual JSON/text roots. */\npublic object Codecs {\n",
+    );
+    for s in plan.models.symbols() {
         writeln!(out,"    /** Source: {} */\n    public val {}: ModelCodec<{}> get() = ModelCodec({}, source{}(), ::read{}, ::write{})",source(&s.source),s.codec_name,s.kotlin_type,s.index,s.index,s.index,s.index).unwrap();
     }
     out.push_str("}\n");
-    for s in symbols {
+    for s in plan.models.symbols() {
         writeln!(
             out,
             "internal fun source{}(): SourceLocation = {}",
@@ -374,4 +370,43 @@ fn write_shape(m: &ModelPlan, s: &Symbol) -> String {
             out
         }
     }
+}
+
+/// `ua/v1` attribution constants compiled at generation time. The runtime
+/// resolver in Protocol.kt reads them; an absent descriptor emits the disabled
+/// sentinel (empty suspect version) so the static runtime compiles unchanged.
+pub(super) fn attribution(plan: &Plan) -> String {
+    let mut out = header(plan);
+    match &plan.config.attribution {
+        Some(attribution) => {
+            out.push_str(
+                "/** ua/v1 attribution: every request identifies suspect as the generator and the SDK or a caller-supplied application as the client. */\n",
+            );
+            for (name, value) in [
+                ("ATTRIBUTION_SUSPECT_VERSION", &attribution.suspect_version),
+                ("ATTRIBUTION_SDK_NAME", &attribution.sdk_name),
+                ("ATTRIBUTION_SDK_VERSION", &attribution.sdk_version),
+                ("ATTRIBUTION_SPEC_VERSION", &attribution.spec_version),
+            ] {
+                writeln!(
+                    out,
+                    "internal const val {name}: String = {}",
+                    quote(value)
+                )
+                .unwrap();
+            }
+        }
+        None => {
+            out.push_str("// An empty suspect version disables the automatic attribution header.\n");
+            for name in [
+                "ATTRIBUTION_SUSPECT_VERSION",
+                "ATTRIBUTION_SDK_NAME",
+                "ATTRIBUTION_SDK_VERSION",
+                "ATTRIBUTION_SPEC_VERSION",
+            ] {
+                writeln!(out, "internal const val {name}: String = \"\"").unwrap();
+            }
+        }
+    }
+    out
 }

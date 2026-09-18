@@ -2,10 +2,12 @@
 //! Source-addressed contracts drive native models, checked
 //! codecs, HTTP clients, documentation and compatibility reports.
 
+pub mod attribution;
 pub mod backend;
 pub mod compatibility;
 pub mod credential_env;
 pub mod generation_session;
+pub mod sdk_defaults;
 #[cfg(feature = "java-sdk")]
 #[rustfmt::skip]
 pub mod java_sdk;
@@ -47,7 +49,7 @@ pub mod rust_codecs;
 pub mod rust_http;
 pub mod rust_models;
 pub mod rust_validation;
-pub(crate) mod schema_view;
+pub mod schema_view;
 pub mod swift_sdk;
 #[cfg(feature = "http-protocol")]
 pub mod terraform;

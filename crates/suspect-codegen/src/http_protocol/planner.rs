@@ -195,13 +195,34 @@ pub fn plan(
         let body = super::bodies::plan(&mut p, &source);
         let responses = super::responses::plan(&mut p, &source);
         let path = op.path_template().unwrap_or_default().to_owned();
+        let declared: BTreeSet<_> = parameters
+            .iter()
+            .filter(|v| v.location == ParameterLocation::Path)
+            .map(|v| v.name.as_str())
+            .collect();
+        // Under ColonPathParametersV1, a legacy colon segment that exactly
+        // matches a declared required path parameter is normalized to the OAS
+        // brace expression before template matching. An undeclared colon
+        // segment stays literal, so the ordinary exact-match check refuses it.
+        let path = if p
+            .capabilities
+            .profiles
+            .contains(&CompatibilityProfile::ColonPathParametersV1)
+            && let Some(normalized) = colon_path_parameters(&path, &declared)
+        {
+            p.warn(
+                op.path_item_source(),
+                "http-compatibility-profile",
+                format!(
+                    "colon-path-parameters-v1 normalized the legacy colon segment(s) of {path} to the declared brace path parameters {normalized}"
+                ),
+            );
+            normalized
+        } else {
+            path
+        };
         match super::servers::placeholders(&path) {
             Ok(names) => {
-                let declared: BTreeSet<_> = parameters
-                    .iter()
-                    .filter(|v| v.location == ParameterLocation::Path)
-                    .map(|v| v.name.as_str())
-                    .collect();
                 if names.into_iter().collect::<BTreeSet<_>>() != declared {
                     p.error(op.path_item_source(), "http-path-parameters", "path template expressions must exactly match the effective required path parameters");
                 }
@@ -347,6 +368,26 @@ pub(super) struct Planner<'a> {
 }
 
 impl<'a> Planner<'a> {
+    /// A planner for non-selected admission passes (webhooks and callbacks).
+    /// Incoming planning is a Contract-level admission question, not an
+    /// adapter capability negotiation, so the complete feature vocabulary is
+    /// enabled; each backend refuses what its native emission cannot express.
+    pub(super) fn admission(contract: &'a Contract) -> Self {
+        Self {
+            contract,
+            capabilities: Capabilities::for_adapter(
+                "sdk-incoming-v1",
+                Capability::ALL.iter().copied(),
+            ),
+            diagnostics: Vec::new(),
+            checked_schemas: BTreeSet::new(),
+            checked_versions: BTreeSet::new(),
+            reference_uses: BTreeMap::new(),
+        }
+    }
+}
+
+impl<'a> Planner<'a> {
     pub fn location(&self, source: &SourceId) -> SourceLocation {
         // Missing-field diagnostics point to an existing container, never to a
         // fabricated schema/default node or an unrelated document's byte range.
@@ -442,7 +483,7 @@ impl<'a> Planner<'a> {
             resource_context: self.resource_context(source),
         });
     }
-    fn related(&self, source: &SourceId) -> Vec<SourceLocation> {
+    pub(super) fn related(&self, source: &SourceId) -> Vec<SourceLocation> {
         let mut found = BTreeSet::new();
         let mut pending = vec![source.clone()];
         while let Some(id) = pending.pop() {
@@ -812,7 +853,15 @@ impl<'a> Planner<'a> {
                     }
                     _ => {
                         if schema.raw().get("nullable").is_some() {
-                            self.warn(&current.child("nullable"), "http-nullable-annotation", "nullable is an OAS 3.0 keyword, not a 3.1/3.2 null-type declaration; no wire null convention is inferred");
+                            if self
+                                .capabilities
+                                .profiles
+                                .contains(&CompatibilityProfile::Oas30NullableIn31V1)
+                            {
+                                self.warn(&current.child("nullable"), "http-nullable-annotation", "oas30-nullable-in-3.1-v1 interprets this nullable annotation with OAS 3.0 semantics: the same-object type gains (or, with nullable: false, loses) null for wire decode/encode");
+                            } else {
+                                self.warn(&current.child("nullable"), "http-nullable-annotation", "nullable is an OAS 3.0 keyword, not a 3.1/3.2 null-type declaration; no wire null convention is inferred");
+                            }
                         }
                     }
                 }
@@ -973,6 +1022,31 @@ impl<'a> Planner<'a> {
     }
 }
 
+/// Colon-path normalization under `ColonPathParametersV1`: replace each
+/// `/`:name segment whose name is a declared path parameter with `/{name}`.
+/// Returns `None` when nothing changes, so undeclared colon segments keep the
+/// ordinary exact-match refusal instead of being guessed.
+fn colon_path_parameters(path: &str, declared: &BTreeSet<&str>) -> Option<String> {
+    let mut normalized = String::with_capacity(path.len());
+    let mut changed = false;
+    for (index, segment) in path.split('/').enumerate() {
+        if index != 0 {
+            normalized.push('/');
+        }
+        if let Some(name) = segment.strip_prefix(':')
+            && declared.contains(name)
+        {
+            normalized.push('{');
+            normalized.push_str(name);
+            normalized.push('}');
+            changed = true;
+        } else {
+            normalized.push_str(segment);
+        }
+    }
+    changed.then_some(normalized)
+}
+
 // JSON Schema's integer is mathematical (50, 50.0 and 5e1 are the same bound).
 // Preserve exactness without float rounding or exponent-sized allocation.
 fn finite_counter(value: &Value) -> Option<u64> {
@@ -1009,7 +1083,7 @@ pub(super) fn parent(source: &SourceId) -> Option<SourceId> {
     }
     Some(id)
 }
-fn method(value: &str) -> Option<Method> {
+pub(super) fn method(value: &str) -> Option<Method> {
     Some(match value {
         "GET" => Method::Get,
         "PUT" => Method::Put,
@@ -1076,7 +1150,7 @@ fn operation_roots(op: &OperationPlan, roots: &mut BTreeSet<SourceId>) {
         }
     }
 }
-fn representation_roots(value: &Representation, roots: &mut BTreeSet<SourceId>) {
+pub(super) fn representation_roots(value: &Representation, roots: &mut BTreeSet<SourceId>) {
     match value {
         Representation::Json { codec } | Representation::Text { codec, .. } => {
             if let Some(c) = codec {
@@ -1107,16 +1181,18 @@ fn representation_roots(value: &Representation, roots: &mut BTreeSet<SourceId>) 
             }
         },
         Representation::Stream { stream } => {
-            roots.insert(stream.item_codec.schema.id.clone());
+            if let Some(codec) = &stream.item_codec {
+                roots.insert(codec.schema.id.clone());
+            }
         }
     }
 }
-fn additional_roots(value: &AdditionalParts, roots: &mut BTreeSet<SourceId>) {
+pub(super) fn additional_roots(value: &AdditionalParts, roots: &mut BTreeSet<SourceId>) {
     if let AdditionalParts::Allowed(part) = value {
         part_roots(part, roots);
     }
 }
-fn part_roots(part: &PartPlan, roots: &mut BTreeSet<SourceId>) {
+pub(super) fn part_roots(part: &PartPlan, roots: &mut BTreeSet<SourceId>) {
     match &part.representation {
         PartRepresentation::Json { codec, .. }
         | PartRepresentation::Text { codec, .. }

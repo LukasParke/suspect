@@ -229,13 +229,25 @@ module __NAMESPACE__
       end
       out.each_value(&:freeze); out.freeze
     end
+    # ua/v1 application identity: `<name>` or `<name>/<version>` of RFC 9110 tokens.
+    def application_identity?(value)
+      name, slash, version = value.partition('/')
+      Wire.token?(name) && (slash.empty? || (!version.empty? && Wire.token?(version)))
+    end
   end
 
   # Native keyword client; every wire choice comes from its retained protocol.
   class Client
+    # `user_agent:` is the full User-Agent override: a non-empty String wins
+    # entirely, an explicit empty String or nil suppresses the automatic
+    # attribution header, and the default (UNSET) assembles the automatic
+    # ua/v1 attribution from the generated constants.
+    # `application_id:` replaces the SDK identity token in the automatic
+    # attribution header with a caller identity (RFC 9110 token or token/version).
     def initialize(auth: {}, credential_provider: nil, security: UNSET, transport: nil, server_url: nil,
                    server: UNSET, server_variables: {}, document_url: nil, timeout: 30.0,
-                   max_response_bytes: Internal::POLICY[:max_response_bytes], max_capture_bytes: Internal::POLICY[:max_capture_bytes])
+                   max_response_bytes: Internal::POLICY[:max_response_bytes], max_capture_bytes: Internal::POLICY[:max_capture_bytes],
+                   user_agent: UNSET, application_id: nil)
       raise ArgumentError, 'auth must be a string-keyed Hash' unless auth.instance_of?(Hash) && auth.keys.all? { |k| k.instance_of?(String) }
       @auth = auth.to_h { |key, value| [key.dup.freeze, value.instance_of?(String) ? value.dup.freeze : value] }.freeze
       bearer_names = Internal::PROTOCOL['operations'].flat_map { |o| o['security']['alternatives'] || [] }.flat_map { |a| a['requirements'] }.select { |r| r['credential']['kind'] == 'bearer' }.map { |r| r['name'] }
@@ -251,6 +263,10 @@ module __NAMESPACE__
       @timeout = timeout; ExchangeContext.new(timeout: timeout, cancellation: nil, operation_id: '', source: '')
       @max_response_bytes = Internal.bounded_limit(max_response_bytes, Internal::POLICY[:max_response_bytes], 'max_response_bytes')
       @max_capture_bytes = Internal.bounded_limit(max_capture_bytes, [Internal::POLICY[:max_capture_bytes], @max_response_bytes].min, 'max_capture_bytes')
+      raise ArgumentError, 'user_agent must be a String, nil or unset' unless user_agent.equal?(UNSET) || user_agent.nil? || user_agent.instance_of?(String)
+      raise ArgumentError, 'application_id must be a String or nil' unless application_id.nil? || application_id.instance_of?(String)
+      @user_agent = user_agent.equal?(UNSET) ? UNSET : user_agent&.dup&.freeze
+      @application_id = application_id&.dup&.freeze
       @transport, @owned, @closed = transport || NetHTTPTransport.new, transport.nil?, false
       raise ArgumentError, 'transport must implement exchange(request:, context:)' unless @transport.respond_to?(:exchange)
     end
@@ -362,6 +378,23 @@ module __NAMESPACE__
         end
       end
     end
+    # ua/v1 attribution: an explicit caller User-Agent wins entirely; an explicit
+    # empty or nil value suppresses the header; otherwise the automatic value
+    # identifies suspect as the generator and the SDK package or a
+    # caller-supplied application as the client.
+    def resolve_user_agent
+      unless @user_agent.equal?(UNSET)
+        return @user_agent.nil? || @user_agent.empty? ? nil : @user_agent
+      end
+      plan = Internal::ATTRIBUTION
+      return nil if plan[:suspect_version].empty?
+      identity = plan[:sdk_name] + '/' + plan[:sdk_version]
+      if @application_id && !@application_id.empty?
+        return nil if @application_id.bytesize > 128 || !Internal.application_identity?(@application_id)
+        identity = @application_id
+      end
+      'suspect/' + plan[:suspect_version] + ' ' + identity + ' (ruby/' + ::RUBY_VERSION + '; openapi/' + plan[:spec_version] + ')'
+    end
     def prepare_request(op, parameters, body, content_type, accept, security, server, variables, document_url)
       payload = Internal::PayloadSession.new
       headers, queries, cookies, ownership = {'Accept-Encoding' => 'identity'}, [], [], {}
@@ -419,6 +452,12 @@ module __NAMESPACE__
       unless cookies.empty?
         raise RequestError.new('Cookie header conflicts with cookie parameters', source: op[:source]) if headers.keys.any? { |k| k.casecmp?('cookie') }
         headers['Cookie'] = cookies.join('; ')
+      end
+      # ua/v1 attribution is applied after declared parameters so an explicit
+      # caller-supplied User-Agent header parameter keeps precedence.
+      unless headers.any? { |name, _| name.casecmp?('user-agent') }
+        user_agent = resolve_user_agent
+        headers['User-Agent'] = user_agent unless user_agent.nil?
       end
       url = base.sub(%r{/\z}, '') + path
       url += '?' + queries.join('&') unless queries.empty?

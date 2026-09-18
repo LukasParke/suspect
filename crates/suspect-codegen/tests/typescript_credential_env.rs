@@ -104,18 +104,10 @@ fn hashes(files: &[OutFile]) -> BTreeMap<String, String> {
 #[test]
 fn no_policy_http_package_keeps_its_baseline_bytes() {
     let files = package(&plan(load_at(fixture(), ENTRY), HttpConfig::expanded()));
-    let mut expected: BTreeMap<String, String> = serde_json::from_str(include_str!(
+    let expected: BTreeMap<String, String> = serde_json::from_str(include_str!(
         "fixtures/typescript-credential-env-no-policy-v1.json"
     ))
     .unwrap();
-    // Explicit metadata type references preserve precision at full-contract size.
-    assert_eq!(
-        expected.insert(
-            "typescript/operations.ts".into(),
-            "c052325fd83eb7ffcce56e80127004a9475074dd90abd935c9b1e0036ea88b87".into()
-        ),
-        Some("1139268993b71885c25a01fd18c994b6a452bd1aa246c4e2379f6d3647e1478f".into())
-    );
     assert_eq!(hashes(&files), expected, "no-policy artifact bytes changed");
 }
 

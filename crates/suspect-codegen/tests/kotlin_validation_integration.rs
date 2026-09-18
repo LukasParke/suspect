@@ -147,6 +147,14 @@ fn verified_default_sdk_adoption_matches_the_explicit_v2_entrypoint() {
         version: "0.3.0".into(),
         package_name: "example.scoped.sdk".into(),
         credential_env: None,
+        sdk_defaults: None,
+        attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+            env!("CARGO_PKG_VERSION"),
+            &target().package_name,
+            &target().package_version,
+            contract.openapi_version(),
+            Backend::KotlinHttp.language_tag(),
+        )),
     };
     let explicit = kotlin_sdk::plan_sdk_v2(contract.clone(), &selected, config.clone()).unwrap();
     let default = kotlin_sdk::plan_sdk(contract.clone(), &selected, config).unwrap();

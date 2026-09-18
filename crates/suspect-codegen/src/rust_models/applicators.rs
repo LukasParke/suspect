@@ -8,12 +8,14 @@ use suspect_ir::contract::{Contract, SchemaId};
 pub(super) fn null_allowed(
     contract: &Contract,
     root: &SchemaId,
+    policy: schema_view::DialectPolicy,
 ) -> Result<bool, schema_view::Problem> {
     fn visit(
         contract: &Contract,
         id: &SchemaId,
         active: &mut BTreeSet<SchemaId>,
         work: &mut usize,
+        policy: schema_view::DialectPolicy,
     ) -> Option<bool> {
         *work = work.checked_sub(1)?;
         if active.len() >= 256 || !active.insert(id.clone()) {
@@ -32,7 +34,7 @@ pub(super) fn null_allowed(
             // A local type/literal rejection is a sufficient non-null proof,
             // independent of later branch/resource behavior. It never implies
             // that any other instance will validate against the whole schema.
-            if !schema_view::accepts_literal(schema, &Value::Null)
+            if !schema_view::accepts_literal(schema, &Value::Null, policy)
                 || raw.get("const").is_some_and(|v| !v.is_null())
                 || raw
                     .get("enum")
@@ -43,7 +45,7 @@ pub(super) fn null_allowed(
             }
             let mut accepts = true;
             for reference in schema.references() {
-                accepts &= visit(contract, reference.target.as_ref()?, active, work)?;
+                accepts &= visit(contract, reference.target.as_ref()?, active, work, policy)?;
             }
             for keyword in ["allOf", "anyOf", "oneOf"] {
                 if let Some(values) = raw.get(keyword).and_then(Value::as_array) {
@@ -54,6 +56,7 @@ pub(super) fn null_allowed(
                             &id.child(keyword).child(&index.to_string()),
                             active,
                             work,
+                            policy,
                         )?);
                     }
                     accepts &= match keyword {
@@ -64,16 +67,16 @@ pub(super) fn null_allowed(
                 }
             }
             if raw.contains_key("not") {
-                accepts &= !visit(contract, &id.child("not"), active, work)?;
+                accepts &= !visit(contract, &id.child("not"), active, work, policy)?;
             }
             if raw.contains_key("if") && (raw.contains_key("then") || raw.contains_key("else")) {
-                let selected = if visit(contract, &id.child("if"), active, work)? {
+                let selected = if visit(contract, &id.child("if"), active, work, policy)? {
                     "then"
                 } else {
                     "else"
                 };
                 if raw.contains_key(selected) {
-                    accepts &= visit(contract, &id.child(selected), active, work)?;
+                    accepts &= visit(contract, &id.child(selected), active, work, policy)?;
                 }
             }
             // All remaining modern applicators apply only to objects/arrays;
@@ -83,7 +86,7 @@ pub(super) fn null_allowed(
         active.remove(id);
         result
     }
-    visit(contract,root,&mut BTreeSet::new(),&mut 100_000).ok_or_else(||schema_view::Problem{
+    visit(contract,root,&mut BTreeSet::new(),&mut 100_000,policy).ok_or_else(||schema_view::Problem{
         source:root.clone(),code:"native-nullability-analysis",message:"v2 carrier nullability proof is incomplete within the finite static-reference analysis profile",
     })
 }

@@ -459,11 +459,32 @@ impl Session {
                 selected.extend(contract.operations().map(|op| op.source().clone()));
             } else {
                 for id in &self.config.operation_ids {
+                    // A selector names either the operation's operationId or,
+                    // for unnamed operations, the `METHOD /path` identity the
+                    // SDK-behavior planners use. Both spellings must reach
+                    // exactly one source operation.
                     let found = contract
                         .operations()
                         .filter(|op| op.operation_id() == Some(id.as_str()))
                         .collect::<Vec<_>>();
                     if found.len() != 1 {
+                        if found.is_empty() {
+                            let method_path = id.split_once(' ');
+                            if let Some((method, path)) = method_path {
+                                let by_path = contract
+                                    .operations()
+                                    .filter(|op| {
+                                        op.operation_id().is_none()
+                                            && op.method().as_str().eq_ignore_ascii_case(method)
+                                            && op.path_template() == Some(path)
+                                    })
+                                    .collect::<Vec<_>>();
+                                if by_path.len() == 1 {
+                                    selected.push(by_path[0].source().clone());
+                                    continue;
+                                }
+                            }
+                        }
                         return Err(SessionError::Configuration(format!(
                             "operationId {id:?} requires exactly one source operation"
                         )));

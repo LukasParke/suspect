@@ -56,6 +56,8 @@ struct Configuration {
     compatibility_profiles: std::collections::BTreeSet<CompatibilityProfile>,
     #[serde(default)]
     credential_env: Option<suspect_codegen::credential_env::CredentialEnv>,
+    #[serde(default)]
+    sdk_defaults: Option<suspect_codegen::sdk_defaults::SdkDefaults>,
     owner: Option<String>,
     cache_entries: Option<usize>,
     cache_bytes: Option<usize>,
@@ -111,6 +113,7 @@ pub(super) fn read_config(
         generation: GenerationOptions {
             compatibility_profiles: config.compatibility_profiles,
             credential_env: config.credential_env,
+            sdk_defaults: config.sdk_defaults,
         },
         ..Default::default()
     };
@@ -232,6 +235,9 @@ pub fn generate(args: SessionArgs) -> Result<i32> {
             let mut record = json!({"format":"suspect.sdk.session.v1","success":success,"status":status,"source":entry.path(),"sourceDocument":generated.contract.entry().as_str(),"input":entry,"output":args.out,"config":config_path,"revision":generated.revision,"compatibilityProfiles":generation_options.compatibility_profiles,"changedArtifacts":changed,"newDocuments":generated.new_documents,"delta":stats(generated.delta),"stats":stats(generated.stats),"diagnostics":diagnostics});
             if let Some(policy) = generation_options.credential_env {
                 record["credentialEnv"] = json!(policy);
+            }
+            if let Some(defaults) = generation_options.sdk_defaults {
+                record["sdkDefaults"] = json!(defaults);
             }
             if args.preview {
                 record["artifacts"] = json!(

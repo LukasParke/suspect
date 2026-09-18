@@ -76,6 +76,7 @@ pub(super) fn capabilities(config: &SwiftConfig) -> Capabilities {
 // existing typed-name table permits collision allocation without changing any
 // schema layout, source binding, validation instruction or codec implementation.
 pub(super) const RUNTIME_NAMES: &[&str] = &[
+    "Attribution",
     "HTTPNoContent",
     "HTTPMediaType",
     "HTTPServer",
@@ -579,18 +580,20 @@ pub(super) fn media(
                     ordered = Some(native);
                     ("multipart", ty, None)
                 }
-                Representation::Stream { stream } => (
-                    if stream.framing() == StreamFraming::ServerSentEvents {
-                        "events"
-                    } else {
-                        "jsonLines"
-                    },
-                    format!(
-                        "HTTPEventStream<{}>",
-                        models.ty(stream.item_codec().schema().id())
+                Representation::Stream { stream } => match stream.item_codec() {
+                    Some(codec) => (
+                        if stream.framing() == StreamFraming::ServerSentEvents {
+                            "events"
+                        } else {
+                            "jsonLines"
+                        },
+                        format!("HTTPEventStream<{}>", models.ty(codec.schema().id())),
+                        None,
                     ),
-                    None,
-                ),
+                    // A schemaless stream surfaces untyped whole-body JSON values
+                    // because the native stream runtime has no untyped codec.
+                    None => ("schemalessStream", "JsonValue".into(), None),
+                },
             };
             PlannedMedia {
                 wire: m.clone(),

@@ -53,6 +53,9 @@ pub struct CodecConfig {
     pub max_conversion_depth: usize,
     /// Shared conversion visits and copied string bytes.
     pub max_conversion_steps: usize,
+    /// Versioned source dialect interpretation choices; the default preserves
+    /// the ordinary strict dialect semantics.
+    pub dialect: crate::schema_view::DialectPolicy,
 }
 
 impl Default for CodecConfig {
@@ -62,6 +65,7 @@ impl Default for CodecConfig {
             json_limits: JsonLimits::default(),
             max_conversion_depth: 128,
             max_conversion_steps: 32 * 1024 * 1024,
+            dialect: crate::schema_view::DialectPolicy::default(),
         }
     }
 }
@@ -118,7 +122,7 @@ pub fn plan_codecs(
     roots: &[SchemaId],
     config: CodecConfig,
 ) -> Result<CodecPlan, Vec<ModelDiagnostic>> {
-    let models = crate::python_models::plan_models(&contract, roots);
+    let models = crate::python_models::plan_models_with_policy(&contract, roots, config.dialect);
     if models.has_errors() {
         return Err(models.diagnostics().to_vec());
     }
@@ -153,7 +157,9 @@ pub fn plan_codecs(
     validation_roots.sort();
     validation_roots.dedup();
     validation_roots = crate::schema_view::closure(&contract, &validation_roots);
-    let compiler = OwnedCompiler::new(config.schema.clone());
+    let mut schema_config = config.schema.clone();
+    schema_config.oas30_nullable_in_31 = config.dialect.oas30_nullable_in_31;
+    let compiler = OwnedCompiler::new(schema_config);
     let compiled = if crate::python_models::requires_resources(&contract, &validation_roots) {
         compiler.compile_v3(contract.clone(), &validation_roots)
     } else {

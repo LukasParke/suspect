@@ -211,7 +211,16 @@ pub(super) fn emit(plan: &HttpPlan, op: &PlannedOperation, crate_name: &str) -> 
                     else {
                         unreachable!()
                     };
-                    code.push_str(&format!("    if selected.response=={ri}&&selected.media==std::option::Option::Some({mi}) {{\n        let status=exchange.status;\n        let typed_headers={};\n        let response=exchange.into_item_response(crate::codecs::{model}Codec::decode_value,crate::http::Framing::{:?},{},{},{:?},typed_headers,OPERATION.responses[{ri}].links);\n        {}\n    }}\n",r.headers_type.as_ref().map(|name|format!("{name}::from_headers(&exchange.headers).map_err(|e|exchange.header_error({},e))?",source(r.wire.source().use_site().source()))).unwrap_or_else(||"()".into()),stream.framing(),source(stream.item_codec().schema().id()),stream.max_item_bytes(),r.wire.media()[mi].media_type().declared(),return_response(op,v,"return ")));
+                    let decode = model.as_ref().map_or_else(
+                        // A schemaless stream passes parsed envelope values through.
+                        || "|value|std::result::Result::Ok(value)".to_owned(),
+                        |model| format!("crate::codecs::{model}Codec::decode_value"),
+                    );
+                    let item_source = stream
+                        .item_codec()
+                        .map(|codec| codec.schema().id().clone())
+                        .unwrap_or_else(|| stream.source().source().clone());
+                    code.push_str(&format!("    if selected.response=={ri}&&selected.media==std::option::Option::Some({mi}) {{\n        let status=exchange.status;\n        let typed_headers={};\n        let response=exchange.into_item_response({decode},crate::http::Framing::{:?},{},{},{:?},typed_headers,OPERATION.responses[{ri}].links);\n        {}\n    }}\n",r.headers_type.as_ref().map(|name|format!("{name}::from_headers(&exchange.headers).map_err(|e|exchange.header_error({},e))?",source(r.wire.source().use_site().source()))).unwrap_or_else(||"()".into()),stream.framing(),source(&item_source),stream.max_item_bytes(),r.wire.media()[mi].media_type().declared(),return_response(op,v,"return ")));
                 }
             }
         }
@@ -240,6 +249,16 @@ pub(super) fn emit(plan: &HttpPlan, op: &PlannedOperation, crate_name: &str) -> 
     code.push_str(&format!(
         "#[cfg(feature=\"reqwest-rustls\")]\n#[doc={first_request:?}]\npub mod quickstart {{}}\n"
     ));
+    // The typed event stream's lenient envelope reader and request path live
+    // beside the operation's own descriptor and input members, which stay
+    // private to this module; the events iterator lives in `stream_events`.
+    if let Some(entry) = plan
+        .stream_events
+        .iter()
+        .find(|entry| entry.module == op.module_name)
+    {
+        code.push_str(&stream_events::operation_helpers(plan, op, entry));
+    }
     code
 }
 fn return_response(op: &PlannedOperation, v: &PlannedResponseVariant, prefix: &str) -> String {

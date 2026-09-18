@@ -89,7 +89,7 @@ pub(super) fn literal(value: &Value) -> String {
 fn q(value: &str) -> String {
     serde_json::to_string(value).unwrap()
 }
-fn schema_key(schema: &SchemaId) -> String {
+pub(super) fn schema_key(schema: &SchemaId) -> String {
     serde_json::to_string(&[schema.document().as_str(), schema.pointer()]).unwrap()
 }
 fn model(codec: &CodecRef, names: &BTreeMap<SchemaId, String>) -> String {
@@ -109,14 +109,14 @@ pub(super) fn media_type(
             .map_or_else(|| "string".into(), |codec| model(codec, names)),
         Representation::Binary { .. } => "Uint8Array".into(),
         Representation::Stream { stream } => {
+            // A schemaless stream surfaces untyped parsed envelope values.
+            let item = stream
+                .item_codec()
+                .map_or_else(|| "Models.JsonValue".into(), |codec| model(codec, names));
             if response {
-                format!("AsyncIterable<{}>", model(stream.item_codec(), names))
+                format!("AsyncIterable<{item}>")
             } else {
-                format!(
-                    "Iterable<{}> | AsyncIterable<{}>",
-                    model(stream.item_codec(), names),
-                    model(stream.item_codec(), names)
-                )
+                format!("Iterable<{item}> | AsyncIterable<{item}>")
             }
         }
         Representation::Form { form } => object_type(
@@ -556,15 +556,38 @@ pub(super) fn client_requirements(
     (credentials, requirements)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit(
     ops: &[PlannedOperation],
     symbols: &HttpSymbols,
     config: &HttpConfig,
     credential_env: Option<&crate::credential_env::CredentialEnvPlan>,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
+    pagination: &[super::pagination_emit::PaginatedOperation],
+    oauth: &[&OAuthSchemePlan],
+    streams: &[super::stream_emit::StreamEventsOperation],
 ) -> String {
     let mut code = String::from(
         "// Generated from the verified HTTP protocol and native model plans.\nimport type * as Models from './models.js';\nimport * as Codecs from './model-codecs.js';\nimport { JsonNumber } from './json.js';\nimport { executeOperation, createRuntimeClient, isDeclaredApiError, freezeMetadata, type ClientOptions as RuntimeClientOptions, type CallOptions, type Credential, type BasicCredential, type AuthorizationCredential, type ApiResponse, type DeclaredApiError, type MediaBody, type Part, type LinkMetadata } from './runtime.js';\nexport { isSdkError } from './runtime.js';\nexport type { ClientOptions as RuntimeClientOptions, CallOptions, CredentialContext, CredentialProvider, Credential, BasicCredential, AuthorizationCredential, ApiResponse, DeclaredApiError, ReadonlyResponseData, ReadonlyBytes, SdkError, SdkFailureKind, Fetch, MediaBody, Part, BinaryPart, LinkMetadata } from './runtime.js';\n/** One actual HTTP status class; response selection excludes more-specific declarations. */\ntype StatusClass<C extends 1 | 2 | 3 | 4 | 5> = `${C}${Digit}${Digit}` extends `${infer S extends number}` ? S : never;\n/** A decimal status digit. */\ntype Digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;\n\n",
     );
+    if !streams.is_empty() {
+        // The typed events decode reads framed envelopes leniently and brands
+        // its per-kind decode failures exactly like the runtime does.
+        code.push_str("import { parseJson, stringifyJson } from './json.js';\nimport { responseFailure } from './http/common.js';\n");
+    }
+    if !pagination.is_empty() {
+        code.push_str("import { paginationDescriptors, walkPages, walkItems, nextPageInput, type PageBody, type PageProperty, type PageItem } from './pagination.js';\n");
+    }
+    if !oauth.is_empty() {
+        code.push_str(&super::oauth_emit::reexports(oauth));
+    }
+    if let Some(attribution) = attribution {
+        writeln!(code, "/** ua/v1 attribution: every request identifies suspect as the generator and the SDK or a caller-supplied application as the client. */\nconst attribution = {} as const;", literal(&serde_json::to_value(attribution).unwrap())).unwrap();
+    } else {
+        code.push_str(
+            "const attribution: import('./http/types.js').AttributionPlan | null = null;\n",
+        );
+    }
     let (credentials, requirements) = client_requirements(ops);
     if let Some(helper) = &symbols.credential_env_helper {
         writeln!(
@@ -691,21 +714,86 @@ pub(super) fn emit(
             .map(|(id, name)| (id.clone(), name.clone()))
             .collect();
         let extras = object_extras(wire);
-        writeln!(code,"const {}Descriptor = {{ operationId: {}, source: {}Source, wire: {}Wire, limits: {}, inputMembers: {}, parameterMembers: {}, requestCodecs: {{{}}}, responseCodecs: {{{}}}, objectExtras: {}, taggedBody: {} }} as const;",op.function_name,q(&op.operation_id),op.function_name,op.function_name,literal(&limits),serde_json::to_string(&inputs).unwrap(),serde_json::to_string(&names).unwrap(),binding(&request),binding(&response),serde_json::to_string(&extras).unwrap(),wire.body().is_some_and(tagged_body)).unwrap();
+        writeln!(code,"const {}Descriptor = {{ operationId: {}, source: {}Source, wire: {}Wire, limits: {}, inputMembers: {}, parameterMembers: {}, requestCodecs: {{{}}}, responseCodecs: {{{}}}, objectExtras: {}, taggedBody: {}, attribution }} as const;",op.function_name,q(&op.operation_id),op.function_name,op.function_name,literal(&limits),serde_json::to_string(&inputs).unwrap(),serde_json::to_string(&names).unwrap(),binding(&request),binding(&response),serde_json::to_string(&extras).unwrap(),wire.body().is_some_and(tagged_body)).unwrap();
+        if let Some(stream) = streams
+            .iter()
+            .find(|stream| stream.function_name == op.function_name)
+        {
+            // The typed events descriptor re-emits the full descriptor as one
+            // plain literal whose every value is a literal, an identifier or a
+            // namespace codec read: no spreads and no member reads, which
+            // bundlers cannot prove side-effect free (a getter could hide
+            // behind `descriptor.responseCodecs`). A pure-annotated call is
+            // therefore not enough — the clone is only sheddable as a literal.
+            // The replaced stream item codec is omitted from the re-emitted
+            // table (not overridden), so the literal carries no duplicate key.
+            let lenient_response = response
+                .iter()
+                .filter(|(schema, _)| schema_key(schema) != stream.item_codec_key)
+                .map(|(id, name)| (id.clone(), name.clone()))
+                .collect();
+            let mut response_codecs = binding(&lenient_response);
+            if !response_codecs.is_empty() {
+                response_codecs.push(',');
+            }
+            response_codecs.push_str(&format!(
+                "[{}]: {{ decode: (text: string) => text, encode: (value: unknown) => stringifyJson(value) }}",
+                q(&stream.item_codec_key)
+            ));
+            writeln!(code,"{}const {}EventsDescriptor = {{ operationId: {}, source: {}Source, wire: {}Wire, limits: {}, inputMembers: {}, parameterMembers: {}, requestCodecs: {{{}}}, responseCodecs: {{{}}}, objectExtras: {}, taggedBody: {}, attribution }} as const;",crate::typescript::declaration_comment(&format!("The {} descriptor with its stream item codec replaced by a lenient frame reader: the existing stream item iteration, limits and cancellation are unchanged while the framed envelope arrives as raw text, so the typed decode below owns per-kind validation and undeclared event kinds stay representable. Every other codec and wire policy is identical. The clone re-emits the full descriptor as one plain literal, so a bundler sheds it — without retaining this operation's Source/Wire data — when the consumer references no typed events iterator.",op.function_name),&src(&op.source),"The direct operation function and its untyped stream iterator are unchanged."),op.function_name,q(&op.operation_id),op.function_name,op.function_name,literal(&limits),serde_json::to_string(&inputs).unwrap(),serde_json::to_string(&names).unwrap(),binding(&request),response_codecs,serde_json::to_string(&extras).unwrap(),wire.body().is_some_and(tagged_body)).unwrap();
+        }
         writeln!(code,"/** Source description: {}\n * @param client Explicit credentials, transport, server choice and limits.\n * @param input Native operation input; omit when every member is optional.\n * @param call Per-call cancellation and server/security selection.\n * @returns The declared success union; streams expose native AsyncIterable items.\n * @throws A branded declared API error or source-linked SDK failure.\n * @remarks OpenAPI source: {}\n */\nexport function {}(client: ClientOptions{}, input: {input}{}, call?: CallOptions): Promise<{}> {{ return executeOperation({}Descriptor, input, client, call); }}\n/** Tests a branded error for this exact operation.\n * @param error Unknown caught value.\n * @returns Whether the value is a declared error of this operation.\n */\nexport function {}(error: unknown): error is {} {{ return isDeclaredApiError(error, {}Source); }}\n",crate::typescript::escape_prose(&op.description),crate::typescript::escape_prose(&src(&op.source)),op.function_name,if requirements.is_empty() && op.input_optional() {" = {}"} else {""},if op.input_optional() {" = {}"} else {""},op.success_type,op.function_name,op.error_guard,op.error_type,op.function_name).unwrap();
     }
-    let metadata_type = ops
-        .iter()
-        .map(|op| {
-            format!(
-                "readonly {}: typeof {}Wire;",
-                q(&op.function_name),
-                op.function_name
+    if !pagination.is_empty() {
+        code.push_str("/** Compiled pagination: each descriptor records the source-selected pattern, the exact request members and response pointers, and the generic walker applies the documented stop rules. The first page of every walk is the direct call's result (supplying the descriptor's documented fallback page size when the caller omitted the limit control) and later pages rebuild only the pagination controls, keeping the limit the walk last used. */\n");
+        for page in pagination {
+            let item = format!("{}Item", upper(&page.function_name));
+            code.push_str(&crate::typescript::declaration_comment(
+                &format!("One item across every page of {}.", page.operation_id),
+                &page.source,
+                "Generated pagination: the walker reads the compiled descriptor's items pointer with plain property access and never searches schemas.",
+            ));
+            writeln!(code, "export type {item} = {};", page.item_type).unwrap();
+            code.push_str(&crate::typescript::declaration_comment(
+                &format!("Every page result of {}, starting with the direct call's result.", page.operation_id),
+                &page.source,
+                "Later pages rebuild only the pagination controls and preserve every other input member exactly. Early break never starts a not-yet-started page request and call cancellation propagates.",
+            ));
+            writeln!(
+                code,
+                "export function {}Pages(client: ClientOptions, input: {}, call?: CallOptions): AsyncIterable<{}> {{\n  return walkPages<{}, {}>(paginationDescriptors.{}, input, (page_input) => {}(client, page_input, call));\n}}\n",
+                page.function_name, page.input_type, page.success_type, page.input_type, page.success_type, page.function_name, page.function_name,
             )
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    writeln!(code,"/** Source-backed metadata for server choices, credentials, responses and links. */\nexport const operationMetadata: {{ {metadata_type} }} = /* @__PURE__ */ freezeMetadata({{ {} }});",ops.iter().map(|op|format!("{}: {}Wire",q(&op.function_name),op.function_name)).collect::<Vec<_>>().join(",")).unwrap();
+            .unwrap();
+            code.push_str(&crate::typescript::declaration_comment(
+                &format!("Every item across all pages of {}.", page.operation_id),
+                &page.source,
+                "Items are read from the compiled items pointer page by page. Early break never starts a not-yet-started page request and call cancellation propagates.",
+            ));
+            writeln!(
+                code,
+                "export function {}Items(client: ClientOptions, input: {}, call?: CallOptions): AsyncIterable<{}> {{\n  return walkItems<{}, {}, {}>(paginationDescriptors.{}, input, (page_input) => {}(client, page_input, call));\n}}\n",
+                page.function_name, page.input_type, item, page.input_type, page.success_type, item, page.function_name, page.function_name,
+            )
+            .unwrap();
+            code.push_str(&crate::typescript::declaration_comment(
+                &format!("The input record for the page after {}, or null when the walk stops.", page.operation_id),
+                &page.source,
+                "Fetches the page described by input to compute the continuation, so callers can drive pages manually.",
+            ));
+            writeln!(
+                code,
+                "export function {}NextPage(client: ClientOptions, input: {}, call?: CallOptions): Promise<{} | null> {{\n  return nextPageInput<{}, {}>(paginationDescriptors.{}, (page_input) => {}(client, page_input, call), input);\n}}\n",
+                page.function_name, page.input_type, page.input_type, page.input_type, page.success_type, page.function_name, page.function_name,
+            )
+            .unwrap();
+        }
+    }
+    if !streams.is_empty() {
+        code.push_str("/** Compiled typed stream events: each descriptor clone keeps the exact wire and transport policy while the stream item codec reads framed envelopes leniently, and the typed generator applies the compiled per-kind decode, sentinel and completion semantics. The direct operation function and its untyped stream iterator are unchanged. */\n");
+        code.push_str(&super::stream_emit::emit(streams));
+    }
+    writeln!(code,"/** Source-backed metadata for server choices, credentials, responses and links. */\nexport const operationMetadata = /* @__PURE__ */ freezeMetadata({{ {} }});",ops.iter().map(|op|format!("{}: {}Wire",q(&op.function_name),op.function_name)).collect::<Vec<_>>().join(",")).unwrap();
     if let Some(policy) = credential_env {
         let bindings = policy
             .bindings()
@@ -744,7 +832,9 @@ fn representation_roots(representation: &Representation, roots: &mut BTreeSet<Sc
         }
         Representation::Binary { .. } => {}
         Representation::Stream { stream } => {
-            roots.insert(stream.item_codec().schema().id().clone());
+            if let Some(codec) = stream.item_codec() {
+                roots.insert(codec.schema().id().clone());
+            }
         }
         Representation::Form { form } => part_roots(form.fields(), form.additional(), roots),
         Representation::Multipart { multipart } => match multipart {
@@ -911,6 +1001,7 @@ pub(super) fn docs(
     config: &HttpConfig,
     directional: bool,
     first: Option<&super::FirstRequest>,
+    streams: &[super::stream_emit::StreamEventsOperation],
 ) -> String {
     let mut text = format!(
         "# TypeScript HTTP client\n\nThe `{}` profile implements exactly the admitted source operations in [http-manifest.json](http-manifest.json). Requests use native Fetch or an explicit Fetch-compatible transport. The package has no runtime dependencies.\n\n",
@@ -927,6 +1018,31 @@ pub(super) fn docs(
     }
     for op in ops {
         writeln!(text,"## `{}`\n\n`{} {}` — source `{}`.\n\nCall `client.{}({})`. Declared response keys: {}.\n\n{}\n",crate::typescript::escape_prose(&op.operation_id),op.method,crate::typescript::escape_prose(&op.path),crate::typescript::escape_prose(&src(&op.source)),op.function_name,if op.input_optional(){""}else{"input"},op.protocol().responses().iter().map(|response|response.status_key()).collect::<Vec<_>>().join(", "),crate::typescript::escape_prose(&op.description)).unwrap();
+    }
+    if !streams.is_empty() {
+        text.push_str("## Typed stream events\n\nOperations whose source stream schema declares a discriminated SSE event set expose `<operation>Events(client, input, call?)`: an async generator over the same stream item iteration, yielding one typed event per frame. A declared event kind decodes the framed envelope through the operation's stream item codec into its declared model type; an event kind the source never declared surfaces through the typed `{ kind: 'unknown', event, data }` alternative without failing the stream; an invalid payload for a recognized kind remains a decoding error. When the source declares a terminal sentinel, the raw token completes the stream before any payload decoding, the last data frame before the sentinel or end of body is preserved as the completion's terminal `usage` instead of being yielded, and no further reads are issued. Per-item metadata (the event name as `kind`, plus `id`/`retry` when the item schema declares them) and the `{ reason, usage }` completion value — the generator's documented return value, read with a manual `next()` after the final event — are explicit. Early break or return cancels the response body and issues no further reads. The direct operation function and its untyped AsyncIterable stay exported and unchanged.\n\n");
+        for stream in streams {
+            writeln!(
+                text,
+                "- `{}`: declared kinds {}; terminal sentinel {}.\n",
+                crate::typescript::escape_prose(&stream.function_name),
+                stream
+                    .events
+                    .iter()
+                    .map(|kind| format!("`{}`", crate::typescript::escape_prose(kind)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                match &stream.sentinel {
+                    Some(token) => format!(
+                        "`{}` (completes the stream before decoding)",
+                        crate::typescript::escape_prose(token)
+                    ),
+                    None => "none (the end of the body completes the stream)".to_owned(),
+                }
+            )
+            .unwrap();
+        }
+        text.push('\n');
     }
     text
 }

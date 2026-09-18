@@ -388,10 +388,29 @@ fn canonical_rust_generation_session_and_capture_select_the_verified_scoped_prof
             .is_err(),
         "the explicitly retained Rust v1 library API must keep its admission boundary"
     );
+
+    fn rust_config_with_attribution(
+        contract: &std::sync::Arc<Contract>,
+        config: &backend::TargetConfig,
+    ) -> suspect_codegen::rust_http::HttpConfig {
+        suspect_codegen::rust_http::HttpConfig {
+            attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+                env!("CARGO_PKG_VERSION"),
+                &config.package_name,
+                &config.package_version,
+                contract.openapi_version(),
+                Backend::RustHttp.language_tag(),
+            )),
+            ..Default::default()
+        }
+    }
     let config = target(Backend::RustHttp);
-    let direct =
-        suspect_codegen::rust_http::plan_http_v2(contract.clone(), &selected, Default::default())
-            .unwrap();
+    let direct = suspect_codegen::rust_http::plan_http_v2(
+        contract.clone(),
+        &selected,
+        rust_config_with_attribution(&contract, &config),
+    )
+    .unwrap();
     let expected = suspect_codegen::rust_http::emit_http(
         &direct,
         &suspect_codegen::rust_http::PackageConfig {
@@ -400,9 +419,12 @@ fn canonical_rust_generation_session_and_capture_select_the_verified_scoped_prof
         },
     )
     .unwrap();
-    let resource_capable =
-        suspect_codegen::rust_http::plan_http_v3(contract.clone(), &selected, Default::default())
-            .unwrap();
+    let resource_capable = suspect_codegen::rust_http::plan_http_v3(
+        contract.clone(),
+        &selected,
+        rust_config_with_attribution(&contract, &config),
+    )
+    .unwrap();
     let resource_capable_files = suspect_codegen::rust_http::emit_http(
         &resource_capable,
         &suspect_codegen::rust_http::PackageConfig {

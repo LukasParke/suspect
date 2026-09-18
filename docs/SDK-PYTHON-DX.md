@@ -1,6 +1,7 @@
 # Python SDK: public results and executable task guides
 
-This describes Python onboarding and public exports. Generated HTTP packages start
+This implements the Python onboarding and public-export work identified in
+[SDK-DX-ASSESSMENT.md](SDK-DX-ASSESSMENT.md). Generated HTTP packages now start
 with native request construction, explicit bearer credentials, and task guides.
 The model names come from the shared source-role allocator; their original
 source identities remain in metadata.

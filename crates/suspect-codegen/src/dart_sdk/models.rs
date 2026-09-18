@@ -871,6 +871,7 @@ fn reserved() -> BTreeSet<String> {
         "parseJsonBytes",
         "writeJson",
         "validateJson",
+        "PaginationException",
     ]
     .into_iter()
     .map(str::to_owned)

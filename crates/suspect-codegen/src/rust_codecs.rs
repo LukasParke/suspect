@@ -43,6 +43,9 @@ pub struct CodecConfig {
     pub max_conversion_depth: usize,
     /// Shared conversion visits and copied string bytes.
     pub max_conversion_steps: usize,
+    /// Versioned source dialect interpretation choices; the default preserves
+    /// the ordinary strict dialect semantics.
+    pub dialect: crate::schema_view::DialectPolicy,
 }
 impl Default for CodecConfig {
     fn default() -> Self {
@@ -51,6 +54,7 @@ impl Default for CodecConfig {
             json_limits: JsonLimits::default(),
             max_conversion_depth: 128,
             max_conversion_steps: 32 * 1024 * 1024,
+            dialect: crate::schema_view::DialectPolicy::default(),
         }
     }
 }
@@ -182,9 +186,9 @@ fn plan_codecs_with_profile(
     resources: bool,
 ) -> Result<CodecPlan, Vec<ModelDiagnostic>> {
     let models = if resources {
-        rust_models::plan_models_v3(&contract, roots)
+        rust_models::plan_models_v3_with_policy(&contract, roots, config.dialect)
     } else if applicators {
-        rust_models::plan_models_v2(&contract, roots)
+        rust_models::plan_models_v2_with_policy(&contract, roots, config.dialect)
     } else {
         rust_models::plan_models(&contract, roots)
     };
@@ -221,7 +225,9 @@ fn plan_codecs_with_profile(
     }
     validation_roots.sort();
     validation_roots.dedup();
-    let compiler = OwnedCompiler::new(config.schema.clone());
+    let mut schema_config = config.schema.clone();
+    schema_config.oas30_nullable_in_31 = config.dialect.oas30_nullable_in_31;
+    let compiler = OwnedCompiler::new(schema_config);
     let compiled = (if resources {
         compiler.compile_v3(contract.clone(), &validation_roots)
     } else if applicators {

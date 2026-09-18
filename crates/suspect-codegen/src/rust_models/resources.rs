@@ -88,9 +88,10 @@ pub(super) fn null_allowed(
     contract: &Contract,
     id: &SchemaId,
     dynamic: bool,
+    policy: schema_view::DialectPolicy,
 ) -> Result<bool, schema_view::Problem> {
     if !dynamic {
-        return super::applicators::null_allowed(contract, id);
+        return super::applicators::null_allowed(contract, id, policy);
     }
     let schema = contract.schema(id).ok_or_else(|| schema_view::Problem {
         source: id.clone(),
@@ -101,7 +102,7 @@ pub(super) fn null_allowed(
     // Local assertions can prove non-null independently of every dynamic
     // binding. Otherwise retain null in the exact JSON carrier; no fallback
     // assumption may exclude a value admitted by an entered outer resource.
-    Ok(schema_view::accepts_literal(schema, &Value::Null)
+    Ok(schema_view::accepts_literal(schema, &Value::Null, policy)
         && !raw.get("const").is_some_and(|v| !v.is_null())
         && !raw
             .get("enum")

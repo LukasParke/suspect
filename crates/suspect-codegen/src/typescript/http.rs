@@ -37,6 +37,10 @@ pub fn source_assets() -> &'static [(&'static str, &'static [u8])] {
             include_bytes!("http/protocol_emit.rs"),
         ),
         (
+            "typescript/http/stream_emit.rs",
+            include_bytes!("http/stream_emit.rs"),
+        ),
+        (
             "typescript/http/native_examples.rs",
             include_bytes!("http/native_examples.rs"),
         ),
@@ -73,11 +77,19 @@ pub fn source_assets() -> &'static [(&'static str, &'static [u8])] {
 #[cfg(feature = "http-protocol")]
 use crate::http_protocol as protocol;
 #[cfg(feature = "http-protocol")]
+mod incoming_emit;
+#[cfg(feature = "http-protocol")]
 mod interface;
 #[cfg(feature = "http-protocol")]
 mod native_examples;
 #[cfg(feature = "http-protocol")]
+mod oauth_emit;
+#[cfg(feature = "http-protocol")]
+mod pagination_emit;
+#[cfg(feature = "http-protocol")]
 mod protocol_emit;
+#[cfg(feature = "http-protocol")]
+mod stream_emit;
 #[cfg(feature = "http-protocol")]
 pub use native_examples::FirstRequest;
 
@@ -118,8 +130,15 @@ pub struct HttpConfig {
     pub profile: HttpProfile,
     /// Explicit OAS 3.1+ string/binary-marker compatibility; off by default.
     pub legacy_binary_string: bool,
+    /// Explicit versioned source-interpretation profiles; off by default.
+    #[cfg(feature = "http-protocol")]
+    pub compatibility_profiles: std::collections::BTreeSet<protocol::CompatibilityProfile>,
     /// Explicit source-scheme to runtime environment-variable names; no values are read during generation.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 
 impl Default for HttpConfig {
@@ -134,7 +153,11 @@ impl Default for HttpConfig {
             max_stream_items: 100_000,
             profile: HttpProfile::StrictJson,
             legacy_binary_string: false,
+            #[cfg(feature = "http-protocol")]
+            compatibility_profiles: std::collections::BTreeSet::new(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         }
     }
 }
@@ -220,6 +243,9 @@ impl HttpConfig {
             capabilities =
                 capabilities.with_profile(protocol::CompatibilityProfile::LegacyBinaryStringV1);
         }
+        for profile in &self.compatibility_profiles {
+            capabilities = capabilities.with_profile(*profile);
+        }
         capabilities
     }
 
@@ -234,11 +260,10 @@ impl HttpConfig {
     #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn with_compatibility_profile(mut self, profile: protocol::CompatibilityProfile) -> Self {
-        match profile {
-            protocol::CompatibilityProfile::LegacyBinaryStringV1 => {
-                self.legacy_binary_string = true
-            }
+        if profile == protocol::CompatibilityProfile::LegacyBinaryStringV1 {
+            self.legacy_binary_string = true;
         }
+        self.compatibility_profiles.insert(profile);
         self
     }
 }
@@ -252,8 +277,21 @@ pub struct HttpPlan {
     files: Vec<OutFile>,
     examples: crate::examples::ExamplePlan,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    config: HttpConfig,
     #[cfg(feature = "http-protocol")]
     protocol: protocol::ProtocolPlan,
+    /// Compiled pagination policy, present exactly when SDK defaults were configured.
+    #[cfg(feature = "http-protocol")]
+    pagination: Option<protocol::PaginationOutcome>,
+    /// Compiled OAuth lifecycle policy, present exactly when SDK defaults were configured.
+    #[cfg(feature = "http-protocol")]
+    oauth: Option<protocol::OAuthPlan>,
+    /// Compiled typed-stream semantics for every declared operation stream media.
+    #[cfg(feature = "http-protocol")]
+    stream_semantics: protocol::StreamSemanticsPlan,
+    /// Compiled incoming webhook/callback receipts over the whole contract.
+    #[cfg(feature = "http-protocol")]
+    incoming: protocol::IncomingPlan,
     #[cfg(feature = "http-protocol")]
     first_request: Option<FirstRequest>,
 }
@@ -276,6 +314,18 @@ impl HttpPlan {
         self.credential_env.as_ref()
     }
 
+    /// Compiled `ua/v1` attribution constants carried by this plan, when configured.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.config.attribution.as_ref()
+    }
+
+    /// Application-selected client defaults carried by this plan, when configured.
+    #[must_use]
+    pub fn sdk_defaults(&self) -> Option<&crate::sdk_defaults::SdkDefaults> {
+        self.config.sdk_defaults.as_ref()
+    }
+
     /// Original immutable, admitted wire descriptors, including provenance.
     #[cfg(feature = "http-protocol")]
     #[must_use]
@@ -287,6 +337,41 @@ impl HttpPlan {
     #[must_use]
     pub fn first_request(&self) -> Option<&FirstRequest> {
         self.first_request.as_ref()
+    }
+    /// Compiled pagination policy for this plan, when SDK defaults were configured.
+    #[cfg(feature = "http-protocol")]
+    #[must_use]
+    pub fn pagination(&self) -> Option<&protocol::PaginationOutcome> {
+        self.pagination.as_ref()
+    }
+    /// Compiled OAuth lifecycle policy for this plan, when SDK defaults were configured.
+    #[cfg(feature = "http-protocol")]
+    #[must_use]
+    pub fn oauth(&self) -> Option<&protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// Compiled typed-stream semantics (declared event kinds, payload codecs,
+    /// sentinel and completion policies) for every operation stream media, in
+    /// protocol-plan operation order. Emission consumes only the discriminated
+    /// subset; every other operation keeps its existing untyped stream path.
+    #[cfg(feature = "http-protocol")]
+    #[must_use]
+    pub fn stream_semantics(&self) -> &protocol::StreamSemanticsPlan {
+        &self.stream_semantics
+    }
+    /// Compiled incoming webhook/callback receipts for the whole contract,
+    /// independent of operation selection. Empty when the source declares none.
+    #[cfg(feature = "http-protocol")]
+    #[must_use]
+    pub fn incoming(&self) -> &protocol::IncomingPlan {
+        &self.incoming
+    }
+    /// Whether this plan emits the generated `typescript/oauth.ts` module:
+    /// exactly when a compiled scheme carries an executable flow.
+    #[cfg(feature = "http-protocol")]
+    #[must_use]
+    pub fn oauth_emitted(&self) -> bool {
+        self.oauth.as_ref().is_some_and(oauth_emit::has_usable)
     }
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
@@ -469,6 +554,18 @@ pub fn plan_http(
             return Err(errors);
         }
     };
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = protocol::plan_incoming(&contract)?;
+    // Incoming receipts extend the codec table only when declared: their body
+    // schemas become actual codec inputs beside the selected operations'.
+    let mut codec_roots: Vec<SchemaId> = wire.codec_roots().to_vec();
+    if !incoming.is_empty() {
+        codec_roots.extend(incoming.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+    }
     let credential_env =
         crate::credential_env::plan(&contract, &wire, config.credential_env.as_ref())?;
     for operation in wire.operations() {
@@ -532,6 +629,29 @@ pub fn plan_http(
     if !errors.is_empty() {
         return Err(errors);
     }
+    // Compiled pagination policy: SDK defaults are required, and a policy
+    // failure is a plan failure like every other diagnostic.
+    let pagination = match config.sdk_defaults.as_ref() {
+        Some(defaults) => Some(protocol::plan_pagination(&contract, &wire, Some(defaults))?),
+        None => None,
+    };
+    // Compiled OAuth lifecycle policy shares the pagination gate: without
+    // configured client defaults the runtime stays exactly the pre-OAuth
+    // emission, and configuration errors surface as the shared
+    // HttpDiagnostics. Schemes without an executable flow emit nothing.
+    let oauth = if config.sdk_defaults.is_some() {
+        Some(protocol::plan_oauth(
+            &contract,
+            &wire,
+            config.sdk_defaults.as_ref(),
+        )?)
+    } else {
+        None
+    };
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission stays conditional.
+    let stream_semantics = protocol::plan_stream_semantics(&contract, &wire);
     let mut operations: Vec<_> = wire
         .operations()
         .iter()
@@ -675,10 +795,19 @@ pub fn plan_http(
             }
         })
         .collect();
+    // Emission-ready pagination data for exactly the operations the policy paginated.
+    let paginated = pagination.as_ref().map_or_else(Vec::new, |outcome| {
+        pagination_emit::prepare(&operations, outcome)
+    });
+    // Emission-ready OAuth data: only schemes carrying at least one executable
+    // (non-deprecated) flow participate.
+    let oauth_schemes = oauth
+        .as_ref()
+        .map_or_else(Vec::new, |plan| oauth_emit::usable(plan));
     // Preserve neutral names for equivalent closures; annotated contracts use
     // explicitly bound request/response models and validation programs.
     let mut directional = false;
-    for id in crate::schema_view::closure(&contract, wire.codec_roots()) {
+    for id in crate::schema_view::closure(&contract, &codec_roots) {
         if let Some(schema) = contract.schema(&id) {
             let raw = crate::schema_view::raw(schema);
             for keyword in ["readOnly", "writeOnly"] {
@@ -750,6 +879,19 @@ pub fn plan_http(
         .into_iter()
         .map(str::to_owned),
     );
+    // The generated oauth.ts re-exports participate in the public symbol
+    // allocation, so an operation or model name colliding with them is a
+    // typed planning error rather than a broken generated package.
+    for name in oauth_emit::exported_symbols(&oauth_schemes) {
+        if !public.insert(name.to_owned()) {
+            errors.push(diag(
+                &contract,
+                SourceId::new(contract.entry().clone(), Default::default()),
+                "http-symbol-collision",
+                format!("allocated public TypeScript OAuth symbol `{name}` collides or is unsafe"),
+            ));
+        }
+    }
     for op in &operations {
         let mut allocated = vec![
             op.function_name.clone(),
@@ -761,6 +903,15 @@ pub fn plan_http(
             format!("{}Wire", op.function_name),
             format!("{}Descriptor", op.function_name),
         ];
+        if paginated
+            .iter()
+            .any(|entry| entry.function_name == op.function_name)
+        {
+            allocated.push(format!("{}Pages", op.function_name));
+            allocated.push(format!("{}Items", op.function_name));
+            allocated.push(format!("{}NextPage", op.function_name));
+            allocated.push(format!("{}Item", upper(&op.function_name)));
+        }
         for response in op.protocol().responses() {
             let stem = format!(
                 "{}Response{}",
@@ -812,22 +963,21 @@ pub fn plan_http(
     } else {
         &[ModelView::Neutral]
     };
-    let codecs = plan_codecs_with_views(
-        contract.clone(),
-        wire.codec_roots(),
-        views,
-        config.codecs.clone(),
-    )
-    .map_err(|ds| {
-        ds.into_iter()
-            .map(|d| HttpDiagnostic {
-                source: d.source,
-                at: d.at,
-                code: d.code,
-                message: d.message,
-            })
-            .collect::<Vec<_>>()
-    })?;
+    let mut codec_config = config.codecs.clone();
+    codec_config.dialect = crate::schema_view::DialectPolicy::from_profiles(
+        config.compatibility_profiles.iter().copied(),
+    );
+    let codecs = plan_codecs_with_views(contract.clone(), &codec_roots, views, codec_config)
+        .map_err(|ds| {
+            ds.into_iter()
+                .map(|d| HttpDiagnostic {
+                    source: d.source,
+                    at: d.at,
+                    code: d.code,
+                    message: d.message,
+                })
+                .collect::<Vec<_>>()
+        })?;
     let symbols_for = |view| {
         codecs
             .models()
@@ -858,6 +1008,32 @@ pub fn plan_http(
             name
         }),
     };
+    // Emission-ready typed stream decode data for exactly the operations whose
+    // compiled stream plan carries a discriminated SSE event set. Allocated
+    // event type names join the public symbol set so nothing else can take them.
+    let stream_events = stream_emit::prepare(
+        &operations,
+        &symbols.response,
+        &mut public,
+        &stream_semantics,
+    );
+    // Emission-ready incoming receipt helpers. Decoded payloads bind response
+    // views and constructed replies bind request views; allocated receipt names
+    // join the public symbol set, and receipts the v1 helpers cannot express
+    // surface as the shared plan errors.
+    let mut incoming_errors = Vec::new();
+    let incoming_helpers = incoming_emit::prepare(
+        &contract,
+        &incoming,
+        &symbols.request,
+        &symbols.response,
+        &mut public,
+        &mut incoming_errors,
+    );
+    errors.extend(incoming_errors);
+    if !errors.is_empty() {
+        return Err(errors);
+    }
     let interfaces = interface::capture(&contract, &operations, &symbols, &config);
     for (operation, native) in operations.iter_mut().zip(interfaces) {
         operation.interface = native;
@@ -916,11 +1092,47 @@ pub fn plan_http(
     }
     files.push(OutFile {
         path: "typescript/operations.ts".into(),
-        content: protocol_emit::emit(&operations, &symbols, &config, credential_env.as_ref()),
+        content: protocol_emit::emit(
+            &operations,
+            &symbols,
+            &config,
+            credential_env.as_ref(),
+            config.attribution.as_ref(),
+            &paginated,
+            &oauth_schemes,
+            &stream_events,
+        ),
     });
+    if !paginated.is_empty() {
+        files.push(OutFile {
+            path: "typescript/pagination.ts".into(),
+            content: pagination_emit::emit_library(&paginated),
+        });
+    }
+    if !incoming_helpers.is_empty() {
+        files.push(OutFile {
+            path: "typescript/incoming.ts".into(),
+            content: incoming_emit::emit(&incoming_helpers),
+        });
+    }
+    if !oauth_schemes.is_empty() {
+        files.push(OutFile {
+            path: "typescript/oauth.ts".into(),
+            content: oauth_emit::emit(
+                &oauth_schemes,
+                &oauth_emit::no_replay_requirements(&oauth_schemes, &operations),
+            ),
+        });
+    }
     files.push(OutFile {
         path: "typescript/http.md".into(),
-        content: protocol_emit::docs(&operations, &config, directional, first_request.as_ref()),
+        content: protocol_emit::docs(
+            &operations,
+            &config,
+            directional,
+            first_request.as_ref(),
+            &stream_events,
+        ),
     });
     files.push(OutFile {
         path: "typescript/http-manifest.json".into(),
@@ -1009,7 +1221,12 @@ pub fn plan_http(
         files,
         examples,
         credential_env,
+        config,
         protocol: wire,
+        pagination,
+        oauth,
+        stream_semantics,
+        incoming,
         first_request,
     })
 }

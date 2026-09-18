@@ -6,6 +6,7 @@ use crate::OutFile;
 use serde_json::json;
 use std::{collections::BTreeSet, fmt::Write};
 
+
 pub(super) fn package(plan: &Plan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> {
     validation::admit(&plan.contract, &plan.program)?;
     let samples = samples::plan(plan)?;
@@ -70,8 +71,31 @@ pub(super) fn package(plan: &Plan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> 
         format!("src/main/kotlin/{prefix}/Models.kt"),
         emit::models(plan),
     );
-    for file in codec_files::files(plan) {
-        add(file.path.strip_prefix("kotlin/").expect("Kotlin artifact").into(), file.content);
+    add(
+        format!("src/main/kotlin/{prefix}/Codecs.kt"),
+        emit::codecs(plan),
+    );
+    add(
+        format!("src/main/kotlin/{prefix}/Attribution.kt"),
+        emit::attribution(plan),
+    );
+    if plan.stream_events().emits() {
+        add(
+            format!("src/main/kotlin/{prefix}/StreamEvents.kt"),
+            super::stream_events::types_file(plan, plan.stream_events()),
+        );
+    }
+    if let Some(oauth) = plan.oauth() {
+        add(
+            format!("src/main/kotlin/{prefix}/OAuth.kt"),
+            super::oauth::runtime(plan, oauth),
+        );
+    }
+    if !plan.incoming_entries().is_empty() {
+        add(
+            format!("src/main/kotlin/{prefix}/Incoming.kt"),
+            super::incoming::module(plan),
+        );
     }
     add(format!("src/main/kotlin/{prefix}/Client.kt"), client(plan));
     add(
@@ -79,12 +103,12 @@ pub(super) fn package(plan: &Plan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> 
         serde_json::to_string(&plan.program).unwrap(),
     );
     let protocol = serde_json::to_string(plan.protocol()).unwrap();
-    if protocol.len() > 16 * 1024 * 1024 {
+    if protocol.len() > 4 * 1024 * 1024 {
         return Err(vec![diagnostic(
             &plan.contract,
             plan.operations[0].source.clone(),
             "kotlin-protocol-size",
-            "protocol metadata exceeds the 16 MiB program budget",
+            "protocol metadata exceeds 4 MiB",
         )]);
     }
     add(
@@ -505,8 +529,12 @@ fn decode_type(
 }
 
 fn client(plan: &Plan) -> String {
+    let paginated = plan.pagination().filter(|plan| plan.emits());
     let mut out = header(plan);
     out.push_str("import kotlinx.coroutines.channels.ProducerScope\nimport kotlinx.coroutines.flow.Flow\nimport kotlinx.coroutines.flow.channelFlow\nimport kotlinx.coroutines.flow.buffer\n\n");
+    if paginated.is_some() {
+        out.push_str("import kotlinx.coroutines.flow.flow\n\n");
+    }
     out.push_str("/** Explicit source credential values. Values never appear in diagnostics. */\npublic class Credentials(\n");
     for c in plan.credentials.values() {
         writeln!(
@@ -598,46 +626,49 @@ fn client(plan: &Plan) -> String {
         }
         out.push_str("}\n");
     }
+    if paginated.is_some() {
+        out.push_str(&super::pagination::exception());
+    }
     if plan.credential_env().is_some() {
         out.push_str(super::environment::client_constructors());
     } else {
         out.push_str("/** Source-selected coroutine client. Close it with Kotlin use. */\npublic class Client(\n    private val credentials: Credentials = Credentials(),\n    private val transport: Transport = JdkTransport(),\n    private val options: ClientOptions = ClientOptions(),\n) : AutoCloseable {\n    /** Release this client's transport. */\n    override fun close() { try { (transport as? AutoCloseable)?.close() } catch (error: Exception) { throw SdkException(FailureKind.TRANSPORT, \"transport cleanup failed\", cause = error) } }\n");
     }
+    if plan.oauth().is_some() {
+        out.push_str(super::oauth::client_member());
+    }
     for (i, op) in plan.operations.iter().enumerate() {
         operation(&mut out, plan, op, i);
+    }
+    if let Some(paginated) = paginated {
+        for paginated_op in &paginated.operations {
+            out.push_str(&paginated_op.member);
+        }
+    }
+    let stream_events = plan.stream_events();
+    if stream_events.emits() {
+        for entry in &stream_events.operations {
+            let Some(op) = plan.operations.get(entry.index) else {
+                continue;
+            };
+            out.push_str(&super::stream_events::flow_signature(entry));
+            out.push_str(&format!(
+                "        operation({}, {}, requestOptions.timeout ?: options.timeout) {{ control ->\n",
+                quote(&op.operation_id),
+                source_value(&op.source)
+            ));
+            request_preparation(&mut out, plan, op, entry.index);
+            out.push_str(&super::stream_events::flow_tail(entry));
+        }
     }
     out.push_str("}\n");
     out
 }
-fn response_class(out: &mut String, r: &PlannedResponse, parent: &str, override_data: bool) {
-    writeln!(out,"    /** Source status &#96;{}&#96;, {}. */\n    public {} {}(\n        /** Validated native payload. */ public {}val data: {},\n        /** Actual bounded HTTP metadata. */ {}response: ResponseInfo,",r.status_key,if r.stream{"parsed item stream"}else{"finite response"},if r.success{"data class"}else{"class"},r.variant_name,if override_data{"override "}else{""},r.kotlin_type,if r.success{"public override val "}else{""}).unwrap();
-    if let Some(ty) = &r.headers_type {
-        writeln!(
-            out,
-            "        /** Typed declared response headers. */ public val responseHeaders: {ty},"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "    ) : {parent}{}",
-        if r.success { "" } else { "(response)" }
-    )
-    .unwrap();
-}
-fn operation(out: &mut String, plan: &Plan, op: &PlannedOperation, index: usize) {
-    writeln!(out,"    /** {} Source: {}\n     * Caller cancellation is preserved; configured deadlines cover the entire exchange/collection.\n     */",kdoc(op.wire.description().map(|d|d.value().as_str()).unwrap_or(&op.operation_id)),source(&op.source)).unwrap();
-    let default = if op.input_has_default() {
-        format!(" = {}()", op.input_type)
-    } else {
-        String::new()
-    };
-    if op.flow {
-        writeln!(out,"    public fun {}(input: {}{default}, requestOptions: RequestOptions = RequestOptions()): Flow<{}> = channelFlow {{",op.method_name,op.input_type,op.result_type).unwrap();
-    } else {
-        writeln!(out,"    public suspend fun {}(input: {}{default}, requestOptions: RequestOptions = RequestOptions()): {} {{",op.method_name,op.input_type,op.result_type).unwrap();
-    }
-    writeln!(out,"        {}operation({}, {}, requestOptions.timeout ?: options.timeout) {{ control ->\n            val descriptor = ProtocolData.operations[{index}]\n            val budget = ModelBudget(options.codecLimits, control::check)\n            val parameters = linkedMapOf<Int, JsonValue>()",if op.flow{""}else{"return "},quote(&op.operation_id),source_value(&op.source)).unwrap();
+/// The request preparation shared by every operation call and typed-events
+/// flow: the protocol descriptor lookup, the encoded parameters/body and the
+/// prepared request.
+fn request_preparation(out: &mut String, plan: &Plan, op: &PlannedOperation, index: usize) {
+    writeln!(out,"            val descriptor = ProtocolData.operations[{index}]\n            val budget = ModelBudget(options.codecLimits, control::check)\n            val parameters = linkedMapOf<Int, JsonValue>()").unwrap();
     for (i, p) in op.parameters.iter().enumerate() {
         let value = if p.required {
             format!("input.{}", p.name)
@@ -675,6 +706,36 @@ fn operation(out: &mut String, plan: &Plan, op: &PlannedOperation, index: usize)
     } else {
         out.push_str("            val request = requestValue { ProtocolRuntime.prepare(descriptor, PreparedInput(parameters, body), credentials.values(), options, requestOptions, control) }\n");
     }
+}
+fn response_class(out: &mut String, r: &PlannedResponse, parent: &str, override_data: bool) {    writeln!(out,"    /** Source status &#96;{}&#96;, {}. */\n    public {} {}(\n        /** Validated native payload. */ public {}val data: {},\n        /** Actual bounded HTTP metadata. */ {}response: ResponseInfo,",r.status_key,if r.stream{"parsed item stream"}else{"finite response"},if r.success{"data class"}else{"class"},r.variant_name,if override_data{"override "}else{""},r.kotlin_type,if r.success{"public override val "}else{""}).unwrap();
+    if let Some(ty) = &r.headers_type {
+        writeln!(
+            out,
+            "        /** Typed declared response headers. */ public val responseHeaders: {ty},"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "    ) : {parent}{}",
+        if r.success { "" } else { "(response)" }
+    )
+    .unwrap();
+}
+fn operation(out: &mut String, plan: &Plan, op: &PlannedOperation, index: usize) {
+    writeln!(out,"    /** {} Source: {}\n     * Caller cancellation is preserved; configured deadlines cover the entire exchange/collection.\n     */",kdoc(op.wire.description().map(|d|d.value().as_str()).unwrap_or(&op.operation_id)),source(&op.source)).unwrap();
+    let default = if op.input_has_default() {
+        format!(" = {}()", op.input_type)
+    } else {
+        String::new()
+    };
+    if op.flow {
+        writeln!(out,"    public fun {}(input: {}{default}, requestOptions: RequestOptions = RequestOptions()): Flow<{}> = channelFlow {{",op.method_name,op.input_type,op.result_type).unwrap();
+    } else {
+        writeln!(out,"    public suspend fun {}(input: {}{default}, requestOptions: RequestOptions = RequestOptions()): {} {{",op.method_name,op.input_type,op.result_type).unwrap();
+    }
+    writeln!(out,"        {}operation({}, {}, requestOptions.timeout ?: options.timeout) {{ control ->\n",if op.flow{""}else{"return "},quote(&op.operation_id),source_value(&op.source)).unwrap();
+    request_preparation(out, plan, op, index);
     if op.flow {
         writeln!(out,"            collectProtocol(descriptor, transport, request, options, requestOptions, control) {{ response ->\n                send(decode{index}(response, ModelBudget(options.codecLimits, control::check)))\n            }}\n        }}\n    }}.buffer(0)").unwrap();
     } else {

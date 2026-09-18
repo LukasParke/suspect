@@ -18,9 +18,10 @@ mod document_tests;
 mod emit;
 mod environment;
 mod http_emit;
+pub mod incoming;
 mod models;
-#[cfg(test)]
-mod mixed_stream_tests;
+mod oauth;
+mod pagination;
 mod protocol;
 #[cfg(test)]
 mod sdk_v2_tests;
@@ -28,6 +29,7 @@ mod sdk_v2_tests;
 mod v3_sdk_tests;
 #[cfg(test)]
 mod v3_tests;
+mod stream_events;
 mod validation;
 #[cfg(test)]
 mod validation_tests;
@@ -60,6 +62,10 @@ pub struct DartConfig {
     pub package: PackageConfig,
     /// Explicit variable names bound to used source security declarations.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
     pub schema: suspect_schema::Config,
     pub max_json_depth: usize,
     pub max_conversion_depth: usize,
@@ -78,6 +84,8 @@ impl Default for DartConfig {
         Self {
             package: PackageConfig::default(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
             schema: suspect_schema::Config {
                 max_depth: 128,
                 ..Default::default()
@@ -108,6 +116,13 @@ pub struct Plan {
     operations: Vec<PlannedOperation>,
     credentials: Vec<PlannedCredential>,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    pagination: Option<http_protocol::PaginationOutcome>,
+    oauth: Option<http_protocol::OAuthPlan>,
+    /// Compiled incoming webhook/callback receipts over the whole contract.
+    incoming: http_protocol::IncomingPlan,
+    /// Emission-ready receipt helpers bound to the compiled model codecs.
+    incoming_receipts: incoming::Prepared,
+    stream_semantics: http_protocol::StreamSemanticsPlan,
     examples: crate::examples::ExamplePlan,
 }
 impl std::fmt::Debug for Plan {
@@ -140,6 +155,44 @@ impl Plan {
     #[must_use]
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
+    }
+    /// Compiled pagination selection over the admitted protocol plan, retained
+    /// only when a client-default policy is configured.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&http_protocol::PaginationOutcome> {
+        self.pagination.as_ref()
+    }
+    /// Compiled OAuth lifecycle plan over the used source schemes, retained
+    /// only when a client-default policy is configured.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&http_protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// Compiled incoming webhook/callback receipts over the whole contract.
+    /// Planning walks the whole Contract (selection-independent) and fails the
+    /// plan on broken incoming declarations like every other diagnostic.
+    #[must_use]
+    pub fn incoming(&self) -> &http_protocol::IncomingPlan {
+        &self.incoming
+    }
+    /// Emission-ready incoming receipt helpers. Receipts the v1 helpers cannot
+    /// decode produce plan errors, so a planned receipt list is always
+    /// renderable.
+    #[must_use]
+    pub fn incoming_receipts(&self) -> &incoming::Prepared {
+        &self.incoming_receipts
+    }
+    /// Compiled typed-stream semantics over the admitted protocol plan. The
+    /// planner is infallible and every entry carries its own evidence; only
+    /// discriminated SSE operations lower into emitted typed events members.
+    #[must_use]
+    pub fn stream_semantics(&self) -> &http_protocol::StreamSemanticsPlan {
+        &self.stream_semantics
+    }
+    /// Compiled ua/v1 attribution descriptor retained from the backend config.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.config.attribution.as_ref()
     }
     #[must_use]
     pub fn program(&self) -> &OwnedProgram {

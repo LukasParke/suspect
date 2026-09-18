@@ -493,9 +493,13 @@ impl Names {
                         })
                     }
                     Representation::Binary { .. } => JavaValue::Bytes,
-                    Representation::Stream { stream } => JavaValue::Stream {
-                        schema: stream.item_codec().schema().id().clone(),
-                        request,
+                    Representation::Stream { stream } => match stream.item_codec() {
+                        Some(codec) => JavaValue::Stream {
+                            schema: codec.schema().id().clone(),
+                            request,
+                        },
+                        // A schemaless stream surfaces untyped parsed envelope values.
+                        None => JavaValue::Json,
                     },
                     Representation::Form { form } => self.aggregate(
                         &format!("{base}Form"),

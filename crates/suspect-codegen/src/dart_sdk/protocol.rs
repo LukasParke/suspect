@@ -76,8 +76,8 @@ pub enum PlannedPayload {
     },
     Aggregate(PlannedAggregate),
     Stream {
-        schema: SchemaId,
-        codec: String,
+        schema: Option<SchemaId>,
+        codec: Option<String>,
         framing: wire::StreamFraming,
         max_item_bytes: u64,
     },
@@ -86,14 +86,14 @@ impl PlannedPayload {
     pub fn codec_name(&self) -> Option<&str> {
         match self {
             Self::Json { codec, .. } | Self::Text { codec, .. } => codec.as_deref(),
-            Self::Stream { codec, .. } => Some(codec),
+            Self::Stream { codec, .. } => codec.as_deref(),
             _ => None,
         }
     }
     pub fn schema(&self) -> Option<&SchemaId> {
         match self {
             Self::Json { schema, .. } | Self::Text { schema, .. } => schema.as_ref(),
-            Self::Stream { schema, .. } => Some(schema),
+            Self::Stream { schema, .. } => schema.as_ref(),
             _ => None,
         }
     }
@@ -296,10 +296,37 @@ pub fn plan_sdk_with_profiles(
                 .collect::<Vec<_>>()
         })?;
     let credential_env =
-        crate::credential_env::plan(&contract, &protocol, config.credential_env.as_ref())?;
-    // Actual wire inputs remain protocol.codec_roots(); the retained closure is
-    // the candidate-aware schema catalogue. Resource/dynamic execution is fenced.
-    let roots = protocol.codec_schema_closure().to_vec();
+        crate::credential_env::plan_with_defaults(&contract, &protocol, config.credential_env.as_ref(), config.sdk_defaults.as_ref())?;
+    let pagination = if config.sdk_defaults.is_some() {
+        Some(wire::plan_pagination(&contract, &protocol, config.sdk_defaults.as_ref())?)
+    } else {
+        None
+    };
+    let oauth = if config.sdk_defaults.is_some() {
+        Some(wire::plan_oauth(&contract, &protocol, config.sdk_defaults.as_ref())?)
+    } else {
+        None
+    };
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission stays conditional on
+    // the discriminated SSE subset, so every other document stays byte-identical.
+    let stream_semantics = wire::plan_stream_semantics(&contract, &protocol);
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = wire::plan_incoming(&contract)?;
+    // Incoming receipts extend the compiled schema catalogue only when
+    // declared: their closure joins the protocol's so receipt bodies compile
+    // into the same model plan. Actual wire inputs remain
+    // protocol.codec_roots(); the retained closure is the candidate-aware
+    // schema catalogue. Resource/dynamic execution is fenced.
+    let mut roots = protocol.codec_schema_closure().to_vec();
+    if !incoming.is_empty() {
+        roots.extend(incoming.codec_schema_closure().iter().cloned());
+        roots.sort();
+        roots.dedup();
+    }
     for id in &roots {
         for key in ["readOnly", "writeOnly"] {
             if contract
@@ -363,7 +390,10 @@ pub fn plan_sdk_with_profiles(
     }
     // Installed floor/current VM, JavaScript and browser witnesses cover the
     // scoped executor and native carriers. Unused v2 forms keep v1 programs.
-    let compiler = OwnedCompiler::new(config.schema.clone());
+    let mut schema_config = config.schema.clone();
+    schema_config.oas30_nullable_in_31 =
+        profiles.contains(&wire::CompatibilityProfile::Oas30NullableIn31V1);
+    let compiler = OwnedCompiler::new(schema_config);
     let compiled = compiler
         .compile_v2(contract.clone(), &roots)
         // Keep ordinary closures' established v1/v2 representation. The checked
@@ -410,6 +440,11 @@ pub fn plan_sdk_with_profiles(
     })?;
     let model_plan = models::plan(&contract, &compiled, &program)?;
     let mut names = model_plan.used_names();
+    // Emission-ready incoming receipt helpers, planned beside the operations so
+    // receipt codecs bind the same compiled models and every emitted name is
+    // collision-free. Receipts the v1 helpers cannot decode produce
+    // source-linked sdk-incoming-* errors instead of silent skips.
+    let incoming_receipts = super::incoming::prepare(&contract, &incoming, &model_plan, &mut names)?;
     let mut methods = BTreeSet::from([
         "close".into(),
         "runtimeType".into(),
@@ -598,8 +633,12 @@ pub fn plan_sdk_with_profiles(
                         .media
                         .iter()
                         .any(|m| matches!(m.payload, PlannedPayload::Stream { .. }))
+                    || status.success_name.is_some()
+                        && (status.media.len() != 1
+                            || !matches!(status.media[0].payload, PlannedPayload::Stream { .. })
+                            || status.none_variant.is_some())
                 {
-                    errors.push(diag(&contract,status.source.clone(),"dart-stream-response-profile","stream operations require bounded non-stream errors"));
+                    errors.push(diag(&contract,status.source.clone(),"dart-stream-response-profile","stream operations require an unambiguous item stream for each success and bounded non-stream errors"));
                 }
             }
         }
@@ -648,6 +687,11 @@ pub fn plan_sdk_with_profiles(
         operations,
         credentials: credential_map.into_values().collect(),
         credential_env,
+        pagination,
+        oauth,
+        incoming,
+        incoming_receipts,
+        stream_semantics,
         examples,
     })
 }
@@ -841,21 +885,33 @@ fn plan_media(
                 max_bytes: bytes.max_bytes(),
             },
         ),
-        R::Stream { stream } => (
-            models
-                .native_type(stream.item_codec().schema().id())
-                .expect("item root"),
-            PlannedPayload::Stream {
-                schema: stream.item_codec().schema().id().clone(),
-                codec: models
-                    .model(stream.item_codec().schema().id())
-                    .unwrap()
-                    .codec_name
-                    .clone(),
-                framing: stream.framing(),
-                max_item_bytes: stream.max_item_bytes(),
-            },
-        ),
+        R::Stream { stream } => match stream.item_codec() {
+            Some(codec) => (
+                models.native_type(codec.schema().id()).expect("item root"),
+                PlannedPayload::Stream {
+                    schema: Some(codec.schema().id().clone()),
+                    codec: Some(
+                        models
+                            .model(codec.schema().id())
+                            .unwrap()
+                            .codec_name
+                            .clone(),
+                    ),
+                    framing: stream.framing(),
+                    max_item_bytes: stream.max_item_bytes(),
+                },
+            ),
+            // A schemaless stream surfaces untyped parsed envelope values.
+            None => (
+                "JsonValue".into(),
+                PlannedPayload::Stream {
+                    schema: None,
+                    codec: None,
+                    framing: stream.framing(),
+                    max_item_bytes: stream.max_item_bytes(),
+                },
+            ),
+        },
         R::Form { form } => {
             let name = models::allocate(&format!("{stem}Fields"), names);
             let mut members = BTreeSet::from(["extraFields".into()]);

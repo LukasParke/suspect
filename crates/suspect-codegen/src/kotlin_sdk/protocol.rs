@@ -123,8 +123,42 @@ pub(super) fn plan(
                 .collect::<Vec<_>>()
         })?;
     let credential_env =
-        crate::credential_env::plan(&contract, &protocol, config.credential_env.as_ref())?;
-    let roots = protocol.codec_schema_closure().to_vec();
+        crate::credential_env::plan_with_defaults(&contract, &protocol, config.credential_env.as_ref(), config.sdk_defaults.as_ref())?;
+    let pagination_outcome = match config.sdk_defaults.as_ref() {
+        Some(defaults) => Some(w::plan_pagination(&contract, &protocol, Some(defaults))?),
+        None => None,
+    };
+    let oauth_outcome = match config.sdk_defaults.as_ref() {
+        Some(defaults) => Some(w::plan_oauth(&contract, &protocol, Some(defaults))?),
+        None => None,
+    };
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Only the lowered emission is
+    // conditional on the compiled discrimination evidence.
+    let stream_semantics = w::plan_stream_semantics(&contract, &protocol);
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming_plan = w::plan_incoming(&contract)?;
+    // Emission is conditional: `OAuth.kt` joins the package exactly when a
+    // usable scheme exists, and the identifiers it declares are reserved
+    // against model and method allocation in that case only, so no-policy
+    // output stays byte-identical.
+    let oauth_emits = oauth_outcome.as_ref().is_some_and(super::oauth::emittable);
+    let mut roots = protocol.codec_schema_closure().to_vec();
+    if !incoming_plan.is_empty() {
+        // Incoming receipts extend the codec table only when declared: their
+        // body schemas become actual codec inputs beside the selected
+        // operations'. The effective closure is recomputed over the merged
+        // roots once, so the resource gate, the compiled program and the
+        // native models all agree on exactly the same schema closure.
+        let mut codec_roots = protocol.codec_roots().to_vec();
+        codec_roots.extend(incoming_plan.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+        roots = contract.effective_schema_closure(&codec_roots);
+    }
     if let Some(id) = roots.iter().find(|id| {
         contract
             .schema(id)
@@ -201,6 +235,7 @@ pub(super) fn plan(
             "ProtocolCredential",
             "ProtocolValue",
             "ProtocolPartValue",
+            "PaginationStalled",
             "ProtocolBudget",
             "ProtocolMedia",
             "ProtocolKt",
@@ -218,6 +253,20 @@ pub(super) fn plan(
         .into_iter()
         .map(str::to_owned),
     );
+    if oauth_emits {
+        used.extend(
+            super::oauth::reserved_types(
+                oauth_outcome
+                    .as_ref()
+                    .is_some_and(super::oauth::has_discovery_among),
+                oauth_outcome
+                    .as_ref()
+                    .is_some_and(super::oauth::has_client_credentials),
+            )
+            .into_iter()
+            .map(|name| name.to_owned()),
+        );
+    }
     let mut names = BTreeSet::new();
     let mut credentials = BTreeMap::new();
     for op in protocol.operations() {
@@ -263,6 +312,9 @@ pub(super) fn plan(
     .collect();
     if credential_env.is_some() {
         methods.insert("fromEnv".into());
+    }
+    if oauth_emits {
+        methods.insert(super::oauth::RESERVED_MEMBER.to_owned());
     }
     let mut operations = Vec::new();
     for op in protocol.operations() {
@@ -482,6 +534,20 @@ pub(super) fn plan(
             wire: op.clone(),
         });
     }
+    // Typed-stream public type names join the reservation set before model
+    // planning, so model symbols can never take them; the emission itself is
+    // lowered after model planning binds the item codecs.
+    let mut stream_events =
+        super::stream_events::reserve(&operations, &stream_semantics, &mut used, &mut methods);
+    // Incoming receipt public names join the reservation set before model
+    // planning, so model symbols can never take them; the emission itself is
+    // lowered after model planning binds the codecs. Unrepresentable receipts
+    // refuse the plan here, exactly like the shared planner's own refusals.
+    let mut incoming_entries = if incoming_plan.is_empty() {
+        Vec::new()
+    } else {
+        super::incoming::reserve(&contract, &incoming_plan, &mut used)?
+    };
     let models = models::plan(&contract, &roots, &program, used)?;
     for op in &mut operations {
         for p in &mut op.parameters {
@@ -526,6 +592,12 @@ pub(super) fn plan(
                 .map(|r| r.ty.clone());
         }
     }
+    let pagination = pagination_outcome
+        .map(|outcome| super::pagination::lower(&models, &outcome, &operations, &mut methods));
+    // `Some` exactly when `OAuth.kt` will be emitted.
+    let oauth = oauth_outcome.filter(super::oauth::emittable);
+    super::stream_events::bind(&mut stream_events, &models);
+    super::incoming::bind(&mut incoming_entries, &models);
     let examples = if program.version == OwnedProgram::V3_VERSION {
         plan_protocol_examples_v3(contract.clone(), &protocol, ExampleConfig::default())
     } else if program.version == OwnedProgram::V2_VERSION {
@@ -543,6 +615,14 @@ pub(super) fn plan(
         protocol,
         examples,
         credential_env,
+        pagination,
+        oauth,
+        stream_events: super::stream_events::StreamEventsPlan {
+            semantics: stream_semantics,
+            operations: stream_events,
+        },
+        incoming: incoming_plan,
+        incoming_entries,
     })
 }
 
@@ -761,8 +841,13 @@ fn media_plan(
         }
         w::Representation::Binary { .. } => ("Bytes", NativeType::Bytes),
         w::Representation::Stream { stream } => {
-            schema = Some(stream.item_codec().schema().id().clone());
-            ("Items", NativeType::Model(schema.clone().unwrap()))
+            schema = stream.item_codec().map(|codec| codec.schema().id().clone());
+            let native = match schema.clone() {
+                Some(model) => NativeType::Model(model),
+                // A schemaless stream surfaces untyped parsed envelope values.
+                None => NativeType::Json,
+            };
+            ("Items", native)
         }
         w::Representation::Form { form: f } => {
             if f.fields().len() > 100 {

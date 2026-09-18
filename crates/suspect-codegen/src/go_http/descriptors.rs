@@ -208,7 +208,12 @@ pub(super) fn media(m: &PlannedMedia, plan: &HttpPlan) -> Value {
         }
         Representation::Stream { stream } => {
             v["Kind"] = json!("stream");
-            v["Codec"] = json!(codec(stream.item_codec(), plan));
+            v["Codec"] = json!(
+                stream
+                    .item_codec()
+                    .map(|c| codec(c, plan))
+                    .unwrap_or_else(|| "any".to_owned())
+            );
             v["Framing"] = json!(stream.framing());
             v["MaxItemBytes"] = json!(stream.max_item_bytes());
         }

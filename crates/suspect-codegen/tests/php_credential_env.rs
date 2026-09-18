@@ -107,6 +107,16 @@ fn plan(contract: Arc<Contract>, config: PhpConfig) -> Result<Plan, Vec<php_sdk:
         .operations()
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
+    let mut config = config;
+    // Canonical backend generation always compiles the ua/v1 attribution
+    // descriptor; direct planning must carry the identical constants.
+    config.attribution = Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        &config.package_name,
+        &config.package_version,
+        contract.openapi_version(),
+        "php",
+    ));
     php_sdk::plan_sdk(contract, &selected, config)
 }
 fn run(command: &mut Command, root: &Path, label: &str) {

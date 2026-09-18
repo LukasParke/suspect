@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import math
+import platform
 import re
 import sys
 from collections.abc import AsyncIterable, AsyncIterator, Iterable, Iterator, Mapping
@@ -21,6 +22,17 @@ from . import _auth as auth_runtime, _media as media, _parts as parts, _registry
 from ._wire import Budget, TOKEN, header_value, location, parse_scalar, percent, scalar, serialize, text_bytes
 
 _MANAGED = {'host', 'content-length', 'transfer-encoding', 'connection', 'trailer', 'upgrade', 'accept-encoding'}
+_AUTO = object()
+_APPLICATION_ID = re.compile(r"[A-Za-z0-9!#$%&'*+.^`|~-]+(?:/[A-Za-z0-9!#$%&'*+.^`|~-]+)?")
+
+
+def _validate_application_id(value: str | None) -> str | None:
+    """Validate `<name>` or `<name>/<version>` as RFC 9110 product tokens."""
+    if value is None:
+        return None
+    if not value or len(value) > 128 or _APPLICATION_ID.fullmatch(value) is None:
+        raise ValueError('application_id must be <name> or <name>/<version> of RFC 9110 tokens, e.g. "acme-chatbot/7"')
+    return value
 
 
 def server_url(op: Operation, override: str | None, selected: int | str, variables: Mapping[str, str], document_url: str | None) -> str:
@@ -364,7 +376,8 @@ class AsyncResponse(RawResponse):
 class _Base:
     def _configure(self, auth: Mapping[str, Credential] | None, override: str | None, selected: int | str,
                    variables: Mapping[str, str] | None, document: str | None, security: int | None,
-                   maximum: int | None, capture: int, timeout: float | None) -> None:
+                   maximum: int | None, capture: int, timeout: float | None,
+                   user_agent: str | None = _AUTO, application_id: str | None = None) -> None:
         if maximum is not None and (type(maximum) is not int or maximum <= 0):
             raise ValueError('max_response_bytes must be positive')
         if type(capture) is not int or capture < 0:
@@ -377,6 +390,20 @@ class _Base:
         self._max_response, self._max_capture = maximum, capture
         self._timeout = httpx.Timeout(timeout).as_dict()
         self._closed = False
+        self._user_agent, self._application_id = user_agent, _validate_application_id(application_id)
+
+    def _resolve_user_agent(self) -> str | None:
+        """ua/v1 attribution: explicit override wins, ``None`` suppresses, ``_AUTO`` assembles."""
+        if self._user_agent is not _AUTO:
+            return self._user_agent or None
+        plan = getattr(type(self), '_ATTRIBUTION', None)
+        if not plan:
+            return None
+        identity = plan['sdk_name'] + '/' + plan['sdk_version']
+        if self._application_id is not None:
+            identity = self._application_id
+        return ('suspect/' + plan['suspect_version'] + ' ' + identity
+                + ' (python/' + platform.python_version() + '; openapi/' + plan['spec_version'] + ')')
 
     def _prepare(self, op: Operation, encoded_parameters: list[tuple[str, str, str]], body: bytes | None,
                  content_type: str | None, attachments: list[tuple[str, str, str]], base: str) -> tuple[httpx.Request, int]:
@@ -444,6 +471,11 @@ class _Base:
             budget.charge(len(name) + len(value) + 4)
         if cookies:
             headers.append(('Cookie', '; '.join(cookies)))
+        # ua/v1 attribution is applied last so an explicit caller-supplied
+        # User-Agent header parameter keeps precedence over the automatic value.
+        user_agent = self._resolve_user_agent()
+        if user_agent is not None and 'user-agent' not in used_headers:
+            headers.append(('User-Agent', user_agent))
         url = (base[:-1] if base.endswith('/') else base) + route + ('?' + '&'.join(query) if query else '')
         text_bytes(url, op.max_request_bytes, op.source)
         try:
@@ -461,8 +493,9 @@ class SyncClient(_Base):
                  server: int | str = 0, server_variables: Mapping[str, str] | None = None,
                  document_url: str | None = None, auth_alternative: int | None = None,
                  transport: httpx.BaseTransport | None = None, max_response_bytes: int | None = None,
-                 max_capture_bytes: int = 4096, timeout: float | None = 30) -> None:
-        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout)
+                 max_capture_bytes: int = 4096, timeout: float | None = 30,
+                 user_agent: str | None = _AUTO, application_id: str | None = None) -> None:
+        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout, user_agent, application_id)
         self._owned = transport is None
         self._transport = httpx.HTTPTransport(trust_env=False, retries=0) if transport is None else transport
         self._responses: set[SyncResponse] = set()
@@ -544,8 +577,9 @@ class AsyncClientBase(_Base):
                  server: int | str = 0, server_variables: Mapping[str, str] | None = None,
                  document_url: str | None = None, auth_alternative: int | None = None,
                  transport: httpx.AsyncBaseTransport | None = None, max_response_bytes: int | None = None,
-                 max_capture_bytes: int = 4096, timeout: float | None = 30) -> None:
-        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout)
+                 max_capture_bytes: int = 4096, timeout: float | None = 30,
+                 user_agent: str | None = _AUTO, application_id: str | None = None) -> None:
+        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout, user_agent, application_id)
         self._owned = transport is None
         self._transport = httpx.AsyncHTTPTransport(trust_env=False, retries=0) if transport is None else transport
         self._responses: set[AsyncResponse] = set()

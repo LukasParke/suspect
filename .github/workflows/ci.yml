@@ -25,11 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/sdk-test-tools
       - run: cargo test --workspace
   bench-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/sdk-test-tools
       - run: cargo bench --workspace -- --test

@@ -79,12 +79,12 @@ OpenRouter credits. HTTP tests additionally build/install the wheel and run stri
 mypy over the generated package and native consumers.
 
 ```sh
-OPENROUTER_WEB_ROOT=/path/to/openrouter-web \
+OPENROUTER_WEB_ROOT=/Users/luke/github/openrouter-web \
   cargo test --locked -p suspect-codegen --test python_codecs -- --include-ignored
 ```
 
 `SUSPECT_PYTHON_BIN` selects the interpreter. The declared floor is Python 3.11;
-see [capabilities](SDK-CAPABILITIES.md) for the current profile boundaries.
+current integrated evidence and remaining gates are in [progress](SDK-PROGRESS.md).
 
 New scoped and resource evidence is recorded in
 `target/sdk-python-scoped-completion-01/` and

@@ -168,13 +168,15 @@ fn external_type(payload: &Payload, crate_name: &str) -> String {
         Payload::Text => "String".into(),
         Payload::Bytes => "Vec<u8>".into(),
         Payload::NoContent => "()".into(),
-        Payload::Stream { model, request, .. } => {
-            if *request {
-                format!("Vec<{crate_name}::models::{model}>")
-            } else {
+        Payload::Stream { model, request, .. } => match (model, request) {
+            (Some(model), true) => format!("Vec<{crate_name}::models::{model}>"),
+            (Some(model), false) => {
                 format!("{crate_name}::http::ItemStream<{crate_name}::models::{model}>")
             }
-        }
+            // A schemaless stream surfaces untyped parsed envelope values.
+            (None, true) => format!("Vec<{crate_name}::JsonValue>"),
+            (None, false) => format!("{crate_name}::http::ItemStream<{crate_name}::JsonValue>"),
+        },
         Payload::Parts(a) => format!("operation::{}", a.type_name),
     }
 }

@@ -67,6 +67,7 @@ Settings settings(const ClientOptions& client,const CallOptions& call,const Sour
     const auto& variables=call.server_variables?*call.server_variables:client.server_variables;
     std::size_t bytes=0;for(const auto& [key,value]:variables){if(key.size()>result.max_request_bytes-bytes)http_fail(SdkError::Kind::ResourceLimit,source,"server variable names exceed request ceiling");bytes+=key.size();if(value.size()>result.max_request_bytes-bytes)http_fail(SdkError::Kind::ResourceLimit,source,"server variables exceed request ceiling");bytes+=value.size();}
     result.variables=variables;result.security_alternative=call.security_alternative?call.security_alternative:client.security_alternative;
+    result.user_agent=client.user_agent;result.application_id=client.application_id;
     result.response_media=call.response_media;return result;
 }
 std::string lower_ascii(std::string_view text){std::string value(text);for(char& c:value)if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');return value;}

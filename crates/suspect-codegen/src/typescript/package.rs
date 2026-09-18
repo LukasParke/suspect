@@ -120,6 +120,10 @@ fn emit_package(
     if http.is_some() {
         exports.insert("./operations", entry("operations"));
     }
+    #[cfg(feature = "http-protocol")]
+    if http.is_some_and(crate::typescript::http::HttpPlan::oauth_emitted) {
+        exports.insert("./oauth", entry("oauth"));
+    }
     let package = json!({
         "name": config.name,
         "version": config.version,
@@ -185,8 +189,16 @@ fn emit_package(
                 INDEX_VIEWS
             };
             if http.is_some() {
+                #[cfg(feature = "http-protocol")]
+                let oauth = if http.is_some_and(crate::typescript::http::HttpPlan::oauth_emitted) {
+                    "\nexport * as oauth from '../oauth.js';\n"
+                } else {
+                    ""
+                };
+                #[cfg(not(feature = "http-protocol"))]
+                let oauth = "";
                 format!(
-                    "{index}\nexport * as operations from '../operations.js';\nexport {{ createClient }} from '../operations.js';\n"
+                    "{index}\nexport * as operations from '../operations.js';\nexport {{ createClient }} from '../operations.js';\n{oauth}"
                 )
             } else {
                 index.into()

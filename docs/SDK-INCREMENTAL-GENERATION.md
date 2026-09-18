@@ -1,8 +1,8 @@
 # Canonical incremental SDK generation
 
-The session, CLI watch/preview and native compatibility commands share the
-owned `Contract` and canonical language backends. Available profiles are
-documented in the [capability matrix](SDK-CAPABILITIES.md).
+The M6 session, CLI watch/preview and native compatibility commands share the
+owned `Contract` and canonical language backends. Current scope and milestone
+acceptance are recorded in [today's goal](SDK-TODAY-M3-M6.md).
 
 ## Generate, check or preview
 
@@ -19,7 +19,7 @@ package identities are explicit configuration, independent of OpenAPI `info`.
     {"backend": "go-http", "package_name": "example.com/example-sdk", "package_version": "1.0.0"},
     {"backend": "swift-http", "package_name": "ExampleSDK", "package_version": "1.0.0"}
   ],
-  "operation_ids": ["getWidget"],
+  "operation_ids": ["getCredits"],
   "owner": "example-sdk",
   "cache_entries": 4,
   "cache_bytes": 134217728
@@ -167,6 +167,6 @@ cargo test --locked -p suspect-codegen --test generation_session
 cargo test --locked -p suspect-cli --test codegen_session --test codegen_compare
 ```
 
-Measure latency/RSS and calibrate numerical regression budgets separately from
-functional cache correctness. Zero-rewrite checks do not substitute for a
-calibrated p95 latency gate; see the [measurement guide](SDK-SESSION-PERFORMANCE.md).
+Latency/RSS observations and calibrated numerical regression policy are recorded
+separately by the session-performance tooling. Functional cache correctness and
+zero-rewrite checks do not substitute for a calibrated p95 latency gate.

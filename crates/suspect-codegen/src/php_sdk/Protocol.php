@@ -386,6 +386,31 @@ final class Protocol
         return JsonValue::fromObject($members);
     }
 
+    /** Validate one caller-supplied application identifier: `<name>` or `<name>/<version>`
+     * of RFC 9110 tokens, at most 128 bytes. */
+    private static function applicationIdentity(string $value): bool
+    {
+        return strlen($value) <= 128 && preg_match('/\A[A-Za-z0-9!#$%&\'*+.^_`|~-]+(?:\/[A-Za-z0-9!#$%&\'*+.^_`|~-]+)?\z/', $value) === 1;
+    }
+
+    /** ua/v1 attribution: an explicit caller User-Agent wins entirely, an explicit
+     * empty value suppresses the header, and the automatic default identifies
+     * suspect as the generator and the SDK package or a caller-supplied application
+     * as the client. Invalid application identifiers degrade to no header rather
+     * than a malformed User-Agent. */
+    public static function userAgent(ClientOptions $options): ?string
+    {
+        if ($options->userAgent !== null) { return $options->userAgent === '' ? null : $options->userAgent; }
+        $version=RuntimeConfig::ATTRIBUTION_SUSPECT_VERSION;
+        if ($version==='') { return null; }
+        $identity=RuntimeConfig::ATTRIBUTION_SDK_NAME.'/'.RuntimeConfig::ATTRIBUTION_SDK_VERSION;
+        if ($options->applicationId!==null && $options->applicationId!=='') {
+            if (!self::applicationIdentity($options->applicationId)) { return null; }
+            $identity=$options->applicationId;
+        }
+        return 'suspect/'.$version.' '.$identity.' ('.RuntimeConfig::ATTRIBUTION_LANGUAGE.'/'.\PHP_VERSION.'; openapi/'.RuntimeConfig::ATTRIBUTION_SPEC_VERSION.')';
+    }
+
     /** Execute prepared native values using one source-selected exchange.
      * @param array<array-key,JsonValue> $values
      * @return ($stream is true ? StreamResponse : HttpResponse)
@@ -447,6 +472,10 @@ final class Protocol
         }elseif($bodyPlan!==null&&self::flag($bodyPlan,'required')){throw new SdkError('request_validation','required request body absent');}
         if(!isset($headers['accept'])){$media=[];foreach(self::list($operation,'responses') as$r){foreach(self::list($r,'media') as$m){$media[]=self::text(self::get($m,'media_type'),'declared');}}$headers['accept']=$media===[]?'*/*':implode(', ',array_unique($media));}
         $headers['accept-encoding']='identity';
+        // ua/v1 attribution is applied last so an explicit caller-supplied
+        // User-Agent header parameter keeps precedence over the automatic value.
+        $userAgent=self::userAgent($options);
+        if($userAgent!==null&&!isset($headers['user-agent'])){$headers['user-agent']=$userAgent;}
         $url=rtrim($server,'/').$path.($query===[]?'':'?'.implode('&',$query));
         if(strlen($url)>$options->maxRequestBytes||($body!==null&&strlen($body)>$options->maxRequestBytes)){throw new SdkError('resource_limit','request exceeds byte ceiling');}
         Wire::headers($headers,$options->maxHeaderBytes);Wire::serverOrigin($url);

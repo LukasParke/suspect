@@ -179,6 +179,8 @@ fn plan(root: &Path, a: &str, b: &str) -> kotlin_sdk::Plan {
             version: "0.4.0".into(),
             package_name: "example.documents".into(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         },
     )
     .unwrap();

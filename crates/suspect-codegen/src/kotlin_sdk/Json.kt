@@ -125,12 +125,9 @@ public data class JsonLimits(
     }
 }
 
-internal class JsonBudget(
-    val limits: JsonLimits,
-    val checkpoint: () -> Unit,
-    private var remaining: Int = limits.maxValues,
-    private var work: Int = limits.maxWorkBytes,
-) {
+internal class JsonBudget(val limits: JsonLimits, val checkpoint: () -> Unit) {
+    private var remaining = limits.maxValues
+    private var work = limits.maxWorkBytes
     fun value(depth: Int) {
         checkpoint()
         if (depth >= limits.maxDepth || remaining-- <= 0) resource("JSON nesting/value limit exceeded")
@@ -146,13 +143,6 @@ internal class JsonBudget(
 /** Strict, finite exact JSON I/O. Duplicate keys and trailing data are rejected. */
 public object Json {
     internal const val MAX_BYTES: Int = 4 * 1024 * 1024
-    internal const val MAX_PROGRAM_BYTES: Int = 16 * 1024 * 1024
-
-    // Generated metadata has its own finite load budget, separate from API payloads.
-    internal fun parseProgram(bytes: ByteArray): JsonValue {
-        if (bytes.size > MAX_PROGRAM_BYTES) throw JsonException("program byte limit exceeded", 0, JsonErrorKind.RESOURCE_LIMIT)
-        return Parser(decodeUtf8(bytes), JsonBudget(JsonLimits(), {}, 1_000_000, 4 * MAX_PROGRAM_BYTES)).document()
-    }
 
     /** Parse a document, retaining exact numbers and distinct Unicode keys. */
     public fun parse(text: String, limits: JsonLimits = JsonLimits()): JsonValue = parseChecked(text, limits) {}
@@ -168,15 +158,13 @@ public object Json {
     internal fun parseChecked(bytes: ByteArray, limits: JsonLimits, checkpoint: () -> Unit): JsonValue {
         checkpoint()
         if (bytes.size > limits.maxBytes) throw JsonException("JSON byte limit exceeded", 0, JsonErrorKind.RESOURCE_LIMIT)
-        val text = decodeUtf8(bytes)
+        val text = try {
+            Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (_: java.nio.charset.CharacterCodingException) { throw JsonException("invalid UTF-8", 0) }
         checkpoint()
         return Parser(text, JsonBudget(limits, checkpoint)).document()
     }
-
-    private fun decodeUtf8(bytes: ByteArray): String = try {
-        Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString()
-    } catch (_: java.nio.charset.CharacterCodingException) { throw JsonException("invalid UTF-8", 0) }
     internal fun stringifyChecked(value: JsonValue, limits: JsonLimits, checkpoint: () -> Unit): String {
         val writer = Writer(JsonBudget(limits, checkpoint))
         writer.value(value, 0)

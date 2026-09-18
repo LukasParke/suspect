@@ -12,8 +12,6 @@ public final class JsonRuntime {
     private JsonRuntime() {}
     /** Hard input/output allocation ceiling. */
     public static final int MAX_BYTES = 8 * 1024 * 1024;
-    // Generated metadata is loaded once under a separate finite budget.
-    static final int MAX_PROGRAM_BYTES = 32 * 1024 * 1024;
     /** Hard native recursion ceiling, independent of the schema graph. */
     public static final int MAX_DEPTH = 128;
     /** Hard numeric-token ceiling; exponents never expand implicitly. */
@@ -239,14 +237,6 @@ public final class JsonRuntime {
     static JsonValue parse(byte[] bytes, Budget budget) {
         Objects.requireNonNull(bytes);
         if (bytes.length > budget.limits.maxInputBytes()) throw resource("JSON input byte ceiling");
-        return parseUtf8(bytes, budget);
-    }
-    static JsonValue parseProgram(byte[] bytes) {
-        Objects.requireNonNull(bytes);
-        if (bytes.length > MAX_PROGRAM_BYTES) throw resource("program input byte ceiling");
-        return parseUtf8(bytes, new Budget(Limits.defaults().withWork(8L * MAX_PROGRAM_BYTES)));
-    }
-    private static JsonValue parseUtf8(byte[] bytes, Budget budget) {
         budget.spend(bytes.length);
         try {
             String text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)

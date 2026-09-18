@@ -423,8 +423,28 @@ fn canonical_environment_capture_keeps_typed_semantics() {
         .operations()
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
-    let generated = backend::generate_with_options(source, &selected, &target, &options).unwrap();
-    let direct = plan(Some(policy())).render().unwrap();
+    let generated = backend::generate_with_options(source.clone(), &selected, &target, &options).unwrap();
+    // Mirror backend.rs: canonical generation always compiles the ua/v1
+    // descriptor from the package identity and source document version.
+    let direct = super::plan_sdk_with_options(
+        source,
+        &selected,
+        config(),
+        super::protocol::ProtocolOptions {
+            credential_env: Some(policy()),
+            attribution: Some(crate::attribution::AttributionDescriptor::plan(
+                env!("CARGO_PKG_VERSION"),
+                &target.package_name,
+                &target.package_version,
+                contract().openapi_version(),
+                "csharp",
+            )),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .render()
+    .unwrap();
     assert_eq!(generated.len(), direct.len());
     for (a, b) in generated.iter().zip(&direct) {
         assert_eq!(a.path, b.path);

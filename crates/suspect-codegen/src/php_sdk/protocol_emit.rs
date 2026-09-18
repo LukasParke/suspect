@@ -23,6 +23,19 @@ pub(super) fn package(plan: &SdkPlan) -> Vec<OutFile> {
     put("src/ProtocolModels.php", context.models());
     put("src/ProtocolData.php", context.data());
     put("src/Client.php", context.client());
+    // Compiled OAuth lifecycle exists only under configured SDK defaults with
+    // at least one usable scheme; without them this contributes nothing at all.
+    if let Some(oauth) = super::oauth::source(plan) {
+        put("src/OAuth.php", oauth);
+    }
+    // Compiled incoming receipt helpers exist only for declared
+    // webhooks/callbacks; receipt-less packages contribute nothing at all.
+    if super::incoming::emittable(&plan.incoming) {
+        put(
+            "src/Incoming.php",
+            super::incoming::source(plan, &plan.incoming_receipts),
+        );
+    }
     put("composer.json",format!("{}\n",serde_json::to_string_pretty(&json!({"name":plan.config().package_name,"version":plan.config().package_version,
         "description":"Source-selected typed PHP SDK with checked exact codecs","type":"library","license":"proprietary",
         "require":{"php":"^8.3","ext-json":"*"},"suggest":{"ext-curl":"Default bounded HTTP adapter"},"autoload":{"classmap":["src/"]},
@@ -48,10 +61,95 @@ pub(super) fn package(plan: &SdkPlan) -> Vec<OutFile> {
     files.sort_by(|a, b| a.path.cmp(&b.path));
     files
 }
-struct Emitter<'a> {
+pub(super) struct Emitter<'a> {
     plan: &'a SdkPlan,
 }
 impl Emitter<'_> {
+    /// The emitter over one admitted plan, shared with the typed-events
+    /// emission so both paths render byte-identical request preparation.
+    pub(super) fn new(plan: &SdkPlan) -> Emitter<'_> {
+        Emitter { plan }
+    }
+    /// The request preparation shared by the direct operation method and the
+    /// typed-events generator: call context, protocol metadata and encoded
+    /// native values.
+    pub(super) fn request_preparation(&self, op: &Operation) -> String {
+        let mut out = String::new();
+        out.push_str(
+            "        $call = new CallContext($this->options, $options);\n        $context = new CodecContext($call->control);\n",
+        );
+        writeln!(
+            out,
+            "        $metadata = ProtocolData::{}();\n        $values = []; $payload = null;",
+            op.method
+        )
+        .unwrap();
+        if !self.arguments(op, false).is_empty() {
+            out.push_str("        try {\n");
+        }
+        for parameter in &op.parameters {
+            if !parameter.wire.required() {
+                writeln!(
+                    out,
+                    "        if ($input->{} !== Absent::Value) {{",
+                    parameter.name
+                )
+                .unwrap();
+            }
+            writeln!(
+                out,
+                "            $values[{}] = Codecs::{}($input->{}, $context);",
+                php(&format!(
+                    "{}:{}",
+                    location(parameter.wire.location()),
+                    parameter.wire.name()
+                )),
+                self.plan.models().nodes[&parameter.schema].codecs.to_value,
+                parameter.name
+            )
+            .unwrap();
+            if !parameter.wire.required() {
+                out.push_str("        }\n");
+            }
+        }
+        if !op.body.is_empty() {
+            let max_bytes = format!(
+                "min($this->options->maxRequestBytes, {})",
+                op.wire.body().unwrap().limits().body()
+            );
+            if !op.body_required {
+                out.push_str("        if ($input->body !== Absent::Value) {\n");
+            }
+            if op.body.iter().all(|m| m.wrapper.is_some()) {
+                writeln!(
+                    out,
+                    "            $payload = $input->body->toPayload($context, {max_bytes});"
+                )
+                .unwrap();
+            } else {
+                let media = &op.body[0];
+                writeln!(
+                    out,
+                    "            $payload = {};",
+                    self.payload(
+                        media,
+                        0,
+                        "$input->body",
+                        &php(media.wire.media_type().declared()),
+                        &max_bytes
+                    )
+                )
+                .unwrap();
+            }
+            if !op.body_required {
+                out.push_str("        }\n");
+            }
+        }
+        if !self.arguments(op, false).is_empty() {
+            out.push_str("        } catch (JsonError|ValidationError|\\Error $error) { throw new SdkError('request_validation', 'invalid native request', previous: $error); }\n");
+        }
+        out
+    }
     fn head(&self) -> String {
         format!(
             "<?php\ndeclare(strict_types=1);\nnamespace {};\n\n",
@@ -660,71 +758,8 @@ impl Emitter<'_> {
             } else {
                 format!(" = new {}()", op.input)
             };
-            writeln!(out,"    public function {}({} $input{default}, ?RequestOptions $options = null): {} {{\n        try {{\n        $call = new CallContext($this->options, $options);\n        $context = new CodecContext($call->control);\n        $metadata = ProtocolData::{}();\n        $values = []; $payload = null;",op.method,op.input,self.result(op),op.method).unwrap();
-            if !self.arguments(op, false).is_empty() {
-                out.push_str("        try {\n");
-            }
-            for parameter in &op.parameters {
-                if !parameter.wire.required() {
-                    writeln!(
-                        out,
-                        "        if ($input->{} !== Absent::Value) {{",
-                        parameter.name
-                    )
-                    .unwrap();
-                }
-                writeln!(
-                    out,
-                    "            $values[{}] = Codecs::{}($input->{}, $context);",
-                    php(&format!(
-                        "{}:{}",
-                        location(parameter.wire.location()),
-                        parameter.wire.name()
-                    )),
-                    self.plan.models().nodes[&parameter.schema].codecs.to_value,
-                    parameter.name
-                )
-                .unwrap();
-                if !parameter.wire.required() {
-                    out.push_str("        }\n");
-                }
-            }
-            if !op.body.is_empty() {
-                let max_bytes = format!(
-                    "min($this->options->maxRequestBytes, {})",
-                    op.wire.body().unwrap().limits().body()
-                );
-                if !op.body_required {
-                    out.push_str("        if ($input->body !== Absent::Value) {\n");
-                }
-                if op.body.iter().all(|m| m.wrapper.is_some()) {
-                    writeln!(
-                        out,
-                        "            $payload = $input->body->toPayload($context, {max_bytes});"
-                    )
-                    .unwrap();
-                } else {
-                    let media = &op.body[0];
-                    writeln!(
-                        out,
-                        "            $payload = {};",
-                        self.payload(
-                            media,
-                            0,
-                            "$input->body",
-                            &php(media.wire.media_type().declared()),
-                            &max_bytes
-                        )
-                    )
-                    .unwrap();
-                }
-                if !op.body_required {
-                    out.push_str("        }\n");
-                }
-            }
-            if !self.arguments(op, false).is_empty() {
-                out.push_str("        } catch (JsonError|ValidationError|\\Error $error) { throw new SdkError('request_validation', 'invalid native request', previous: $error); }\n");
-            }
+            writeln!(out,"    public function {}({} $input{default}, ?RequestOptions $options = null): {} {{\n        try {{",op.method,op.input,self.result(op),).unwrap();
+            out.push_str(&self.request_preparation(op));
             let streaming = op
                 .responses
                 .iter()
@@ -821,7 +856,17 @@ impl Emitter<'_> {
             )
             .unwrap();
         }
+        // Compiled pagination walks are appended under the configured SDK
+        // defaults; without them this contributes nothing at all.
+        out.push_str(&super::pagination::client_methods(self.plan));
+        // Compiled typed-event generators are appended for exactly the
+        // discriminated SSE operations; without them this contributes nothing
+        // at all.
+        out.push_str(&super::stream::client_methods(self.plan));
         out.push_str("}\n");
+        // The per-kind event, unknown-event and completion classes join the
+        // generated file only when a typed stream operation exists.
+        out.push_str(&super::stream::classes(self.plan));
         out
     }
     fn environment_factory(&self) -> String {
@@ -946,6 +991,8 @@ Declared API errors carry a typed `body`, typed `headers`, source `links` and re
 Credential keys are source scheme names. Strings mean bearer tokens. Supply `BasicCredential`, `ApiKeyCredential` or `AuthorizationCredential` for those explicit source mechanisms. OR alternatives are considered in source order; all credentials in an AND alternative must be available. An anonymous alternative may win even when credentials are present. `RequestOptions(securityAlternative: index)` selects a specific alternative. OAuth/OIDC callbacks receive immutable flow/discovery metadata and source scopes/roles in `CredentialRequest`.
 
 `ClientOptions(serverIndex: ..., serverVariables: [...], serverBaseUrl: ...)` selects a source server and variable values. Source defaults and enums remain authoritative. File-based source fixtures need an explicit HTTPS base (HTTP loopback is available for native test fixtures); HTTP(S) document origins can supply a relative base. `serverUrl` is an explicit complete override. Reserved expansion requires caller escaping where delimiters would change structure. Undefined combinations are refused. Whole-query form parameters serialize their checked object once, without a second URI-encoding pass.
+
+Every request carries the automatic `ua/v1` attribution User-Agent. `ClientOptions(userAgent: ...)` overrides it entirely; an explicit empty string suppresses the header. `ClientOptions(applicationId: ...)` replaces the SDK identity token with `<name>` or `<name>/<version>` of RFC 9110 tokens; an invalid identifier omits the header rather than sending a malformed value. A declared User-Agent header parameter always wins over the automatic value.
 
 ## Media, forms and parts
 
@@ -1481,7 +1528,7 @@ fn location(location: wire::ParameterLocation) -> &'static str {
         wire::ParameterLocation::Cookie => "cookie",
     }
 }
-fn php(value: &str) -> String {
+pub(super) fn php(value: &str) -> String {
     let mut out = String::from("\"");
     for ch in value.chars() {
         match ch {
@@ -1501,7 +1548,7 @@ fn php(value: &str) -> String {
 fn doc(out: &mut String, value: &str) {
     doc_tags(out, value, &[]);
 }
-fn doc_tags(out: &mut String, value: &str, tags: &[String]) {
+pub(super) fn doc_tags(out: &mut String, value: &str, tags: &[String]) {
     out.push_str("/**\n");
     for line in value.lines() {
         writeln!(

@@ -202,7 +202,29 @@ pub(super) fn package(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile> 
             super::credential_env::runtime(policy),
         );
     }
+    // OAuth lifecycle emission is conditional on at least one compiled scheme
+    // with an executable (non-deprecated) flow; plans without one emit no
+    // new file and keep their pre-OAuth bytes.
+    if let Some(oauth) = plan.oauth()
+        && super::oauth::emittable(oauth)
+    {
+        files.insert(
+            format!("{prefix}_oauth.py"),
+            super::oauth::runtime(
+                oauth,
+                &super::oauth::no_replay_requirements(oauth, plan.operations()),
+            ),
+        );
+    }
     files.insert(format!("{prefix}operations.py"), operations(plan));
+    if !plan.incoming_receipts.is_empty() {
+        // Generated-only incoming receipt helpers: no incoming declaration, no
+        // module, and byte-identical output for every other file.
+        files.insert(
+            format!("{prefix}_incoming.py"),
+            super::incoming::emit(&plan.incoming_receipts),
+        );
+    }
     files.insert("python/pyproject.toml".into(),format!("[build-system]\nrequires=[\"hatchling==1.29.0\"]\nbuild-backend=\"hatchling.build\"\n[project]\nname={}\nversion={}\nrequires-python=\">=3.11\"\ndependencies=[\"httpx==0.28.1\"]\nreadme=\"README.md\"\n[tool.hatch.build.targets.wheel]\npackages=[{}]\n",q(&package.name),q(&package.version),q(&format!("src/{}",package.import_name))));
     files.insert(
         format!("{prefix}http-manifest.json"),
@@ -460,6 +482,7 @@ fn operations(plan: &HttpPlan) -> String {
         }
         code.push('\n');
     }
+    code.push_str(&super::stream_emit::operations_module(plan));
     code.push_str(&format!(
         "__all__ = {}\n",
         serde_json::to_string(&operation_exports(plan)).unwrap()
@@ -471,19 +494,60 @@ fn client(plan: &HttpPlan) -> String {
     let mut code = String::from(
         "\"\"\"Source-selected native HTTP clients over one admitted protocol plan.\"\"\"\nfrom __future__ import annotations\nfrom collections.abc import Iterable, AsyncIterable\nfrom typing import cast\nfrom . import models, operations\nfrom .models import UNSET, Unset\nfrom .json_runtime import JsonNumber, JsonValue\nfrom ._types import Part\nfrom ._runtime import SyncClient, AsyncClientBase\nfrom ._registry import operation as _operation\n",
     );
+    let paginated = super::pagination::paginated_operations(plan);
+    let events = super::stream_emit::prepared(plan);
     if plan.credential_env().is_some() {
         code.push_str(super::credential_env::IMPORTS);
+    }
+    if !paginated.is_empty() {
+        code.push_str(super::pagination::IMPORTS);
+    }
+    if !events.is_empty() {
+        code.push_str(super::stream_emit::IMPORTS);
+    }
+    if let Some(attribution) = &plan.config.attribution {
+        let suspect_version = format!("{:?}", attribution.suspect_version);
+        let sdk_name = format!("{:?}", attribution.sdk_name);
+        let sdk_version = format!("{:?}", attribution.sdk_version);
+        let spec_version = format!("{:?}", attribution.spec_version);
+        code.push_str(&format!(
+            "\n# ua/v1 attribution: every request identifies suspect as the generator and the SDK or a caller-supplied application as the client.\n_ATTRIBUTION = {{'suspect_version': {suspect_version}, 'sdk_name': {sdk_name}, 'sdk_version': {sdk_version}, 'spec_version': {spec_version}}}\n"
+        ));
     }
     for name in operation_exports(plan) {
         code.push_str(&format!("from .operations import {name} as {name}\n"));
     }
+    if !paginated.is_empty() {
+        code.push_str(super::pagination::HELPERS);
+    }
+    if !events.is_empty() {
+        code.push_str(super::stream_emit::HELPERS);
+        code.push_str(&super::stream_emit::descriptors(&events));
+    }
     for asynchronous in [false, true] {
         code.push_str(if asynchronous {"\n\nclass AsyncClient(AsyncClientBase):\n    \"\"\"Context-managed async client. Streaming and credential hooks stay on the caller task.\"\"\"\n"}else{"\n\nclass Client(SyncClient):\n    \"\"\"Context-managed synchronous client with explicit credentials and transport ownership.\"\"\"\n"});
+        if plan.config.attribution.is_some() {
+            code.push_str("    _ATTRIBUTION = _ATTRIBUTION\n");
+        }
         if plan.credential_env().is_some() {
             code.push_str(&super::credential_env::constructor(asynchronous));
         }
         for (index, op) in plan.operations.iter().enumerate() {
             code.push_str(&method(plan, op, index, asynchronous));
+            if let Some(entry) = paginated.iter().find(|entry| entry.index == index) {
+                code.push_str(&super::pagination::methods(
+                    plan,
+                    op,
+                    entry.page,
+                    index,
+                    &entry.pages_name,
+                    &entry.items_name,
+                    asynchronous,
+                ));
+            }
+            if let Some(entry) = events.iter().find(|entry| entry.index == index) {
+                code.push_str(&super::stream_emit::methods(entry, asynchronous));
+            }
         }
     }
     code

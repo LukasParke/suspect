@@ -12,12 +12,30 @@ use suspect_ir::contract::{Contract, SchemaId, SourceId};
 
 #[path = "protocol_emit.rs"]
 mod emit;
+#[path = "oauth.rs"]
+mod oauth;
+#[path = "pagination.rs"]
+mod pagination;
+#[path = "stream.rs"]
+mod stream;
+#[path = "incoming.rs"]
+mod incoming;
 
 #[derive(Debug)]
 pub struct SdkPlan {
     pub(super) core: super::ModelCore,
     pub surface: Surface,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    pagination: Option<crate::http_protocol::PaginationOutcome>,
+    oauth: Option<crate::http_protocol::OAuthPlan>,
+    /// Compiled typed-stream semantics, carried from the infallible shared
+    /// planner. Emission stays conditional on discriminated SSE operations.
+    stream_semantics: crate::http_protocol::StreamSemanticsPlan,
+    /// Compiled incoming webhook/callback receipts over the whole contract,
+    /// independent of operation selection. Empty when the source declares none.
+    incoming: crate::http_protocol::IncomingPlan,
+    /// Emission-ready incoming receipt helpers with allocated member names.
+    incoming_receipts: Vec<incoming::Receipt>,
 }
 impl SdkPlan {
     pub fn config(&self) -> &PhpConfig {
@@ -25,6 +43,24 @@ impl SdkPlan {
     }
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
+    }
+    /// Compiled pagination selection carried from the configured SDK defaults.
+    pub fn pagination(&self) -> Option<&crate::http_protocol::PaginationOutcome> {
+        self.pagination.as_ref()
+    }
+    /// Compiled OAuth lifecycle selection carried from the configured SDK defaults.
+    pub fn oauth(&self) -> Option<&crate::http_protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// Compiled typed-stream semantics for every operation stream media,
+    /// carried from the infallible shared planner.
+    pub fn stream_semantics(&self) -> &crate::http_protocol::StreamSemanticsPlan {
+        &self.stream_semantics
+    }
+    /// Compiled incoming webhook/callback receipts for the whole contract,
+    /// independent of operation selection. Empty when the source declares none.
+    pub fn incoming(&self) -> &crate::http_protocol::IncomingPlan {
+        &self.incoming
     }
     pub fn contract(&self) -> &Arc<Contract> {
         self.core.contract()
@@ -126,9 +162,103 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
         return Err(errors);
     }
     let mut used = models::reserved_symbols();
-    let surface = plan(contract.clone(), selected, &config, capabilities, &mut used)?;
+    let mut surface = plan(contract.clone(), selected, &config, capabilities, &mut used)?;
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = crate::http_protocol::plan_incoming(&contract)?;
     let credential_env =
-        crate::credential_env::plan(&contract, &surface.protocol, config.credential_env.as_ref())?;
+        crate::credential_env::plan_with_defaults(&contract, &surface.protocol, config.credential_env.as_ref(), config.sdk_defaults.as_ref())?;
+    // Compiled pagination policy: SDK defaults are required, and a policy
+    // failure is a plan failure like every other diagnostic.
+    let pagination = match config.sdk_defaults.as_ref() {
+        Some(defaults) => Some(crate::http_protocol::plan_pagination(
+            &contract,
+            &surface.protocol,
+            Some(defaults),
+        )?),
+        None => None,
+    };
+    // Compiled OAuth lifecycle policy, mirrored from pagination: SDK defaults
+    // are required, and a policy failure is a plan failure like every other
+    // diagnostic.
+    let oauth = match config.sdk_defaults.as_ref() {
+        Some(defaults) => Some(crate::http_protocol::plan_oauth(
+            &contract,
+            &surface.protocol,
+            Some(defaults),
+        )?),
+        None => None,
+    };
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission stays conditional on
+    // discriminated SSE operations and is never gated on SDK defaults.
+    let stream_semantics = crate::http_protocol::plan_stream_semantics(&contract, &surface.protocol);
+    // The emitted OAuth class names share the package namespace with native
+    // models; reserve them only while OAuth emission participates, so
+    // no-policy allocation behavior is unchanged. The replaying transport
+    // class joins the reservation only while the replaying credential
+    // wrapper participates, so non-replaying plans allocate unchanged.
+    if let Some(oauth) = &oauth
+        && oauth::emittable(oauth)
+    {
+        for name in oauth::CLASS_NAMES {
+            used.insert(name.to_ascii_lowercase());
+        }
+        if oauth::replaying(oauth) {
+            used.insert("replaytransport".to_owned());
+        }
+    }
+    // The emitted Incoming class names join the reservation only while
+    // receipts are declared, so receipt-less allocation behavior is unchanged.
+    if incoming::emittable(&incoming) {
+        for name in incoming::CLASS_NAMES {
+            used.insert(name.to_ascii_lowercase());
+        }
+    }
+    // The receipt payload and reply schemas join the named model plan under
+    // the receipt's own stem, so the receipt codecs read like the receipts
+    // they serve. Hints only apply outside /components/schemas (the shared
+    // model-planner rule), so shared component schemas keep their source
+    // names, and the planner's allocator keeps every name collision-free.
+    if !incoming.is_empty() {
+        for operation in incoming.operations() {
+            let stem = models::pascal(operation.name());
+            if let Some(body) = operation.request().body() {
+                for (index, media) in body.media().iter().enumerate() {
+                    if let Representation::Json { codec: Some(codec) } = media.representation() {
+                        let suffix = if body.media().len() == 1 {
+                            String::new()
+                        } else {
+                            media_name(media, index)
+                        };
+                        surface
+                            .names
+                            .entry(codec.schema().id().clone())
+                            .or_insert_with(|| format!("{stem}Body{suffix}"));
+                    }
+                }
+            }
+            for response in operation.responses() {
+                for (index, media) in response.media().iter().enumerate() {
+                    if let Representation::Json { codec: Some(codec) } = media.representation() {
+                        let suffix = if response.media().len() == 1 {
+                            String::new()
+                        } else {
+                            media_name(media, index)
+                        };
+                        surface
+                            .names
+                            .entry(codec.schema().id().clone())
+                            .or_insert_with(|| {
+                                format!("{stem}Response{}{suffix}", response.status_key())
+                            });
+                    }
+                }
+            }
+        }
+    }
     for operation in &surface.operations {
         for response in &operation.responses {
             if let Payload::Object(name) = &response.payload
@@ -156,8 +286,16 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
             }
         }
     }
-    let reachable = surface.protocol.codec_schema_closure().to_vec();
-    for source in &reachable {
+    // Incoming receipts widen the directional-codec refusal closure exactly as
+    // their compiled schemas join the codec table; receipt-less plans keep the
+    // selected closure.
+    let mut directional = surface.protocol.codec_schema_closure().to_vec();
+    if !incoming.is_empty() {
+        directional.extend(incoming.codec_schema_closure().iter().cloned());
+        directional.sort();
+        directional.dedup();
+    }
+    for source in &directional {
         for keyword in ["readOnly", "writeOnly"] {
             if contract
                 .source(source)
@@ -173,6 +311,14 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
         }
     }
     let compiler = suspect_schema::OwnedCompiler::new(config.validation.clone());
+    // Incoming receipts extend the codec table only when declared: their body
+    // schemas become actual codec inputs beside the selected operations'.
+    let mut reachable = directional;
+    if !incoming.is_empty() {
+        reachable.extend(incoming.codec_roots().iter().cloned());
+        reachable.sort();
+        reachable.dedup();
+    }
     let validation = if resources {
         compiler
             .compile_v2(contract.clone(), &reachable)
@@ -209,9 +355,7 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
     })?;
     let models = if program.version == "suspect.validation.experimental.v3" {
         models::plan_resources(&contract, &reachable, &surface.names, &mut used)
-    } else if program.version != "suspect.validation.experimental.v1"
-        || crate::schema_view::has_intersections(&contract, &reachable)
-    {
+    } else if program.version != "suspect.validation.experimental.v1" {
         models::plan_scoped(&contract, &reachable, &surface.names, &mut used)
     } else {
         models::plan_named(&contract, &reachable, &surface.names, &mut used)
@@ -225,6 +369,14 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
     };
     let examples = example_planner(contract.clone(), &surface.protocol, Default::default());
     let samples = super::samples::plan(&models, &validation, &examples);
+    // Emission-ready incoming receipt helpers. Receipts the PHP v1 helpers
+    // cannot express surface as the shared plan errors instead of silent
+    // skips.
+    let mut incoming_errors = Vec::new();
+    let incoming_receipts = incoming::prepare(&contract, &incoming, &models, &mut incoming_errors);
+    if !incoming_errors.is_empty() {
+        return Err(incoming_errors);
+    }
     Ok(SdkPlan {
         core: super::ModelCore {
             contract,
@@ -237,6 +389,11 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
         },
         surface,
         credential_env,
+        pagination,
+        oauth,
+        stream_semantics,
+        incoming,
+        incoming_receipts,
     })
 }
 
@@ -626,14 +783,18 @@ fn media_plan(
         Representation::Json { codec: None } => Payload::Json,
         Representation::Text { codec: None, .. } => Payload::Text,
         Representation::Binary { .. } => Payload::Bytes,
-        Representation::Stream { stream } => {
-            let schema = stream.item_codec().schema().id().clone();
-            surface
-                .names
-                .entry(schema.clone())
-                .or_insert_with(|| format!("{name}Item"));
-            Payload::Stream(schema)
-        }
+        Representation::Stream { stream } => match stream.item_codec() {
+            Some(codec) => {
+                let schema = codec.schema().id().clone();
+                surface
+                    .names
+                    .entry(schema.clone())
+                    .or_insert_with(|| format!("{name}Item"));
+                Payload::Stream(schema)
+            }
+            // A schemaless stream surfaces untyped parsed envelope values.
+            None => Payload::Json,
+        },
         Representation::Form { form } => {
             let class = body_object(
                 contract,

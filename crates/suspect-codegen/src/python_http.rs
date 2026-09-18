@@ -9,8 +9,12 @@ use suspect_ir::contract::{Contract, SchemaId, SourceId};
 mod credential_env;
 mod docs;
 mod emit;
+mod incoming;
 mod native_examples;
+mod oauth;
+mod pagination;
 mod planning;
+mod stream_emit;
 
 pub use crate::examples::ExamplePlan;
 pub use planning::{
@@ -31,6 +35,10 @@ pub struct HttpConfig {
     pub capabilities: protocol::Capabilities,
     /// Explicit variable names bound to admitted source security declarations.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 impl Default for HttpConfig {
     fn default() -> Self {
@@ -43,6 +51,8 @@ impl Default for HttpConfig {
             max_parts: 1024,
             capabilities: capabilities(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         }
     }
 }
@@ -57,6 +67,11 @@ pub struct HttpPlan {
     config: HttpConfig,
     examples: ExamplePlan,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    pagination: Option<protocol::PaginationOutcome>,
+    oauth: Option<protocol::OAuthPlan>,
+    stream_semantics: protocol::StreamSemanticsPlan,
+    incoming: protocol::IncomingPlan,
+    incoming_receipts: Vec<incoming::IncomingReceipt>,
 }
 impl HttpPlan {
     pub fn contract(&self) -> &Arc<Contract> {
@@ -82,6 +97,39 @@ impl HttpPlan {
     }
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
+    }
+    /// Compiled `ua/v1` attribution constants carried by this plan, when configured.
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.config.attribution.as_ref()
+    }
+    /// Application-selected client defaults carried by this plan, when configured.
+    pub fn sdk_defaults(&self) -> Option<&crate::sdk_defaults::SdkDefaults> {
+        self.config.sdk_defaults.as_ref()
+    }
+    /// Compiled pagination selection over the admitted protocol plan, when
+    /// client defaults are configured. Empty outcomes mean every operation
+    /// stays an ordinary single-page call.
+    pub fn pagination(&self) -> Option<&protocol::PaginationOutcome> {
+        self.pagination.as_ref()
+    }
+    /// Compiled OAuth 2.0 / OpenID Connect lifecycle plan over the admitted
+    /// protocol plan, when client defaults are configured. Schemes whose
+    /// compiled flows are all non-executable (deprecated implicit/password,
+    /// or OpenID Connect without compiled flows) emit no runtime module.
+    pub fn oauth(&self) -> Option<&protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// Compiled typed-stream semantics (declared event kinds, payload codecs,
+    /// sentinel and completion policies) for every operation stream media, in
+    /// protocol-plan operation order. Emission consumes only the discriminated
+    /// subset; every other operation keeps its existing untyped stream path.
+    pub fn stream_semantics(&self) -> &protocol::StreamSemanticsPlan {
+        &self.stream_semantics
+    }
+    /// Compiled incoming webhook/callback receipts for the whole contract,
+    /// independent of operation selection. Empty when the source declares none.
+    pub fn incoming(&self) -> &protocol::IncomingPlan {
+        &self.incoming
     }
     pub fn render(&self) -> Vec<OutFile> {
         emit_http(self, &PackageConfig::default()).expect("default package identity")
@@ -242,9 +290,25 @@ pub fn plan_http(
             })
             .collect::<Vec<_>>()
     })?;
-    let credential_env =
-        crate::credential_env::plan(&contract, &wire, config.credential_env.as_ref())?;
-    for id in crate::schema_view::closure(&contract, wire.codec_roots()) {
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = protocol::plan_incoming(&contract)?;
+    // Incoming receipts extend the codec table only when declared: their body
+    // schemas become actual codec inputs beside the selected operations'.
+    let mut codec_roots: Vec<SchemaId> = wire.codec_roots().to_vec();
+    if !incoming.is_empty() {
+        codec_roots.extend(incoming.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+    }
+    let credential_env = crate::credential_env::plan_with_defaults(
+        &contract,
+        &wire,
+        config.credential_env.as_ref(),
+        config.sdk_defaults.as_ref(),
+    )?;
+    for id in crate::schema_view::closure(&contract, &codec_roots) {
         for keyword in ["readOnly", "writeOnly"] {
             if contract
                 .source(&id)
@@ -263,25 +327,60 @@ pub fn plan_http(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let codecs =
-        python_codecs::plan_codecs(contract.clone(), wire.codec_roots(), config.codecs.clone())
-            .map_err(|errors| {
-                errors
-                    .into_iter()
-                    .map(|e| HttpDiagnostic {
-                        source: e.source,
-                        at: e.at,
-                        code: e.code,
-                        message: e.message,
-                    })
-                    .collect::<Vec<_>>()
-            })?;
+    let pagination = if config.sdk_defaults.is_some() {
+        Some(protocol::plan_pagination(
+            &contract,
+            &wire,
+            config.sdk_defaults.as_ref(),
+        )?)
+    } else {
+        None
+    };
+    // OAuth lifecycle planning shares the pagination gate: without configured
+    // client defaults the runtime stays exactly the pre-OAuth emission, and
+    // configuration errors surface as the shared HttpDiagnostics.
+    let oauth = if config.sdk_defaults.is_some() {
+        Some(protocol::plan_oauth(
+            &contract,
+            &wire,
+            config.sdk_defaults.as_ref(),
+        )?)
+    } else {
+        None
+    };
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission stays conditional.
+    let stream_semantics = protocol::plan_stream_semantics(&contract, &wire);
+    let mut codec_config = config.codecs.clone();
+    codec_config.dialect = crate::schema_view::DialectPolicy::from_profiles(
+        config.capabilities.profiles().iter().copied(),
+    );
+    let codecs = python_codecs::plan_codecs(contract.clone(), &codec_roots, codec_config).map_err(
+        |errors| {
+            errors
+                .into_iter()
+                .map(|e| HttpDiagnostic {
+                    source: e.source,
+                    at: e.at,
+                    code: e.code,
+                    message: e.message,
+                })
+                .collect::<Vec<_>>()
+        },
+    )?;
     let symbols = codecs
         .models()
         .symbols()
         .iter()
         .map(|symbol| (symbol.source().clone(), symbol.name().into()))
         .collect();
+    // Emission-ready incoming receipt helpers; receipts the v1 helpers cannot
+    // express surface as the shared plan errors.
+    let incoming_receipts = incoming::prepare(&contract, &incoming, &symbols, &mut errors);
+    if !errors.is_empty() {
+        return Err(errors);
+    }
     let (operations, groups) = planning::lower(&wire);
     let examples =
         if codecs.validation_program().version == suspect_schema::OwnedProgram::V3_VERSION {
@@ -299,6 +398,11 @@ pub fn plan_http(
         config,
         examples,
         credential_env,
+        pagination,
+        oauth,
+        stream_semantics,
+        incoming,
+        incoming_receipts,
     })
 }
 
@@ -369,6 +473,9 @@ pub fn source_assets() -> &'static [(&'static str, &'static [u8])] {
         "python_http/native_examples.rs",
         "python_http/credential_env.rs",
         "python_http/credential_env.py",
+        "python_http/oauth.rs",
+        "python_http/pagination.rs",
+        "python_http/stream_emit.rs",
         "python_http/runtime.py",
         "python_http/types.py",
         "python_http/auth.py",

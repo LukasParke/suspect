@@ -1,0 +1,50 @@
+package nativecosts
+
+import @@IMPORT@@.*
+import java.net.URI
+import kotlinx.coroutines.runBlocking
+
+private fun checked(value: @@MODEL@@) {
+    check(value.data.totalCredits.token == "@@PRECISION@@")
+    check(value.data.totalUsage.token == "25.75")
+}
+object NativeCosts {
+    @JvmStatic fun main(args: Array<String>) {
+        val phase = args[0]
+        val count = args[1].toInt()
+        val fixture = @@FIXTURE@@
+        when (phase) {
+            "import" -> {
+                check(count == 1)
+                Class.forName("@@IMPORT@@.Client")
+                check(Codecs.@@CODEC@@.javaClass.name.isNotEmpty())
+                println("SUSPECT_NATIVE_COSTS {\"phase\":\"import\",\"iterations\":1,\"loaded\":true}")
+            }
+            "codec" -> {
+                var encodedBytes = 0L
+                repeat(count) {
+                    val value: @@MODEL@@ = Codecs.@@CODEC@@.decode(fixture)
+                    checked(value)
+                    val encoded = Codecs.@@CODEC@@.encode(value)
+                    check(encoded.contains("\"total_credits\":@@PRECISION@@"))
+                    encodedBytes += encoded.toByteArray(Charsets.UTF_8).size
+                }
+                println("SUSPECT_NATIVE_COSTS {\"phase\":\"codec\",\"iterations\":$count,\"encodedBytes\":$encodedBytes,\"precision\":\"@@PRECISION@@\"}")
+            }
+            "request" -> {
+                val base = args[2]
+                check(base.startsWith("http://127.0.0.1:") && base.endsWith("/api/v1"))
+                runBlocking {
+                    Client(Credentials(apiKey = "@@TOKEN@@"), options = ClientOptions(serverUrl = URI(base))).use { client ->
+                        repeat(count) {
+                            val response = client.@@METHOD@@()
+                            checked(@@KOTLIN_DATA@@)
+                        }
+                    }
+                }
+                println("SUSPECT_NATIVE_COSTS {\"phase\":\"request\",\"iterations\":$count,\"precision\":\"@@PRECISION@@\"}")
+            }
+            else -> error("unknown phase")
+        }
+    }
+}

@@ -218,7 +218,7 @@ fn media_type(plan: &SdkPlan, media: &csharp_sdk::protocol::PlannedMedia) -> Val
         Representation::Json{codec}=>codec.as_ref().map_or(json!({"kind":"primitive","name":"System.Text.Json.JsonElement","jsonNullAllowed":true}),|c|type_at(plan.models(),c.schema().id(),ns)),
         Representation::Text{codec,..}=>codec.as_ref().map_or(json!({"kind":"primitive","name":"string"}),|c|type_at(plan.models(),c.schema().id(),ns)),
         Representation::Binary{..}=>json!({"kind":"array","type":{"kind":"primitive","name":"byte"}}),
-        Representation::Stream{stream}=>json!({"kind":"generic","name":qualified(ns,"HttpStream"),"arguments":[type_at(plan.models(),stream.item_codec().schema().id(),ns)],"interfaces":["System.Collections.Generic.IAsyncEnumerable","System.IAsyncDisposable"]}),
+        Representation::Stream{stream}=>json!({"kind":"generic","name":qualified(ns,"HttpStream"),"arguments":[stream.item_codec().map_or(json!({"kind":"primitive","name":"System.Text.Json.JsonElement","jsonNullAllowed":true}),|codec|type_at(plan.models(),codec.schema().id(),ns))],"interfaces":["System.Collections.Generic.IAsyncEnumerable","System.IAsyncDisposable"]}),
         _=>named(qualified(ns,&media.native_type)),
     }
 }
@@ -661,7 +661,7 @@ pub(super) fn capture(
         contract.clone(),
         selected,
         backend::csharp_config(&snapshot.target),
-        backend::csharp_options(&snapshot.generation),
+        backend::csharp_options(&snapshot.generation, None),
     )
     .map_err(errors)?;
     plan.render().map_err(errors)?;

@@ -129,8 +129,8 @@ module __NAMESPACE__
     def close: () -> nil
   end
   class Client
-    def initialize: (?auth: Hash[String, credential], ?credential_provider: _CredentialProvider?, ?security: Integer | Unset, ?transport: _Transport?, ?server_url: String?, ?server: Integer | String | Unset, ?server_variables: Hash[String, String], ?document_url: String?, ?timeout: Float | Integer, ?max_response_bytes: Integer, ?max_capture_bytes: Integer) -> void
-    def self.open: [Result] (?auth: Hash[String, credential], ?credential_provider: _CredentialProvider?, ?security: Integer | Unset, ?transport: _Transport?, ?server_url: String?, ?server: Integer | String | Unset, ?server_variables: Hash[String, String], ?document_url: String?, ?timeout: Float | Integer, ?max_response_bytes: Integer, ?max_capture_bytes: Integer) { (Client) -> Result } -> Result
+    def initialize: (?auth: Hash[String, credential], ?credential_provider: _CredentialProvider?, ?security: Integer | Unset, ?transport: _Transport?, ?server_url: String?, ?server: Integer | String | Unset, ?server_variables: Hash[String, String], ?document_url: String?, ?timeout: Float | Integer, ?max_response_bytes: Integer, ?max_capture_bytes: Integer, ?user_agent: String | nil | Unset, ?application_id: String?) -> void
+    def self.open: [Result] (?auth: Hash[String, credential], ?credential_provider: _CredentialProvider?, ?security: Integer | Unset, ?transport: _Transport?, ?server_url: String?, ?server: Integer | String | Unset, ?server_variables: Hash[String, String], ?document_url: String?, ?timeout: Float | Integer, ?max_response_bytes: Integer, ?max_capture_bytes: Integer, ?user_agent: String | nil | Unset, ?application_id: String?) { (Client) -> Result } -> Result
     def close: () -> nil
     def closed?: () -> bool
   end

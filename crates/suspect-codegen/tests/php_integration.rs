@@ -184,6 +184,13 @@ fn public_backend_and_snapshot_use_the_same_composer_namespace_and_symbols() {
     )
     .unwrap();
     assert_eq!(coverage["namespace"], "Acme\\WidgetsSdk");
+    let attribution = suspect_codegen::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        "acme/widgets-sdk",
+        "1.0.0",
+        contract.openapi_version(),
+        "php",
+    );
     let plan = php_sdk::plan_sdk(
         contract,
         &selected,
@@ -191,6 +198,9 @@ fn public_backend_and_snapshot_use_the_same_composer_namespace_and_symbols() {
             package_name: target().package_name,
             package_version: "1.0.0".into(),
             namespace: "Acme\\WidgetsSdk".into(),
+            // Canonical backend generation compiles the ua/v1 attribution
+            // descriptor from the same package identity and source.
+            attribution: Some(attribution),
             ..Default::default()
         },
     )

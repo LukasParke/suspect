@@ -93,9 +93,12 @@ fn payload(plan: &Plan, media: &PlannedMedia) -> Value {
         | P::Text {
             schema: Some(id), ..
         }
-        | P::Stream { schema: id, .. } => at(plan, id),
+        | P::Stream {
+            schema: Some(id), ..
+        } => at(plan, id),
         P::Json { schema: None, .. } => named("JsonValue"),
         P::Text { schema: None, .. } => primitive("String"),
+        P::Stream { schema: None, .. } => named("JsonValue"),
         P::Bytes { .. } => named("Uint8List"),
         P::Aggregate(a) => named(&a.name),
     }

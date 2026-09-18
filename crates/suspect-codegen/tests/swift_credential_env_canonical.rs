@@ -78,6 +78,13 @@ fn canonical_generation_and_capture_match_the_bound_swift_plan() {
         &selected(&source),
         SwiftConfig {
             credential_env: options.credential_env.clone(),
+            attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+                env!("CARGO_PKG_VERSION"),
+                &target.package_name,
+                &target.package_version,
+                source.openapi_version(),
+                Backend::SwiftHttp.language_tag(),
+            )),
             ..Default::default()
         },
     )

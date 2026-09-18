@@ -6,6 +6,33 @@ use serde_json::Value;
 use std::{borrow::Cow, collections::BTreeSet};
 use suspect_ir::contract::{Contract, ContractDiagnostic, Schema, SchemaDialect, SchemaId};
 
+/// Versioned dialect interpretation choices shared by model/codec planners.
+/// The zero value preserves the ordinary strict dialect semantics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DialectPolicy {
+    /// Interpret the OAS 3.0 `nullable` annotation on OAS 3.1/3.2 schemas with
+    /// its 3.0 semantics: the same-object type gains (or, with
+    /// `nullable: false`, loses) null. Mirrors the
+    /// `CompatibilityProfile::Oas30NullableIn31V1` generation option.
+    pub oas30_nullable_in_31: bool,
+}
+
+impl DialectPolicy {
+    /// The policy implied by the adapter's explicit compatibility profiles.
+    pub(crate) fn from_profiles<I>(profiles: I) -> Self
+    where
+        I: IntoIterator<Item = crate::http_protocol::CompatibilityProfile>,
+    {
+        let mut policy = Self::default();
+        for profile in profiles {
+            if profile == crate::http_protocol::CompatibilityProfile::Oas30NullableIn31V1 {
+                policy.oas30_nullable_in_31 = true;
+            }
+        }
+        policy
+    }
+}
+
 pub(crate) fn reference_only(schema: Schema<'_>) -> bool {
     schema.ignores_ref_siblings()
 }
@@ -40,15 +67,6 @@ pub(crate) fn closure(contract: &Contract, roots: &[SchemaId]) -> Vec<SchemaId> 
     contract.effective_schema_closure(roots)
 }
 
-/// Intersections can need a checked native carrier even when the validator
-/// uses only v1 instructions. Its envelope version is not a model capability.
-pub(crate) fn has_intersections(contract: &Contract, reachable: &[SchemaId]) -> bool {
-    reachable
-        .iter()
-        .filter_map(|id| contract.schema(id))
-        .any(|schema| raw(schema).get("allOf").is_some())
-}
-
 pub(crate) fn diagnostic_applies(
     contract: &Contract,
     reachable: &[SchemaId],
@@ -57,12 +75,17 @@ pub(crate) fn diagnostic_applies(
     contract.schema_diagnostic_applies(reachable, diagnostic)
 }
 
-pub(crate) fn null_allowed(contract: &Contract, root: &SchemaId) -> Result<bool, Problem> {
+pub(crate) fn null_allowed(
+    contract: &Contract,
+    root: &SchemaId,
+    policy: DialectPolicy,
+) -> Result<bool, Problem> {
     fn visit(
         contract: &Contract,
         id: &SchemaId,
         active: &mut BTreeSet<SchemaId>,
         work: &mut usize,
+        policy: DialectPolicy,
     ) -> Option<bool> {
         *work = work.checked_sub(1)?;
         if active.len() >= 256 || !active.insert(id.clone()) {
@@ -82,7 +105,7 @@ pub(crate) fn null_allowed(contract: &Contract, root: &SchemaId) -> Result<bool,
             {
                 return None;
             }
-            let mut accepts = accepts_literal(schema, &Value::Null);
+            let mut accepts = accepts_literal(schema, &Value::Null, policy);
             if let Some(value) = object.get("const") {
                 accepts &= value.is_null();
             }
@@ -90,7 +113,7 @@ pub(crate) fn null_allowed(contract: &Contract, root: &SchemaId) -> Result<bool,
                 accepts &= values.iter().any(Value::is_null);
             }
             for reference in schema.references() {
-                accepts &= visit(contract, reference.target.as_ref()?, active, work)?;
+                accepts &= visit(contract, reference.target.as_ref()?, active, work, policy)?;
             }
             for keyword in ["allOf", "anyOf", "oneOf"] {
                 if let Some(values) = object.get(keyword).and_then(Value::as_array) {
@@ -101,6 +124,7 @@ pub(crate) fn null_allowed(contract: &Contract, root: &SchemaId) -> Result<bool,
                             &id.child(keyword).child(&index.to_string()),
                             active,
                             work,
+                            policy,
                         )?);
                     }
                     accepts &= match keyword {
@@ -111,30 +135,38 @@ pub(crate) fn null_allowed(contract: &Contract, root: &SchemaId) -> Result<bool,
                 }
             }
             if object.contains_key("not") {
-                accepts &= !visit(contract, &id.child("not"), active, work)?;
+                accepts &= !visit(contract, &id.child("not"), active, work, policy)?;
             }
             Some(accepts)
         })();
         active.remove(id);
         result
     }
-    visit(contract, root, &mut BTreeSet::new(), &mut 100_000).ok_or_else(|| Problem {
+    visit(contract, root, &mut BTreeSet::new(), &mut 100_000, policy).ok_or_else(|| Problem {
         source:root.clone(), code:"native-nullability-analysis", message:"nullability proof is incomplete (unsupported applicability or finite reference/depth/work limits); incomplete analysis cannot become a non-null type",
     })
 }
 
 /// Local type intersection only; nullable cannot bypass enum or composition.
-pub(crate) fn accepts_literal(schema: Schema<'_>, value: &Value) -> bool {
+pub(crate) fn accepts_literal(schema: Schema<'_>, value: &Value, policy: DialectPolicy) -> bool {
     if reference_only(schema) {
         return true;
     }
     let raw = schema.raw();
-    if value.is_null()
-        && matches!(schema.dialect(), SchemaDialect::OpenApi30)
-        && raw.get("type").is_some_and(Value::is_string)
-        && raw.get("nullable") == Some(&Value::Bool(true))
-    {
-        return true;
+    if value.is_null() && raw.get("nullable").is_some() {
+        let declared_nullable = raw.get("nullable") == Some(&Value::Bool(true));
+        let mutates_type =
+            matches!(schema.dialect(), SchemaDialect::OpenApi30) || policy.oas30_nullable_in_31;
+        if mutates_type && raw.get("type").is_some_and(Value::is_string) {
+            return declared_nullable;
+        }
+        if mutates_type && declared_nullable && raw.get("type").is_some_and(Value::is_array) {
+            return true;
+        }
+        if mutates_type && raw.get("nullable") == Some(&Value::Bool(false)) {
+            // nullable: false removes "null" from a declared type array.
+            return !raw.get("type").is_some_and(Value::is_array);
+        }
     }
     let Some(types) = raw.get("type") else {
         return true;

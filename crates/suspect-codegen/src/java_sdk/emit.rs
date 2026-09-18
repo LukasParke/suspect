@@ -2,7 +2,7 @@
 
 use super::{
     SdkPlan,
-    models::{JavaDeclaration, javadoc},
+    models::{JavaDeclaration, javadoc, q},
 };
 use crate::{OutFile, http_contract::HttpDiagnostic};
 use serde_json::json;
@@ -50,6 +50,40 @@ pub(crate) fn render(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>
         );
     }
     let header = format!("package {package};\nimport static {package}.JsonRuntime.*;\n\n");
+    files.insert(
+        format!("{prefix}/Attribution.java"),
+        attribution_source(plan, package),
+    );
+    // Generated pagination walks exist only under configured SDK defaults with
+    // at least one emittable paginated operation.
+    if let Some(pagination) = super::pagination::source(plan) {
+        files.insert(
+            format!("{prefix}/Pagination.java"),
+            format!("{header}{}", pagination),
+        );
+    }
+    // Generated typed-event decoding exists only for discriminated SSE stream
+    // operations; without them this contributes nothing at all.
+    if let Some(stream_events) = super::stream::source(plan) {
+        files.insert(
+            format!("{prefix}/StreamEvents.java"),
+            format!("{header}{}", stream_events),
+        );
+    }
+    // Generated OAuth lifecycle exists only under configured SDK defaults with
+    // at least one usable scheme; without them this contributes nothing at all.
+    if let Some(oauth) = super::oauth::source(plan) {
+        files.insert(format!("{prefix}/OAuth.java"), format!("{header}{}", oauth));
+    }
+    // Generated incoming receipt helpers exist only when the source declares
+    // webhooks or callbacks; without them this contributes nothing at all, so
+    // receipt-less packages stay byte-identical.
+    if let Some(incoming) = super::incoming::source(plan) {
+        files.insert(
+            format!("{prefix}/Incoming.java"),
+            format!("{header}{}", incoming),
+        );
+    }
     for symbol in plan.models().symbols() {
         files.insert(
             format!("{prefix}/{}.java", symbol.name()),
@@ -76,7 +110,7 @@ pub(crate) fn render(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>
         serde_json::to_string(plan.program()).expect("checked program"),
     );
     let protocol = serde_json::to_string(plan.protocol()).expect("protocol data");
-    if protocol.len() > 32 * 1024 * 1024 {
+    if protocol.len() > 8 * 1024 * 1024 {
         return Err(vec![super::plan_diag(
             plan.contract(),
             "java-protocol-resource-limit",
@@ -158,11 +192,11 @@ pub(crate) fn render(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>
     if !quickstart.is_empty() {
         files.insert("java/examples/GettingStarted.java".into(), quickstart);
     }
-    if files.values().map(String::len).sum::<usize>() > 256 * 1024 * 1024 {
+    if files.values().map(String::len).sum::<usize>() > 64 * 1024 * 1024 {
         return Err(vec![super::plan_diag(
             plan.contract(),
             "java-artifact-resource-limit",
-            "Java package exceeds the 256 MiB emitted-text ceiling",
+            "Java package exceeds the 64 MiB emitted-text ceiling",
         )]);
     }
     Ok(files
@@ -173,4 +207,33 @@ pub(crate) fn render(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>
 
 fn source(id: &suspect_ir::contract::SourceId) -> serde_json::Value {
     json!({"document":id.document().as_str(),"pointer":id.pointer()})
+}
+
+/// `ua/v1` attribution constants compiled at generation time. The native
+/// runtime resolver in `HttpRuntime.java` reads them; an absent descriptor
+/// emits the disabled sentinel (empty suspect version) so the static runtime
+/// compiles unchanged.
+fn attribution_source(plan: &SdkPlan, package: &str) -> String {
+    let (suspect, name, version, spec) = match plan.attribution() {
+        Some(attribution) => (
+            q(&attribution.suspect_version),
+            q(&attribution.sdk_name),
+            q(&attribution.sdk_version),
+            q(&attribution.spec_version),
+        ),
+        None => (
+            "\"\"".to_owned(),
+            "\"\"".to_owned(),
+            "\"\"".to_owned(),
+            "\"\"".to_owned(),
+        ),
+    };
+    let comment = if plan.attribution().is_some() {
+        "/** ua/v1 attribution: every request identifies suspect as the generator and the\n * SDK or a caller-supplied application as the client.\n */\n"
+    } else {
+        "/** ua/v1 attribution is disabled for this package: an empty suspect version\n * suppresses the automatic User-Agent header.\n */\n"
+    };
+    format!(
+        "package {package};\n\n{comment}public final class Attribution {{\n    private Attribution() {{}}\n    /** Suspect generator version captured at generation time. An empty value disables the automatic attribution header. */\n    public static final String SUSPECT_VERSION = {suspect};\n    /** Sanitized SDK package identity token. */\n    public static final String SDK_NAME = {name};\n    /** Exact SDK package version. */\n    public static final String SDK_VERSION = {version};\n    /** Source document's declared OpenAPI or Swagger version. */\n    public static final String SPEC_VERSION = {spec};\n    /** Language tag used inside the trailing User-Agent comment. */\n    public static final String LANGUAGE = \"java\";\n}}\n"
+    )
 }

@@ -51,6 +51,27 @@ internal static class ServerRuntime
         return Resolve(result.ToString(), document);
     }
     internal static string Absolute(string value) => Resolve(value, null);
+    // A caller-supplied client-wide server override must state its final base.
+    // Literal or percent-encoded dot segments could traverse outside that base
+    // in processors that decode before path matching, so they are refused
+    // here instead of being canonicalized away.
+    internal static string Explicit(string value)
+    {
+        Check(value, document: false);
+        var schemeEnd = SchemeEnd(value);
+        if (schemeEnd < 0) throw Invalid();
+        var (authority, path) = Authority(value[(schemeEnd + 1)..]);
+        ValidateAuthority(value[..schemeEnd], authority);
+        var decoded = new StringBuilder(path.Length);
+        for (var i = 0; i < path.Length; i++)
+        {
+            if (path[i] == '%' && i + 2 < path.Length && Uri.IsHexDigit(path[i + 1]) && Uri.IsHexDigit(path[i + 2]))
+            { decoded.Append((char)(Uri.FromHex(path[i + 1]) << 4 | Uri.FromHex(path[i + 2]))); i += 2; }
+            else decoded.Append(path[i]);
+        }
+        if (decoded.ToString().Split('/').Any(segment => segment is "." or "..")) throw Invalid();
+        return Absolute(value);
+    }
     internal static string Resolve(string reference, string? document)
     {
         Check(reference, document: false);

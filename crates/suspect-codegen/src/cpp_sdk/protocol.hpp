@@ -1,6 +1,7 @@
 #pragma once
 /** @file protocol.hpp Generated protocol descriptors and bounded implementation seams. */
 #include "@PACKAGE@/http.hpp"
+#include "@PACKAGE@/attribution.hpp"
 
 namespace @NAMESPACE@::detail {
 struct HttpFailure { SdkError error; };
@@ -81,6 +82,8 @@ struct Settings {
     std::size_t max_parts = @PARTS@;
     std::size_t max_item_bytes = @STREAM_ITEM_BYTES@;
     Presence<std::string> server_url, document_url, response_media;
+    /** ua/v1 attribution: the caller override/suppression and application identity. */
+    Presence<std::string> user_agent, application_id;
     std::size_t server_index = 0;
     std::map<std::string, std::string, std::less<>> variables;
     Presence<std::size_t> security_alternative;

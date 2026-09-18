@@ -279,6 +279,7 @@ pub(super) fn package(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
         "# frozen_string_literal: true\n# Native source-bound SDK.\nmodule {ns}\n  VERSION = {}.freeze\nend\n",
         q(&package.version)
     );
+    let mut requires = Vec::<&str>::new();
     for name in [
         "policy",
         "json",
@@ -293,11 +294,41 @@ pub(super) fn package(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
         "wire",
         "payload",
         "streams",
+        "attribution",
         "http",
-        "wire_models",
-        "client",
     ] {
+        requires.push(name);
+    }
+    // The generated OAuth lifecycle module is emitted only for a configured
+    // policy with at least one usable scheme; no-policy output stays
+    // byte-identical, and the require appears exactly when the file does.
+    if plan.oauth().is_some() {
+        requires.push("oauth");
+    }
+    // The generated incoming receipt module is emitted only for a declared
+    // webhook/callback; receipt-less output stays byte-identical, and the
+    // require appears exactly when the file does, after the lifecycle module
+    // it sits beside.
+    if plan.incoming().is_some_and(|incoming| !incoming.is_empty()) {
+        requires.push("incoming");
+    }
+    requires.extend(["wire_models", "client"]);
+    for name in requires {
         writeln!(entry, "require_relative {}", q(&format!("{req}/{name}"))).unwrap();
+    }
+    if let Some(oauth) = plan.oauth() {
+        add(
+            format!("lib/{req}/oauth.rb"),
+            super::oauth::runtime(oauth, plan.operations()).replace("__NAMESPACE__", ns),
+        );
+    }
+    if let Some(incoming) = plan.incoming()
+        && !incoming.is_empty()
+    {
+        add(
+            format!("lib/{req}/incoming.rb"),
+            super::incoming::runtime(incoming).replace("__NAMESPACE__", ns),
+        );
     }
     if let Some(env) = plan.credential_env() {
         writeln!(
@@ -359,6 +390,10 @@ pub(super) fn package(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
     }
     policy.push_str("    }.freeze\n  end\nend\n");
     add(format!("lib/{req}/policy.rb"), policy);
+    add(
+        format!("lib/{req}/attribution.rb"),
+        attribution_constants(plan, ns),
+    );
     add(
         format!("lib/{req}/validation-program.json"),
         serde_json::to_string(plan.program()).unwrap() + "\n",
@@ -461,6 +496,37 @@ fn credential_environment(plan: &SdkPlan, namespace: &str) -> String {
     include_str!("credential_env.rb")
         .replace("__NAMESPACE__", namespace)
         .replace("__CREDENTIAL_ENV_BINDINGS__", &list(bindings))
+}
+/// ua/v1 attribution constants compiled into every generated gem. An empty
+/// suspect version is the disabled sentinel the runtime refuses to assemble.
+fn attribution_constants(plan: &SdkPlan, ns: &str) -> String {
+    let mut out = format!(
+        "# frozen_string_literal: true\nmodule {ns}\n  # @api private\n  module Internal\n"
+    );
+    match plan.attribution() {
+        Some(attribution) => {
+            writeln!(
+                out,
+                "    # ua/v1 attribution: every request identifies suspect as the generator and\n    # the SDK or a caller-supplied application as the client.\n    ATTRIBUTION = {{\n      template_version: {},\n      suspect_version: {},\n      sdk_name: {},\n      sdk_version: {},\n      spec_version: {},\n      language: {},\n    }}.freeze",
+                q(match attribution.template_version {
+                    crate::attribution::AttributionTemplateVersion::V1 => "v1",
+                }),
+                q(&attribution.suspect_version),
+                q(&attribution.sdk_name),
+                q(&attribution.sdk_version),
+                q(&attribution.spec_version),
+                q(&attribution.language),
+            )
+            .unwrap();
+        }
+        None => writeln!(
+            out,
+            "    # An empty suspect version disables the automatic attribution header.\n    ATTRIBUTION = {{template_version: \"\", suspect_version: \"\", sdk_name: \"\", sdk_version: \"\", spec_version: \"\", language: \"\"}}.freeze"
+        )
+        .unwrap(),
+    }
+    out.push_str("  end\nend\n");
+    out
 }
 fn models(plan: &SdkPlan, ns: &str) -> String {
     let mut out = format!(
@@ -776,6 +842,14 @@ fn client(plan: &SdkPlan, ns: &str) -> String {
             }
         }
     }
+    // The typed event classes, completion carriers, events wrappers and the
+    // shared raw-envelope framer are emitted only for discriminated declared
+    // SSE event streams; every other document stays byte-identical.
+    if let Some(events) = plan.stream_events()
+        && !events.operations.is_empty()
+    {
+        out.push_str(&super::stream_events::classes(events));
+    }
     out.push_str("  # @api private\n  module Internal\n    OPERATIONS = [\n");
     for (i, op) in plan.operations().iter().enumerate() {
         let stream = op.responses.iter().any(|r| {
@@ -864,6 +938,17 @@ fn client(plan: &SdkPlan, ns: &str) -> String {
                 .join(", ")
         )
         .unwrap();
+    }
+    if let Some(pagination) = plan.pagination() {
+        out.push('\n');
+        out.push_str(&super::pagination::client_methods(plan, pagination));
+    }
+    // The typed events methods and the shared events exchange are emitted only
+    // for discriminated declared SSE event streams.
+    if let Some(events) = plan.stream_events()
+        && !events.operations.is_empty()
+    {
+        out.push_str(&super::stream_events::client_methods(plan, events));
     }
     out.push_str("  end\nend\n");
     out
@@ -1012,6 +1097,13 @@ fn signatures(plan: &SdkPlan, ns: &str) -> String {
             }
         }
     }
+    // The typed event RBS declarations are emitted only for discriminated
+    // declared SSE event streams.
+    if let Some(events) = plan.stream_events()
+        && !events.operations.is_empty()
+    {
+        out.push_str(&super::stream_events::signatures(events));
+    }
     out.push_str("  class Client\n");
     for op in plan.operations() {
         let mut args = op
@@ -1073,6 +1165,24 @@ fn signatures(plan: &SdkPlan, ns: &str) -> String {
             }
         )
         .unwrap();
+    }
+    if let Some(pagination) = plan.pagination() {
+        out.push_str(&super::pagination::signatures(plan, pagination));
+    }
+    // The typed events method signatures are emitted only for discriminated
+    // declared SSE event streams.
+    if let Some(events) = plan.stream_events()
+        && !events.operations.is_empty()
+    {
+        out.push_str(&super::stream_events::client_signatures(events));
+    }
+    if let Some(oauth) = plan.oauth() {
+        out.push_str(&super::oauth::signatures(oauth));
+    }
+    if let Some(incoming) = plan.incoming()
+        && !incoming.is_empty()
+    {
+        out.push_str(&super::incoming::signatures(incoming));
     }
     out.push_str("  end\nend\n");
     out

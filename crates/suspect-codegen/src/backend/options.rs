@@ -14,6 +14,10 @@ pub struct GenerationOptions {
     /// Source scheme -> runtime variable names; values are never read by generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults; omitted fields resolve to the documented
+    /// defaults. Participates in generation fingerprints like every other option.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
 }
 
 impl GenerationOptions {
@@ -36,51 +40,81 @@ impl GenerationOptions {
 
 pub(crate) fn typescript_options(
     options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
 ) -> crate::typescript::http::HttpConfig {
     crate::typescript::http::HttpConfig {
         legacy_binary_string: options.legacy_binary_strings(),
+        #[cfg(feature = "http-protocol")]
+        compatibility_profiles: options.compatibility_profiles.iter().copied().collect(),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
         ..crate::typescript::http::HttpConfig::expanded()
     }
 }
 
-pub(crate) fn rust_options(options: &GenerationOptions) -> crate::rust_http::HttpConfig {
+pub(crate) fn rust_options(
+    options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
+) -> crate::rust_http::HttpConfig {
     crate::rust_http::HttpConfig {
         compatibility_profiles: options.compatibility_profiles.iter().copied().collect(),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
         ..Default::default()
     }
 }
 
-pub(crate) fn python_options(options: &GenerationOptions) -> crate::python_http::HttpConfig {
+pub(crate) fn python_options(
+    options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
+) -> crate::python_http::HttpConfig {
     crate::python_http::HttpConfig {
         capabilities: options.apply_to(crate::python_http::capabilities()),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
         ..Default::default()
     }
 }
 
-pub(crate) fn go_options(options: &GenerationOptions) -> crate::go_http::HttpConfig {
+pub(crate) fn go_options(
+    options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
+) -> crate::go_http::HttpConfig {
     crate::go_http::HttpConfig {
         compatibility_profiles: options.compatibility_profiles.clone(),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
         ..Default::default()
     }
 }
 
-pub(crate) fn swift_options(options: &GenerationOptions) -> crate::swift_sdk::SwiftConfig {
+pub(crate) fn swift_options(
+    options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
+) -> crate::swift_sdk::SwiftConfig {
     crate::swift_sdk::SwiftConfig {
         compatibility_profiles: options.compatibility_profiles.clone(),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
         ..Default::default()
     }
 }
 
 #[cfg(feature = "ruby-sdk")]
-pub(crate) fn ruby_options(options: &GenerationOptions) -> crate::ruby_sdk::RubyConfig {
+pub(crate) fn ruby_options(
+    options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
+) -> crate::ruby_sdk::RubyConfig {
     crate::ruby_sdk::RubyConfig {
         legacy_binary_strings: options.legacy_binary_strings(),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
         ..Default::default()
     }
 }
@@ -88,18 +122,26 @@ pub(crate) fn ruby_options(options: &GenerationOptions) -> crate::ruby_sdk::Ruby
 #[cfg(feature = "csharp-sdk")]
 pub(crate) fn csharp_options(
     options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
 ) -> crate::csharp_sdk::protocol::ProtocolOptions {
     crate::csharp_sdk::protocol::ProtocolOptions {
         compatibility_profiles: options.compatibility_profiles.iter().copied().collect(),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
     }
 }
 
 #[cfg(feature = "java-sdk")]
-pub(crate) fn java_options(options: &GenerationOptions) -> crate::java_sdk::ProtocolConfig {
+pub(crate) fn java_options(
+    options: &GenerationOptions,
+    attribution: Option<&crate::attribution::AttributionDescriptor>,
+) -> crate::java_sdk::ProtocolConfig {
     crate::java_sdk::ProtocolConfig {
         compatibility_profiles: options.compatibility_profiles.clone(),
         credential_env: options.credential_env.clone(),
+        sdk_defaults: options.sdk_defaults.clone(),
+        attribution: attribution.cloned(),
         ..Default::default()
     }
 }

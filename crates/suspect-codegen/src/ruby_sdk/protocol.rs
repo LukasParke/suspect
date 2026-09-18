@@ -242,7 +242,9 @@ pub(super) fn hints(
                 }
             }
             Stream { stream } => {
-                if let Some(i) = indices.get(stream.item_codec().schema().id()) {
+                if let Some(codec) = stream.item_codec()
+                    && let Some(i) = indices.get(codec.schema().id())
+                {
                     out.insert(*i, format!("{stem}Item"));
                 }
             }
@@ -558,7 +560,11 @@ impl Lower<'_> {
                 .as_ref()
                 .map_or(NativeType::Scalar(*scalar), |c| self.codec(c)),
             Binary { .. } => NativeType::Bytes,
-            Stream { stream } => NativeType::Stream(Box::new(self.codec(stream.item_codec()))),
+            Stream { stream } => {
+                NativeType::Stream(Box::new(
+                    stream.item_codec().map_or(NativeType::Json, |codec| self.codec(codec)),
+                ))
+            }
             Form { form } => self.named(m, stem, form.fields(), form.additional()),
             Multipart {
                 multipart:

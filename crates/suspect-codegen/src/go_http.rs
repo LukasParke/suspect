@@ -18,8 +18,12 @@ mod credential_env;
 mod descriptors;
 mod docs;
 mod emit;
+pub mod incoming;
 mod native_examples;
+mod oauth;
+pub mod pagination;
 mod planning;
+pub mod stream_events;
 
 /// Finite transport and codec policy embedded in the generated package.
 #[derive(Debug, Clone)]
@@ -40,6 +44,10 @@ pub struct HttpConfig {
     pub compatibility_profiles: BTreeSet<protocol::CompatibilityProfile>,
     /// Explicit source-scheme to runtime environment VARIABLE NAME policy.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 
 impl Default for HttpConfig {
@@ -53,6 +61,8 @@ impl Default for HttpConfig {
             max_stream_item_bytes: 64 * 1024,
             compatibility_profiles: BTreeSet::new(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         }
     }
 }
@@ -239,7 +249,9 @@ impl PlannedMedia {
             | protocol::Representation::Text { codec, .. } => {
                 codec.as_ref().map(|c| c.schema().id())
             }
-            protocol::Representation::Stream { stream } => Some(stream.item_codec().schema().id()),
+            protocol::Representation::Stream { stream } => {
+                stream.item_codec().map(|codec| codec.schema().id())
+            }
             _ => None,
         }
     }
@@ -289,6 +301,11 @@ pub struct HttpPlan {
     protocol: protocol::ProtocolPlan,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
     credential_env_factory: Option<String>,
+    pagination: Option<pagination::PaginationPlan>,
+    oauth: Option<protocol::OAuthPlan>,
+    stream_events: Option<stream_events::StreamEventsPlan>,
+    incoming: protocol::IncomingPlan,
+    incoming_receipts: Vec<incoming::IncomingReceipt>,
 }
 
 impl HttpPlan {
@@ -328,10 +345,59 @@ impl HttpPlan {
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
     }
+    /// Compiled `ua/v1` attribution constants carried by this plan, when configured.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.config.attribution.as_ref()
+    }
+    /// Application-selected client defaults carried by this plan, when configured.
+    #[must_use]
+    pub fn sdk_defaults(&self) -> Option<&crate::sdk_defaults::SdkDefaults> {
+        self.config.sdk_defaults.as_ref()
+    }
     /// Allocated Go factory name, present only for a configured environment policy.
     #[must_use]
     pub fn credential_env_factory(&self) -> Option<&str> {
         self.credential_env_factory.as_deref()
+    }
+    /// The compiled pagination selection carried by this plan, when a policy is
+    /// configured. Helpers are emitted only when [`PaginationPlan::operations`]
+    /// is non-empty, so no-policy output stays byte-identical.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&pagination::PaginationPlan> {
+        self.pagination.as_ref()
+    }
+    /// The compiled OAuth/OIDC lifecycle plan, carried only when a configured
+    /// policy yields schemes. The generated lifecycle runtime is emitted only
+    /// for usable schemes, so no-policy output stays byte-identical.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// The compiled typed-event subset of the stream semantics plan, carried
+    /// only when an operation will emit a typed events iterator. Computed
+    /// unconditionally during planning; storing stays conditional so
+    /// no-stream plans stay cheap and their output byte-identical.
+    #[must_use]
+    pub fn stream_events(&self) -> Option<&stream_events::StreamEventsPlan> {
+        self.stream_events.as_ref()
+    }
+    /// The compiled incoming webhook/callback receipt plan over the whole
+    /// contract. Planning walks the whole Contract (selection-independent) and
+    /// fails the plan on broken incoming declarations like every other
+    /// diagnostic.
+    #[must_use]
+    pub fn incoming(&self) -> &protocol::IncomingPlan {
+        &self.incoming
+    }
+    /// Emission-ready incoming receipt helpers. Receipts the Go v1 helpers
+    /// cannot express surface as plan errors, so the helpers exist exactly
+    /// when the compiled plan carries receipts and `go/incoming.go` is emitted
+    /// exactly when these are non-empty; receipt-less output stays
+    /// byte-identical.
+    #[must_use]
+    pub fn incoming_receipts(&self) -> &[incoming::IncomingReceipt] {
+        &self.incoming_receipts
     }
     /// The single admitted shared protocol plan, including located annotations.
     #[must_use]
@@ -549,16 +615,20 @@ const RUNTIME_NAMES: &[&str] = &[
 
 /// Reserve declarations from typed lowering, including names not represented by
 /// a standalone GoSymbol (constructors, literals and closed-union variants).
-/// An inconsistent model namespace must be rejected at its source, never
-/// repaired by rewriting the already rendered model or codec artifacts.
+/// `emitted` carries the package-level names of conditionally emitted runtime
+/// files (currently `go/oauth.go`); an inconsistent model namespace must be
+/// rejected at its source, never repaired by rewriting the already rendered
+/// model or codec artifacts.
 fn model_package_names(
     contract: &Contract,
     models: &crate::go_models::ModelPlan,
+    emitted: &[&str],
 ) -> Result<BTreeSet<String>, Vec<HttpDiagnostic>> {
     use crate::go_models::GoDecl;
 
     let mut used: BTreeMap<String, Option<SourceId>> = RUNTIME_NAMES
         .iter()
+        .chain(emitted.iter())
         .map(|name| ((*name).into(), None))
         .collect();
     let mut errors = Vec::new();

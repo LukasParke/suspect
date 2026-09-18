@@ -698,7 +698,11 @@ fn decode_expression(media: &PlannedMedia) -> String {
         ),
         P::Text { codec: None, .. } => "_responseText(response)".into(),
         P::Bytes { .. } => "response.bytes.asUnmodifiableView()".into(),
-        P::Stream { codec, .. } => format!("_decoded(response, () => {codec}.fromJson(item!))"),
+        P::Stream { codec: Some(codec), .. } => {
+            format!("_decoded(response, () => {codec}.fromJson(item!))")
+        }
+        // A schemaless stream surfaces the framed envelope value untyped.
+        P::Stream { codec: None, .. } => "_decoded(response, () => item!)".into(),
         P::Aggregate(_) => unreachable!("response aggregate refused"),
     }
 }
@@ -714,7 +718,11 @@ fn result_type(op: &PlannedOperation) -> String {
         op.success_type.clone()
     }
 }
-pub(super) fn client(plan: &Plan) -> String {
+pub(super) fn client(
+    plan: &Plan,
+    pagination: Option<&super::pagination::Emission>,
+    stream_events: Option<&super::stream_events::Emission>,
+) -> String {
     let mut out = String::from(if plan.credential_env().is_some() {
         "// Some selected status families have no concrete error alternatives.\n// ignore_for_file: unused_element_parameter\n/// Source-named values. Explicit credentials override the whole environment snapshot.\nfinal class Credentials {\n"
     } else {
@@ -857,7 +865,7 @@ pub(super) fn client(plan: &Plan) -> String {
             "credentials",
         )
     };
-    writeln!(out,"/// Native Future and lazy single-subscription Stream operations.\nfinal class Client extends _ClientBase {{\n  Client({{required HttpTransport transport, {credentials_parameter}, Uri? server, ServerSelection? serverSelection, Duration timeout = const Duration(seconds:30), int maxRequestBytes = {}, int maxResponseBytes = {}, int maxCaptureBytes = {}, int maxResponseHeaderBytes = {}, int maxStreamBufferBytes = {}}}) : super(transport,{credentials_value},serverSelection ?? ServerSelection(override:server),timeout,maxRequestBytes,maxResponseBytes,maxCaptureBytes,maxResponseHeaderBytes,maxStreamBufferBytes,[{},{},{},{},{}]);",c.max_request_bytes,c.max_response_bytes,c.max_capture_bytes,c.max_response_header_bytes,c.max_stream_buffer_bytes,c.max_request_bytes,c.max_response_bytes,c.max_capture_bytes,c.max_response_header_bytes,c.max_stream_buffer_bytes).unwrap();
+    writeln!(out,"/// Native Future and lazy single-subscription Stream operations.\n///\n/// `userAgent` fully overrides the automatic ua/v1 attribution header: a\n/// non-empty value wins entirely and an explicit empty string suppresses the\n/// header. `applicationId` replaces the SDK identity token in the automatic\n/// attribution header: `<name>` or `<name>/<version>` of RFC 9110 tokens.\nfinal class Client extends _ClientBase {{\n  Client({{required HttpTransport transport, {credentials_parameter}, Uri? server, ServerSelection? serverSelection, Duration timeout = const Duration(seconds:30), int maxRequestBytes = {}, int maxResponseBytes = {}, int maxCaptureBytes = {}, int maxResponseHeaderBytes = {}, int maxStreamBufferBytes = {}, String? userAgent, String? applicationId}}) : super(transport,{credentials_value},serverSelection ?? ServerSelection(override:server),timeout,maxRequestBytes,maxResponseBytes,maxCaptureBytes,maxResponseHeaderBytes,maxStreamBufferBytes,userAgent,applicationId,[{},{},{},{},{}]);",c.max_request_bytes,c.max_response_bytes,c.max_capture_bytes,c.max_response_header_bytes,c.max_stream_buffer_bytes,c.max_request_bytes,c.max_response_bytes,c.max_capture_bytes,c.max_response_header_bytes,c.max_stream_buffer_bytes).unwrap();
     for (i, op) in plan.operations.iter().enumerate() {
         doc(
             &mut out,
@@ -895,71 +903,19 @@ pub(super) fn client(plan: &Plan) -> String {
             out.push_str(" async");
         }
         out.push_str(" {\n    _RequestInput prepare() {\n      final inputs = <_InputValue>[];\n");
-        for (n, p) in op.parameters.iter().enumerate() {
-            if !p.required {
-                writeln!(
-                    out,
-                    "      if ({} is Present<{}>) {{",
-                    p.name, p.native_type
-                )
-                .unwrap();
-            }
-            writeln!(
-                out,
-                "      inputs.add(_InputValue(_operation{i}.parameters[{n}], {}.toJson({})));",
-                p.codec_name,
-                if p.required {
-                    p.name.clone()
-                } else {
-                    format!("{}.value", p.name)
-                }
-            )
-            .unwrap();
-            if !p.required {
-                out.push_str("      }\n");
-            }
-        }
-        if let Some(body) = &op.body {
-            let value = if body.required { "body" } else { "body.value" };
-            if !body.required {
-                writeln!(
-                    out,
-                    "      if (body is! Present<{}>) {{ return _RequestInput(inputs,null); }}",
-                    body.native_type
-                )
-                .unwrap();
-            }
-            if body.choice_name.is_some() {
-                writeln!(
-                    out,
-                    "      final selected = {value};\n      switch (selected) {{"
-                )
-                .unwrap();
-                for (n, m) in body.media.iter().enumerate() {
-                    writeln!(out,"        case {}():\n          if (_selectMedia([{}], selected.contentType) != {n}) {{ throw const ConfigurationException('body representation cannot bypass a more specific content declaration'); }}\n          return _RequestInput(inputs, {});",m.variant_name,body.media.iter().map(media).collect::<Vec<_>>().join(", "),body_expression(m,"selected.value","selected.contentType")).unwrap();
-                }
-                out.push_str("      }\n");
-            } else {
-                writeln!(
-                    out,
-                    "      return _RequestInput(inputs, {});",
-                    body_expression(
-                        &body.media[0],
-                        value,
-                        &q(body.media[0].wire.media_type().declared())
-                    )
-                )
-                .unwrap();
-            }
-        } else {
-            out.push_str("      return _RequestInput(inputs,null);\n");
-        }
+        out.push_str(&request_preparation(op, i));
         out.push_str("    }\n");
         if op.stream {
             writeln!(out,"    return _stream(_operation{i},prepare,(frame)=>_decodeOperation{i}(frame.received,frame.item),cancellation,timeout,server,securityAlternative);\n  }}").unwrap();
         } else {
             writeln!(out,"    final response = await _exchange(_operation{i},prepare,cancellation,timeout,server,securityAlternative);\n    return _decodeOperation{i}(response);\n  }}").unwrap();
         }
+    }
+    if let Some(pagination) = pagination {
+        out.push_str(&pagination.client);
+    }
+    if let Some(stream_events) = stream_events {
+        out.push_str(&stream_events.client);
     }
     out.push_str("}\n");
     out
@@ -1005,6 +961,67 @@ fn response_decoder(out: &mut String, op: usize, index: usize, status: &PlannedS
         writeln!(out, "  return {};", decode_expression(&status.media[0])).unwrap();
     }
     out.push_str("}\n");
+}
+
+/// The request-building closure body shared by the direct method and the
+/// generated typed events stream: parameter and body encoding only.
+pub(super) fn request_preparation(op: &PlannedOperation, operation_index: usize) -> String {
+    let mut out = String::new();
+    for (n, p) in op.parameters.iter().enumerate() {
+        if !p.required {
+            writeln!(out, "      if ({} is Present<{}>) {{", p.name, p.native_type).unwrap();
+        }
+        writeln!(
+            out,
+            "      inputs.add(_InputValue(_operation{operation_index}.parameters[{n}], {}.toJson({})));",
+            p.codec_name,
+            if p.required {
+                p.name.clone()
+            } else {
+                format!("{}.value", p.name)
+            }
+        )
+        .unwrap();
+        if !p.required {
+            out.push_str("      }\n");
+        }
+    }
+    if let Some(body) = &op.body {
+        let value = if body.required { "body" } else { "body.value" };
+        if !body.required {
+            writeln!(
+                out,
+                "      if (body is! Present<{}>) {{ return _RequestInput(inputs,null); }}",
+                body.native_type
+            )
+            .unwrap();
+        }
+        if body.choice_name.is_some() {
+            writeln!(
+                out,
+                "      final selected = {value};\n      switch (selected) {{"
+            )
+            .unwrap();
+            for (n, m) in body.media.iter().enumerate() {
+                writeln!(out,"        case {}():\n          if (_selectMedia([{}], selected.contentType) != {n}) {{ throw const ConfigurationException('body representation cannot bypass a more specific content declaration'); }}\n          return _RequestInput(inputs, {});",m.variant_name,body.media.iter().map(media).collect::<Vec<_>>().join(", "),body_expression(m,"selected.value","selected.contentType")).unwrap();
+            }
+            out.push_str("      }\n");
+        } else {
+            writeln!(
+                out,
+                "      return _RequestInput(inputs, {});",
+                body_expression(
+                    &body.media[0],
+                    value,
+                    &q(body.media[0].wire.media_type().declared())
+                )
+            )
+            .unwrap();
+        }
+    } else {
+        out.push_str("      return _RequestInput(inputs,null);\n");
+    }
+    out
 }
 
 pub(super) fn examples(plan: &Plan) -> String {
@@ -1188,6 +1205,9 @@ pub(super) fn manifest(plan: &Plan) -> String {
         "native_gate_toolchains":["3.9.4","3.13.3"]});
     if let Some(policy) = plan.credential_env() {
         manifest["credential_env"] = serde_json::to_value(policy).unwrap();
+    }
+    if let Some(attribution) = &plan.config.attribution {
+        manifest["attribution"] = serde_json::to_value(attribution).unwrap();
     }
     format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap())
 }

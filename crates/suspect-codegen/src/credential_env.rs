@@ -8,6 +8,7 @@ use suspect_ir::contract::{Contract, SourceId};
 
 pub use crate::http_contract::HttpDiagnostic;
 use crate::http_protocol::{CredentialHook, ProtocolPlan, Provenance, SourceLocation};
+use crate::sdk_defaults::SdkDefaults;
 
 /// Closed version of the application credential-loading policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,19 +44,8 @@ impl CredentialEnv {
                         .into(),
                 );
             }
-            let bytes = variable.as_bytes();
-            let valid = bytes.len() <= 128
-                && bytes
-                    .first()
-                    .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
-                && bytes
-                    .iter()
-                    .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_');
-            if !valid {
-                return Err(format!(
-                    "credential_env.schemes[{name:?}] needs a portable 1..=128 byte environment variable name"
-                ));
-            }
+            validate_variable_name(variable)
+                .map_err(|message| format!("credential_env.schemes[{name:?}] {message}"))?;
         }
         Ok(())
     }
@@ -77,6 +67,25 @@ impl<'de> Deserialize<'de> for CredentialEnv {
         };
         config.validate().map_err(de::Error::custom)?;
         Ok(config)
+    }
+}
+
+/// The shared portability rule for every configured environment variable name:
+/// 1..=128 ASCII bytes of letters, digits and underscores, starting with a
+/// letter or underscore. Generation never reads the variables it names.
+pub(crate) fn validate_variable_name(variable: &str) -> Result<(), String> {
+    let bytes = variable.as_bytes();
+    let valid = bytes.len() <= 128
+        && bytes
+            .first()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
+        && bytes
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_');
+    if valid {
+        Ok(())
+    } else {
+        Err("needs a portable 1..=128 byte environment variable name".into())
     }
 }
 
@@ -229,10 +238,102 @@ fn diagnostic(
 /// Repeated requirements for one declaration share one binding; names ambiguous
 /// across declaration documents are refused instead of selecting a document.
 ///
+/// When no explicit mapping is configured and the SDK defaults carry an
+/// environment prefix, a single unambiguous bearer/API-key scheme automatically
+/// binds `<ENV_PREFIX>_API_KEY`; ambiguous or non-string-credential sources
+/// produce no binding instead of guessing.
+///
 /// # Errors
 /// Unadmitted protocol plans, unbound/ambiguous source names, or unsupported
 /// credential attachment kinds. No runtime credential values enter this interface.
 pub fn plan(
+    contract: &Contract,
+    protocol: &ProtocolPlan,
+    config: Option<&CredentialEnv>,
+) -> Result<Option<CredentialEnvPlan>, Vec<HttpDiagnostic>> {
+    plan_with_defaults(contract, protocol, config, None)
+}
+
+/// `plan` with golden-default environment resolution. Explicit `credential_env`
+/// mappings win entirely; the prefix applies only when no explicit mapping exists.
+///
+/// # Errors
+/// Same as [`plan`].
+pub fn plan_with_defaults(
+    contract: &Contract,
+    protocol: &ProtocolPlan,
+    config: Option<&CredentialEnv>,
+    defaults: Option<&SdkDefaults>,
+) -> Result<Option<CredentialEnvPlan>, Vec<HttpDiagnostic>> {
+    if config.is_some() || defaults.is_none() {
+        return plan_explicit(contract, protocol, config);
+    }
+    let Some(prefix) = defaults
+        .expect("defaults checked above")
+        .env_prefix
+        .as_deref()
+    else {
+        return Ok(None);
+    };
+    if !protocol.is_admitted() {
+        return Err(vec![diagnostic(
+            contract,
+            None,
+            "sdk-credential-env-protocol",
+            "credential_env requires an admitted canonical HTTP protocol plan",
+        )]);
+    }
+    let variable = format!("{prefix}_API_KEY");
+    let mut declarations: BTreeMap<
+        SourceId,
+        (
+            &crate::http_protocol::CredentialRequirement,
+            CredentialEnvKind,
+        ),
+    > = BTreeMap::new();
+    for requirement in protocol
+        .operations()
+        .iter()
+        .flat_map(|operation| operation.security().alternatives())
+        .flat_map(|alternative| alternative.requirements())
+    {
+        let kind = match requirement.credential() {
+            CredentialHook::Bearer { .. } => CredentialEnvKind::Bearer,
+            CredentialHook::ApiKey { .. } => CredentialEnvKind::ApiKey,
+            _ => continue,
+        };
+        declarations.insert(
+            requirement.scheme().use_site().source().clone(),
+            (requirement, kind),
+        );
+    }
+    if declarations.len() != 1 {
+        // The documented convention cannot disambiguate zero or multiple
+        // string-credential schemes; explicit `credential_env` mappings remain
+        // the precise override. Generation continues without default bindings.
+        return Ok(None);
+    }
+    let (requirement, kind) = declarations.values().next().expect("one declaration");
+    Ok(Some(CredentialEnvPlan {
+        version: CredentialEnvVersion::V1,
+        bindings: vec![CredentialEnvBinding {
+            name: requirement.name().to_owned(),
+            variable,
+            kind: *kind,
+            scheme: requirement.scheme().clone(),
+        }],
+    }))
+}
+
+/// Bind explicitly configured variable names through an already admitted
+/// canonical protocol. Repeated requirements for one declaration share one
+/// binding; names ambiguous across declaration documents are refused instead
+/// of selecting a document.
+///
+/// # Errors
+/// Unadmitted protocol plans, unbound/ambiguous source names, or unsupported
+/// credential attachment kinds. No runtime credential values enter this interface.
+fn plan_explicit(
     contract: &Contract,
     protocol: &ProtocolPlan,
     config: Option<&CredentialEnv>,

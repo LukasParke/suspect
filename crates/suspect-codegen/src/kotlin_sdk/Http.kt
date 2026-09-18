@@ -132,6 +132,10 @@ public data class ClientOptions(
     /** Retrieval URL base for relative servers loaded from local files. */ public val documentUrl: URI? = null,
     /** Maximum raw transport chunk. */ public val maxChunkBytes: Int = 65536,
     /** Maximum buffered SSE/JSON-lines item. */ public val maxStreamItemBytes: Int = 1024 * 1024,
+    /** Complete User-Agent override; an explicit empty value suppresses the automatic ua/v1 attribution header entirely. */
+    public val userAgent: String? = null,
+    /** Replaces the SDK identity token in the automatic ua/v1 attribution header: `name` or `name/version` of RFC 9110 tokens; an invalid identifier suppresses the header. */
+    public val applicationId: String? = null,
 ) {
     init {
         require(maxResponseBytes in 1..Json.MAX_BYTES && maxRequestBytes in 1..Json.MAX_BYTES) { "HTTP byte ceilings must be in 1..4194304" }
@@ -386,7 +390,11 @@ internal class WireUrl(server: URI, path: String, parameters: Map<String, String
         out.append(value)
     }
     private fun percent(value: String, segment: Boolean = false) {
-        Json.utf8Size(value, maximum, checkpoint)
+        // The request URL budget owns this classification: resource
+        // exhaustion while sizing a URL field is a request limit, not a JSON
+        // evaluation failure.
+        try { Json.utf8Size(value, maximum, checkpoint) } catch (error: JsonException) {
+            if (error.kind == JsonErrorKind.RESOURCE_LIMIT) throw SdkException(FailureKind.REQUEST_LIMIT, "request URL byte limit exceeded", cause = error) else throw error }
         val dotSegment = segment && (value == "." || value == "..")
         for (byte in value.toByteArray(Charsets.UTF_8)) {
             val b = byte.toInt() and 255

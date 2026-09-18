@@ -324,8 +324,7 @@ pub(super) fn plan(
     let mut planner = Planner {
         contract,
         validator,
-        applicators: program.version != OwnedProgram::V1_VERSION
-            || schema_view::has_intersections(contract, &reachable),
+        applicators: program.version != OwnedProgram::V1_VERSION,
         contextual: context_dependent_sources(contract, program),
         plan: ModelPlan {
             names,

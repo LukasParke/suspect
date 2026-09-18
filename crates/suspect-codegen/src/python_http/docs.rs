@@ -506,13 +506,17 @@ fn native_links(ty: &NativeType, plan: &HttpPlan, import: &str, links: &mut Vec<
                 native_links(ty, plan, import, links);
             }
         }
-        NativeType::Items(source) | NativeType::Stream(source) => {
+        NativeType::Stream(Some(source)) => {
             native_links(&NativeType::Model(source.clone()), plan, import, links)
         }
-        NativeType::Builtin("JsonNumber" | "JsonValue") => {
-            if let NativeType::Builtin(name) = ty {
-                links.push(format!("{import}.{name}"));
-            }
+        NativeType::Items(Some(source)) => {
+            native_links(&NativeType::Model(source.clone()), plan, import, links)
+        }
+        NativeType::Stream(None) | NativeType::Items(None) | NativeType::Builtin("JsonValue") => {
+            links.push(format!("{import}.JsonValue"));
+        }
+        NativeType::Builtin("JsonNumber") => {
+            links.push(format!("{import}.JsonNumber"));
         }
         _ => {}
     }

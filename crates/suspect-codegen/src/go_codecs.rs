@@ -32,7 +32,7 @@ pub fn plan_codecs(
     roots: &[SchemaId],
     config: CodecConfig,
 ) -> Result<CodecPlan, Vec<ModelDiagnostic>> {
-    let models = crate::go_models::plan_models(&contract, roots);
+    let models = crate::go_models::plan_models_with_policy(&contract, roots, config.dialect);
     if models.has_errors() {
         return Err(models.diagnostics().to_vec());
     }
@@ -57,7 +57,9 @@ pub fn plan_codecs(
             .map(|s| s.source().clone())
             .collect::<Vec<_>>(),
     );
-    let compiler = OwnedCompiler::new(config.schema.clone());
+    let mut schema_config = config.schema.clone();
+    schema_config.oas30_nullable_in_31 = config.dialect.oas30_nullable_in_31;
+    let compiler = OwnedCompiler::new(schema_config);
     let validator = if crate::go_models::requires_resources(&contract, &validation_roots) {
         compiler.compile_v3(contract.clone(), &validation_roots)
     } else {

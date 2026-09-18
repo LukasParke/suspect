@@ -20,8 +20,10 @@ they do not describe the current numeric implementation.
 The evaluation exercised the real public `Compiler::compile` and
 `Schema::validate` interfaces, using the pinned tracked OpenRouter input and
 independent normative vectors. No `suspect-schema` code was changed during that
-initial evaluation. Current behavior is verified by the maintained schema,
-owned-program and native codec suites.
+initial evaluation. The archived
+reproducer is [the evaluation project](../target/schema-sdk-evaluation/src/main.rs),
+with [results](../target/schema-sdk-evaluation/results.json). Current behavior is
+verified by the maintained schema, owned-program and native codec suites.
 
 Three blocker families were reproduced:
 

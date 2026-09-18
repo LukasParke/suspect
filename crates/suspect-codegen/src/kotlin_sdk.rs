@@ -6,15 +6,22 @@ use std::{collections::BTreeMap, sync::Arc};
 use suspect_ir::contract::{Contract, SchemaId, SourceId};
 use suspect_schema::OwnedProgram;
 
-mod codec_files;
 mod emit;
 mod environment;
+mod incoming;
 pub mod models;
+mod oauth;
+mod pagination;
 mod protocol;
 mod rich_emit;
 mod samples;
+mod stream_events;
 pub mod validation;
 mod validation_v3;
+
+pub use incoming::{IncomingBody, IncomingEntry, IncomingPayload, IncomingReply};
+pub use pagination::{Advance, ControlKind, PaginationOperation, PaginationPlan};
+pub use stream_events::{StreamEventsEntry, StreamEventsPlan};
 
 pub const KOTLIN_VERSION: &str = "2.4.20";
 pub const COROUTINES_VERSION: &str = "1.11.0";
@@ -29,6 +36,10 @@ pub struct SdkConfig {
     pub package_name: String,
     /// Explicit runtime variable names, bound to used source security schemes.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 impl Default for SdkConfig {
     fn default() -> Self {
@@ -38,6 +49,8 @@ impl Default for SdkConfig {
             version: "0.0.0".into(),
             package_name: "generated.sdk".into(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         }
     }
 }
@@ -212,6 +225,17 @@ pub struct Plan {
     protocol: wire::ProtocolPlan,
     examples: ExamplePlan,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    pagination: Option<pagination::PaginationPlan>,
+    oauth: Option<wire::OAuthPlan>,
+    /// The compiled, infallible typed-stream semantics and the lowered
+    /// emission for exactly the discriminated SSE stream operations.
+    stream_events: stream_events::StreamEventsPlan,
+    /// The compiled incoming webhook/callback receipts over the whole
+    /// contract. Compiled unconditionally; emission is conditional on
+    /// receipts being declared at all.
+    incoming: wire::IncomingPlan,
+    /// The lowered, codec-bound emission entries for the incoming receipts.
+    incoming_entries: Vec<incoming::IncomingEntry>,
 }
 pub type SdkPlan = Plan;
 impl Plan {
@@ -247,6 +271,34 @@ impl Plan {
     }
     pub fn examples(&self) -> &ExamplePlan {
         &self.examples
+    }
+    /// The compiled pagination selection carried by this plan, when SDK
+    /// defaults were configured.
+    pub fn pagination(&self) -> Option<&pagination::PaginationPlan> {
+        self.pagination.as_ref()
+    }
+    /// The compiled OAuth lifecycle selection carried by this plan. `Some`
+    /// exactly when SDK defaults were configured and at least one source
+    /// scheme carries an executable flow, so `OAuth.kt` is emitted.
+    pub fn oauth(&self) -> Option<&wire::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// The compiled typed-stream semantics carried by this plan, with the
+    /// lowered emission for exactly the discriminated SSE stream operations.
+    /// Compiled unconditionally; emission is conditional on the compiled
+    /// discrimination evidence.
+    pub fn stream_events(&self) -> &stream_events::StreamEventsPlan {
+        &self.stream_events
+    }
+    /// The compiled incoming webhook/callback receipts over the whole
+    /// contract. Compiled unconditionally; emission is conditional on
+    /// receipts being declared at all.
+    pub fn incoming(&self) -> &wire::IncomingPlan {
+        &self.incoming
+    }
+    /// The lowered, codec-bound emission entries for the incoming receipts.
+    pub fn incoming_entries(&self) -> &[incoming::IncomingEntry] {
+        &self.incoming_entries
     }
     pub fn render(&self) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> {
         emit::package(self)

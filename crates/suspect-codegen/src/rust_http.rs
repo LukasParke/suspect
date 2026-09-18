@@ -13,11 +13,15 @@ use crate::{
 };
 
 mod emit;
+mod incoming;
 mod plan;
+mod stream_events;
 
+pub use incoming::{IncomingPayload, IncomingReceipt};
 pub use plan::{
     native_capabilities, native_capabilities_v3, plan_http, plan_http_v2, plan_http_v3,
 };
+pub use stream_events::{EventMetadata, StreamEventsEntry};
 
 /// Exact adapter source closure for compatibility/runtime provenance. Paths are
 /// relative to `suspect-codegen/src`; these are compile-time assets, not parsed
@@ -128,6 +132,10 @@ pub struct HttpConfig {
     pub compatibility_profiles: Vec<http_protocol::CompatibilityProfile>,
     /// Explicit runtime environment-variable names, bound after protocol admission.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 
 impl Default for HttpConfig {
@@ -142,6 +150,8 @@ impl Default for HttpConfig {
             max_header_bytes: 64 * 1024,
             compatibility_profiles: Vec::new(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         }
     }
 }
@@ -194,8 +204,8 @@ pub enum Payload {
     Bytes,
     NoContent,
     Stream {
-        schema: SchemaId,
-        model: String,
+        schema: Option<SchemaId>,
+        model: Option<String>,
         request: bool,
     },
     Parts(Box<PlannedAggregate>),
@@ -339,6 +349,11 @@ pub struct HttpPlan {
     config: HttpConfig,
     examples: crate::examples::ExamplePlan,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    pagination: Option<http_protocol::PaginationOutcome>,
+    oauth: Option<http_protocol::OAuthPlan>,
+    stream_events: Vec<stream_events::StreamEventsEntry>,
+    incoming: Option<http_protocol::IncomingPlan>,
+    incoming_receipts: Vec<incoming::IncomingReceipt>,
 }
 
 #[derive(Debug, Clone)]
@@ -364,6 +379,56 @@ impl HttpPlan {
     #[must_use]
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
+    }
+    /// Compiled `ua/v1` attribution constants carried by this plan, when configured.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.config.attribution.as_ref()
+    }
+    /// Application-selected client defaults carried by this plan, when configured.
+    #[must_use]
+    pub fn sdk_defaults(&self) -> Option<&crate::sdk_defaults::SdkDefaults> {
+        self.config.sdk_defaults.as_ref()
+    }
+    /// Compiled pagination selection carried by this plan. Only the canonical
+    /// v3 planning path with configured `sdk_defaults` populates it; the
+    /// retained v1/v2 APIs leave it `None` and their artifacts stay unchanged.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&http_protocol::PaginationOutcome> {
+        self.pagination.as_ref()
+    }
+    /// Compiled OAuth lifecycle plan carried by this plan. Only the canonical
+    /// v3 planning path with configured `sdk_defaults` in `auto` mode and
+    /// compiled source schemes populates it; the retained v1/v2 APIs leave it
+    /// `None` and their artifacts stay unchanged. Emission additionally gates
+    /// on executable flows, so plans with only deprecated or
+    /// discovery-defined schemes still emit nothing.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&http_protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// The compiled typed-event subset of the stream semantics plan: one
+    /// entry per operation that will emit a typed events iterator. Computed
+    /// unconditionally by the canonical v3 path; only admitted discriminated
+    /// SSE operations produce entries, so other plans gain no artifact.
+    #[must_use]
+    pub fn stream_events(&self) -> &[stream_events::StreamEventsEntry] {
+        &self.stream_events
+    }
+    /// Compiled incoming webhook/callback receipts carried by this plan. Only
+    /// the canonical v3 planning path populates it; the retained v1/v2 APIs
+    /// leave it `None` and their artifacts stay unchanged. A `None` value (and
+    /// an empty plan) emits no artifact at all.
+    #[must_use]
+    pub fn incoming(&self) -> Option<&http_protocol::IncomingPlan> {
+        self.incoming.as_ref()
+    }
+    /// The emission-ready incoming receipts lowered from the compiled incoming
+    /// plan against this plan's compiled codec symbols. Empty exactly when no
+    /// receipt helper is emitted.
+    #[must_use]
+    pub fn incoming_receipts(&self) -> &[incoming::IncomingReceipt] {
+        &self.incoming_receipts
     }
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {

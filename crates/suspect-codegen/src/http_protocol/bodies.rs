@@ -254,26 +254,48 @@ fn representation(
             },
             at,
         );
-        if !p.is_32(at) || !raw.contains_key("itemSchema") {
-            p.unsupported(&if raw.contains_key("schema") { at.child("schema") } else { at.clone() }, "http-stream-item-schema-required", "stream item semantics require standard OAS 3.2 itemSchema; a 3.1 complete-content schema is not an item/data schema or a sentinel declaration");
-            return None;
+        if p.is_32(at) && raw.contains_key("itemSchema") {
+            if raw.contains_key("schema") {
+                p.unsupported(&at.child("schema"), "http-stream-aggregate-schema", "this item-stream plan cannot also enforce whole-content schema assertions; aggregate validation needs a separately verified bounded buffering capability");
+                return None;
+            }
+            let item_codec = p.codec(&at.child("itemSchema"), CodecInput::Json)?;
+            if framing == StreamFraming::ServerSentEvents {
+                validate_sse_item(p, &item_codec.schema);
+            }
+            return Some(Representation::Stream {
+                stream: StreamPlan {
+                    source: p.location(at),
+                    framing,
+                    item_codec: Some(item_codec),
+                    max_item_bytes: p.capabilities.limits.stream_item,
+                },
+            });
         }
-        if raw.contains_key("schema") {
-            p.unsupported(&at.child("schema"), "http-stream-aggregate-schema", "this item-stream plan cannot also enforce whole-content schema assertions; aggregate validation needs a separately verified bounded buffering capability");
-            return None;
+        // Schemaless SSE is an explicit compatibility departure: a 3.0/3.1
+        // `text/event-stream` response without a standard OAS 3.2 itemSchema
+        // streams untyped frames — its complete-content schema (if any) is not
+        // an item/data schema and stays uninterpreted. JSON-lines framing,
+        // request streams and declared 3.2 item schemas keep their ordinary
+        // strict admission.
+        if !request
+            && framing == StreamFraming::ServerSentEvents
+            && p.capabilities
+                .profiles
+                .contains(&CompatibilityProfile::SchemalessStreamEventsV1)
+        {
+            p.warn(at, "http-compatibility-profile", "schemaless-stream-events-v1 admits this schemaless text/event-stream response as untyped frames; frame data stays an untyped text payload and no item codec is compiled");
+            return Some(Representation::Stream {
+                stream: StreamPlan {
+                    source: p.location(at),
+                    framing,
+                    item_codec: None,
+                    max_item_bytes: p.capabilities.limits.stream_item,
+                },
+            });
         }
-        let item_codec = p.codec(&at.child("itemSchema"), CodecInput::Json)?;
-        if framing == StreamFraming::ServerSentEvents {
-            validate_sse_item(p, &item_codec.schema);
-        }
-        return Some(Representation::Stream {
-            stream: StreamPlan {
-                source: p.location(at),
-                framing,
-                item_codec,
-                max_item_bytes: p.capabilities.limits.stream_item,
-            },
-        });
+        p.unsupported(&if raw.contains_key("schema") { at.child("schema") } else { at.clone() }, "http-stream-item-schema-required", "stream item semantics require standard OAS 3.2 itemSchema; a 3.1 complete-content schema is not an item/data schema or a sentinel declaration");
+        return None;
     }
     if raw.contains_key("itemSchema") {
         p.unsupported(

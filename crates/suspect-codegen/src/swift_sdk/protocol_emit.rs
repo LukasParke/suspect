@@ -498,11 +498,25 @@ fn operation(out: &mut String, op: &PlannedOperation, plan: &SdkPlan) {
     );
     let _ = writeln!(
         out,
-        "    public func {}(_ input: {}{}, options requestOptions: RequestOptions = .init()) async throws -> {} {{\n        try Task.checkCancellation()\n        let request: HTTPRequest\n        do {{\n            let server = try HTTPBuild.server({}.metadata, options: options, request: requestOptions, maxBytes: Self.maxRequestBytes)",
+        "    public func {}(_ input: {}{}, options requestOptions: RequestOptions = .init()) async throws -> {} {{",
         op.method_name,
         op.input_type,
         if op.default_input() { " = .init()" } else { "" },
-        op.success_type,
+        op.success_type
+    );
+    request_prelude(out, op, plan);
+    response_decode(out, op, plan);
+    out.push_str("    }\n}\n\n");
+}
+
+/// The shared request construction every emitted operation executes before its
+/// response decoding: server selection, parameter/body/auth wire assembly and
+/// the typed failure branding. Emitted verbatim so generated helpers (the
+/// typed events exchange) reuse the exact direct-call construction.
+pub(super) fn request_prelude(out: &mut String, op: &PlannedOperation, plan: &SdkPlan) {
+    let _ = writeln!(
+        out,
+        "        try Task.checkCancellation()\n        let request: HTTPRequest\n        do {{\n            let server = try HTTPBuild.server({}.metadata, options: options, request: requestOptions, maxBytes: Self.maxRequestBytes)",
         op.metadata_name
     );
     let path_mut = op
@@ -579,9 +593,8 @@ fn operation(out: &mut String, op: &PlannedOperation, plan: &SdkPlan) {
         source(&op.source),
         source(&op.source)
     );
-    response_decode(out, op, plan);
-    out.push_str("    }\n}\n\n");
 }
+
 fn parameter_encode(
     out: &mut String,
     p: &super::PlannedParameter,
@@ -916,7 +929,7 @@ fn response_decode(out: &mut String, op: &PlannedOperation, plan: &SdkPlan) {
         source(&op.source)
     );
 }
-fn decode_media(m: &PlannedMedia, plan: &SdkPlan, _streaming: bool) -> String {
+pub(super) fn decode_media(m: &PlannedMedia, plan: &SdkPlan, _streaming: bool) -> String {
     match m.wire.representation(){
         Representation::Json{codec}=>codec.as_ref().map(|c|format!("try Codecs.{}.decode(response.body, limits: JsonLimits(maxBytes: request.maxResponseBytes))",plan.models.codecs[c.schema().id()])).unwrap_or_else(||"try JsonValue.parse(response.body, limits: JsonLimits(maxBytes: request.maxResponseBytes))".into()),
         Representation::Text{codec,scalar,..}=>{
@@ -925,7 +938,11 @@ fn decode_media(m: &PlannedMedia, plan: &SdkPlan, _streaming: bool) -> String {
         },
         Representation::Binary{bytes,..}=>format!("try HTTPParts.bytes(response.body, limit: min(request.maxResponseBytes, {}))",bytes.max_bytes()),
         Representation::Form{..}|Representation::Multipart{..}=>format!("try {}.decode(response.body, contentType: contentType, limit: request.maxResponseBytes, partLimit: Self.maxPartBytes)",m.type_name),
-        Representation::Stream{stream}=>format!("try HTTPBuild.eventStream(stream, codec: Codecs.{}, contentType: contentType, framing: {}, itemLimit: {}, totalLimit: request.maxResponseBytes, captureLimit: Self.maxCaptureBytes)",plan.models.codecs[stream.item_codec().schema().id()],if stream.framing()==StreamFraming::ServerSentEvents{".serverSentEvents"}else{".jsonLines"},stream.max_item_bytes()),
+        Representation::Stream{stream}=>stream.item_codec().map_or_else(
+            // A schemaless stream surfaces untyped whole-body JSON values because
+            // the native stream runtime has no untyped codec.
+            || "try JsonValue.parse(response.body, limits: JsonLimits(maxBytes: request.maxResponseBytes))".into(),
+            |codec| format!("try HTTPBuild.eventStream(stream, codec: Codecs.{}, contentType: contentType, framing: {}, itemLimit: {}, totalLimit: request.maxResponseBytes, captureLimit: Self.maxCaptureBytes)",plan.models.codecs[codec.schema().id()],if stream.framing()==StreamFraming::ServerSentEvents{".serverSentEvents"}else{".jsonLines"},stream.max_item_bytes())),
     }
 }
 

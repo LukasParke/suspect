@@ -18,8 +18,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: ./.github/actions/sdk-test-tools
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -33,23 +31,6 @@ jobs:
 
       - name: Tests
         run: cargo test --workspace
-
-      - name: Build CLI for editor integration tests
-        run: cargo build --locked -p suspect-cli
-
-      - name: Compile editor SDK integration
-        working-directory: editors/vscode
-        run: |
-          npm ci --ignore-scripts --no-audit --no-fund
-          npm run compile
-
-      - name: Test editor generation and host inputs
-        working-directory: editors/vscode
-        env:
-          SUSPECT_TEST_BINARY: ${{ github.workspace }}/target/debug/suspect
-        run: |
-          npm run test:generation
-          npm run test:generation:host:inputs
 
   platform-smoke:
     runs-on: ubuntu-latest

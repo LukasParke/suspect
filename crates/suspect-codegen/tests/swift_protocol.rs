@@ -506,9 +506,13 @@ fn typed_protocol_roots_capabilities_and_dxcalls() {
         panic!()
     };
     assert!(
-        plan.protocol()
-            .codec_roots()
-            .contains(stream.item_codec().schema().id())
+        plan.protocol().codec_roots().contains(
+            stream
+                .item_codec()
+                .expect("declared item schema")
+                .schema()
+                .id()
+        )
     );
     assert!(
         plan.operations()

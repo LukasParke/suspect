@@ -258,6 +258,7 @@ fn unsupported_reachable_fields_fail_at_original_sources_before_emission() {
         // Ordinary pattern properties are in the verified scoped profile. A
         // nonportable lookahead still fails at the original pattern source.
         json!({"type":"object","patternProperties":{"(?=a)":{"type":"string"}}}),
+        json!({"allOf":[{"type":"object","properties":{"a":{"type":"string"}}},{"type":"object","properties":{"b":{"type":"number"}}}]}),
     ] {
         let contract = fixture(enveloped(
             json!({"/x":{"get":{"operationId":"getX","responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Thing"}}}}}}}}),

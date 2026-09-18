@@ -3,9 +3,9 @@
 
 internal object ValidationProgram {
     val compiled: ScopedProgram = run {
-        val bytes = ValidationProgram::class.java.getResourceAsStream("validation.json")?.use { it.readNBytes(Json.MAX_PROGRAM_BYTES + 1) }
+        val bytes = ValidationProgram::class.java.getResourceAsStream("validation.json")?.use { it.readNBytes(Json.MAX_BYTES + 1) }
             ?: error("generated validation program is missing")
-        ScopedProgram(Json.parseProgram(bytes) as JsonObject)
+        ScopedProgram(Json.parse(bytes) as JsonObject)
     }
     val nodes: List<JsonObject> get() = compiled.nodes
     val roots: Map<SourceLocation, Int> get() = compiled.roots
@@ -43,7 +43,7 @@ internal class ScopedProgram(value: JsonObject) {
     val roots: Map<SourceLocation, Int>
     init {
         require(value.text("version") == "suspect.validation.experimental.v2" && value.text("profile") == "oas31-jsonschema202012-static-applicators") { "unknown scoped validation version/profile" }
-        require(nodes.size <= 16_384)
+        require(nodes.size <= 4096)
         require(limits.number("maxDepth") <= 128 && limits.number("maxNumberBytes") <= 4096)
         for (name in listOf("maxEvaluationSteps", "maxEqualitySteps", "maxErrors")) require(limits.number(name) <= 100000)
         val identities = nodes.map { it.source().also(::location) }

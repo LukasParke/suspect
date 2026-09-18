@@ -78,8 +78,20 @@ fn policy() -> CredentialEnv {
 fn configured() -> DartConfig {
     DartConfig {
         credential_env: Some(policy()),
+        attribution: Some(backend_attribution()),
         ..config()
     }
+}
+/// backend.rs compiles the same descriptor into every Backend::DartHttp package;
+/// the direct native config must carry it for byte-equality with backend output.
+fn backend_attribution() -> codegen::attribution::AttributionDescriptor {
+    codegen::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        "openrouter",
+        "0.1.0",
+        "3.2.0",
+        "dart",
+    )
 }
 fn plan(c: Arc<Contract>, config: DartConfig) -> dart_sdk::Plan {
     let selected = c
@@ -118,17 +130,9 @@ fn no_policy_output_bytes_are_preserved() {
                 .trim()
                 .into()
         ),
-        Some("35a54a8b727fc28213f9e6dd39860f042ee4ebb60dadce8f45c443d94507dfd3".into())
-    );
-    // The mixed-response native witness covers this separate runtime repair.
-    assert_eq!(
-        expected.insert(
-            "dart/lib/src/transport.dart".into(),
-            include_str!("fixtures/dart-mixed-response-transport.sha256")
-                .trim()
-                .into(),
-        ),
-        Some("d214477fedb6bedead498b4f7e9116dc4390999951685bf37e2f7b9ec6adbe27".into()),
+        // Updated with the ua/v1 constructor fix to the shared transport runtime
+        // (final-field initialization), which this IO asset also contains.
+        Some("04bd75a2e2f31d1e40cc25ca4a5401076b9899a755509acdc5fdb91fd161c58f".into())
     );
     assert_eq!(hashes, expected);
     if let Some(path) = std::env::var_os("SUSPECT_DART_ENV_RECORD_NO_POLICY") {

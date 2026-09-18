@@ -37,7 +37,7 @@ pub(super) fn literal(value: &Value) -> String {
         ),
     }
 }
-fn doc(out: &mut String, value: &str, indent: &str) {
+pub(super) fn doc(out: &mut String, value: &str, indent: &str) {
     let value = value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -66,13 +66,11 @@ pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
         ),
     );
     push("analysis_options.yaml","analyzer:\n  language:\n    strict-casts: true\n    strict-inference: true\n    strict-raw-types: true\n  errors:\n    unused_import: error\n    unused_local_variable: error\n    unused_element: error\n    dead_code: error\n".into());
-    let mut library = format!(
-        "/// Exact native models, Future/Stream operations and portable transport.\nlibrary {name};\nimport 'dart:async' hide TimeoutException;\nimport 'dart:collection';\nimport 'dart:convert' show utf8, base64Encode;\nimport 'dart:typed_data';\n"
-    );
-    if plan.credential_env().is_some() {
-        library.push_str("import 'src/environment_stub.dart' if (dart.library.io) 'src/environment_io.dart' as _environment;\n");
-    }
-    for part in [
+    let pagination = super::pagination::emission(plan);
+    let oauth = super::oauth::emission(plan);
+    let stream_events = super::stream_events::emission(plan);
+    let incoming = super::incoming::emission(plan);
+    let mut parts = vec![
         "json",
         "validation",
         "program",
@@ -83,10 +81,33 @@ pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
         "auth",
         "forms",
         "framing",
+        "attribution",
         "transport",
         "protocol",
         "client",
-    ] {
+    ];
+    if pagination.is_some() {
+        parts.push("pagination");
+    }
+    if oauth.is_some() {
+        parts.push("oauth");
+    }
+    if stream_events.is_some() {
+        parts.push("stream_events");
+    }
+    if incoming.is_some() {
+        parts.push("incoming");
+    }
+    let mut library = format!(
+        "/// Exact native models, Future/Stream operations and portable transport.\nlibrary {name};\nimport 'dart:async' hide TimeoutException;\nimport 'dart:collection';\nimport 'dart:convert' show utf8, base64Encode;\nimport 'dart:typed_data';\n"
+    );
+    if plan.credential_env().is_some() || oauth.is_some() {
+        library.push_str("import 'src/environment_stub.dart' if (dart.library.io) 'src/environment_io.dart' as _environment;\n");
+    }
+    if oauth.is_some() {
+        library.push_str("import 'dart:convert' show base64Url, jsonDecode;\nimport 'dart:math' show Random;\nimport 'src/oauth_transport_stub.dart' if (dart.library.io) 'src/oauth_transport_io.dart' as _oauth_transport;\n");
+    }
+    for part in parts {
         writeln!(library, "part 'src/{part}.dart';").unwrap();
     }
     if plan.credential_env().is_some() {
@@ -98,6 +119,8 @@ pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
                 super::environment::render(plan)
             ),
         );
+    }
+    if plan.credential_env().is_some() || oauth.is_some() {
         push(
             "lib/src/environment_io.dart",
             include_str!("environment_io.dart").into(),
@@ -130,14 +153,75 @@ pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
         ("auth", include_str!("auth.dart").into()),
         ("forms", include_str!("forms.dart").into()),
         ("framing", include_str!("framing.dart").into()),
+        ("attribution", attribution(plan)),
         ("transport", include_str!("transport.dart").into()),
         ("protocol", http_emit::data(plan)),
-        ("client", http_emit::client(plan)),
+        ("client", http_emit::client(plan, pagination.as_ref(), stream_events.as_ref())),
     ] {
         push(
             &format!("lib/src/{part}.dart"),
             format!(
                 "// Generated from canonical source and checked plans.\npart of '../{name}.dart';\n\n{source}"
+            ),
+        );
+    }
+    if let Some(pagination) = &pagination {
+        push(
+            "lib/src/pagination.dart",
+            format!(
+                "// Generated from the configured pagination policy. Pointers resolve with\n// plain property access only; a page that satisfies the pattern's stop rule\n// ends the walk, and the first page of every walk is exactly the direct\n// call's result.\npart of '../{name}.dart';\n\n{}",
+                pagination.part
+            ),
+        );
+    }
+    if let Some(oauth) = &oauth {
+        push(
+            "lib/src/oauth.dart",
+            format!(
+                "// Generated from the compiled OAuth lifecycle plan. Every endpoint is a\n// frozen compiled constant; environment variable names are compiled and\n// values are read at call time, and no OpenAPI is parsed at runtime.\npart of '../{name}.dart';\n\n{}",
+                oauth.part
+            ),
+        );
+        push(
+            "lib/src/oauth_transport_io.dart",
+            format!(
+                "{}{}",
+                "// Default VM endpoint transport for the generated OAuth lifecycle: one POST\n// per call with no redirects, cookies or proxies.\nimport 'dart:async';\nimport 'dart:convert';\nimport 'dart:io';\n\n/// One OAuth endpoint exchange response: status, response headers and body.\nfinal class OAuthEndpointResponse {\n  const OAuthEndpointResponse(this.status, this.headers, this.body);\n  final int status;\n  final Map<String, List<String>> headers;\n  final String body;\n}\n\n/// The default endpoint transport on VM builds. Callers may pass any function\n/// with the `OAuthTransport` shape instead; the injected transport stays\n/// caller-owned.\nFuture<OAuthEndpointResponse> oauthEndpointPost(Uri url, Map<String, String> headers, String body) async {\n  final client = HttpClient();\n  try {\n    client.autoUncompress = false;\n    client.findProxy = null;\n    client.userAgent = null;\n    final request = await client.openUrl('POST', url);\n    request.followRedirects = false;\n    request.maxRedirects = 0;\n    request.persistentConnection = false;\n    for (final entry in headers.entries) {\n      request.headers.set(entry.key, entry.value);\n    }\n    request.headers.set('content-type', 'application/x-www-form-urlencoded');\n    request.add(utf8.encode(body));\n    final response = await request.close();\n    final responseHeaders = <String, List<String>>{};\n    response.headers.forEach((responseName, values) {\n      responseHeaders[responseName] = List.of(values);\n    });\n    final payload = await response.transform(utf8.decoder).join();\n    return OAuthEndpointResponse(response.statusCode, responseHeaders, payload);\n  } finally {\n    client.close(force: true);\n  }\n}\n",
+                if oauth.discovery {
+                    "\n/// The default VM document transport for the generated OAuth lifecycle: one\n/// GET per call with no redirects, cookies or proxies.\nFuture<OAuthEndpointResponse> oauthEndpointGet(Uri url, Map<String, String> headers) async {\n  final client = HttpClient();\n  try {\n    client.autoUncompress = false;\n    client.findProxy = null;\n    client.userAgent = null;\n    final request = await client.openUrl('GET', url);\n    request.followRedirects = false;\n    request.maxRedirects = 0;\n    request.persistentConnection = false;\n    for (final entry in headers.entries) {\n      request.headers.set(entry.key, entry.value);\n    }\n    final response = await request.close();\n    final responseHeaders = <String, List<String>>{};\n    response.headers.forEach((responseName, values) {\n      responseHeaders[responseName] = List.of(values);\n    });\n    final payload = await response.transform(utf8.decoder).join();\n    return OAuthEndpointResponse(response.statusCode, responseHeaders, payload);\n  } finally {\n    client.close(force: true);\n  }\n}\n"
+                } else {
+                    ""
+                }
+            ),
+        );
+        push(
+            "lib/src/oauth_transport_stub.dart",
+            format!(
+                "{}{}",
+                "// Portable and browser builds have no implicit endpoint transport for the\n// generated OAuth lifecycle; callers inject one instead.\n\n/// One OAuth endpoint exchange response: status, response headers and body.\nfinal class OAuthEndpointResponse {\n  const OAuthEndpointResponse(this.status, this.headers, this.body);\n  final int status;\n  final Map<String, List<String>> headers;\n  final String body;\n}\n\n/// The portable-build default: no implicit HTTP client exists, so the helpers\n/// fail with a transport failure until a caller passes [transport:].\nFuture<OAuthEndpointResponse> oauthEndpointPost(Uri url, Map<String, String> headers, String body) async {\n  throw UnsupportedError('no default OAuth endpoint transport on this platform; pass transport:');\n}\n",
+                if oauth.discovery {
+                    "\n/// The portable-build default for the document transport: no implicit HTTP\n/// client exists, so the helpers fail with a transport failure until a caller\n/// passes [discoveryTransport:].\nFuture<OAuthEndpointResponse> oauthEndpointGet(Uri url, Map<String, String> headers) async {\n  throw UnsupportedError('no default OAuth document transport on this platform; pass discoveryTransport:');\n}\n"
+                } else {
+                    ""
+                }
+            ),
+        );
+    }
+    if let Some(stream_events) = &stream_events {
+        push(
+            "lib/src/stream_events.dart",
+            format!(
+                "// Generated from the compiled typed-stream semantics plan. The existing\n// untyped stream item iteration stays the transport: the events streams reuse\n// the direct call's wire preparation and the runtime framer with a lenient\n// frame reader, then apply the compiled per-kind decode, sentinel and\n// completion semantics themselves.\npart of '../{name}.dart';\n\n{}",
+                stream_events.part
+            ),
+        );
+    }
+    if let Some(incoming) = &incoming {
+        push(
+            "lib/src/incoming.dart",
+            format!(
+                "// Generated incoming receipt helpers for this package's declared webhooks and\n// callbacks. HTTP semantics are inverted for these receipts: the declared\n// method is the verb the provider sends and the declared responses are what\n// the handler returns. Decoders presence-check the declared required headers\n// and decode the declared body through the same compiled model codecs the\n// client uses; constructors build the declared 2xx reply. Route expressions\n// ({{$request...}}) are carried verbatim; their substitution is a\n// runtime/framework concern.\npart of '../{name}.dart';\n\n{}",
+                incoming
             ),
         );
     }
@@ -216,6 +300,21 @@ pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
     push("sdk-manifest.json", http_emit::manifest(plan));
     files.sort_by(|a, b| a.path.cmp(&b.path));
     files
+}
+/// Compiled ua/v1 attribution constants for the generated library. A missing
+/// descriptor emits the disabled sentinel: an empty suspect version keeps the
+/// runtime resolver inert.
+fn attribution(plan: &Plan) -> String {
+    match &plan.config.attribution {
+        Some(attribution) => format!(
+            "// ua/v1 attribution: every request identifies suspect as the generator and the\n// SDK or a caller-supplied application as the client.\nconst userAgentSuspectVersion = {};\nconst userAgentSdkName = {};\nconst userAgentSdkVersion = {};\nconst userAgentSpecVersion = {};\n",
+            quote(&attribution.suspect_version),
+            quote(&attribution.sdk_name),
+            quote(&attribution.sdk_version),
+            quote(&attribution.spec_version),
+        ),
+        None => "// ua/v1 attribution is disabled for this package; an empty suspect\n// version sentinel keeps the automatic attribution header inert.\nconst userAgentSuspectVersion = '';\nconst userAgentSdkName = '';\nconst userAgentSdkVersion = '';\nconst userAgentSpecVersion = '';\n".into(),
+    }
 }
 fn codec_config(plan: &Plan) -> String {
     let c = &plan.config;

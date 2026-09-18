@@ -10,9 +10,11 @@ The canonical `codegen` CLI exposes this profile without a custom Rust integrati
 
 ```sh
 cargo run --locked -p suspect-cli -- codegen \
-  crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+  ../openrouter-web/projects/docs/openapi/openapi.yaml \
   --profile typescript-http \
-  --package-name @example/widgets --package-version 0.0.0 \
+  --operation-id getCredits --operation-id createKeys --operation-id updateKeys \
+  --operation-id listContainerFiles --operation-id getContainerFile \
+  --package-name @example/openrouter-sdk --package-version 0.0.0 \
   --out sdk-out
 ```
 
@@ -26,11 +28,11 @@ detect defects outside the selected operation closures. Generated output lives
 under `sdk-out/typescript/`; package building is explicit and no package manager
 or publication command is invoked by `suspect codegen`.
 
-The CLI-to-package native gate uses source fixtures directly, installs the
-emitted tarball, compiles a strict TypeScript consumer, calls a localhost fixture
+The CLI-to-package native gate uses the tracked source directly, installs the
+emitted tarball, compiles a strict TypeScript consumer, calls a localhost credits
 server, checks exact decimals, and builds/validates TypeDoc. The editor uses the
 same profile for generation and the shared session command for watch/preview.
-See [native call sites](SDK-M2-CALLSITES.md) and
+Current verification is recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md) and
 [editor integration](SDK-EDITOR-PREVIEW.md).
 
 ## Admitted contract

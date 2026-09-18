@@ -109,19 +109,20 @@ fn inventory_hash(value: &Value) -> String {
 }
 #[test]
 fn no_policy_retains_pre_change_sdk_and_terraform_bytes() {
-    // Captured before the env factory/config implementation. This binds every
-    // path, length and SHA-256, without depending on a target/ witness at runtime.
+    // Captured after the ua/v1 attribution emission (one added go/attribution.go
+    // file). This binds every path, length and SHA-256, without depending on a
+    // target/ witness at runtime.
     let synthetic = inventory(&synthetic_files());
-    assert_eq!(synthetic.as_object().unwrap().len(), 34);
+    assert_eq!(synthetic.as_object().unwrap().len(), 35);
     assert_eq!(
         inventory_hash(&synthetic),
-        "0724e1c4c26a8861ae87b3d5a9028ee1502feca87f7f317c061be9b3c3f62336"
+        "74ffce12340c324c4d451738c30dde409e289ef04427a599b7f7eb8833e3c8ca"
     );
     let terraform = inventory(&terraform_files());
-    assert_eq!(terraform.as_object().unwrap().len(), 48);
+    assert_eq!(terraform.as_object().unwrap().len(), 49);
     assert_eq!(
         inventory_hash(&terraform),
-        "eb880b0850550fa8b69d2852e988414699376e750b7b55486e3688078a50dcf6"
+        "3ede744f1d03a93d27c04b230c69c291a70889dec4206a79be4ddfc9b7a7e81f"
     );
     let sdk = json!(
         terraform
@@ -132,10 +133,10 @@ fn no_policy_retains_pre_change_sdk_and_terraform_bytes() {
             .map(|(path, value)| (path.clone(), value.clone()))
             .collect::<BTreeMap<_, _>>()
     );
-    assert_eq!(sdk.as_object().unwrap().len(), 34);
+    assert_eq!(sdk.as_object().unwrap().len(), 35);
     assert_eq!(
         inventory_hash(&sdk),
-        "2a4ea978860555651e64491ef0aee742fd551e2837ae519f0a7cceb9ae374d63"
+        "3de9a714710ac82e7a08cb8d29f9b4a47ec7d818af266e720842afb816e6e282"
     );
 }
 
@@ -536,7 +537,7 @@ fn generator_environment_values_do_not_enter_configured_or_unconfigured_artifact
     );
     assert_eq!(
         inventory_hash(&inventory(&synthetic_files())),
-        "0724e1c4c26a8861ae87b3d5a9028ee1502feca87f7f317c061be9b3c3f62336"
+        "74ffce12340c324c4d451738c30dde409e289ef04427a599b7f7eb8833e3c8ca"
     );
 }
 

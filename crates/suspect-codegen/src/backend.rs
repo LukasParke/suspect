@@ -9,7 +9,7 @@ pub use options::GenerationOptions;
 pub(crate) use options::*;
 
 macro_rules! backends {
-    ($( $(#[$attribute:meta])* $variant:ident => ($name:literal, $directory:literal, $description:literal); )+) => {
+    ($( $(#[$attribute:meta])* $variant:ident => ($name:literal, $directory:literal, $language:literal, $description:literal); )+) => {
         /// Independently verified profiles. Registration requires native acceptance.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
         pub enum Backend {
@@ -30,30 +30,34 @@ macro_rules! backends {
             pub const fn owner(self) -> &'static str {
                 match self { $( $(#[$attribute])* Self::$variant => concat!("suspect-sdk:", $name), )+ }
             }
+            /// `ua/v1` language tag used in the attribution header comment.
+            pub const fn language_tag(self) -> &'static str {
+                match self { $( $(#[$attribute])* Self::$variant => $language, )+ }
+            }
         }
     };
 }
 
 backends! {
-    TypescriptHttp => ("typescript-http", "typescript", "Source-selected HTTP operations, exact codecs and ESM packaging");
-    RustHttp => ("rust-http", "rust", "Source-selected native HTTP clients, exact codecs and Cargo packaging");
-    PythonHttp => ("python-http", "python", "Source-selected sync/async clients, exact codecs and wheel packaging");
-    GoHttp => ("go-http", "go", "Source-selected context-aware clients, exact codecs and Go modules");
-    SwiftHttp => ("swift-http", "swift", "Source-selected async clients, exact codecs, SwiftPM and DocC");
+    TypescriptHttp => ("typescript-http", "typescript", "typescript", "Source-selected HTTP operations, exact codecs and ESM packaging");
+    RustHttp => ("rust-http", "rust", "rust", "Source-selected native HTTP clients, exact codecs and Cargo packaging");
+    PythonHttp => ("python-http", "python", "python", "Source-selected sync/async clients, exact codecs and wheel packaging");
+    GoHttp => ("go-http", "go", "go", "Source-selected context-aware clients, exact codecs and Go modules");
+    SwiftHttp => ("swift-http", "swift", "swift", "Source-selected async clients, exact codecs, SwiftPM and DocC");
     #[cfg(feature = "ruby-sdk")]
-    RubyHttp => ("ruby-http", "ruby", "Source-selected keyword clients, exact codecs, gems, RBS and YARD");
+    RubyHttp => ("ruby-http", "ruby", "ruby", "Source-selected keyword clients, exact codecs, gems, RBS and YARD");
     #[cfg(feature = "csharp-sdk")]
-    CsharpHttp => ("csharp-http", "csharp", "Source-selected Task clients, exact codecs, NuGet and native .NET docs");
+    CsharpHttp => ("csharp-http", "csharp", "csharp", "Source-selected Task clients, exact codecs, NuGet and native .NET docs");
     #[cfg(feature = "dart-sdk")]
-    DartHttp => ("dart-http", "dart", "Source-selected Future clients, exact codecs, pub packages and dartdoc");
+    DartHttp => ("dart-http", "dart", "dart", "Source-selected Future clients, exact codecs, pub packages and dartdoc");
     #[cfg(feature = "cpp-sdk")]
-    CppHttp => ("cpp-http", "cpp", "Source-selected C++20 clients, exact codecs, CMake, libcurl and Doxygen");
+    CppHttp => ("cpp-http", "cpp", "cpp", "Source-selected C++20 clients, exact codecs, CMake, libcurl and Doxygen");
     #[cfg(feature = "kotlin-sdk")]
-    KotlinHttp => ("kotlin-http", "kotlin", "Source-selected coroutine clients, exact codecs, Maven and Dokka");
+    KotlinHttp => ("kotlin-http", "kotlin", "kotlin", "Source-selected coroutine clients, exact codecs, Maven and Dokka");
     #[cfg(feature = "php-sdk")]
-    PhpHttp => ("php-http", "php", "Source-selected typed PHP clients, exact codecs, Composer and PHPDoc");
+    PhpHttp => ("php-http", "php", "php", "Source-selected typed PHP clients, exact codecs, Composer and PHPDoc");
     #[cfg(feature = "java-sdk")]
-    JavaHttp => ("java-http", "java", "Source-selected immutable Java clients, exact codecs, CompletableFuture, Maven and Javadoc");
+    JavaHttp => ("java-http", "java", "java", "Source-selected immutable Java clients, exact codecs, CompletableFuture, Maven and Javadoc");
 }
 /// Package identity is independent from every OpenAPI semantic.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -294,12 +298,20 @@ pub fn generate_with_options(
     if let Some(error) = credential_env_admission_error(config, options) {
         return Err(vec![error]);
     }
+    let attribution = crate::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        &config.package_name,
+        &config.package_version,
+        contract.openapi_version(),
+        config.backend.language_tag(),
+    );
+    let attribution = Some(&attribution);
     match config.backend {
         Backend::TypescriptHttp => {
             let plan = crate::typescript::http::plan_http(
                 contract,
                 operations,
-                typescript_options(options),
+                typescript_options(options, attribution),
             )
             .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             crate::typescript::package::emit_http(
@@ -312,8 +324,12 @@ pub fn generate_with_options(
             .map_err(package)
         }
         Backend::RustHttp => {
-            let plan = crate::rust_http::plan_http_v3(contract, operations, rust_options(options))
-                .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
+            let plan = crate::rust_http::plan_http_v3(
+                contract,
+                operations,
+                rust_options(options, attribution),
+            )
+            .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             crate::rust_http::emit_http(
                 &plan,
                 &crate::rust_http::PackageConfig {
@@ -324,8 +340,12 @@ pub fn generate_with_options(
             .map_err(package)
         }
         Backend::PythonHttp => {
-            let plan = crate::python_http::plan_http(contract, operations, python_options(options))
-                .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
+            let plan = crate::python_http::plan_http(
+                contract,
+                operations,
+                python_options(options, attribution),
+            )
+            .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             crate::python_http::emit_http(
                 &plan,
                 &crate::python_http::PackageConfig {
@@ -340,8 +360,9 @@ pub fn generate_with_options(
             .map_err(package)
         }
         Backend::GoHttp => {
-            let plan = crate::go_http::plan_http(contract, operations, go_options(options))
-                .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
+            let plan =
+                crate::go_http::plan_http(contract, operations, go_options(options, attribution))
+                    .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             crate::go_http::emit_http(
                 &plan,
                 &crate::go_http::PackageConfig {
@@ -353,8 +374,12 @@ pub fn generate_with_options(
             .map_err(|errors| package(errors.join("; ")))
         }
         Backend::SwiftHttp => {
-            let plan = crate::swift_sdk::plan_sdk(contract, operations, swift_options(options))
-                .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
+            let plan = crate::swift_sdk::plan_sdk(
+                contract,
+                operations,
+                swift_options(options, attribution),
+            )
+            .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             crate::swift_sdk::emit_sdk(
                 &plan,
                 &crate::swift_sdk::PackageConfig {
@@ -379,8 +404,9 @@ pub fn generate_with_options(
         }
         #[cfg(feature = "ruby-sdk")]
         Backend::RubyHttp => {
-            let plan = crate::ruby_sdk::plan_sdk(contract, operations, ruby_options(options))
-                .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
+            let plan =
+                crate::ruby_sdk::plan_sdk(contract, operations, ruby_options(options, attribution))
+                    .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             crate::ruby_sdk::emit_sdk(&plan, &ruby_package(config)).map_err(|errors| {
                 package(
                     errors
@@ -397,7 +423,7 @@ pub fn generate_with_options(
                 contract,
                 operations,
                 csharp_config(config),
-                csharp_options(options),
+                csharp_options(options, attribution),
             )
             .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             plan.render()
@@ -407,6 +433,8 @@ pub fn generate_with_options(
         Backend::DartHttp => {
             let mut native_config = dart_config(config);
             native_config.credential_env = options.credential_env.clone();
+            native_config.attribution = attribution.cloned();
+            native_config.sdk_defaults = options.sdk_defaults.clone();
             let plan = crate::dart_sdk::plan_sdk_with_profiles(
                 contract,
                 operations,
@@ -421,6 +449,8 @@ pub fn generate_with_options(
             let mut native_config = cpp_config(config);
             native_config.legacy_binary_strings = options.legacy_binary_strings();
             native_config.credential_env = options.credential_env.clone();
+            native_config.sdk_defaults = options.sdk_defaults.clone();
+            native_config.attribution = attribution.cloned();
             let plan = crate::cpp_sdk::plan_sdk(contract, operations, native_config)
                 .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             plan.render()
@@ -430,6 +460,8 @@ pub fn generate_with_options(
         Backend::KotlinHttp => {
             let mut native_config = kotlin_config(config)?;
             native_config.credential_env = options.credential_env.clone();
+            native_config.sdk_defaults = options.sdk_defaults.clone();
+            native_config.attribution = attribution.cloned();
             let plan = crate::kotlin_sdk::plan_sdk_with_profiles(
                 contract,
                 operations,
@@ -444,6 +476,8 @@ pub fn generate_with_options(
         Backend::PhpHttp => {
             let mut native_config = php_config(config);
             native_config.credential_env = options.credential_env.clone();
+            native_config.attribution = attribution.cloned();
+            native_config.sdk_defaults = options.sdk_defaults.clone();
             let plan = crate::php_sdk::protocol::plan_sdk(
                 contract,
                 operations,
@@ -462,7 +496,7 @@ pub fn generate_with_options(
                 package,
                 &[],
                 maven,
-                java_options(options),
+                java_options(options, attribution),
             )
             .map_err(|errors| errors.into_iter().map(Into::into).collect::<Vec<_>>())?;
             plan.render()

@@ -97,6 +97,12 @@ pub struct ClientOptions {
     pub max_stream_item_bytes: Option<usize>,
     pub max_chunk_bytes: Option<usize>,
     pub max_error_capture_bytes: usize,
+    /// Full User-Agent override. `Some(empty)` suppresses the automatic
+    /// attribution header entirely.
+    pub user_agent: Option<String>,
+    /// Replaces the SDK identity token in the automatic attribution header:
+    /// `<name>` or `<name>/<version>` of RFC 9110 tokens.
+    pub application_id: Option<String>,
 }
 impl Default for ClientOptions {
     fn default() -> Self {
@@ -110,8 +116,58 @@ impl Default for ClientOptions {
             max_stream_item_bytes: None,
             max_chunk_bytes: None,
             max_error_capture_bytes: DEFAULT_CAPTURE_BYTES,
+            user_agent: None,
+            application_id: None,
         }
     }
+}
+
+/// ua/v1 application identity: `<name>` or `<name>/<version>` of RFC 9110 tokens.
+fn is_application_identity(value: &str) -> bool {
+    const TOKEN_EXTRA: &[u8] = b"!#$%&'*+-.^_`|~";
+    let token = |part: &str| {
+        !part.is_empty()
+            && part.len() <= 128
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || TOKEN_EXTRA.contains(&byte))
+    };
+    match value.split_once('/') {
+        Some((name, version)) => token(name) && token(version),
+        None => token(value),
+    }
+}
+
+/// ua/v1 attribution: explicit override wins, `Some(empty)` suppresses, and the
+/// default identifies suspect as the generator and the SDK package or a
+/// caller-supplied application as the client.
+fn resolve_user_agent(options: &ClientOptions) -> Option<String> {
+    use crate::attribution::{
+        ATTRIBUTION_SDK_NAME, ATTRIBUTION_SDK_VERSION, ATTRIBUTION_SPEC_VERSION,
+        ATTRIBUTION_SUSPECT_VERSION,
+    };
+    if let Some(user_agent) = &options.user_agent {
+        return if user_agent.is_empty() {
+            None
+        } else {
+            Some(user_agent.clone())
+        };
+    }
+    if ATTRIBUTION_SUSPECT_VERSION.is_empty() {
+        return None;
+    }
+    let identity = match &options.application_id {
+        Some(application_id) if !application_id.is_empty() => {
+            if application_id.len() > 128 || !is_application_identity(application_id) {
+                return None;
+            }
+            application_id.clone()
+        }
+        _ => format!("{ATTRIBUTION_SDK_NAME}/{ATTRIBUTION_SDK_VERSION}"),
+    };
+    Some(format!(
+        "suspect/{ATTRIBUTION_SUSPECT_VERSION} {identity} (rust/unknown; openapi/{ATTRIBUTION_SPEC_VERSION})"
+    ))
 }
 
 pub struct Client<T> {
@@ -291,6 +347,13 @@ impl<T: Transport> Client<T> {
         }
         if let Some(body) = &body {
             headers.push(("content-type".into(), body.content_type.as_bytes().to_vec()));
+        }
+        // ua/v1 attribution is applied after declared parameters so an explicit
+        // caller-supplied User-Agent header keeps precedence over the default.
+        if !headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("user-agent")) {
+            if let Some(user_agent) = resolve_user_agent(&self.options) {
+                headers.push(("user-agent".into(), user_agent.into_bytes()));
+            }
         }
         check_headers(op.source, op.source, &headers, op.limits.header, false)?;
         let url = servers::assemble(op, &base, &path, &query)?;

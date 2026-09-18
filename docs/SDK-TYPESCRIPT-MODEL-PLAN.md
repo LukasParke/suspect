@@ -87,4 +87,4 @@ cargo test --locked -p suspect-codegen --test typescript_contract --test typescr
   -- --include-ignored
 ```
 
-Current profile boundaries are in [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
+Current integrated status is in [SDK-PROGRESS.md](SDK-PROGRESS.md).

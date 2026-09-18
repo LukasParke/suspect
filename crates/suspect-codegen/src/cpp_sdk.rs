@@ -9,9 +9,13 @@ use suspect_ir::contract::{Contract, SourceId};
 use suspect_schema::{Config, OwnedProgram, ProgramInstruction};
 
 mod emit;
+mod incoming;
 mod models;
+mod oauth;
+mod pagination;
 mod protocol;
 mod scoped_examples;
+mod stream_events;
 #[cfg(test)]
 mod server_tests;
 #[cfg(test)]
@@ -22,11 +26,18 @@ pub use models::{
     CodecDescriptor, CodecMethods, Constructor, ConstructorParameter, Extras, Field, ModelPlan,
     ModelSymbol, Shape, TagInitializer,
 };
+pub use pagination::{Advance, ControlKind, PaginationOperation, PaginationPlan};
+pub use stream_events::{StreamEventsEntry, StreamEventsPlan};
+pub use incoming::{
+    ConstructedBody as IncomingReplyBody, IncomingEmission, IncomingReceipt,
+    Payload as IncomingPayload,
+};
 pub use protocol::{
     InputArgument, InputConstructor, PlannedAggregate, PlannedBody, PlannedCredential,
     PlannedHeader, PlannedMedia, PlannedOperation, PlannedParameter, PlannedPart, PlannedResponse,
     PlannedResponseCase, ValueKind, ValueType, capabilities,
 };
+pub use oauth::{OAuthNames, OAuthPlan as OAuthEmission, OAuthScheme as CompiledOAuthScheme};
 
 /// Package identity and finite native resource policy, independent of API semantics.
 #[derive(Debug, Clone)]
@@ -49,6 +60,10 @@ pub struct SdkConfig {
     pub legacy_binary_strings: bool,
     /// Explicit runtime variable-name policy. Generation never reads values.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
     pub validation: Config,
 }
 impl Default for SdkConfig {
@@ -69,6 +84,8 @@ impl Default for SdkConfig {
             max_stream_buffer_bytes: 64 * 1024,
             legacy_binary_strings: false,
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
             validation: Config {
                 max_depth: 128,
                 ..Default::default()
@@ -90,6 +107,14 @@ pub struct SdkPlan {
     program: OwnedProgram,
     examples: examples::ExamplePlan,
     protocol: http_protocol::ProtocolPlan,
+    pagination: Option<pagination::PaginationPlan>,
+    oauth: Option<oauth::OAuthPlan>,
+    /// The compiled, infallible typed-stream semantics and the lowered
+    /// emission for exactly the discriminated SSE stream operations.
+    stream_events: stream_events::StreamEventsPlan,
+    /// The compiled incoming webhook/callback receipts with their lowered
+    /// emission, when the contract declares any.
+    incoming: Option<incoming::IncomingEmission>,
 }
 impl SdkPlan {
     #[must_use]
@@ -141,6 +166,34 @@ impl SdkPlan {
     #[must_use]
     pub fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
+    }
+    /// The compiled pagination selection carried by this plan, when SDK
+    /// defaults were configured.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&pagination::PaginationPlan> {
+        self.pagination.as_ref()
+    }
+    /// The compiled OAuth lifecycle selection carried by this plan, when SDK
+    /// defaults were configured. Emission additionally requires at least one
+    /// usable scheme, checked by [`OAuthEmission::emits`].
+    #[must_use]
+    pub fn oauth(&self) -> Option<&oauth::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// The compiled typed-stream semantics carried by this plan, with the
+    /// lowered emission for exactly the discriminated SSE stream operations.
+    /// Compiled unconditionally; emission is conditional on the compiled
+    /// discrimination evidence.
+    #[must_use]
+    pub fn stream_events(&self) -> &stream_events::StreamEventsPlan {
+        &self.stream_events
+    }
+    /// The compiled incoming webhook/callback receipts with the lowered
+    /// emission for exactly the receipts the v1 helpers represent. Compiled
+    /// for every contract; emission is conditional on declared receipts.
+    #[must_use]
+    pub fn incoming(&self) -> Option<&incoming::IncomingEmission> {
+        self.incoming.as_ref()
     }
     /// Pure emission; source-located refusal returns no partial artifact set.
     pub fn render(&self) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> {

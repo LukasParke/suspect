@@ -1,30 +1,57 @@
-# Contract-backed SDK compiler
+# OpenAPI-driven SDK generation plan
 
-The SDK compiler derives API semantics from OpenAPI and generates native
-models, checked codecs, HTTP clients, installable packages, examples and
-documentation. The [capability matrix](SDK-CAPABILITIES.md) lists the twelve
-experimental native profiles.
+Authorized 2026-09-08; full-plan implementation resumed 2026-09-10.
+OpenRouter's tracked `openrouter-web` specifications
+are the primary acceptance workload. [SDK-PROGRESS.md](SDK-PROGRESS.md) records
+current verification; [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md) defines the
+implemented profile boundaries.
+
+## Goal and current scope
+
+Generate language-native SDKs with faithful types and HTTP behavior, checked
+codecs, installable packages, executable examples and native documentation.
+OpenAPI is the complete source of API semantics.
+
+The default registry now contains **Python, Go, Swift, Rust, TypeScript/JavaScript,
+Java, C#, Kotlin, Ruby, PHP, Dart and C++**. Each has native base-profile evidence.
+The verified five-language hackathon deliverable remains the M3/native-parity and
+M6 iteration-tool baseline. The user's resumed instruction covers all remaining
+original-plan work end to end; protocol, schema, acquisition, compatibility and
+maintenance gates are tracked in
+[SDK-FULL-PLAN-WORK.md](SDK-FULL-PLAN-WORK.md). Approved native interfaces remain in
+[SDK-REMAINING-DX.md](SDK-REMAINING-DX.md).
+
+M0–M2 completion is a historical checkpoint, recorded in
+[SDK-M0-M2-EXIT.md](SDK-M0-M2-EXIT.md). The sealed post-cleanup native run verifies
+M3 and all 208 demo-relevant generation/SDK/iteration criteria. The original
+four numerical M6 criteria remain unmet and are deferred from the demo by user
+decision. See [SDK-DEMO.md](SDK-DEMO.md) and [current evidence](SDK-PROGRESS.md).
 
 ## Product contract
 
-1. **One semantic source.** Endpoints, schemas, wire names, security and examples
-   come from OpenAPI. Package identity and runtime/presentation options are
-   target configuration.
-2. **Faithful runtime behavior.** Native types express representable constraints;
-   codecs and validation enforce supported remaining constraints, including
-   exact values, absence/null and exclusive unions.
-3. **Explicit admission.** Unsupported selected declarations produce located
-   diagnostics before output. Generation, preview and comparison use the same
-   target admission boundaries.
-4. **Native interfaces.** Shared semantic plans and vectors support idiomatic
-   ecosystem-specific APIs. Emitters consume allocated symbols and typed plans.
-5. **Documentation is an artifact.** Native comments, references and examples
-   use the same plans and source identities as generated code.
-6. **Reproducibility.** Source closure, configuration and generator/runtime
-   assets determine output. The writer tracks ownership and preserves unchanged
-   file bytes and metadata.
+1. **One semantic source.** Endpoints, schemas, wire names, security, examples
+   and API-specific behavior originate in OpenAPI. Package identity, runtime
+   versions and presentation are target configuration.
+2. **Faithfulness includes runtime behavior.** Native types express what the
+   language can represent. Codecs/validation enforce the remaining supported
+   constraints, including exact numbers, absence/null and `oneOf` exclusivity.
+3. **Explicit admission.** Each feature is represented exactly, faithfully
+   enforced at runtime, or rejected with a source-linked diagnostic. Preview
+   uses the same admission boundary as generation.
+4. **Native public interfaces.** Share semantic decisions and test vectors;
+   design public APIs for each ecosystem. Ordinary valid calls should not need
+   unsafe casts, reflection or manual request assembly.
+5. **Documentation is an artifact.** Code, native comments, browsable references
+   and examples use the same typed language plan and source identities.
+6. **Reproducibility.** Pinned source closures, generator/runtime assets and
+   configuration determine output. Regeneration tracks ownership and preserves
+   unchanged file bytes/mtimes/inodes.
 
-## Pipeline
+Optional versioned `x-*` metadata may express semantics absent from the standard.
+Standard-only operation remains first-class. Pagination, retries, authentication
+flows, streaming and defaults must not be inferred from suggestive names.
+
+## One SDK pipeline
 
 ```mermaid
 flowchart TD
@@ -44,88 +71,157 @@ flowchart TD
     Backend --> Compare
 ```
 
-`suspect_ir::contract::Contract` owns normalized values, schema/reference edges,
-effective HTTP metadata and physical source addresses. The lossless reader and
-explicit Fast reader have independent parity checks. Resource URIs, anchors and
-dynamic-reference scope remain distinct from physical document identity.
+### Contract compilation
 
-Reference acquisition is explicit. Local split specs and
-[hash-pinned offline closures](SDK-PINNED-CLOSURE-DESIGN.md) feed the same
-compiler. An HTTP URI used as a schema identifier does not authorize retrieval.
+`suspect_ir::contract::Contract` owns normalized values, finite schema/reference
+edges, effective HTTP metadata and source addresses. SDK backends consume it
+directly. `Contract::from_workspace` uses the lossless reader; the explicit Fast
+reader independently materializes supported values and checks parity against
+the lossless source/reference sidecar.
+
+Reference acquisition is separate from compilation. Local split specs are
+supported; remote acquisition/offline-cache policy is designed in
+[SDK-PINNED-CLOSURE-DESIGN.md](SDK-PINNED-CLOSURE-DESIGN.md). An HTTP URI used as an
+identifier is not a command to download a document.
+
+### Native planning and emission
 
 `backend::generate(Arc<Contract>, selected_sources, TargetConfig)` is the shared
-dispatch boundary. Language plans own symbols, models, codecs, operation
-inputs/results, dependencies and diagnostics. Model-only and codec-only library
-APIs expose useful layers; HTTP profiles admit their complete selected closure.
+dispatch boundary. Language plans own allocated symbols, wire/native bindings,
+models, codecs, operation inputs/results, dependencies and diagnostics.
+Renderers and documentation consume these typed plans. They do not infer a
+second API from emitted language text.
 
-The [artifact writer](SDK-ARTIFACT-OWNERSHIP.md) preflights the complete desired
-file set. Unchanged output retains metadata; unedited obsolete owned files can
-be removed. Drift checking is read-only. Replacement is atomic per file.
+Model-only and codec-only library APIs expose useful layers of this pipeline.
+Model-only plans retain their validation/codec obligations; HTTP profiles admit
+their complete selected closure before returning a package.
 
-## Commands and migration
+### Artifact lifecycle
 
-```sh
-suspect codegen-profiles --format json
-suspect codegen api.openapi.yaml --profile typescript-http \
-  --package-name @example/sdk --package-version 1.0.0 --out generated
-suspect codegen-session --config sdk-session.json --out generated --preview --format json
-suspect codegen-compare --before baseline/sdk-session.json --after candidate/sdk-session.json
-```
+The writer receives the complete desired artifact set. Preflight validates
+paths, ownership and conflicts before publication. Unchanged files keep their
+metadata; only unchanged obsolete owned files can be removed. `--check` is
+read-only. Atomic replacement is per file, not a whole-batch transaction or
+cross-process lock. See [SDK-ARTIFACT-OWNERSHIP.md](SDK-ARTIFACT-OWNERSHIP.md).
 
-Package name and version are explicit. Repeated `--operation-id` selectors use
-exact source IDs; omission attempts every outgoing operation. The
-[session guide](SDK-INCREMENTAL-GENERATION.md) documents multi-target JSON,
-bounded reuse, watch/check/preview and editor integration.
+`suspect-gen` provides `docs-md` and custom manifest/template rendering over the
+platform `IrSpec`. Native SDK packaging and documentation belong to the typed
+backend pipeline.
 
-[Large contract generation](SDK-LARGE-CONTRACTS.md) covers checked model carriers, native compiler size boundaries, and their regression witnesses.
-
-This replaces the earlier `suspect-codegen` STG/lift/standalone emitter APIs and
-their prototype consumer-impact and semantic-diff implementations. Library
-users should migrate to `Contract`, `backend` and `compatibility`.
-
-The old `suspect gen --preset ts-sdk` and `--preset rust-sdk` presets are
-replaced by `suspect codegen --profile typescript-http` and `rust-http` with
-explicit package configuration. `suspect-gen` continues to render `docs-md` and
-custom manifests over the platform `IrSpec`. The CLI's structural `suspect diff`
-command remains available; SDK wire/native migration analysis uses
-[`codegen-compare`](SDK-COMPATIBILITY-REPORTS.md).
-
-## Verification
-
-The ordinary workspace gates use in-repository fixtures and controlled
-transports. Use the Node/npm versions pinned in
-`crates/suspect-codegen/tools/typescript-docs/`, then install the native
-TypeScript test tools:
+## User workflow
 
 ```sh
-npm ci --prefix crates/suspect-codegen/tools/typescript-docs --ignore-scripts --no-audit --no-fund
-export PATH="$PWD/crates/suspect-codegen/tools/typescript-docs/node_modules/.bin:$PATH"
+suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+  --profile typescript-http --package-name @example/widgets \
+  --package-version 0.1.0 --out generated
 ```
 
-Run the workspace gates:
+Use `suspect codegen-profiles --format json` to discover the exact compiled
+registry. Default profiles are `python-http`, `go-http`, `swift-http`, `rust-http`,
+`typescript-http`, `java-http`, `csharp-http`, `kotlin-http`, `ruby-http`, `php-http`,
+`dart-http` and `cpp-http`.
+Package name and exact version are required. Repeat `--operation-id NAME` to
+select exact outgoing operations; omission attempts all of them. Add
+`--check --format json` for read-only ownership/drift results.
 
-```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked
-cargo bench --workspace --locked -- --test
-```
+[`codegen-session`](SDK-INCREMENTAL-GENERATION.md) selects multiple profiles in
+one JSON configuration and shares a Contract across them. It supports finite
+generation, check, preview and persistent watch. The editor uses the same CLI
+and protocol. [`codegen-compare`](SDK-COMPATIBILITY-REPORTS.md) compares two
+source/configuration snapshots and emits JSON or Markdown migration notes.
 
-Tests cover parser parity and exact values; schema dialects, applicators and
-resources; source-located diagnostics; artifact ownership; generation sessions;
-and source/native compatibility. Installed native consumers and external-corpus
-regressions are opt-in ignored tests with their tool/input requirements stated
-on each test. Compiler tests and generated-package runtime tests establish
-different boundaries.
+Generation is independent of installed native toolchains. Native build/install,
+documentation and consumer execution are separate verification gates.
 
-For VS Code, build the CLI with `cargo build --locked -p suspect-cli` and set
-`SUSPECT_TEST_BINARY` to its absolute path. Run `npm ci`, `npm run compile`,
-`npm run test:generation` and `npm run test:generation:host:inputs` in
-`editors/vscode`. Real extension-host checks require the explicit inputs
-documented by its native-host harness.
+## Fidelity and protocol growth
 
-The [session measurement guide](SDK-SESSION-PERFORMANCE.md) defines cold, warm,
-edited and reverted snapshot boundaries. Functional reuse and zero-rewrite
-checks establish correctness; numerical latency claims require qualified
-repeated measurements.
+Normative references are in [SDK-OPENAPI-RESEARCH.md](SDK-OPENAPI-RESEARCH.md).
+Current HTTP profiles include each target's independently witnessed expansion of
+the original JSON/exact-status/bearer/static-server slice. Shared OAS3.0/3.1/3.2
+indexing and owned compilation remain distinct from native capability acceptance.
+
+| Concern | Required behavior |
+| --- | --- |
+| Presence and null | Distinguish required non-null, required nullable, optional non-null and optional nullable; preserve omission during encode/decode |
+| Direction | Apply an explicit dialect-aware request/response policy and preserve annotations; supplied fields remain validated under the TS 3.1 policy |
+| Composition | Preserve intersection, inclusive union and exactly-one validation; flatten only with an equivalence proof |
+| Objects and arrays | Preserve named fields, typed/untyped extras, recursive identity and supported collection constraints |
+| Exact values | Preserve numeric tokens and mathematical integrality; use bounded native numbers only when the schema proves the range |
+| References | Keep source/resource identity, escaped pointers, local/external closure and recursion; unsupported scope/dialect behavior must fail explicitly |
+| HTTP | Derive method, URL, encoding, requiredness, security, status and media from effective declarations; retain typed errors and bounded unexpected-response captures |
+| Resources | Propagate cancellation, bound request/response/evaluation work, and validate mutable models again on encode |
+| Examples | Validate declared examples, retain provenance/findings, and label synthesized replacements separately |
+
+The shared protocol now represents parameter/security encodings, status
+ranges/defaults, no-content and binary responses, forms/multipart, typed headers,
+and item streaming. Native completion and broader applicator/resource execution
+follow the source-backed contracts in
+[SDK-PROTOCOL-NEXT.md](SDK-PROTOCOL-NEXT.md) and
+[SDK-NATIVE-DX.md](SDK-NATIVE-DX.md) require their own native gates before admission.
+Expanding a shared shape must not silently expand every backend's support claim.
+
+## Verification gates
+
+The maintained twelve-language integrated runner is `xtask sdk-full`; its exact
+configuration and required evidence are in [SDK-FULL-EXIT.md](SDK-FULL-EXIT.md).
+`sdk-m3-m6` retains the historical five-language scope and numerical policy.
+
+| Gate | Acceptance requirement |
+| --- | --- |
+| Contract | Independent YAML/JSON, reordered, split, recursive, scalar and invalid-source cases preserve semantics and locations |
+| Native packages | Installed consumers build under declared floor/current toolchains with actual emitted bytes and no manual repairs |
+| Types and codecs | Positive/negative native types, exact round trips, omission/null, union membership and mutable-model validation |
+| Wire | Independent recording fixtures assert method, URL/query/header bytes, body, security, status/media and decoding |
+| Runtime | Cancellation, cleanup, encoding, finite resource policies and security regressions execute in each native runtime |
+| Docs/examples | Native rendered docs resolve actual symbols and source bindings; packaged examples compile and execute |
+| Artifacts/session | Determinism, zero unchanged rewrites/replans, complete source/config invalidation, bounded caching and conflict handling |
+| Compatibility | Separate native and wire changes, source evidence, migration notes and explicit unknown results |
+| Quality | Workspace tests, all-target warnings-denied Clippy, warnings-denied Rustdoc and formatting |
+| Performance | Qualified baseline/candidate measurements, reproducible provenance and the versioned numerical regression policy |
+
+Use the tracked OpenRouter inputs plus independent normative/adversarial
+fixtures. Source validation findings remain visible separately from
+selected-operation SDK admission. A historical failed-stage classification is
+not a current workflow requirement. New reports use fresh paths and record the
+actual source, binary, tool inventory and command outcomes.
+
+## Speed: measure the complete workflow
+
+Sessions already provide SHA-256 closure/config identity, one owned Contract per
+accepted snapshot, finite LRU reuse, target-only configuration invalidation,
+cached reverts and missing-reference recovery. Source edits currently invalidate
+the complete relevant snapshot; finer internal reuse requires measured benefit.
+
+Measure cold, warm unchanged, schema, operation and docs-only changes across
+small, split-recursive and real OpenRouter inputs. Record generation phases,
+file/byte counts, writes, native build/docs costs, runtime/import/codec behavior
+and RSS with their actual boundaries. The prepared-template throughput floor is
+a narrow rendering check, not end-to-end SDK performance.
+
+The initial candidate regression policy is to investigate **>10% beyond measured
+noise**. Qualified baseline/candidate evidence must establish the numerical
+gate; smoke execution alone is not a p95 result.
+
+**Current disposition:** five complete Mac baseline suites were collected. Work
+and size metrics were stable, while timing noise prevented qualification under
+the candidate policy. No candidate run followed. The user chose generation and
+output SDKs as the hackathon deliverable, so these timings remain observational.
+Future numerical p95 acceptance requires prospectively agreed controls/policy
+and fresh qualifying evidence; the preserved baseline is not relabeled passing.
+See [SDK-SESSION-PERFORMANCE.md](SDK-SESSION-PERFORMANCE.md).
+
+## Delivery sequence
+
+| Work | Current state / next gate |
+| --- | --- |
+| M0–M2 foundations and TS/JS–Rust vertical | Historical completion; immutable reports indexed in `SDK-M0-M2-EXIT.md` |
+| M3 Python/Go/Swift/Rust with TS/JS baseline | Verified by the sealed post-cleanup native/package/docs/runtime matrix |
+| M6 sessions/editor/compatibility/performance | Iteration tools delivered for the hackathon; timing observational, original strict numerical exit deferred |
+| Java/C#/Kotlin/Ruby/PHP/Dart/C++ | Native base profiles verified and registered; final twelve-target integrated acceptance pending |
+| Protocol/dialect expansion | Native protocol witnesses recorded per language; scoped v2/resource execution advances through explicit native gates |
+| Terraform Provider generation | User-added stretch goal (2026-09-10), after core SDK work; [scope and acceptance](SDK-TERRAFORM-STRETCH.md) |
+
+The initial review and old milestone reports remain under `target/sdk-m0-m2*`
+and the earlier acceptance archives. They describe their pinned historical
+implementation. Current scope and decisions live in this plan, the capability
+matrix, [progress](SDK-PROGRESS.md) and [handoff](SDK-SESSION-HANDOFF.md).

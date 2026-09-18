@@ -16,9 +16,13 @@ use crate::{OutFile, credential_env, examples, http_protocol};
 pub use crate::http_contract::HttpDiagnostic;
 
 mod emit;
+mod incoming;
 mod models;
+mod oauth;
+pub mod pagination;
 mod protocol;
 mod samples;
+mod stream_events;
 
 pub use models::{
     ExtraFields, ModelField, ModelPlan, ModelShape, ModelSymbol, PatternExtra, ScalarKind,
@@ -37,6 +41,10 @@ pub fn source_assets() -> &'static [(&'static str, &'static [u8])] {
             "ruby_sdk/protocol.rs",
             include_bytes!("ruby_sdk/protocol.rs"),
         ),
+        ("ruby_sdk/pagination.rs", include_bytes!("ruby_sdk/pagination.rs")),
+        ("ruby_sdk/stream_events.rs", include_bytes!("ruby_sdk/stream_events.rs")),
+        ("ruby_sdk/oauth.rs", include_bytes!("ruby_sdk/oauth.rs")),
+        ("ruby_sdk/incoming.rs", include_bytes!("ruby_sdk/incoming.rs")),
         ("ruby_sdk/emit.rs", include_bytes!("ruby_sdk/emit.rs")),
         ("ruby_sdk/models.rs", include_bytes!("ruby_sdk/models.rs")),
         ("ruby_sdk/samples.rs", include_bytes!("ruby_sdk/samples.rs")),
@@ -103,6 +111,10 @@ pub struct RubyConfig {
     pub dynamic_schema_references: bool,
     /// Explicit variable-name defaults, read only by configured clients at creation.
     pub credential_env: Option<credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
     pub schema: Config,
 }
 
@@ -127,6 +139,8 @@ impl Default for RubyConfig {
             schema_resources: true,
             dynamic_schema_references: true,
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
             schema: Config {
                 max_depth: 128,
                 ..Config::default()
@@ -168,6 +182,20 @@ pub struct SdkPlan {
     protocol: http_protocol::ProtocolPlan,
     records: Vec<NativeRecord>,
     credential_env: Option<credential_env::CredentialEnvPlan>,
+    /// Compiled pagination selection over the admitted protocol plan, when a
+    /// policy is configured and at least one operation is emittable.
+    pagination: Option<pagination::PaginationPlan>,
+    /// Compiled typed-stream semantics over the admitted protocol plan, when
+    /// the document declares any stream media. Emission follows only its
+    /// discriminated SSE operations.
+    stream_events: Option<stream_events::StreamEventsPlan>,
+    /// Compiled OAuth lifecycle plan over the admitted protocol plan, when a
+    /// policy is configured and at least one scheme is usable.
+    oauth: Option<http_protocol::OAuthPlan>,
+    /// Compiled incoming webhook/callback receipt emission over the whole
+    /// contract, when the document declares any receipt. Emission follows the
+    /// compiled receipts, so receipt-less documents emit nothing.
+    incoming: Option<incoming::IncomingEmission>,
 }
 
 impl SdkPlan {
@@ -175,8 +203,41 @@ impl SdkPlan {
     pub fn credential_env(&self) -> Option<&credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
     }
+    /// Compiled `ua/v1` attribution constants retained from generation options.
+    #[must_use]
+    pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
+        self.config.attribution.as_ref()
+    }
     pub fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
+    }
+    /// Compiled pagination selection carried by this plan, when a policy is
+    /// configured. Emission follows only its emittable operations.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&pagination::PaginationPlan> {
+        self.pagination.as_ref()
+    }
+    /// Compiled typed-stream semantics carried by this plan, present whenever
+    /// the document declares any stream media. Emission follows only its
+    /// discriminated SSE operations, so every other document emits nothing.
+    #[must_use]
+    pub fn stream_events(&self) -> Option<&stream_events::StreamEventsPlan> {
+        self.stream_events.as_ref()
+    }
+    /// The compiled OAuth/OIDC lifecycle plan, carried only when a configured
+    /// policy yields usable schemes. The generated lifecycle module is emitted
+    /// only for usable schemes, so no-policy output stays byte-identical.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&http_protocol::OAuthPlan> {
+        self.oauth.as_ref()
+    }
+    /// The compiled incoming receipt emission, carried only when the document
+    /// declares at least one webhook or callback. The generated receipt module
+    /// is emitted only for compiled receipts, so receipt-less output stays
+    /// byte-identical.
+    #[must_use]
+    pub fn incoming(&self) -> Option<&incoming::IncomingEmission> {
+        self.incoming.as_ref()
     }
     pub fn records(&self) -> &[NativeRecord] {
         &self.records
@@ -291,7 +352,11 @@ pub fn plan_sdk(
                 })
                 .collect::<Vec<_>>()
         })?;
-    let credential_env = credential_env::plan(&contract, &wire, config.credential_env.as_ref())?;
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = http_protocol::plan_incoming(&contract)?;
+    let credential_env = credential_env::plan_with_defaults(&contract, &wire, config.credential_env.as_ref(), config.sdk_defaults.as_ref())?;
     let entry = SourceId::new(contract.entry().clone(), Default::default());
     let mut errors = Vec::new();
     if selected.is_empty() {
@@ -334,8 +399,15 @@ pub fn plan_sdk(
     }
     // The protocol owns the effective candidate-aware schema closure. These are
     // compilation dependencies, not additional HTTP body inputs or dynamic
-    // target selections.
-    let reachable = wire.codec_schema_closure().to_vec();
+    // target selections. Incoming receipts extend the compiled closure only
+    // when declared: their body schemas become actual codec inputs beside the
+    // selected operations'.
+    let mut reachable = wire.codec_schema_closure().to_vec();
+    if !incoming.is_empty() {
+        reachable.extend(incoming.codec_schema_closure().iter().cloned());
+        reachable.sort();
+        reachable.dedup();
+    }
     for id in &reachable {
         if contract
             .schema(id)
@@ -508,13 +580,70 @@ pub fn plan_sdk(
         })
         .collect::<BTreeMap<_, _>>();
     let hints = protocol::hints(&wire, &indices);
-    let roots = wire
-        .codec_roots()
+    let mut codec_roots = wire.codec_roots().to_vec();
+    if !incoming.is_empty() {
+        codec_roots.extend(incoming.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+    }
+    let roots = codec_roots
         .iter()
         .map(|id| indices[id])
         .collect::<Vec<_>>();
     let models = models::plan(&contract, &program, &roots, hints)?;
     let (operations, records) = protocol::lower(&wire, &indices, &models);
+    let mut pagination_names = models::reserved_members();
+    pagination_names.extend(operations.iter().map(|op| op.method_name.clone()));
+    let pagination = pagination::plan(
+        &contract,
+        &wire,
+        config.sdk_defaults.as_ref(),
+        &operations,
+        &models,
+        &mut pagination_names,
+    )?;
+    // Compiled OAuth lifecycle planning follows the configured policy, like
+    // pagination helpers; the module is emitted only for usable schemes, so
+    // no-policy output stays byte-identical.
+    let oauth = oauth::plan(&contract, &wire, config.sdk_defaults.as_ref())?;
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission stays conditional on
+    // the discriminated SSE subset, so every other document stays byte-identical.
+    let stream_semantics = http_protocol::plan_stream_semantics(&contract, &wire);
+    let mut stream_names = models::reserved_members();
+    stream_names.extend(operations.iter().map(|op| op.method_name.clone()));
+    let stream_events = stream_events::plan(
+        &models,
+        &records,
+        &operations,
+        &stream_semantics,
+        &mut stream_names,
+    );
+    // Emission-ready incoming receipt helpers; receipts the v1 Ruby helpers
+    // cannot express surface as the shared plan errors. The decoded side binds
+    // the compiled model codecs the client uses, so every declared JSON body
+    // and reply schema must have a compiled codec.
+    let incoming_emission = {
+        let mut symbols = BTreeMap::new();
+        let mut type_names = BTreeMap::new();
+        for symbol in models.symbols() {
+            symbols
+                .entry(symbol.source.clone())
+                .or_insert_with(|| symbol.name.clone());
+            type_names
+                .entry(symbol.source.clone())
+                .or_insert_with(|| symbol.type_name.clone());
+        }
+        let mut incoming_errors = Vec::new();
+        let emission =
+            incoming::prepare(&contract, &incoming, &symbols, &type_names, &mut incoming_errors);
+        errors.extend(incoming_errors);
+        if !errors.is_empty() {
+            return Err(errors);
+        }
+        (!emission.receipts.is_empty()).then_some(emission)
+    };
     let examples = if program.version == OwnedProgram::V3_VERSION {
         examples::plan_protocol_examples_v3(
             contract.clone(),
@@ -550,6 +679,10 @@ pub fn plan_sdk(
         protocol: wire,
         records,
         credential_env,
+        pagination,
+        stream_events,
+        oauth,
+        incoming: incoming_emission,
     })
 }
 

@@ -433,8 +433,8 @@ Protocol capability support is distinct from whole-API or release-readiness clai
 
 ### Phase-3 recorded results (2026-09-10)
 
-The historical local evidence was recorded at
-`target/sdk-csharp-protocol-evidence-20260910/report.json`.
+The indexed evidence is
+[`target/sdk-csharp-protocol-evidence-20260910/report.json`](../target/sdk-csharp-protocol-evidence-20260910/report.json).
 The final expanded matrix passed **4/4 tests**, including **787 native checks and
 79 independent loopback requests per SDK** on SDK 8.0.424/.NET 8.0.30 and SDK
 10.0.400/.NET 10.0.11. Both installed packages passed the compiler-negative cases,

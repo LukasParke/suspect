@@ -191,7 +191,7 @@ fn java_registry_generation_and_separate_maven_import_identity() {
     let (_, contract) = fixture(&api());
     let selected = selected(&contract);
     let files = backend::generate(contract.clone(), &selected, &target()).unwrap();
-    let direct = java_sdk::plan_sdk_with_maven(
+    let direct = java_sdk::plan_sdk_with_protocol(
         contract.clone(),
         &selected,
         PackageConfig {
@@ -203,6 +203,18 @@ fn java_registry_generation_and_separate_maven_import_identity() {
         MavenConfig {
             group_id: Some("example.widgets".into()),
             artifact_id: "thing-sdk".into(),
+            ..Default::default()
+        },
+        // The adapter compiles ua/v1 attribution constants from the same
+        // package identity; the direct plan must retain them to stay identical.
+        java_sdk::ProtocolConfig {
+            attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+                env!("CARGO_PKG_VERSION"),
+                "example.widgets:thing-sdk",
+                "1.0.0",
+                contract.openapi_version(),
+                Backend::JavaHttp.language_tag(),
+            )),
             ..Default::default()
         },
     )
@@ -1318,11 +1330,15 @@ fn canonical_sessions_reuse_warm_files_contracts_and_other_targets_on_java_confi
         (0, 1, 1)
     );
     assert!(Arc::ptr_eq(&cold.contract, &coordinates.contract));
+    // Maven coordinates drive pom/manifest bytes, and the ua/v1 attribution
+    // constants intentionally embed the sanitized package identity; every
+    // other generated .java source byte stays coordinate-independent.
     assert!(
         coordinates
             .changed_paths
             .iter()
-            .all(|p| p.starts_with("java/") && !p.ends_with(".java"))
+            .all(|p| p.starts_with("java/")
+                && (!p.ends_with(".java") || p.ends_with("/Attribution.java")))
     );
     assert_eq!(other_files(&cold), other_files(&coordinates));
     session.set_config(original).unwrap();

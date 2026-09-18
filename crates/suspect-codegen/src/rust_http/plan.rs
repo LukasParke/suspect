@@ -77,7 +77,7 @@ pub fn plan_http(
     selected: &[SourceId],
     config: HttpConfig,
 ) -> Result<HttpPlan, Vec<HttpDiagnostic>> {
-    plan_with_codecs(contract, selected, config, false, false)
+    plan_with_codecs(contract, selected, config, false, false, false)
 }
 
 /// Plan the same native HTTP protocol with explicit scoped-applicator codecs
@@ -87,7 +87,7 @@ pub fn plan_http_v2(
     selected: &[SourceId],
     config: HttpConfig,
 ) -> Result<HttpPlan, Vec<HttpDiagnostic>> {
-    plan_with_codecs(contract, selected, config, true, false)
+    plan_with_codecs(contract, selected, config, true, false, false)
 }
 
 /// Resource-capable SDK with source-selected v3 codec/example admission.
@@ -98,7 +98,7 @@ pub fn plan_http_v3(
     selected: &[SourceId],
     config: HttpConfig,
 ) -> Result<HttpPlan, Vec<HttpDiagnostic>> {
-    plan_with_codecs(contract, selected, config, true, true)
+    plan_with_codecs(contract, selected, config, true, true, true)
 }
 
 fn plan_with_codecs(
@@ -107,6 +107,7 @@ fn plan_with_codecs(
     config: HttpConfig,
     scoped: bool,
     resources: bool,
+    pagination: bool,
 ) -> Result<HttpPlan, Vec<HttpDiagnostic>> {
     let fallback = selected
         .first()
@@ -179,6 +180,31 @@ fn plan_with_codecs(
             })
             .collect::<Vec<_>>()
     })?;
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic. The retained v1/v2 planning
+    // APIs leave it `None` and their artifacts stay byte-identical.
+    let incoming = if pagination {
+        let compiled = wire::plan_incoming(&contract)?;
+        (!compiled.is_empty()).then_some(compiled)
+    } else {
+        None
+    };
+    // Incoming receipts extend the codec table only when declared: their body
+    // schemas become actual codec inputs beside the selected operations'.
+    let mut codec_roots: Vec<SchemaId> = protocol.codec_roots().to_vec();
+    if let Some(incoming) = incoming.as_ref() {
+        codec_roots.extend(incoming.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+    }
+    // Incoming closures carry the same neutral-codec requirement as the
+    // selected ones: a resource-sensitive incoming schema upgrades the codec
+    // planner exactly like a selected one would.
+    let resources = resources
+        || incoming.as_ref().is_some_and(|incoming| {
+            rust_models::resources::required(&contract, incoming.codec_roots())
+        });
     // RFC6570 form expansion needs a variable name. Positional parts have no
     // such binding; do not invent an empty name for an Encoding Object.
     for operation in protocol.operations() {
@@ -207,7 +233,15 @@ fn plan_with_codecs(
             }
         }
     }
-    for id in protocol.codec_schema_closure() {
+    // Directional annotations stay refused across the whole neutral codec
+    // closure, including the incoming receipts'.
+    for id in protocol.codec_schema_closure().iter().chain(
+        incoming
+            .as_ref()
+            .map(|incoming| incoming.codec_schema_closure())
+            .into_iter()
+            .flatten(),
+    ) {
         if let Some(schema) = contract.schema(id) {
             let raw = crate::schema_view::raw(schema);
             for keyword in ["readOnly", "writeOnly"] {
@@ -223,8 +257,48 @@ fn plan_with_codecs(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let credential_env =
-        crate::credential_env::plan(&contract, &protocol, config.credential_env.as_ref())?;
+    let credential_env = crate::credential_env::plan_with_defaults(
+        &contract,
+        &protocol,
+        config.credential_env.as_ref(),
+        config.sdk_defaults.as_ref(),
+    )?;
+    // Pagination is compiled only by the canonical v3 path with configured
+    // defaults; v1/v2 plans keep `None` and their emission stays byte-identical.
+    let pagination_outcome = if pagination && config.sdk_defaults.is_some() {
+        Some(wire::plan_pagination(
+            &contract,
+            &protocol,
+            config.sdk_defaults.as_ref(),
+        )?)
+    } else {
+        None
+    };
+    // OAuth lifecycle planning follows the same canonical-v3 gate. Errors are
+    // configuration errors and fail the plan like `credential_env` ones; a
+    // plan without compiled schemes stays `None` so its emission gains nothing.
+    let oauth_plan = if pagination
+        && config
+            .sdk_defaults
+            .as_ref()
+            .is_some_and(|defaults| defaults.oauth.mode == wire::OAuthMode::Auto)
+    {
+        let compiled = wire::plan_oauth(&contract, &protocol, config.sdk_defaults.as_ref())?;
+        (!compiled.schemes.is_empty()).then_some(compiled)
+    } else {
+        None
+    };
+    // Compiled typed-stream semantics are infallible and unconditional within
+    // the canonical v3 path: they record the declared event kinds, payload
+    // codecs, sentinel and completion policies for every operation stream
+    // media. Emission — and the client method names it reserves — stay
+    // conditional on a discriminated SSE event set, so other plans keep every
+    // artifact byte-identical.
+    let stream_semantics = if pagination {
+        Some(wire::plan_stream_semantics(&contract, &protocol))
+    } else {
+        None
+    };
     let codec_planner = if resources {
         crate::rust_codecs::plan_codecs_v3
     } else if scoped {
@@ -232,12 +306,11 @@ fn plan_with_codecs(
     } else {
         crate::rust_codecs::plan_codecs
     };
-    let codecs = codec_planner(
-        contract.clone(),
-        protocol.codec_roots(),
-        config.codecs.clone(),
-    )
-    .map_err(|errors| {
+    let mut codec_config = config.codecs.clone();
+    codec_config.dialect = crate::schema_view::DialectPolicy::from_profiles(
+        config.compatibility_profiles.iter().copied(),
+    );
+    let codecs = codec_planner(contract.clone(), &codec_roots, codec_config).map_err(|errors| {
         errors
             .into_iter()
             .map(|e| HttpDiagnostic {
@@ -295,6 +368,24 @@ fn plan_with_codecs(
         methods.extend(["from_env".into(), "with_transport_from_env".into()]);
         credential_methods.insert("from_env".into());
     }
+    // Generated OAuth lifecycle methods are emitted on the client when the
+    // plan carries OAuth schemes; reserving their names here keeps later
+    // operations from colliding with them.
+    if oauth_plan.is_some() {
+        for name in [
+            "begin_authorization",
+            "begin_device_authorization",
+            "client_credentials_token",
+            "complete_authorization",
+            "introspect_token",
+            "poll_device_token",
+            "poll_device_token_until_complete",
+            "refresh_token",
+            "revoke_token",
+        ] {
+            allocate(name, &mut methods);
+        }
+    }
     let mut operations = Vec::new();
     for op in protocol.operations() {
         let operation_id = op
@@ -309,6 +400,25 @@ fn plan_with_codecs(
             });
         let module_name = allocate(&rust_models::snake(&operation_id), &mut modules);
         let function_name = allocate(&rust_models::snake(&operation_id), &mut methods);
+        // Typed event iterators are emitted per operation in the shared
+        // `stream_events` module; reserving the client-method name here keeps
+        // later operations from colliding with it.
+        if let Some(semantics) = stream_semantics.as_ref()
+            && stream_events::admits_operation(op, semantics, &symbols)
+        {
+            allocate(&format!("{function_name}_events"), &mut methods);
+        }
+        // Pagination walkers are emitted per operation in the shared
+        // `pagination` module; reserving their client-method names here keeps
+        // later operations from colliding with them.
+        if pagination
+            && let Some(outcome) = pagination_outcome.as_ref()
+            && !outcome.paginated.is_empty()
+        {
+            for suffix in ["_pages", "_items", "_next_page"] {
+                allocate(&format!("{function_name}{suffix}"), &mut methods);
+            }
+        }
         let stem = rust_models::pascal(&operation_id);
         let mut types = [
             stem.clone(),
@@ -519,6 +629,17 @@ fn plan_with_codecs(
         crate::examples::plan_protocol_examples
     };
     let examples = example_planner(contract.clone(), &protocol, Default::default());
+    let stream_events = stream_semantics.map_or_else(Vec::new, |semantics| {
+        stream_events::prepare(&semantics, &operations, &symbols, &codecs)
+    });
+    // Emission-ready incoming receipts. Receipts the v1 Rust helpers cannot
+    // express refuse with source-linked diagnostics like every other plan
+    // error; a plan without incoming declarations prepares nothing.
+    let incoming_receipts = incoming
+        .as_ref()
+        .map(|incoming| incoming::prepare(&contract, incoming, &symbols))
+        .transpose()?
+        .unwrap_or_default();
     Ok(HttpPlan {
         contract,
         protocol,
@@ -529,6 +650,11 @@ fn plan_with_codecs(
         config,
         examples,
         credential_env,
+        pagination: pagination_outcome,
+        oauth: oauth_plan,
+        stream_events,
+        incoming,
+        incoming_receipts,
     })
 }
 
@@ -609,11 +735,21 @@ fn payload(
         Representation::Json { codec: None } => Payload::Json,
         Representation::Text { codec: None, .. } => Payload::Text,
         Representation::Binary { .. } => Payload::Bytes,
-        Representation::Stream { stream } => Payload::Stream {
-            schema: stream.item_codec().schema().id().clone(),
-            model: symbols[stream.item_codec().schema().id()].clone(),
-            request,
-        },
+        Representation::Stream { stream } => {
+            let (schema, model) = match stream.item_codec() {
+                Some(codec) => (
+                    Some(codec.schema().id().clone()),
+                    Some(symbols[codec.schema().id()].clone()),
+                ),
+                // A schemaless stream surfaces untyped parsed envelope values.
+                None => (None, None),
+            };
+            Payload::Stream {
+                schema,
+                model,
+                request,
+            }
+        }
         Representation::Form { .. } | Representation::Multipart { .. } => {
             let (multipart, positional, parts, additional) = match media.representation() {
                 Representation::Form { form } => (false, false, form.fields(), form.additional()),

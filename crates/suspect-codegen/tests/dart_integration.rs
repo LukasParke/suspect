@@ -284,6 +284,13 @@ fn public_backend_uses_the_dart_package_identity_and_the_actual_plan() {
                 name: config.package_name.clone(),
                 version: config.package_version.clone(),
             },
+            attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+                env!("CARGO_PKG_VERSION"),
+                &config.package_name,
+                &config.package_version,
+                "3.1.0",
+                "dart",
+            )),
             ..Default::default()
         },
     )

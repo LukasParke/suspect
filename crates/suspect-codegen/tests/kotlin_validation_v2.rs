@@ -371,7 +371,7 @@ fn invalid_programs(root: &Path) -> Vec<Value> {
 }
 
 #[test]
-fn v1_program_stays_compatible_and_runtime_matches_the_recorded_baseline() {
+fn v1_program_and_runtime_bytes_remain_frozen() {
     use sha2::{Digest, Sha256};
     let root = root();
     let (contract, id) = load(
@@ -388,7 +388,6 @@ fn v1_program_stays_compatible_and_runtime_matches_the_recorded_baseline() {
         validation::emit_validation(&v1, "example.base").unwrap(),
         validation::emit_validation(&v2, "example.base").unwrap()
     );
-    // Metadata-loader changes are independently covered by kotlin_program_scale.
     let hashes: Value =
         serde_json::from_str(include_str!("kotlin_support/v1-runtime-hashes.json")).unwrap();
     for (name, bytes) in [
@@ -404,7 +403,7 @@ fn v1_program_stays_compatible_and_runtime_matches_the_recorded_baseline() {
         assert_eq!(
             format!("{:x}", Sha256::digest(bytes)),
             hashes[name].as_str().unwrap(),
-            "recorded v1 runtime asset {name}"
+            "frozen v1 runtime asset {name}"
         );
     }
 }
@@ -588,6 +587,8 @@ fn sdk_plan(root: &Path) -> kotlin_sdk::Plan {
             version: "0.3.0".into(),
             package_name: "example.scoped.sdk".into(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         },
     )
     .unwrap()

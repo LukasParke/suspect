@@ -94,12 +94,41 @@ pub struct ModelPlan {
     diagnostics: Vec<ModelDiagnostic>,
     openapi_version: String,
     pub(crate) declarations: BTreeMap<Key, Decl>,
+    names: BTreeMap<Key, String>,
 }
 impl ModelPlan {
     /// Every selected root, reference target and promoted inline declaration.
     #[must_use]
     pub fn symbols(&self) -> &[ModelSymbol] {
         &self.symbols
+    }
+    /// Render a planned type as a path usable outside the generated `models`
+    /// module, with every named model carried by `crate::models::`.
+    #[must_use]
+    pub(crate) fn render_external_type(&self, ty: &Type) -> String {
+        match ty {
+            Type::Primitive(value) => (*value).into(),
+            Type::Named(key) => format!("crate::models::{}", self.names[key]),
+            Type::Nullable(inner) => {
+                format!("crate::Nullable<{}>", self.render_external_type(inner))
+            }
+            Type::Optional(inner) => {
+                format!("std::option::Option<{}>", self.render_external_type(inner))
+            }
+            Type::Presence(inner) => {
+                format!("crate::Presence<{}>", self.render_external_type(inner))
+            }
+            Type::Vec(inner) => {
+                format!("std::vec::Vec<{}>", self.render_external_type(inner))
+            }
+            Type::Map(inner) => format!(
+                "std::collections::BTreeMap<std::string::String, {}>",
+                self.render_external_type(inner)
+            ),
+            Type::Boxed(inner) => {
+                format!("std::boxed::Box<{}>", self.render_external_type(inner))
+            }
+        }
     }
     /// Original-source findings, including mandatory codec obligations.
     #[must_use]
@@ -170,7 +199,13 @@ pub(crate) type Key = (SchemaId, RepresentationRole);
 /// Unknown roots and unsupported shapes are ordinary source-linked errors.
 #[must_use]
 pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
-    plan_models_with_profile(contract, roots, false, false)
+    plan_models_with_profile(
+        contract,
+        roots,
+        false,
+        false,
+        schema_view::DialectPolicy::default(),
+    )
 }
 
 /// Plan native carriers for the additive v2 scoped-applicator profile.
@@ -178,18 +213,44 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
 /// codec obligations; they are never flattened into unconditional fields.
 #[must_use]
 pub fn plan_models_v2(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
-    plan_models_with_profile(contract, roots, true, false)
+    plan_models_with_profile(
+        contract,
+        roots,
+        true,
+        false,
+        schema_view::DialectPolicy::default(),
+    )
 }
 
 /// Plan resource-aware carriers without selecting a dynamic fallback as a
 /// static Rust type. Base closures retain their established v2/v1 declarations.
 #[must_use]
 pub fn plan_models_v3(contract: &Contract, roots: &[SchemaId]) -> ModelPlan {
+    plan_models_v3_with_policy(contract, roots, schema_view::DialectPolicy::default())
+}
+
+/// The v3 plan under explicit versioned dialect interpretation choices.
+#[must_use]
+pub fn plan_models_v3_with_policy(
+    contract: &Contract,
+    roots: &[SchemaId],
+    policy: schema_view::DialectPolicy,
+) -> ModelPlan {
     if resources::required(contract, roots) {
-        plan_models_with_profile(contract, roots, true, true)
+        plan_models_with_profile(contract, roots, true, true, policy)
     } else {
-        plan_models_v2(contract, roots)
+        plan_models_v2_with_policy(contract, roots, policy)
     }
+}
+
+/// The v2 plan under explicit versioned dialect interpretation choices.
+#[must_use]
+pub fn plan_models_v2_with_policy(
+    contract: &Contract,
+    roots: &[SchemaId],
+    policy: schema_view::DialectPolicy,
+) -> ModelPlan {
+    plan_models_with_profile(contract, roots, true, false, policy)
 }
 
 fn plan_models_with_profile(
@@ -197,6 +258,7 @@ fn plan_models_with_profile(
     roots: &[SchemaId],
     applicators: bool,
     resources: bool,
+    policy: schema_view::DialectPolicy,
 ) -> ModelPlan {
     let reachable = schema_view::closure(contract, roots);
     let transparent: BTreeMap<_, _> = reachable
@@ -236,6 +298,7 @@ fn plan_models_with_profile(
         } else {
             BTreeSet::new()
         },
+        policy,
     };
     for root in roots {
         if contract.schema(root).is_none() {
@@ -286,11 +349,16 @@ fn plan_models_with_profile(
             }
         }
         let nullability = if resources {
-            self::resources::null_allowed(contract, id, planner.dynamic.contains(id))
+            self::resources::null_allowed(
+                contract,
+                id,
+                planner.dynamic.contains(id),
+                planner.policy,
+            )
         } else if applicators {
-            applicators::null_allowed(contract, id)
+            applicators::null_allowed(contract, id, planner.policy)
         } else {
-            schema_view::null_allowed(contract, id)
+            schema_view::null_allowed(contract, id, planner.policy)
         };
         let nullable = nullability.unwrap_or_else(|problem| {
             planner.report(
@@ -341,6 +409,7 @@ fn plan_models_with_profile(
         diagnostics: planner.diagnostics,
         openapi_version: contract.openapi_version().into(),
         declarations,
+        names: planner.names,
     }
 }
 
@@ -353,6 +422,7 @@ struct Planner<'a> {
     applicators: bool,
     resources: bool,
     dynamic: BTreeSet<SchemaId>,
+    policy: schema_view::DialectPolicy,
 }
 
 #[derive(Debug, Clone)]

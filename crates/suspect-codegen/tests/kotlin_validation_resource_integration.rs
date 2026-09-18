@@ -23,13 +23,21 @@ fn load(value: Value) -> Arc<Contract> {
     let workspace = Arc::new(WorkspaceBuilder::new().root(&root).build().unwrap());
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(&path).unwrap()).unwrap())
 }
-fn config() -> SdkConfig {
+fn config(contract: &Arc<Contract>) -> SdkConfig {
     SdkConfig {
         group_id: "test.suspect.kotlin".into(),
         artifact_id: "resource-sdk".into(),
         version: "0.4.0".into(),
         package_name: "example.resources.sdk".into(),
         credential_env: None,
+        sdk_defaults: None,
+        attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+            env!("CARGO_PKG_VERSION"),
+            &target().package_name,
+            &target().package_version,
+            contract.openapi_version(),
+            Backend::KotlinHttp.language_tag(),
+        )),
     }
 }
 fn target() -> TargetConfig {
@@ -49,8 +57,8 @@ fn verified_default_resource_admission_matches_explicit_v3() {
         .operations()
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
-    let explicit = kotlin_sdk::plan_sdk_v3(contract.clone(), &selected, config()).unwrap();
-    let default = kotlin_sdk::plan_sdk(contract.clone(), &selected, config()).unwrap();
+    let explicit = kotlin_sdk::plan_sdk_v3(contract.clone(), &selected, config(&contract)).unwrap();
+    let default = kotlin_sdk::plan_sdk(contract.clone(), &selected, config(&contract)).unwrap();
     assert_eq!(
         default.program().version,
         suspect_schema::OwnedProgram::V3_VERSION
@@ -115,7 +123,7 @@ fn ordinary_default_closures_keep_their_established_versions() {
             .operations()
             .map(|op| op.source().clone())
             .collect::<Vec<_>>();
-        let plan = kotlin_sdk::plan_sdk(contract, &selected, config()).unwrap();
+        let plan = kotlin_sdk::plan_sdk(contract.clone(), &selected, config(&contract)).unwrap();
         assert_eq!(plan.program().version, version);
         assert!(plan.program().resource_context.is_none());
     }

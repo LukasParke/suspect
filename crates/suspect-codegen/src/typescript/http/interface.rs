@@ -97,7 +97,7 @@ fn representation(value: &Representation, names: &Names, response: bool) -> Valu
             json!({"kind":"multipart","layout":"positional","prefix":prefix.iter().map(|value|part(value,names,response,true)).collect::<Vec<_>>(),"items":additional(items,names,response,true),"minItems":min_items.as_ref().map(Located::value),"maxItems":max_items.as_ref().map(Located::value)})
         }
         Representation::Stream { stream } => {
-            json!({"kind":"stream","framing":stream.framing(),"itemCodec":codec(stream.item_codec(),names),"maxItemBytes":stream.max_item_bytes()})
+            json!({"kind":"stream","framing":stream.framing(),"itemCodec":stream.item_codec().map(|c|codec(c,names)),"maxItemBytes":stream.max_item_bytes()})
         }
     }
 }

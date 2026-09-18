@@ -84,6 +84,13 @@ fn canonical_go_environment_capture_retains_bound_semantics_and_fingerprinted_fa
             &selected,
             go_http::HttpConfig {
                 credential_env: options.credential_env.clone(),
+                attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+                    env!("CARGO_PKG_VERSION"),
+                    &target.package_name,
+                    &target.package_version,
+                    contract.openapi_version(),
+                    Backend::GoHttp.language_tag(),
+                )),
                 ..Default::default()
             },
         )

@@ -66,6 +66,15 @@ bounded in the HTTP body subscriber before accumulation. The deadline is
 cancelled when the call or owned stream finishes. Cleanup exceptions cannot replace a primary
 resource failure or cancellation.
 
+Every request identifies suspect as the generator through the automatic
+`User-Agent` header: `suspect/<generator> <identity> (java/<runtime version>;
+openapi/<spec>)`, where the identity is the SDK package or a caller-supplied
+application. `userAgent(value)` fully overrides it (an empty string suppresses
+the header entirely) and `applicationId(name)` replaces the SDK identity token
+with an RFC 9110 `<name>[/<version>]` application identifier; invalid
+identifiers simply omit the automatic header. A declared or caller-supplied
+`User-Agent` header keeps precedence over the automatic value.
+
 ## Authentication and errors
 
 Credentials are keyed by the **exact OpenAPI security scheme name**:

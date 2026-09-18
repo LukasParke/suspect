@@ -26,6 +26,33 @@ function limitsFor(descriptor: OperationDescriptor<unknown>, client: TransportOp
         streamItems: budget(client.maxStreamItems, limits.streamItems, 'maxStreamItems', source),
     };
 }
+
+/** Runtime-discovered language version, degrading to `unknown` without omission. */
+function languageVersion(): string {
+    const globalProcess = (globalThis as { process?: { versions?: { node?: string } } }).process;
+    if (typeof globalProcess?.versions?.node === 'string') return `node/${globalProcess.versions.node}`;
+    return 'unknown';
+}
+
+/** Validate a caller-supplied application identifier: `<name>` or `<name>/<version>`, RFC 9110 tokens. */
+function applicationIdentity(value: string): string {
+    const token = "[A-Za-z0-9!#$%&'*+.^`|~-]+";
+    if (value.length > 128 || !(new RegExp(`^${token}(/${token})?$`)).test(value) || value.split('/').length > 2) {
+        throw new TypeError('applicationId must be <name> or <name>/<version> of RFC 9110 tokens, e.g. "acme-chatbot/7"');
+    }
+    return value;
+}
+
+/** ua/v1 automatic attribution; explicit caller values win, `null` suppresses. */
+function resolveUserAgent(descriptor: OperationDescriptor<unknown>, client: TransportOptions<object>): string | null {
+    if (client.userAgent === null) return null;
+    if (typeof client.userAgent === 'string') return client.userAgent;
+    const plan = descriptor.attribution;
+    if (plan === null || plan === undefined) return null;
+    let identity = `${plan.sdk_name}/${plan.sdk_version}`;
+    if (client.applicationId !== undefined) identity = applicationIdentity(client.applicationId);
+    return `suspect/${plan.suspect_version} ${identity} (${plan.language}/${languageVersion()}; openapi/${plan.spec_version})`;
+}
 async function encodeBody(value: unknown, media: MediaPlan, contentType: string, descriptor: OperationDescriptor<unknown>, limits: RuntimeLimits, control: Control): Promise<{ body: string | ArrayBuffer; contentType: string }> {
     const source = media.source.terminal.source;
     const representation = media.representation;
@@ -91,6 +118,8 @@ export async function executeOperation<I, S>(descriptor: OperationDescriptor<I>,
         const limits = limitsFor(descriptor, client);
         const captureMaximum = budget(client.maxErrorCaptureBytes, 64 * 1024, 'maxErrorCaptureBytes', descriptor.source);
         const headers = new Headers();
+        const userAgent = resolveUserAgent(descriptor, client);
+        if (userAgent !== null && !headers.has('user-agent')) headers.set('user-agent', userAgent);
         const query: string[] = [], cookies: string[] = [];
         let path = descriptor.wire.path;
         for (let index = 0; index < descriptor.wire.parameters.length; index++) {

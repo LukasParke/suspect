@@ -59,9 +59,9 @@ internal data class ProtocolResponse(val responseIndex: Int, val mediaIndex: Int
 
 internal object ProtocolData {
     val operations: List<JsonObject> by lazy {
-        val bytes = ProtocolData::class.java.getResourceAsStream("protocol.json")?.use { it.readNBytes(Json.MAX_PROGRAM_BYTES + 1) }
+        val bytes = ProtocolData::class.java.getResourceAsStream("protocol.json")?.use { it.readNBytes(Json.MAX_BYTES + 1) }
             ?: error("generated protocol metadata is missing")
-        val value = Json.parseProgram(bytes) as JsonObject
+        val value = Json.parse(bytes) as JsonObject
         check(value.number("version") == 1) { "unsupported protocol descriptor version" }
         value.array("operations").map { it as JsonObject }
     }
@@ -77,7 +77,15 @@ internal fun protocolMetadata(value: JsonObject): JsonObject = Json.parse(Json.s
 internal class ProtocolBudget(val maximum: Int, val checkpoint: () -> Unit) {
     private var remaining = maximum
     fun spend(bytes: Int) { checkpoint(); if (bytes < 0 || bytes > remaining) throw SdkException(FailureKind.REQUEST_LIMIT, "protocol byte limit exceeded"); remaining -= bytes }
-    fun text(value: String): String { val count = Json.utf8Size(value, maximum, checkpoint); spend(count); return value }
+    fun text(value: String): String {
+        // The wire budget owns this classification: resource exhaustion while
+        // sizing a protocol field is a request limit, not a JSON evaluation
+        // failure. Rethrowing SdkException keeps the operation id and source
+        // location attached by the operation wrapper.
+        val count = try { Json.utf8Size(value, maximum, checkpoint) } catch (error: JsonException) {
+            if (error.kind == JsonErrorKind.RESOURCE_LIMIT) throw SdkException(FailureKind.REQUEST_LIMIT, "protocol byte limit exceeded", cause = error) else throw error }
+        spend(count); return value
+    }
 }
 
 internal data class ProtocolMedia(val type: String, val subtype: String, val parameters: Map<String,String>) {
@@ -128,7 +136,12 @@ internal val protocolUnicodeOrder: Comparator<String> = Comparator { a,b ->
     if(result!=0) result else if(i==a.length && j==b.length) 0 else if(i==a.length) -1 else 1
 }
 internal fun protocolPercent(value: String, mode: String, location: String, style: String?, composite: Boolean, budget: ProtocolBudget): String {
-    Json.utf8Size(value,budget.maximum,budget.checkpoint)
+    // The wire budget owns this classification: resource exhaustion while
+    // sizing a protocol field is a request limit, not a JSON evaluation
+    // failure. Rethrowing SdkException keeps the operation id and source
+    // location attached by the operation wrapper.
+    try { Json.utf8Size(value,budget.maximum,budget.checkpoint) } catch (error: JsonException) {
+        if (error.kind == JsonErrorKind.RESOURCE_LIMIT) throw SdkException(FailureKind.REQUEST_LIMIT, "protocol byte limit exceeded", cause = error) else throw error }
     if (mode == "none") {
         if (value.any { it < ' ' && !(location == "header" && it == '\t') || it == '\u007f' }) throw SdkException(FailureKind.REQUEST_REPRESENTATION,"control character in protocol field")
         if (location == "cookie" && value.any { it.code > 126 || it in " \t\",;\\" }) throw SdkException(FailureKind.REQUEST_REPRESENTATION,"cookie value needs caller-defined escaping")
@@ -206,6 +219,24 @@ internal fun protocolHeader(headers: MutableMap<String,String>, name: String, va
     if(headers.keys.any {it.equals(name,true)})throw SdkException(FailureKind.REQUEST_REPRESENTATION,"duplicate generated HTTP header")
     if(headers.size>=128||headers.entries.sumOf {it.key.length+it.value.length}+name.length+value.length>32768)throw SdkException(FailureKind.REQUEST_LIMIT,"request header limit exceeded")
     headers[name]=value
+}
+internal fun protocolToken(value: String): Boolean = value.isNotEmpty() && value.length <= 128 && value.all { it.code < 128 && (it.isLetterOrDigit() || it in "!#$%&'*+-.^_`|~") }
+internal fun protocolApplicationIdentity(value: String): Boolean {
+    val at=value.indexOf('/')
+    return if(at<0)protocolToken(value)else protocolToken(value.substring(0,at))&&protocolToken(value.substring(at+1))
+}
+
+/** ua/v1 attribution: an explicit non-empty override wins, an explicit empty value suppresses the header entirely, and the default identifies suspect as the generator and the SDK package or a caller-supplied application as the client. */
+internal fun resolveUserAgent(options: ClientOptions): String? {
+    val explicit=options.userAgent
+    if(explicit!=null)return if(explicit.isEmpty())null else explicit
+    if(ATTRIBUTION_SUSPECT_VERSION.isEmpty())return null
+    val application=options.applicationId
+    val identity=if(application.isNullOrEmpty())"$ATTRIBUTION_SDK_NAME/$ATTRIBUTION_SDK_VERSION" else {
+        if(application.length>128||!protocolApplicationIdentity(application))return null
+        application
+    }
+    return "suspect/$ATTRIBUTION_SUSPECT_VERSION $identity (kotlin/${System.getProperty("java.version") ?: "unknown"}; openapi/$ATTRIBUTION_SPEC_VERSION)"
 }
 internal fun protocolServer(op:JsonObject, options:ClientOptions, call:RequestOptions, budget:ProtocolBudget):URI {
     options.serverUrl?.let { return it }
@@ -322,6 +353,8 @@ internal object ProtocolRuntime {
             val accept=call.responseMedia?:choices.joinToString(", ")
             if(accept.isNotEmpty())protocolHeader(headers,"Accept",accept)
         }
+        // ua/v1 attribution is applied after declared parameters so an explicit caller-supplied User-Agent header parameter keeps precedence over the automatic value.
+        if(headers.keys.none{it.equals("User-Agent",true)})resolveUserAgent(options)?.let{protocolHeader(headers,"User-Agent",it)}
         control.check()
         return HttpRequest(op.text("method"),URI(url),headers,bytes,call.timeout?:options.timeout,options.maxResponseBytes)
     }

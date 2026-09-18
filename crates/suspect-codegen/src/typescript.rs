@@ -284,6 +284,22 @@ impl ModelPlan {
 /// edges determine symbol identity, never schema titles or reference text.
 #[must_use]
 pub fn plan_models(contract: &Contract, roots: &[SchemaId], views: &[ModelView]) -> ModelPlan {
+    plan_models_with_policy(
+        contract,
+        roots,
+        views,
+        crate::schema_view::DialectPolicy::default(),
+    )
+}
+
+/// The same plan under explicit versioned dialect interpretation choices.
+#[must_use]
+pub fn plan_models_with_policy(
+    contract: &Contract,
+    roots: &[SchemaId],
+    views: &[ModelView],
+    policy: crate::schema_view::DialectPolicy,
+) -> ModelPlan {
     let reachable = schema_view::closure(contract, roots);
     let resource_sources = resource_requirements(contract, &reachable);
     let resource_validation = !resource_sources.is_empty();
@@ -291,6 +307,7 @@ pub fn plan_models(contract: &Contract, roots: &[SchemaId], views: &[ModelView])
         contract,
         names: BTreeMap::new(),
         diagnostics: Vec::new(),
+        policy,
     };
     for root in roots {
         if contract.schema(root).is_none() {
@@ -565,6 +582,7 @@ struct Planner<'a> {
     contract: &'a Contract,
     names: BTreeMap<(SchemaId, ModelView), String>,
     diagnostics: Vec<ModelDiagnostic>,
+    policy: crate::schema_view::DialectPolicy,
 }
 
 impl Planner<'_> {
@@ -866,6 +884,15 @@ impl Planner<'_> {
             && raw.get("type").is_some_and(Value::is_string)
         {
             types.push("null".into());
+        }
+        // The versioned OAS-3.0-nullable interpretation on OAS 3.1/3.2 nodes:
+        // the same-object type gains (or loses) "null".
+        if !oas30 && self.policy.oas30_nullable_in_31 {
+            match raw.get("nullable") {
+                Some(&Value::Bool(true)) if raw.get("type").is_some() => types.push("null".into()),
+                Some(&Value::Bool(false)) => types.retain(|kind| kind != "null"),
+                _ => {}
+            }
         }
         types
     }

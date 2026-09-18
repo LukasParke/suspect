@@ -13,8 +13,9 @@ pub enum NativeType {
     List(Box<Self>),
     Part(Box<Self>),
     Union(Vec<Self>),
-    Stream(SchemaId),
-    Items(SchemaId),
+    /// A declared stream item schema, or `None` for a schemaless stream.
+    Stream(Option<SchemaId>),
+    Items(Option<SchemaId>),
 }
 
 impl NativeType {
@@ -35,21 +36,37 @@ impl NativeType {
                 .map(|value| value.render(names, qualified, asynchronous))
                 .collect::<Vec<_>>()
                 .join(" | "),
-            Self::Stream(source) => format!(
-                "{}Stream[models.{}]",
-                if asynchronous { "Async" } else { "Sync" },
-                names[source]
-            ),
-            Self::Items(source) => {
-                if asynchronous {
-                    format!(
-                        "Iterable[models.{0}] | AsyncIterable[models.{0}]",
-                        names[source]
-                    )
-                } else {
-                    format!("Iterable[models.{}]", names[source])
+            Self::Stream(source) => match source {
+                Some(source) => format!(
+                    "{}Stream[models.{}]",
+                    if asynchronous { "Async" } else { "Sync" },
+                    names[source]
+                ),
+                // A schemaless stream surfaces untyped parsed envelope values.
+                None => format!(
+                    "{}Stream[JsonValue]",
+                    if asynchronous { "Async" } else { "Sync" }
+                ),
+            },
+            Self::Items(source) => match source {
+                Some(source) => {
+                    if asynchronous {
+                        format!(
+                            "Iterable[models.{0}] | AsyncIterable[models.{0}]",
+                            names[source]
+                        )
+                    } else {
+                        format!("Iterable[models.{}]", names[source])
+                    }
                 }
-            }
+                None => {
+                    if asynchronous {
+                        "Iterable[JsonValue] | AsyncIterable[JsonValue]".into()
+                    } else {
+                        "Iterable[JsonValue]".into()
+                    }
+                }
+            },
         }
     }
     pub fn schema(&self) -> Option<&SchemaId> {
@@ -370,10 +387,11 @@ impl Lower {
             ),
             p::Representation::Binary { .. } => NativeType::Builtin("bytes"),
             p::Representation::Stream { stream } => {
+                let source = stream.item_codec().map(|codec| codec.schema().id().clone());
                 if request {
-                    NativeType::Items(stream.item_codec().schema().id().clone())
+                    NativeType::Items(source)
                 } else {
-                    NativeType::Stream(stream.item_codec().schema().id().clone())
+                    NativeType::Stream(source)
                 }
             }
             p::Representation::Form { .. } | p::Representation::Multipart { .. } => {

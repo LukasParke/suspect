@@ -212,6 +212,27 @@ static std::string server_url(const Operation& operation,const Settings& setting
 static bool bearer(std::string_view token){if(token.size()>8192)return false;while(!token.empty()&&token.back()=='=')token.remove_suffix(1);if(token.empty())return false;for(unsigned char c:token)if(!unreserved(c)&&c!='+'&&c!='/')return false;return true;}
 static std::string base64(std::string_view bytes){static constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";std::string out;
     for(std::size_t i=0;i<bytes.size();i+=3){unsigned a=static_cast<unsigned char>(bytes[i]),b=i+1<bytes.size()?static_cast<unsigned char>(bytes[i+1]):0,c=i+2<bytes.size()?static_cast<unsigned char>(bytes[i+2]):0;out.push_back(alphabet[a>>2]);out.push_back(alphabet[((a&3)<<4)|(b>>4)]);out.push_back(i+1<bytes.size()?alphabet[((b&15)<<2)|(c>>6)]:'=');out.push_back(i+2<bytes.size()?alphabet[c&63]:'=');}return out;}
+/** ua/v1 application identity: `<name>` or `<name>/<version>` of RFC 9110 tokens. */
+static bool application_identity(std::string_view value){
+    auto token=[&](std::string_view part){return !part.empty()&&part.size()<=128&&header_name(part);};
+    auto slash=value.find('/');
+    return slash==std::string_view::npos?token(value):token(value.substr(0,slash))&&token(value.substr(slash+1));
+}
+/** ua/v1 attribution: an explicit caller User-Agent wins entirely, an explicit
+ * empty value suppresses the header, and the default identifies suspect as the
+ * generator and the SDK package or a caller-supplied application as the client. */
+static Presence<std::string> resolve_user_agent(const Settings& settings){
+    if(settings.user_agent)return settings.user_agent->empty()?std::nullopt:Presence<std::string>(*settings.user_agent);
+    if(attribution_suspect_version.empty())return std::nullopt;
+    std::string identity=std::string(attribution_sdk_name)+'/'+std::string(attribution_sdk_version);
+    if(settings.application_id&&!settings.application_id->empty()){
+        if(settings.application_id->size()>128||!application_identity(*settings.application_id))return std::nullopt;
+        identity=*settings.application_id;
+    }
+    // M0-pending decision: C++ exposes no standard language-version query, so
+    // the ua/v1 comment carries "unknown" instead of omitting the segment.
+    return Presence<std::string>("suspect/"+std::string(attribution_suspect_version)+' '+identity+" ("+std::string(attribution_language)+"/unknown; openapi/"+std::string(attribution_spec_version)+')');
+}
 HttpRequest prepare_request(const Operation& operation,const std::vector<ParameterValue>& parameters,Presence<EncodedBody> body,const CredentialValues& credentials,const Settings& settings,Context& context){
     HttpRequest request;request.method=operation.method;request.url=server_url(operation,settings,context);
     const auto effective_server=request.url;
@@ -279,6 +300,10 @@ HttpRequest prepare_request(const Operation& operation,const std::vector<Paramet
     }else if(settings.security_alternative)http_fail(SdkError::Kind::Configuration,operation.source,"anonymous operation has no security alternative selector");
     if(!query.empty()){append_bounded(request.url,"?",limit,operation.source,context);append_bounded(request.url,query,limit,operation.source,context);}
     if(!cookie.empty())header("Cookie",std::move(cookie),operation.source);
+    // ua/v1 attribution is applied before the managed Accept header, and only
+    // when the request does not already carry User-Agent: a declared header
+    // parameter or credential always keeps precedence over the automatic value.
+    if(auto user_agent=resolve_user_agent(settings);user_agent&&std::none_of(request.headers.begin(),request.headers.end(),[](const auto& field){return lower_ascii(field.first)=="user-agent";}))header("User-Agent",std::move(*user_agent),operation.source);
     std::string accept;
     if(settings.response_media){(void)select_media(operation.accept,*settings.response_media,operation.source);accept=*settings.response_media;}
     else{for(const auto& media:operation.accept){if(!accept.empty())append_bounded(accept,", ",settings.transfer.max_header_bytes,operation.source,context);append_bounded(accept,media.declared,settings.transfer.max_header_bytes,operation.source,context);}if(accept.empty())accept="*/*";}

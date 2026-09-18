@@ -266,12 +266,24 @@ pub(super) fn plan_capabilities(
                 .collect::<Vec<_>>()
         })?;
     let credential_env =
-        crate::credential_env::plan(&contract, &protocol, config.credential_env.as_ref())?;
+        crate::credential_env::plan_with_defaults(&contract, &protocol, config.credential_env.as_ref(), config.sdk_defaults.as_ref())?;
     validate_native_boundaries(&contract, &protocol)?;
     // This is the candidate-aware schema planning closure, not additional HTTP
     // body inputs. Actual wire codecs remain protocol.codec_roots(). Resource
     // and dynamic execution stay behind their separate capability fences.
-    let roots = protocol.codec_schema_closure().to_vec();
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming = wire::plan_incoming(&contract)?;
+    // Incoming receipts extend the codec table only when declared: their
+    // candidate-aware schema closure joins the selected operations', so their
+    // body schemas become actual codec inputs with the same program roots.
+    let mut roots = protocol.codec_schema_closure().to_vec();
+    if !incoming.is_empty() {
+        roots.extend(incoming.codec_schema_closure().iter().cloned());
+        roots.sort();
+        roots.dedup();
+    }
     for id in &roots {
         if let Some(schema) = contract.schema(id) {
             let raw = crate::schema_view::raw(schema);
@@ -666,6 +678,46 @@ pub(super) fn plan_capabilities(
         });
     }
     let aggregates = state.aggregates;
+    let pagination = match config.sdk_defaults.as_ref() {
+        Some(defaults) => {
+            let outcome = wire::plan_pagination(&contract, &protocol, Some(defaults))?;
+            Some(super::pagination::lower(
+                &models,
+                &outcome,
+                &operations,
+                &mut state.names,
+                &mut methods,
+            ))
+        }
+        None => None,
+    };
+    let oauth = match config.sdk_defaults.as_ref() {
+        Some(defaults) => {
+            let outcome = wire::plan_oauth(&contract, &protocol, Some(defaults))?;
+            super::oauth::lower(&outcome, &mut state.names)
+        }
+        None => None,
+    };
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Only the lowered emission is
+    // conditional on the compiled discrimination evidence.
+    let stream_semantics = wire::plan_stream_semantics(&contract, &protocol);
+    let stream_events = super::stream_events::lower(
+        &models,
+        &stream_semantics,
+        &operations,
+        &mut state.names,
+        &mut methods,
+    );
+    // Emission-ready incoming receipt helpers; receipts the v1 helpers cannot
+    // represent surface as the shared plan errors. Lowered last so the fixed
+    // surface names join the allocation only when receipts are emitted.
+    let incoming = if incoming.is_empty() {
+        None
+    } else {
+        Some(super::incoming::lower(&contract, &incoming, &models, &mut state.names)?)
+    };
     let examples = if program.version == suspect_schema::OwnedProgram::V3_VERSION {
         super::scoped_examples::plan_resources(contract.clone(), &protocol, Default::default())
     } else if program.version == suspect_schema::OwnedProgram::V2_VERSION {
@@ -684,6 +736,10 @@ pub(super) fn plan_capabilities(
         program,
         examples,
         protocol,
+        pagination,
+        oauth,
+        stream_events,
+        incoming,
     })
 }
 
@@ -864,10 +920,9 @@ fn seed_media(media: &wire::MediaPlan, name: &str, seeds: &mut BTreeMap<SchemaId
             seeds.insert(codec.schema().id().clone(), name.into());
         }
         wire::Representation::Stream { stream } => {
-            seeds.insert(
-                stream.item_codec().schema().id().clone(),
-                format!("{name}Item"),
-            );
+            if let Some(codec) = stream.item_codec() {
+                seeds.insert(codec.schema().id().clone(), format!("{name}Item"));
+            }
         }
         wire::Representation::Form { form } => {
             for part in form.fields() {
@@ -1000,21 +1055,29 @@ impl State<'_> {
                 cpp_type: "Bytes".into(),
                 kind: ValueKind::Bytes,
             },
-            wire::Representation::Stream { stream } => {
-                let schema = stream.item_codec().schema().id();
-                ValueType {
-                    cpp_type: format!(
-                        "{}<{}>",
-                        if request { "std::vector" } else { "ItemStream" },
-                        self.models.get(schema).cpp_type
-                    ),
-                    kind: ValueKind::Stream {
-                        schema: schema.clone(),
-                        framing: stream.framing(),
-                        max_item_bytes: stream.max_item_bytes() as usize,
-                    },
+            wire::Representation::Stream { stream } => match stream.item_codec() {
+                Some(codec) => {
+                    let schema = codec.schema().id();
+                    ValueType {
+                        cpp_type: format!(
+                            "{}<{}>",
+                            if request { "std::vector" } else { "ItemStream" },
+                            self.models.get(schema).cpp_type
+                        ),
+                        kind: ValueKind::Stream {
+                            schema: schema.clone(),
+                            framing: stream.framing(),
+                            max_item_bytes: stream.max_item_bytes() as usize,
+                        },
+                    }
                 }
-            }
+                // A schemaless stream surfaces untyped whole-body JSON values
+                // because the native stream runtime has no untyped codec.
+                None => ValueType {
+                    cpp_type: if request { "std::vector<Json>" } else { "Json" }.into(),
+                    kind: ValueKind::Json,
+                },
+            },
             representation => {
                 let (rules, parts, extra, multipart) = match representation {
                     wire::Representation::Form { form } => {

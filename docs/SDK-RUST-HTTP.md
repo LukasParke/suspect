@@ -123,11 +123,13 @@ milestone is promoted by this slice.
 ## Verification
 
 The native seams are maintained in `tests/rust_http.rs`,
-`tests/rust_http_runtime.rs`, CLI `tests/rust_sdk.rs`, and the editor's real
-helper-to-CLI test. Native checks cover generation, drift,
-model-only/custom/reqwest builds, Rustdoc and private packing. The shared
-installed-package fixture is documented in [native call sites](SDK-M2-CALLSITES.md).
+`tests/rust_http_runtime.rs`, `tests/rust_http_openrouter.rs`, CLI
+`tests/rust_sdk.rs`, and the editor's real helper-to-CLI test. Native checks cover
+generation, drift, model-only/custom/reqwest builds, Rustdoc and private packing
+for credits, keys and container-file groups. The integrated gate is documented
+in [SDK-M3-M6-EXIT.md](SDK-M3-M6-EXIT.md).
 
-Generated-package consumers, Rustdoc/doctests and installed native HTTP checks
-support explicit floor/current toolchain selection, including the recommended
-reqwest/rustls profile. See [SDK capabilities](SDK-CAPABILITIES.md).
+Results are recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md) and the
+[session handoff](SDK-SESSION-HANDOFF.md). Generated-package consumers,
+Rustdoc/doctests and installed native HTTP checks pass on Rust 1.88.0 and the
+current compiler, including the recommended reqwest/rustls profile.

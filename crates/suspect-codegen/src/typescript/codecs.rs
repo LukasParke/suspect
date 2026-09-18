@@ -29,6 +29,9 @@ pub struct CodecConfig {
     pub max_conversion_steps: usize,
     /// Maximum decimal digits when materializing a native mathematical integer.
     pub max_integer_digits: usize,
+    /// Versioned source dialect interpretation choices; the default preserves
+    /// the ordinary strict dialect semantics.
+    pub dialect: crate::schema_view::DialectPolicy,
 }
 
 impl Default for CodecConfig {
@@ -38,6 +41,7 @@ impl Default for CodecConfig {
             max_conversion_depth: 256,
             max_conversion_steps: 100_000,
             max_integer_digits: 4096,
+            dialect: crate::schema_view::DialectPolicy::default(),
         }
     }
 }
@@ -131,7 +135,7 @@ pub fn plan_codecs_with_views(
     views: &[ModelView],
     config: CodecConfig,
 ) -> Result<CodecPlan, Vec<ModelDiagnostic>> {
-    let models = super::plan_models(&contract, roots, views);
+    let models = super::plan_models_with_policy(&contract, roots, views, config.dialect);
     if models.has_errors() {
         let mut errors = models.diagnostics.clone();
         for error in &mut errors {
@@ -201,7 +205,9 @@ pub fn plan_codecs_with_views(
         .iter()
         .map(|symbol| symbol.source.clone())
         .collect();
-    let compiler = OwnedCompiler::new(config.validation);
+    let mut validation_config = config.validation;
+    validation_config.oas30_nullable_in_31 = config.dialect.oas30_nullable_in_31;
+    let compiler = OwnedCompiler::new(validation_config);
     let schema = if models.resource_validation {
         compiler.compile_v3(contract.clone(), &validation_roots)
     } else {

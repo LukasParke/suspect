@@ -63,6 +63,10 @@ export interface ClientOptions<Auth extends object = Readonly<Record<string, Cre
     readonly maxStreamBufferBytes?: number;
     readonly maxStreamItems?: number;
     readonly maxErrorCaptureBytes?: number;
+    /** Full User-Agent override. `null` suppresses the automatic attribution header entirely. */
+    readonly userAgent?: string | null;
+    /** Replaces the SDK identity token in the automatic attribution header: `<name>` or `<name>/<version>`. */
+    readonly applicationId?: string;
 }
 /** Per-call choices and cancellation, never persisted on a reusable client. */
 export interface CallOptions {
@@ -245,4 +249,15 @@ export interface OperationDescriptor<I> {
     readonly objectExtras: Readonly<Record<string, string>>;
     readonly taggedBody: boolean;
     readonly inputType?: I;
+    /** ua/v1 attribution constants; `null` when generation supplied none. */
+    readonly attribution: AttributionPlan | null;
+}
+/** Compiled ua/v1 attribution constants from generation time. */
+export interface AttributionPlan {
+    readonly template_version: string;
+    readonly suspect_version: string;
+    readonly sdk_name: string;
+    readonly sdk_version: string;
+    readonly spec_version: string;
+    readonly language: string;
 }

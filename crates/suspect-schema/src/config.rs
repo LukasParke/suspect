@@ -9,6 +9,14 @@ pub struct Config {
     /// `format` is annotation-only and never fails validation.
     pub format_assertion: bool,
 
+    /// When `true`, an OAS 3.0 `nullable` annotation on an OAS 3.1/3.2 Schema
+    /// Object is interpreted with its 3.0 semantics: `nullable: true` appends
+    /// `"null"` to the same-object type and `nullable: false` removes it. The
+    /// default (2020-12) leaves the keyword annotation-only. This never
+    /// applies to OAS 3.0 documents, whose dialect already gives `nullable`
+    /// that meaning.
+    pub oas30_nullable_in_31: bool,
+
     /// Maximum nesting depth, reused for two guards:
     ///
     /// - **compile time**: eagerly-compiled subschema nesting beyond this
@@ -66,6 +74,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             format_assertion: false,
+            oas30_nullable_in_31: false,
             max_depth: 512,
             max_errors: 100,
             max_number_bytes: 4096,

@@ -108,6 +108,10 @@ final readonly class ClientOptions
         /** @var array<array-key,string> */
         public array $serverVariables = [],
         public ?string $serverBaseUrl = null,
+        /** Full override of the automatic ua/v1 attribution header; an empty string suppresses the header entirely. */
+        public ?string $userAgent = null,
+        /** Replaces the SDK identity token in the automatic attribution header: `<name>` or `<name>/<version>` of RFC 9110 tokens. */
+        public ?string $applicationId = null,
     ) {
         if ($timeoutMilliseconds < 1 || $timeoutMilliseconds > 2147483647
             || $maxResponseBytes < 1 || $maxResponseBytes > RuntimeConfig::MAX_RESPONSE_BYTES

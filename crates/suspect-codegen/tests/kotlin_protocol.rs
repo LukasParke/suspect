@@ -105,6 +105,8 @@ fn plan_in(root: &Path) -> Plan {
             version: "0.2.0".into(),
             package_name: "example.protocol".into(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         },
     )
     .unwrap()
@@ -279,6 +281,8 @@ fn legacy_plan(
             version: "0.2.0".into(),
             package_name: "example.protocol".into(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         },
         profiles,
     )

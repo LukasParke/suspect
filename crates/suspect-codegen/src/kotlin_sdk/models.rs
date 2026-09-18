@@ -107,8 +107,7 @@ pub(crate) fn plan(
     program: &OwnedProgram,
     mut used: BTreeSet<String>,
 ) -> Result<ModelPlan, Vec<HttpDiagnostic>> {
-    let scoped = program.version != OwnedProgram::V1_VERSION
-        || crate::schema_view::has_intersections(contract, roots);
+    let scoped = program.version != OwnedProgram::V1_VERSION;
     if scoped {
         used.extend(
             ["ScopedProgram", "ScopedMarks", "ScopedResult"]
@@ -506,6 +505,8 @@ fn schema_name(contract: &Contract, id: &SchemaId) -> String {
     }
     if let Some(op) = contract
         .operations()
+        .chain(contract.webhooks())
+        .chain(contract.callbacks())
         .filter(|op| {
             id.document() == op.source().document()
                 && id

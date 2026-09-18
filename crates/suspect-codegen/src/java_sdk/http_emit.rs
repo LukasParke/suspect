@@ -1,6 +1,7 @@
 //! Sync/CompletableFuture client methods and typed actual-status/media results.
 use super::{
     SdkPlan,
+    http::JavaOperation,
     models::{javadoc, q},
     protocol::{JavaMedia, JavaValue},
     wire_emit,
@@ -152,33 +153,47 @@ pub(crate) fn client(plan: &SdkPlan) -> String {
             op.source.document(),
             op.source.pointer()
         ));
-        out.push_str(&format!("    /** {description}\n     * @param input source inputs\n     * @return declared success\n     */\n    public {success} {method}({input} input) {{ return {method}(input,RequestOptions.defaults()); }}\n    /** Explicit per-call source choices and deadline.\n     * @param input source inputs\n     * @param options request policy\n     * @return declared success\n     */\n    public {success} {method}({input} input,RequestOptions options) {{ return HttpRuntime.await({asynchronous}(input,options),OP{index}.source()); }}\n    /** Cancellable asynchronous call. @param input inputs @return future */\n    public java.util.concurrent.CompletableFuture<{success}> {asynchronous}({input} input) {{ return {asynchronous}(input,RequestOptions.defaults()); }}\n    /** Asynchronous call with explicit source choices. @param input inputs @param options policy @return future */\n    public java.util.concurrent.CompletableFuture<{success}> {asynchronous}({input} input,RequestOptions options) {{\n        return runtime.call(OP{index},options,c->{{\n            c.require(input);var parameters=new java.util.ArrayList<HttpRuntime.Parameter>();\n"));
-        for (pindex, p) in op.parameters.iter().enumerate() {
-            out.push_str(&format!("            {}parameters.add(new HttpRuntime.Parameter({pindex},{}.CODEC.encodeValue(input.{}{},c)));\n",if p.required{String::new()}else{format!("if(input.{}.isPresent()) ",p.native_name)},plan.models().codec(&p.schema).holder,p.native_name,if p.required{""}else{".value()"}));
-        }
-        out.push_str("            WireValue body=null;\n");
-        if let Some(body) = &op.body {
-            out.push_str(&format!(
-                "            {}body={};\n",
-                if body.required {
-                    ""
-                } else {
-                    "if(input.body.isPresent()) "
-                },
-                wire_emit::write(
-                    plan,
-                    &body.value,
-                    &format!("input.body{}", if body.required { "" } else { ".value()" }),
-                    "c"
-                )
-            ));
-        }
+        out.push_str(&format!("    /** {description}\n     * @param input source inputs\n     * @return declared success\n     */\n    public {success} {method}({input} input) {{ return {method}(input,RequestOptions.defaults()); }}\n    /** Explicit per-call source choices and deadline.\n     * @param input source inputs\n     * @param options request policy\n     * @return declared success\n     */\n    public {success} {method}({input} input,RequestOptions options) {{ return HttpRuntime.await({asynchronous}(input,options),OP{index}.source()); }}\n    /** Cancellable asynchronous call. @param input inputs @return future */\n    public java.util.concurrent.CompletableFuture<{success}> {asynchronous}({input} input) {{ return {asynchronous}(input,RequestOptions.defaults()); }}\n    /** Asynchronous call with explicit source choices. @param input inputs @param options policy @return future */\n    public java.util.concurrent.CompletableFuture<{success}> {asynchronous}({input} input,RequestOptions options) {{\n        return runtime.call(OP{index},options,c->{{\n"));
+        out.push_str(&prepare_fragment(plan, op));
         out.push_str(&format!("            return new HttpRuntime.Prepared(parameters,body);\n        }},{api}::decode{index});\n    }}\n"));
         if fields.is_empty() {
             out.push_str(&format!("    /** No-input call. @return declared success */\n    public {success} {method}() {{ return {method}({input}.builder().build()); }}\n    /** No-input call with policy. @param options policy @return declared success */\n    public {success} {method}(RequestOptions options) {{ return {method}({input}.builder().build(),options); }}\n    /** No-input asynchronous call. @return future */\n    public java.util.concurrent.CompletableFuture<{success}> {asynchronous}() {{ return {asynchronous}({input}.builder().build()); }}\n    /** No-input asynchronous call with policy. @param options policy @return future */\n    public java.util.concurrent.CompletableFuture<{success}> {asynchronous}(RequestOptions options) {{ return {asynchronous}({input}.builder().build(),options); }}\n"));
         }
     }
+    // The typed-events exchange seams share the client's request preparation
+    // with the direct asynchronous methods, and only exist when a typed
+    // stream operation was admitted.
+    out.push_str(&super::stream::client_seams(plan));
     out.push_str("}\n");
+    out
+}
+
+/// The encoded-parameter and body preparation emitted inside one runtime call,
+/// shared verbatim by the direct asynchronous method and the typed-events seam.
+pub(crate) fn prepare_fragment(plan: &SdkPlan, op: &JavaOperation) -> String {
+    let mut out = String::from(
+        "            c.require(input);var parameters=new java.util.ArrayList<HttpRuntime.Parameter>();\n",
+    );
+    for (pindex, p) in op.parameters.iter().enumerate() {
+        out.push_str(&format!("            {}parameters.add(new HttpRuntime.Parameter({pindex},{}.CODEC.encodeValue(input.{}{},c)));\n",if p.required{String::new()}else{format!("if(input.{}.isPresent()) ",p.native_name)},plan.models().codec(&p.schema).holder,p.native_name,if p.required{""}else{".value()"}));
+    }
+    out.push_str("            WireValue body=null;\n");
+    if let Some(body) = &op.body {
+        out.push_str(&format!(
+            "            {}body={};\n",
+            if body.required {
+                ""
+            } else {
+                "if(input.body.isPresent()) "
+            },
+            wire_emit::write(
+                plan,
+                &body.value,
+                &format!("input.body{}", if body.required { "" } else { ".value()" }),
+                "c"
+            )
+        ));
+    }
     out
 }
 

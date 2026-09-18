@@ -177,12 +177,10 @@ fn invalid_package_policy_and_unproved_shapes_fail_before_artifacts() {
     let c = contract(
         json!({"Bad":{"allOf":[{"type":"object","properties":{"a":{"type":"string"}}},{"type":"object","properties":{"b":{"type":"string"}}}]}}),
     );
-    let checked = plan_sdk(c.clone(), &selected(&c), RubyConfig::default()).unwrap();
-    assert_eq!(
-        checked.program().version,
-        suspect_schema::OwnedProgram::V1_VERSION
-    );
-    assert!(emit_sdk(&checked, &package()).is_ok());
+    let errors = plan_sdk(c.clone(), &selected(&c), RubyConfig::default()).unwrap_err();
+    assert!(errors.iter().any(|d| d.code == "ruby-model-representation"
+        && !d.source.pointer().is_empty()
+        && d.at.end > d.at.start));
     let c = contract(
         json!({"Bad":{"type":"object","properties":{"secret":{"type":"string","writeOnly":true}}}}),
     );

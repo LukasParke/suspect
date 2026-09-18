@@ -210,8 +210,22 @@ impl RuntimeContext<'_> {
     fn config(&self) -> String {
         let c = self.config;
         let p = &self.program.limits;
+        // ua/v1 attribution: constant parts compile at generation time; an absent
+        // descriptor keeps the empty disabled sentinel so the runtime emits no header.
+        let attribution = match &c.attribution {
+            Some(descriptor) => format!(
+                "    /** ua/v1 attribution compiled from package identity and source; the runtime supplies the language version. */\n    public const ATTRIBUTION_SUSPECT_VERSION = {};\n    public const ATTRIBUTION_SDK_NAME = {};\n    public const ATTRIBUTION_SDK_VERSION = {};\n    public const ATTRIBUTION_SPEC_VERSION = {};\n    public const ATTRIBUTION_LANGUAGE = {};\n",
+                php(&descriptor.suspect_version),
+                php(&descriptor.sdk_name),
+                php(&descriptor.sdk_version),
+                php(&descriptor.spec_version),
+                php(&descriptor.language)
+            ),
+            None => "    /** An empty suspect version disables the automatic attribution header. */\n    public const ATTRIBUTION_SUSPECT_VERSION = \"\";\n    public const ATTRIBUTION_SDK_NAME = \"\";\n    public const ATTRIBUTION_SDK_VERSION = \"\";\n    public const ATTRIBUTION_SPEC_VERSION = \"\";\n    public const ATTRIBUTION_LANGUAGE = \"\";\n"
+                .into(),
+        };
         format!(
-            "{}/** Immutable generated ceilings. @internal */\nfinal class RuntimeConfig\n{{\n    public const MAX_REQUEST_BYTES = {};\n    public const MAX_RESPONSE_BYTES = {};\n    public const MAX_CAPTURE_BYTES = {};\n    public const MAX_HEADER_BYTES = {};\n    public const MAX_CONVERSION_BYTES = {};\n    public const MAX_JSON_BYTES = {};\n    public const MAX_DEPTH = {};\n    public const MAX_NODES = {};\n    public const MAX_SCHEMA_DEPTH = {};\n    public const MAX_NUMBER_BYTES = {};\n    public const MAX_EVALUATION_STEPS = {};\n    public const MAX_EQUALITY_STEPS = {};\n}}\n",
+            "{}/** Immutable generated ceilings and ua/v1 attribution constants. @internal */\nfinal class RuntimeConfig\n{{\n    public const MAX_REQUEST_BYTES = {};\n    public const MAX_RESPONSE_BYTES = {};\n    public const MAX_CAPTURE_BYTES = {};\n    public const MAX_HEADER_BYTES = {};\n    public const MAX_CONVERSION_BYTES = {};\n    public const MAX_JSON_BYTES = {};\n    public const MAX_DEPTH = {};\n    public const MAX_NODES = {};\n    public const MAX_SCHEMA_DEPTH = {};\n    public const MAX_NUMBER_BYTES = {};\n    public const MAX_EVALUATION_STEPS = {};\n    public const MAX_EQUALITY_STEPS = {};\n{}}}\n",
             self.head(),
             c.max_request_bytes,
             c.max_response_bytes,
@@ -224,7 +238,8 @@ impl RuntimeContext<'_> {
             p.max_depth,
             p.max_number_bytes,
             p.max_evaluation_steps,
-            p.max_equality_steps
+            p.max_equality_steps,
+            attribution
         )
     }
 

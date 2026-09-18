@@ -3,10 +3,15 @@ use super::super::{
     PlannedMedia, PlannedOperation, PlannedResponse, PlannedResponseCase, ValueKind,
 };
 use super::{SdkPlan, aggregates, prose, single_line, source_expr, string, wire};
+use crate::cpp_sdk::pagination;
+use crate::cpp_sdk::stream_events;
 use crate::http_protocol as w;
 use std::fmt::Write;
 
 pub(super) fn header(plan: &SdkPlan) -> String {
+    let paginated = plan.pagination().filter(|plan| plan.emits());
+    let compiled_events = plan.stream_events();
+    let events = compiled_events.emits().then_some(compiled_events);
     let mut out = format!(
         "#pragma once\n/** @file client.hpp Native source-selected protocol client. */\n#include \"{0}/models.hpp\"\n#include \"{0}/stream.hpp\"\n\nnamespace {1} {{\n",
         plan.config.name, plan.config.namespace
@@ -129,6 +134,14 @@ pub(super) fn header(plan: &SdkPlan) -> String {
         )
         .unwrap();
     }
+    if let Some(paginated) = paginated {
+        out.push_str(&pagination::client_forward_declarations(plan, paginated));
+        out.push('\n');
+    }
+    if let Some(events) = &events {
+        out.push_str(&stream_events::client_forward_declarations(plan, events));
+        out.push('\n');
+    }
     out.push_str("/// Copies share the transport; stream responses retain their own transfer lease.\nclass Client {\n    std::shared_ptr<const Transport> transport_;\n    Credentials credentials_;\n    ClientOptions options_;\npublic:\n    explicit Client(std::shared_ptr<const Transport> transport, Credentials credentials = {}, ClientOptions options = {})\n        : transport_(std::move(transport)), credentials_(std::move(credentials)), options_(std::move(options)) {}\n");
     writeln!(out,"#if defined({}_HAS_CURL)\n    static Result<Client, TransportError> with_curl(Credentials credentials = {{}}, ClientOptions options = {{}}, CurlOptions curl = {{}});\n#endif",plan.config.name).unwrap();
     out.push_str(&super::credential_env::declarations(plan));
@@ -149,6 +162,12 @@ pub(super) fn header(plan: &SdkPlan) -> String {
             }
         }
         writeln!(out,"    [[nodiscard]] Result<{}, {}> {}(const {}& input{}, CallOptions options = {{}}) const;",op.success_type,op.error_type,op.method_name,op.input_type,if op.constructor.parameters.is_empty(){" = {}"}else{""}).unwrap();
+    }
+    if let Some(paginated) = paginated {
+        out.push_str(&pagination::client_declarations(paginated));
+    }
+    if let Some(events) = &events {
+        out.push_str(&stream_events::client_declarations(events));
     }
     out.push_str("};\n");
     out.push_str("namespace detail_native {\n");
@@ -171,7 +190,54 @@ pub(super) fn source(plan: &SdkPlan) -> String {
     writeln!(out,"#if defined({}_HAS_CURL)\nResult<Client, TransportError> Client::with_curl(Credentials credentials, ClientOptions options, CurlOptions curl) {{\n    auto transport = CurlTransport::create(std::move(curl));\n    if (!transport) return Result<Client, TransportError>::failure(std::move(transport).error());\n    return Result<Client, TransportError>::success(Client(std::move(transport).value(), std::move(credentials), std::move(options)));\n}}\n#endif",plan.config.name).unwrap();
     out.push_str(&super::credential_env::definitions(plan));
     for op in &plan.operations {
-        writeln!(out,"Result<{}, {}> Client::{}(const {}& input, CallOptions options) const {{\n    (void)input; (void)credentials_; using Outcome = Result<{}, {}>;\n    static const detail::Operation operation = {};\n    Presence<ResponseMetadata> retained;\n    try {{\n        auto settings = detail::settings(options_, options, operation.source);\n        auto owned_context = std::make_unique<detail::Context>(settings.control());\n        auto& context = *owned_context; context.limits.max_bytes = settings.max_request_bytes;\n        std::vector<detail::ParameterValue> parameters;",op.success_type,op.error_type,op.method_name,op.input_type,op.success_type,op.error_type,wire::operation(plan,op)).unwrap();
+        operation_source(plan, op, None, &mut out);
+    }
+    writeln!(out, "}} // namespace {}", plan.config.namespace).unwrap();
+    out
+}
+
+/// The typed-events exchange opener for one streamed operation, defined
+/// inline in the emitted `stream_events.hpp`: the direct call's exact
+/// request preparation, status matching and typed failure surface, returning
+/// the raw stream state for the emitted event pager to consume instead of
+/// decoding stream items.
+pub(in crate::cpp_sdk) fn events_opener(
+    plan: &SdkPlan,
+    op: &PlannedOperation,
+    entry: &stream_events::StreamEventsEntry,
+) -> String {
+    let mut out = String::new();
+    operation_source(plan, op, Some(entry), &mut out);
+    out
+}
+
+/// One operation's client method: the direct call, or — with `events` — the
+/// typed-events exchange opener that returns the raw stream state instead of
+/// decoding stream items, byte-identical everywhere else. The opener is
+/// emitted inline into `stream_events.hpp`, so it carries the `inline`
+/// linkage the header requires.
+fn operation_source(
+    plan: &SdkPlan,
+    op: &PlannedOperation,
+    events: Option<&stream_events::StreamEventsEntry>,
+    out: &mut String,
+) {
+    let (linkage, returns, method) = match events {
+        Some(entry) => (
+            "inline ",
+            format!(
+                "Result<std::unique_ptr<detail::ItemState>, {}>",
+                entry.error_type
+            ),
+            entry.open_method.clone(),
+        ),
+        None => (
+            "",
+            format!("Result<{}, {}>", op.success_type, op.error_type),
+            op.method_name.clone(),
+        ),
+    };
+    writeln!(out,"{linkage}{returns} Client::{method}(const {}& input, CallOptions options) const {{\n    (void)input; (void)credentials_; using Outcome = {returns};\n    static const detail::Operation operation = {};\n    Presence<ResponseMetadata> retained;\n    try {{\n        auto settings = detail::settings(options_, options, operation.source);\n        auto owned_context = std::make_unique<detail::Context>(settings.control());\n        auto& context = *owned_context; context.limits.max_bytes = settings.max_request_bytes;\n        std::vector<detail::ParameterValue> parameters;",op.input_type,wire::operation(plan,op)).unwrap();
         for (i, p) in op.parameters.iter().enumerate() {
             if !p.required {
                 writeln!(out, "if (input.{}) {{", p.field_name).unwrap();
@@ -189,7 +255,7 @@ pub(super) fn source(plan: &SdkPlan) -> String {
                     plan,
                     &p.value,
                     &expression,
-                    &mut out,
+                    out,
                     &format!("json{i}"),
                     &src,
                 );
@@ -219,7 +285,7 @@ pub(super) fn source(plan: &SdkPlan) -> String {
                     .join(", ");
                 for (i, m) in body.media.iter().enumerate() {
                     writeln!(out,"case {i}: {{\nconst auto& selected = std::get<{i}>(choice);\nstd::string content_type = {};\nif (detail::select_media({{{media}}}, content_type, {}) != {i}) detail::http_fail(SdkError::Kind::RequestRepresentation, operation.source, \"request choice bypasses a more specific source representation\");",if m.requires_content_type{"selected.content_type".into()}else{format!("selected.content_type.value_or({})",string(m.wire.media_type().declared()))},source_expr(plan,&m.source)).unwrap();
-                    encode_media(plan, m, "selected.data", &mut out, "content_type");
+                    encode_media(plan, m, "selected.data", out, "content_type");
                     out.push_str("break;\n}\n");
                 }
                 out.push_str("default: detail::http_fail(SdkError::Kind::RequestRepresentation, operation.source, \"invalid request media index\");\n}\n");
@@ -229,7 +295,7 @@ pub(super) fn source(plan: &SdkPlan) -> String {
                     plan,
                     m,
                     value,
-                    &mut out,
+                    out,
                     &string(m.wire.media_type().declared()),
                 );
             }
@@ -291,14 +357,11 @@ pub(super) fn source(plan: &SdkPlan) -> String {
         out.push_str("switch (selected_response) {\n");
         for (i, response) in op.responses.iter().enumerate() {
             writeln!(out, "case {i}: {{").unwrap();
-            emit_response(plan, op, response, &mut out);
+            emit_response(plan, op, response, out, events);
             out.push_str("}\n");
         }
         out.push_str("default: {\nauto collected = detail::collect(std::move(exchange), settings, operation.source);\nif (!collected) throw detail::HttpFailure{std::move(collected).error()};\nretained = detail::metadata(collected.value(), settings.transfer.max_capture_bytes);\ndetail::http_fail(SdkError::Kind::UnexpectedResponse, operation.source, \"status is not declared\");\n}\n}\n");
         writeln!(out,"}} catch (detail::Failure& failure) {{\n    return Outcome::failure({}(std::in_place_type<SdkError>, detail::codec_error(operation, std::move(failure.error), std::move(retained))));\n}} catch (detail::HttpFailure& failure) {{\n    failure.error.operation_source = operation.source; failure.error.operation_id = operation.id;\n    if (retained && (failure.error.kind == SdkError::Kind::RequestValidation || failure.error.kind == SdkError::Kind::RequestRepresentation)) failure.error.kind = SdkError::Kind::ResponseDecoding;\n    if (!failure.error.response) failure.error.response = std::move(retained);\n    return Outcome::failure({}(std::in_place_type<SdkError>, std::move(failure.error)));\n}}\n}}",op.error_type,op.error_type).unwrap();
-    }
-    writeln!(out, "}} // namespace {}", plan.config.namespace).unwrap();
-    out
 }
 
 fn encode_media(
@@ -349,7 +412,9 @@ fn emit_response(
     op: &PlannedOperation,
     response: &PlannedResponse,
     out: &mut String,
+    events: Option<&stream_events::StreamEventsEntry>,
 ) {
+    let open = events.is_some();
     let source = source_expr(plan, &response.source);
     writeln!(
         out,
@@ -366,7 +431,8 @@ fn emit_response(
     }
     if let Some(case) = response.cases.iter().find(|c| c.forbidden) {
         out.push_str("if (detail::forbidden_body(operation.method, status)) {\nif (exchange.body) exchange.body->close();\n");
-        return_case(op, response, case, "Unit{}", out);
+        let forbidden_source = source_expr(plan, &case.source);
+        return_case(op, response, case, "Unit{}", out, open, &forbidden_source);
         out.push_str("}\n");
     }
     let ordinary = response
@@ -379,7 +445,7 @@ fn emit_response(
         return;
     }
     if ordinary[0].media.is_none() {
-        decode_case(plan, op, response, ordinary[0], out);
+        decode_case(plan, op, response, ordinary[0], out, events);
         return;
     }
     out.push_str("auto content_type = detail::content_type(exchange.headers);\nif (!content_type) {\nauto collected = detail::collect(std::move(exchange), settings, response_source);\nif (!collected) throw detail::HttpFailure{std::move(collected).error()};\nretained = detail::metadata(collected.value(), settings.transfer.max_capture_bytes);\ndetail::http_fail(SdkError::Kind::UnexpectedResponse, response_source, \"Content-Type absent or duplicated\");\n}\nstd::size_t selected_media;\ntry {\n");
@@ -396,7 +462,7 @@ fn emit_response(
     out.push_str("if (settings.response_media && status >= 200 && status < 300) { auto expected = detail::parse_media(*settings.response_media); auto actual = detail::parse_media(*content_type); if (!expected || !actual || !detail::matches_media(*expected, *actual)) detail::http_fail(SdkError::Kind::UnexpectedResponse, response_source, \"response differs from requested representation\"); }\n} catch (detail::HttpFailure& failure) {\nauto collected = detail::collect(std::move(exchange), settings, response_source);\nif (!collected) throw detail::HttpFailure{std::move(collected).error()};\nretained = detail::metadata(collected.value(), settings.transfer.max_capture_bytes); failure.error.kind = SdkError::Kind::UnexpectedResponse; throw;\n}\nswitch (selected_media) {\n");
     for (i, case) in ordinary.iter().enumerate() {
         writeln!(out, "case {i}: {{").unwrap();
-        decode_case(plan, op, response, case, out);
+        decode_case(plan, op, response, case, out, events);
         out.push_str("}\n");
     }
     out.push_str("default: detail::http_fail(SdkError::Kind::UnexpectedResponse, response_source, \"invalid representation selection\");\n}\n");
@@ -407,7 +473,9 @@ fn decode_case(
     response: &PlannedResponse,
     case: &PlannedResponseCase,
     out: &mut String,
+    events: Option<&stream_events::StreamEventsEntry>,
 ) {
+    let open = events.is_some();
     let source = source_expr(plan, &case.source);
     if !matches!(case.value.kind, ValueKind::Bytes | ValueKind::Unit) {
         out.push_str("for (const auto& [name, value] : exchange.headers) if (detail::lower_ascii(name) == \"content-encoding\" && detail::lower_ascii(value) != \"identity\") detail::http_fail(SdkError::Kind::ResponseDecoding, response_source, \"structured response content encoding is not identity\");\n");
@@ -419,7 +487,18 @@ fn decode_case(
     } = &case.value.kind
     {
         let model = plan.models().get(schema);
-        writeln!(out,"auto state = std::make_unique<detail::ItemState>(std::move(exchange), settings, operation, {source}, StreamFraming::{}, {max_item_bytes}, std::move(owned_context));\nstate->response.links = retained->links;\n{} data(std::move(state), detail::decode_{}, {});",framing_name(*framing),case.value.cpp_type,model.index,model.index).unwrap();
+        writeln!(out,"auto state = std::make_unique<detail::ItemState>(std::move(exchange), settings, operation, {source}, StreamFraming::{}, {max_item_bytes}, std::move(owned_context));\nstate->response.links = retained->links;",framing_name(*framing)).unwrap();
+        if open {
+            // The typed-events opener returns the raw stream state; the
+            // emitted event pager owns the compiled decode semantics.
+            writeln!(
+                out,
+                "return Outcome::success(std::move(state));"
+            )
+            .unwrap();
+            return;
+        }
+        writeln!(out,"{} data(std::move(state), detail::decode_{}, {});",case.value.cpp_type,model.index,model.index).unwrap();
     } else {
         out.push_str("auto collected = detail::collect(std::move(exchange), settings, response_source);\nif (!collected) throw detail::HttpFailure{std::move(collected).error()};\nauto raw = std::move(collected).value();\nretained = detail::metadata(raw, settings.transfer.max_capture_bytes);\n");
         writeln!(
@@ -428,6 +507,14 @@ fn decode_case(
             wire::links(plan, response.wire.links())
         )
         .unwrap();
+        if open {
+            // The typed-events opener reads only the declared stream
+            // representation; the collected metadata rides the thrown
+            // failure into the branded outcome instead of decoding a
+            // payload the pager cannot surface.
+            out.push_str("detail::http_fail(SdkError::Kind::UnexpectedResponse, response_source, \"the typed-events stream reads only the declared stream representation\");\n");
+            return;
+        }
         match &case.value.kind {
             ValueKind::Bytes => {
                 let limit = case
@@ -461,7 +548,7 @@ fn decode_case(
             }
         }
     }
-    return_case(op, response, case, "std::move(data)", out);
+    return_case(op, response, case, "std::move(data)", out, open, &source);
 }
 fn return_case(
     op: &PlannedOperation,
@@ -469,7 +556,20 @@ fn return_case(
     case: &PlannedResponseCase,
     data: &str,
     out: &mut String,
+    open: bool,
+    source: &str,
 ) {
+    // The typed-events opener reads only the declared stream representation:
+    // every other outcome is an unexpected response, thrown so the enclosing
+    // handler attaches the retained metadata and the branded failure surface.
+    if open {
+        writeln!(
+            out,
+            "detail::http_fail(SdkError::Kind::UnexpectedResponse, {source}, \"the typed-events stream reads only the declared stream representation\");"
+        )
+        .unwrap();
+        return;
+    }
     let args = format!(
         "std::in_place_type<{}>, {data}, std::move(*retained){}",
         case.variant_type,
@@ -480,23 +580,12 @@ fn return_case(
         }
     );
     if response.can_succeed() && response.can_fail() {
-        writeln!(out,"if (status >= 200 && status < 300) return Outcome::success({}({args}));\nreturn Outcome::failure({}({args}));",op.success_type,op.error_type).unwrap();
+        writeln!(out,"if (status >= 200 && status < 300) return Outcome::success({}({args}));",op.success_type).unwrap();
+        writeln!(out, "return Outcome::failure({}({args}));", op.error_type).unwrap();
+    } else if response.can_succeed() {
+        writeln!(out, "return Outcome::success({}({args}));", op.success_type).unwrap();
     } else {
-        writeln!(
-            out,
-            "return Outcome::{}({}({args}));",
-            if response.can_succeed() {
-                "success"
-            } else {
-                "failure"
-            },
-            if response.can_succeed() {
-                &op.success_type
-            } else {
-                &op.error_type
-            }
-        )
-        .unwrap();
+        writeln!(out, "return Outcome::failure({}({args}));", op.error_type).unwrap();
     }
 }
 fn framing_name(framing: w::StreamFraming) -> &'static str {

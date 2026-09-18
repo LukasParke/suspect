@@ -11,7 +11,7 @@ final class Protocol {
     private static JsonObject load() {
         try (var stream = Protocol.class.getResourceAsStream("protocol-program.json")) {
             if (stream == null) throw new IllegalStateException("missing HTTP protocol program");
-            JsonObject value = object(JsonRuntime.parseProgram(stream.readNBytes(MAX_PROGRAM_BYTES + 1)));
+            JsonObject value = object(JsonRuntime.parse(stream.readNBytes(MAX_BYTES + 1)));
             if (number(get(value,"version")) != 1) throw new IllegalStateException("unsupported HTTP protocol program");
             return value;
         } catch (IOException error) { throw new IllegalStateException("cannot load HTTP protocol program"); }

@@ -322,6 +322,14 @@ fn node(
                 let mut bits = types(contract, &source, value)?;
                 if oas30 && object.get("nullable") == Some(&Value::Bool(true)) {
                     bits.0 |= TypeBits::NULL;
+                } else if !oas30 && config.oas30_nullable_in_31 {
+                    // The versioned OAS-3.0-nullable interpretation: the
+                    // same-object type gains (or loses) "null".
+                    match object.get("nullable") {
+                        Some(&Value::Bool(true)) => bits.0 |= TypeBits::NULL,
+                        Some(&Value::Bool(false)) => bits.0 &= !TypeBits::NULL,
+                        _ => {}
+                    }
                 }
                 Kind::Type(bits)
             }

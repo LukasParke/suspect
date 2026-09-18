@@ -353,6 +353,7 @@ pub(crate) fn plan_models(
     config: &PackageConfig,
     compiled: &OwnedSchema,
     program: &OwnedProgram,
+    reserved: BTreeSet<String>,
 ) -> Result<JavaModelPlan, Vec<HttpDiagnostic>> {
     let reachable = crate::schema_view::closure(contract, roots);
     let mut errors = Vec::new();
@@ -377,6 +378,9 @@ pub(crate) fn plan_models(
         return Err(errors);
     }
     let mut used = reserved_types();
+    for name in reserved {
+        used.insert(name);
+    }
     used.insert(config.api_name.clone());
     let names: BTreeMap<_, _> = reachable
         .iter()
@@ -390,7 +394,7 @@ pub(crate) fn plan_models(
         scoped: matches!(
             program.version,
             OwnedProgram::V2_VERSION | OwnedProgram::V3_VERSION
-        ) || crate::schema_view::has_intersections(contract, &reachable),
+        ),
     };
     for id in &reachable {
         planner.check_shape(id);
@@ -1221,6 +1225,8 @@ pub(crate) fn reserved_types() -> BTreeSet<String> {
             "WireValue",
             "WireCodec",
             "Protocol",
+            "Attribution",
+            "Pagination",
             "Credential",
             "Authorization",
             "CredentialContext",

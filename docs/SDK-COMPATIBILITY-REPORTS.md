@@ -300,5 +300,4 @@ emitted code or compare the implementation to itself.
 cargo test -p suspect-codegen --test sdk_compatibility --locked
 ```
 
-See the [capability matrix](SDK-CAPABILITIES.md) for the compiled native profiles
-and their documented admission boundaries.
+Current integrated verification is recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md).

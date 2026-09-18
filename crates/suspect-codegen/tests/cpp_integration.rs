@@ -152,6 +152,15 @@ fn public_backend_is_the_same_cpp_plan_with_the_configured_package_identity() {
         target
     );
     let files = backend::generate(contract.clone(), &selected, &target).unwrap();
+    // Canonical backend generation compiles the ua/v1 attribution descriptor
+    // from the same package identity and source.
+    let attribution = suspect_codegen::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        &target.package_name,
+        &target.package_version,
+        contract.openapi_version(),
+        Backend::CppHttp.language_tag(),
+    );
     let direct = cpp_sdk::plan_sdk(
         contract,
         &selected,
@@ -159,6 +168,7 @@ fn public_backend_is_the_same_cpp_plan_with_the_configured_package_identity() {
             name: target.package_name.clone(),
             version: target.package_version.clone(),
             namespace: target.import_name.clone().unwrap(),
+            attribution: Some(attribution),
             ..Default::default()
         },
     )
@@ -233,6 +243,15 @@ fn explicit_generation_profile_drives_the_public_backend_and_native_snapshot() {
     let response = &captured.native[0].operations[0].descriptor["responses"][0];
     assert_eq!(response["binding"]["type"]["kind"], "bytes");
     assert!(response["binding"]["codec"].is_null());
+    // Canonical backend generation compiles the ua/v1 attribution descriptor
+    // from the same package identity and source.
+    let attribution = suspect_codegen::attribution::AttributionDescriptor::plan(
+        env!("CARGO_PKG_VERSION"),
+        &target.package_name,
+        &target.package_version,
+        contract.openapi_version(),
+        Backend::CppHttp.language_tag(),
+    );
     let direct = cpp_sdk::plan_sdk(
         contract,
         &selected,
@@ -241,6 +260,7 @@ fn explicit_generation_profile_drives_the_public_backend_and_native_snapshot() {
             version: target.package_version.clone(),
             namespace: target.import_name.clone().unwrap(),
             legacy_binary_strings: true,
+            attribution: Some(attribution),
             ..Default::default()
         },
     )

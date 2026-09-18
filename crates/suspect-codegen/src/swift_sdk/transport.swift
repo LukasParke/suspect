@@ -111,12 +111,21 @@ public struct ClientOptions: Sendable {
     public var allowHTTP: Bool
     public var timeout: TimeInterval
     public var maxResponseBytes: Int?
+    /// Overrides the automatic ua/v1 attribution header. A non-nil empty string
+    /// suppresses the header entirely.
+    public var userAgent: String?
+    /// Replaces the SDK identity token in the automatic attribution header:
+    /// "<name>" or "<name>/<version>" (RFC 9110 tokens). An invalid identity
+    /// suppresses the automatic header.
+    public var applicationId: String?
     public init(serverURL: String? = nil, timeout: TimeInterval = 60, maxResponseBytes: Int? = nil,
                 serverIndex: Int = 0, serverVariables: [String: String] = [:], documentURL: String? = nil,
-                securityAlternative: Int? = nil, allowHTTP: Bool = false) {
+                securityAlternative: Int? = nil, allowHTTP: Bool = false,
+                userAgent: String? = nil, applicationId: String? = nil) {
         self.serverURL = serverURL; self.timeout = timeout; self.maxResponseBytes = maxResponseBytes
         self.serverIndex = serverIndex; self.serverVariables = serverVariables; self.documentURL = documentURL
         self.securityAlternative = securityAlternative; self.allowHTTP = allowHTTP
+        self.userAgent = userAgent; self.applicationId = applicationId
     }
 }
 /// Explicit per-call timeout and a response ceiling no larger than the client ceiling.

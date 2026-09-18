@@ -13,13 +13,17 @@ use crate::{OutFile, http_protocol};
 use suspect_ir::contract::{Contract, SchemaId, SourceId};
 
 mod emit;
+pub mod incoming;
 pub(crate) mod models;
+mod oauth;
+pub mod pagination;
 mod protocol;
 mod protocol_emit;
 mod protocol_examples;
 mod protocol_metadata;
 mod protocol_positional;
 mod protocol_query;
+pub mod stream_events;
 mod validation;
 
 #[cfg(test)]
@@ -71,6 +75,10 @@ pub struct SwiftConfig {
     /// Explicit runtime environment variable names, bound to used source schemes.
     /// The generator never reads their credential values.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
+    /// Golden SDK behavior defaults resolved inside this backend's plan.
+    pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
+    /// `ua/v1` attribution constants compiled from package identity and source.
+    pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 
 impl Default for SwiftConfig {
@@ -88,6 +96,8 @@ impl Default for SwiftConfig {
             max_stream_buffer_bytes: 64 * 1024,
             compatibility_profiles: BTreeSet::new(),
             credential_env: None,
+            sdk_defaults: None,
+            attribution: None,
         }
     }
 }
@@ -161,6 +171,21 @@ pub struct SdkPlan {
     credentials: BTreeMap<String, String>,
     credential_bindings: Vec<protocol::PlannedCredential>,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
+    /// Compiled pagination selection over the admitted protocol plan, when a
+    /// policy is configured and at least one operation is emittable.
+    pagination: Option<pagination::PaginationPlan>,
+    /// Compiled typed-stream semantics over the admitted protocol plan, when
+    /// the document declares any stream media. Emission follows only its
+    /// discriminated SSE operations.
+    stream_events: Option<stream_events::StreamEventsPlan>,
+    /// Emission-ready incoming webhook/callback receipts with their native
+    /// symbol bindings, present only when the document declares receipts.
+    /// Emission follows only non-empty receipts, so every other document
+    /// emits no new bytes at all.
+    incoming: Vec<incoming::IncomingReceipt>,
+    /// Compiled OAuth lifecycle plan over the admitted protocol plan, when a
+    /// policy is configured and at least one scheme is usable.
+    oauth: Option<http_protocol::OAuthPlan>,
     protocol: http_protocol::ProtocolPlan,
     config: SwiftConfig,
     models: models::ModelPlan,
@@ -205,6 +230,33 @@ impl SdkPlan {
     #[must_use]
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
+    }
+    /// Compiled pagination selection carried by this plan, when a policy is
+    /// configured. Emission follows only its emittable operations.
+    #[must_use]
+    pub fn pagination(&self) -> Option<&pagination::PaginationPlan> {
+        self.pagination.as_ref()
+    }
+    /// Compiled typed-stream semantics carried by this plan, present whenever
+    /// the document declares any stream media. Emission follows only its
+    /// discriminated SSE operations, so every other document emits nothing.
+    #[must_use]
+    pub fn stream_events(&self) -> Option<&stream_events::StreamEventsPlan> {
+        self.stream_events.as_ref()
+    }
+    /// Emission-ready incoming webhook/callback receipts carried by this plan,
+    /// exactly when the document declares receipts. Emission follows only
+    /// non-empty receipts, so receipt-less documents emit no file at all.
+    #[must_use]
+    pub fn incoming(&self) -> &[incoming::IncomingReceipt] {
+        &self.incoming
+    }
+    /// The compiled OAuth/OIDC lifecycle plan, carried only when a configured
+    /// policy yields usable schemes. The generated lifecycle file is emitted
+    /// only for usable schemes, so no-policy output stays byte-identical.
+    #[must_use]
+    pub fn oauth(&self) -> Option<&http_protocol::OAuthPlan> {
+        self.oauth.as_ref()
     }
     /// Native credential member for one source-document-scoped scheme declaration.
     /// Scheme names alone are not identities in a multi-document contract.
@@ -556,9 +608,26 @@ pub fn plan_sdk(
                 .collect::<Vec<_>>()
         })?;
     protocol::admit(&contract, &wire)?;
-    let credential_env =
-        crate::credential_env::plan(&contract, &wire, config.credential_env.as_ref())?;
-    for id in wire.codec_schema_closure() {
+    // Compiled incoming webhook/callback receipts. Planning walks the whole
+    // Contract (selection-independent) and fails the plan on broken incoming
+    // declarations like every other diagnostic.
+    let incoming_plan = http_protocol::plan_incoming(&contract)?;
+    // Incoming receipts extend the codec table only when declared: their body
+    // schemas become actual codec inputs beside the selected operations'.
+    let mut codec_roots: Vec<SchemaId> = wire.codec_roots().to_vec();
+    if !incoming_plan.is_empty() {
+        codec_roots.extend(incoming_plan.codec_roots().iter().cloned());
+        codec_roots.sort();
+        codec_roots.dedup();
+    }
+    let codec_closure = contract.effective_schema_closure(&codec_roots);
+    let credential_env = crate::credential_env::plan_with_defaults(
+        &contract,
+        &wire,
+        config.credential_env.as_ref(),
+        config.sdk_defaults.as_ref(),
+    )?;
+    for id in &codec_closure {
         if let Some(schema) = contract.schema(id) {
             let raw = crate::schema_view::raw(schema);
             for keyword in ["readOnly", "writeOnly"] {
@@ -574,8 +643,12 @@ pub fn plan_sdk(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let reachable = wire.codec_schema_closure().to_vec();
-    let compiler = suspect_schema::OwnedCompiler::new(config.validation.clone());
+    let reachable = codec_closure;
+    let mut validation = config.validation.clone();
+    validation.oas30_nullable_in_31 = config
+        .compatibility_profiles
+        .contains(&http_protocol::CompatibilityProfile::Oas30NullableIn31V1);
+    let compiler = suspect_schema::OwnedCompiler::new(validation);
     // Prefer the frozen base/scoped envelopes. Only a closure declined by v2
     // needs explicit v3 admission; unrelated unsupported assertions still fail
     // the v3 compiler at their original sources before any artifacts are emitted.
@@ -595,7 +668,7 @@ pub fn plan_sdk(
         })?;
     let program = validator.program();
     let validation_data = validation::emit(&contract, &program)?;
-    let mut models = models::plan(&contract, wire.codec_roots(), &validator, &program)?;
+    let mut models = models::plan(&contract, &codec_roots, &validator, &program)?;
     protocol::reserve_runtime_names(&mut models);
     let symbols = models.symbols();
     let mut type_names = models.reserved_names();
@@ -625,6 +698,17 @@ pub fn plan_sdk(
     let mut credential_bindings = Vec::new();
     let mut credential_sources = BTreeSet::new();
     type_names.extend(protocol::RUNTIME_NAMES.iter().map(|s| (*s).to_owned()));
+    // Compiled OAuth lifecycle planning follows the configured policy, like
+    // pagination helpers; the runtime file is emitted only for usable schemes,
+    // so no-policy output stays byte-identical. Its fixed API names are
+    // reserved before operation allocation, mirroring the Go backend.
+    let oauth = oauth::plan(
+        &contract,
+        &wire,
+        config.sdk_defaults.as_ref(),
+        &mut type_names,
+        &mut methods,
+    )?;
     let mut operations = Vec::new();
     for op in wire.operations() {
         let operation_id = op
@@ -715,6 +799,42 @@ pub fn plan_sdk(
     if !errors.is_empty() {
         return Err(errors);
     }
+    let pagination = pagination::plan(
+        &contract,
+        &wire,
+        config.sdk_defaults.as_ref(),
+        &operations,
+        &models,
+        &mut type_names,
+        &mut methods,
+    )?;
+    // Compiled typed-stream semantics are infallible and unconditional: they
+    // record the declared event kinds, payload codecs, sentinel and completion
+    // policies for every operation stream media. Emission stays conditional on
+    // the discriminated SSE subset, so every other document stays byte-identical.
+    let stream_semantics = http_protocol::plan_stream_semantics(&contract, &wire);
+    let stream_events = stream_events::plan(
+        &operations,
+        &models,
+        &stream_semantics,
+        &mut type_names,
+        &mut methods,
+    );
+    // Emission-ready incoming receipt helpers. Receipts the v1 helpers cannot
+    // decode refuse the plan with source-linked diagnostics instead of silent
+    // skips, mirroring the TypeScript and Python backends.
+    let mut incoming_errors = Vec::new();
+    let incoming = incoming::prepare(
+        &contract,
+        &incoming_plan,
+        &models,
+        &mut type_names,
+        &mut incoming_errors,
+    );
+    errors.extend(incoming_errors);
+    if !errors.is_empty() {
+        return Err(errors);
+    }
     let examples = match program.version {
         suspect_schema::OwnedProgram::V3_VERSION => {
             crate::examples::plan_protocol_examples_v3(contract.clone(), &wire, Default::default())
@@ -731,6 +851,10 @@ pub fn plan_sdk(
         credentials,
         credential_bindings,
         credential_env,
+        pagination,
+        stream_events,
+        incoming,
+        oauth,
         protocol: wire,
         config,
         models,
