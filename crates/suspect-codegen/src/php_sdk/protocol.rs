@@ -355,7 +355,9 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
     })?;
     let models = if program.version == "suspect.validation.experimental.v3" {
         models::plan_resources(&contract, &reachable, &surface.names, &mut used)
-    } else if program.version != "suspect.validation.experimental.v1" {
+    } else if program.version != "suspect.validation.experimental.v1"
+        || crate::schema_view::has_intersections(&contract, &reachable)
+    {
         models::plan_scoped(&contract, &reachable, &surface.names, &mut used)
     } else {
         models::plan_named(&contract, &reachable, &surface.names, &mut used)

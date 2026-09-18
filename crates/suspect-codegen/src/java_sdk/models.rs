@@ -394,7 +394,7 @@ pub(crate) fn plan_models(
         scoped: matches!(
             program.version,
             OwnedProgram::V2_VERSION | OwnedProgram::V3_VERSION
-        ),
+        ) || crate::schema_view::has_intersections(contract, &reachable),
     };
     for id in &reachable {
         planner.check_shape(id);

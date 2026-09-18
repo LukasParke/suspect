@@ -196,7 +196,8 @@ pub(crate) fn plan(
         };
         let raw = crate::schema_view::raw(schema);
         let scoped = program.version == OwnedProgram::V2_VERSION
-            || program.version == OwnedProgram::V3_VERSION;
+            || program.version == OwnedProgram::V3_VERSION
+            || crate::schema_view::has_intersections(contract, &closure);
         let shaped = shape(contract, id, &raw, scoped).or_else(|error| {
             if scoped {
                 Ok((Shape::ValidatedJson, false))

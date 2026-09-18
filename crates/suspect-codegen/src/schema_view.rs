@@ -67,6 +67,13 @@ pub(crate) fn closure(contract: &Contract, roots: &[SchemaId]) -> Vec<SchemaId> 
     contract.effective_schema_closure(roots)
 }
 
+pub(crate) fn has_intersections(contract: &Contract, reachable: &[SchemaId]) -> bool {
+    reachable
+        .iter()
+        .filter_map(|id| contract.schema(id))
+        .any(|schema| raw(schema).get("allOf").is_some())
+}
+
 pub(crate) fn diagnostic_applies(
     contract: &Contract,
     reachable: &[SchemaId],

@@ -169,6 +169,7 @@ pub fn plan_models_with_policy(
     let reachable = schema_view::closure(contract, roots);
     let resources = requires_resources(contract, &reachable);
     let scoped = resources
+        || schema_view::has_intersections(contract, &reachable)
         || reachable
             .iter()
             .filter_map(|id| contract.schema(id))
@@ -186,6 +187,11 @@ pub fn plan_models_with_policy(
                 ]
                 .iter()
                 .any(|keyword| raw.get(*keyword).is_some())
+                    || raw.get("const").is_some_and(serde_json::Value::is_number)
+                    || raw
+                        .get("enum")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|values| values.iter().any(serde_json::Value::is_number))
             });
     let transparent: BTreeMap<_, _> = reachable
         .iter()

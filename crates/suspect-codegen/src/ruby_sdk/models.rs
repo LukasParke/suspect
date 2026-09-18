@@ -201,11 +201,13 @@ pub(super) fn plan(
     let mut errors = Vec::new();
     let mut pending = roots.iter().copied().collect::<BTreeSet<_>>();
     let mut visited = BTreeSet::new();
+    let scoped = program.version != OwnedProgram::V1_VERSION
+        || crate::schema_view::has_intersections(contract, &ids);
     while let Some(index) = pending.pop_first() {
         if !visited.insert(index) {
             continue;
         }
-        match shape(contract, program, &ids, index) {
+        match shape(contract, program, &ids, index, scoped) {
             Ok(shape) => {
                 pending.extend(shape.edges());
                 shapes.insert(index, shape);
@@ -323,9 +325,9 @@ fn shape(
     program: &OwnedProgram,
     ids: &[SchemaId],
     index: usize,
+    scoped: bool,
 ) -> Result<ModelShape, String> {
     let checks = &program.nodes[index].checks;
-    let scoped = program.version != OwnedProgram::V1_VERSION;
     if let Some((initial_target, initial_resource, anchor)) =
         checks.iter().find_map(|c| match &c.instruction {
             Op::DynamicRef {
@@ -408,15 +410,15 @@ fn shape(
     if !intersections.is_empty() {
         let mut carriers = BTreeSet::new();
         for target in intersections {
-            if let Some(carrier) = structural_carrier(program, target, &mut BTreeSet::new())? {
-                carriers.insert(carrier);
+            match structural_carrier(program, target, &mut BTreeSet::new()) {
+                Ok(Some(carrier)) => { carriers.insert(carrier); }
+                Ok(None) => {}
+                Err(_) if scoped => return Ok(ModelShape::RefinedJson),
+                Err(error) => return Err(error),
             }
         }
         if carriers.len() > 1 {
-            if scoped {
-                return Ok(ModelShape::RefinedJson);
-            }
-            return Err("allOf has multiple distinct native carriers; merged object/intersection models are not implemented".into());
+            return Ok(ModelShape::RefinedJson);
         }
         if let Some(target) = carriers.pop_first() {
             return Ok(ModelShape::Alias(target));

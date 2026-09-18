@@ -116,7 +116,7 @@ fn check_limits(program: &OwnedProgram) -> Result<(), String> {
         );
     }
     let limits = &program.limits;
-    if program.nodes.len() > 4096
+    if program.nodes.len() > 16_384
         || limits.max_depth > 128
         || limits.max_number_bytes > 4096
         || [
@@ -127,7 +127,7 @@ fn check_limits(program: &OwnedProgram) -> Result<(), String> {
         .iter()
         .any(|n| *n > 100_000)
     {
-        return Err("Kotlin validation requires at most 4096 nodes, depth 128, 4096 numeric bytes and 100000 visits/findings per budget".into());
+        return Err("Kotlin validation requires at most 16384 nodes, depth 128, 4096 numeric bytes and 100000 visits/findings per budget".into());
     }
     // An exhaustive match keeps newly added shared opcodes behind a compiler
     // change, instead of letting an unknown instruction silently succeed.
@@ -171,7 +171,7 @@ fn check_limits(program: &OwnedProgram) -> Result<(), String> {
     let mut count = 0;
     while let Some((value, depth)) = pending.pop() {
         count += 1;
-        if count > 100_000 || depth >= 128 {
+        if count > 1_000_000 || depth >= 128 {
             return Err("compiled metadata exceeds the Kotlin JSON depth/value budget".into());
         }
         match value {
@@ -187,8 +187,8 @@ fn check_limits(program: &OwnedProgram) -> Result<(), String> {
             _ => {}
         }
     }
-    if serde_json::to_vec(program).expect("portable program").len() > 4 * 1024 * 1024 {
-        return Err("compiled metadata exceeds the Kotlin 4 MiB JSON budget".into());
+    if serde_json::to_vec(program).expect("portable program").len() > 16 * 1024 * 1024 {
+        return Err("compiled metadata exceeds the Kotlin 16 MiB program budget".into());
     }
     Ok(())
 }

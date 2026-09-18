@@ -103,12 +103,12 @@ pub(super) fn package(plan: &Plan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> 
         serde_json::to_string(&plan.program).unwrap(),
     );
     let protocol = serde_json::to_string(plan.protocol()).unwrap();
-    if protocol.len() > 4 * 1024 * 1024 {
+    if protocol.len() > 16 * 1024 * 1024 {
         return Err(vec![diagnostic(
             &plan.contract,
             plan.operations[0].source.clone(),
             "kotlin-protocol-size",
-            "protocol metadata exceeds 4 MiB",
+            "protocol metadata exceeds 16 MiB",
         )]);
     }
     add(
