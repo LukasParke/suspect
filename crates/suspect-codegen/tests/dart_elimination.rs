@@ -482,6 +482,7 @@ const OPERATION_METHOD_MARKERS: &[&str] = &[
     "listLicenses",
 ];
 
+#[ignore = "requires the Dart SDK for dart analyze (structural gate)"]
 #[test]
 fn dart_emission_shape_supports_elimination() {
     let _gate = NATIVE_GATE.lock().unwrap();
