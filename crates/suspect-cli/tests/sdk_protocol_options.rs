@@ -275,7 +275,8 @@ fn session_preview_and_comparison_retain_and_compare_explicit_interpretation() {
             "legacy-binary-string-v1",
             "oas30-nullable-in-3.1-v1",
             "colon-path-parameters-v1",
-            "schemaless-stream-events-v1"
+            "schemaless-stream-events-v1",
+            "all-of-scoped-mode-v1"
         ])
     );
 }
