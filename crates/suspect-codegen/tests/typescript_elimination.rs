@@ -1572,6 +1572,7 @@ fn launcher_size_is_stable_when_only_unrelated_operations_are_added() {
 // Consumer-profile gates
 // ---------------------------------------------------------------------------
 
+#[ignore = "requires esbuild on the test host for bundler byte gates"]
 #[test]
 fn consumer_profiles_eliminate_unrelated_surfaces() {
     let baseline_files = files_map(&generate(elimination_document()));
