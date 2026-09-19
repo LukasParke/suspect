@@ -97,6 +97,7 @@ fn directional_fixture() -> Arc<Contract> {
     )
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn directional_views_fail_explicitly_when_annotation_applicability_is_unestablishable() {
     let contract = fixture(
@@ -149,6 +150,7 @@ fn directional_views_fail_explicitly_when_annotation_applicability_is_unestablis
     assert!(plan_with(&[ModelView::Neutral], &composed).is_ok());
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn oas30_directional_required_policy_stays_unsupported() {
     // OpenAPI 3.0 changes which direction `required` applies in, but the owned
@@ -171,6 +173,7 @@ fn oas30_directional_required_policy_stays_unsupported() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn directional_artifacts_bind_every_codec_to_its_view_and_stay_deterministic() {
     let contract = directional_fixture();
@@ -223,6 +226,7 @@ fn directional_artifacts_bind_every_codec_to_its_view_and_stay_deterministic() {
     assert_eq!(codecs.len(), plan.models().symbols().len());
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn unannotated_closures_keep_one_validation_program_across_views() {
     // Requesting directional views must not invent directional semantics: a
@@ -245,6 +249,7 @@ fn unannotated_closures_keep_one_validation_program_across_views() {
     assert_eq!(plan.render(), plan.render());
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn neutral_only_planning_stays_backward_compatible() {
     let contract = directional_fixture();
@@ -258,6 +263,7 @@ fn neutral_only_planning_stays_backward_compatible() {
     assert_eq!(neutral.render(), via_views.render());
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn empty_view_selection_returns_a_diagnostic_without_roots() {
     let contract = fixture("3.1.0", json!({}));

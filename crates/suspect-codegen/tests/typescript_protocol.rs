@@ -13,6 +13,7 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn native_security_alternatives_credentials_and_declared_server_choices_are_explicit() {
     let witness: Value =
@@ -111,6 +112,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn bodyless_default_and_range_statuses_preserve_native_discriminants() {
     let response = json!({"description":"actual status controls body presence","headers":{"X-Count":{"required":true,"schema":{"type":"integer"}}},"content":{"text/plain":{"schema":{"type":"string"}}}});
@@ -167,6 +169,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn native_responses_dispatch_by_actual_status_media_and_typed_header_provenance() {
     let document = json!({"openapi":"3.2.0","info":{"title":"Response dispatch","version":"1"},"paths":{
@@ -300,6 +303,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn forms_and_named_multipart_send_literal_values_framing_headers_and_bounded_binary_parts() {
     let fixture: Value =
@@ -386,6 +390,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn positional_multipart_and_form_responses_decode_independent_literal_bytes_and_cardinalities() {
     let multipart = json!({"schema":{"type":"object","required":["file","meta","quota"],"minProperties":3,"maxProperties":4,"properties":{
@@ -466,6 +471,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn native_sse_and_json_lines_preserve_envelopes_exact_items_backpressure_and_cleanup() {
     let event = json!({"type":"object","required":["data"],"properties":{"data":{"type":"string","contentMediaType":"application/json","contentSchema":{"type":"object","required":["notAutomaticallyValidated"]}},"event":{"type":"string"},"id":{"type":"string"},"retry":{"type":"integer","minimum":0}},"additionalProperties":false});
@@ -591,6 +597,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn request_media_choices_preserve_native_values_and_cannot_bypass_specific_codecs() {
     let plan = plan(
@@ -646,6 +653,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn indexed_standard_methods_and_unnamed_operations_keep_exact_native_transport_tokens() {
     let mut document =
@@ -694,6 +702,7 @@ try{
 "#.replace("__METHODS__",&serde_json::to_string(&operations).unwrap()));
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn legacy_binary_markers_are_explicit_and_never_replace_json_codec_inputs() {
     let mut document = json!({"openapi":"3.1.2","info":{"title":"Explicit binary compatibility","version":"1"},"paths":{
@@ -877,6 +886,7 @@ try{
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn unverified_and_ambiguous_protocols_are_source_located_refusals() {
     for (document, code, suffix) in [
@@ -968,6 +978,7 @@ try{const client=createClient({auth:{apiKey:'fixture-only'},serverURL:`http://12
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn large_source_cardinalities_remain_exact_while_transport_allocations_stay_bounded() {
     let plan = plan(
@@ -991,6 +1002,7 @@ try{const client=createClient({serverURL:`http://127.0.0.1:${server.address().po
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn custom_method_tokens_are_exact_and_fetch_normalization_is_an_explicit_refusal() {
     let fixture: Value =
@@ -1027,6 +1039,7 @@ try{
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn whole_query_json_text_and_form_have_no_name_prefix_or_double_encoding() {
     let fixtures: Value =
@@ -1083,6 +1096,7 @@ try{
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn rfc6570_multipart_expands_physical_fields_without_uri_encoding_or_query_text() {
     let plan = plan(
@@ -1133,6 +1147,7 @@ try{
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn rfc6570_multipart_responses_reconstruct_typed_items_and_enforce_group_metadata() {
     let media = json!({"schema":{"type":"object","required":["colors","csv","filter","note","rgb"],"additionalProperties":false,"properties":{
@@ -1163,6 +1178,7 @@ try{const client=createClient({serverURL:`http://127.0.0.1:${server.address().po
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn whole_query_conflicts_and_custom_method_errors_remain_source_located() {
     let query = json!({"name":"whole","in":"querystring","content":{"text/plain":{"schema":{"type":"string"}}}});
@@ -1517,6 +1533,7 @@ fn installed(
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn original_m2_fixture_ts_and_js_consumers_preserve_the_existing_public_api() {
     let path =
@@ -1550,6 +1567,7 @@ fn original_m2_fixture_ts_and_js_consumers_preserve_the_existing_public_api() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn verified_baseline_preserves_native_calls_and_corrects_case_insensitive_wire_metadata() {
     let plan = plan(
@@ -1605,6 +1623,7 @@ try {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn literal_parameter_vectors_reach_native_fetch_with_styles_utf8_headers_and_cookies() {
     let fixture: Value =

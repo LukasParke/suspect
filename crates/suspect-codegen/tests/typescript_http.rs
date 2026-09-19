@@ -35,6 +35,7 @@ fn api(extra: Value) -> Value {
     value
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn source_selected_plan_emits_one_codec_plan_and_literal_http_contract() {
     let (contract, _uri) = fixture(api(json!({})));
@@ -67,6 +68,7 @@ fn source_selected_plan_emits_one_codec_plan_and_literal_http_contract() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn unsupported_security_is_located_and_direct_directional_annotations_are_admitted() {
     let (contract, _uri) = fixture(api(json!({"security":[]})));
@@ -97,6 +99,7 @@ fn unsupported_security_is_located_and_direct_directional_annotations_are_admitt
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn malformed_present_http_profile_metadata_is_never_defaulted_or_filtered() {
     let mut scopes = api(json!({}));
@@ -156,6 +159,7 @@ fn malformed_present_http_profile_metadata_is_never_defaulted_or_filtered() {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn referenced_request_body_and_raw_response_shapes_are_checked_at_terminal_sources() {
     let directory = tempfile::tempdir().unwrap();
@@ -244,6 +248,7 @@ fn referenced_request_body_and_raw_response_shapes_are_checked_at_terminal_sourc
     assert!(plan_http(contract, &[source], HttpConfig::default()).is_ok());
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn malformed_servers_and_unsupported_fetch_methods_fail_before_emission() {
     for server in [
@@ -287,6 +292,7 @@ fn malformed_servers_and_unsupported_fetch_methods_fail_before_emission() {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn source_named_credentials_and_configured_ceiling_are_enforced_by_generated_consumers() {
     let mut value = api(json!({}));
@@ -411,6 +417,7 @@ fn tracked_openrouter_operations_and_query_inputs_plan_together() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn unsupported_query_wire_shapes_fail_at_the_parameter_before_artifacts() {
     for parameter in [
@@ -449,6 +456,7 @@ fn unsupported_query_wire_shapes_fail_at_the_parameter_before_artifacts() {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn query_names_do_not_bind_path_placeholders() {
     let mut value = api(

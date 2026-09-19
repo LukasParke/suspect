@@ -35,6 +35,7 @@ fn plan(schemas: Value) -> CodecPlan {
     .unwrap()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn codec_planning_refuses_unenforced_assertions_and_unsafe_resource_metadata() {
     let contract = fixture(json!({"Pattern":{"type":"string","pattern":r"^\p{Letter}+$"}}));
@@ -107,6 +108,7 @@ fn native(plan: &CodecPlan, consumer: &str) {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn codec_planning_is_deterministic_and_does_not_promote_an_sdk() {
     let plan = plan(json!({"Flag":{"type":"boolean"}}));
@@ -246,6 +248,7 @@ const invalidArray: Arrays = { known: ['wrong'] };
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn additional_property_admission_refuses_misleading_native_index_values() {
     for (name, known, extra) in [

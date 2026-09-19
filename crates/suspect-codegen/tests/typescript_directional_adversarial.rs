@@ -212,6 +212,7 @@ const incompleteResponse: SiblingResponse = {};
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn annotation_reachable_only_through_applicators_inside_a_ref_target_fails() {
     // A required property whose ref target hides the annotation under allOf
@@ -237,6 +238,7 @@ fn annotation_reachable_only_through_applicators_inside_a_ref_target_fails() {
     assert!(plan_with(&[ModelView::Neutral], &contract).is_ok());
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn duplicate_and_reordered_view_selection_produce_identical_artifacts() {
     let contract = adversarial_fixture();

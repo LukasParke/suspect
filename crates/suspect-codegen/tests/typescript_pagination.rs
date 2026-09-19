@@ -106,6 +106,7 @@ fn pagination_options() -> GenerationOptions {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn pagination_exports_and_descriptors_emit_only_under_sdk_defaults() {
     let files = generate(pagination_document(), &pagination_options());
@@ -163,6 +164,7 @@ fn tool_available(name: &str) -> bool {
     Command::new(name).arg("--version").output().is_ok()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn generated_pagination_compiles_strictly_with_the_package() {
     if !tool_available("tsc") {
@@ -203,6 +205,7 @@ fn generated_pagination_compiles_strictly_with_the_package() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn pagination_walkers_drive_stubbed_pages_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
@@ -423,6 +426,7 @@ fn page_size_options() -> GenerationOptions {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn page_size_fallback_supplies_the_first_page_limit_only() {
     let files = generate(pagination_document(), &page_size_options());

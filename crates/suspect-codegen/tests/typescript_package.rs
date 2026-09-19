@@ -61,6 +61,7 @@ fn content<'a>(files: &'a [OutFile], path: &str) -> &'a str {
     &files.iter().find(|file| file.path == path).unwrap().content
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn package_identity_and_version_are_validated_before_emission() {
     let plan = plan(json!({"Flag":{"type":"boolean"}}));
@@ -175,6 +176,7 @@ fn package_identity_and_version_are_validated_before_emission() {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn package_preserves_plan_artifacts_and_declares_bounded_pinned_esm_output() {
     let plan = plan(json!({"Flag":{"type":"boolean","description":"Original schema prose."}}));

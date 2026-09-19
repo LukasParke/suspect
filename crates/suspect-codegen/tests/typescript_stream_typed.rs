@@ -120,6 +120,7 @@ fn operations_source(files: &[suspect_codegen::OutFile]) -> String {
         .clone()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn discriminated_sse_operations_emit_typed_event_iterators() {
     let files = generate(stream_document());
@@ -208,6 +209,7 @@ fn discriminated_sse_operations_emit_typed_event_iterators() {
     assert!(transcribe.terminal.keep_final_usage);
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn control_operations_without_discrimination_keep_the_untyped_package() {
     let document = json!({
@@ -261,6 +263,7 @@ fn tool_available(name: &str) -> bool {
     Command::new(name).arg("--version").output().is_ok()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn typed_stream_events_compile_strictly_with_the_package() {
     if !tool_available("tsc") {
@@ -498,6 +501,7 @@ const client = {};
 }
 "#;
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn typed_stream_events_drive_stubbed_streams_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
@@ -548,6 +552,7 @@ fn typed_stream_events_drive_stubbed_streams_in_node() {
 
 /// The sdk defaults gate must not affect typed stream emission: it is
 /// conditional only on the compiled stream plan.
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn sdk_defaults_neither_enable_nor_disable_typed_stream_emission() {
     let with_defaults = GenerationOptions {

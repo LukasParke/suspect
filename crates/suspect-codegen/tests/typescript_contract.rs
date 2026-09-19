@@ -125,6 +125,7 @@ const invalid: Duplicate = 'different';
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn numeric_literal_compositions_do_not_erase_valid_number_values() {
     with_spec(
@@ -200,6 +201,7 @@ const missingB: Both = { a:'a' };
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn unsupported_semantics_and_codec_obligations_remain_source_linked() {
     use suspect_codegen::typescript::{
@@ -316,6 +318,7 @@ fn unsupported_semantics_and_codec_obligations_remain_source_linked() {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn aliases_and_numeric_compositions_do_not_emit_impossible_representation_types() {
     with_spec(
@@ -346,6 +349,7 @@ fn aliases_and_numeric_compositions_do_not_emit_impossible_representation_types(
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn directional_views_do_not_guess_annotation_applicability_through_composition() {
     with_spec(

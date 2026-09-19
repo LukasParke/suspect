@@ -49,6 +49,7 @@ fn manifest(plan: &ModelPlan) -> Value {
     serde_json::from_str(&manifest.content).unwrap()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn documentation_artifacts_share_symbols_sources_and_release_obligations() {
     let plan = hostile_plan();

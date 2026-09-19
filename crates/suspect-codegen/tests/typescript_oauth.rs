@@ -230,6 +230,7 @@ fn files_map(files: &[OutFile]) -> BTreeMap<String, String> {
         .collect()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn oauth_module_emits_exactly_for_executable_schemes() {
     let files = generate(oauth_document(), &oauth_options());
@@ -356,6 +357,7 @@ fn discovery_options() -> GenerationOptions {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn discovery_schemes_emit_the_discovery_engine_and_cache() {
     let files = generate(discovery_document(), &discovery_options());
@@ -406,6 +408,7 @@ fn tool_available(name: &str) -> bool {
     Command::new(name).arg("--version").output().is_ok()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn generated_oauth_module_compiles_strictly_with_the_package() {
     if !tool_available("tsc") {
@@ -446,6 +449,7 @@ fn generated_oauth_module_compiles_strictly_with_the_package() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn oauth_lifecycle_behaves_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
@@ -507,6 +511,7 @@ fn oauth_lifecycle_behaves_in_node() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn discovery_lifecycle_behaves_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
@@ -1136,6 +1141,7 @@ fn replay_options() -> GenerationOptions {
 /// The replaying credential wrapper is compiled only with an executable
 /// client-credentials flow, wraps exactly that provider, and compiles the
 /// stream-protection pointers of its scheme's operations.
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let files = generate(replay_document(), &replay_options());
@@ -1195,6 +1201,7 @@ fn replaying_credentials_emit_conditionally_with_stream_protection() {
     assert!(!plain_oauth.contains("noReplayRequirements"));
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn replay_lifecycle_behaves_in_node() {
     if !tool_available("tsc") || !tool_available("node") {

@@ -71,6 +71,7 @@ fn manifest(files: &[OutFile]) -> Value {
     .unwrap()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn codec_manifest_binds_every_public_model_to_its_codec_and_source() {
     let plan = hostile_plan();

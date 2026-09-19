@@ -80,6 +80,7 @@ fn tree() -> Arc<Contract> {
     )
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn v3_metadata_and_dynamic_ops_cannot_enter_older_or_mismatched_envelopes() {
     let program = compile(tree(), &[root("Strict")], Config::default());
@@ -265,12 +266,14 @@ fn native(label: &str, programs: &[OwnedProgram], cases: &Value, extra: &str) {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn source_driven_v3_executes_all_44_official_cases_from_closed_supplied_documents() {
     let (programs, cases) = official_vectors();
     native("official-", &programs, &cases, "");
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn native_v3_scope_identity_lookup_budgets_and_malformed_metadata_controls() {
     let mut programs = Vec::new();
@@ -944,6 +947,7 @@ fn physical_document_server_bases_preserve_redirect_provenance_overrides_and_enc
     installed("physical-servers-", &plan, PHYSICAL_TYPES, PHYSICAL_RUNTIME);
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn resource_selection_keeps_base_profiles_and_source_linked_refusals() {
     use suspect_codegen::typescript::{
@@ -1048,6 +1052,7 @@ for(const program of [p0,p1]){let calls=0;const result=program.validate(program.
     ));
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn resource_capture_uses_typed_context_graphs_and_keeps_physical_locations_separate() {
     use suspect_codegen::{
@@ -1138,6 +1143,7 @@ fn resource_capture_uses_typed_context_graphs_and_keeps_physical_locations_separ
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn v3_example_admission_retains_dynamic_invalidity_and_declared_source() {
     let mut document = sdk_document();

@@ -36,6 +36,7 @@ fn compile(schema: Value, config: Config) -> (OwnedProgram, SchemaId) {
     (compiled.program(), root)
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn v2_instructions_cannot_enter_v1_or_unknown_program_envelopes() {
     let (program, _) = compile(
@@ -212,6 +213,7 @@ fn native(label: &str, programs: &[OwnedProgram], cases: &Value, extra: &str) {
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn source_driven_v2_vectors_preserve_scope_failures_and_original_locations() {
     let (programs, cases) = source_vectors();
@@ -259,6 +261,7 @@ fn source_vectors() -> (Vec<OwnedProgram>, Value) {
     (programs, json!(cases))
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn scoped_work_identity_and_mutation_controls_are_native_failures_not_mismatches() {
     let schemas = [
@@ -447,6 +450,7 @@ fn load_document(document: &Value) -> Arc<Contract> {
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(&path).unwrap()).unwrap())
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn scoped_sdk_capture_tracks_checked_graphs_and_preserves_literal_instance_data() {
     use suspect_codegen::{
@@ -578,6 +582,7 @@ fn scoped_sdk_capture_tracks_checked_graphs_and_preserves_literal_instance_data(
     }
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn scoped_http_examples_keep_valid_declared_values_and_locate_invalid_ones() {
     use suspect_codegen::{

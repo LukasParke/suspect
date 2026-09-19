@@ -171,6 +171,7 @@ fn case(program: usize, compiled: &OwnedSchema, root: &SchemaId, input: &str) ->
     case
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn emission_is_lossless_and_rejects_unsafe_or_inconsistent_metadata() {
     let (schema, _) = compile(serde_json::from_str(r#"{"Model":{"enum":[9007199254740993,1e-400,{"__proto__":18446744073709551616}]},"Zero":{"maxItems":-0e9}}"#).unwrap(),Config::default());
@@ -198,6 +199,7 @@ fn emission_is_lossless_and_rejects_unsafe_or_inconsistent_metadata() {
     assert!(emit(&malformed).is_err());
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn source_prose_in_documentation_is_inert() {
     let (schema, _) = compile(

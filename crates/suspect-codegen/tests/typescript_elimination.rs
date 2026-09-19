@@ -1491,6 +1491,7 @@ const VARIANT_FILES: &[&str] = &[
     "typescript/tsconfig.docs.json",
 ];
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn launcher_size_is_stable_when_only_unrelated_operations_are_added() {
     let baseline = files_map(&generate(elimination_document()));

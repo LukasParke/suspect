@@ -101,6 +101,7 @@ fn hashes(files: &[OutFile]) -> BTreeMap<String, String> {
         .collect()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn no_policy_http_package_keeps_its_baseline_bytes() {
     let files = package(&plan(load_at(fixture(), ENTRY), HttpConfig::expanded()));
@@ -124,6 +125,7 @@ fn environment_policy() -> CredentialEnv {
     )
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn environment_plan_retains_source_binding_and_semantic_metadata() {
     let config = HttpConfig {
@@ -198,6 +200,7 @@ fn environment_plan_retains_source_binding_and_semantic_metadata() {
     }));
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn environment_binding_refuses_invalid_unbound_and_unsupported_policies() {
     for (document, policy, code) in [

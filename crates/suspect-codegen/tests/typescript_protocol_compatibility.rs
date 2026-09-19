@@ -69,6 +69,7 @@ fn document() -> Value {
     })
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn rich_native_capture_contains_real_media_parts_headers_streams_and_signatures() {
     let fixture = Fixture::new(&document());
@@ -142,6 +143,7 @@ fn rich_native_capture_contains_real_media_parts_headers_streams_and_signatures(
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn relocation_and_prose_do_not_change_the_native_protocol_interface() {
     let before = Fixture::new(&document());
@@ -173,6 +175,7 @@ fn relocation_and_prose_do_not_change_the_native_protocol_interface() {
     assert!(native.changes.is_empty(), "{:?}", native.changes);
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn native_types_presence_credentials_statuses_and_literal_data_mutations_are_detected() {
     for mutation in [

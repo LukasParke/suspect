@@ -76,6 +76,7 @@ fn assert_conflict(schemas: Value, name: &str, input: Value, location: &str) {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn overlapping_properties_detect_safe_integer_and_exact_decimal_conflicts() {
     for other in [
@@ -103,6 +104,7 @@ fn overlapping_properties_detect_safe_integer_and_exact_decimal_conflicts() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn arrays_maps_and_named_fields_against_typed_extras_share_the_guard() {
     assert_conflict(
@@ -143,6 +145,7 @@ fn arrays_maps_and_named_fields_against_typed_extras_share_the_guard() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn reference_siblings_and_recursive_container_pairs_are_checked() {
     assert_conflict(
@@ -166,6 +169,7 @@ fn reference_siblings_and_recursive_container_pairs_are_checked() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn optional_discriminators_do_not_hide_an_overlap_without_the_discriminator() {
     assert_conflict(
@@ -179,6 +183,7 @@ fn optional_discriminators_do_not_hide_an_overlap_without_the_discriminator() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn conditional_numeric_alternatives_remain_explicitly_unsupported_when_intersected() {
     assert_conflict(
@@ -232,6 +237,7 @@ fn compatible_schemas() -> Value {
     })
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn disjoint_compatible_passthrough_and_empty_overlap_cases_remain_admitted() {
     let (_directory, contract) = fixture(compatible_schemas());
