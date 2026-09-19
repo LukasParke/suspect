@@ -150,6 +150,7 @@ fn paths(files: &[suspect_codegen::OutFile]) -> Vec<&str> {
         .collect::<Vec<_>>()
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     let files = generate(document());
@@ -238,6 +239,7 @@ const TSC_ARGS: [&str; 8] = [
     "--moduleResolution",
 ];
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn generated_incoming_module_compiles_strictly_with_the_package() {
     if !tool_available("tsc") {
@@ -267,6 +269,7 @@ fn generated_incoming_module_compiles_strictly_with_the_package() {
     );
 }
 
+#[ignore = "requires npm/tsc and node on the test host"]
 #[test]
 fn fake_webhook_posts_drive_the_decoder_and_constructor_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
