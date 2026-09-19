@@ -15,6 +15,10 @@ pub struct DialectPolicy {
     /// `nullable: false`, loses) null. Mirrors the
     /// `CompatibilityProfile::Oas30NullableIn31V1` generation option.
     pub oas30_nullable_in_31: bool,
+    /// Route schemas with `allOf` intersections through the scoped (checked)
+    /// model/codec path. Mirrors the `CompatibilityProfile::AllOfScopedModeV1`
+    /// generation option.
+    pub all_of_scoped: bool,
 }
 
 impl DialectPolicy {
@@ -25,8 +29,14 @@ impl DialectPolicy {
     {
         let mut policy = Self::default();
         for profile in profiles {
-            if profile == crate::http_protocol::CompatibilityProfile::Oas30NullableIn31V1 {
-                policy.oas30_nullable_in_31 = true;
+            match profile {
+                crate::http_protocol::CompatibilityProfile::Oas30NullableIn31V1 => {
+                    policy.oas30_nullable_in_31 = true;
+                }
+                crate::http_protocol::CompatibilityProfile::AllOfScopedModeV1 => {
+                    policy.all_of_scoped = true;
+                }
+                _ => {}
             }
         }
         policy

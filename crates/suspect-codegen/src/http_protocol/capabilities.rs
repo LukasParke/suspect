@@ -146,6 +146,12 @@ pub enum CompatibilityProfile {
     /// strict admission, and non-stream media are unaffected.
     #[serde(rename = "schemaless-stream-events-v1")]
     SchemalessStreamEventsV1,
+    /// Route schemas with `allOf` intersections through the scoped (checked)
+    /// model/codec path instead of the unscoped projection. Required for
+    /// contracts that compose object carriers through `allOf` where the
+    /// unscoped path would refuse them.
+    #[serde(rename = "all-of-scoped-mode-v1")]
+    AllOfScopedModeV1,
 }
 
 impl CompatibilityProfile {
@@ -155,6 +161,7 @@ impl CompatibilityProfile {
         Self::Oas30NullableIn31V1,
         Self::ColonPathParametersV1,
         Self::SchemalessStreamEventsV1,
+        Self::AllOfScopedModeV1,
     ];
 
     #[must_use]
@@ -164,6 +171,7 @@ impl CompatibilityProfile {
             Self::Oas30NullableIn31V1 => "oas30-nullable-in-3.1-v1",
             Self::ColonPathParametersV1 => "colon-path-parameters-v1",
             Self::SchemalessStreamEventsV1 => "schemaless-stream-events-v1",
+            Self::AllOfScopedModeV1 => "all-of-scoped-mode-v1",
         }
     }
 }
