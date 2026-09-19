@@ -131,6 +131,7 @@ fn sorted(files: &[OutFile]) -> std::collections::BTreeSet<&str> {
     files.iter().map(|file| file.path.as_str()).collect()
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn pagination_class_emits_only_under_sdk_defaults() {
     let files = generate(&configured());
@@ -193,6 +194,7 @@ fn pagination_class_emits_only_under_sdk_defaults() {
 /// then stop on `false` even when the page still returned items. The runtime
 /// behavior of the identical stop rule is verified by the PHP suite and by the
 /// stubbed probe above for the shared rules.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn manual_has_more_mapping_emits_the_false_stop_rule() {
     let defaults: SdkDefaults = serde_json::from_value(json!({
@@ -227,6 +229,7 @@ fn manual_has_more_mapping_emits_the_false_stop_rule() {
 /// A detected cursor walk without a recognized items pointer (scanKeys) still
 /// emits the page walk and the next-input builder; only the flattening item
 /// walk is omitted.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn cursor_without_items_emits_the_page_walk_only() {
     let files = generate(&configured());
@@ -243,6 +246,7 @@ fn cursor_without_items_emits_the_page_walk_only() {
     assert!(!source.contains("scanKeysItems"), "{source}");
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn policy_without_paginated_operations_emits_nothing_new() {
     let off = GenerationOptions {
@@ -327,6 +331,7 @@ fn compiled_package(root: &Path) -> PathBuf {
     classes
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn generated_pagination_compiles_strictly_with_the_package() {
     let root = tempfile::tempdir().unwrap();
@@ -334,6 +339,7 @@ fn generated_pagination_compiles_strictly_with_the_package() {
     compiled_package(root.path());
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn pagination_walks_drive_stubbed_pages_in_java() {
     let root = tempfile::tempdir().unwrap();
