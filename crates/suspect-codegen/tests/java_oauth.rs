@@ -373,6 +373,7 @@ fn compiled_package(root: &Path) -> PathBuf {
     classes
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn generated_oauth_compiles_strictly_with_the_package() {
     let root = tempfile::tempdir().unwrap();
