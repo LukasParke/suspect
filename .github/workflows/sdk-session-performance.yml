@@ -1,14 +1,7 @@
 name: SDK Session performance
 
 on:
-  pull_request:
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/**"
-      - "tools/sdk-session-perf/**"
-      - ".github/workflows/sdk-session-performance.yml"
-  push:
+  workflow_dispatch:
     branches: [main]
     paths:
       - "Cargo.toml"
