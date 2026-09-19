@@ -139,7 +139,7 @@ fn no_policy_emission_is_byte_stable() {
     let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&hashes).unwrap()));
     assert_eq!(
         hash,
-        "e5e06b4f0e74a5a743c93ee74b4b3ed85a6699395c4cb4d47c233a818dec3eeb"
+        "19b5a8767a9eb846adfbf550e290973efb8232c58edb7ee097ce004b46a7a25f"
     );
     assert!(
         !files
