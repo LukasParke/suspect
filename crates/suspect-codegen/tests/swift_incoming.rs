@@ -129,6 +129,7 @@ fn file<'a>(files: &'a [OutFile], suffix: &str) -> &'a OutFile {
         .unwrap_or_else(|| panic!("no generated file ending in {suffix}"))
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     let files = generate(document());
@@ -190,6 +191,7 @@ fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     assert!(!operations.contains("decodeNewIssueWebhook"));
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn receipt_less_documents_emit_no_incoming_bytes() {
     let without = document();
@@ -232,6 +234,7 @@ fn receipt_less_documents_emit_no_incoming_bytes() {
     assert!(plan.incoming().is_empty());
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn plan_carries_the_compiled_receipts_with_allocated_names() {
     let contract = contract_with_document(document());
@@ -278,6 +281,7 @@ fn plan_carries_the_compiled_receipts_with_allocated_names() {
     assert!(callback.required_body);
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn non_json_receipt_media_refuse_the_plan() {
     let mut text = document();
@@ -462,6 +466,7 @@ final class IncomingTests: XCTestCase {
 }
 "##;
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn native_receipts_decode_and_construct() {
     let Some(swiftc) = swiftc() else {

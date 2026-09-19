@@ -117,6 +117,7 @@ fn pagination_file(files: &[OutFile]) -> &OutFile {
         .expect("generated Pagination.swift")
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn configured_emission_adds_only_pagination_swift() {
     let configured = generate(&configured_options());
@@ -190,6 +191,7 @@ fn configured_emission_adds_only_pagination_swift() {
 
 /// A manual mapping may declare a has-more indicator; the emitted walk must
 /// then stop on `false` even when the page still returned items.
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
     let defaults: SdkDefaults = serde_json::from_value(json!({
@@ -235,6 +237,7 @@ fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
     );
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn policy_without_paginated_operations_emits_nothing_new() {
     let off = GenerationOptions {
@@ -255,6 +258,7 @@ fn policy_without_paginated_operations_emits_nothing_new() {
     }
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn plan_carries_the_pagination_outcome_only_when_configured() {
     let contract = contract();
@@ -598,6 +602,7 @@ fn swift_command(root: &Path, action: &str) -> Command {
     command
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn native_walks_count_requests_and_preserve_input() {
     let Some(swiftc) = swiftc() else {

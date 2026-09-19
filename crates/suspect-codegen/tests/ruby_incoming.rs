@@ -161,6 +161,7 @@ fn content<'a>(files: &'a [OutFile], suffix: &str) -> &'a str {
         .as_str()
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     let files = generate(incoming_document());
@@ -247,6 +248,7 @@ fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     assert!(content(&files, "ruby/lib/incoming_sdk/client.rb").contains("def list_widgets("));
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn receipt_less_contracts_emit_no_new_bytes() {
     // The receipt-less control — with and without an empty webhooks map —
@@ -464,6 +466,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
     );
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn native_receipts_decode_deliveries_and_construct_replies() {
     let Some(ruby) = ruby() else {

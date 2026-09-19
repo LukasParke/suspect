@@ -137,6 +137,7 @@ fn sorted(files: &[OutFile]) -> std::collections::BTreeSet<&str> {
     files.iter().map(|file| file.path.as_str()).collect()
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn discriminated_sse_operations_emit_typed_event_generators() {
     let files = generate(&GenerationOptions::default());
@@ -217,6 +218,7 @@ fn discriminated_sse_operations_emit_typed_event_generators() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn control_operations_without_discrimination_keep_the_untyped_package() {
     let document = json!({
@@ -303,6 +305,7 @@ fn plan() -> suspect_codegen::php_sdk::Plan {
 
 /// The sdk defaults gate must not affect typed stream emission: it is
 /// conditional only on the compiled stream plan.
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn sdk_defaults_neither_enable_nor_disable_typed_stream_emission() {
     let with_defaults = generate(&configured());
@@ -332,6 +335,7 @@ fn php() -> Option<PathBuf> {
         .then_some(candidate)
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
@@ -362,6 +366,7 @@ fn emitted_php_files_lint() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn typed_stream_events_drive_stubbed_streams_in_php() {
     let Some(php) = php() else {

@@ -153,6 +153,7 @@ fn sorted(files: &mut [OutFile]) {
     files.sort_by(|left, right| left.path.cmp(&right.path));
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn discriminated_sse_operations_emit_typed_event_pagers() {
     let files = generate(stream_document());
@@ -260,6 +261,7 @@ fn discriminated_sse_operations_emit_typed_event_pagers() {
     }
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn control_operations_without_discrimination_emit_nothing() {
     let files = generate(untyped_document());
@@ -284,6 +286,7 @@ fn control_operations_without_discrimination_emit_nothing() {
 
 /// SDK defaults neither enable nor disable typed stream emission: it is
 /// conditional only on the compiled stream plan.
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn sdk_defaults_neither_enable_nor_disable_typed_stream_emission() {
     let with_defaults = GenerationOptions {
@@ -314,6 +317,7 @@ fn sdk_defaults_neither_enable_nor_disable_typed_stream_emission() {
     }
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn plan_carries_the_compiled_stream_semantics() {
     let contract = contract_with_document(stream_document());
@@ -654,6 +658,7 @@ int main() {
 }
 "#;
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn native_typed_events_drive_scripted_streams() {
     let Some((cmake, cxx)) = toolchain() else {

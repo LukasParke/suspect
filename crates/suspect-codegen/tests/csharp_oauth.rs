@@ -197,6 +197,7 @@ fn files_map(files: &[OutFile]) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn oauth_module_emits_exactly_for_executable_schemes() {
     let files = generate(oauth_document(), &oauth_options());
@@ -307,6 +308,7 @@ fn oauth_module_emits_exactly_for_executable_schemes() {
     assert!(!implicit_files.contains_key("csharp/src/OAuth.g.cs"));
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn plan_carries_the_oauth_plan_only_when_configured() {
     use suspect_codegen::csharp_sdk;
@@ -657,6 +659,7 @@ fn discovery_options() -> GenerationOptions {
     }
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn discovery_schemes_emit_the_discovery_engine_and_per_provider_cache() {
     let configured = files_map(&generate(discovery_document(), &discovery_options()));
@@ -973,6 +976,7 @@ fn discovery_run(
     output
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn native_discovery_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
@@ -1167,6 +1171,7 @@ fn replay_options() -> GenerationOptions {
 /// stream-protection pointers of its scheme's operations in the full
 /// document-and-pointer form the generated runtime reads back from the attach
 /// context.
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let files = generate(replay_document(), &replay_options());
@@ -1521,6 +1526,7 @@ sealed class ReplayStub : HttpMessageHandler
 }
 "#;
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn replay_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
@@ -1647,6 +1653,7 @@ fn replay_lifecycle_drives_a_stubbed_http_handler() {
     );
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn native_oauth_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {

@@ -174,6 +174,7 @@ fn file<'a>(files: &'a [OutFile], suffix: &str) -> &'a str {
         .as_str()
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn configured_emission_adds_only_the_oauth_header() {
     let mut configured = generate(&oauth_options());
@@ -257,6 +258,7 @@ fn configured_emission_adds_only_the_oauth_header() {
     assert!(!oauth.contains("client-secret-value"));
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn policy_without_usable_schemes_or_off_mode_is_byte_identical() {
     for options in [&off_options()] {
@@ -298,6 +300,7 @@ fn policy_without_usable_schemes_or_off_mode_is_byte_identical() {
     }
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn plan_carries_the_compiled_selection_only_when_configured() {
     let contract = contract_with_document(oauth_document(), ENTRY);
@@ -913,6 +916,7 @@ fn generate_named(document: Value, options: &GenerationOptions) -> Vec<OutFile> 
     generate_document(document, options)
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn discovery_schemes_emit_the_discovery_engine_and_precedence() {
     let configured = generate_named(discovery_document(), &discovery_options());
@@ -971,6 +975,7 @@ fn discovery_schemes_emit_the_discovery_engine_and_precedence() {
     );
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn native_discovery_lifecycle_resolves_caches_single_flights_and_retries() {
     let Some(cmake) = tool("SUSPECT_CPP_CMAKE", "cmake") else {
@@ -1339,6 +1344,7 @@ fn checked(command: &mut Command, retained: &std::path::Path) {
 
 /// Native behavior of the generated lifecycle, when the C++ toolchain is
 /// available. Degrades to the static assertions above otherwise.
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn native_lifecycle_acquires_refreshes_polls_and_revokes() {
     let Some(cmake) = tool("SUSPECT_CPP_CMAKE", "cmake") else {
@@ -1506,6 +1512,7 @@ fn code_only_options() -> GenerationOptions {
 /// The replaying credential wrapper is compiled only with an executable
 /// client-credentials flow, reserves its two type names only then, and
 /// compiles the stream-protected operations of its scheme.
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let configured = generate_document(replay_document(), &replay_options());
@@ -1985,6 +1992,7 @@ int main() {
 
 /// Native behavior of the replaying credential wrapper, when the C++ toolchain
 /// is available. Degrades to the static assertions above otherwise.
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn native_replay_lifecycle_over_a_stubbed_transport() {
     let Some(cmake) = tool("SUSPECT_CPP_CMAKE", "cmake") else {

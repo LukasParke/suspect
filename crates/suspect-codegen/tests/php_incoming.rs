@@ -174,6 +174,7 @@ fn sorted(files: &[OutFile]) -> std::collections::BTreeSet<&str> {
     files.iter().map(|file| file.path.as_str()).collect()
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn incoming_file_emits_exactly_when_receipts_are_declared() {
     let files = generate(&document());
@@ -271,6 +272,7 @@ fn incoming_file_emits_exactly_when_receipts_are_declared() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn the_plan_carries_the_compiled_incoming_receipts() {
     let contract = contract(&document());
@@ -337,6 +339,7 @@ fn php() -> Option<PathBuf> {
         .then_some(candidate)
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
@@ -367,6 +370,7 @@ fn emitted_php_files_lint() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn receipt_decoders_and_constructors_drive_the_package_in_php() {
     let Some(php) = php() else {

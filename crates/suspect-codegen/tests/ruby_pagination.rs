@@ -121,6 +121,7 @@ fn content<'a>(files: &'a [OutFile], suffix: &str) -> &'a str {
         .as_str()
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn configured_emission_extends_only_the_generated_client_and_signatures() {
     let configured = generate(&configured_options());
@@ -209,6 +210,7 @@ fn configured_emission_extends_only_the_generated_client_and_signatures() {
 
 /// A manual mapping may declare a has-more indicator; the emitted walk must
 /// then stop on `false` even when the page still returned items.
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
     let defaults: SdkDefaults = serde_json::from_value(json!({
@@ -245,6 +247,7 @@ fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
     );
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn policy_without_paginated_operations_emits_nothing_new() {
     let off = GenerationOptions {
@@ -265,6 +268,7 @@ fn policy_without_paginated_operations_emits_nothing_new() {
     }
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn plan_carries_the_pagination_outcome_only_when_configured() {
     let contract = contract();
@@ -509,6 +513,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
     );
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn native_walks_count_requests_and_preserve_input() {
     let Some(ruby) = ruby() else {

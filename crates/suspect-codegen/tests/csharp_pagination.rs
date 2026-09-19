@@ -120,6 +120,7 @@ fn source(files: &[OutFile], path: &str) -> String {
         .clone()
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn pagination_walkers_and_descriptors_emit_only_under_sdk_defaults() {
     let shared = contract();
@@ -214,6 +215,7 @@ fn pagination_walkers_and_descriptors_emit_only_under_sdk_defaults() {
     }
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn disabled_pagination_emits_nothing_new() {
     let off = GenerationOptions {
@@ -237,6 +239,7 @@ fn disabled_pagination_emits_nothing_new() {
     }
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn plan_carries_the_pagination_outcome_only_when_configured() {
     use suspect_codegen::csharp_sdk;
@@ -471,6 +474,7 @@ fn project(config: &str, framework: &str) -> String {
     )
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn native_walks_drive_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {

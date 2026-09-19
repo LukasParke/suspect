@@ -276,6 +276,7 @@ fn content<'a>(files: &'a [OutFile], suffix: &str) -> &'a str {
         .as_str()
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn configured_policy_emits_only_the_oauth_module_and_entry_require() {
     let configured = generate(&service_document(), &configured_options());
@@ -382,6 +383,7 @@ fn configured_policy_emits_only_the_oauth_module_and_entry_require() {
     }
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn interactive_flows_compile_pkce_and_device_polling() {
     let files = generate(&interactive_document(), &interactive_options());
@@ -420,6 +422,7 @@ fn interactive_flows_compile_pkce_and_device_polling() {
     }
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn discovery_schemes_emit_the_discovery_engine_and_byte_identical_plain_output() {
     let files = generate(&discovery_document(), &discovery_options());
@@ -467,6 +470,7 @@ fn discovery_schemes_emit_the_discovery_engine_and_byte_identical_plain_output()
     assert!(!plain_oauth.contains("DISCOVERY_MAX_BYTES"));
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn deprecated_only_schemes_and_unconfigured_policies_emit_nothing() {
     let deprecated = generate(&deprecated_only_document(), &deprecated_options());
@@ -510,6 +514,7 @@ fn deprecated_only_schemes_and_unconfigured_policies_emit_nothing() {
     );
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn plan_carries_the_oauth_outcome_only_when_usable() {
     let service_contract = contract(&service_document());
@@ -1072,6 +1077,7 @@ fn code_only_options() -> GenerationOptions {
 /// The replaying credential wrapper is compiled only with an executable
 /// client-credentials flow, wraps exactly that provider, and compiles the
 /// stream-protection pointers of its scheme's operations.
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let files = generate(&replay_document(), &replay_options());
@@ -1340,6 +1346,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
     );
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn native_lifecycle_counts_requests_and_protects_secrets() {
     let Some(ruby) = ruby() else {
@@ -1377,6 +1384,7 @@ fn native_lifecycle_counts_requests_and_protects_secrets() {
     eprintln!("ruby_oauth: native Ruby behavioral gate passed");
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn native_discovery_lifecycle_resolves_compiled_precedence() {
     let Some(ruby) = ruby() else {
@@ -1415,6 +1423,7 @@ fn native_discovery_lifecycle_resolves_compiled_precedence() {
     eprintln!("ruby_oauth: native Ruby discovery behavioral gate passed");
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn native_replay_lifecycle_budgets_one_refresh_and_one_replay() {
     let Some(ruby) = ruby() else {

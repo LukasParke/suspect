@@ -128,6 +128,7 @@ fn sorted(files: &mut [OutFile]) {
     files.sort_by(|left, right| left.path.cmp(&right.path));
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn configured_emission_adds_no_files_and_the_client_gains_the_walkers() {
     let mut configured = generate(&configured_options());
@@ -206,6 +207,7 @@ fn configured_emission_adds_no_files_and_the_client_gains_the_walkers() {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn policy_without_paginated_operations_leaves_everything_byte_identical() {
     let off = GenerationOptions {
@@ -225,6 +227,7 @@ fn policy_without_paginated_operations_leaves_everything_byte_identical() {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn plan_carries_the_compiled_selection_only_when_configured() {
     let contract = contract();
@@ -407,6 +410,7 @@ fn manual_options() -> GenerationOptions {
 
 /// Every supported walker template emits through the typed lowering, and the
 /// emitted package compiles when a JDK/Maven toolchain is available.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn manual_templates_emit_for_every_supported_shape() {
     let files = generate_document(manual_document(), &manual_options());
@@ -462,6 +466,7 @@ fn manual_templates_emit_for_every_supported_shape() {
 }
 
 /// Native compile of the emitted package, when a JDK and Maven are available.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn emitted_package_compiles_with_a_jdk_toolchain() {
     let Some(java_home) = java_home() else {

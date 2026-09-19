@@ -286,6 +286,7 @@ fn oauth_file(files: &[OutFile]) -> &OutFile {
         .expect("generated OAuth.swift")
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn configured_policy_emits_only_oauth_swift() {
     let configured = generate(&service_document(), &configured_options());
@@ -364,6 +365,7 @@ fn configured_policy_emits_only_oauth_swift() {
     );
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn deprecated_only_schemes_and_unconfigured_policies_emit_nothing() {
     let deprecated = generate(&deprecated_only_document(), &deprecated_options());
@@ -403,6 +405,7 @@ fn deprecated_only_schemes_and_unconfigured_policies_emit_nothing() {
     );
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn interactive_flows_compile_pkce_and_device_polling() {
     let files = generate(&interactive_document(), &interactive_options());
@@ -445,6 +448,7 @@ fn interactive_flows_compile_pkce_and_device_polling() {
     }
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn plan_carries_the_oauth_outcome_only_when_usable() {
     let service_contract = contract(&service_document());
@@ -516,6 +520,7 @@ fn plan_carries_the_oauth_outcome_only_when_usable() {
     );
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn discovery_emits_only_when_a_scheme_compiles_a_discovery_url() {
     let discovered = generate(&discovery_document(), &discovery_options());
@@ -570,6 +575,7 @@ fn discovery_emits_only_when_a_scheme_compiles_a_discovery_url() {
     }
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn plan_carries_the_compiled_discovery_urls() {
     let discovery_contract = contract(&discovery_document());
@@ -1056,6 +1062,7 @@ fn code_only_options() -> GenerationOptions {
 /// The replaying credential wrapper is compiled only with an executable
 /// client-credentials flow, wraps exactly that provider, and compiles the
 /// stream-protection pointers of its scheme's operations.
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let files = generate(&replay_document(), &replay_options());
@@ -1328,6 +1335,7 @@ fn swift_command(root: &Path, action: &str) -> Command {
     command
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn native_lifecycle_counts_requests_and_protects_secrets() {
     let Some(swiftc) = swiftc() else {
@@ -1628,6 +1636,7 @@ final class DiscoveryTests: XCTestCase {
 }
 "##;
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn native_discovery_resolves_caches_and_validates_documents() {
     let Some(swiftc) = swiftc() else {
@@ -1688,6 +1697,7 @@ fn native_discovery_resolves_caches_and_validates_documents() {
     );
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn native_replay_lifecycle_budgets_one_refresh_and_one_replay() {
     let Some(swiftc) = swiftc() else {

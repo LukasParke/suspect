@@ -132,6 +132,7 @@ fn sorted(files: &[OutFile]) -> std::collections::BTreeSet<&str> {
     files.iter().map(|file| file.path.as_str()).collect()
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn pagination_methods_emit_only_under_sdk_defaults() {
     let files = generate(&configured());
@@ -182,6 +183,7 @@ fn pagination_methods_emit_only_under_sdk_defaults() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn policy_without_paginated_operations_emits_nothing_new() {
     let off = GenerationOptions {
@@ -204,6 +206,7 @@ fn policy_without_paginated_operations_emits_nothing_new() {
 
 /// A manual mapping may declare a has-more indicator; the emitted walk must
 /// then stop on `false` even when the page still returned items.
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
     let defaults: SdkDefaults = serde_json::from_value(json!({
@@ -299,6 +302,7 @@ echo 'has-more behavior verified', PHP_EOL;
 /// A detected cursor walk without a recognized items pointer (scanKeys) still
 /// emits the page walk and the next-page builder; only the flattening
 /// generator is omitted.
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn cursor_without_items_emits_the_page_walk_only() {
     let files = generate(&configured());
@@ -329,6 +333,7 @@ fn php() -> Option<PathBuf> {
         .then_some(candidate)
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
@@ -359,6 +364,7 @@ fn emitted_php_files_lint() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn pagination_walks_drive_stubbed_pages_in_php() {
     let Some(php) = php() else {

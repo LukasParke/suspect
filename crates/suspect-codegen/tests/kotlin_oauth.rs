@@ -175,6 +175,7 @@ fn file<'a>(files: &'a [OutFile], suffix: &str) -> &'a str {
         .as_str()
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn configured_emission_adds_only_oauth_kt_and_the_client_accessor() {
     let mut configured = generate(&oauth_options());
@@ -282,6 +283,7 @@ fn configured_emission_adds_only_oauth_kt_and_the_client_accessor() {
     assert!(!oauth.contains("client-secret-value"));
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn policy_without_usable_schemes_or_off_mode_is_byte_identical() {
     let mut disabled = generate(&off_options());
@@ -321,6 +323,7 @@ fn policy_without_usable_schemes_or_off_mode_is_byte_identical() {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn plan_carries_the_compiled_selection_only_when_configured() {
     let contract = contract_with_document(oauth_document(), ENTRY);
@@ -787,6 +790,7 @@ fn discovery_options() -> GenerationOptions {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn discovery_emission_is_conditional_on_a_compiled_discovery_url() {
     let mut configured = generate_document(discovery_document(), &discovery_options());
@@ -852,6 +856,7 @@ fn discovery_emission_is_conditional_on_a_compiled_discovery_url() {
 /// behaves against a scripted transport: the discovered token endpoint is
 /// used, cached per instance, single-flighted, the issuer rule is enforced,
 /// and a failed fetch is retried on the next call.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn native_discovery_resolves_caches_single_flights_and_retries() {
     let Some((java_home, maven)) = toolchain() else {
@@ -1137,6 +1142,7 @@ fn maven() -> Option<std::path::PathBuf> {
 }
 
 /// Native compile of the emitted package, when a JDK and Maven are available.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn emitted_package_compiles_with_a_jdk_toolchain() {
     let Some(java_home) = java_home() else {
@@ -1166,6 +1172,7 @@ fn emitted_package_compiles_with_a_jdk_toolchain() {
 
 /// The emitted package compiles and the generated lifecycle behaves against a
 /// scripted transport, when a JDK and Maven are available.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn native_lifecycle_acquires_refreshes_polls_and_revokes() {
     let Some(java_home) = java_home() else {
@@ -1332,6 +1339,7 @@ fn code_only_options() -> GenerationOptions {
 /// The replaying credential wrapper is compiled only with an executable
 /// client-credentials flow, wraps exactly that provider, and compiles the
 /// stream-protected operations of its scheme's operations.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let configured = generate_document(replay_document(), &replay_options());
@@ -1711,6 +1719,7 @@ fun main() {
 
 /// The native compile and behavioral-probe gates for the replaying credential
 /// wrapper, when a JDK and Maven are available.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn native_replay_lifecycle_over_a_stubbed_transport() {
     let Some(java_home) = java_home() else {

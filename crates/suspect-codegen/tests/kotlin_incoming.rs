@@ -163,6 +163,7 @@ fn file<'a>(files: &'a [OutFile], suffix: &str) -> &'a str {
         .as_str()
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     let configured = generate(incoming_document());
@@ -301,6 +302,7 @@ fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn plan_carries_the_compiled_incoming_receipts_only_when_declared() {
     let contract = contract_with_document(incoming_document(), ENTRY);
@@ -415,6 +417,7 @@ fn maven() -> Option<std::path::PathBuf> {
 }
 
 /// Native compile of the emitted package, when a JDK and Maven are available.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn generated_incoming_module_compiles_with_the_package() {
     let Some(java_home) = java_home() else {
@@ -564,6 +567,7 @@ fun main() {
 /// Native behavioral verification of the emitted receipt helpers: decode a
 /// valid fake webhook POST, refuse a missing required header, refuse an
 /// invalid payload, and construct the declared replies.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn receipts_drive_the_decoder_and_constructor() {
     let Some(java_home) = java_home() else {

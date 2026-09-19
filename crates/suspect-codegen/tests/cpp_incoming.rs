@@ -158,6 +158,7 @@ fn sorted(files: &mut [OutFile]) {
     files.sort_by(|left, right| left.path.cmp(&right.path));
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn incoming_receipts_emit_the_helpers_header() {
     let files = generate();
@@ -226,6 +227,7 @@ fn incoming_receipts_emit_the_helpers_header() {
     }
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn receipt_less_contracts_emit_nothing_and_stay_byte_identical() {
     let mut without = document();
@@ -274,6 +276,7 @@ fn receipt_less_contracts_emit_nothing_and_stay_byte_identical() {
     }
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn plan_carries_the_compiled_receipts() {
     let contract = contract_with_document(document());
@@ -570,6 +573,7 @@ int main() {
 
 /// Native behavior of the generated receipt helpers, when the C++ toolchain
 /// is available. Degrades to the static assertions above otherwise.
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn native_incoming_receipts_decode_and_construct() {
     let Some((cmake, cxx)) = toolchain() else {

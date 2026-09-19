@@ -124,6 +124,7 @@ fn sorted(files: &mut [OutFile]) {
     files.sort_by(|left, right| left.path.cmp(&right.path));
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn configured_emission_adds_only_the_pagination_header() {
     let mut configured = generate(&configured_options());
@@ -217,6 +218,7 @@ fn configured_emission_adds_only_the_pagination_header() {
     }
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn policy_without_paginated_operations_emits_nothing_new() {
     let off = GenerationOptions {
@@ -236,6 +238,7 @@ fn policy_without_paginated_operations_emits_nothing_new() {
     }
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn plan_carries_the_compiled_selection_only_when_configured() {
     let contract = contract();
@@ -614,6 +617,7 @@ fn manual_options() -> GenerationOptions {
 
 /// Every supported walker template emits through the typed lowering, and the
 /// generated header typechecks inside a compiled consumer package.
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn manual_templates_emit_for_every_supported_shape_and_compile() {
     let files = generate_document(manual_document(), &manual_options());
@@ -738,6 +742,7 @@ fn checked(command: &mut Command, retained: &std::path::Path) {
     );
 }
 
+#[ignore = "requires cmake and a C++ toolchain on the test host"]
 #[test]
 fn native_walks_count_requests_and_preserve_input() {
     let Some(cmake) = tool("SUSPECT_CPP_CMAKE", "cmake") else {

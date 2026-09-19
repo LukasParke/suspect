@@ -117,6 +117,7 @@ fn file<'a>(files: &'a [OutFile], suffix: &str) -> &'a OutFile {
         .unwrap_or_else(|| panic!("no generated file ending in {suffix}"))
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn discriminated_sse_operations_emit_typed_event_sequences() {
     let files = generate(stream_document());
@@ -172,6 +173,7 @@ fn discriminated_sse_operations_emit_typed_event_sequences() {
     assert!(!client.contains("streamChatEvents"));
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn control_operations_without_discrimination_keep_the_untyped_package() {
     let document = json!({
@@ -225,6 +227,7 @@ fn control_operations_without_discrimination_keep_the_untyped_package() {
     assert!(events.operations.is_empty());
 }
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn plan_carries_the_compiled_stream_semantics_and_emittable_operations() {
     let contract = contract_with_document(stream_document());
@@ -551,6 +554,7 @@ final class TypedStreamTests: XCTestCase {
 }
 "##;
 
+#[ignore = "requires the Swift compiler on the test host"]
 #[test]
 fn native_typed_events_drive_stubbed_streams() {
     let Some(swiftc) = swiftc() else {

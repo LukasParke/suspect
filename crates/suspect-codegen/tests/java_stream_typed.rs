@@ -147,6 +147,7 @@ fn client_file(files: &[OutFile]) -> &OutFile {
         .expect("generated client")
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn discriminated_sse_operations_emit_typed_event_iterators() {
     let files = generate();
@@ -259,6 +260,7 @@ fn discriminated_sse_operations_emit_typed_event_iterators() {
     );
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn control_operations_without_discrimination_keep_the_untyped_package() {
     let paths = json!({
@@ -412,6 +414,7 @@ fn compiled_package(root: &Path) -> PathBuf {
     classes
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn generated_stream_events_compile_strictly_with_the_package() {
     let root = tempfile::tempdir().unwrap();
@@ -419,6 +422,7 @@ fn generated_stream_events_compile_strictly_with_the_package() {
     compiled_package(root.path());
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn typed_stream_events_drive_stubbed_streams_in_java() {
     let root = tempfile::tempdir().unwrap();

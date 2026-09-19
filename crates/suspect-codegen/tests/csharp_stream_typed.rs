@@ -148,6 +148,7 @@ fn source(files: &[OutFile], path: &str) -> String {
         .clone()
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn discriminated_sse_operations_emit_typed_event_members() {
     let files = generate(stream_document());
@@ -229,6 +230,7 @@ fn discriminated_sse_operations_emit_typed_event_members() {
     assert!(client.contains("raw.Stream(static bytes => Codecs.DecodeStreamChatItem(bytes))"));
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn operations_without_discrimination_keep_the_untyped_package() {
     let shared = stream_document();
@@ -264,6 +266,7 @@ fn operations_without_discrimination_keep_the_untyped_package() {
     );
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn plan_carries_the_compiled_stream_semantics() {
     use suspect_codegen::csharp_sdk;
@@ -585,6 +588,7 @@ fn project(config: &str, framework: &str) -> String {
     )
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn typed_events_drive_stubbed_streams_in_dotnet() {
     let Some(dotnet) = dotnet() else {

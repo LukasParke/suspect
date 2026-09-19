@@ -236,6 +236,7 @@ fn sorted(files: &[OutFile]) -> std::collections::BTreeSet<&str> {
     files.iter().map(|file| file.path.as_str()).collect()
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn oauth_file_emits_only_under_a_usable_scheme() {
     let configured = generate(&service_document(), &configured());
@@ -379,6 +380,7 @@ fn php() -> Option<PathBuf> {
         .then_some(candidate)
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_oauth_php_lints() {
     let Some(php) = php() else {
@@ -398,6 +400,7 @@ fn emitted_oauth_php_lints() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn oauth_lifecycle_drives_stubbed_transport_in_php() {
     let Some(php) = php() else {
@@ -429,6 +432,7 @@ fn oauth_lifecycle_drives_stubbed_transport_in_php() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn discovery_schemes_emit_the_discovery_engine_and_the_per_instance_cache() {
     let with_policy = generate(&discovery_document(), &discovery_options());
@@ -499,6 +503,7 @@ fn discovery_schemes_emit_the_discovery_engine_and_the_per_instance_cache() {
     }
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_discovery_oauth_php_lints() {
     let Some(php) = php() else {
@@ -521,6 +526,7 @@ fn emitted_discovery_oauth_php_lints() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn discovery_lifecycle_drives_stubbed_transport_in_php() {
     let Some(php) = php() else {
@@ -1186,6 +1192,7 @@ fn code_only_options() -> GenerationOptions {
 /// The replaying credential wrapper is emitted only with an executable
 /// client-credentials flow, wraps exactly that attach path, and compiles the
 /// stream-protection pointers of its scheme's operations.
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let configured = generate(&replay_document(), &replay_options());
@@ -1237,6 +1244,7 @@ fn replaying_credentials_emit_conditionally_with_stream_protection() {
 /// The discovery variant resolves the wrapped token endpoint through the
 /// compiled precedence and adds the compiled discovery URL to the
 /// lifecycle-endpoint guard.
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn replaying_credentials_resolve_their_discovery_variant() {
     let configured = generate(&discovery_document(), &discovery_options());
@@ -1258,6 +1266,7 @@ fn replaying_credentials_resolve_their_discovery_variant() {
     );
 }
 
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_replay_oauth_php_lints() {
     let Some(php) = php() else {
@@ -1282,6 +1291,7 @@ fn emitted_replay_oauth_php_lints() {
 
 /// The replay lifecycle (a)–(f) over a stubbed stream transport, mirroring the
 /// TypeScript, Python, Go and Rust acceptance scenarios.
+#[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn replay_lifecycle_drives_stubbed_transport_in_php() {
     let Some(php) = php() else {

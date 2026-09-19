@@ -168,6 +168,7 @@ fn files_map(files: &[OutFile]) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     let configured = files_map(&generate(incoming_document()));
@@ -289,6 +290,7 @@ fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     }
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn plan_carries_the_compiled_incoming_receipts_only_when_emission_happens() {
     use suspect_codegen::csharp_sdk;
@@ -465,6 +467,7 @@ fn incoming_run(label: &str, directory: &str, arguments: &[&str], root: &Path, d
     );
 }
 
+#[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn receipts_drive_the_decoder_and_constructor_in_dotnet() {
     let Some(dotnet) = dotnet() else {

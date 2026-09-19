@@ -122,6 +122,7 @@ fn dart_toolchain() -> Option<String> {
     output.status.success().then(|| "dart".to_owned())
 }
 
+#[ignore = "requires the Dart SDK on the test host"]
 #[test]
 fn pagination_streams_and_helpers_emit_only_under_sdk_defaults() {
     let shared = contract();
@@ -232,6 +233,7 @@ fn pagination_streams_and_helpers_emit_only_under_sdk_defaults() {
     }
 }
 
+#[ignore = "requires the Dart SDK on the test host"]
 #[test]
 fn disabled_pagination_emits_nothing_new() {
     let off = GenerationOptions {
@@ -255,6 +257,7 @@ fn disabled_pagination_emits_nothing_new() {
     }
 }
 
+#[ignore = "requires the Dart SDK on the test host"]
 #[test]
 fn plan_carries_the_pagination_outcome_only_when_configured() {
     use suspect_codegen::{dart_sdk, sdk_defaults};
@@ -313,6 +316,7 @@ fn plan_carries_the_pagination_outcome_only_when_configured() {
 /// 6. `async*` streams are single-subscription; pause propagates through the
 ///    inner `await for` at each yield point and cancel terminates the
 ///    generator at the yield, so no not-yet-started request can fire.
+#[ignore = "requires the Dart SDK on the test host"]
 #[test]
 fn dart_pagination_walkers_are_static_and_no_policy_is_unchanged() {
     if dart_toolchain().is_none() {

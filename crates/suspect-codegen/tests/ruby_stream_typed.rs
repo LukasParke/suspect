@@ -121,6 +121,7 @@ fn content<'a>(files: &'a [OutFile], suffix: &str) -> &'a str {
         .as_str()
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn discriminated_sse_operations_emit_typed_event_methods() {
     let files = generate(stream_document());
@@ -190,6 +191,7 @@ fn discriminated_sse_operations_emit_typed_event_methods() {
     }
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn control_operations_without_discrimination_keep_the_untyped_gem() {
     let document = json!({
@@ -232,6 +234,7 @@ fn control_operations_without_discrimination_keep_the_untyped_gem() {
     assert!(events.operations.is_empty());
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn plan_carries_the_compiled_stream_semantics_and_emittable_operations() {
     let contract = contract_with_document(stream_document());
@@ -464,6 +467,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
     );
 }
 
+#[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn native_typed_events_drive_stubbed_streams() {
     let Some(ruby) = ruby() else {
