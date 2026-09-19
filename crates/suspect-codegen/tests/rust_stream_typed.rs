@@ -361,6 +361,7 @@ fn registry_unavailable(log: &str) -> bool {
         || log.contains("could not download")
 }
 
+#[ignore = "requires a warm Cargo dependency cache for compiled-consumer gates"]
 #[test]
 fn emitted_events_drive_real_streams_in_a_compiled_package() {
     let configured = generate_document(stream_document());

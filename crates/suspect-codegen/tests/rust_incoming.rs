@@ -471,6 +471,7 @@ fn emitted_incoming_package_compiles_model_only() {
     }
 }
 
+#[ignore = "requires a warm Cargo dependency cache for compiled-consumer gates"]
 #[test]
 fn decoded_and_constructed_receipts_behave_in_a_compiled_package() {
     let generated = generate_document(document());
