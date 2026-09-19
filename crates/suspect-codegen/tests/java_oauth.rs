@@ -178,6 +178,7 @@ fn sorted(files: &[OutFile]) -> std::collections::BTreeSet<&str> {
     files.iter().map(|file| file.path.as_str()).collect()
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn oauth_class_emits_only_under_a_usable_scheme() {
     let configured = generate(&service_document(), &configured());
@@ -374,6 +375,7 @@ fn compiled_package(root: &Path) -> PathBuf {
 }
 
 #[ignore = "requires JDK and Maven on the test host"]
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn generated_oauth_compiles_strictly_with_the_package() {
     let root = tempfile::tempdir().unwrap();
@@ -382,6 +384,7 @@ fn generated_oauth_compiles_strictly_with_the_package() {
     compiled_package(root.path());
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn oauth_lifecycle_drives_stubbed_transport_in_java() {
     let root = tempfile::tempdir().unwrap();
@@ -905,6 +908,7 @@ fn discovery_options() -> GenerationOptions {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn discovery_schemes_emit_the_discovery_engine_and_per_instance_cache() {
     let discovery_configured = generate(&discovery_document(), &discovery_options());
@@ -981,6 +985,7 @@ fn discovery_schemes_emit_the_discovery_engine_and_per_instance_cache() {
 
 /// A scheme whose only usability is its discovery URL — an OpenID Connect
 /// declaration with no flows — still emits the lifecycle.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn discovery_only_schemes_emit_the_lifecycle() {
     let mut document = discovery_document();
@@ -1024,6 +1029,7 @@ fn discovery_only_schemes_emit_the_lifecycle() {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn discovery_lifecycle_drives_stubbed_transport_in_java() {
     let root = tempfile::tempdir().unwrap();
@@ -1431,6 +1437,7 @@ fn code_only_options() -> GenerationOptions {
 /// The replaying credential wrapper is emitted only with an executable
 /// client-credentials flow, wraps exactly that provider, and compiles the
 /// stream-protection addresses of its scheme's operations.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn replaying_credentials_emit_conditionally_with_stream_protection() {
     let configured = generate(&replay_document(), &replay_options());
@@ -1483,6 +1490,7 @@ fn replaying_credentials_emit_conditionally_with_stream_protection() {
     }
 }
 
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn emitted_replay_oauth_compiles_strictly_with_the_package() {
     let root = tempfile::tempdir().unwrap();
@@ -1496,6 +1504,7 @@ fn emitted_replay_oauth_compiles_strictly_with_the_package() {
 
 /// The replay lifecycle (a)–(f) over a stubbed JDK transport, mirroring the
 /// TypeScript, Python, Go and Rust acceptance scenarios.
+#[ignore = "requires JDK and Maven on the test host"]
 #[test]
 fn replay_lifecycle_drives_stubbed_httpclient_in_java() {
     let root = tempfile::tempdir().unwrap();
