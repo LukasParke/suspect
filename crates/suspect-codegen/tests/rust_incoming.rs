@@ -457,7 +457,6 @@ fn registry_unavailable(log: &str) -> bool {
 }
 
 #[ignore = "requires a warm Cargo dependency cache for compiled-consumer gates"]
-#[ignore = "requires a warm Cargo dependency cache"]
 #[test]
 fn emitted_incoming_package_compiles_model_only() {
     let generated = generate_document(document());
@@ -478,7 +477,6 @@ fn emitted_incoming_package_compiles_model_only() {
 }
 
 #[ignore = "requires a warm Cargo dependency cache for compiled-consumer gates"]
-#[ignore = "requires a warm Cargo dependency cache"]
 #[test]
 fn decoded_and_constructed_receipts_behave_in_a_compiled_package() {
     let generated = generate_document(document());
