@@ -267,6 +267,7 @@ fn without_the_nullable_profile_the_31_annotation_stays_semantics_free() {
 fn with_the_nullable_profile_the_type_gains_null() {
     let models = emitted_field_types(suspect_codegen::schema_view::DialectPolicy {
         oas30_nullable_in_31: true,
+        ..suspect_codegen::schema_view::DialectPolicy::default()
     });
     // {type: "string", nullable: true} behaves as {type: ["string", "null"]}.
     let description = &models["Workspace"]
@@ -305,6 +306,7 @@ fn the_nullable_profile_leaves_oas30_documents_unchanged() {
         shape(suspect_codegen::schema_view::DialectPolicy::default()),
         shape(suspect_codegen::schema_view::DialectPolicy {
             oas30_nullable_in_31: true,
+            ..suspect_codegen::schema_view::DialectPolicy::default()
         }),
         "OAS 3.0 nullable is already dialect semantics"
     );
@@ -351,6 +353,7 @@ fn the_nullable_profile_decodes_null_in_the_emitted_python_codecs() {
         (
             suspect_codegen::schema_view::DialectPolicy {
                 oas30_nullable_in_31: true,
+                ..suspect_codegen::schema_view::DialectPolicy::default()
             },
             true,
         ),

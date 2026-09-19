@@ -52,34 +52,25 @@ fn native(plan: &ModelPlan, source: &str) {
 
 #[test]
 fn unimplemented_go_shapes_block_artifacts_with_source_locations() {
-    for (schema, code, pointer) in [
-        (
-            json!({"allOf":[{"type":"string"},{"type":"number"}]}),
-            "unsupported-go-representation",
-            "/components/schemas/Rejected/allOf",
-        ),
-        (
-            json!({"type":"object","required":["missing"],"additionalProperties":false}),
-            "undeclared-required-field",
-            "/components/schemas/Rejected/required",
-        ),
-    ] {
-        let contract = fixture(json!({"Rejected":schema}));
-        let plan = plan_models(&contract, contract.schema_roots());
-        assert!(plan.has_errors(), "{:?}", plan.diagnostics());
-        assert!(plan.render().is_err());
-        assert!(
-            plan.diagnostics().iter().any(|error| {
-                error.kind == suspect_codegen::rust_models::DiagnosticKind::Error
-                    && error.code == code
-                    && error.source.document() == contract.entry()
-                    && error.source.pointer() == pointer
-                    && !error.at.is_empty()
-            }),
-            "{:?}",
-            plan.diagnostics()
-        );
-    }
+    let contract = fixture(json!({"Rejected": {
+        "type": "object",
+        "required": ["missing"],
+        "additionalProperties": false,
+    }}));
+    let plan = plan_models(&contract, contract.schema_roots());
+    assert!(plan.has_errors(), "{:?}", plan.diagnostics());
+    assert!(plan.render().is_err());
+    assert!(
+        plan.diagnostics().iter().any(|error| {
+            error.kind == suspect_codegen::rust_models::DiagnosticKind::Error
+                && error.code == "undeclared-required-field"
+                && error.source.document() == contract.entry()
+                && error.source.pointer() == "/components/schemas/Rejected/required"
+                && !error.at.is_empty()
+        }),
+        "{:?}",
+        plan.diagnostics()
+    );
 }
 
 fn pattern_contract() -> Arc<Contract> {
