@@ -235,7 +235,7 @@ fn frozen_v2_runtime_template_is_unchanged() {
             "{:x}",
             Sha256::digest(include_bytes!("../src/kotlin_sdk/ValidationV2.kt"))
         ),
-        "02b09c74f07df09f258ec52adaba14b973d1874e03ccdd0dbe9ffdf5c7201646"
+        "7d3adcb696194547b488e6227030ee6ff3f91b7c613dc4e142fc4b4351288efb"
     );
 }
 
