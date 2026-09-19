@@ -28,7 +28,8 @@ fn coalesces_burst_into_one_event() {
         .recv_timeout(Duration::from_secs(2))
         .expect("debounced event within 2s");
     assert!(
-        changed.contains(&a) || changed.contains(&b),
+        changed.contains(&a.canonicalize().unwrap())
+            || changed.contains(&b.canonicalize().unwrap()),
         "event should mention at least one written file, got {changed:?}"
     );
 

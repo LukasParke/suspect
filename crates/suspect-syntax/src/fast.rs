@@ -194,7 +194,7 @@ pub fn try_parse_fast(bytes: &[u8]) -> Option<FastValue> {
             }
             i += 1;
         }
-        if bounds.len() < 2 || !split_key_value(lines[bounds[0]].text).is_some() {
+        if bounds.len() < 2 || split_key_value(lines[bounds[0]].text).is_none() {
             out.push(start..end);
             return Some(());
         }
@@ -814,22 +814,20 @@ fn decode_key(raw: &[u8]) -> Option<String> {
 
 /// Decodes an inline scalar token (plain, single- or double-quoted).
 ///
-/// Returns `(text, quoted)` where quoted tokens have their outer quotes
-/// stripped. Escape sequences survive literally (`\n` stays `\\n`) and
-/// `''` is not collapsed — byte-compatible with `suspect-low`'s
-/// `scalar_bytes`, which strips quotes without further decoding. Declines
-/// when the token is malformed or has trailing junk after a closing quote.
+/// Returns `(text, quoted)` with quoted text decoded through the same
+/// decoder used by the CST reader. Malformed tokens or escapes decline.
 fn decode_scalar(text: &[u8]) -> Option<(String, bool)> {
     match text[0] {
-        b'"' => {
-            let inner = quoted_inner(text, b'"', true)?;
-            // SAFETY: subslice of the validated input buffer.
-            Some((unsafe { str_owned_unchecked(inner) }, true))
-        }
-        b'\'' => {
-            let inner = quoted_inner(text, b'\'', false)?;
-            // SAFETY: subslice of the validated input buffer.
-            Some((unsafe { str_owned_unchecked(inner) }, true))
+        b'"' | b'\'' => {
+            let double = text[0] == b'"';
+            quoted_inner(text, text[0], double)?;
+            let style = if double {
+                crate::ScalarStyle::DoubleQuoted
+            } else {
+                crate::ScalarStyle::SingleQuoted
+            };
+            let decoded = crate::decode_quoted_scalar(text, style, crate::Format::Yaml)?;
+            Some((String::from_utf8(decoded.into_owned()).ok()?, true))
         }
         // SAFETY: subslice of the validated input buffer.
         _ => Some((unsafe { str_owned_unchecked(text) }, false)),
@@ -1099,12 +1097,9 @@ impl FlowParser<'_> {
                 if j >= self.b.len() || self.b[j] != quote {
                     return None;
                 }
-                // Quotes stripped only; escapes stay literal (see
-                // `decode_scalar` for the rationale).
-                let inner = &self.b[start..j];
+                let (decoded, _) = decode_scalar(&self.b[start - 1..j + 1])?;
                 self.i = j + 1;
-                // SAFETY: subslice of the validated input buffer.
-                Some(unsafe { str_owned_unchecked(inner) })
+                Some(decoded)
             }
             _ => {
                 let start = self.i;
@@ -1129,8 +1124,9 @@ impl FlowParser<'_> {
             Some(b',') | Some(b']') | Some(b'}') => Some(FastValue::null()),
             Some(b':') => None, // `{: v}` has no key
             Some(_) => {
+                let quoted = matches!(self.b.get(self.i), Some(b'"' | b'\''));
                 let raw = self.token(false)?;
-                Some(FastValue::Scalar { raw, quoted: false })
+                Some(FastValue::Scalar { raw, quoted })
             }
         }
     }
@@ -1301,19 +1297,19 @@ p: {q: 1, r: s}
                 quoted: false
             }
         );
-        // Escapes/quote-doubling stay literal: byte-compatible with
-        // suspect-low's scalar_bytes.
+        // Quoted scalar values are decoded, while quoting still controls
+        // type inference downstream.
         assert_eq!(
             get("i"),
             &FastValue::Scalar {
-                raw: "it''s".into(),
+                raw: "it's".into(),
                 quoted: true
             }
         );
         assert_eq!(
             get("j"),
             &FastValue::Scalar {
-                raw: "tab\\there".into(),
+                raw: "tab\there".into(),
                 quoted: true
             }
         );

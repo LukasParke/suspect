@@ -58,6 +58,9 @@ pub struct Finding {
     pub line: u32,
     /// 1-based column of the offending span.
     pub col: u32,
+    /// Exact half-open range in decoded UTF-8 source bytes, when available.
+    /// This retains container identity that a line/column alone cannot express.
+    pub range: Option<std::ops::Range<usize>>,
 }
 
 impl Finding {

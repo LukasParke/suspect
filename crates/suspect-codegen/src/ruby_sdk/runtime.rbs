@@ -1,0 +1,214 @@
+module __NAMESPACE__
+  VERSION: String
+  type json_value = nil | bool | String | Integer | JsonNumber | Array[json_value] | Hash[String, json_value]
+  type headers = Hash[String, Array[String]]
+
+  class SdkError < StandardError
+    attr_reader kind: Symbol
+    attr_reader source: String?
+    attr_reader instance_path: String
+    attr_reader operation_id: String?
+    attr_reader status: Integer?
+    attr_reader headers: headers
+    attr_reader capture: String
+    attr_reader truncated: bool
+    def initialize: (String message, ?kind: Symbol, ?source: String?, ?instance_path: String, ?operation_id: String?, ?status: Integer?, ?headers: headers, ?capture: String, ?truncated: bool) -> void
+  end
+  class JsonError < SdkError
+  end
+  class CodecError < SdkError
+  end
+  class ValidationError < CodecError
+  end
+  class EvaluationFailure < CodecError
+  end
+  class RequestError < SdkError
+  end
+  class ResponseError < SdkError
+  end
+  class TransportError < SdkError
+  end
+  class TimeoutError < SdkError
+  end
+  class CancelledError < SdkError
+  end
+  class ResourceLimitError < SdkError
+  end
+  class Unset
+    def inspect: () -> String
+    def to_s: () -> String
+  end
+  UNSET: Unset
+
+  class JsonNumber
+    include Comparable
+    attr_reader token: String
+    def initialize: (String token) -> void
+    def <=>: (Integer | JsonNumber other) -> Integer
+    def integer?: () -> bool
+    def to_i: (?max_digits: Integer) -> Integer
+    def to_f: () -> Float
+    def to_s: () -> String
+    def hash: () -> Integer
+    def eql?: (untyped other) -> bool
+  end
+  module Json
+    def self.parse: (String text, ?max_bytes: Integer, ?max_depth: Integer, ?max_work: Integer) -> json_value
+    def self.dump: (json_value value, ?max_bytes: Integer, ?max_depth: Integer, ?max_work: Integer) -> String
+  end
+  class Model
+    def validate!: () -> self
+    def to_h: () -> Hash[String, json_value]
+    def to_json: () -> String
+  end
+  class Codec[Value]
+    attr_reader schema_index: Integer
+    attr_reader source: String
+    def initialize: (Integer schema_index) -> void
+    def decode: (json_value value) -> Value
+    def decode_json: (String text, ?max_bytes: Integer) -> Value
+    def encode: (Value value) -> json_value
+    def encode_json: (Value value, ?max_bytes: Integer) -> String
+  end
+  class ApiResponse[Value]
+    attr_reader data: Value
+    attr_reader status: Integer
+    attr_reader headers: headers
+    attr_reader content_type: String?
+    attr_reader typed_headers: WireModel?
+    attr_reader links: Hash[String, Link]
+    attr_reader source: String
+    attr_reader operation_id: String
+    def initialize: (data: Value, status: Integer, headers: headers, source: String, operation_id: String, ?content_type: String?, ?typed_headers: WireModel?, ?links: Hash[String, Link]) -> void
+    def close: () -> nil
+  end
+  class ApiError[Value] < SdkError
+    attr_reader data: Value
+    attr_reader content_type: String?
+    attr_reader typed_headers: WireModel?
+    attr_reader links: Hash[String, Link]
+    def initialize: (data: Value, ?content_type: String?, ?typed_headers: WireModel?, ?links: Hash[String, Link], ?source: String?, ?instance_path: String, ?operation_id: String?, ?status: Integer?, ?headers: headers, ?capture: String, ?truncated: bool) -> void
+  end
+  class CancellationToken
+    def initialize: () -> void
+    def cancel: () -> nil
+    def cancelled?: () -> bool
+  end
+  class ExchangeContext
+    attr_reader deadline: Float
+    attr_reader cancellation: CancellationToken?
+    attr_reader operation_id: String
+    attr_reader source: String
+    def initialize: (timeout: Float | Integer, cancellation: CancellationToken?, operation_id: String, source: String) -> void
+    def remaining: () -> Float
+    def check!: () -> nil
+  end
+  class PreparedRequest
+    attr_reader method: String
+    attr_reader url: String
+    attr_reader headers: Hash[String, String]
+    attr_reader body: String?
+    attr_reader source: String
+    attr_reader operation_id: String
+    def initialize: (method: String, url: String, headers: Hash[String, String], body: String?, source: String, operation_id: String) -> void
+  end
+  class WireResponse
+    attr_reader status: Integer
+    attr_reader headers: Hash[String, String | Array[String]]
+    def initialize: (status: Integer, headers: Hash[String, String | Array[String]], body: String | Enumerable[String]) ?{ () -> void } -> void
+    def each_chunk: () { (String) -> void } -> nil
+    def close: () -> nil
+    def closed?: () -> bool
+  end
+  interface _Transport
+    def exchange: (request: PreparedRequest, context: ExchangeContext) { (WireResponse) -> void } -> void
+  end
+  class NetHTTPTransport
+    def initialize: () -> void
+    def exchange: (request: PreparedRequest, context: ExchangeContext) { (WireResponse) -> void } -> void
+    def close: () -> nil
+  end
+  class Client
+    def initialize: (?auth: Hash[String, credential], ?credential_provider: _CredentialProvider?, ?security: Integer | Unset, ?transport: _Transport?, ?server_url: String?, ?server: Integer | String | Unset, ?server_variables: Hash[String, String], ?document_url: String?, ?timeout: Float | Integer, ?max_response_bytes: Integer, ?max_capture_bytes: Integer, ?user_agent: String | nil | Unset, ?application_id: String?) -> void
+    def self.open: [Result] (?auth: Hash[String, credential], ?credential_provider: _CredentialProvider?, ?security: Integer | Unset, ?transport: _Transport?, ?server_url: String?, ?server: Integer | String | Unset, ?server_variables: Hash[String, String], ?document_url: String?, ?timeout: Float | Integer, ?max_response_bytes: Integer, ?max_capture_bytes: Integer, ?user_agent: String | nil | Unset, ?application_id: String?) { (Client) -> Result } -> Result
+    def close: () -> nil
+    def closed?: () -> bool
+  end
+  type credential = String | BasicCredential | AuthorizationCredential
+  class BasicCredential
+    attr_reader username: String
+    attr_reader password: String
+    def initialize: (username: String, password: String) -> void
+  end
+  class AuthorizationCredential
+    attr_reader scheme: String
+    attr_reader token: String
+    def initialize: (scheme: String, token: String) -> void
+  end
+  class CredentialContext
+    attr_reader name: String
+    attr_reader source: String
+    attr_reader operation_id: String
+    attr_reader scheme: json_value
+    attr_reader permissions: json_value
+    attr_reader metadata: json_value
+    attr_reader kind: String
+    attr_reader scopes: Array[String]
+    attr_reader roles: Array[String]
+    attr_reader flows: Array[OAuthFlow]
+    attr_reader metadata_url: String?
+    attr_reader discovery_url: String?
+    attr_reader url_base: String?
+    attr_reader server_url: String?
+  end
+  class OAuthFlow
+    attr_reader kind: String
+    attr_reader source: String
+    attr_reader authorization_url: String?
+    attr_reader token_url: String?
+    attr_reader refresh_url: String?
+    attr_reader device_authorization_url: String?
+    attr_reader scopes: Hash[String, String]
+    attr_reader url_base: String
+    attr_reader server_url: String?
+  end
+  interface _CredentialProvider
+    def call: (CredentialContext) -> credential?
+  end
+  class Bytes
+    attr_reader data: String
+    def initialize: (String) -> void
+    def bytesize: () -> Integer
+  end
+  class NoContent
+  end
+  NO_CONTENT: NoContent
+  class Part[Value]
+    attr_reader data: Value
+    attr_reader filename: String?
+    attr_reader content_type: String?
+    attr_reader headers: Hash[String, untyped] | WireModel
+    def initialize: (data: Value, ?filename: String?, ?content_type: String?, ?headers: Hash[String, untyped] | WireModel) -> void
+  end
+  class BytePart < Part[Bytes]
+    def initialize: (bytes: String, ?filename: String?, ?content_type: String?, ?headers: Hash[String, untyped] | WireModel) -> void
+  end
+  class WireModel
+    def validate!: () -> self
+  end
+  class ItemStream[Value] < Enumerator[Value, void]
+    attr_reader source: String
+    def next: () -> Value
+    def close: () -> nil
+    def closed?: () -> bool
+  end
+  class Link
+    attr_reader name: String
+    attr_reader source: String
+    attr_reader target: json_value
+    attr_reader parameters: Hash[String, json_value]
+    attr_reader request_body: json_value | Unset
+    attr_reader server: json_value
+    attr_reader description: String?
+  end
+end

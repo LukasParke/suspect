@@ -190,7 +190,7 @@ pub fn references(
                         uri: target,
                         pointer,
                     } => target == &doc_uri && pointer == &ptr,
-                    ParsedRef::PlainName(_) => false,
+                    ParsedRef::PlainName(_) | ParsedRef::ExternalAnchor { .. } => false,
                 };
                 if hit {
                     out.push(Definition {
@@ -206,7 +206,9 @@ pub fn references(
                         uri: target,
                         pointer,
                     } => target == &doc_uri && pointer == &ptr,
-                    ParsedRef::Local(_) | ParsedRef::PlainName(_) => false,
+                    ParsedRef::Local(_)
+                    | ParsedRef::PlainName(_)
+                    | ParsedRef::ExternalAnchor { .. } => false,
                 };
                 if hit {
                     out.push(Definition {
@@ -316,32 +318,7 @@ fn live_edges(low: &suspect_low::LowDoc) -> Vec<LiveEdge> {
 /// document part joins against the base, and fragments percent-decode
 /// before RFC 6901 parsing. Unparseable refs yield `None` (never a match).
 fn parse_live_ref(base: &Uri, raw: &str) -> Option<ParsedRef> {
-    /// Percent-decodes a fragment body to UTF-8 (`None` when invalid).
-    fn decode(frag: &str) -> Option<String> {
-        String::from_utf8(suspect_low::percent_decode_fragment(frag)).ok()
-    }
-    let (doc_part, frag) = Uri::split_ref(raw);
-    Some(match doc_part {
-        None => match frag {
-            "" => ParsedRef::Local(Pointer::root()),
-            f if f.starts_with('/') => ParsedRef::Local(Pointer::parse(&decode(f)?).ok()?),
-            f => ParsedRef::PlainName(decode(f)?.into_boxed_str()),
-        },
-        Some(doc) => {
-            let uri = base.join(doc).ok()?;
-            match frag {
-                "" => ParsedRef::External {
-                    uri,
-                    pointer: Pointer::root(),
-                },
-                f if f.starts_with('/') => ParsedRef::External {
-                    uri,
-                    pointer: Pointer::parse(&decode(f)?).ok()?,
-                },
-                f => ParsedRef::PlainName(decode(f)?.into_boxed_str()),
-            }
-        }
-    })
+    suspect_ref::parse_ref(base, raw).ok()
 }
 
 /// Source excerpt of `range`, truncated to `max_lines` lines with a `...`

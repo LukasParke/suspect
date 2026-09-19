@@ -11,16 +11,21 @@
 //! - [`servers`] — server-URL template variables
 //! - [`tags`] — operation tags declared in the root `tags` list
 //! - [`schemas`] — schema `type` values and discriminators
+//! - [`references`] — malformed/unresolved references in contract positions
 //! - [`examples`] — media-type examples vs. schema type sets
 //! - [`webhooks`] — `webhooks` availability per OpenAPI version
 //! - [`info`] — license identification fields
 
 mod examples;
+mod http_declarations;
 mod info;
 mod operations;
 mod parameters;
 mod paths;
+mod references;
 mod responses;
+mod schema_dialect;
+mod schema_keywords;
 mod schemas;
 mod security;
 mod servers;
@@ -48,6 +53,7 @@ fn check_groups() -> Vec<(&'static str, CheckFn)> {
         ("parameters::fields",                 parameters::check_parameter_fields),
         ("parameters::required_path_params",   parameters::check_required_path_params),
         ("parameters::duplicate_header_params",parameters::check_duplicate_header_params),
+        ("http_declarations",                    http_declarations::check_http_declarations),
         ("paths::keys",                        paths::check_path_keys),
         ("paths::templates",                   paths::check_path_templates),
         ("responses::descriptions",            responses::check_response_descriptions),
@@ -55,6 +61,7 @@ fn check_groups() -> Vec<(&'static str, CheckFn)> {
         ("servers::variables",                 servers::check_server_variables),
         ("tags::declared",                     tags::check_declared_tags),
         ("schemas",                            schemas::check_schemas),
+        ("references",                         references::check_references),
         ("examples",                           examples::check_example_types),
         ("webhooks",                           webhooks::check_webhook_version),
         ("info::license",                      info::check_license),
@@ -126,12 +133,23 @@ pub(crate) fn diag(
     range: std::ops::Range<usize>,
     message: impl Into<String>,
 ) -> Diagnostic {
+    diag_at(api.root(), code, severity, range, message)
+}
+
+/// Builds a diagnostic anchored to the node's actual source document.
+pub(crate) fn diag_at(
+    node: NodeRef<'_>,
+    code: &'static str,
+    severity: Severity,
+    range: std::ops::Range<usize>,
+    message: impl Into<String>,
+) -> Diagnostic {
     Diagnostic {
         code,
         severity,
         message: message.into(),
         range,
-        doc: api.root().syntax().doc().uri().clone(),
+        doc: node.syntax().doc().uri().clone(),
     }
 }
 

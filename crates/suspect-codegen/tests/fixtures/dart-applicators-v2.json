@@ -1,0 +1,113 @@
+{
+  "openapi": "3.2.0",
+  "info": {"title": "Dart scoped native operations", "version": "1"},
+  "servers": [{"url": "https://example.test/v2"}],
+  "security": [],
+  "paths": {
+    "/echo": {"post": {
+      "operationId": "scopedEcho",
+      "description": "Validate current native inputs and source-typed scoped output.",
+      "requestBody": {"required": true, "content": {"application/json": {
+        "schema": {"$ref": "#/components/schemas/Envelope"},
+        "examples": {
+          "bad": {"dataValue": {"stamp": null}},
+          "first": {"$ref": "#/components/examples/EnvelopeExample"}
+        }
+      }}},
+      "responses": {"200": {"description": "Exact native echo", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Envelope"}}}}}
+    }},
+    "/patch": {"post": {
+      "operationId": "optionalPatch",
+      "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Patch"}}}},
+      "responses": {"200": {"description": "Nullable patch", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Patch"}}}}}
+    }},
+    "/extras": {"post": {
+      "operationId": "mixedExtras",
+      "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MixedExtras"}}}},
+      "responses": {"200": {"description": "Matched and unmatched values", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/MixedExtras"}}}}}
+    }},
+    "/rows": {"get": {
+      "operationId": "scopedRows",
+      "responses": {"200": {"description": "Individually checked rows", "content": {"application/x-ndjson": {"itemSchema": {"$ref": "#/components/schemas/Envelope"}}}}}
+    }}
+  },
+  "components": {
+    "schemas": {
+      "Envelope": {
+        "type": "object",
+        "description": "A native object preserving required null, optional absence, scoped extras and exact counts.",
+        "required": ["patch", "sequence", "stamp", "flexible"],
+        "properties": {
+          "patch": {"$ref": "#/components/schemas/Patch"},
+          "sequence": {"$ref": "#/components/schemas/Sequence"},
+          "stamp": {"type": ["string", "null"]},
+          "optional": {"type": ["string", "null"], "default": "never inserted"},
+          "flexible": {"$ref": "#/components/schemas/Flexible"},
+          "tree": {"$ref": "#/components/schemas/Recursive"}
+        },
+        "additionalProperties": false,
+        "examples": [{"patch": {"kind": "card", "x-n": 9007199254740993, "card": null, "billing": null, "x-null": null}, "sequence": ["s", 9007199254740993, 1e+000008], "stamp": null, "flexible": null}]
+      },
+      "Patch": {
+        "type": ["object", "null"],
+        "description": "Patterns are conjunctive; nullable card presence triggers billing.",
+        "required": ["kind", "x-n"],
+        "properties": {
+          "kind": {"type": "string"},
+          "card": {"type": ["string", "null"]},
+          "billing": {"type": ["string", "null"]},
+          "enabled": {"type": "boolean"},
+          "note": {"type": ["string", "null"]}
+        },
+        "patternProperties": {
+          "^x-": {"type": ["integer", "null"]},
+          "-n$": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": false,
+        "propertyNames": {"maxLength": 64},
+        "dependentRequired": {"card": ["billing"]},
+        "dependentSchemas": {"enabled": {"properties": {"enabled": {"const": true}, "note": {"type": ["string", "null"]}}, "required": ["note"]}},
+        "if": {"properties": {"kind": {"const": "card"}}, "required": ["kind"]},
+        "then": {"required": ["card"]},
+        "else": {"not": {"required": ["card"]}},
+        "unevaluatedProperties": false,
+        "examples": [null, {"kind": "cash", "x-n": 2, "x-null": null}]
+      },
+      "Sequence": {
+        "type": "array",
+        "description": "A string prefix plus one or two exact integer matches; no unevaluated tail.",
+        "prefixItems": [{"type": "string"}],
+        "contains": {"type": "integer"},
+        "minContains": 1.0,
+        "maxContains": 2e0,
+        "unevaluatedItems": false
+      },
+      "Flexible": {
+        "description": "A checked exact-JSON carrier with a valid JSON-null value.",
+        "if": {"type": "array"},
+        "then": {"contains": {"type": "number"}},
+        "else": {"type": "null"},
+        "unevaluatedItems": false
+      },
+      "Recursive": {
+        "type": "object",
+        "properties": {"next": {"$ref": "#/components/schemas/Recursive"}},
+        "unevaluatedProperties": false
+      },
+      "MixedExtras": {
+        "type": "object",
+        "required": ["s-required"],
+        "properties": {"fixed": {"type": "string"}},
+        "patternProperties": {"^s-": {"type": ["string", "null"]}},
+        "additionalProperties": {"type": "integer"},
+        "examples": [{"s-required": "r", "s-title": "t", "s-null": null, "count": 9007199254740993}]
+      }
+    },
+    "examples": {
+      "EnvelopeExample": {
+        "summary": "Original dataValue, including arbitrary precision and explicit nulls",
+        "dataValue": {"patch": {"kind": "card", "x-n": 9007199254740993, "card": null, "billing": null, "x-null": null}, "sequence": ["s", 9007199254740993, 1e+000008], "stamp": null, "flexible": null}
+      }
+    }
+  }
+}

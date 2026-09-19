@@ -17,6 +17,137 @@ fn workspace_with(dir: &std::path::Path, entry: &str) -> Arc<suspect_ref::Worksp
 }
 
 #[test]
+fn primitive_type_views_preserve_explicit_declarations_and_versioned_nullability() {
+    let dir =
+        std::env::temp_dir().join(format!("suspect-oas-type-semantics-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    write(
+        &dir,
+        "main.json",
+        r#"{
+      "openapi":"3.1.0","info":{"title":"Types","version":"1"},"paths":{},
+      "components":{"schemas":{
+        "UntypedObject":{"properties":{"id":{"type":"string"}}},
+        "UntypedArray":{"items":{"type":"integer"}},
+        "AnnotationOnly":{"nullable":true},
+        "LegacyNullable":{"type":"string","nullable":true},
+        "ActualNullable":{"type":["string","null"]},
+        "EscapedType":{"type":"\u0073tring"}
+      }}
+    }"#,
+    );
+    let session = Session::new(workspace_with(&dir, "main.json"));
+    let api = session.open("main.json").unwrap();
+    let components = api.components().unwrap();
+    for name in ["UntypedObject", "UntypedArray", "AnnotationOnly"] {
+        assert_eq!(components.schema(name).unwrap().type_(), None, "{name}");
+    }
+    let legacy = components.schema("LegacyNullable").unwrap();
+    assert_eq!(legacy.type_().unwrap().bits(), suspect_oas::TypeSet::STRING);
+    assert_eq!(
+        legacy.type_set_for(OasVersion::V30).unwrap().bits(),
+        suspect_oas::TypeSet::STRING | suspect_oas::TypeSet::NULL
+    );
+    assert_eq!(
+        legacy.type_set_for(OasVersion::V31).unwrap().bits(),
+        suspect_oas::TypeSet::STRING
+    );
+    assert_eq!(
+        components
+            .schema("AnnotationOnly")
+            .unwrap()
+            .type_set_for(OasVersion::V30),
+        None
+    );
+    let nullable = components.schema("ActualNullable").unwrap();
+    assert_eq!(
+        nullable.type_().unwrap().bits(),
+        suspect_oas::TypeSet::STRING | suspect_oas::TypeSet::NULL
+    );
+    assert_eq!(
+        components
+            .schema("EscapedType")
+            .unwrap()
+            .type_()
+            .unwrap()
+            .bits(),
+        suspect_oas::TypeSet::STRING
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn typed_schema_resolution_uses_decoded_reference_fragments() {
+    let dir = std::env::temp_dir().join(format!("suspect-oas-decoded-ref-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    write(
+        &dir,
+        "main.json",
+        r##"{
+      "openapi":"3.1.0","info":{"title":"Refs","version":"1"},"paths":{},
+      "components":{"schemas":{
+        "caf\u00e9":{"type":"string"},
+        "Use":{"$ref":"#/components/schemas/caf%C3%A9"},
+        "EncodedRoot":{"$ref":"#%2Fcomponents%2Fschemas%2Fcaf%C3%A9"}
+      }}
+    }"##,
+    );
+    let session = Session::new(workspace_with(&dir, "main.json"));
+    let api = session.load("main.json").unwrap();
+    let schemas = api.components().unwrap().schemas();
+    let (_, schema) = schemas.iter().find(|(name, _)| *name == "Use").unwrap();
+    assert!(
+        schema
+            .type_()
+            .is_some_and(|t| t.contains(suspect_oas::TypeSet::STRING))
+    );
+    assert!(!schema.resolved().is_cyclic());
+    let (_, encoded_root) = schemas
+        .iter()
+        .find(|(name, _)| *name == "EncodedRoot")
+        .unwrap();
+    assert!(
+        encoded_root
+            .type_()
+            .is_some_and(|t| t.contains(suspect_oas::TypeSet::STRING))
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn typed_schemas_guard_cross_file_root_cycles_and_keep_legal_recursion() {
+    let dir = std::env::temp_dir().join(format!("suspect-oas-cross-cycle-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    write(
+        &dir,
+        "main.yaml",
+        "openapi: 3.1.0\ninfo: {title: Refs, version: '1'}\npaths: {}\ncomponents:\n  schemas:\n    Cycle: {$ref: 'a.yaml'}\n    Node: {$ref: 'node.yaml'}\n",
+    );
+    write(&dir, "a.yaml", "$ref: 'b.yaml'\n");
+    write(&dir, "b.yaml", "$ref: 'a.yaml'\n");
+    write(
+        &dir,
+        "node.yaml",
+        "type: object\nproperties:\n  next: {$ref: 'node.yaml'}\n",
+    );
+    let session = Session::new(workspace_with(&dir, "main.yaml"));
+    let api = session.load("main.yaml").unwrap();
+    let schemas = api.components().unwrap().schemas();
+    let (_, cycle) = schemas.iter().find(|(name, _)| *name == "Cycle").unwrap();
+    assert!(cycle.resolved().is_cyclic());
+    let (_, node) = schemas.iter().find(|(name, _)| *name == "Node").unwrap();
+    assert!(!node.resolved().is_cyclic());
+    let properties = node.properties();
+    let (_, next) = properties.iter().find(|(name, _)| *name == "next").unwrap();
+    assert!(!next.resolved().is_cyclic());
+    assert!(
+        next.type_()
+            .is_some_and(|t| t.contains(suspect_oas::TypeSet::OBJECT))
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn openapi_traversal_and_refs() -> Result<(), ModelError> {
     let dir = std::env::temp_dir().join("suspect-oas-test1");
     std::fs::create_dir_all(&dir).unwrap();

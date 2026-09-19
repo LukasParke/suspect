@@ -1,0 +1,32 @@
+{
+  "support": {
+    "Tree": {"$id":"urn:tree","$dynamicAnchor":"node","type":"object","properties":{"data":true,"children":{"type":"array","items":{"$dynamicRef":"#node"}}}},
+    "Fallback": {"$id":"urn:fallback","$defs":{"Text":{"$dynamicAnchor":"element","$anchor":"plain","type":"string"},"Use":{"$dynamicRef":"#element"}}},
+    "Plain": {"$id":"urn:plain","type":"string"},
+    "Nested": {"$id":"urn:nested","const":false,"$defs":{"Binding":{"$dynamicAnchor":"element","type":"integer"},"Start":{"$ref":"urn:fallback#/$defs/Use"}}},
+    "CycleFallback": {"$id":"urn:cycle-fallback","$dynamicAnchor":"flag","not":{}},
+    "NewContext": {"$id":"urn:new-context","$defs":{"flag":{"$dynamicAnchor":"flag"}},"$ref":"urn:cycle"}
+  },
+  "cases": [
+    {"name":"Strict","operation":"writeStrictTree","path":"/tree",
+      "schema":{"$id":"urn:strict","$dynamicAnchor":"node","$ref":"urn:tree","unevaluatedProperties":false},
+      "good":{"data":"root","children":[{"data":1.2300}]},"bad":{"children":[{"unexpected":1}]}},
+    {"name":"Override","operation":"writeOverride","path":"/override",
+      "schema":{"$id":"urn:override","type":"object","properties":{"payload":{"$ref":"#/$defs/Use"}},"required":["payload"],"unevaluatedProperties":false,"$defs":{"Use":{"$dynamicRef":"urn:fallback#element"},"Binding":{"$dynamicAnchor":"element","type":"integer","minimum":9007199254740993}}},
+      "good":{"payload":9007199254740993},"bad":{"payload":"fallback must not win"}},
+    {"name":"NestedUse","operation":"writeNested","path":"/nested",
+      "schema":{"$ref":"#/components/schemas/Nested/$defs/Start"},"good":7,"bad":"not the parent binding"},
+    {"name":"StaticFallbacks","operation":"writeFallbacks","path":"/fallbacks",
+      "schema":{"$id":"urn:scope","type":"object","$defs":{"Binding":{"$dynamicAnchor":"element","type":"integer"}},"properties":{"dynamic":{"$dynamicRef":"urn:fallback#element"},"pointer":{"$dynamicRef":"urn:fallback#/$defs/Text"},"plain":{"$dynamicRef":"urn:fallback#plain"},"empty":{"$dynamicRef":"urn:plain#"},"static":{"$ref":"urn:fallback#element"}},"unevaluatedProperties":false},
+      "good":{"dynamic":1,"pointer":"s","plain":"s","empty":"s","static":"s"},"bad":{"pointer":1}},
+    {"name":"Number","operation":"writeNumber","path":"/number",
+      "schema":{"$id":"urn:number","type":"number","minimum":0},
+      "good":9007199254740993.000000000000000001,"bad":-1},
+    {"name":"DynamicArray","operation":"writeArray","path":"/array",
+      "schema":{"$id":"urn:array","type":"array","$defs":{"Binding":{"$dynamicAnchor":"element","type":"integer"}},"prefixItems":[{"const":"head"}],"contains":{"$dynamicRef":"urn:fallback#element"},"unevaluatedItems":false},
+      "good":["head",1.0,2],"bad":["head",1,"unmarked"]},
+    {"name":"ContextCycle","operation":"writeContextCycle","path":"/cycle",
+      "schema":{"$id":"urn:cycle","if":{"$dynamicRef":"urn:cycle-fallback#flag"},"then":true,"else":{"$ref":"urn:new-context"}},
+      "good":{"null":null,"exact":1.2300},"alternate":null}
+  ]
+}

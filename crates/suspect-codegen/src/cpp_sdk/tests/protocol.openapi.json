@@ -1,0 +1,124 @@
+{
+  "openapi": "3.2.0",
+  "info": {"title": "Independent native C++ protocol witness", "version": "1"},
+  "servers": [{"url": "https://example.test/base"}],
+  "components": {
+    "securitySchemes": {
+      "bearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+      "basic": {"type": "http", "scheme": "basic"},
+      "headerKey": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+      "queryKey": {"type": "apiKey", "in": "query", "name": "api_key"},
+      "cookieKey": {"type": "apiKey", "in": "cookie", "name": "session"},
+      "oauth": {"type": "oauth2", "flows": {"authorizationCode": {
+        "authorizationUrl": "https://auth.example.test/authorize", "tokenUrl": "https://auth.example.test/token", "scopes": {"read": "Read records"}
+      }}},
+      "oidc": {"type": "openIdConnect", "openIdConnectUrl": "https://auth.example.test/.well-known/openid-configuration"}
+    },
+    "schemas": {
+      "Coordinates": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "integer"}, "y": {"type": "string"}}},
+      "Record": {"type": "object", "required": ["message"], "properties": {"message": {"type": "string", "minLength": 1}, "value": {"type": "number"}}},
+      "Event": {"type": "object", "required": ["data"], "properties": {
+        "data": {"type": "string", "contentMediaType": "application/json", "contentSchema": {"type": "object"}},
+        "event": {"type": "string"}, "id": {"type": "string"}, "retry": {"type": "integer", "minimum": 0}
+      }},
+      "Line": {"type": "object", "required": ["n"], "properties": {"n": {"type": "integer"}}, "additionalProperties": false}
+    }
+  },
+  "paths": {
+    "/unnamed": {"get": {"responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}},
+    "/packedForm": {"post": {"operationId": "packedForm", "requestBody": {"required": true, "content": {"application/x-www-form-urlencoded": {
+      "schema": {"type": "object", "required": ["pair"], "additionalProperties": false, "properties": {"pair": {"$ref": "#/components/schemas/Coordinates"}}},
+      "encoding": {"pair": {"style": "form", "explode": false}}
+    }}}, "responses": {"200": {"content": {"application/x-www-form-urlencoded": {
+      "schema": {"type": "object", "required": ["pair"], "additionalProperties": false, "properties": {"pair": {"$ref": "#/components/schemas/Coordinates"}}},
+      "encoding": {"pair": {"style": "form", "explode": false}}
+    }}}}}},
+    "/styledUpload": {"post": {"operationId": "styledUpload", "requestBody": {"required": true, "content": {"multipart/form-data": {
+      "schema": {"type": "object", "required": ["coordinates", "deep", "labels"], "additionalProperties": false, "properties": {
+        "coordinates": {"$ref": "#/components/schemas/Coordinates"}, "deep": {"$ref": "#/components/schemas/Coordinates"}, "labels": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }}, "encoding": {"coordinates": {"style": "form", "explode": true}, "deep": {"style": "deepObject", "explode": true}, "labels": {"style": "form"}}
+    }}}, "responses": {"200": {"content": {"multipart/form-data": {
+      "schema": {"type": "object", "required": ["coordinates", "deep", "labels"], "additionalProperties": false, "properties": {
+        "coordinates": {"$ref": "#/components/schemas/Coordinates"}, "deep": {"$ref": "#/components/schemas/Coordinates"}, "labels": {"type": "array", "items": {"type": "string"}}
+      }}, "encoding": {"coordinates": {"style": "form", "explode": true}, "deep": {"style": "deepObject", "explode": true}, "labels": {"style": "form"}}
+    }}}}}},
+    "/schemaFree": {"get": {"operationId": "schemaFree", "responses": {"200": {"content": {"application/json": {}}}}}},
+    "/unbound": {"get": {"operationId": "unbound"}},
+    "/textNumber": {"get": {"operationId": "textNumber", "responses": {"200": {"content": {"text/plain": {"schema": {"type": "number", "minimum": 0}}}}}}},
+    "/queryText": {"get": {"operationId": "queryText", "parameters": [{"name": "complete", "in": "querystring", "required": true, "content": {"text/plain": {"schema": {"type": "string"}}}}], "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}},
+    "/queryJson": {"get": {"operationId": "queryJson", "parameters": [{"name": "complete", "in": "querystring", "required": true, "content": {"application/json": {"schema": {"type": "object", "required": ["active"], "properties": {"active": {"type": "boolean"}}}}}}], "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}},
+    "/queryForm": {"get": {"operationId": "queryForm", "parameters": [{"name": "complete", "in": "querystring", "required": true, "content": {"application/x-www-form-urlencoded": {"schema": {"type": "object", "required": ["bar", "foo"], "additionalProperties": false, "properties": {"bar": {"type": "boolean"}, "foo": {"type": "string"}, "items": {"type": "array", "items": {"type": "integer"}}}}}}}], "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}},
+    "/public": {"get": {"operationId": "publicCall", "security": [], "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}},
+    "/secure": {"get": {"operationId": "secure", "security": [
+      {}, {"bearer": ["reader"], "headerKey": [], "queryKey": [], "cookieKey": []}, {"basic": []}, {"oauth": ["read"]}, {"oidc": ["openid"]}
+    ], "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}},
+    "/servers": {"get": {"operationId": "servers", "servers": [
+      {"url": "http://127.0.0.1:{port}/{base}", "variables": {"port": {"default": "80"}, "base": {"default": "v1", "enum": ["v1", "v2"]}}},
+      {"url": "../api"}
+    ], "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}},
+    "/media": {"post": {"operationId": "media", "requestBody": {"required": true, "content": {
+      "application/json": {"schema": {"$ref": "#/components/schemas/Record"}},
+      "text/plain": {"schema": {"type": "string", "minLength": 1}},
+      "application/octet-stream": {}, "application/*": {}, "*/*": {}
+    }}, "responses": {"200": {"content": {
+      "application/json": {"schema": {"$ref": "#/components/schemas/Record"}},
+      "application/json;profile=v2": {"schema": {"$ref": "#/components/schemas/Record"}},
+      "application/problem+json": {"schema": {"$ref": "#/components/schemas/Record"}},
+      "text/plain": {"schema": {"type": "string"}}, "application/*": {}, "*/*": {}
+    }}}}},
+    "/precedence/{mode}": {"get": {"operationId": "precedence", "parameters": [{"name": "mode", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {
+      "200": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/Record"}}}},
+      "2XX": {"content": {"text/plain": {"schema": {"type": "string"}}}}, "default": {}
+    }}},
+    "/empty": {"get": {"operationId": "empty", "responses": {"204": {"content": {"application/json": {"schema": false}}}}}},
+    "/default": {"get": {"operationId": "defaultStatus", "responses": {"default": {}}}},
+    "/head": {"head": {"operationId": "head", "responses": {"200": {"headers": {"X-Count": {"required": true, "schema": {"type": "integer"}}}, "content": {"application/json": {"schema": false}}}}}},
+    "/headers": {"get": {"operationId": "headers", "responses": {"200": {
+      "headers": {
+        "X-Rate": {"required": true, "schema": {"type": "integer"}},
+        "X-Flags": {"schema": {"type": "array", "items": {"type": "string"}}},
+        "X-Meta": {"content": {"application/json": {"schema": {"type": "object", "required": ["active"], "properties": {"active": {"type": "boolean"}}}}}}
+      },
+      "links": {"next": {"operationId": "media", "parameters": {"message": "$response.body#/message"}, "requestBody": {"$ref": "literal-data", "schema": {"type": "string"}}}},
+      "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Record"}}}
+    }}}},
+    "/form": {"post": {"operationId": "form", "requestBody": {"required": true, "content": {"application/x-www-form-urlencoded": {
+      "schema": {"type": "object", "required": ["id"], "minProperties": 1, "maxProperties": 4, "additionalProperties": false, "properties": {
+        "address": {"type": "object", "required": ["city"], "properties": {"city": {"type": "string"}}},
+        "codes": {"type": "array", "items": {"type": "integer"}}, "id": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}
+      }}, "encoding": {"codes": {"style": "form", "explode": false}}
+    }}}, "responses": {"200": {"content": {"application/x-www-form-urlencoded": {
+      "schema": {"type": "object", "required": ["id"], "additionalProperties": false, "properties": {
+        "address": {"type": "object", "required": ["city"], "properties": {"city": {"type": "string"}}},
+        "codes": {"type": "array", "items": {"type": "integer"}}, "id": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}
+      }}, "encoding": {"codes": {"style": "form", "explode": false}}
+    }}}}}},
+    "/upload": {"post": {"operationId": "upload", "requestBody": {"required": true, "content": {"multipart/form-data": {
+      "schema": {"type": "object", "required": ["file", "metadata"], "minProperties": 2, "maxProperties": 3, "additionalProperties": false, "properties": {
+        "file": {"maxLength": 64}, "labels": {"type": "array", "minItems": 1, "maxItems": 3, "items": {"type": "string"}},
+        "metadata": {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}
+      }}, "encoding": {
+        "file": {"contentType": "image/png, image/jpeg", "headers": {"X-Part-Id": {"required": true, "schema": {"type": "string"}}}},
+        "metadata": {"contentType": "application/json"}
+      }
+    }}}, "responses": {"200": {"content": {"multipart/form-data": {
+      "schema": {"type": "object", "required": ["file", "metadata"], "additionalProperties": false, "properties": {
+        "file": {"maxLength": 64}, "labels": {"type": "array", "items": {"type": "string"}},
+        "metadata": {"type": "object", "required": ["title"], "properties": {"title": {"type": "string"}}}
+      }}, "encoding": {
+        "file": {"contentType": "image/png", "headers": {"X-Part-Id": {"required": true, "schema": {"type": "string"}}}},
+        "metadata": {"contentType": "application/json"}
+      }
+    }}}}}},
+    "/sse/{mode}": {"get": {"operationId": "events", "parameters": [{"name": "mode", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"content": {"text/event-stream": {"itemSchema": {"$ref": "#/components/schemas/Event"}}}}}}},
+    "/lines/{mode}": {"get": {"operationId": "lines", "parameters": [{"name": "mode", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"content": {"application/x-ndjson": {"itemSchema": {"$ref": "#/components/schemas/Line"}}}}}}},
+    "/emit": {"post": {"operationId": "emitEvents", "requestBody": {"required": true, "content": {"text/event-stream": {"itemSchema": {"$ref": "#/components/schemas/Event"}}}}, "responses": {"204": {}}}},
+    "/methods": {
+      "query": {"operationId": "queryMethod", "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}},
+      "additionalOperations": {
+        "COPY": {"operationId": "copyMethod", "responses": {"204": {}}},
+        "head": {"operationId": "lowerHead", "responses": {"200": {"content": {"text/plain": {"schema": {"type": "string"}}}}}}
+      }
+    }
+  }
+}

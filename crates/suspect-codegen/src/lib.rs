@@ -1,35 +1,63 @@
-//! Semantic Type Graph compiler: OpenAPI to idiomatic TypeScript, Rust, and
-//! Go.
-//!
-//! Layer 1 lifts schemas into a semantic type graph (allOf composition,
-//! oneOf+discriminator sums, string enums, constraint refinements); layer 2
-//! plans per-language representations; layer 3 emits idiomatic source with
-//! deterministic ordering and built-in drift checking.
+//! Canonical OpenAPI SDK generation through a twelve-language native registry.
+//! Source-addressed contracts drive native models, checked
+//! codecs, HTTP clients, documentation and compatibility reports.
 
-pub mod consumer_impact;
-pub mod diff;
-pub mod go_emitter;
-pub mod idents;
-pub mod lift;
-pub mod rust_emitter;
-pub mod stg;
-pub mod ts;
-
-pub use stg::{
-    Base, Graph, Ident, OpModel, OpParam, Refinements, StgField, StgNode, StgPrim, StgStringEnum,
-    StgStruct, StgSum, StgType, StgUnion, WellKnownFormat,
-};
+pub mod attribution;
+pub mod backend;
+pub mod compatibility;
+pub mod credential_env;
+pub mod generation_session;
+pub mod sdk_defaults;
+#[cfg(feature = "java-sdk")]
+#[rustfmt::skip]
+pub mod java_sdk;
+#[cfg(feature = "csharp-sdk")]
+#[rustfmt::skip]
+pub mod csharp_sdk;
+#[cfg(feature = "kotlin-sdk")]
+#[rustfmt::skip]
+pub mod kotlin_sdk;
+#[cfg(feature = "ruby-sdk")]
+#[rustfmt::skip]
+pub mod ruby_sdk;
+#[cfg(feature = "php-sdk")]
+#[rustfmt::skip]
+pub mod php_sdk;
+#[cfg(feature = "dart-sdk")]
+#[rustfmt::skip]
+pub mod dart_sdk;
+#[cfg(feature = "cpp-sdk")]
+#[rustfmt::skip]
+pub mod cpp_sdk;
+pub mod examples;
+pub mod go_codecs;
+pub mod go_http;
+pub mod go_json;
+pub mod go_models;
+pub mod go_validation;
+pub(crate) mod http_contract;
+mod http_examples;
+#[cfg(feature = "http-protocol")]
+pub mod http_protocol;
+mod model_naming;
+pub mod python_codecs;
+pub mod python_http;
+pub mod python_json;
+pub mod python_models;
+pub mod python_validation;
+pub mod rust_codecs;
+pub mod rust_http;
+pub mod rust_models;
+pub mod rust_validation;
+pub mod schema_view;
+pub mod swift_sdk;
+#[cfg(feature = "http-protocol")]
+pub mod terraform;
+pub mod typescript;
 
 use std::path::Path;
 
-use suspect_ir::IrSpec;
-
-/// Builds the semantic graph for one spec.
-#[must_use]
-pub fn build_graph(spec: &IrSpec) -> Graph {
-    lift::lift(spec)
-}
-
+pub use suspect_artifact::{Adoption, OwnershipChangeKind, OwnershipReport};
 /// One generated file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutFile {
@@ -39,97 +67,72 @@ pub struct OutFile {
     pub content: String,
 }
 
-/// Per-target emission options.
-#[derive(Debug, Clone, Default)]
-pub struct EmitOptions {
-    /// TypeScript only: emit a Zod schema twin.
-    pub zod: bool,
-}
-
-/// Emits every target for `graph`.
-///
-/// # Errors
-/// Returns an error message when a target backend fails.
-pub fn emit_all(
-    graph: &Graph,
-    targets: &[&str],
-    opts: &EmitOptions,
-) -> Result<Vec<OutFile>, String> {
-    let mut out = Vec::new();
-    for target in targets {
-        match *target {
-            "ts" => {
-                for (path, content) in ts::emit_ts(graph, &crate::ts::TsOptions { zod: opts.zod }) {
-                    out.push(OutFile {
-                        path: format!("ts/{path}"),
-                        content,
-                    });
-                }
-            }
-            "rust" => {
-                for (path, content) in rust_emitter::emit_rust(graph) {
-                    out.push(OutFile {
-                        path: format!("rust/src/{path}"),
-                        content,
-                    });
-                }
-                out.push(OutFile {
-                    path: "rust/Cargo.toml".into(),
-                    content: RUST_CARGO.toml().into(),
-                });
-            }
-            "go" => {
-                for (path, content) in go_emitter::emit_go(graph) {
-                    out.push(OutFile {
-                        path: format!("go/{path}"),
-                        content,
-                    });
-                }
-            }
-            other => return Err(format!("unknown target `{other}`")),
-        }
-    }
-    Ok(out)
-}
-
-struct RustCargo;
-impl RustCargo {
-    fn toml(&self) -> &'static str {
-        r#"[package]
-name = "generated-api"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-"#
-    }
-}
-const RUST_CARGO: RustCargo = RustCargo;
-
-/// Content-hash drift check: `true` when all files already match.
+/// Ownership-aware drift check: outputs and versioned metadata must both match.
 #[must_use]
 pub fn matches_disk(files: &[OutFile], root: &Path) -> bool {
-    files
-        .iter()
-        .all(|f| std::fs::read_to_string(root.join(&f.path)).is_ok_and(|disk| disk == f.content))
+    check_files(files, root).is_ok_and(|report| report.is_current())
 }
 
-/// Writes files under `root`, creating directories as needed.
+/// Detailed drift for the default compiler owner, without filesystem writes.
+///
+/// # Errors
+/// Invalid paths or ownership metadata, symlinks, and filesystem failures.
+pub fn check_files(files: &[OutFile], root: &Path) -> Result<OwnershipReport, String> {
+    check_files_with_owner(files, root, "suspect-codegen")
+}
+
+/// Detailed drift for one caller-selected stable logical generation owner.
+///
+/// # Errors
+/// Invalid paths or ownership metadata, symlinks, and filesystem failures.
+pub fn check_files_with_owner(
+    files: &[OutFile],
+    root: &Path,
+    owner: &str,
+) -> Result<OwnershipReport, String> {
+    owned_files(files, root, owner, Adoption::Refuse).map(|batch| batch.report().clone())
+}
+
+/// Writes the compiler's complete desired file set with strict ownership.
+/// Unowned and user-edited files are preserved as conflicts. Unchanged owned
+/// files retain metadata; byte-identical obsolete owned files are removed.
 ///
 /// # Errors
 /// Propagates filesystem failures.
 pub fn write_files(files: &[OutFile], root: &Path) -> Result<(), String> {
-    use std::io::Write;
-    for f in files {
-        let full = root.join(&f.path);
-        if let Some(parent) = full.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        let mut fh = std::fs::File::create(&full).map_err(|e| e.to_string())?;
-        fh.write_all(f.content.as_bytes())
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    write_files_with_owner(files, root, "suspect-codegen", Adoption::Refuse)
+}
+
+/// Write one stable owner's complete output set, optionally adopting identical
+/// preexisting output explicitly. Adoption never takes files from another owner.
+///
+/// # Errors
+/// Ownership conflicts, unsafe paths, malformed metadata and I/O failures.
+/// Replacements are atomic per file; the whole batch is not a transaction.
+pub fn write_files_with_owner(
+    files: &[OutFile],
+    root: &Path,
+    owner: &str,
+    adoption: Adoption,
+) -> Result<(), String> {
+    owned_files(files, root, owner, adoption)?
+        .commit()
+        .map_err(|error| error.to_string())
+}
+
+fn owned_files<'a>(
+    files: &'a [OutFile],
+    root: &Path,
+    owner: &str,
+    adoption: Adoption,
+) -> Result<suspect_artifact::OwnedBatch<'a>, String> {
+    suspect_artifact::ArtifactBatch::prepare(
+        root,
+        files.iter().map(|file| suspect_artifact::Artifact {
+            path: Path::new(&file.path),
+            content: file.content.as_bytes(),
+        }),
+    )
+    .and_then(|batch| batch.with_ownership(owner, adoption))
+    .map_err(|error| error.to_string())
 }

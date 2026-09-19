@@ -24,34 +24,48 @@ pub(crate) fn method_key(method: Method) -> &'static str {
 
 /// Resolves a `$ref` value to a local component name.
 ///
-/// Local `#/components/schemas/{name}` references resolve to the bare,
-/// percent-decoded component name; anything else stays unresolved.
+/// URI-fragment decoding precedes JSON Pointer token decoding. Only a pointer
+/// to an immediate component schema resolves to a name; malformed fragments
+/// and references to nested schema locations stay unresolved.
 pub(crate) fn local_schema_ref(reference: &str) -> Option<String> {
-    reference
-        .strip_prefix("#/components/schemas/")
-        .map(percent_decode)
-        .filter(|n| !n.is_empty())
+    let fragment = percent_decode(reference.strip_prefix('#')?)?;
+    let token = fragment.strip_prefix("/components/schemas/")?;
+    if token.is_empty() || token.contains('/') {
+        return None;
+    }
+    let mut name = String::with_capacity(token.len());
+    let mut chars = token.chars();
+    while let Some(ch) = chars.next() {
+        name.push(match ch {
+            '~' => match chars.next()? {
+                '0' => '~',
+                '1' => '/',
+                _ => return None,
+            },
+            ch => ch,
+        });
+    }
+    Some(name)
 }
 
-/// Decodes `~1`/`~0` JSON-pointer escapes plus `%XX` sequences.
-pub(crate) fn percent_decode(text: &str) -> String {
-    let unescaped = text.replace("~1", "/").replace("~0", "~");
-    let bytes = unescaped.as_bytes();
-    let mut out = String::with_capacity(unescaped.len());
+/// Decodes URI-fragment `%XX` bytes without corrupting UTF-8 or replacing
+/// invalid sequences. JSON Pointer escapes are handled by the caller.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = &unescaped[i + 1..i + 3];
-            if let Ok(value) = u8::from_str_radix(hex, 16) {
-                out.push(value as char);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%' {
+            let high = char::from(*bytes.get(i + 1)?).to_digit(16)? as u8;
+            let low = char::from(*bytes.get(i + 2)?).to_digit(16)? as u8;
+            out.push(high * 16 + low);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
         }
-        out.push(bytes[i] as char);
-        i += 1;
     }
-    out
+    String::from_utf8(out).ok()
 }
 
 /// Collects local `#/components/schemas/{name}` references from JSON.
@@ -68,11 +82,9 @@ fn walk_refs(json: &serde_json::Value, out: &mut Vec<String>) {
         serde_json::Value::Object(map) => {
             for (k, v) in map {
                 if k == "$ref"
-                    && let Some(name) = v
-                        .as_str()
-                        .and_then(|r| r.strip_prefix("#/components/schemas/"))
+                    && let Some(name) = v.as_str().and_then(local_schema_ref)
                 {
-                    out.push(name.to_owned());
+                    out.push(name);
                 } else {
                     walk_refs(v, out);
                 }
@@ -87,14 +99,13 @@ fn walk_refs(json: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
-/// Materializes one plain-scalar token into JSON using the YAML 1.2 core
-/// schema — the exact rules `suspect-low` applies (`infer_scalar`,
-/// `parse_int`, `parse_float`, mirrored here because that crate does not
-/// export the parse helpers).
+/// Materializes scalar tokens using YAML 1.2 core-schema inference.
 ///
-/// Quoted scalars are always strings. Non-finite floats become `null`, and
-/// integer literals outside `i64` degrade to `0`, matching the overlay
-/// round-trip (`Value::Int(as_i64().unwrap_or(0))` through a JSON string).
+/// Quoted scalars stay strings. Finite numbers retain their exact value
+/// through `serde_json`'s arbitrary-precision representation, without an
+/// intermediate `i64` or `f64`. YAML-only number spellings are normalized to
+/// JSON; non-JSON spellings that are not finite core-schema numbers retain
+/// their text for validation rather than silently becoming zero or null.
 pub(crate) fn scalar_json(raw: &str, quoted: bool) -> serde_json::Value {
     if quoted {
         return serde_json::Value::String(raw.to_owned());
@@ -104,16 +115,12 @@ pub(crate) fn scalar_json(raw: &str, quoted: bool) -> serde_json::Value {
         "true" | "True" | "TRUE" => serde_json::Value::Bool(true),
         "false" | "False" | "FALSE" => serde_json::Value::Bool(false),
         _ => {
-            if is_yaml_int(raw.as_bytes()) {
-                serde_json::Value::Number(serde_json::Number::from(
-                    parse_yaml_int(raw).unwrap_or(0),
-                ))
+            if let Ok(number) = raw.parse::<serde_json::Number>() {
+                serde_json::Value::Number(number)
+            } else if is_yaml_int(raw.as_bytes()) {
+                serde_json::Value::Number(parse_yaml_int(raw))
             } else if is_yaml_float(raw.as_bytes()) {
-                match parse_yaml_float(raw) {
-                    Some(f) => serde_json::Number::from_f64(f)
-                        .map_or(serde_json::Value::Null, serde_json::Value::Number),
-                    None => serde_json::Value::Null,
-                }
+                serde_json::Value::Number(parse_yaml_float(raw))
             } else {
                 serde_json::Value::String(raw.to_owned())
             }
@@ -169,30 +176,82 @@ fn is_yaml_float(raw: &[u8]) -> bool {
     int_ok && frac_ok && has_digit && dot_or_exp
 }
 
-/// Mirrors `suspect_low::parse_int` for YAML spellings.
-fn parse_yaml_int(s: &str) -> Option<i64> {
+/// Normalizes a validated YAML integer without a bounded integer conversion.
+fn parse_yaml_int(s: &str) -> serde_json::Number {
     let (neg, body) = match s.as_bytes().first() {
         Some(b'-') => (true, &s[1..]),
         Some(b'+') => (false, &s[1..]),
         _ => (false, s),
     };
     let magnitude = if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-        i64::from_str_radix(hex, 16).ok()?
+        radix_to_decimal(hex, 16)
     } else if let Some(oct) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
-        i64::from_str_radix(oct, 8).ok()?
+        radix_to_decimal(oct, 8)
     } else {
-        body.parse::<i64>().ok()?
+        decimal_digits(body).to_owned()
     };
-    Some(if neg { -magnitude } else { magnitude })
+    let normalized = if neg {
+        format!("-{magnitude}")
+    } else {
+        magnitude
+    };
+    normalized
+        .parse()
+        .expect("validated YAML integer normalizes to a JSON number")
 }
 
-/// Mirrors `suspect_low::parse_float`.
-fn parse_yaml_float(s: &str) -> Option<f64> {
-    match s {
-        ".inf" | ".Inf" | ".INF" | "+.inf" | "+.Inf" | "+.INF" => return Some(f64::INFINITY),
-        "-.inf" | "-.Inf" | "-.INF" => return Some(f64::NEG_INFINITY),
-        ".nan" | ".NaN" | ".NAN" => return Some(f64::NAN),
-        _ => {}
+/// Converts hexadecimal/octal digits to little-endian decimal digits.
+fn radix_to_decimal(digits: &str, radix: u8) -> String {
+    let mut decimal = vec![0u8];
+    for digit in digits.chars() {
+        let mut carry = digit
+            .to_digit(u32::from(radix))
+            .expect("validated YAML radix digit") as u8;
+        for place in &mut decimal {
+            let value = *place * radix + carry;
+            *place = value % 10;
+            carry = value / 10;
+        }
+        while carry != 0 {
+            decimal.push(carry % 10);
+            carry /= 10;
+        }
     }
-    s.parse().ok()
+    decimal
+        .into_iter()
+        .rev()
+        .map(|digit| char::from(b'0' + digit))
+        .collect()
+}
+
+/// Removes YAML's optional leading zeroes, retaining a zero for an empty part.
+fn decimal_digits(digits: &str) -> &str {
+    let trimmed = digits.trim_start_matches('0');
+    if trimmed.is_empty() { "0" } else { trimmed }
+}
+
+/// Normalizes a validated finite YAML float by editing its spelling only.
+fn parse_yaml_float(s: &str) -> serde_json::Number {
+    let body = s.strip_prefix(['-', '+']).unwrap_or(s);
+    let (mantissa, exponent) = match body.find(['e', 'E']) {
+        Some(index) => (&body[..index], &body[index..]),
+        None => (body, ""),
+    };
+    let (integer, fraction) = match mantissa.split_once('.') {
+        Some((integer, fraction)) => (integer, Some(fraction)),
+        None => (mantissa, None),
+    };
+    let mut normalized = String::with_capacity(s.len() + 2);
+    if s.starts_with('-') {
+        normalized.push('-');
+    }
+    normalized.push_str(decimal_digits(integer));
+    if let Some(fraction) = fraction {
+        normalized.push('.');
+        normalized.push_str(if fraction.is_empty() { "0" } else { fraction });
+    }
+    normalized.push_str(exponent);
+    normalized
+        .parse()
+        .expect("validated finite YAML float normalizes to a JSON number")
 }

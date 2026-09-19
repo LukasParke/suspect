@@ -18,8 +18,9 @@ pub use diagnostic::{Diagnostic, Severity};
 /// checks — and returns every finding. The result is sorted by
 /// `(doc, range, code)` so output is stable across runs.
 ///
-/// Diagnostics are anchored to `api`'s source document; references resolved
-/// from other documents are still reported under that URI.
+/// Schema and reference diagnostics use the offending node's source document,
+/// including external documents. Other check groups currently anchor diagnostics
+/// to `api`'s source document. Reference-shaped instance data is not traversed.
 #[must_use]
 pub fn validate_openapi(api: &OpenApi<'_>) -> Vec<Diagnostic> {
     let mut out = Vec::new();
@@ -48,22 +49,21 @@ pub fn validate_workspace(session: &Session) -> Result<Vec<Diagnostic>, ModelErr
                     | suspect_low::SpecFamily::Oas32
             )
         ) {
-            let api = session.load(uri.as_str())?;
+            let api = session.open(uri.as_str())?;
             out.extend(validate_openapi(&api));
         }
     }
     Ok(finish(out))
 }
 
-/// Validates one entry document, plus whatever its `$ref` closure pulls
-/// into the session. The result covers only the entry document's own
-/// diagnostics, sorted like [`validate_openapi`]'s.
+/// Validates one entry and its reachable contract positions. Reference-shaped
+/// example/default data cannot cause document loading. Invalid contract
+/// references produce located findings, including missing external documents.
 ///
 /// # Errors
-/// Propagates [`ModelError`] if `entry`, or a document referenced from it,
-/// fails to load as an OpenAPI model.
+/// Propagates [`ModelError`] if `entry` fails to open as an OpenAPI model.
 pub fn validate_entry(session: &Session, entry: &str) -> Result<Vec<Diagnostic>, ModelError> {
-    let api = session.load(entry)?;
+    let api = session.open(entry)?;
     Ok(validate_openapi(&api))
 }
 

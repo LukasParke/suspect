@@ -1,0 +1,38 @@
+import 'package:@@PACKAGE@@/@@PACKAGE@@_io.dart';
+
+void check(bool value) { if (!value) throw StateError('native SDK observation assertion'); }
+void checked(@@MODEL@@ value) {
+  check(value.data.totalCredits.token == '@@PRECISION@@');
+  check(value.data.totalUsage.token == '25.75');
+}
+Future<void> main(List<String> args) async {
+  final phase = args[0];
+  final count = int.parse(args[1]);
+  const fixture = @@FIXTURE@@;
+  if (phase == 'import') {
+    check(count == 1 && @@CODEC@@ is ModelCodec<@@MODEL@@>);
+    print('SUSPECT_NATIVE_COSTS {"phase":"import","iterations":1,"loaded":true}');
+  } else if (phase == 'codec') {
+    var encodedBytes = 0;
+    for (var i = 0; i < count; i++) {
+      final @@MODEL@@ value = @@CODEC@@.decode(fixture);
+      checked(value);
+      final encoded = @@CODEC@@.encode(value);
+      check(encoded.contains('"total_credits":@@PRECISION@@'));
+      encodedBytes += encoded.length; // Independent fixture and encoded field names are ASCII.
+    }
+    print('SUSPECT_NATIVE_COSTS {"phase":"codec","iterations":$count,"encodedBytes":$encodedBytes,"precision":"@@PRECISION@@"}');
+  } else if (phase == 'request') {
+    final base = args[2];
+    check(base.startsWith('http://127.0.0.1:') && base.endsWith('/api/v1'));
+    final client = Client(transport: IoTransport(), credentials: const Credentials(apiKey: '@@TOKEN@@'), server: Uri.parse(base));
+    try {
+      for (var i = 0; i < count; i++) {
+        final response = await client.@@METHOD@@();
+        check(response.status == 200);
+        checked(response.data);
+      }
+    } finally { await client.close(); }
+    print('SUSPECT_NATIVE_COSTS {"phase":"request","iterations":$count,"precision":"@@PRECISION@@"}');
+  } else { throw StateError('unknown phase'); }
+}

@@ -77,7 +77,7 @@ enum Verdict {
 /// Propagates workspace/IR compilation failures and transport setup errors;
 /// crashes surface through the exit code instead.
 pub fn fuzz(spec: &Path, base_url: &str, runs: usize, filter: Option<&str>) -> anyhow::Result<i32> {
-    let ws = super::workspace_dir_all(spec)?;
+    let ws = super::workspace_for_entry(spec)?;
     let uri = Uri::from_path(spec)?;
     ws.get(&uri)
         .ok_or_else(|| anyhow::anyhow!("spec document not loaded: {uri}"))?;
@@ -478,7 +478,7 @@ components:
 "###,
     )
     .unwrap();
-    let ws = super::workspace_dir_all(&spec_path).unwrap();
+    let ws = super::workspace_for_entry(&spec_path).unwrap();
     let uri = Uri::from_path(&spec_path).unwrap();
     let ir = IrSpec::from_workspace(&ws, &uri).unwrap();
     let op = ir

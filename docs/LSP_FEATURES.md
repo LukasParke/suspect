@@ -15,8 +15,7 @@ implementation approach using suspect's existing infrastructure.
 - [Workspace Features](#workspace-features)
 - [Window & Progress](#window--progress)
 - [Missing LSP 3.17 Methods](#missing-lsp-317-methods)
-- [Quality & UX Deep-Dive](#quality--ux-deep-dive)
-- [Priority Roadmap](#priority-roadmap)
+- [Priority Roadmap — Shipped](#priority-roadmap--shipped)
 
 ---
 

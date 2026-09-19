@@ -1,0 +1,15 @@
+{
+  "format": "suspect-sdk-session-runner-v2",
+  "id": "luke-mac-m5-pro-18c-64g",
+  "kind": "dedicated",
+  "image": "macOS 26.6.2 build 25G83; Darwin 25.6.0 arm64",
+  "cpu_policy": "User-reserved for sequential baseline/candidate runs only after Main finishes builds/reviews and freezes integration. Unmodified macOS scheduler; no explicit CPU affinity (observed null), 18 physical/logical CPUs. AC Power throughout, observed powermode 0. No privileged power/governor changes. An optional nonprivileged caffeinate -is parent may hold awake assertions without altering recorded pmset configuration.",
+  "expected_identity_sha256": "6fe3b27d006b8fc3cec896331405c89baed9d1839976d3d04fc778dc14bc0033",
+  "expected_tools_sha256": "ec60636a689cc32d5af44d722cd0745faf4069dbe8ab0c67bc530d719fbfaaee",
+  "reservation": {
+    "decision": "User explicitly requested: Calibrate this Mac",
+    "date": "2026-09-09",
+    "starts": "Only after Main explicitly declares integration frozen and all builds/reviews finished",
+    "qualification": "pending actual repeated measurements; this declaration is not a passing baseline"
+  }
+}

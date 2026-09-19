@@ -151,7 +151,7 @@ pub struct FatalBody {
 }
 
 /// Worker → host: any frame the worker sends.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum WorkerFrame {
     /// Rules loaded after hello/reload.
@@ -168,6 +168,72 @@ pub enum WorkerFrame {
     Fatal(FatalBody),
     /// Liveness reply.
     Pong,
+}
+
+// serde's internally tagged enum buffer cannot decode f64 when serde_json's
+// arbitrary_precision feature is unified into this workspace. Dispatch through
+// JSON values so only explicitly typed timing fields convert to floats; exact
+// contract values in finding fixes stay exact. Reject duplicate fields before
+// buffering so a repeated tag or run_id cannot silently replace the first.
+impl<'de> Deserialize<'de> for WorkerFrame {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct FrameVisitor;
+        impl<'de> serde::de::Visitor<'de> for FrameVisitor {
+            type Value = WorkerFrame;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a worker frame object with a t field")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut input: A,
+            ) -> Result<WorkerFrame, A::Error> {
+                use serde::de::Error;
+                use serde_json::Value;
+
+                let mut fields = serde_json::Map::new();
+                while let Some((name, value)) = input.next_entry::<String, Value>()? {
+                    if fields.insert(name.clone(), value).is_some() {
+                        return Err(A::Error::custom(format!("duplicate field `{name}`")));
+                    }
+                }
+                let tag = match fields.remove("t") {
+                    Some(Value::String(tag)) => tag,
+                    Some(_) => return Err(A::Error::custom("frame t must be a string")),
+                    None => return Err(A::Error::missing_field("t")),
+                };
+                let body = Value::Object(fields);
+                match tag.as_str() {
+                    "ready" => serde_json::from_value(body).map(WorkerFrame::Ready),
+                    "finding" => serde_json::from_value(body).map(WorkerFrame::Finding),
+                    "findings_batch" => {
+                        serde_json::from_value(body).map(WorkerFrame::FindingsBatch)
+                    }
+                    "done" => serde_json::from_value(body).map(WorkerFrame::Done),
+                    "rule_error" => serde_json::from_value(body).map(WorkerFrame::RuleError),
+                    "fatal" => serde_json::from_value(body).map(WorkerFrame::Fatal),
+                    "pong" => return Ok(WorkerFrame::Pong),
+                    _ => {
+                        return Err(A::Error::unknown_variant(
+                            &tag,
+                            &[
+                                "ready",
+                                "finding",
+                                "findings_batch",
+                                "done",
+                                "rule_error",
+                                "fatal",
+                                "pong",
+                            ],
+                        ));
+                    }
+                }
+                .map_err(A::Error::custom)
+            }
+        }
+        deserializer.deserialize_map(FrameVisitor)
+    }
 }
 
 /// Host → worker frames, tagged the same way.

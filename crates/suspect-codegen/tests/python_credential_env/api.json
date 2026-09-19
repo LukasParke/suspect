@@ -1,0 +1,34 @@
+{
+  "openapi": "3.2.0",
+  "info": {"title": "Python environment credentials", "version": "1"},
+  "servers": [{"url": "https://credentials.example.test/v1"}],
+  "components": {
+    "securitySchemes": {
+      "apiKey": {"type": "http", "scheme": "bearer"},
+      "headerKey": {"type": "apiKey", "in": "header", "name": "X-Api-Key"},
+      "queryKey": {"type": "apiKey", "in": "query", "name": "key"},
+      "cookieKey": {"type": "apiKey", "in": "cookie", "name": "session"},
+      "basic": {"type": "http", "scheme": "basic"},
+      "oauth": {"type": "oauth2", "flows": {"clientCredentials": {"tokenUrl": "https://auth.example.test/token", "scopes": {}}}},
+      "oidc": {"type": "openIdConnect", "openIdConnectUrl": "https://auth.example.test/discovery"}
+    },
+    "responses": {
+      "Ok": {"description": "Controlled response", "content": {"application/json": {"schema": {"type": "string"}, "example": "ok"}}}
+    }
+  },
+  "paths": {
+    "/key": {"get": {"operationId": "getCurrentKey", "security": [{"apiKey": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/header": {"get": {"operationId": "headerKey", "security": [{"headerKey": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/query": {"get": {"operationId": "queryKey", "security": [{"queryKey": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/cookie": {"get": {"operationId": "cookieKey", "security": [{"cookieKey": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/either": {"get": {"operationId": "either", "security": [{"apiKey": []}, {"headerKey": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/together": {"get": {"operationId": "together", "security": [{"apiKey": [], "headerKey": [], "queryKey": [], "cookieKey": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/anonymous": {"get": {"operationId": "anonymous", "security": [], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/optional": {"get": {"operationId": "optionalAuth", "security": [{}, {"apiKey": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/basic": {"get": {"operationId": "basicAuth", "security": [{"basic": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/oauth": {"get": {"operationId": "oauthAuth", "security": [{"oauth": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/oidc": {"get": {"operationId": "oidcAuth", "security": [{"oidc": []}], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/collision": {"get": {"operationId": "credentialEnv", "security": [], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}},
+    "/init": {"get": {"operationId": "__init__", "security": [], "responses": {"200": {"$ref": "#/components/responses/Ok"}}}}
+  }
+}

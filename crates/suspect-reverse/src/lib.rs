@@ -228,7 +228,7 @@ pub fn cross_reference(spec: &suspect_ir::IrSpec, routes: &[ExtractedRoute]) -> 
     for (method, path) in spec_set.keys() {
         let impl_has = impl_set
             .keys()
-            .any(|(m, p)| (p == path && (m == method || m == "ANY")) || (m == "ANY" && p == path));
+            .any(|(m, p)| p == path && (m == method || m == "ANY"));
         if !impl_has {
             report.spec_only.push(Mismatch {
                 kind: "spec_only_endpoint".to_owned(),

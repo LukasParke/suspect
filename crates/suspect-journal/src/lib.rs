@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 
 pub mod cassette;
 pub mod causal;
+mod record;
 #[cfg(test)]
 mod tests;
 pub use cassette::{
@@ -138,7 +139,7 @@ pub struct RunSummaryRecord {
 }
 
 /// Everything a journal can emit.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Record {
     /// Identity/settings record.

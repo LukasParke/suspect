@@ -14,8 +14,10 @@
 use std::fmt;
 
 pub mod filters;
+mod json_context;
 pub mod orchestrate;
 pub mod presets;
+mod rust_support;
 #[cfg(test)]
 mod tests;
 
@@ -46,16 +48,63 @@ impl From<minijinja::Error> for GenError {
     }
 }
 
+/// An immutable input prepared for repeated template rendering.
+///
+/// Create one with [`TemplateEngine::prepare_context`] and reuse it with
+/// [`TemplateEngine::render_prepared`]. Its borrow keeps the source JSON
+/// unchanged for the duration of the prepared context; any converted data
+/// belongs to this context rather than an engine-wide cache.
+pub struct PreparedContext<'a> {
+    source: &'a serde_json::Value,
+    minijinja: Option<minijinja::Value>,
+}
+
+impl PreparedContext<'_> {
+    fn minijinja_value(&self) -> minijinja::Value {
+        self.minijinja
+            .clone()
+            .unwrap_or_else(|| json_context::to_template(self.source))
+    }
+}
+
 /// Engine contract used by manifest rendering.
 ///
 /// Implementations own their template store; templates are added by name
 /// and evaluated against a JSON context.
 pub trait TemplateEngine: Send + Sync {
     /// Renders the named template with `ctx` (any serializable JSON value).
+    /// Each call observes the current value of `ctx`.
     ///
     /// # Errors
     /// When the template is unknown or evaluation fails.
     fn render(&self, template_name: &str, ctx: &serde_json::Value) -> Result<String, GenError>;
+
+    /// Prepares immutable JSON for repeated rendering without reconversion.
+    ///
+    /// [`MinijinjaEngine`] converts the JSON once. The default keeps the
+    /// JSON borrow, preserving compatibility with engines that implement
+    /// only [`Self::render`] and [`Self::add_template`].
+    #[must_use]
+    fn prepare_context<'a>(&self, ctx: &'a serde_json::Value) -> PreparedContext<'a> {
+        PreparedContext {
+            source: ctx,
+            minijinja: None,
+        }
+    }
+
+    /// Renders with an immutable context prepared for reuse across files.
+    ///
+    /// The default delegates to [`Self::render`] with the source JSON.
+    ///
+    /// # Errors
+    /// When the template is unknown or evaluation fails.
+    fn render_prepared(
+        &self,
+        template_name: &str,
+        ctx: &PreparedContext<'_>,
+    ) -> Result<String, GenError> {
+        self.render(template_name, ctx.source)
+    }
 
     /// Adds (or replaces) a template under `name`.
     ///
@@ -74,41 +123,24 @@ pub trait TemplateEngine: Send + Sync {
 /// [minijinja]: https://docs.rs/minijinja
 pub struct MinijinjaEngine {
     env: minijinja::Environment<'static>,
-    /// Memoized context conversion: `render` deep-converts the incoming
-    /// [`serde_json::Value`] into a minijinja value on every call, which
-    /// dominates render time for large specs (megabytes of JSON). The most
-    /// recently converted context is kept, keyed by its address; callers
-    /// must not mutate a context in place between renders.
-    ctx_cache: std::sync::Mutex<CtxCache>,
-}
-
-#[derive(Default)]
-struct CtxCache {
-    addr: usize,
-    value: Option<minijinja::Value>,
 }
 
 impl MinijinjaEngine {
     /// Creates an empty engine.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            env: minijinja::Environment::new(),
-            ctx_cache: std::sync::Mutex::new(CtxCache::default()),
-        }
+        let mut env = minijinja::Environment::new();
+        env.add_filter("tojson", json_context::tojson);
+        Self { env }
     }
 
-    /// Renders without touching the context memoization cache.
-    ///
-    /// Used by context builders that render many short-lived per-entity
-    /// contexts (whose addresses would thrash or falsely hit the cache).
+    /// Renders a short-lived per-entity context without preparing it for reuse.
     pub(crate) fn render_once(
         &self,
         template_name: &str,
         ctx: &serde_json::Value,
     ) -> Result<String, GenError> {
-        let tmpl = self.env.get_template(template_name)?;
-        Ok(tmpl.render(ctx)?)
+        self.render(template_name, ctx)
     }
 }
 
@@ -121,15 +153,25 @@ impl Default for MinijinjaEngine {
 impl TemplateEngine for MinijinjaEngine {
     fn render(&self, template_name: &str, ctx: &serde_json::Value) -> Result<String, GenError> {
         let tmpl = self.env.get_template(template_name)?;
-        let mut cache = self.ctx_cache.lock().expect("ctx cache lock");
-        let addr = std::ptr::from_ref(ctx).addr();
-        if cache.addr != addr || cache.value.is_none() {
-            *cache = CtxCache {
-                addr,
-                value: Some(minijinja::Value::from_serialize(ctx)),
-            };
+        Ok(tmpl.render(json_context::to_template(ctx))?)
+    }
+
+    fn prepare_context<'a>(&self, ctx: &'a serde_json::Value) -> PreparedContext<'a> {
+        PreparedContext {
+            source: ctx,
+            minijinja: Some(json_context::to_template(ctx)),
         }
-        Ok(tmpl.render(cache.value.clone().expect("cache populated"))?)
+    }
+
+    fn render_prepared(
+        &self,
+        template_name: &str,
+        ctx: &PreparedContext<'_>,
+    ) -> Result<String, GenError> {
+        Ok(self
+            .env
+            .get_template(template_name)?
+            .render(ctx.minijinja_value())?)
     }
 
     fn add_template(&mut self, name: &str, src: &str) -> Result<(), GenError> {
@@ -145,5 +187,6 @@ pub use filters::{
 };
 pub use orchestrate::{
     BEGIN_MARK, END_MARK, Manifest, OutputRule, RenderOutcome, WriteReason, load_manifest,
-    parse_manifest, parse_manifest_str, render_manifest,
+    parse_manifest, parse_manifest_str, render_manifest, render_manifest_owned,
 };
+pub use suspect_artifact::Adoption;

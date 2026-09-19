@@ -40,6 +40,7 @@ exports.gatewayPort = gatewayPort;
 exports.spawnSuspectRun = spawnSuspectRun;
 exports.errorMessage = errorMessage;
 const cp = __importStar(require("child_process"));
+const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const vscode = __importStar(require("vscode"));
 function isSuspectEvent(value) {
@@ -72,6 +73,13 @@ function suspectBinary() {
     if (/[/\\]suspect$/.test(base)) {
         return base;
     }
+    try {
+        // Explicit executables may be versioned, renamed, or symlinks to a pinned
+        // build. The setting accepts the file itself as well as a CLI directory.
+        if (fs.statSync(base).isFile())
+            return base;
+    }
+    catch { /* Let spawning diagnose an unavailable CLI using the directory form. */ }
     return path.join(base, 'suspect');
 }
 function testBaseUrl() {

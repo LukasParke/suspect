@@ -4,6 +4,10 @@
 > replay, TLS, credentials, inference) and `docs/TS-RULE-RUNTIME.md`
 > (TS custom rules on a Bun sidecar).
 
+Future integration proposal. SDK generation consumes accepted OpenAPI through
+the current [Contract-backed pipeline](SDK-GENERATION-PLAN.md); code-derived
+facts supply evidence and proposed source changes.
+
 ## 0. Goal
 
 Merge charte.rs (tree-sitter fact extraction from 14 web-framework sources
@@ -35,7 +39,7 @@ are two evidence sources for every API element:
   openapi.yaml (spec truth)          src/** (code truth)
         │                                  │
         ▼                                  ▼
-   IrSpec (existing)  ←──────────  facts → IrSpec + Provenance
+   Contract          ←──────────  facts → proposed OpenAPI + Provenance
         │                                  │        (suspect-code)
         └────────────┬─────────────────────┘
                      ▼
@@ -47,13 +51,13 @@ are two evidence sources for every API element:
   (projected)   (projected)    (handler coverage)
 ```
 
-**Key simplification over charte.rs:** charte has its own parallel IR
-(`ApiDocument`) and renderer. In the fold, the IR is *suspect's* `IrSpec`.
-Code facts lower into an `IrSpec` plus a `ProvenanceIndex` — so every
-downstream consumer (validate, lint, diff, codegen, gateway, test) works on
-code-derived specs **with zero changes**, exactly like `IrSpec::from_workspace`
-already does for YAML. The renderer survives only as an emitter for
-`suspect code gen` output and for lossless YAML insertion in code actions.
+**Shared semantic boundary:** code facts produce proposed OpenAPI plus a
+`ProvenanceIndex`. The normal source compiler can then build a `Contract` for
+comparison with the accepted specification. Native SDK generation uses the
+accepted OpenAPI source and its existing backend plans. Validation, lint,
+gateway and test integration each need explicit adapters and behavioral gates;
+code facts do not silently become a second SDK contract. The proposed renderer
+also supplies lossless YAML insertion snippets for code actions.
 
 ### The killer mechanism: union evaluation + projection
 
@@ -104,7 +108,7 @@ crates/suspect-code/
                       fastify,hono,nextjs,nestjs,sveltekit}, python/{fastapi,
                       flask}, go/{mux,chi}, java/{jaxrs,spring},
                       csharp/aspnet
-    lower.rs          facts → suspect_ir::IrSpec  (+ ProvenanceIndex)
+    lower.rs          facts → proposed OpenAPI (+ ProvenanceIndex)
     provenance.rs     ProvenanceIndex: (method, path) → Vec<SpanEntry>
                       ranked by confidence; (schema name) → Vec<SpanEntry>
     render/           OpenAPI 3.1 emitter (JSON/YAML) for `suspect code gen`
@@ -126,13 +130,13 @@ charte already pins compatible versions).
 
 | Crate | Change |
 |---|---|
-| `suspect-ir` | `IrSpec::from_code(facts) -> (IrSpec, ProvenanceIndex)` constructor; no changes to existing types |
+| `suspect-ir` | Compile emitted source proposals through the Contract boundary; retain code provenance alongside source identity |
 | `suspect-lint` | `RuleTarget { Spec, Facts }` on compiled rules; `project(findings, provenance) -> Vec<ProjectedFinding>`; union evaluation mode |
 | `suspect-lsp` | State gains `code: CodeWorkspace` (parsed trees, facts, provenance); diagnostics push into code documents; cross-resolvers (§5) |
 | `suspect-validate` | `--with-code`: cross-checks spec responses/params/security against facts; violations carry projection spans |
 | `suspect-test` | plan/step provenance (`x-suspect-handler`); handler-coverage report (handlers with zero test coverage) |
 | `suspect-cli` | `suspect code gen|check|sync|lint`; `--project` flags on `lint`/`check` |
-| `suspect-codegen` | `diff_specs(spec_ir, code_ir)` — already exists, no change; `sync` composes it |
+| `suspect-codegen` | `compatibility` compares Contract snapshots and selected native plans; `sync` must retain uncertainty and code provenance |
 
 ---
 
@@ -159,7 +163,7 @@ charte already pins compatible versions).
 | 5 | java/spring, jaxrs, csharp/aspnet | enterprise coverage |
 
 **Discarded from charte** (suspect-primitives alignment): `ApiDocument` IR
-(replaced by lowering into `IrSpec`), CLI surface, sdk/mcp/serve/
+(replaced by source proposals and Contract compilation), CLI surface, sdk/mcp/serve/
 context_pack/ledger/ingest commands, its lint command (superseded by
 suspect-lint with fact-space), coverage command (superseded by R10 quality
 scoring, which gains a new *code-agreement* dimension fed by facts).
@@ -244,10 +248,11 @@ lookup O(1).
   signals), parameters declared but never read, security schemes declared
   but no middleware evidence, operations declared with no handler. Each
   violation carries both spec and code spans.
-- `suspect code sync spec.yaml`: three-way report — code-only (undocumented),
-  spec-only (unimplemented), both-present (run `suspect-codegen::diff` between
-  spec-IR and code-IR → BREAKING/ADDITIVE/COSMETIC drift with semver). This
-  reuses the R5 engine verbatim: drift detection between two IrSpecs.
+- `suspect code sync spec.yaml`: proposed three-way report — code-only
+  (undocumented), spec-only (unimplemented), and both-present. Compile proposed
+  OpenAPI and compare Contract snapshots through `suspect_codegen::compatibility`;
+  report compatible, breaking, potentially-breaking and unknown findings with
+  both source and code provenance.
 - Test engine: compiled `StepPlan` gains optional handler provenance; step
   failures report "assertion failed at step 2 (GET /pets/{id}) — handler
   src/routes/pets.rs:42". New report: **handler coverage** — handlers with
@@ -262,7 +267,7 @@ lookup O(1).
 | Phase | Deliverable | Gate |
 |---|---|---|
 | P0 | `suspect-code` skeleton: span/confidence/facts/parser/workspace + axum + actix adapters, lowering, provenance | charte axum+actix goldens byte-identical; `suspect code gen` on suspect's own gateway source round-trips; bench: extraction ≤3ms/file; clippy clean |
-| P1 | CLI `code gen|check|sync`; `diff_specs(spec_ir, code_ir)` drift report | sync on a deliberately drifted fixture reports exact BREAKING set; corpus bench updated |
+| P1 | CLI `code gen|check|sync`; source/Contract adapter and compatibility report | sync on a deliberately drifted fixture reports supported changes and explicit unknowns; corpus bench updated |
 | P2 | Lint projection: RuleTarget::Facts, union evaluation, ProvenanceIndex projection | every existing spectral-default rule produces projected findings on a fixture repo; union rules fire on both sides of drift |
 | P2.5 | TS/JS custom rules on a Bun sidecar worker — see `docs/TS-RULE-RUNTIME.md` | protocol bench budgets met; conformance suite green; union TS rules report at handler spans |
 | P3 | LSP: CodeWorkspace, projected diagnostics, hover/def/links, code actions | driven verification: edit handler → diagnostic appears in editor at handler span within debounce window; navigation round-trips |
@@ -294,8 +299,8 @@ determinism test (double-run byte-identical), bench deltas recorded.
 2. A Spectral rule written for any spec produces a correct diagnostic inside
    the handler source that implements the violating operation — zero rule
    changes, zero code annotations.
-3. `suspect code sync` classifies seeded spec/code drift with correct
-   BREAKING/ADDITIVE/COSMETIC labels and semver recommendation.
+3. `suspect code sync` classifies seeded spec/code drift with source-linked
+   compatibility findings and explicit uncertainty.
 4. LSP: hover/definition/documentLink round-trips spec↔code; projected
    diagnostics appear at handler spans within one debounce window.
 5. Failing Arazzo step reports the implementing handler's file:line.

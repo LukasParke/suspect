@@ -1,0 +1,232 @@
+openapi: 3.1.0
+info:
+  title: M2 Canonical Vertical
+  version: "1"
+  description: >-
+    Representative create/update/list/get contract exercised identically by the
+    canonical TypeScript and Rust HTTP package consumers. JSON media only,
+    single bearer security, static HTTPS server. Every feature below is present
+    in the source document; nothing is inferred.
+servers:
+  - url: https://m2.example.test/api/v1
+security:
+  - apiKey: []
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      description: Create a widget with a required JSON body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WidgetInput"
+            examples:
+              valid:
+                value:
+                  name: alpha
+      responses:
+        "200":
+          description: Created widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+        "401":
+          description: Denied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Failure"
+        "422":
+          description: Rejected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Failure"
+    get:
+      operationId: listWidgets
+      description: List widgets with form scalar and array query parameters.
+      parameters:
+        - name: tag
+          in: query
+          schema:
+            type: string
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items:
+              type: string
+        - name: labels
+          in: query
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Widget page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WidgetList"
+        "401":
+          description: Denied.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Failure"
+  /widgets/{widget_id}:
+    get:
+      operationId: getWidget
+      description: Read one widget with a simple string path parameter.
+      parameters:
+        - name: widget_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+        "404":
+          description: Missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Failure"
+    patch:
+      operationId: updateWidget
+      description: Update a widget.
+      parameters:
+        - name: widget_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WidgetPatch"
+      responses:
+        "200":
+          description: Updated widget.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Widget"
+        "400":
+          description: Invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Failure"
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+  schemas:
+    Failure:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          example: denied
+    WidgetInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: alpha
+        amount:
+          type: number
+          description: Unbounded exact decimal; never a float in native code.
+          example: 9007199254740993.000000000000000001
+    WidgetPatch:
+      type: object
+      properties:
+        amount:
+          type: number
+          example: 0.0000000000000000001
+    Widget:
+      type: object
+      required: [id, amount, payload]
+      properties:
+        id:
+          type: string
+          example: w1
+        amount:
+          type: number
+          example: 9007199254740993.000000000000000001
+        meta:
+          description: Declared nullable member; null is distinct from absent.
+          type:
+            - string
+            - "null"
+          example: null
+        child:
+          description: Optional recursive member guarded by this object.
+          $ref: "#/components/schemas/WidgetNode"
+        payload:
+          description: Source-tagged oneOf; every branch carries its own required tag.
+          oneOf:
+            - $ref: "#/components/schemas/StandardPayload"
+            - $ref: "#/components/schemas/SecurePayload"
+    StandardPayload:
+      type: object
+      required: [kind, text]
+      properties:
+        kind:
+          type: string
+          const: standard
+        text:
+          type: string
+          example: plain
+    SecurePayload:
+      type: object
+      required: [kind, vault]
+      properties:
+        kind:
+          type: string
+          const: secure
+        vault:
+          type: string
+          example: vlt-1
+    WidgetNode:
+      type: object
+      required: [label]
+      properties:
+        label:
+          type: string
+          example: root
+        child:
+          $ref: "#/components/schemas/WidgetNode"
+    WidgetList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Widget"

@@ -1,12 +1,10 @@
 # Ten Revolutionary Features for the Suspect Platform
 
-The platform already has something no other OpenAPI toolchain has: a single
-semantic core that drives parsing, validation, code generation, contract
-testing, gateway serving, and traffic capture — all from one lossless parse
-of the specification at sub-10ms latency on production-scale APIs.
-
-These ten features exploit that foundation to build capabilities that don't
-exist anywhere else in the ecosystem.
+These platform proposals build on source-aware parsing, validation, contract
+testing, gateway serving and traffic records. SDK-related work uses the single
+[Contract-backed pipeline](SDK-GENERATION-PLAN.md) for native models, codecs,
+HTTP, docs, sessions and compatibility reports. Proposal descriptions below are
+future integrations; current support is recorded in [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
 
 ---
 
@@ -149,36 +147,37 @@ the spec eliminates hundreds of lines of manual test setup code.
 
 ## 5. Wire-Format-Aware Semantic Diffing
 
-Text diffs and JSON structural diffs can't distinguish between a breaking
-change and a cosmetic refactoring. This feature diffs at the Semantic Type
-Graph level, understanding wire-format transforms.
+Compare source-addressed Contract snapshots and the actual typed native plans.
+The current [compatibility API](SDK-COMPATIBILITY-REPORTS.md) reports wire and
+native changes separately, with explicit proof limits. Traffic-derived impact
+estimation is a proposed addition.
 
 ### How it works
 
-1. Parse two spec versions into separate STGs.
-2. Match components by semantic identity (not name — handle renames via
-   heuristic matching on field sets and types).
+1. Compile two spec versions into separate owned Contracts.
+2. Match operations and schema uses through source bindings, method/path
+   correspondence and resolved reference graphs.
 3. For each matched pair, compute a delta: added/removed/changed fields,
    constraint tightening/loosening, enum value changes, nullability flips.
-4. Classify each delta as BREAKING / ADDITIVE / COSMETIC based on whether
-   it changes the wire format consumers observe.
+4. Report compatible, breaking, potentially-breaking or unknown findings for
+   the native interface and wire contract independently.
 5. Output: a report showing only semantically meaningful changes, with
    breaking changes highlighted and consumer impact estimated from
    recorded traffic.
 
 ### Why it's revolutionary
 
-Renaming a JSON key with a custom serializer is NOT breaking, but every
-text-based diff tool flags it. Changing a discriminator value from
-`"created"` to `"new"` IS breaking, but a structural diff might miss it if
-only the string literal changed. Only a semantic-level diff gets this right.
+Changing a native symbol can break source consumers even when wire bytes stay
+the same. Changing a wire key or discriminator can affect values accepted by
+existing clients. Separate native/wire evidence makes those distinctions
+visible, while unsupported semantic proofs remain unknown.
 
 ### What it leverages
 
-- The STG already lifts schemas into typed nodes with refinements
-- Constraint comparisons (tighter vs looser) are type-theory operations
-- Recorded cassettes provide ground truth about which fields consumers
-  actually read
+- Contract stores resolved schema/HTTP identity and each backend retains typed
+  native descriptors
+- Bounded compatibility proofs distinguish request and response variance
+- Recorded cassettes provide sampled wire values for additional validation
 
 ---
 
@@ -186,15 +185,15 @@ only the string literal changed. Only a semantic-level diff gets this right.
 
 Continuous bidirectional synchronization between the running server and the
 specification. The gateway watches real responses; when undocumented
-behavior appears, it proposes spec amendments. When the spec changes, mocks
-and SDKs regenerate instantly.
+behavior appears, it proposes spec amendments. Accepted spec changes can drive
+mock updates and SDK session regeneration.
 
 ### How it works
 
 1. **Observation loop**: gateway validates live traffic → detects
    undocumented fields/responses → accumulates evidence → proposes spec
    patches (feature #1 above).
-2. **Propagation loop**: approved spec changes trigger instant
+2. **Propagation loop**: approved spec changes trigger
    regeneration of mock routes, SDK types, documentation pages, and
    validator rules via the existing watch infrastructure.
 3. **Reconciliation**: conflicts (spec says X, server returns Y) are
@@ -212,23 +211,23 @@ No manual sync steps, no drift, no stale docs.
 - Watch mode (already built) provides file-system eventing
 - Gateway validate mode (already built) provides behavioral observation
 - LSP diagnostics (already built) surface conflicts in-editor
-- Codegen hashing (already built) enables incremental regeneration
-- The entire pipeline runs at <10ms per iteration on stripe-sized specs
+- Generation sessions reuse unchanged Contract snapshots and native artifacts
+- End-to-end iteration latency is measured by the session-performance harness
 
 ---
 
 ## 7. Consumer Impact Analysis Across Versions
 
-Given two spec versions and a recorded traffic cassette, compute exactly
-which recorded consumers break under the new version, what migration steps
-they need, and quantify the blast radius.
+Given two spec versions and a recorded traffic cassette, identify recorded
+requests/responses that violate the candidate contract and report source-linked
+migration evidence. Sampling cannot establish every consumer's behavior.
 
 ### How it works
 
-1. Load both spec versions into separate IRs.
+1. Compile both spec versions into source-addressed Contracts.
 2. Compute the semantic diff (feature #5): which fields were removed,
    renamed, retyped, had constraints tightened.
-3. Replay the cassette against BOTH IRs: which recorded exchanges pass the
+3. Validate the cassette against both Contracts: which recorded exchanges pass the
    old spec but fail the new one?
 4. Group violations by consumer fingerprint (user-agent, client-id header,
    source IP range) to identify affected consumers.
@@ -244,8 +243,8 @@ what they need to change."
 ### What it leverages
 
 - Cassette entries record full request headers including identifying info
-- The dual-IR approach lets us evaluate the same request against both versions
-- The STG semantic diff classifies each difference by severity
+- Paired Contract snapshots let us evaluate the same request against both versions
+- Native/wire compatibility reports retain changes and explicit uncertainty
 - The journal format tracks consumer fingerprints across sessions
 
 ---
@@ -281,8 +280,8 @@ and implementation.
 ### What it leverages
 
 - Tree-sitter parsers already exist for Rust, TypeScript, and Go
-- The STG compiler can synthesize schema definitions from native type
-  declarations (structs/interfaces)
+- Proposed source adapters lower native type declarations into reviewable
+  OpenAPI candidates with code provenance
 - The diagnostic infrastructure surfaces mismatches as editor warnings
 
 ---
@@ -296,13 +295,13 @@ in any target language, and export working requests as Arazzo test steps.
 ### How it works
 
 1. The LSP serves a webview (VS Code extension) or opens a browser tab.
-2. The playground loads the current spec's IR and presents available
+2. The playground loads the current spec's Contract and presents available
    operations as a searchable palette.
 3. Selecting an operation shows its parameters with inline validation,
-   auto-completion from enums/examples, and type hints from the STG.
+   auto-completion from enums/examples, and type hints from native model plans.
 4. Executing a request shows the response alongside:
    - Contract validation verdicts (per-field)
-   - Generated type representations in TS/Rust/Go
+   - Generated types for the selected Python/Go/Swift/Rust/TS profile
    - Schema conformance score
    - Similar historical requests from cassettes
 5. "Save as test step" exports the request + assertions as an Arazzo step
@@ -318,7 +317,7 @@ with instant feedback from real servers and generated code.
 
 - The LSP already serves spec analysis at keystroke latency
 - The executor handles real HTTP dispatch with criteria evaluation
-- The STG compiler generates type representations on demand
+- Native model planners provide source-bound type representations
 - The journal captures results for reproducibility
 - The VS Code extension provides the webview container
 
@@ -367,11 +366,11 @@ you're making progress. It turns API governance from policing into coaching.
 | 2 | Causal Contract Debugger | Failure→spec-source→git-blame timeline | CST offsets + cassettes + git | Low |
 | 3 | Grammar-Evolved Fuzzing | Coverage-guided API input exploration | fuzz module + executor + journal | Medium |
 | 4 | Stateful Dependency-Graph Testing | Auto-generated stateful test sequences | IR + executor + path analysis | Medium |
-| 5 | Wire-Format-Aware Semantic Diffing | Breaking vs cosmetic classification | STG compiler + dual-IR comparison | Low |
+| 5 | Wire-Format-Aware Semantic Diffing | Native/wire changes with explicit uncertainty | Contract + typed native compatibility | Low |
 | 6 | Live Contract Bridge | Self-healing spec↔implementation loop | gateway + watch + codegen + LSP | High |
-| 7 | Consumer Impact Analysis | Quantified blast radius per version change | dual-IR + cassettes + STG diff | Medium |
-| 8 | Handler-to-Spec Reverse Engineering | Detect undocumented server endpoints | tree-sitter parsers + STG synthesis | High |
-| 9 | Interactive Contract Playground | Visual REPL for API exploration + test authoring | LSP webview + executor + STG | High |
+| 7 | Consumer Impact Analysis | Recorded-traffic impact evidence | Contract snapshots + cassettes + compatibility | Medium |
+| 8 | Handler-to-Spec Reverse Engineering | Detect undocumented server endpoints | tree-sitter parsers + proposed OpenAPI lowering | High |
+| 9 | Interactive Contract Playground | Visual REPL for API exploration + test authoring | LSP webview + executor + native model plans | High |
 | 10 | Quality Scoring with Actionable Feedback | Continuous governance, not binary policing | lint + IR + journal + cassettes | Low |
 
 ## Recommended Sequencing

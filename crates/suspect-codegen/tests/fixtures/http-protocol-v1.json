@@ -1,0 +1,430 @@
+{
+  "version": 1,
+  "provenance": "Synthetic normative witnesses, not corpus-derived and not generated from the planner.",
+  "references": [
+    "https://spec.openapis.org/oas/v3.1.2.html#responses-object",
+    "https://spec.openapis.org/oas/v3.1.2.html#style-examples",
+    "https://spec.openapis.org/oas/v3.2.0.html#special-considerations-for-server-sent-events"
+  ],
+  "ignoredMultipartEncoding": {
+    "reference":"https://spec.openapis.org/oas/v3.2.0.html#fixed-fields-for-rfc6570-style-serialization",
+    "document":{
+      "openapi":"3.2.0","info":{"title":"Ignored style fields preserve part content","version":"1"},
+      "paths":{"/parts":{"post":{
+        "requestBody":{"required":true,"content":{"multipart/mixed":{"$ref":"#/components/mediaTypes/Mixed"}}},
+        "responses":{"200":{"content":{"multipart/mixed":{"$ref":"#/components/mediaTypes/Mixed"}}}}
+      }}},
+      "components":{"mediaTypes":{"Mixed":{
+        "schema":{"type":"array","minItems":4,"maxItems":5,"prefixItems":[
+          {"type":"string"},
+          {"type":"integer"},
+          {"type":"array","items":{"type":"string"}},
+          {}
+        ],"items":{"type":"object","properties":{"n":{"type":"integer"}}}},
+        "prefixEncoding":[
+          {"contentType":"application/json","style":"form","explode":false,"headers":{"X-Part":{"required":true,"schema":{"type":"integer"}}}},
+          {"style":"deepObject"},
+          {"explode":true},
+          {"allowReserved":true}
+        ],
+        "itemEncoding":{"style":"form","explode":true,"allowReserved":true}
+      }}}
+    },
+    "prefixMedia":["application/json","text/plain","application/json","application/octet-stream"],
+    "itemMedia":"application/json",
+    "codecRoots":[
+      "/components/mediaTypes/Mixed/prefixEncoding/0/headers/X-Part/schema",
+      "/components/mediaTypes/Mixed/schema/items",
+      "/components/mediaTypes/Mixed/schema/prefixItems/0",
+      "/components/mediaTypes/Mixed/schema/prefixItems/1",
+      "/components/mediaTypes/Mixed/schema/prefixItems/2"
+    ]
+  },
+  "dynamicResourceCodec": {
+    "openapi":"3.2.0","info":{"title":"Dynamic candidate roots are not selected bindings","version":"1"},
+    "servers":[{"url":"https://api.example.test"}],
+    "paths":{"/tree":{"get":{"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"https://schemas.example.test/extended#/$defs/Entry"}}}}}}}},
+    "components":{"schemas":{
+      "Base":{"$id":"https://schemas.example.test/base","$dynamicAnchor":"item","type":"object","properties":{"next":{"$dynamicRef":"#item"}}},
+      "Extended":{"$id":"https://schemas.example.test/extended","$dynamicAnchor":"item","type":"object","properties":{"flag":{"type":"boolean"}},"$defs":{"Entry":{"$ref":"https://schemas.example.test/base"}}}
+    }}
+  },
+  "canonicalResources": {
+    "entry":"https://download.example/spec/latest.json",
+    "documents":[
+      {
+        "requested":"https://download.example/spec/latest.json",
+        "effective":"https://cdn.example/specs/releases/api.json",
+        "value":{
+          "openapi":"3.2.0","$self":"https://logical.example/catalog/api.json#definition",
+          "info":{"title":"Physical server base and logical references","version":"1"},
+          "servers":[{"url":"../service"}],
+          "paths":{"/items":{"$ref":"parts.json#/components/pathItems/Items"}}
+        }
+      },
+      {
+        "requested":"https://download.example/spec/latest-parts.json",
+        "effective":"https://storage.example/artifacts/parts.json",
+        "value":{
+          "openapi":"3.2.0","$self":"https://logical.example/catalog/parts.json",
+          "info":{"title":"Referenced wire declarations","version":"1"},
+          "components":{
+            "pathItems":{"Items":{"get":{"operationId":"getItems","responses":{"200":{"$ref":"#/components/responses/Ok"}}}}},
+            "responses":{"Ok":{"description":"OK","content":{"application/json":{"$ref":"#/components/mediaTypes/Result"}}}},
+            "mediaTypes":{"Result":{"schema":{"$ref":"models/result#value"}}}
+          }
+        }
+      },
+      {
+        "requested":"https://download.example/spec/latest-model.json",
+        "effective":"https://storage.example/artifacts/result.json",
+        "value":{"$id":"https://logical.example/catalog/models/result","$defs":{"Result":{"$anchor":"value","type":"string"}}}
+      }
+    ],
+    "serverBase":"https://cdn.example/specs/releases/api.json",
+    "serverUrl":"https://cdn.example/specs/service",
+    "referenceBase":"https://logical.example/catalog/parts.json",
+    "codecRootDocument":"https://storage.example/artifacts/parts.json",
+    "codecRootPointer":"/components/mediaTypes/Result/schema",
+    "schemaTargetDocument":"https://storage.example/artifacts/result.json",
+    "schemaTargetPointer":"/$defs/Result"
+  },
+  "querystringOverride": {
+    "openapi":"3.2.0","info":{"title":"Querystring override identity","version":"1"},
+    "paths":{"/search":{
+      "parameters":[{"$ref":"#/components/parameters/Inherited"}],
+      "get":{"parameters":[{"$ref":"#/components/parameters/Override"}],"responses":{"200":{}}}
+    }},
+    "components":{"parameters":{
+      "Inherited":{"name":"queryValue","in":"querystring","content":{"text/plain":{"schema":{"type":"string"}}}},
+      "Override":{"name":"queryValue","in":"querystring","content":{"application/json":{"schema":{"type":"object"}}}}
+    }}
+  },
+  "oas32Metadata": {
+    "api.json": {
+      "openapi":"3.2.0","info":{"title":"Source-backed metadata forms","version":"1"},
+      "security":[{"device":["read:items"]}],
+      "components":{"securitySchemes":{"device":{"$ref":"auth.json#/Device"}}},
+      "paths":{"/items":{"get":{"responses":{"200":{"summary":"A summary without a description","content":{
+        "application/json":{"schema":true,"examples":{
+          "semantic":{"$ref":"examples.json#/Semantic","description":"Use-site explanation"},
+          "external":{"dataValue":null,"externalValue":"https://example.test/serialized.json"}
+        }}
+      }}}}}}
+    },
+    "auth.json":{"Device":{
+      "type":"oauth2","deprecated":true,"oauth2MetadataUrl":"https://auth.example.test/.well-known/oauth-authorization-server",
+      "flows":{"deviceAuthorization":{
+        "deviceAuthorizationUrl":"https://auth.example.test/device","tokenUrl":"https://auth.example.test/token",
+        "scopes":{"read:items":"Read the item collection"}
+      }}
+    }},
+    "examples.json":{"Semantic":{
+      "description":"Terminal explanation",
+      "dataValue":{"$ref":"must-not-load.json#/value","schema":{"type":"string"},"itemSchema":{"type":"integer"}},
+      "serializedValue":"{\"$ref\":\"must-not-load.json#/value\",\"schema\":{\"type\":\"string\"},\"itemSchema\":{\"type\":\"integer\"}}"
+    }}
+  },
+  "oas32MediaReferences": {
+    "api.json": {
+      "openapi":"3.2.0","info":{"title":"Indexed media and item roots","version":"1"},
+      "paths":{"/transfer":{"post":{
+        "requestBody":{"content":{"multipart/mixed":{"$ref":"#/components/mediaTypes/Parts"}}},
+        "responses":{"200":{"summary":"Sequential representations","content":{
+          "text/event-stream":{"$ref":"#/components/mediaTypes/EventAlias"},
+          "application/x-ndjson":{"$ref":"streams.json#/Lines"}
+        }}}
+      }}},
+      "components":{"mediaTypes":{
+        "EventAlias":{"$ref":"streams.json#/Sse"},
+        "Parts":{
+          "schema":{"type":"array","maxItems":4,"prefixItems":[{"type":"string"}],"items":{}},
+          "prefixEncoding":[{"contentType":"text/plain","headers":{"X-Prefix":{"$ref":"headers.json#/Prefix"}}}],
+          "itemEncoding":{"contentType":"application/octet-stream","headers":{"X-Item":{"required":true,"schema":{"type":"integer"}}}}
+        }
+      }}
+    },
+    "streams.json": {
+      "Sse":{"itemSchema":{"$ref":"events.json#/$defs/Event","maxProperties":4}},
+      "Lines":{"itemSchema":{"type":"object","properties":{"value":{"type":"integer"}}}}
+    },
+    "events.json": {
+      "$schema":"https://json-schema.org/draft/2020-12/schema",
+      "$defs":{"Event":{"type":"object","required":["data"],"properties":{"data":{"type":"string"},"retry":{"type":"number","minimum":0}}}}
+    },
+    "headers.json":{"Prefix":{"required":true,"schema":{"type":"string"}}}
+  },
+  "oas32MediaRoots":[
+    {"document":"api.json","pointer":"/components/mediaTypes/Parts/itemEncoding/headers/X-Item/schema"},
+    {"document":"api.json","pointer":"/components/mediaTypes/Parts/schema/prefixItems/0"},
+    {"document":"headers.json","pointer":"/Prefix/schema"},
+    {"document":"streams.json","pointer":"/Lines/itemSchema"},
+    {"document":"streams.json","pointer":"/Sse/itemSchema"}
+  ],
+  "querystringCases": [
+    {
+      "parameter":{"name":"completeQuery","in":"querystring","required":true,"content":{"text/plain":{"schema":{"type":"string"}}}},
+      "value":"a=b & 雪%2F","wire":"a%3Db%20%26%20%E9%9B%AA%252F","rootCount":1
+    },
+    {
+      "parameter":{"name":"ignoredName","in":"querystring","content":{"application/json":{"schema":{"type":"object","properties":{"numbers":{"type":"array","items":{"type":"integer"}},"flag":{"type":"null"}}}}}},
+      "value":{"numbers":[1,2],"flag":null},"wire":"%7B%22flag%22%3Anull%2C%22numbers%22%3A%5B1%2C2%5D%7D","rootCount":1
+    },
+    {
+      "parameter":{
+        "name":"alsoUnused","in":"querystring",
+        "content":{"application/x-www-form-urlencoded":{
+          "schema":{
+            "type":"object","required":["foo","bar"],"additionalProperties":false,
+            "properties":{"foo":{"type":"string"},"bar":{"type":"boolean"},"items":{"type":"array","items":{"type":"integer"}}}
+          }
+        }}
+      },
+      "value":{"foo":"a + b","bar":true,"items":[1,2]},"wire":"bar=true&foo=a+%2B+b&items=1&items=2","rootCount":4
+    }
+  ],
+  "oas32Methods": {
+    "document": {
+      "openapi":"3.2.0","info":{"title":"Case-sensitive method witnesses","version":"1"},
+      "paths":{"/methods":{
+        "get":{"operationId":"fixedGet","responses":{"200":{"description":"fixed"}}},
+        "query":{"operationId":"fixedQuery","responses":{"200":{"description":"query"}}},
+        "additionalOperations":{
+          "COPY":{"operationId":"copy","responses":{"200":{"description":"copy"}}},
+          "GeT":{"operationId":"mixedGet","responses":{"200":{"description":"mixed"}}},
+          "get":{"operationId":"lowerGet","responses":{"200":{"description":"lower"}}},
+          "head":{"operationId":"lowerHead","responses":{"200":{"description":"case sensitive","content":{"application/json":{"schema":{"type":"object"}}}}}},
+          "x-PING":{"operationId":"extensionNamedMethod","responses":{"200":{"description":"a real HTTP method"}}}
+        }
+      }}
+    },
+    "expected":[
+      {"source":"/paths/~1methods/additionalOperations/COPY","token":"COPY"},
+      {"source":"/paths/~1methods/additionalOperations/GeT","token":"GeT"},
+      {"source":"/paths/~1methods/additionalOperations/get","token":"get"},
+      {"source":"/paths/~1methods/additionalOperations/head","token":"head"},
+      {"source":"/paths/~1methods/additionalOperations/x-PING","token":"x-PING"},
+      {"source":"/paths/~1methods/get","token":"GET"},
+      {"source":"/paths/~1methods/query","token":"QUERY"}
+    ]
+  },
+  "baseline": {
+    "openapi":"3.1.2",
+    "info":{"title":"Strict projection witness","version":"1"},
+    "servers":[{"url":"https://example.test/v1"}],
+    "security":[{"token":[]}],
+    "components":{"securitySchemes":{"token":{"type":"http","scheme":"bearer"}}},
+    "paths":{"/items/{id}":{
+      "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+      "get":{"operationId":"getItem","parameters":[{"name":"limit","in":"query","schema":{"type":"integer"}}],"responses":{
+        "200":{"description":"ok","content":{"application/json":{"schema":{"type":"object"}}}},
+        "404":{"description":"missing","content":{"application/json":{"schema":{"type":"object"}}}}
+      }}
+    }}
+  },
+  "serverCases": {
+    "servers":[
+      {"url":"https://{tenant}.example.test:{port}/{basePath}","variables":{
+        "tenant":{"default":"demo"},"port":{"default":"443","enum":["443","8443"]},"basePath":{"default":"v2"}
+      }},
+      {"url":"../api"}
+    ],
+    "defaults":"https://demo.example.test:443/v2",
+    "overrides":{"tenant":"customer","port":"8443","basePath":"v3"},
+    "overridden":"https://customer.example.test:8443/v3",
+    "documentUrl":"https://docs.example.test/specs/openapi.json",
+    "relativeResolved":"https://docs.example.test/api",
+    "invalidOverride":{"port":"1234"}
+  },
+  "securityCases": {
+    "security":[{}, {"token":["reader"],"key":[]}, {"oauth":["read:items"]}, {"oidc":["openid","profile"]}, {"basic":[]}],
+    "schemes":{
+      "token":{"type":"http","scheme":"BeArEr","bearerFormat":"JWT"},
+      "key":{"type":"apiKey","in":"header","name":"X-Key"},
+      "basic":{"type":"http","scheme":"basic"},
+      "oauth":{"type":"oauth2","flows":{"authorizationCode":{
+        "authorizationUrl":"https://auth.example.test/authorize","tokenUrl":"https://auth.example.test/token","refreshUrl":"https://auth.example.test/refresh",
+        "scopes":{"read:items":"Read items"}
+      }}},
+      "oidc":{"type":"openIdConnect","openIdConnectUrl":"https://auth.example.test/.well-known/openid-configuration"}
+    }
+  },
+  "multipart": {
+    "openapi":"3.1.2",
+    "info":{"title":"Named multipart codec separation","version":"1"},
+    "paths":{"/upload":{"post":{"operationId":"upload","requestBody":{"required":true,"content":{
+      "multipart/form-data":{"schema":{"type":"object","required":["file","metadata"],"additionalProperties":false,"properties":{
+        "file":{},
+        "metadata":{"type":"object","properties":{"title":{"type":"string"}}},
+        "labels":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"string"}}
+      }},"encoding":{
+        "file":{"contentType":"image/png, image/jpeg","headers":{"X-Part-Id":{"required":true,"schema":{"type":"string"}}}},
+        "metadata":{"contentType":"application/json"}
+      }}
+    }},"responses":{"204":{"description":"stored"}}}}}
+  },
+  "multipartCodecRoots": [
+    "/paths/~1upload/post/requestBody/content/multipart~1form-data/encoding/file/headers/X-Part-Id/schema",
+    "/paths/~1upload/post/requestBody/content/multipart~1form-data/schema/properties/labels/items",
+    "/paths/~1upload/post/requestBody/content/multipart~1form-data/schema/properties/metadata"
+  ],
+  "form": {
+    "openapi":"3.1.2",
+    "info":{"title":"Form encoding modes","version":"1"},
+    "paths":{"/forms":{"post":{"requestBody":{"content":{
+      "application/x-www-form-urlencoded":{"schema":{"type":"object","required":["id"],"additionalProperties":false,"properties":{
+        "id":{"type":"string"},"address":{"type":"object","properties":{"city":{"type":"string"}}},
+        "tags":{"type":"array","items":{"type":"string"}},"codes":{"type":"array","items":{"type":"integer"}}
+      }},"encoding":{"codes":{"style":"form","explode":false,"contentType":"application/json"}}}
+    }},"responses":{"200":{"description":"ok"}}}}}
+  },
+  "formCodecRoots": [
+    "/paths/~1forms/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/address",
+    "/paths/~1forms/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/codes",
+    "/paths/~1forms/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/id",
+    "/paths/~1forms/post/requestBody/content/application~1x-www-form-urlencoded/schema/properties/tags/items"
+  ],
+  "positionalMultipart": {
+    "openapi":"3.2.0","info":{"title":"Positional part encoding","version":"1"},
+    "paths":{"/parts":{"post":{"requestBody":{"content":{
+      "multipart/mixed":{"schema":{"type":"array","minItems":1,"maxItems":3,
+        "prefixItems":[{"type":"string"}],"items":{"type":"object","properties":{"n":{"type":"integer"}}}
+      },"prefixEncoding":[{"contentType":"text/plain"}],"itemEncoding":{"contentType":"application/json"}}
+    }},"responses":{"204":{"description":"accepted"}}}}}
+  },
+  "positionalCodecRoots": [
+    "/paths/~1parts/post/requestBody/content/multipart~1mixed/schema/items",
+    "/paths/~1parts/post/requestBody/content/multipart~1mixed/schema/prefixItems/0"
+  ],
+  "stream": {
+    "openapi":"3.2.0",
+    "info":{"title":"OAS 3.2 parsed sequential items","version":"1"},
+    "paths":{"/events":{"get":{"responses":{"200":{"description":"stream","content":{
+      "text/event-stream":{"itemSchema":{"type":"object","required":["data"],"properties":{
+        "data":{"type":"string","contentMediaType":"application/json","contentSchema":{"type":"object"}},
+        "id":{"type":"string"},"event":{"type":"string"},"retry":{"type":"integer","minimum":0}
+      }}},
+      "application/x-ndjson":{"itemSchema":{"type":"object","properties":{"value":{"type":"integer"}}}}
+    }}}}}}
+  },
+  "streamCodecRoots": [
+    "/paths/~1events/get/responses/200/content/application~1x-ndjson/itemSchema",
+    "/paths/~1events/get/responses/200/content/text~1event-stream/itemSchema"
+  ],
+  "sourceReferences": {
+    "api.json": {
+      "openapi":"3.1.2","info":{"title":"Exact source references","version":"1"},
+      "paths":{
+        "/items/{id}":{"$ref":"shared.json#/components/pathItems/Item"},
+        "/state":{"get":{"operationId":"getState","responses":{"200":{"description":"state"}}}}
+      }
+    },
+    "shared.json": {
+      "openapi":"3.1.2","info":{"title":"Referenced HTTP declarations","version":"1"},
+      "components":{
+        "pathItems":{"Item":{
+          "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}},{"name":"limit","in":"query","schema":{"type":"integer"}}],
+          "get":{"operationId":"getItem","parameters":[{"name":"limit","in":"query","schema":{"type":"string"}}],"responses":{
+            "200":{"$ref":"#/components/responses/Alias","description":"Use-site description"}
+          }}
+        }},
+        "responses":{
+          "Alias":{"$ref":"#/components/responses/Item~1Result~0"},
+          "Item/Result~":{"description":"Terminal description","headers":{"X-Rate":{"$ref":"headers.json#/Rate"}},"links":{"state":{"$ref":"#/components/links/State"}},"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Item"}}}}
+        },
+        "schemas":{"Item":{"type":"object","properties":{"id":{"type":"string"}}}},
+        "links":{"State":{"operationId":"getState","description":"Link metadata only","parameters":{"id":"$response.body#/id"},"requestBody":{"schema":{"type":"integer"},"$ref":"literal-instance-data"}}}
+      }
+    },
+    "headers.json":{"Rate":{"description":"Requests remaining","required":true,"schema":{"type":"integer"}}}
+  },
+  "invalidMetadata": [
+    {"pointer":"/paths/~1items/get/responses","value":[],"code":"http-metadata-object","at":"/paths/~1items/get/responses"},
+    {"pointer":"/paths/~1items/get/responses/2xx","value":{"description":"bad range"},"code":"http-response-status","at":"/paths/~1items/get/responses/2xx"},
+    {"pointer":"/paths/~1items/get/responses/200/description","value":null,"code":"http-metadata-string","at":"/paths/~1items/get/responses/200/description"},
+    {"pointer":"/paths/~1items/get/responses/200/content","value":[],"code":"http-content-invalid","at":"/paths/~1items/get/responses/200/content"},
+    {"pointer":"/paths/~1items/get/responses/200/content","value":{"application/json":null},"code":"http-metadata-object","at":"/paths/~1items/get/responses/200/content/application~1json"},
+    {"pointer":"/paths/~1items/get/responses/200/content","value":{"application/json":{"schema":7}},"code":"http-schema-invalid","at":"/paths/~1items/get/responses/200/content/application~1json/schema"},
+    {"pointer":"/paths/~1items/get/responses/200/content","value":{"application/*+json":{}},"code":"http-media-type-invalid","at":"/paths/~1items/get/responses/200/content/application~1*+json"},
+    {"pointer":"/paths/~1items/get/responses/200/content","value":{"application/json;profile":{}},"code":"http-media-type-invalid","at":"/paths/~1items/get/responses/200/content/application~1json;profile"},
+    {"pointer":"/paths/~1items/get/responses/200/content","value":{"application/json;profile=a;PROFILE=b":{}},"code":"http-media-type-invalid","at":"/paths/~1items/get/responses/200/content/application~1json;profile=a;PROFILE=b"},
+    {"pointer":"/paths/~1items/get/responses/200/headers","value":[],"code":"http-headers-invalid","at":"/paths/~1items/get/responses/200/headers"},
+    {"pointer":"/paths/~1items/get/responses/200/headers","value":{"X-Rate":{"required":"yes","schema":{"type":"integer"}}},"code":"http-metadata-boolean","at":"/paths/~1items/get/responses/200/headers/X-Rate/required"},
+    {"pointer":"/paths/~1items/get/responses/200/headers","value":{"X-Rate":{"name":"invalid","schema":{"type":"integer"}}},"code":"http-header-field-forbidden","at":"/paths/~1items/get/responses/200/headers/X-Rate/name"},
+    {"pointer":"/paths/~1items/get/responses/200/links","value":[],"code":"http-links-invalid","at":"/paths/~1items/get/responses/200/links"},
+    {"pointer":"/paths/~1items/get/responses/200/links","value":{"next":{"operationId":"next","operationRef":"#/paths/~1items/get"}},"code":"http-link-target","at":"/paths/~1items/get/responses/200/links/next"},
+    {"pointer":"/paths/~1items/get/parameters","value":{},"code":"http-parameters-invalid","at":"/paths/~1items/get/parameters"},
+    {"pointer":"/paths/~1items/get/parameters","value":[null],"code":"http-metadata-object","at":"/paths/~1items/get/parameters/0"},
+    {"pointer":"/paths/~1items/get/security","value":[null],"code":"http-security-invalid","at":"/paths/~1items/get/security/0"},
+    {"pointer":"/paths/~1items/get/servers","value":{},"code":"http-servers-invalid","at":"/paths/~1items/get/servers"},
+    {"pointer":"/paths/~1items/get/servers","value":[{"url":false}],"code":"http-metadata-string","at":"/paths/~1items/get/servers/0/url"},
+    {"pointer":"/paths/~1items/get/servers","value":[{"url":"https://{port}.example.test","variables":{"port":{"default":"a","enum":[false]}}}],"code":"http-metadata-string","at":"/paths/~1items/get/servers/0/variables/port/enum/0"},
+    {"pointer":"/paths/~1items/get/requestBody","value":[],"code":"http-metadata-object","at":"/paths/~1items/get/requestBody"},
+    {"pointer":"/paths/~1items/get/requestBody","value":{"content":{"application/json":{"schema":{},"encoding":false}}},"code":"http-encoding-map-invalid","at":"/paths/~1items/get/requestBody/content/application~1json/encoding"}
+  ],
+  "parameterCases": [
+    {"parameter":{"name":"color","in":"path","required":true,"style":"simple","schema":{"type":"string"}},"value":"blue","wire":"blue"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"simple","schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":"blue,black,brown"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"simple","explode":false,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"B,150,G,200,R,100"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"simple","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"B=150,G=200,R=100"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"label","schema":{"type":"string"}},"value":"blue","wire":".blue"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"label","explode":false,"schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":".blue,black,brown"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"label","explode":true,"schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":".blue.black.brown"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"label","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":".B=150.G=200.R=100"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"matrix","schema":{"type":"string"}},"value":"blue","wire":";color=blue"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"matrix","explode":false,"schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":";color=blue,black,brown"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"matrix","explode":true,"schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":";color=blue;color=black;color=brown"},
+    {"parameter":{"name":"color","in":"path","required":true,"style":"matrix","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":";B=150;G=200;R=100"},
+    {"parameter":{"name":"color","in":"query","schema":{"type":"string"}},"value":"blue","wire":"color=blue"},
+    {"parameter":{"name":"color","in":"query","explode":false,"schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":"color=blue,black,brown"},
+    {"parameter":{"name":"color","in":"query","explode":true,"schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":"color=blue&color=black&color=brown"},
+    {"parameter":{"name":"color","in":"query","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"B=150&G=200&R=100"},
+    {"parameter":{"name":"color","in":"query","style":"spaceDelimited","schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":"color=blue%20black%20brown"},
+    {"parameter":{"name":"color","in":"query","style":"spaceDelimited","schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"color=B%20150%20G%20200%20R%20100"},
+    {"parameter":{"name":"color","in":"query","style":"pipeDelimited","schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":"color=blue%7Cblack%7Cbrown"},
+    {"parameter":{"name":"color","in":"query","style":"pipeDelimited","schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"color=B%7C150%7CG%7C200%7CR%7C100"},
+    {"parameter":{"name":"color","in":"query","style":"deepObject","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"color%5BB%5D=150&color%5BG%5D=200&color%5BR%5D=100"},
+    {"parameter":{"name":"q","in":"query","allowReserved":true,"schema":{"type":"string"}},"value":"https://example.test/a?x%3D%2B","wire":"q=https://example.test/a?x%3D%2B"},
+    {"parameter":{"name":"q","in":"query","schema":{"type":"string"}},"value":"a +/雪&%","wire":"q=a%20%2B%2F%E9%9B%AA%26%25"},
+    {"parameter":{"name":"X-Tag","in":"header","schema":{"type":"string"}},"value":"W/\"hello%20world\"","wire":"W/\"hello%20world\""},
+    {"parameter":{"name":"X-Color","in":"header","explode":true,"schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"B=150,G=200,R=100"},
+    {"parameter":{"name":"color","in":"cookie","explode":false,"schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":"color=blue,black,brown"},
+    {"version":"3.2.0","parameter":{"name":"color","in":"cookie","style":"cookie","schema":{"type":"array","items":{"type":"string"}}},"value":["blue","black","brown"],"wire":"color=blue; color=black; color=brown"},
+    {"version":"3.2.0","parameter":{"name":"color","in":"query","style":"deepObject","schema":{"type":"object","additionalProperties":{"type":"integer"}}},"value":{"R":100,"G":200,"B":150},"wire":"color%5BB%5D=150&color%5BG%5D=200&color%5BR%5D=100"},
+    {"parameter":{"name":"filter","in":"query","content":{"application/json":{"schema":{"type":"object","properties":{"a":{"type":"integer"}}}}}},"value":{"a":1},"wire":"filter=%7B%22a%22%3A1%7D"},
+    {"parameter":{"name":"sid","in":"cookie","content":{"text/plain":{"schema":{"type":"string"}}}},"value":"already%20encoded","wire":"sid=already%20encoded"}
+  ],
+  "responseSelection": {
+    "document": {
+      "openapi": "3.1.2",
+      "info": {"title": "Normative response selection", "version": "1"},
+      "paths": {
+        "/items": {
+          "get": {
+            "responses": {
+              "200": {"description": "exact", "content": {
+                "application/json": {"schema": {"type": "object"}},
+                "application/problem+json": {"schema": {"type": "object"}},
+                "text/plain": {"schema": {"type": "string"}},
+                "application/*": {},
+                "*/*": {}
+              }},
+              "2XX": {"description": "class"},
+              "default": {"description": "fallback"}
+            }
+          }
+        }
+      }
+    },
+    "cases": [
+      {"status": 200, "contentType": "Application/JSON; charset=UTF-8", "response": "200", "media": "application/json", "success": true},
+      {"status": 200, "contentType": "application/problem+json", "response": "200", "media": "application/problem+json", "success": true},
+      {"status": 200, "contentType": "application/pdf", "response": "200", "media": "application/*", "success": true},
+      {"status": 200, "contentType": "image/png", "response": "200", "media": "*/*", "success": true},
+      {"status": 201, "contentType": null, "response": "2XX", "media": null, "success": true},
+      {"status": 299, "contentType": null, "response": "2XX", "media": null, "success": true},
+      {"status": 404, "contentType": null, "response": "default", "media": null, "success": false},
+      {"status": 500, "contentType": null, "response": "default", "media": null, "success": false}
+    ]
+  }
+}

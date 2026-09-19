@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="sdk-demo-nonce" content="__BOOTSTRAP_NONCE__">
+  <meta name="description" content="One API. Twelve native SDKs. Explore four-line examples and run real OpenRouter requests with your local, prepared SDKs.">
+  <title>One API. Twelve native SDKs. — Suspect</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#sdks">Skip to the SDKs</a>
+  <div id="test-banner" class="test-banner" hidden>CONTROLLED UI TEST · Simulated child programs · No native SDK or OpenRouter requests</div>
+  <div class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Suspect SDK showcase home">
+        <svg class="brand-mark" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M9 5 2 14l7 9M19 5l7 9-7 9M16 3l-4 22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>suspect</span><span class="brand-divider">/</span><span class="brand-subtitle">SDK playground</span>
+      </a>
+      <nav class="header-nav" aria-label="Main navigation">
+        <a href="#sdks">The SDKs</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="/reference" target="_blank" rel="noopener noreferrer">Source guide <span aria-hidden="true">↗</span></a>
+      </nav>
+      <span class="local-badge"><span class="signal-dot" aria-hidden="true"></span>Local session</span>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span>OPENROUTER × SUSPECT</p>
+          <h1 id="hero-title">One API.<br><span>Twelve native SDKs.</span></h1>
+          <p class="hero-description">Find your language. Read four lines. Run a real request.<br class="desktop-break"> Familiar code, native types, and a result you can see.</p>
+          <div class="hero-language-list" role="group" aria-label="Twelve SDK languages plus Terraform">
+            <ol class="hero-native-list">
+              <li>TypeScript/JavaScript</li>
+              <li>Python</li>
+              <li>Go</li>
+              <li>Rust</li>
+              <li>Swift</li>
+              <li>Java</li>
+              <li>C#</li>
+              <li>Kotlin</li>
+              <li>Ruby</li>
+              <li>PHP</li>
+              <li>Dart</li>
+              <li>C++</li>
+            </ol>
+            <div class="hero-language-plus" aria-hidden="true">+</div>
+            <ol class="hero-terraform-list" start="13"><li>Terraform</li></ol>
+          </div>
+          <div class="hero-actions">
+            <a class="button primary" href="#sdks">Explore the SDKs <span aria-hidden="true">↓</span></a>
+            <span class="hero-footnote">Built locally. Ready to try.</span>
+          </div>
+        </div>
+
+        <aside class="request-preview" aria-label="The live request flow">
+          <div class="preview-heading"><span class="tiny-label">ONE CONTRACT. EVERY STACK.</span><span class="mini-square" aria-hidden="true"></span></div>
+          <div class="endpoint"><span class="http-method">GET</span><code>/key</code><span class="readonly-tag">READ ONLY</span></div>
+          <p class="endpoint-host">https://openrouter.ai/api/v1</p>
+          <div class="pipeline">
+            <div class="pipeline-step"><span class="step-marker" aria-hidden="true">1</span><div><strong>Environment credentials</strong><code>OPENROUTER_API_KEY</code></div></div>
+            <div class="pipeline-step"><span class="step-marker" aria-hidden="true">2</span><div><strong>Your language. Its native client.</strong><span>Prepared packages, pinned executables</span></div></div>
+            <div class="pipeline-step"><span class="step-marker" aria-hidden="true">3</span><div><strong>A typed, decoded confirmation</strong><span>Actual HTTP status, exact usage</span></div></div>
+          </div>
+          <div class="preview-footer"><span class="signal-dot muted-dot" aria-hidden="true"></span><span id="preflight-label">Checking local preparation…</span><span class="preview-version">v0.1.0</span></div>
+        </aside>
+      </section>
+
+      <section class="launch-panel" aria-labelledby="launch-title">
+        <div class="credential-panel">
+          <div class="panel-heading"><h2 id="launch-title"><span class="section-number">01</span> Bring your API key</h2><span id="credential-state" class="credential-state">No key loaded</span></div>
+          <form id="credential-form" novalidate>
+            <label class="sr-only" for="api-key">OpenRouter API key</label>
+            <div class="key-input-wrap">
+              <svg class="key-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="6.5" cy="7" r="3.5"/><path d="m9 9.5 7 7M13 13.5l2-2M15 15.5l2-2" stroke-linecap="round"/></svg>
+              <input id="api-key" type="password" name="local-api-key" placeholder="OpenRouter API key" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="4096" aria-describedby="key-help key-error" data-lpignore="true" data-1p-ignore>
+            </div>
+            <button class="button secondary" id="save-key" type="submit">Use key</button>
+            <button class="text-button" id="clear-key" type="button" disabled>Clear</button>
+          </form>
+          <p id="key-help" class="panel-help">Held in this local server’s memory. Each SDK loads <code>OPENROUTER_API_KEY</code>.</p>
+          <p id="key-error" class="inline-error" role="alert" hidden></p>
+        </div>
+        <div class="collection-panel">
+          <div class="panel-heading"><h2><span class="section-number">02</span> Make it real</h2><span class="normal-key-note">Normal API key</span></div>
+          <div class="collection-actions">
+            <button class="button primary" id="run-all" type="button" aria-describedby="run-help">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 2.8a.7.7 0 0 1 1.1-.6l8 5.2a.7.7 0 0 1 0 1.2l-8 5.2a.7.7 0 0 1-1.1-.6z"/></svg>
+              <span>Run all 12</span>
+            </button>
+            <button class="button quiet" id="cancel-all" type="button" disabled>Cancel all</button>
+          </div>
+          <p id="run-help" class="panel-help"><code>GET /key</code> · 3 in parallel · 22s deadline per SDK</p>
+        </div>
+      </section>
+      <div id="connection-error" class="connection-error" role="alert" hidden><span id="connection-message">The local server is unavailable.</span><button class="text-button" id="reconnect" type="button">Reconnect</button></div>
+      <div id="activity-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+
+      <section class="sdk-section" id="sdks" aria-labelledby="sdk-title">
+        <div class="section-intro">
+          <div><p class="eyebrow">THE COLLECTION</p><h2 id="sdk-title">Feels right in every language.</h2><p>Same API. Idiomatic factories, ownership, and error handling.</p></div>
+          <div class="live-score"><div><span id="confirmed-count">0</span><span class="score-denominator">/ 12</span></div><span>live confirmations</span></div>
+        </div>
+
+        <div class="session-strip" aria-label="Native SDK session results">
+          <div class="status-counts"><span><i class="legend-dot ready-dot" aria-hidden="true"></i><strong id="ready-count">0</strong> prepared</span><span><i class="legend-dot running-dot" aria-hidden="true"></i><strong id="running-count">0</strong> running</span><span><i class="legend-dot queued-dot" aria-hidden="true"></i><strong id="queued-count">0</strong> queued</span><span><i class="legend-dot failed-dot" aria-hidden="true"></i><strong id="failed-count">0</strong> failed</span><span id="cancelled-stat" hidden><strong id="cancelled-count">0</strong> cancelled</span></div>
+          <span id="session-caption" class="session-caption">Ready is preflight. Run to confirm live.</span>
+        </div>
+        <nav class="language-index" id="language-index" aria-label="Jump to a language"></nav>
+        <div id="sdk-groups" aria-busy="true"><div class="loading-note"><span class="spinner" aria-hidden="true"></span>Loading the prepared SDK collection…</div></div>
+
+        <section class="bonus-section" aria-labelledby="bonus-title">
+          <div class="bonus-heading"><div><span class="bonus-label">ONE MORE THING</span><h2 id="bonus-title">Prefer plain JavaScript?</h2><p>The same ESM package. Its own runnable consumer.</p></div><button id="toggle-bonus" class="button secondary" type="button" aria-controls="bonus-sdk" aria-expanded="false">Show JavaScript <span aria-hidden="true">+</span></button></div>
+          <div id="bonus-sdk" class="bonus-grid" hidden></div>
+        </section>
+      </section>
+
+      <section class="how-section" id="how-it-works" aria-labelledby="how-title">
+        <div class="how-heading"><p class="eyebrow">UNDER THE HOOD</p><h2 id="how-title">Small examples.<br>Real native execution.</h2></div>
+        <div class="how-grid">
+          <div><span class="feature-number">01 / NATIVE</span><h3>A real program behind every button</h3><p>Your local server starts the prebuilt consumer for that language in a background job. The UI stays responsive.</p></div>
+          <div><span class="feature-number">02 / AUTOMATIC</span><h3>Credentials at client creation</h3><p>The generated factories read the configured environment variable. The source supplies the HTTPS server default.</p></div>
+          <div><span class="feature-number">03 / OBSERVABLE</span><h3>Confirmation you can inspect</h3><p>Success requires HTTP 200, a decoded native response, and a clean process exit. Errors retain available status and kind.</p></div>
+        </div>
+      </section>
+
+      <details class="provenance" id="provenance">
+        <summary><span>Prepared locally, pinned end to end</span><span class="provenance-hint">Source & runtime provenance <span aria-hidden="true">+</span></span></summary>
+        <div class="provenance-body"><p>12 native targets and an optional JavaScript consumer, all local version <code>0.1.0</code>. The collection reuses the accepted 52 controlled preparation outcomes. Preflight executes no native request.</p><p>Full programs include application scaffolding, native deadlines, error handling, and cleanup. Replacing or clearing the key cancels active and queued jobs.</p><div class="provenance-links"><a href="/reference" target="_blank" rel="noopener noreferrer">Read the source & setup guide ↗</a><button id="show-pins" class="text-button" type="button">View verified pins</button></div><pre id="pins-output" tabindex="0" aria-label="Verified runtime provenance" hidden></pre></div>
+      </details>
+    </main>
+
+    <footer class="site-footer"><span><span class="footer-mark">suspect</span> From contract to client.</span><span>Local packages · OpenRouter API · Built for your stack</span><a href="#top">Back to top ↑</a></footer>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <noscript><div class="noscript">Enable JavaScript to use the background SDK jobs. The complete examples are available in the <a href="/reference">source guide</a>.</div></noscript>
+</body>
+</html>

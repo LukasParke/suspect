@@ -1,13 +1,10 @@
 //! `$ref` (lazy, cached, cycle-safe) and `$dynamicRef`/`$dynamicAnchor`
-//! (RFC 3093 basic semantics).
-
-use std::rc::Rc;
+//! within the indexed schema resources.
 
 use suspect_low::{NodeRef, Pointer};
 
-use crate::compile::{
-    Compiler, Prg, RefTarget, base_for_pointer, compile_program, resource_root_for,
-};
+use crate::CompileError;
+use crate::compile::{Compiler, Prg, RefTarget, compile_program};
 use crate::exec::Stack;
 use crate::exec::{Ann, Ctx, eval};
 
@@ -15,16 +12,21 @@ use crate::exec::{Ann, Ctx, eval};
 /// first use and memoizing the result (`None` = unresolvable). Because
 /// resolution happens at execution time, recursive schemas compile fine:
 /// the cycle is broken by the cache before the inner `$ref` resolves.
-pub(crate) fn resolve_target<'a, 'd>(ctx: &Ctx<'a, 'd>, target: &Pointer) -> Option<Prg<'d>> {
+pub(crate) fn resolve_target<'a, 'd>(
+    ctx: &Ctx<'a, 'd>,
+    target: &Pointer,
+) -> Result<Option<Prg<'d>>, CompileError> {
     if let Some(hit) = ctx.sch.cache.borrow().get(target) {
         return hit.clone();
     }
-    let node = ctx.sch.root_node().pointer(target)?;
+    let Some(node) = ctx.sch.root_node().pointer(target) else {
+        return Ok(None);
+    };
     let scan = ctx.sch.scan();
-    let base = base_for_pointer(scan, ctx.sch.root_base(), target);
-    let res_ptr = resource_root_for(scan, target);
+    let base = scan.base_for(target);
+    let res_ptr = scan.resource_for(target);
     let compiler = Compiler::new(ctx.sch.config().clone());
-    let compiled = compile_program(&compiler, node, target, &base, scan, 0, &res_ptr).ok();
+    let compiled = compile_program(&compiler, node, target, base, scan, 0, &res_ptr).map(Some);
     ctx.sch
         .cache
         .borrow_mut()
@@ -42,25 +44,31 @@ pub(crate) fn check_ref<'a, 'd>(
 ) -> bool {
     match target {
         RefTarget::External => {
-            ctx.emit(st, at, "external schema resolution not configured".into());
+            ctx.fail_evaluation(st, at, "external schema resolution not configured".into());
             false
         }
         RefTarget::Local(ptr) => match resolve_target(ctx, ptr) {
-            Some(p) => {
+            Ok(Some(p)) => {
                 let o = eval(ctx, &p, *inst, st);
                 if o.ok {
-                    ctx.masks.record(*inst, o.ann.clone());
-                    ann.merge(o.ann);
-                    true
+                    ctx.merge_annotations(st, at, ann, o.ann)
                 } else {
                     false
                 }
             }
-            None => {
-                ctx.emit(
+            Ok(None) => {
+                ctx.fail_evaluation(
                     st,
                     at,
                     format!("unresolvable $ref target `{}`", ptr.to_path()),
+                );
+                false
+            }
+            Err(error) => {
+                ctx.fail_evaluation(
+                    st,
+                    at,
+                    format!("cannot compile $ref target `{}`: {error}", ptr.to_path()),
                 );
                 false
             }
@@ -68,48 +76,26 @@ pub(crate) fn check_ref<'a, 'd>(
     }
 }
 
-/// RFC 3093 basic semantics, documented simplification: the dynamic scope is
-/// walked outermost-first and the first fragment declaring the anchor wins;
-/// if no dynamic scope declares it, we fall back to static resolution
-/// through the document's `$dynamicAnchor` registry.
-pub(crate) fn check_dynamic_ref<'a, 'd>(
-    ctx: &mut Ctx<'a, 'd>,
-    st: &mut Stack<'d>,
+/// Only a statically resolved $dynamicAnchor fragment is eligible for
+/// rebinding. The outermost resource declaring that name wins (2020-12
+/// Core §8.2.3.2); pointers and ordinary $anchor fragments stay static.
+pub(crate) fn dynamic_target<'d>(
+    ctx: &mut Ctx<'_, 'd>,
+    st: &Stack<'d>,
     at: &Pointer,
-    inst: &NodeRef<'d>,
-    name: &Rc<str>,
-    ann: &mut Ann<'d>,
-) -> bool {
-    let mut scoped: Option<Prg<'d>> = None;
-    for (anchor, prog) in &ctx.dyn_scope {
-        if anchor.as_ref() == name.as_ref() {
-            scoped = Some(prog.clone());
-            break;
-        }
-    }
-    let target = match scoped {
-        Some(t) => t,
-        None => {
-            let Some(ptr) = ctx.sch.scan().dyn_anchors.get(name.as_ref()) else {
-                ctx.emit(st, at, format!("unresolvable $dynamicRef `#{name}`"));
-                return false;
-            };
-            let ptr = ptr.clone();
-            match resolve_target(ctx, &ptr) {
-                Some(t) => t,
-                None => {
-                    ctx.emit(st, at, format!("unresolvable $dynamicRef `#{name}`"));
-                    return false;
-                }
+    target: &RefTarget,
+    name: Option<&str>,
+) -> Option<RefTarget> {
+    if let Some(name) = name {
+        for index in 0..ctx.dyn_scope.len() {
+            if !ctx.step(st, at) {
+                return None;
+            }
+            let resource = &ctx.dyn_scope[index];
+            if let Some(pointer) = ctx.sch.scan().dynamic_anchor(resource, name) {
+                return Some(RefTarget::Local(pointer.clone()));
             }
         }
-    };
-    let o = eval(ctx, &target, *inst, st);
-    if o.ok {
-        ctx.masks.record(*inst, o.ann.clone());
-        ann.merge(o.ann);
-        true
-    } else {
-        false
     }
+    Some(target.clone())
 }

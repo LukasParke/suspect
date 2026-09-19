@@ -1,0 +1,81 @@
+{
+  "openapi": "3.2.0",
+  "$self": "https://logical.ruby.test/catalog/api.json",
+  "info": {"title": "Native Ruby resource-scoped SDK", "version": "1"},
+  "servers": [{"url": "./service/"}],
+  "components": {"schemas": {
+    "Tree": {
+      "$id": "urn:ruby:tree", "$dynamicAnchor": "node",
+      "description": "Named tree fields; recursive children retain exact JSON under the caller's resource scope.",
+      "type": "object", "required": ["label"],
+      "if": false, "then": {"$ref": "urn:ruby:inert"},
+      "properties": {
+        "label": {"type": "string", "minLength": 1},
+        "note": {"type": ["string", "null"]},
+        "amount": {"type": "number"},
+        "children": {"type": "array", "items": {"$dynamicRef": "#node"}}
+      }
+    },
+    "Strict": {"$id": "urn:ruby:strict", "$dynamicAnchor": "node", "$ref": "urn:ruby:tree", "unevaluatedProperties": false},
+    "Inert": {"$id": "urn:ruby:inert", "$dynamicAnchor": "node", "$ref": "urn:ruby:inert"},
+    "DefaultChoice": {"$id": "urn:ruby:default", "$dynamicAnchor": "item", "type": "string"},
+    "Choice": {
+      "$id": "urn:ruby:choice", "type": "object", "required": ["value"],
+      "properties": {"value": {"$dynamicRef": "urn:ruby:default#item"}},
+      "additionalProperties": false
+    },
+    "Outer": {
+      "$id": "urn:ruby:outer", "type": "object", "required": ["choice"],
+      "$defs": {"IntegerBinding": {"$dynamicAnchor": "item", "type": "integer"}},
+      "properties": {
+        "choice": {"$ref": "urn:ruby:choice"},
+        "union": {"anyOf": [{"$dynamicRef": "urn:ruby:default#item"}, {"type": "boolean"}]}
+      },
+      "additionalProperties": false
+    },
+    "Named": {
+      "$id": "https://schemas.ruby.test/Dir//%2E%2E/%2f/KeEp?Case=YES",
+      "type": "object", "required": ["name", "a/b~😀%"],
+      "properties": {"name": {"type": "string"}, "a/b~😀%": {"type": "string"}},
+      "additionalProperties": false
+    },
+    "Loop": {"$id": "urn:ruby:loop", "$dynamicAnchor": "loop", "$dynamicRef": "#loop"}
+  }},
+  "paths": {
+    "/tree": {"post": {
+      "operationId": "saveTree",
+      "requestBody": {"required": true, "content": {"application/json": {
+        "schema": {"$ref": "urn:ruby:strict"},
+        "examples": {
+          "valid": {"value": {"label": "root", "note": null, "amount": 9007199254740993.000000000000000001, "children": [{"label": "leaf", "amount": 1e-400}]}},
+          "invalid": {"value": {"label": "root", "children": [{"label": "leaf", "unclaimed": true}]}}
+        }
+      }}},
+      "responses": {"200": {"description": "Strict recursive tree", "content": {"application/json": {
+        "schema": {"$ref": "urn:ruby:strict"}, "example": {"label": "received", "children": [{"label": "leaf"}]}
+      }}}}
+    }},
+    "/choice": {"post": {
+      "operationId": "choose",
+      "requestBody": {"required": true, "content": {"application/json": {
+        "schema": {"$ref": "urn:ruby:outer"},
+        "examples": {"valid": {"value": {"choice": {"value": 7}, "union": 8}}, "invalid": {"value": {"choice": {"value": "fallback"}}}}
+      }}},
+      "responses": {"200": {"description": "Outer binding", "content": {"application/json": {
+        "schema": {"$ref": "urn:ruby:outer"}, "example": {"choice": {"value": 7}, "union": true}
+      }}}}
+    }},
+    "/named": {"post": {
+      "operationId": "identify",
+      "requestBody": {"required": true, "content": {"application/json": {
+        "schema": {"$ref": "https://schemas.ruby.test/Dir//%2E%2E/%2f/KeEp?Case=YES"},
+        "example": {"name": "native", "a/b~😀%": "escaped"}
+      }}},
+      "responses": {"200": {"description": "Static resource", "content": {"application/json": {
+        "schema": {"$ref": "https://schemas.ruby.test/Dir//%2E%2E/%2f/KeEp?Case=YES"},
+        "example": {"name": "native", "a/b~😀%": "escaped"}
+      }}}}
+    }},
+    "/loop": {"get": {"operationId": "loopFailure", "responses": {"200": {"description": "Explicit evaluation failure", "content": {"application/json": {"schema": {"$ref": "urn:ruby:loop"}}}}}}}
+  }
+}

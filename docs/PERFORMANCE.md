@@ -1,12 +1,17 @@
-# Performance Profiling Report & Plan of Attack
+# Historical performance profiling report
 
 Corpus: `corpus/stripe.yaml` (6.1 MB, 589 operations, 88 530 nodes,
 1 440 component schemas). All measurements are release-build medians on a
 Ryzen 9 7950X3D (32 HW threads).
 
+These measurements and optimization estimates describe that earlier platform
+checkpoint. They do not measure the current Contract-backed SDK pipeline.
+Current session measurement boundaries and functional checks are documented in
+[SDK-SESSION-PERFORMANCE.md](SDK-SESSION-PERFORMANCE.md).
+
 ---
 
-## 1. Current State vs Targets
+## 1. Recorded state vs targets
 
 | Metric | Target | Measured | Status |
 |---|---|---|---|
@@ -14,7 +19,7 @@ Ryzen 9 7950X3D (32 HW threads).
 | Lint p95 | ≤ 50 ms | **41–46 ms** | ✅ PASS |
 | Validate p95 | ≤ 50 ms | **39–51 ms** | ⚠️ borderline |
 | Gateway startup | < 1 s | **~1014 ms** | ❌ MISS |
-| Gen throughput | ≥ 1 GB/s | **~1.65 GB/s** | ✅ PASS |
+| Prepared docs rendering | ≥ 1 GB/s historical target | **~1.65 GB/s** | ✅ PASS at that checkpoint |
 
 ---
 
@@ -113,17 +118,17 @@ With parallel buckets, wall time ≈ max(bucket) not sum. Currently
 
 **Root cause**: `load_ir` calls `load_workspace` which does a whole-
 directory scan, builds a full `Workspace` with tree-sitter parsing of
-every YAML file, then runs `IrSpec::from_workspace`. This is the legacy
-CST pipeline (~1000 ms) — NOT the fast path.
+every YAML file, then runs `IrSpec::from_workspace`. This was the measured
+CST path (~1000 ms), rather than the fast path.
 
 **Fix**: `IrSpec::from_file(path)` already exists at ~7–9 ms. Switching
 `load_ir` to use it drops startup to ~20 ms total. The workspace is only
 needed for *validate* mode (NodeRef-based contract checking); mock,
 replay, and record modes work purely from IR + cassettes.
 
-### 2.5 Gen throughput
+### 2.5 Prepared docs-render throughput
 
-Current: **~98 971 MB/min = 1.65 GB/s** (docs-md preset on stripe).
+Recorded: **~98 971 MB/min = 1.65 GB/s** (docs-md preset on stripe).
 
 The pipeline is: ctx build (one-pass, memoized) → minijinja render
 (printer-style templates over precomputed strings) → content-hash compare →
@@ -179,7 +184,7 @@ improvement and effort.
 |---|---|---|---|
 | T7 | **Zero-copy FastValue** (borrow `&[u8]` from input buffer for plain scalars) | Parse: −1.5–2 ms; IR: −0.5–1 ms | Eliminates ~60k String allocs per stripe-sized file; requires lifetime threading through FastValue |
 | T8 | **Validate mode value-based checking** (port NodeRef-based checks to operate on `serde_json::Value` from IrSpec) | Gateway validate-mode startup: 1000 ms → ~50 ms | Removes workspace dependency from all gateway modes; larger refactor |
-| T9 | **Specialized Rust emitters for docs-md/ts-sdk/rust-sdk presets** (bypass minijinja for shipped presets) | Gen: 1.65 → 3+ GB/s | Only worth it if gen throughput becomes a bottleneck in practice |
+| T9 | **Specialized rendering for docs-md** (bypass minijinja) | Docs render: 1.65 → 3+ GB/s estimated | Requires new measurements and a clear custom-template contract |
 | T10 | **SIMD-assisted line scanning** (memchr for newline/indent detection in scan_lines) | Parse: scan_lines 1.1 ms → ~0.3 ms | memchr crate already in tree |
 
 ---

@@ -8,16 +8,22 @@
 //! node, a whole document, or a detected cycle), and a per-document cycle
 //! census that classifies loops as legal schema recursion or illegal.
 
+pub mod acquire;
 mod cycles;
 mod edges;
 mod error;
+mod provider;
 mod resolve;
+pub mod resource_uri;
 mod workspace;
 
 pub use cycles::{Cycle, CycleKind, CycleReport};
-pub use edges::{ParsedRef, RefEdge};
+pub use edges::{ParsedRef, RefDiagnostic, RefEdge, parse_ref};
 pub use error::{RefError, WorkspaceError};
-pub use resolve::{Resolution, Step};
+pub use provider::{
+    DocumentMetadata, DocumentProvider, ProvidedDocument, ProviderError, sha256_digest,
+};
+pub use resolve::{ReferenceInput, ReferenceTarget, Resolution, Step};
 pub use workspace::{DocHandle, Workspace, WorkspaceBuilder, WorkspaceStats};
 
 /// Index of a document inside a [`Workspace`].

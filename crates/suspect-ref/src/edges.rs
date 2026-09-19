@@ -7,17 +7,15 @@
 //! byte range is already on the walk path are skipped, which makes alias
 //! cycles (`A: &x {b: *x}`) terminate.
 //!
+//! This is a generic reference scan, not an OpenAPI vocabulary walk: callers
+//! interpreting arbitrary example/default data must scope results to their
+//! schema or OpenAPI reference positions.
+//!
 //! Limitations (v1):
-//! - `$ref` values that fail to parse as URI references (unjoinable relative
-//!   parts, invalid percent-escapes) are not recorded as edges; resolving
-//!   such a node surfaces [`RefError::InvalidRef`] at resolution time.
-//! - Plain-name fragments in *external* refs (`other.yaml#Pet`) parse to
-//!   [`ParsedRef::PlainName`] but resolve against the referencing document's
-//!   anchors; cross-file plain-name lookup is out of scope for v1.
 //! - `$id` base-URI inheritance applies to the ancestor chain of each edge's
 //!   containing mapping only (see `Workspace::effective_parsed`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use percent_encoding::percent_decode_str;
@@ -40,6 +38,24 @@ pub struct RefEdge {
     pub path: Pointer,
 }
 
+/// A malformed `$ref` occurrence found by the generic document scan.
+///
+/// The owning URI is supplied by the [`crate::DocHandle`] that returns it.
+/// This scan does not infer OpenAPI/schema semantics: a literal `$ref` key
+/// inside example data is included, so semantic consumers must scope these
+/// diagnostics to positions where their vocabulary defines references.
+#[derive(Debug, Clone)]
+pub struct RefDiagnostic {
+    /// Value byte range, or key byte range when a YAML value is absent.
+    pub at: Range<usize>,
+    /// Pointer to the mapping containing the malformed `$ref`.
+    pub path: Pointer,
+    /// Decoded string, when the value was a valid string scalar.
+    pub raw: Option<Box<str>>,
+    /// Why the occurrence could not be indexed as a reference edge.
+    pub reason: String,
+}
+
 /// A `$ref` value split into its addressable parts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedRef {
@@ -56,6 +72,13 @@ pub enum ParsedRef {
     /// Plain-name fragment (`#Pet`, `$anchor`) — resolved through the
     /// per-document anchors index.
     PlainName(Box<str>),
+    /// A plain-name fragment anchored in another document.
+    ExternalAnchor {
+        /// Canonical fragment-free target document URI.
+        uri: Uri,
+        /// Decoded plain-name fragment.
+        name: Box<str>,
+    },
 }
 
 /// Per-edge auxiliary ranges kept out of the public edge list.
@@ -71,6 +94,8 @@ pub(crate) struct EdgeMeta {
 #[derive(Debug, Default)]
 pub(crate) struct Scanned {
     pub(crate) edges: Vec<RefEdge>,
+    pub(crate) diagnostics: Vec<RefDiagnostic>,
+    seen_refs: HashSet<Range<usize>>,
     pub(crate) meta: EdgeMeta,
     /// Plain-name targets: `$anchor: name` and Swagger 2.0-style
     /// `id: "#name"` fields, mapped to their containing mapping's pointer.
@@ -84,12 +109,17 @@ pub(crate) struct Scanned {
 ///
 /// Percent-decoding happens before [`Pointer::parse`], so `%7B` becomes `{`
 /// first and `~1`/`~0` unescaping happens inside the pointer parser — the
-/// RFC 7644 / OAS layering for refs like `#/paths/~1pets~1%7Bid%7D/get`.
-pub(crate) fn parse_ref(base: &Uri, raw: &str) -> Result<ParsedRef, RefError> {
+/// RFC 6901 / OAS layering for refs like `#/paths/~1pets~1%7Bid%7D/get`.
+///
+/// # Errors
+/// Invalid percent escapes, invalid UTF-8 fragments, malformed JSON
+/// pointers, or a document URI that cannot join the base.
+pub fn parse_ref(base: &Uri, raw: &str) -> Result<ParsedRef, RefError> {
     let invalid = |reason: String| RefError::InvalidRef {
         raw: raw.to_owned(),
         reason,
     };
+    validate_percent_escapes(raw)?;
     let (doc_part, frag) = Uri::split_ref(raw);
     match doc_part {
         None => fragment_only(frag),
@@ -103,16 +133,20 @@ pub(crate) fn parse_ref(base: &Uri, raw: &str) -> Result<ParsedRef, RefError> {
 }
 
 fn fragment_only(frag: &str) -> Result<ParsedRef, RefError> {
+    let decoded = decode_utf8(frag)?;
+    let frag = decoded.as_str();
     if frag.is_empty() {
         return Ok(ParsedRef::Local(Pointer::root()));
     }
     if frag.starts_with('/') {
-        return Ok(ParsedRef::Local(decode_pointer(frag)?));
+        return Ok(ParsedRef::Local(parse_pointer(frag)?));
     }
-    Ok(ParsedRef::PlainName(decode_name(frag)?))
+    Ok(ParsedRef::PlainName(frag.into()))
 }
 
 fn with_fragment(uri: Uri, frag: &str) -> Result<ParsedRef, RefError> {
+    let decoded = decode_utf8(frag)?;
+    let frag = decoded.as_str();
     if frag.is_empty() {
         return Ok(ParsedRef::External {
             uri,
@@ -120,14 +154,37 @@ fn with_fragment(uri: Uri, frag: &str) -> Result<ParsedRef, RefError> {
         });
     }
     if frag.starts_with('/') {
-        let pointer = decode_pointer(frag)?;
+        let pointer = parse_pointer(frag)?;
         return Ok(ParsedRef::External { uri, pointer });
     }
-    Ok(ParsedRef::PlainName(decode_name(frag)?))
+    Ok(ParsedRef::ExternalAnchor {
+        uri,
+        name: frag.into(),
+    })
 }
 
-/// Percent-decodes a fragment body to UTF-8 (`%XX` sequences; invalid
-/// escapes pass through verbatim per RFC 3986 leniency).
+fn validate_percent_escapes(raw: &str) -> Result<(), RefError> {
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if !bytes.get(i + 1).is_some_and(u8::is_ascii_hexdigit)
+                || !bytes.get(i + 2).is_some_and(u8::is_ascii_hexdigit)
+            {
+                return Err(RefError::InvalidRef {
+                    raw: raw.to_owned(),
+                    reason: format!("invalid percent escape at byte {i}"),
+                });
+            }
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Percent-decodes a validated fragment body to UTF-8.
 fn decode_utf8(frag: &str) -> Result<String, RefError> {
     percent_decode_str(frag)
         .decode_utf8()
@@ -138,41 +195,59 @@ fn decode_utf8(frag: &str) -> Result<String, RefError> {
         })
 }
 
-/// Percent-decodes a fragment body, then parses it as an RFC 6901 pointer
-/// (which applies `~0`/`~1` unescaping on top).
-fn decode_pointer(frag: &str) -> Result<Pointer, RefError> {
-    let s = decode_utf8(frag)?;
-    Pointer::parse(&s).map_err(|e| RefError::InvalidRef {
+/// Parses a decoded fragment as an RFC 6901 pointer (`~0`/`~1` unescaping).
+fn parse_pointer(frag: &str) -> Result<Pointer, RefError> {
+    Pointer::parse(frag).map_err(|e| RefError::InvalidRef {
         raw: frag.to_owned(),
         reason: e.to_string(),
     })
 }
 
-/// Percent-decodes a plain-name fragment.
-fn decode_name(frag: &str) -> Result<Box<str>, RefError> {
-    Ok(decode_utf8(frag)?.into_boxed_str())
+pub(crate) fn ref_text(node: NodeRef<'_>) -> Result<String, RefError> {
+    let invalid = |reason: &str| RefError::InvalidRef {
+        raw: String::from_utf8_lossy(node.scalar_bytes()).into_owned(),
+        reason: reason.to_owned(),
+    };
+    if node.kind() != ValueKind::Str {
+        return Err(invalid("node is not a $ref string value"));
+    }
+    let decoded = node
+        .try_decoded_scalar()
+        .ok_or_else(|| invalid("invalid string escapes"))?;
+    std::str::from_utf8(&decoded)
+        .map(|s| s.trim().to_owned())
+        .map_err(|_| invalid("reference is not valid UTF-8"))
 }
 
 struct Frame<'d> {
     ptr: Pointer,
     /// Byte range of this frame's container node.
     range: Range<usize>,
-    children: Vec<(Option<Box<str>>, NodeRef<'d>, usize)>,
+    children: Vec<(Option<Box<str>>, NodeRef<'d>, usize, bool)>,
     next: usize,
 }
 
-fn children_of<'d>(node: NodeRef<'d>) -> Vec<(Option<Box<str>>, NodeRef<'d>, usize)> {
+fn children_of<'d>(node: NodeRef<'d>) -> Vec<(Option<Box<str>>, NodeRef<'d>, usize, bool)> {
     match node.kind() {
         ValueKind::Object => node
             .entries()
             .into_iter()
-            .filter_map(|e| e.value.map(|v| (Some(Box::from(e.key)), v, 0usize)))
+            .filter_map(|e| {
+                let decoded = e.key_node.try_decoded_scalar()?;
+                let key = std::str::from_utf8(&decoded).ok()?;
+                Some((
+                    Some(Box::from(key)),
+                    e.value.unwrap_or(e.key_node),
+                    0usize,
+                    e.value.is_none(),
+                ))
+            })
             .collect(),
         ValueKind::Array => node
             .items()
             .into_iter()
             .enumerate()
-            .map(|(i, v)| (None, v, i))
+            .map(|(i, v)| (None, v, i, false))
             .collect(),
         _ => Vec::new(),
     }
@@ -197,7 +272,8 @@ pub(crate) fn scan(doc: &LowDoc) -> Scanned {
     let mut on_path: Vec<Range<usize>> = vec![root.byte_range()];
 
     while let Some(frame) = stack.last_mut() {
-        let Some((key, child_node, index)) = frame.children.get(frame.next).cloned() else {
+        let Some((key, child_node, index, missing)) = frame.children.get(frame.next).cloned()
+        else {
             stack.pop();
             on_path.pop();
             continue;
@@ -208,15 +284,22 @@ pub(crate) fn scan(doc: &LowDoc) -> Scanned {
             None => frame.ptr.push(&index.to_string()),
         };
 
-        if child_node.kind() == ValueKind::Str {
-            if key.as_deref() == Some("$ref") {
-                record_ref(&mut sc, doc, child_node, frame.range.clone(), &frame.ptr);
-            } else if let (Some(name), true) = (
-                child_node.as_str(),
+        if key.as_deref() == Some("$ref") {
+            record_ref(
+                &mut sc,
+                doc,
+                child_node,
+                frame.range.clone(),
+                &frame.ptr,
+                missing,
+            );
+        } else if !missing && child_node.kind() == ValueKind::Str {
+            if let (Ok(name), true) = (
+                ref_text(child_node),
                 matches!(key.as_deref(), Some("$anchor")),
             ) {
-                sc.anchors.insert(name.to_owned(), frame.ptr.clone());
-            } else if let Some(v) = child_node.as_str()
+                sc.anchors.insert(name, frame.ptr.clone());
+            } else if let Ok(v) = ref_text(child_node)
                 && matches!(key.as_deref(), Some("id" | "$id"))
             {
                 // Swagger 2.0-style JSON `id` / 3.1 `$id` written as a
@@ -226,7 +309,7 @@ pub(crate) fn scan(doc: &LowDoc) -> Scanned {
                         sc.anchors.insert(name.to_owned(), frame.ptr.clone());
                     }
                 } else if key.as_deref() == Some("$id") {
-                    sc.ids.insert(frame.ptr.clone(), v.to_owned());
+                    sc.ids.insert(frame.ptr.clone(), v);
                 }
             }
         }
@@ -262,26 +345,50 @@ fn record_ref(
     value: NodeRef<'_>,
     mapping_range: Range<usize>,
     mapping_ptr: &Pointer,
+    missing: bool,
 ) {
     let range = value.byte_range();
-    // Stripe and friends write refs as folded block scalars (`>-`); the
-    // decoded value is the pointer text, not the raw source slice.
-    let decoded = value.decoded_scalar();
-    let Some(raw) = std::str::from_utf8(&decoded).ok().map(str::trim) else {
-        return;
-    };
-    // Collapse duplicate expansions of the same physical node (aliases).
-    if sc.meta.value_index.contains_key(&range) {
+    if !sc.seen_refs.insert(range.clone()) {
         return;
     }
-    let Ok(parsed) = parse_ref(doc.uri(), raw) else {
-        return;
+    // Stripe and friends write refs as folded block scalars (`>-`); the
+    // decoded value is the pointer text, not the raw source slice.
+    let decoded = if missing {
+        Err(RefError::InvalidRef {
+            raw: String::new(),
+            reason: "$ref value is absent (null)".to_owned(),
+        })
+    } else {
+        ref_text(value)
+    };
+    let (raw, parsed) = match decoded {
+        Ok(raw) => match parse_ref(doc.uri(), &raw) {
+            Ok(parsed) => (raw, parsed),
+            Err(error) => {
+                sc.diagnostics.push(RefDiagnostic {
+                    at: range,
+                    path: mapping_ptr.clone(),
+                    raw: Some(raw.into_boxed_str()),
+                    reason: error.to_string(),
+                });
+                return;
+            }
+        },
+        Err(error) => {
+            sc.diagnostics.push(RefDiagnostic {
+                at: range,
+                path: mapping_ptr.clone(),
+                raw: None,
+                reason: error.to_string(),
+            });
+            return;
+        }
     };
     sc.meta.value_index.insert(range.clone(), sc.edges.len());
     sc.meta.mapping_ranges.push(mapping_range);
     sc.edges.push(RefEdge {
         at: range,
-        raw: Box::from(raw),
+        raw: raw.into_boxed_str(),
         parsed,
         path: mapping_ptr.clone(),
     });

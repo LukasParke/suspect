@@ -14,6 +14,7 @@ use minijinja::Value;
 use serde_json::Value as Json;
 
 use crate::MinijinjaEngine;
+pub use crate::rust_support::{rust_identifier, rust_package_name, rust_string};
 
 /// Registry that installs the built-in generation filters onto an engine.
 ///
@@ -53,9 +54,27 @@ impl FilterRegistry {
         engine
             .env
             .add_filter("ts_type", |v: Value| json_filter(&v, ts_type));
+        engine.env.add_filter("ts_line_comment", |v: Value| {
+            string_filter(&v, ts_line_comment)
+        });
+        engine.env.add_filter("ts_doc_comment", |v: Value| {
+            string_filter(&v, ts_doc_comment)
+        });
+        engine
+            .env
+            .add_filter("ts_ident", |v: Value| string_filter(&v, ts_identifier));
         engine
             .env
             .add_filter("rust_type", |v: Value| json_filter(&v, rust_type));
+        engine
+            .env
+            .add_filter("rust_ident", |v: Value| string_filter(&v, rust_identifier));
+        engine
+            .env
+            .add_filter("rust_string", |v: Value| string_filter(&v, rust_string));
+        engine.env.add_filter("rust_package_name", |v: Value| {
+            string_filter(&v, rust_package_name)
+        });
         engine
             .env
             .add_filter("example_of", |schema: Value, refs: Option<Value>| {
@@ -68,6 +87,60 @@ impl FilterRegistry {
             .env
             .add_filter("mermaid_refs", |v: Value| json_filter(&v, mermaid_of_spec));
     }
+}
+
+/// Keeps source prose inside a TypeScript line comment, including Unicode line breaks.
+#[must_use]
+pub fn ts_line_comment(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .replace(['\r', '\u{2028}', '\u{2029}'], "\n")
+        .replace('\n', "\n// ")
+}
+
+/// Escapes comment terminators inside TypeScript documentation comments.
+#[must_use]
+pub fn ts_doc_comment(text: &str) -> String {
+    text.replace("*/", "*\\/")
+}
+
+/// Makes a case-converted symbol safe as a TypeScript declaration or binding.
+/// Wire property names must use quoted literals instead of this function.
+#[must_use]
+pub fn ts_identifier(text: &str) -> String {
+    let mut out = String::new();
+    for character in text.chars() {
+        if matches!(character, '_' | '$') || unicode_ident::is_xid_continue(character) {
+            if out.is_empty()
+                && !matches!(character, '_' | '$')
+                && !unicode_ident::is_xid_start(character)
+            {
+                out.push('_');
+            }
+            out.push(character);
+        } else {
+            out.push_str(&format!("_u{:x}_", character as u32));
+        }
+    }
+    if out.is_empty() {
+        out.push('_');
+    }
+    if matches!(
+        out.as_str(),
+        "await" | "break" | "case" | "catch" | "class" | "const" | "continue" |
+        "debugger" | "default" | "delete" | "do" | "else" | "enum" | "export" |
+        "extends" | "false" | "finally" | "for" | "function" | "if" | "import" |
+        "in" | "instanceof" | "new" | "null" | "return" | "super" | "switch" |
+        "this" | "throw" | "true" | "try" | "typeof" | "var" | "void" | "while" |
+        "with" | "yield" | "let" | "static" | "implements" | "interface" |
+        "package" | "private" | "protected" | "public" | "constructor" |
+        "any" | "boolean" | "number" | "string" | "symbol" | "unknown" | "never" |
+        "object" | "bigint" | "undefined" | "intrinsic" | "eval" | "arguments" |
+        // Generated method locals and the synthesized request-body argument.
+        "body" | "path" | "query" | "qs" | "url" | "init" | "response"
+    ) {
+        out.insert(0, '_');
+    }
+    out
 }
 
 /// Runs an infallible string mapping as a filter.
@@ -95,19 +168,13 @@ fn mermaid_of_spec(spec: &Json) -> String {
 
 /// Runs an infallible JSON mapping as a filter.
 fn json_filter(value: &Value, f: fn(&Json) -> String) -> Result<String, minijinja::Error> {
-    let json = serde_json::to_value(value).map_err(|e| {
-        minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-    })?;
+    let json = crate::json_context::to_json(value)?;
     Ok(f(&json))
 }
 
 /// The two-argument `example_of` filter: schema plus optional refs map.
 fn example_filter(schema: &Value, refs: Option<&Value>) -> Result<String, minijinja::Error> {
-    let to_json = |v: &Value| {
-        serde_json::to_value(v).map_err(|e| {
-            minijinja::Error::new(minijinja::ErrorKind::InvalidOperation, e.to_string())
-        })
-    };
+    let to_json = crate::json_context::to_json;
     let schema = to_json(schema)?;
     let empty = Json::Object(serde_json::Map::new());
     let refs = match refs {
@@ -254,7 +321,9 @@ fn is_nullable(schema: &Json) -> bool {
 #[must_use]
 pub fn ts_type(schema: &Json) -> String {
     let base = match schema.get("$ref").and_then(Json::as_str) {
-        Some(r) => ref_name(r),
+        Some(r) => ts_identifier(&to_pascal_case(
+            &ref_name(r).replace("~1", "/").replace("~0", "~"),
+        )),
         None => match base_type(schema).as_deref() {
             Some("string") => "string".into(),
             Some("integer") | Some("number") => "number".into(),
@@ -312,14 +381,10 @@ pub fn rust_type(schema: &Json) -> String {
     }
 }
 
-/// Normalizes a component name into valid Rust path segments.
+/// Matches the flat Rust component declarations, including pointer escapes.
 #[must_use]
 fn sanitize_rust_path(name: &str) -> String {
-    name.split(['.', '-', ' '])
-        .filter(|s| !s.is_empty())
-        .map(to_pascal_case)
-        .collect::<Vec<_>>()
-        .join("::")
+    rust_identifier(&to_pascal_case(&name.replace("~1", "/").replace("~0", "~")))
 }
 
 // -------------------------------------------------------------- examples

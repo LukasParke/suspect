@@ -1,0 +1,11 @@
+{
+  "provider_name": "fixture",
+  "provider_address": "registry.terraform.io/suspect/fixture",
+  "module_path": "example.com/terraform-provider-fixture",
+  "version": "0.1.0",
+  "go_version": "1.23.0",
+  "go_toolchain": "go1.23.12",
+  "terraform_version": "1.15.8",
+  "framework_version": "1.15.1",
+  "sdk": {"module_path": "example.com/lifecycle-sdk", "version": "0.4.2"}
+}

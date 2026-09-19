@@ -1,20 +1,45 @@
 [package]
 name = "suspect-codegen"
-description = "Semantic Type Graph compiler: OpenAPI to idiomatic TypeScript, Rust, and Go"
+description = "Canonical OpenAPI SDK compiler with native multi-language backends"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["ruby-sdk", "csharp-sdk", "java-sdk", "kotlin-sdk", "php-sdk", "dart-sdk", "cpp-sdk", "http-protocol"]
+# Language modules become default after native acceptance.
+java-sdk = ["http-protocol"]
+csharp-sdk = ["http-protocol"]
+kotlin-sdk = ["http-protocol"]
+ruby-sdk = ["http-protocol"]
+php-sdk = ["http-protocol"]
+dart-sdk = ["http-protocol"]
+cpp-sdk = ["http-protocol"]
+http-protocol = []
+
 [dependencies]
+suspect-artifact.workspace = true
 suspect-ir.workspace = true
 suspect-gen.workspace = true
+suspect-schema.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+semver = "1"
+pep440_rs = "=0.7.3"
+url.workspace = true
+suspect-ref.workspace = true
+suspect-source.workspace = true
+sha2 = "0.10.9"
 
 [dev-dependencies]
 anyhow.workspace = true
+clap.workspace = true
+sha2 = "0.10.9"
 tempfile.workspace = true
 suspect-ref.workspace = true
 suspect-source.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2.189"

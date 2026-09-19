@@ -1,6 +1,7 @@
 //! Keyword implementations, grouped by family.
 
 pub(crate) mod arrays;
+pub(crate) mod cardinality;
 pub(crate) mod composition;
 pub(crate) mod formats;
 pub(crate) mod numeric;

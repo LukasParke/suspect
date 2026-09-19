@@ -40,31 +40,7 @@ fn infer_plain(raw: &[u8], format: Format) -> ValueKind {
         return match raw {
             b"true" | b"false" => ValueKind::Bool,
             b"null" => ValueKind::Null,
-            _ => {
-                if raw.first() == Some(&b'"') {
-                    ValueKind::Str
-                } else if raw
-                    .iter()
-                    .all(|b| b.is_ascii_digit() || matches!(b, b'-' | b'+'))
-                    && !raw.is_empty()
-                {
-                    // integer-shaped (sign + digits only)
-                    if raw.iter().filter(|&&b| b == b'-' || b == b'+').count() > 1
-                        || raw.first() == Some(&b'+')
-                        || raw == b"-"
-                    {
-                        ValueKind::Str
-                    } else if raw.iter().any(|&b| b.is_ascii_digit()) {
-                        ValueKind::Int
-                    } else {
-                        ValueKind::Str
-                    }
-                } else if looks_like_float_json(raw) {
-                    ValueKind::Float
-                } else {
-                    ValueKind::Str
-                }
-            }
+            _ => json_number_kind(raw).unwrap_or(ValueKind::Str),
         };
     }
     // YAML 1.2 core schema
@@ -85,46 +61,45 @@ fn infer_plain(raw: &[u8], format: Format) -> ValueKind {
     }
 }
 
-fn looks_like_float_json(raw: &[u8]) -> bool {
-    // JSON number with fraction or exponent
-    let s = match std::str::from_utf8(raw) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    let body = s.strip_prefix('-').unwrap_or(s);
-    if body.is_empty() {
-        return false;
-    }
-    let (int_part, rest) = match body.split_once('.') {
-        Some((i, r)) => (i, Some(r)),
-        None => match body.split_once(['e', 'E']) {
-            Some((i, r)) => (i, Some(r)),
-            None => (body, None),
-        },
-    };
-    if int_part.is_empty() || !int_part.bytes().all(|b| b.is_ascii_digit()) {
-        return false;
-    }
-    match rest {
-        None => false,
-        Some(frac) => {
-            let (frac_digits, exp) = match frac.split_once(['e', 'E']) {
-                Some((f, e)) => (f, Some(e)),
-                None => (frac, None),
-            };
-            let frac_ok = frac_digits.is_empty() || frac_digits.bytes().all(|b| b.is_ascii_digit());
-            let exp_ok = match exp {
-                None => true,
-                Some(e) => {
-                    let e = e
-                        .strip_prefix('+')
-                        .unwrap_or(e.strip_prefix('-').unwrap_or(e));
-                    !e.is_empty() && e.bytes().all(|b| b.is_ascii_digit())
-                }
-            };
-            frac_ok && exp_ok
+/// RFC 8259 number grammar. Classification depends on spelling, not the
+/// representable range of a Rust integer or floating-point type.
+fn json_number_kind(raw: &[u8]) -> Option<ValueKind> {
+    let mut rest = raw.strip_prefix(b"-").unwrap_or(raw);
+    match rest.first()? {
+        b'0' => rest = &rest[1..],
+        b'1'..=b'9' => {
+            let digits = rest.iter().take_while(|b| b.is_ascii_digit()).count();
+            rest = &rest[digits..];
         }
+        _ => return None,
     }
+    let mut floating = false;
+    if let Some(fraction) = rest.strip_prefix(b".") {
+        floating = true;
+        let digits = fraction.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
+        rest = &fraction[digits..];
+    }
+    if matches!(rest.first(), Some(b'e' | b'E')) {
+        floating = true;
+        let exponent = &rest[1..];
+        let exponent = match exponent.first() {
+            Some(b'+' | b'-') => &exponent[1..],
+            _ => exponent,
+        };
+        let digits = exponent.iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 {
+            return None;
+        }
+        rest = &exponent[digits..];
+    }
+    rest.is_empty().then_some(if floating {
+        ValueKind::Float
+    } else {
+        ValueKind::Int
+    })
 }
 
 fn is_yaml_int(raw: &[u8]) -> bool {
@@ -180,28 +155,93 @@ fn is_yaml_float(raw: &[u8]) -> bool {
     int_ok && frac_ok && has_digit && dot_or_exp
 }
 
+/// Tests an already classified decimal scalar for mathematical integrality.
+/// Exponent magnitude is bounded by the token length, so the check neither
+/// rounds through a float nor expands arbitrarily large powers of ten.
+pub(crate) fn decimal_is_integer(raw: &[u8]) -> bool {
+    let body = match raw.first() {
+        Some(b'+' | b'-') => &raw[1..],
+        _ => raw,
+    };
+    let (coefficient, exponent) = body
+        .iter()
+        .position(|b| matches!(b, b'e' | b'E'))
+        .map_or((body, b"0".as_slice()), |index| {
+            (&body[..index], &body[index + 1..])
+        });
+    // YAML's nonfinite spellings are Float-kind scalars, but not integers.
+    if !coefficient.iter().all(|b| b.is_ascii_digit() || *b == b'.')
+        || !coefficient.iter().any(u8::is_ascii_digit)
+    {
+        return false;
+    }
+    if coefficient.iter().all(|b| matches!(b, b'0' | b'.')) {
+        return true;
+    }
+    let fraction = coefficient
+        .iter()
+        .position(|b| *b == b'.')
+        .map_or(0, |index| coefficient.len() - index - 1);
+    let trailing_zeroes = coefficient
+        .iter()
+        .rev()
+        .filter(|b| **b != b'.')
+        .take_while(|b| **b == b'0')
+        .count();
+    let digits = match exponent.first() {
+        Some(b'+' | b'-') => &exponent[1..],
+        _ => exponent,
+    };
+    let bound = raw.len().saturating_add(1);
+    let magnitude = digits.iter().fold(0usize, |value, digit| {
+        value
+            .saturating_mul(10)
+            .saturating_add(usize::from(digit - b'0'))
+            .min(bound)
+    });
+    if exponent.first() == Some(&b'-') {
+        trailing_zeroes >= fraction.saturating_add(magnitude)
+    } else {
+        magnitude.saturating_add(trailing_zeroes) >= fraction
+    }
+}
+
 /// Parses an inferred integer scalar.
 #[must_use]
 pub fn parse_int(raw: &[u8], format: Format) -> Option<i64> {
     if format == Format::Json {
         return std::str::from_utf8(raw).ok()?.parse().ok();
     }
-    let Ok(s) = std::str::from_utf8(raw) else {
-        return None;
-    };
+    let (neg, magnitude) = integer_magnitude(raw, format)?;
+    // The magnitude of i64::MIN is one larger than i64::MAX. Keep the sign
+    // separate until both extremes can be represented, then check the range.
+    let magnitude = i128::from(magnitude);
+    i64::try_from(if neg { -magnitude } else { magnitude }).ok()
+}
+
+/// Parses an inferred integer scalar without first narrowing through i64.
+pub(crate) fn parse_uint(raw: &[u8], format: Format) -> Option<u64> {
+    let (neg, magnitude) = integer_magnitude(raw, format)?;
+    (!neg || magnitude == 0).then_some(magnitude)
+}
+
+fn integer_magnitude(raw: &[u8], format: Format) -> Option<(bool, u64)> {
+    let s = std::str::from_utf8(raw).ok()?;
     let (neg, body) = match s.as_bytes().first() {
         Some(b'-') => (true, &s[1..]),
         Some(b'+') => (false, &s[1..]),
         _ => (false, s),
     };
-    let magnitude = if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
-        i64::from_str_radix(hex, 16).ok()?
+    let magnitude = if format == Format::Json {
+        body.parse::<u64>().ok()?
+    } else if let Some(hex) = body.strip_prefix("0x").or_else(|| body.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).ok()?
     } else if let Some(oct) = body.strip_prefix("0o").or_else(|| body.strip_prefix("0O")) {
-        i64::from_str_radix(oct, 8).ok()?
+        u64::from_str_radix(oct, 8).ok()?
     } else {
-        body.parse::<i64>().ok()?
+        body.parse::<u64>().ok()?
     };
-    Some(if neg { -magnitude } else { magnitude })
+    Some((neg, magnitude))
 }
 
 pub fn parse_float(raw: &[u8]) -> Option<f64> {

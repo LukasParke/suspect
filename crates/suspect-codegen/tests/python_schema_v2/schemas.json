@@ -1,0 +1,113 @@
+{
+  "support": {
+    "Null": {"type": "null"},
+    "OpenBase": {"type": "object", "properties": {"name": {"type": "string"}, "stamp": {"type": "null"}}}
+  },
+  "cases": [
+    {
+      "name": "Conditional", "operation": "writeConditional", "path": "/conditional",
+      "schema": {
+        "type": "object", "required": ["kind"],
+        "properties": {"kind": {"enum": ["s", "n"]}, "text": {"type": "string"}, "count": {"type": "integer"}, "flag": {"type": "null"}, "amount": {"type": "number"}},
+        "if": {"properties": {"kind": {"const": "s"}}, "required": ["kind"]},
+        "then": {"required": ["text"]}, "else": {"required": ["count"]}, "unevaluatedProperties": false
+      },
+      "good": {"kind": "s", "text": "native", "flag": null, "amount": 9007199254740993.000000000000000001},
+      "bad": {"kind": "s"}
+    },
+    {
+      "name": "Dependency", "operation": "writeDependency", "path": "/dependency",
+      "schema": {
+        "type": "object",
+        "properties": {"card": {"type": ["string", "null"]}, "billing": {"type": "string"}, "enabled": {"type": "boolean"}, "peer": {"type": "integer"}},
+        "dependentRequired": {"card": ["billing"]},
+        "dependentSchemas": {"enabled": {"required": ["peer"], "properties": {"peer": {"minimum": 1}}}},
+        "unevaluatedProperties": false
+      },
+      "good": {"card": null, "billing": "address", "enabled": false, "peer": 1},
+      "bad": {"card": null}
+    },
+    {
+      "name": "PatternBag", "operation": "writePatterns", "path": "/patterns",
+      "schema": {
+        "type": "object", "required": ["fixed"], "properties": {"fixed": {"type": "string"}},
+        "patternProperties": {"^x": {"type": "number"}, "t$": {"minimum": 1}},
+        "additionalProperties": false, "propertyNames": {"maxLength": 8}, "unevaluatedProperties": false
+      },
+      "good": {"fixed": "label", "xt": 1.2300e2, "xzero": -0},
+      "bad": {"fixed": "label", "xt": 0}
+    },
+    {
+      "name": "PatternResidual", "operation": "writePatternResidual", "path": "/pattern-residual",
+      "schema": {
+        "type": "object", "properties": {"known": {"type": "string"}},
+        "patternProperties": {"^x": {"type": "number"}}, "additionalProperties": {"type": "string"}
+      },
+      "good": {"known": "fixed", "x": 1e0, "other": "residual"},
+      "bad": {"x": 1, "other": 2}
+    },
+    {
+      "name": "TupleItems", "operation": "writeTuple", "path": "/tuple",
+      "schema": {"type": "array", "prefixItems": [{"type": "string"}], "contains": {"type": "integer"}, "minContains": 1, "maxContains": 2, "unevaluatedItems": false},
+      "good": ["head", 1.0, 2], "bad": ["head", 1, "unmarked"]
+    },
+    {
+      "name": "ConditionalExtra", "operation": "writeConditionScope", "path": "/condition-scope",
+      "schema": {
+        "type": "object", "if": {"properties": {"kind": {"const": "x"}}, "required": ["kind"]},
+        "then": {"properties": {"value": {"type": "string"}}, "required": ["value"]},
+        "else": {"properties": {"other": {"type": "integer"}}, "required": ["other"]}, "unevaluatedProperties": false
+      },
+      "good": {"kind": "x", "value": "kept"}, "bad": {"kind": "x", "other": 1}
+    },
+    {
+      "name": "Choice", "operation": "writeUnion", "path": "/union",
+      "schema": {
+        "anyOf": [
+          {"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"]},
+          {"type": "object", "properties": {"b": {"type": "string"}}, "required": ["b"]}
+        ], "unevaluatedProperties": false
+      },
+      "good": {"a": 1, "b": "kept"}, "bad": {"a": 1, "extra": true}
+    },
+    {
+      "name": "Intersection", "operation": "writeIntersection", "path": "/intersection",
+      "schema": {
+        "type": "object", "allOf": [
+          {"properties": {"a": {"type": "integer"}}, "required": ["a"]},
+          {"properties": {"b": {"type": "string"}}, "required": ["b"]}
+        ], "unevaluatedProperties": false
+      },
+      "good": {"a": 1, "b": "kept"}, "bad": {"a": 1}
+    },
+    {
+      "name": "RefSibling", "operation": "writeRefSibling", "path": "/ref-sibling",
+      "schema": {"$ref": "#/components/schemas/OpenBase", "dependentRequired": {"stamp": ["name"]}, "unevaluatedProperties": false},
+      "good": {"name": "native", "stamp": null}, "bad": {"stamp": null}
+    },
+    {
+      "name": "MaybeObject", "operation": "writeNullable", "path": "/nullable",
+      "schema": {"type": ["object", "null"], "properties": {"value": {"type": "number"}}, "if": {"type": "object"}, "then": {"required": ["value"]}, "unevaluatedProperties": false},
+      "good": {"value": 1.2300}, "bad": {"value": "not a number"}
+    },
+    {
+      "name": "CompoundConst", "operation": "writeLiteral", "path": "/literal",
+      "schema": {"const": {"type": "literal-data", "required": ["not-keywords"], "value": 1.23}, "propertyNames": {"type": "string"}},
+      "good": {"type": "literal-data", "required": ["not-keywords"], "value": 1.23},
+      "bad": {"type": "literal-data", "required": [], "value": 1.23}
+    },
+    {
+      "name": "NullFields", "operation": "writeNullFields", "path": "/null-fields",
+      "schema": {
+        "type": "object", "required": ["required"], "properties": {
+          "required": {"$ref": "#/components/schemas/Null"}, "flag": {"type": "null"},
+          "items": {"type": "array", "items": {"type": "null"}},
+          "same": {"anyOf": [{"type": "null"}, {"type": "null"}]},
+          "choice": {"anyOf": [{"type": "null"}, {"type": "string"}]}
+        }, "unevaluatedProperties": false
+      },
+      "good": {"required": null, "flag": null, "items": [null], "same": null, "choice": null},
+      "bad": {"required": null, "flag": "not-null"}
+    }
+  ]
+}

@@ -739,6 +739,10 @@ pub fn show_ref_graph(ws: &Workspace) -> String {
                 ParsedRef::Local(p) => pointer_target(uri.as_str(), p),
                 ParsedRef::External { uri: tu, pointer } => pointer_target(tu.as_str(), pointer),
                 ParsedRef::PlainName(name) => (format!("{uri}#{name}"), format!("{fname}#{name}")),
+                ParsedRef::ExternalAnchor { uri: target, name } => (
+                    format!("{target}#{name}"),
+                    format!("{}#{name}", file_name(target.as_str())),
+                ),
             };
             nodes.entry(tgt_key.clone()).or_insert_with(|| tgt_label);
             let label = edge_label(&e.parsed);
@@ -844,7 +848,7 @@ fn edge_label(parsed: &ParsedRef) -> String {
             .tokens()
             .last()
             .map_or_else(|| "$ref".to_owned(), |t| t.to_string()),
-        ParsedRef::PlainName(name) => format!("#{name}"),
+        ParsedRef::PlainName(name) | ParsedRef::ExternalAnchor { name, .. } => format!("#{name}"),
     }
 }
 

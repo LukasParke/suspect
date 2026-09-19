@@ -55,8 +55,9 @@ pub fn lint_doc(linter: &Linter, doc: &LowDoc, shown: &str) -> Vec<Finding> {
                 severity: map_severity(f.severity),
                 code: f.code.to_string(),
                 message: f.message,
-                line,
+                line: line + 1,
                 col: col + 1,
+                range: Some(f.range),
             }
         })
         .collect()
@@ -84,6 +85,7 @@ pub fn lint_findings(
                 message: format!("{e:#}"),
                 line: 1,
                 col: 1,
+                range: None,
             }],
         })
         .collect::<Vec<_>>()

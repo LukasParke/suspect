@@ -21,8 +21,10 @@ pub(crate) fn check_format<'a, 'd>(
     if inst.kind() != ValueKind::Str {
         return true;
     }
-    let Some(s) = inst.as_str() else { return true };
-    if validate(name, s) {
+    let Some(s) = ctx.text(*inst, st, at) else {
+        return false;
+    };
+    if validate(name, &s) {
         true
     } else {
         ctx.emit(st, at, format!("string is not a valid `{name}`"));
