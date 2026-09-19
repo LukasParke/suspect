@@ -442,6 +442,8 @@ fn json_without_docs(text: &str, source: &SourceId, examples: bool) -> Result<Va
                 object.remove("provenance");
                 object.remove("source");
                 object.remove("sourceOperationId");
+                object.remove("wire");
+                object.remove("attribution");
                 count += 1;
             }
         }
