@@ -53,8 +53,11 @@ impl FastGiven {
     pub(crate) fn parse(expr: &str) -> Option<Self> {
         let rest = expr.strip_prefix('$')?;
         if let Some(key) = rest.strip_prefix("..") {
+            // Only a single plain (or bracket-quoted) segment classifies:
+            // `$..key.*` wildcards, filters, or further segments must fall
+            // through to the generic engine, not become a literal key.
             let key = unquote_segment(key)?;
-            if key.is_empty() || key == "*" {
+            if key.is_empty() || key == "*" || key.contains(['*', '[', ']', '.']) {
                 return None;
             }
             return Some(Self::DescendantKey(key.to_owned()));
@@ -259,6 +262,14 @@ impl PlanSlots {
             let vref = NodeRef::new(vnode);
             ptrs.record_key(&vnode, root_start, kb);
             if let Some(idxs) = plan.root_idx.get(kb) {
+                for &i in idxs {
+                    seed.0[i].push(vref);
+                }
+            }
+            // Root-level pairs are also descendant matches: `$..key`
+            // selections must see them even though no section walks the
+            // root mapping itself.
+            if let Some(idxs) = plan.desc_idx.get(kb) {
                 for &i in idxs {
                     seed.0[i].push(vref);
                 }
