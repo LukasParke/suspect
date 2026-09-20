@@ -3,7 +3,7 @@
 use suspect_low::NodeRef;
 use suspect_ref::Workspace;
 use suspect_source::Uri;
-use suspect_syntax::SyntaxKind;
+use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
 
 use crate::navigation::node_at;
@@ -104,6 +104,18 @@ const SCHEMA_PARENT_KEYS: &[&str] = &[
     "$defs",
 ];
 
+/// Keys valid inside a security scheme object.
+pub const SCHEME_KEYS: &[&str] = &[
+    "type",
+    "description",
+    "name",
+    "in",
+    "scheme",
+    "bearerFormat",
+    "flows",
+    "openIdConnectUrl",
+];
+
 /// Keys valid directly under a path item or webhook mapping: the HTTP
 /// methods plus the path-item-level fields.
 const PATH_ITEM_KEYS: &[&str] = &[
@@ -136,6 +148,64 @@ const COMPONENT_SECTIONS: &[&str] = &[
     "pathItems",
 ];
 
+/// JSON-Schema primitive type names offered for `type:` under a schema.
+pub const SCHEMA_TYPES: &[&str] = &[
+    "string", "number", "integer", "boolean", "object", "array", "null",
+];
+
+/// Security scheme types offered for `type:` under a security scheme.
+pub const SCHEME_TYPES: &[&str] = &["apiKey", "http", "oauth2", "openIdConnect"];
+
+/// Parameter locations offered for `in:` under a parameter object.
+pub const PARAM_IN: &[&str] = &["query", "header", "path", "cookie"];
+
+/// Parameter serialization styles offered for `style:`.
+pub const PARAM_STYLE: &[&str] = &[
+    "form",
+    "simple",
+    "spaceDelimited",
+    "pipeDelimited",
+    "deepObject",
+];
+
+/// Common formats offered for `format:` under a schema (subset of the
+/// OAS + JSON-Schema format registry that editors actually type).
+pub const SCHEMA_FORMATS: &[&str] = &[
+    "int32",
+    "int64",
+    "float",
+    "double",
+    "byte",
+    "binary",
+    "date",
+    "date-time",
+    "password",
+    "email",
+    "uuid",
+    "uri",
+    "uri-reference",
+    "json-pointer",
+    "relative-json-pointer",
+    "regex",
+    "ipv4",
+    "ipv6",
+    "duration",
+    "time",
+];
+
+/// Common media types offered as `content:` map keys.
+pub const MEDIA_TYPES: &[&str] = &[
+    "application/json",
+    "application/xml",
+    "application/x-www-form-urlencoded",
+    "application/octet-stream",
+    "multipart/form-data",
+    "text/plain",
+    "text/html",
+    "text/event-stream",
+    "application/yaml",
+];
+
 /// What kind of completion applies at `offset`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompletionContext {
@@ -143,6 +213,25 @@ pub enum CompletionContext {
     Keys(&'static [&'static str]),
     /// Inside a `$ref` string value: offer component pointers.
     Refs,
+    /// Scalar value position with a fixed vocabulary; items are `VALUE`
+    /// kind with per-value documentation attached on resolve.
+    Values(&'static [&'static str]),
+    /// Value/key position naming an entry of `components/<section>`
+    /// (security requirement keys, discriminator mapping values): offer the
+    /// declared component names, each resolvable to its target preview.
+    ComponentNames(&'static str),
+    /// Value position of a `links.*.operationId`: offer the operationIds
+    /// declared in the current document.
+    OperationIds,
+    /// Scalar item inside an operation's `tags` sequence: offer the names
+    /// declared in the root `tags` list.
+    TagNames,
+    /// Mapping-key position under a `content:` mapping: offer common
+    /// media types.
+    MediaTypes,
+    /// Scalar item of a schema's `required` array: offer the schema's
+    /// declared property names.
+    SchemaPropertyNames(Vec<String>),
     /// No opinion.
     None,
 }
@@ -150,50 +239,224 @@ pub enum CompletionContext {
 /// Classifies what should be completed at `offset`.
 ///
 /// A `$ref` string value wins over everything ([`CompletionContext::Refs`]);
-/// otherwise, if the offset sits on the key side of a mapping pair, the
-/// pair's owning mapping is classified by context into an offer of
-/// operation or schema keys; anything else yields
-/// [`CompletionContext::None`].
+/// a scalar value position with a recognizable owner key yields a fixed
+/// vocabulary or a workspace-derived name list; a mapping-key position is
+/// classified by the owning mapping's pointer path into key or media-type
+/// offers; anything else yields [`CompletionContext::None`].
 #[must_use]
 pub fn context_at(low: &suspect_low::LowDoc, offset: usize) -> CompletionContext {
-    let Some(node) = node_at(low, offset) else {
-        return CompletionContext::None;
-    };
+    if let Some(node) = node_at(low, offset) {
+        // Inside a `$ref` string value?
+        if let Some(ctx) = ref_value_context(node) {
+            return ctx;
+        }
 
-    // Inside a `$ref` string value?
-    {
-        let mut cur = node;
-        while let Some(parent) = cur.parent() {
-            if parent.kind() == SyntaxKind::Pair
-                && let Some(key) = parent.child_by_field("key")
-                && key.scalar_bytes() == b"$ref"
-                && let Some(value) = parent.child_by_field("value")
-            {
-                let (vr, nr) = (value.byte_range(), node.byte_range());
-                if vr.start <= nr.start && nr.end <= vr.end {
-                    return CompletionContext::Refs;
+        // Scalar value position: vocabulary picked by the owning pair's key and
+        // the ancestor chain (schema types, parameter locations, tags, …).
+        if let Some(ctx) = value_context(node, offset) {
+            return ctx;
+        }
+
+        // Mapping-key position: the node (or an ancestor) is the key side of a
+        // pair whose key range contains the offset.
+        let mut cur = Some(node);
+        while let Some(n) = cur {
+            if n.kind() == SyntaxKind::Pair {
+                if let Some(key) = n.child_by_field("key") {
+                    let kr = key.byte_range();
+                    if kr.start <= offset && offset <= kr.end {
+                        return key_context(low, n);
+                    }
                 }
+                break;
             }
-            cur = parent;
+            cur = n.parent();
         }
     }
+    // No context from the node at the offset. Line ends and empty value
+    // positions (`in:` with the cursor after the colon) sit between nodes:
+    // probe backwards to the nearest node and classify by *its* pair, using
+    // the original offset for the key-side guard.
+    fallback_value_context(low, offset)
+}
 
-    // Mapping-key position: the node (or an ancestor) is the key side of a
-    // pair whose key range contains the offset.
+/// Backward probe for value positions with no node at `offset`.
+fn fallback_value_context(low: &suspect_low::LowDoc, offset: usize) -> CompletionContext {
+    let bytes = low.inner().bytes();
+    let mut probe = offset.min(bytes.len());
+    while probe > 0 {
+        probe -= 1;
+        if let Some(node) = node_at(low, probe)
+            && let Some(ctx) = value_context(node, offset)
+        {
+            return ctx;
+        }
+    }
+    CompletionContext::None
+}
+
+/// `Refs` when `offset` sits inside a `$ref` pair's value region.
+fn ref_value_context(node: SNode<'_>) -> Option<CompletionContext> {
     let mut cur = Some(node);
     while let Some(n) = cur {
         if n.kind() == SyntaxKind::Pair {
-            if let Some(key) = n.child_by_field("key") {
-                let kr = key.byte_range();
-                if kr.start <= offset && offset <= kr.end {
-                    return key_context(low, n);
-                }
+            let key = n.child_by_field("key")?;
+            if key.scalar_bytes() != b"$ref" {
+                return None;
             }
-            break;
+            let value = n.child_by_field("value")?;
+            let (vr, nr) = (value.byte_range(), node.byte_range());
+            return (vr.start <= nr.start && nr.end <= vr.end).then_some(CompletionContext::Refs);
         }
         cur = n.parent();
     }
-    CompletionContext::None
+    None
+}
+
+/// Nearest keys of the ancestor pairs above `pair`, nearest first.
+fn ancestor_keys(pair: SNode<'_>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = pair.parent();
+    while let Some(n) = cur {
+        if n.kind() == SyntaxKind::Pair
+            && let Some(key) = n.child_by_field("key")
+        {
+            out.push(String::from_utf8_lossy(key.scalar_bytes()).into_owned());
+        }
+        cur = n.parent();
+    }
+    out
+}
+
+/// Scalar item under an operation's or webhook's `tags` sequence: offer the
+/// root-declared tag names.
+fn tags_item_context(node: SNode<'_>) -> Option<CompletionContext> {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if n.kind() == SyntaxKind::Sequence {
+            // The sequence's owning pair must be `tags`.
+            let mut up = n.parent();
+            while let Some(p) = up {
+                if p.kind() == SyntaxKind::Pair {
+                    let key = p.child_by_field("key")?;
+                    if key.scalar_bytes() != b"tags" {
+                        return None;
+                    }
+                    // Operation tags (not the root list): an ancestor pair
+                    // is a path item owner.
+                    let ancestors = ancestor_keys(p);
+                    return ancestors
+                        .iter()
+                        .any(|k| k == "paths" || k == "webhooks")
+                        .then_some(CompletionContext::TagNames);
+                }
+                up = p.parent();
+            }
+            return None;
+        }
+        cur = n.parent();
+    }
+    None
+}
+
+/// Scalar value position: vocabulary picked by the owning pair's key and
+/// the ancestor chain (schema types, parameter locations, security scheme
+/// names, discriminator mapping values, required property names, …).
+fn value_context(node: SNode<'_>, offset: usize) -> Option<CompletionContext> {
+    // Bare scalars inside a tags sequence complete tag names.
+    if node.kind() == SyntaxKind::Scalar
+        && let Some(ctx) = tags_item_context(node)
+    {
+        return Some(ctx);
+    }
+    // Required-array items complete the schema's declared properties.
+    if node.kind() == SyntaxKind::Scalar
+        && let Some(ctx) = required_item_context(node)
+    {
+        return Some(ctx);
+    }
+    // Find the nearest pair ancestor; classify by its key when the offset
+    // sits in the value region.
+    let mut cur = Some(node);
+    let pair = loop {
+        let n = cur?;
+        if n.kind() == SyntaxKind::Pair {
+            break n;
+        }
+        cur = n.parent();
+    };
+    let key = pair.child_by_field("key")?;
+    if offset <= key.byte_range().end {
+        return None; // key side — handled by [`key_context`]
+    }
+    // The value must be scalar-ish; collections have their own rules.
+    if let Some(v) = pair.child_by_field("value")
+        && matches!(
+            NodeRef::new(v.content()).kind(),
+            suspect_low::ValueKind::Object | suspect_low::ValueKind::Array
+        )
+    {
+        return None;
+    }
+    let key_text = String::from_utf8_lossy(key.scalar_bytes());
+    let ancestors = ancestor_keys(pair);
+    // Schema context: an ancestor key is schema-valued, or the schema is a
+    // named component (`components/schemas/<Name>` — its ancestor chain
+    // carries the section key).
+    let schema_ctx = ancestors
+        .iter()
+        .any(|k| SCHEMA_PARENT_KEYS.contains(&k.as_str()))
+        || ancestors.windows(2).any(|w| w[1] == "schemas");
+    // Discriminator mapping entry values name schema components.
+    if ancestors.iter().any(|k| k == "mapping") && ancestors.iter().any(|k| k == "discriminator") {
+        return Some(CompletionContext::ComponentNames("schemas"));
+    }
+    // Required-array item scalars: property names of the owning schema.
+    Some(match key_text.as_ref() {
+        "type" if ancestors.iter().any(|k| k == "securitySchemes") => {
+            CompletionContext::Values(SCHEME_TYPES)
+        }
+        "type" if schema_ctx => CompletionContext::Values(SCHEMA_TYPES),
+        "in" if ancestors.iter().any(|k| k == "parameters") => CompletionContext::Values(PARAM_IN),
+        "style" if ancestors.iter().any(|k| k == "parameters") => {
+            CompletionContext::Values(PARAM_STYLE)
+        }
+        "format" if schema_ctx => CompletionContext::Values(SCHEMA_FORMATS),
+        "operationId" if ancestors.iter().any(|k| k == "links") => CompletionContext::OperationIds,
+        _ => return None,
+    })
+}
+
+/// Items of a schema's `required` sequence: offer the property names
+/// declared by the owning schema.
+fn required_item_context(node: SNode<'_>) -> Option<CompletionContext> {
+    let mut cur = node.parent();
+    while let Some(n) = cur {
+        if n.kind() == SyntaxKind::Sequence {
+            let mut up = n.parent();
+            while let Some(p) = up {
+                if p.kind() == SyntaxKind::Pair {
+                    let key = p.child_by_field("key")?;
+                    if key.scalar_bytes() != b"required" {
+                        return None;
+                    }
+                    // The schema mapping is the pair's owning mapping.
+                    let properties = NodeRef::new(p.parent()?.content()).get("properties")?;
+                    let names: Vec<String> = properties
+                        .entries()
+                        .iter()
+                        .map(|e| e.key.to_owned())
+                        .collect();
+                    return (!names.is_empty())
+                        .then_some(CompletionContext::SchemaPropertyNames(names));
+                }
+                up = p.parent();
+            }
+            return None;
+        }
+        cur = n.parent();
+    }
+    None
 }
 
 /// Classifies the mapping that owns a key-position pair.
@@ -231,6 +494,21 @@ fn key_context(low: &suspect_low::LowDoc, pair: suspect_syntax::SNode<'_>) -> Co
     // path-item-level keys.
     if tokens.len() == 2 && matches!(tokens[0].as_ref(), "paths" | "webhooks") {
         return CompletionContext::Keys(PATH_ITEM_KEYS);
+    }
+    // Media-type keys: the owning mapping sits under `content`.
+    if tokens.last().is_some_and(|t| t.as_ref() == "content") {
+        return CompletionContext::MediaTypes;
+    }
+    // Security requirement keys: scheme names from securitySchemes.
+    if tokens.len() >= 2 && tokens[tokens.len() - 2].as_ref() == "security" {
+        return CompletionContext::ComponentNames("securitySchemes");
+    }
+    // Security scheme object keys: components / securitySchemes / <name>.
+    if tokens.len() >= 2
+        && tokens[0].as_ref() == "components"
+        && tokens[1].as_ref() == "securitySchemes"
+    {
+        return CompletionContext::Keys(SCHEME_KEYS);
     }
     // The operation object itself: paths / <path> / <method>. Deeper
     // nesting is handled by the schema-parent scan above or yields nothing.
@@ -321,6 +599,146 @@ pub fn key_items(keys: &'static [&'static str]) -> Vec<CompletionItem> {
         .collect()
 }
 
+/// Builds completion items for a fixed scalar vocabulary (schema types,
+/// parameter locations, media types, …).
+#[must_use]
+pub fn value_items(values: &'static [&'static str]) -> Vec<CompletionItem> {
+    values
+        .iter()
+        .map(|v| CompletionItem {
+            label: (*v).to_owned(),
+            kind: Some(CompletionItemKind::ENUM_MEMBER),
+            data: Some(serde_json::json!({ "suspect": "value", "value": v })),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+/// Builds completion items for entries of `components/<section>`: each item
+/// resolves (via the existing `$ref` resolve path) to a target preview.
+#[must_use]
+pub fn component_name_items(names: Vec<String>, section: &str, home: &Uri) -> Vec<CompletionItem> {
+    names
+        .into_iter()
+        .map(|n| {
+            let raw = format!("#/components/{section}/{n}");
+            CompletionItem {
+                label: n,
+                detail: Some(format!("#/components/{section}")),
+                kind: Some(CompletionItemKind::MODULE),
+                data: Some(serde_json::json!({
+                    "suspect": "ref",
+                    "uri": home.as_str(),
+                    "raw": raw,
+                })),
+                ..CompletionItem::default()
+            }
+        })
+        .collect()
+}
+
+/// Builds completion items for declared operationIds; the detail line shows
+/// `METHOD /path` so the picker disambiguates identical ids.
+#[must_use]
+pub fn operation_id_items(candidates: Vec<(String, String)>) -> Vec<CompletionItem> {
+    candidates
+        .into_iter()
+        .map(|(id, detail)| CompletionItem {
+            label: id,
+            detail: Some(detail),
+            kind: Some(CompletionItemKind::FUNCTION),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+/// Builds completion items for root-declared tag names.
+#[must_use]
+pub fn tag_name_items(names: Vec<String>) -> Vec<CompletionItem> {
+    names
+        .into_iter()
+        .map(|n| CompletionItem {
+            label: n,
+            kind: Some(CompletionItemKind::VARIABLE),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+/// Builds completion items for a schema's property names (required-array
+/// items).
+#[must_use]
+pub fn property_name_items(names: Vec<String>) -> Vec<CompletionItem> {
+    names
+        .into_iter()
+        .map(|n| CompletionItem {
+            label: n,
+            kind: Some(CompletionItemKind::PROPERTY),
+            ..CompletionItem::default()
+        })
+        .collect()
+}
+
+/// Names declared under `components/<section>` in `low`.
+#[must_use]
+pub fn component_names(low: &suspect_low::LowDoc, section: &str) -> Vec<String> {
+    let mut out: Vec<String> = low
+        .root()
+        .get("components")
+        .and_then(|c| c.get(section))
+        .map(|sec| sec.entries().iter().map(|e| e.key.to_owned()).collect())
+        .unwrap_or_default();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Declared operationIds with their `METHOD /path` detail lines, in
+/// document order.
+#[must_use]
+pub fn operation_id_candidates(low: &suspect_low::LowDoc) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let Some(paths) = low.root().get("paths") else {
+        return out;
+    };
+    for path_entry in paths.entries() {
+        let Some(item) = path_entry.value else {
+            continue;
+        };
+        for method in METHODS {
+            let Some(op) = item.get(method) else {
+                continue;
+            };
+            let Some(id) = op.get("operationId").and_then(|n| n.as_str()) else {
+                continue;
+            };
+            out.push((
+                id.to_owned(),
+                format!("{} {}", method.to_ascii_uppercase(), path_entry.key),
+            ));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+/// Names declared in the root `tags` list, in document order.
+#[must_use]
+pub fn tag_name_candidates(low: &suspect_low::LowDoc) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let Some(tags) = low.root().get("tags") else {
+        return out;
+    };
+    for item in tags.items() {
+        if let Some(name) = item.get("name").and_then(|n| n.as_str()) {
+            out.push(name.to_owned());
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// Builds completion items for `$ref` pointer candidates.
 ///
 /// Each item stores its owning document plus the raw candidate string in
@@ -350,29 +768,86 @@ pub fn ref_items(candidates: Vec<String>, home: &Uri) -> Vec<CompletionItem> {
 /// unresolvable items come back unchanged (clients tolerate this).
 #[must_use]
 pub fn resolve_item(item: CompletionItem, ws: Option<&Workspace>) -> CompletionItem {
-    struct RefData {
-        uri: String,
-        raw: String,
-    }
-    fn parse_data(d: &serde_json::Value) -> Option<RefData> {
-        if d.get("suspect")?.as_str()? != "ref" {
-            return None;
+    let Some(data) = item.data.clone() else {
+        return item;
+    };
+    let Some(kind) = data.get("suspect").and_then(|s| s.as_str()) else {
+        return item;
+    };
+    match kind {
+        // `$ref`-shaped items resolve to a target preview through the
+        // workspace.
+        "ref" => {
+            let (Some(uri), Some(raw)) = (
+                data.get("uri").and_then(|u| u.as_str()),
+                data.get("raw").and_then(|r| r.as_str()),
+            ) else {
+                return item;
+            };
+            resolve_ref_documentation(item, uri, raw, ws)
         }
-        Some(RefData {
-            uri: d.get("uri")?.as_str()?.to_owned(),
-            raw: d.get("raw")?.as_str()?.to_owned(),
-        })
+        // Fixed-vocabulary items carry static documentation.
+        "value" => {
+            let mut resolved = item;
+            if let Some(doc) = data
+                .get("value")
+                .and_then(|v| v.as_str())
+                .and_then(value_doc)
+            {
+                resolved.documentation = Some(tower_lsp::lsp_types::Documentation::MarkupContent(
+                    tower_lsp::lsp_types::MarkupContent {
+                        kind: tower_lsp::lsp_types::MarkupKind::Markdown,
+                        value: doc.to_owned(),
+                    },
+                ));
+            }
+            resolved
+        }
+        _ => item,
     }
+}
+
+/// Static documentation for fixed scalar vocabularies.
+fn value_doc(value: &str) -> Option<&'static str> {
+    Some(match value {
+        "string" => "JSON string value.",
+        "number" => "JSON number (any numeric value).",
+        "integer" => "JSON number without a fraction part.",
+        "boolean" => "`true` or `false`.",
+        "object" => "Mapping of string keys to values.",
+        "array" => "Ordered list of values.",
+        "null" => "JSON `null`.",
+        "query" => "Parameter is carried in the URL query string.",
+        "path" => "Parameter is part of the path template (always required).",
+        "header" => "Parameter is carried in a request or response header.",
+        "cookie" => "Parameter is carried in a request cookie.",
+        "form" => "Query/cookie style: `a=1&b=2`.",
+        "simple" => "Path/header style: comma-separated items.",
+        "spaceDelimited" => "Space-separated array style.",
+        "pipeDelimited" => "Pipe-separated array style.",
+        "deepObject" => "Nested object style: `param[key]=value`.",
+        "apiKey" => "Named key sent in a header, query parameter, or cookie.",
+        "http" => "Standard HTTP authentication (Basic, Bearer, …).",
+        "oauth2" => "OAuth 2.0 flows.",
+        "openIdConnect" => "OpenID Connect discovery URL.",
+        _ => return None,
+    })
+}
+
+/// Attaches the resolved-target documentation for a `$ref`-shaped item.
+fn resolve_ref_documentation(
+    item: CompletionItem,
+    uri: &str,
+    raw: &str,
+    ws: Option<&Workspace>,
+) -> CompletionItem {
     let Some(ws) = ws else {
         return item;
     };
-    let Some(data) = item.data.as_ref().and_then(parse_data) else {
+    let Ok(home) = Uri::parse(uri) else {
         return item;
     };
-    let Ok(home) = Uri::parse(&data.uri) else {
-        return item;
-    };
-    let Some(handle) = crate::links::resolve_ref_string(ws, &home, &data.raw) else {
+    let Some(handle) = crate::links::resolve_ref_string(ws, &home, raw) else {
         return item;
     };
     let mut resolved = item;
@@ -580,5 +1055,270 @@ mod tests {
             &Uri::parse("file:///w/main.yaml").unwrap(),
         );
         assert_eq!(refs[0].kind, Some(CompletionItemKind::MODULE));
+    }
+
+    // -- value and name completion ------------------------------------------
+
+    const API_DOC: &str = "\
+openapi: 3.1.0
+info:
+  title: T
+tags:
+  - name: alpha
+paths:
+  /pets:
+    get:
+      tags:
+        - x
+      parameters:
+        - name: q
+          in:
+      responses:
+        '200':
+          description: ok
+      security:
+        - ApiKey: []
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name:
+          type:
+      required:
+        - x
+      discriminator:
+        mapping:
+          dog:
+";
+
+    #[test]
+    fn schema_type_values_complete_after_type_key() {
+        // `type:` with the cursor after the colon inside a schema.
+        let text = "\
+components:
+  schemas:
+    Pet:
+      type: o
+";
+        let low = low_of(text);
+        let off = text.find("type: o").unwrap() + 7;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::Values(SCHEMA_TYPES)
+        );
+    }
+
+    #[test]
+    fn scheme_type_values_complete_under_security_schemes() {
+        let text = "\
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+";
+        let low = low_of(text);
+        let off = text.find("type: apiKey").unwrap() + 6;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::Values(SCHEME_TYPES)
+        );
+    }
+
+    #[test]
+    fn parameter_in_values_complete_under_parameters() {
+        let low = low_of(API_DOC);
+        let off = API_DOC.find("in:\n").unwrap() + 4;
+        assert_eq!(context_at(&low, off), CompletionContext::Values(PARAM_IN));
+        // Style values too.
+        let text = "\
+paths:
+  /p:
+    get:
+      parameters:
+        - name: q
+          in: query
+          style: f
+";
+        let low = low_of(text);
+        let off = text.find("style: f").unwrap() + 8;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::Values(PARAM_STYLE)
+        );
+    }
+
+    #[test]
+    fn format_values_complete_in_schema_context() {
+        let text = "\
+components:
+  schemas:
+    Pet:
+      properties:
+        born:
+          format: date-t
+";
+        let low = low_of(text);
+        let off = text.find("format: date-t").unwrap() + 14;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::Values(SCHEMA_FORMATS)
+        );
+    }
+
+    #[test]
+    fn media_type_keys_complete_under_content() {
+        let text = "\
+paths:
+  /p:
+    get:
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: string
+";
+        let low = low_of(text);
+        let off = text.find("application/json").unwrap() + 2;
+        assert_eq!(context_at(&low, off), CompletionContext::MediaTypes);
+    }
+
+    #[test]
+    fn security_requirement_keys_complete_scheme_names() {
+        let low = low_of(API_DOC);
+        let off = API_DOC.find("ApiKey:").unwrap() + 2;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::ComponentNames("securitySchemes")
+        );
+        assert_eq!(
+            component_names(&low, "securitySchemes"),
+            vec!["ApiKeyAuth".to_owned()]
+        );
+    }
+
+    #[test]
+    fn discriminator_mapping_values_complete_schema_names() {
+        let low = low_of(API_DOC);
+        let off = API_DOC.find("dog:").unwrap() + 5;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::ComponentNames("schemas")
+        );
+        assert_eq!(component_names(&low, "schemas"), vec!["Pet".to_owned()]);
+    }
+
+    #[test]
+    fn tags_items_complete_root_declared_names() {
+        let low = low_of(API_DOC);
+        let off = API_DOC.find("- x").unwrap() + 3;
+        assert_eq!(context_at(&low, off), CompletionContext::TagNames);
+        assert_eq!(tag_name_candidates(&low), vec!["alpha".to_owned()]);
+        // The root tags list itself is NOT a TagNames context (items there
+        // are objects with `name` keys).
+        let root_off = API_DOC.find("- name: alpha").unwrap() + 4;
+        assert_ne!(context_at(&low, root_off), CompletionContext::TagNames);
+    }
+
+    #[test]
+    fn required_items_complete_declared_properties() {
+        let text = "\
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name:
+          type: string
+        age:
+          type: integer
+      required:
+        - ag
+";
+        let low = low_of(text);
+        let off = text.find("- ag").unwrap() + 5;
+        assert_eq!(
+            context_at(&low, off),
+            CompletionContext::SchemaPropertyNames(vec!["name".to_owned(), "age".to_owned()])
+        );
+        let items = property_name_items(vec!["name".to_owned()]);
+        assert_eq!(items[0].kind, Some(CompletionItemKind::PROPERTY));
+    }
+
+    #[test]
+    fn links_operation_id_values_complete_declared_ids() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: ok
+          links:
+            address:
+              operationId: getP
+";
+        let low = low_of(text);
+        let off = text.find("operationId: getP").unwrap() + 16;
+        assert_eq!(context_at(&low, off), CompletionContext::OperationIds);
+        let candidates = operation_id_candidates(&low);
+        assert_eq!(
+            candidates,
+            vec![("listPets".to_owned(), "GET /pets".to_owned())]
+        );
+        let items = operation_id_items(candidates);
+        assert_eq!(items[0].label, "listPets");
+        assert_eq!(items[0].detail.as_deref(), Some("GET /pets"));
+    }
+
+    #[test]
+    fn component_name_items_resolve_to_target_previews() {
+        let names = component_name_items(
+            vec!["Pet".to_owned()],
+            "schemas",
+            &Uri::parse("file:///w/main.yaml").unwrap(),
+        );
+        assert_eq!(names[0].label, "Pet");
+        assert_eq!(names[0].detail.as_deref(), Some("#/components/schemas"));
+        assert_eq!(names[0].kind, Some(CompletionItemKind::MODULE));
+    }
+
+    #[test]
+    fn value_items_resolve_to_static_documentation() {
+        let items = value_items(SCHEMA_TYPES);
+        let resolved = resolve_item(items[0].clone(), None);
+        let Some(tower_lsp::lsp_types::Documentation::MarkupContent(markup)) =
+            resolved.documentation
+        else {
+            panic!("string type has documentation");
+        };
+        assert_eq!(markup.value, "JSON string value.");
+        // Unknown values resolve without documentation.
+        let bare = value_items(PARAM_IN);
+        let _ = &bare;
+        let mut no_doc = items[1].clone();
+        no_doc.data = Some(serde_json::json!({"suspect": "value", "value": "mystery"}));
+        assert!(resolve_item(no_doc, None).documentation.is_none());
+    }
+
+    #[test]
+    fn ref_items_still_resolve_through_the_workspace() {
+        // The ref resolve path keeps working after the resolve rewrite.
+        let names = component_name_items(
+            vec!["Pet".to_owned()],
+            "schemas",
+            &Uri::parse("file:///mem/doc.yaml").unwrap(),
+        );
+        // No workspace: the item comes back unchanged.
+        let resolved = resolve_item(names[0].clone(), None);
+        assert_eq!(resolved, names[0]);
     }
 }

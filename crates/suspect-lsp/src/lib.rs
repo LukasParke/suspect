@@ -1418,6 +1418,26 @@ impl LanguageServer for Backend {
                 ),
                 None => Vec::new(),
             },
+            completion::CompletionContext::Values(values) => completion::value_items(values),
+            completion::CompletionContext::ComponentNames(section) => {
+                completion::component_name_items(
+                    completion::component_names(&doc.low, section),
+                    section,
+                    doc.low.uri(),
+                )
+            }
+            completion::CompletionContext::OperationIds => {
+                completion::operation_id_items(completion::operation_id_candidates(&doc.low))
+            }
+            completion::CompletionContext::TagNames => {
+                completion::tag_name_items(completion::tag_name_candidates(&doc.low))
+            }
+            completion::CompletionContext::SchemaPropertyNames(names) => {
+                completion::property_name_items(names)
+            }
+            completion::CompletionContext::MediaTypes => {
+                completion::value_items(completion::MEDIA_TYPES)
+            }
             completion::CompletionContext::None => return Ok(None),
         };
         Ok((!items.is_empty()).then_some(CompletionResponse::Array(items)))
