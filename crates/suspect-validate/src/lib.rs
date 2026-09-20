@@ -68,6 +68,16 @@ pub fn validate_entry(session: &Session, entry: &str) -> Result<Vec<Diagnostic>,
     Ok(validate_openapi(&api))
 }
 
+/// Validates a Swagger 2.0 document directly over its parse tree.
+///
+/// The typed 3.x model does not load Swagger documents, so this battery
+/// walks the low tree and produces the same [`Diagnostic`] shape. Output is
+/// sorted by `(range, code)` like the 3.x battery.
+#[must_use]
+pub fn validate_swagger_low(low: &suspect_low::LowDoc) -> Vec<Diagnostic> {
+    checks::swagger::run(low)
+}
+
 fn finish(mut out: Vec<Diagnostic>) -> Vec<Diagnostic> {
     out.sort_by(|a, b| {
         (&a.doc, a.range.start, a.range.end, a.code).cmp(&(

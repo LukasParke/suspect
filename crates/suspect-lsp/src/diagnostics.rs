@@ -244,8 +244,31 @@ pub fn extension_diagnostics(
     out
 }
 
+/// Swagger 2.0 semantic validation over the parse tree; the typed 3.x
+/// model does not load Swagger documents.
+#[must_use]
+pub fn swagger_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
+    if low.sniff_family() != SpecFamily::Oas2 {
+        return Vec::new();
+    }
+    suspect_validate::validate_swagger_low(low)
+        .into_iter()
+        .map(|d| Diagnostic {
+            range: lsp_range(low.inner().bytes(), low.inner().line_index(), d.range),
+            severity: Some(map_validate_severity(d.severity)),
+            code: Some(NumberOrString::String(d.code.to_owned())),
+            code_description: None,
+            source: Some(SOURCE.to_owned()),
+            message: d.message,
+            related_information: None,
+            tags: None,
+            data: None,
+        })
+        .collect()
+}
+
 /// Full battery for one document: syntax, semantic validation (OAS 3.x
-/// only), lint (all families), and Arazzo checks.
+/// only), lint (all families), Swagger checks (2.0), and Arazzo checks.
 #[must_use]
 pub fn compute_diagnostics(
     ws: Option<&Arc<Workspace>>,
@@ -267,6 +290,7 @@ pub fn compute_diagnostics_raw(
         out.extend(validate_diagnostics(ws, low));
     }
     out.extend(lint_diagnostics(low));
+    out.extend(swagger_diagnostics(low));
     out.extend(arazzo_diagnostics(low));
     let root = ws.and_then(super::workspace_root);
     out.extend(extension_diagnostics(
