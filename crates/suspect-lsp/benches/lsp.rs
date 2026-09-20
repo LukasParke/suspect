@@ -377,7 +377,7 @@ fn bench_feature_ops(c: &mut Criterion) {
                 || LspUrl::parse(uri.as_str()).unwrap(),
                 |lsp_url| {
                     black_box(suspect_lsp::actions::code_actions(
-                        &doc, &lsp_url, range, &diags, false,
+                        &doc, &lsp_url, range, &diags, None, false,
                     ))
                 },
                 criterion::BatchSize::SmallInput,

@@ -1468,6 +1468,7 @@ impl LanguageServer for Backend {
             &url,
             params.range,
             &params.context.diagnostics,
+            ws.as_ref(),
             defer_fix_all,
         );
         if let Some(open) = ws
