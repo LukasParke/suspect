@@ -6,6 +6,7 @@
 //! targets, and monikers emit stable workspace-wide identifiers for
 //! external indexers.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::state::OpenDoc;
@@ -210,6 +211,153 @@ pub fn document_link(_ws: &Workspace, doc: &LowDoc) -> Vec<DocumentLink> {
             target: Some(url),
             tooltip,
             data: Some(json!({ "ptr": frag })),
+        });
+    }
+    out.extend(url_links(doc));
+    out.extend(operation_id_links(doc));
+    out
+}
+
+/// Clickable web URLs inside the document: `externalDocs.url` (document
+/// and operation level), `license.url`, and `contact.url`/`contact.email`.
+fn url_links(doc: &LowDoc) -> Vec<DocumentLink> {
+    let bytes = doc.inner().bytes();
+    let li = doc.inner().line_index();
+    let mut out = Vec::new();
+    let url_pair = |pair: &NodeRef<'_>| -> Option<DocumentLink> {
+        let url = pair.get("url")?;
+        let text = url.resolved().as_str()?;
+        if !(text.starts_with("http://") || text.starts_with("https://")) {
+            return None;
+        }
+        let target = Url::parse(text).ok()?;
+        Some(DocumentLink {
+            range: lsp_range(bytes, li, url.byte_range()),
+            target: Some(target),
+            tooltip: Some(text.to_owned()),
+            data: None,
+        })
+    };
+    for pair in doc.inner().root().descendants() {
+        if pair.kind() != SyntaxKind::Pair {
+            continue;
+        }
+        let Some(key) = pair.child_by_field("key") else {
+            continue;
+        };
+        let key_text = String::from_utf8_lossy(key.content().scalar_bytes()).into_owned();
+        match key_text.as_ref() {
+            "externalDocs" | "license" | "contact" => {
+                if let Some(link) = pair
+                    .child_by_field("value")
+                    .and_then(|v| url_pair(&NodeRef::new(v.content())))
+                {
+                    out.push(link);
+                }
+            }
+            "email" => {
+                // `contact.email` as a mailto link.
+                let Some(value) = pair.child_by_field("value") else {
+                    continue;
+                };
+                let Some(text) = NodeRef::new(value.content()).as_str() else {
+                    continue;
+                };
+                let Some(target) = Url::parse(&format!("mailto:{text}")).ok() else {
+                    continue;
+                };
+                out.push(DocumentLink {
+                    range: lsp_range(bytes, li, value.content().byte_range()),
+                    target: Some(target),
+                    tooltip: Some(text.to_owned()),
+                    data: None,
+                });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `links.<name>.operationId` values jump to the operation they name.
+fn operation_id_links(doc: &LowDoc) -> Vec<DocumentLink> {
+    let bytes = doc.inner().bytes();
+    let li = doc.inner().line_index();
+    let mut out = Vec::new();
+    // Operation id → pointer fragment.
+    let Some(paths) = doc.root().get("paths") else {
+        return out;
+    };
+    let mut ids: HashMap<String, Pointer> = HashMap::new();
+    for path_entry in paths.entries() {
+        let Some(path_item) = path_entry.value else {
+            continue;
+        };
+        for method in [
+            "get", "put", "post", "delete", "options", "head", "patch", "trace",
+        ] {
+            let Some(op) = path_item.get(method) else {
+                continue;
+            };
+            if let Some(id) = op.get("operationId").and_then(|n| n.as_str()) {
+                let ptr = Pointer::from_tokens(vec![
+                    "paths".into(),
+                    path_entry.key.into(),
+                    method.into(),
+                ]);
+                ids.insert(id.to_owned(), ptr);
+            }
+        }
+    }
+    for pair in doc.inner().root().descendants() {
+        if pair.kind() != SyntaxKind::Pair {
+            continue;
+        }
+        let Some(key) = pair.child_by_field("key") else {
+            continue;
+        };
+        if key.content().scalar_bytes() != b"operationId" {
+            continue;
+        }
+        // Only `links.*.operationId` (not the operation's own declaration):
+        // an ancestor pair must be a `links` object.
+        let in_links = {
+            let mut cur = pair.parent();
+            let mut found = false;
+            while let Some(n) = cur {
+                if n.kind() == SyntaxKind::Pair
+                    && let Some(k) = n.child_by_field("key")
+                    && k.content().scalar_bytes() == b"links"
+                {
+                    found = true;
+                    break;
+                }
+                cur = n.parent();
+            }
+            found
+        };
+        if !in_links {
+            continue;
+        }
+        let Some(value) = pair.child_by_field("value") else {
+            continue;
+        };
+        let value = value.content();
+        let Some(id) = NodeRef::new(value).as_str() else {
+            continue;
+        };
+        let Some(ptr) = ids.get(id) else {
+            continue;
+        };
+        let Ok(mut url) = Url::parse(doc.uri().as_str()) else {
+            continue;
+        };
+        url.set_fragment(Some(&ptr.to_path()));
+        out.push(DocumentLink {
+            range: lsp_range(bytes, li, value.byte_range()),
+            target: Some(url),
+            tooltip: Some(format!("operation '{id}'")),
+            data: Some(json!({ "ptr": ptr.to_path() })),
         });
     }
     out
@@ -827,6 +975,82 @@ components:
         let ws = WorkspaceBuilder::new().root(dir).build().unwrap();
         ws.load_all("main.yaml").unwrap();
         Arc::new(ws)
+    }
+
+    #[test]
+    fn document_links_cover_urls_and_operation_ids() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+  version: '1'
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  contact:
+    email: api@example.com
+externalDocs:
+  url: https://example.com/docs
+paths:
+  /p:
+    get:
+      operationId: getP
+      externalDocs:
+        url: https://example.com/op
+      responses:
+        '200':
+          description: ok
+          links:
+            next:
+              operationId: getP
+";
+        let dir = std::env::temp_dir().join("suspect-lsp-links-urls");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("api.yaml"), text).unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        ws.load_all("api.yaml").unwrap();
+        let low = low_at(&dir, "api.yaml", text);
+        let doc = OpenDoc::parse(low.uri().clone(), text.to_owned());
+        let links = document_link(&ws, &doc.low);
+        let targets: Vec<String> = links
+            .iter()
+            .filter_map(|l| l.target.as_ref().map(ToString::to_string))
+            .collect();
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.starts_with("https://opensource.org")),
+            "{targets:?}"
+        );
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.starts_with("https://example.com/docs"))
+        );
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.starts_with("https://example.com/op"))
+        );
+        assert!(
+            targets
+                .iter()
+                .any(|t| t.starts_with("mailto:api@example.com"))
+        );
+        // The links.*.operationId jumps to the operation.
+        let op_link = links
+            .iter()
+            .find(|l| l.tooltip.as_deref() == Some("operation 'getP'"))
+            .expect("operationId jump link");
+        assert!(
+            op_link
+                .target
+                .as_ref()
+                .and_then(|u| u.fragment())
+                .is_some_and(|f| f.starts_with("/paths/")),
+            "{op_link:?}"
+        );
     }
 
     #[test]
