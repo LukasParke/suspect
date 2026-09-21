@@ -11,7 +11,6 @@ use serde_json::json;
 use std::collections::HashMap;
 
 use suspect_low::{LowDoc, NodeRef, ValueKind};
-use suspect_overlay::Value as OverlayValue;
 use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::*;
 

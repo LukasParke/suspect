@@ -32,6 +32,7 @@ pub mod diagnostics;
 pub mod extensions_config;
 pub mod extensions_registry;
 pub mod format_order;
+pub mod generation_contract;
 pub mod hover_detail;
 pub mod keys;
 pub mod keyword_docs;
@@ -49,6 +50,7 @@ pub mod workspace_symbol;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::generation_contract::GenerationContractResult;
 use state::{OpenDoc, State, lsp_range, offset_of_utf16};
 use std::collections::HashMap;
 use suspect_source::Uri;
@@ -1851,6 +1853,50 @@ impl Backend {
         self.run_workflow_uri(&params.uri, &params.workflow).await
     }
 
+    /// Handler for the `suspect/generationContract` custom request: the
+    /// generation admission verdict for the live document.
+    async fn generation_contract_request(
+        &self,
+        params: generation_contract::GenerationContractParams,
+    ) -> JsonRpcResult<generation_contract::GenerationContractResult> {
+        let Ok(uri) = Uri::parse(&params.uri) else {
+            return Ok(GenerationContractResult {
+                operations: Vec::new(),
+                findings: Vec::new(),
+                admissible: false,
+                refusals: 0,
+            });
+        };
+        let ws = self.workspace_for(&uri).await;
+        let st = self.state.read().await;
+        let Some(doc) = st.docs.get(&uri) else {
+            return Ok(GenerationContractResult {
+                operations: Vec::new(),
+                findings: Vec::new(),
+                admissible: false,
+                refusals: 0,
+            });
+        };
+        let Some(ws) = ws else {
+            return Ok(GenerationContractResult {
+                operations: Vec::new(),
+                findings: Vec::new(),
+                admissible: false,
+                refusals: 0,
+            });
+        };
+        Ok(
+            generation_contract::generation_contract(&ws, doc).unwrap_or(
+                GenerationContractResult {
+                    operations: Vec::new(),
+                    findings: Vec::new(),
+                    admissible: false,
+                    refusals: 0,
+                },
+            ),
+        )
+    }
+
     /// Compiles the Arazzo document at `uri_s`, executes the workflow named
     /// `workflow` against the configured base URL, streams progress/logs to
     /// the client, and publishes failure diagnostics on the document
@@ -2038,6 +2084,10 @@ pub async fn run_server() {
         .custom_method(
             <run_lenses::RunWorkflowRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::run_workflow_request,
+        )
+        .custom_method(
+            <generation_contract::GenerationContractRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::generation_contract_request,
         )
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
