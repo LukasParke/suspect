@@ -49,6 +49,7 @@ fn check_groups() -> Vec<(&'static str, CheckFn)> {
     vec![
         ("operations::operation_ids",          operations::check_operation_ids),
         ("operations::missing_responses",      operations::check_missing_responses),
+        ("operations::no_error_response",      operations::check_no_error_response),
         ("operations::deprecated",             operations::check_deprecated),
         ("parameters::fields",                 parameters::check_parameter_fields),
         ("parameters::required_path_params",   parameters::check_required_path_params),
@@ -150,6 +151,8 @@ pub(crate) fn diag_at(
         message: message.into(),
         range,
         doc: node.syntax().doc().uri().clone(),
+        summary: crate::guidance::summary(code),
+        how_to_fix: crate::guidance::how_to_fix(code),
     }
 }
 

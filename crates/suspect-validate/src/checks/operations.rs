@@ -72,3 +72,33 @@ pub(crate) fn check_deprecated(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
         }
     }
 }
+
+/// `oas-operation-no-error-response` (Info): the operation's `responses`
+/// carry no `default` and no 4XX/5XX entry, so generated client error
+/// handling has nothing to bind to.
+pub(crate) fn check_no_error_response(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
+    for op in api.operations() {
+        let Some(responses) = op.responses() else {
+            continue; // missing `responses` is a separate, harder failure
+        };
+        let has_error = responses.iter().into_iter().any(|(key, _)| {
+            key == "default"
+                || key
+                    .parse::<u16>()
+                    .is_ok_and(|status| (400..=599).contains(&status))
+        });
+        if !has_error {
+            let id = op.operation_id().unwrap_or("<unnamed>");
+            out.push(diag(
+                api,
+                "oas-operation-no-error-response",
+                Severity::Info,
+                op.node().byte_range(),
+                format!(
+                    "operation `{id}` ({}) declares no `default` or 4XX/5XX response",
+                    op.method()
+                ),
+            ));
+        }
+    }
+}

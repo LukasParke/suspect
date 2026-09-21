@@ -27,6 +27,8 @@ impl Severity {
 
 /// One semantic finding: a stable code, severity, human-readable message,
 /// byte range into the source document, and the document it came from.
+/// Every code also carries stable one-line `summary` and actionable
+/// `how_to_fix` guidance (empty for codes without guidance).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     /// Stable machine-readable identifier (e.g. `oas-duplicate-operation-id`).
@@ -39,4 +41,8 @@ pub struct Diagnostic {
     pub range: std::ops::Range<usize>,
     /// URI of the document the range refers to.
     pub doc: Uri,
+    /// Stable one-line summary of what the code means.
+    pub summary: &'static str,
+    /// Actionable instruction for resolving the finding.
+    pub how_to_fix: &'static str,
 }

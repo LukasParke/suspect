@@ -30,6 +30,7 @@ pub mod dart_sdk;
 #[rustfmt::skip]
 pub mod cpp_sdk;
 pub mod examples;
+pub mod features;
 pub mod go_codecs;
 pub mod go_http;
 pub mod go_json;

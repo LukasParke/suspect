@@ -7,6 +7,7 @@
 
 mod checks;
 mod diagnostic;
+mod guidance;
 
 use suspect_oas::{ModelError, OpenApi, Session};
 

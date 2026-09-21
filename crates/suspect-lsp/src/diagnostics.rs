@@ -104,14 +104,25 @@ pub fn validate_diagnostics(ws: &Arc<Workspace>, low: &LowDoc) -> Vec<Diagnostic
     diags
         .into_iter()
         .map(|d| {
-            make(
+            let mut diagnostic = make(
                 bytes,
                 li,
                 d.range,
                 map_validate_severity(d.severity),
                 d.code,
                 d.message,
-            )
+            );
+            // Actionable fix guidance rides in `data` so clients can render
+            // or act on it without re-parsing the message.
+            if !d.how_to_fix.is_empty() {
+                diagnostic.data = Some(serde_json::json!({
+                    "suspect": "validate",
+                    "code": d.code,
+                    "summary": d.summary,
+                    "how_to_fix": d.how_to_fix,
+                }));
+            }
+            diagnostic
         })
         .collect()
 }

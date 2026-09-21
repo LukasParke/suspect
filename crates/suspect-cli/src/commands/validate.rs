@@ -80,7 +80,14 @@ fn validate_loaded(path: &Path, allowed_documents: Option<&[Uri]>) -> Result<Vec
                 suspect_validate::Severity::Info => Severity::Info,
             },
             code: diagnostic.code.into(),
-            message: diagnostic.message,
+            message: {
+                let mut message = diagnostic.message;
+                if !diagnostic.how_to_fix.is_empty() {
+                    message.push_str("\nhow to fix: ");
+                    message.push_str(diagnostic.how_to_fix);
+                }
+                message
+            },
             line: line + 1,
             col: col + 1,
             range: Some(diagnostic.range),
