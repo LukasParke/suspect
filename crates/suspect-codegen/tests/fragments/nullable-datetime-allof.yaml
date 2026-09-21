@@ -1,0 +1,32 @@
+# INVARIANT: an allOf member carrying a 3.0-style `nullable: true` alongside
+# `format: date-time` must admit without refusal — nullability survives the
+# composition and the format stays attached to the string branch.
+openapi: 3.1.0
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /events:
+    get:
+      operationId: listEvents
+      responses:
+        '200':
+          description: A nullable timestamp through composition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NullableTimestamp'
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+  schemas:
+    NullableTimestamp:
+      allOf:
+        - type: string
+          format: date-time
+        - type: string
+          nullable: true

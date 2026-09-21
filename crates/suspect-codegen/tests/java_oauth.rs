@@ -324,8 +324,9 @@ fn compiled_package(root: &Path) -> PathBuf {
     let home = java_home();
     assert!(
         home.join("bin/javac").is_file(),
-        "required JDK: {}",
-        home.display()
+        "required JDK at {} is missing: {}",
+        home.display(),
+        suspect_codegen::toolchain::guidance("jdk")
     );
     let mut sources = fs::read_dir(root.join("java/src/main/java/test/suspect"))
         .unwrap()

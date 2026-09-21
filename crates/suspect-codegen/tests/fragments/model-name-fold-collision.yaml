@@ -1,0 +1,30 @@
+# INVARIANT: two component schemas whose names differ only by separator and
+# case (`my-model` vs `my_model`) must produce a `naming-model-collision`
+# advice finding while remaining admissible — the generated model names
+# collide under every naming convention.
+openapi: 3.1.0
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /a:
+    get:
+      operationId: getA
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+  schemas:
+    my-model:
+      type: object
+    my_model:
+      type: object

@@ -2,12 +2,14 @@
 //! Source-addressed contracts drive native models, checked
 //! codecs, HTTP clients, documentation and compatibility reports.
 
+pub mod admission;
 pub mod attribution;
 pub mod backend;
 pub mod compatibility;
 pub mod credential_env;
 pub mod generation_session;
 pub mod sdk_defaults;
+pub mod toolchain;
 #[cfg(feature = "java-sdk")]
 #[rustfmt::skip]
 pub mod java_sdk;

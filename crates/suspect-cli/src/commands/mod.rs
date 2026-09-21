@@ -3,6 +3,7 @@
 use suspect_ref::Workspace;
 pub mod acquire;
 pub mod acquire_cmd;
+pub mod admission;
 pub mod bench;
 pub mod check;
 pub mod codegen_cmd;

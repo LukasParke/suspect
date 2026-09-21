@@ -71,6 +71,8 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
+    /// Run the generation admission layer over documents without generating.
+    Admission(commands::admission::AdmissionArgs),
     /// Run TS/JS custom rules (Bun sidecar) over documents.
     Rules {
         /// The rules subcommand to run.
@@ -323,6 +325,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             reference_allowlist,
             text,
         } => commands::validate::validate(&paths, text.format, reference_allowlist.as_deref()),
+        Command::Admission(args) => commands::admission::admission(&args),
         Command::Rules { cmd } => cmd.run().map(|_| 0),
         Command::Lint {
             paths,

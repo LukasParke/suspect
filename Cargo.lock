@@ -1968,6 +1968,7 @@ dependencies = [
  "clap",
  "libc",
  "pep440_rs",
+ "regex",
  "semver",
  "serde",
  "serde_json",

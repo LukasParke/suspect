@@ -32,6 +32,7 @@ url.workspace = true
 suspect-ref.workspace = true
 suspect-source.workspace = true
 sha2 = "0.10.9"
+regex.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true

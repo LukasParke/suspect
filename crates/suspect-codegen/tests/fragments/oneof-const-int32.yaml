@@ -1,0 +1,31 @@
+# INVARIANT: a `oneOf` whose members mix a `const` scalar with a full schema
+# must admit without refusal — const members survive as literal-valued
+# members rather than being dropped or widened to their base type.
+openapi: 3.1.0
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /mixed:
+    get:
+      operationId: listMixed
+      responses:
+        '200':
+          description: One int32 member or the literal fixed value.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MixedUnion'
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+  schemas:
+    MixedUnion:
+      oneOf:
+        - type: integer
+          format: int32
+        - const: 7

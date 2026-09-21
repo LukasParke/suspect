@@ -1,0 +1,23 @@
+# INVARIANT: an operation without an `operationId` must refuse with
+# `http-operation-id` — unnamed operations are selectable only as
+# `METHOD /path`, and the profile requires stable names.
+openapi: 3.1.0
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /unnamed:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer

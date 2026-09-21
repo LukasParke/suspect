@@ -345,21 +345,21 @@ fn plan_carries_the_incoming_receipts_only_when_emission_happens() {
 }
 
 fn go_toolchain() -> Option<String> {
-    let output = Command::new("go").arg("version").output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let version = text.split_whitespace().nth(2)?;
-    let minor = version
-        .strip_prefix("go1.")
-        .and_then(|rest| rest.split('.').next())
-        .and_then(|minor| minor.parse::<u32>().ok())?;
-    (minor >= 23).then_some(text)
+    // The manifest carries the version command, regex, minimum, and install
+    // guidance; the skip message below quotes it verbatim.
+    let (status, _) = suspect_codegen::toolchain::probe_status("go");
+    match status {
+        suspect_codegen::toolchain::ToolStatus::Available { version } => Some(version),
+        _ => None,
+    }
 }
 
 #[test]
 fn native_module_builds_with_the_incoming_file() {
     let Some(_) = go_toolchain() else {
         eprintln!(
-            "go_incoming: Go toolchain (>= 1.23) not installed; degrading to static assertions"
+            "go_incoming: degrading to static assertions; {}",
+            suspect_codegen::toolchain::guidance("go")
         );
         return;
     };
