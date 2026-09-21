@@ -87,37 +87,39 @@ the ua/v1 attribution constants but has no attribution test. Both are
 recorded as unclaimed (test debt) rather than claimed — the matrix
 cannot be flattered.
 
-## Candidate patterns (not yet landed, ranked)
+## Candidate patterns — status
 
-1. **Naming-collision rules after naming** (`duplicateoperationname`,
-   `duplicatemodelnamespace`, `operationmethodnameconflictchecker`).
-   Their validator detects method-name collisions *after* naming rules
-   (group + method, sanitization), not just duplicate `operationId`s.
-   Our per-backend planners resolve collisions internally, but a
-   spec-side warning that predicts the collision would surface it at
-   authoring time. Requires exporting enough naming logic from the
-   engine to be honest — do it with the public admission API (below).
-2. **A public admission API on the engine** (`HttpContract` is
-   `pub(crate)` today). This unlocks: the LSP `suspect/generationContract`
-   request (hover shows the real admission verdict per operation), the
-   collision rules above, and CI pre-flight for spec authors. Their
-   `cmd/validate` standalone binary is the same idea.
-3. **Fragment/overlay test architecture.** One focused, self-describing
-   OpenAPI fragment per edge case (22 `primary` fragments: self-recursive
-   additionalProperties maps, nullable-datetime allOf, oneOf const int32,
-   …), composed per variant/target, with overlays only for genuinely
-   target-specific behavior. Our per-backend test documents duplicate a
-   lot of fixture YAML; a fragments layer would reduce that and make each
-   edge case's intent explicit. Medium effort, benefits every future
-   feature.
-4. **Toolchain manifests for native gates.** Their compile config
-   declares dependency checks (command, version regex, `minVersion`,
-   `installDocumentation`). Our opt-in native gates could report
-   "missing tool + install instructions" instead of requiring contributors
-   to read the ignore message. Small, nice DX win.
-5. **MCP/CLI targets.** They generate MCP servers and CLIs from the same
-   AST. When suspect grows non-SDK targets, the 12-backend IR makes this
-   a new consumer of the same contracts rather than a new pipeline.
+1. **Naming-collision rules after naming** — LANDED as backend-independent
+   cross-convention analysis in the admission API: operationIds and
+   component schema names that agree after separator-and-case folding are
+   flagged (`naming-method-collision` / `naming-model-collision`, advice)
+   because they collapse to the same identifier under camel, Pascal, and
+   snake conventions alike. Identical operationIds remain the hard
+   `DUPLICATE_OPERATION_ID` refusal. Per-backend group+method collision
+   checking (their richer form) still belongs behind the public admission
+   API once group-based naming exists.
+2. **A public admission API on the engine** — LANDED:
+   `suspect_codegen::admission::{review, review_selected}` returns one
+   `AdmissionReport` (per-operation verdicts, located findings with kind/
+   summary/how_to_fix) composing shared admission, incoming admission,
+   contract limitations, and naming analysis. Consumers: the
+   `suspect admission` CLI pre-flight command (CI-ready, JSON or text) and
+   the LSP `suspect/generationContract` custom request (live-document
+   verdicts in LSP coordinates).
+3. **Fragment/overlay test architecture** — LANDED for admission:
+   `tests/fragments/` holds one focused, self-describing OpenAPI document
+   per tricky construct with an enforced `# INVARIANT:` header;
+   `tests/fragments.rs` pins each fragment's admission verdict and fails
+   on unregistered fragments. Extending the fragment convention to
+   per-backend behavioral suites remains open.
+4. **Toolchain manifests for native gates** — LANDED:
+   `suspect_codegen::toolchain` declares per-tool version command,
+   extraction regex, minimum version, and install guidance;
+   `probe_status`/`guidance` replace hand-rolled checks (wired into the Go
+   and Java gates). Remaining gates adopt incrementally.
+5. **MCP/CLI targets** — not attempted: a new emitter is a program-scale
+   effort, not a pattern adoption. When suspect grows non-SDK targets, the
+   12-backend IR makes this a new consumer of the same contracts.
 
 ## Rejected for suspect
 
