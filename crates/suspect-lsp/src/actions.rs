@@ -115,34 +115,55 @@ pub fn resolve_code_action(
 /// Full-document canonical format as a single [`TextEdit`] replacing the
 /// entire buffer.
 ///
-/// The document is materialized through [`OverlayValue::from_node`] and
-/// re-emitted as YAML (or pretty JSON when the URI ends in `.json`) with
-/// the default two-space indentation; formatting options are ignored.
-/// Documents with syntax errors or non-collection roots are never
-/// formatted, since emission would silently drop content.
+/// The canonicalizer is CST-based and comment-preserving: it normalizes
+/// indentation to two spaces per nesting level, applies quote discipline
+/// (`$ref` values and bare ISO-8601 timestamps double-quoted), and — when
+/// `sort_keys` is enabled — reorders object keys into the canonical
+/// OpenAPI order with registered extensions slotted at their anchors.
+/// Nothing is re-serialized: comments, anchors, block scalars, and flow
+/// collections survive by construction. Documents with syntax errors are
+/// never formatted.
+/// [`format_document_with_config`] with key reordering off (the
+/// unconfigured default).
 #[must_use]
 pub fn format_document(doc: &OpenDoc, uri: &Url) -> Option<TextEdit> {
+    format_document_with_config(doc, uri, false)
+}
+
+/// Canonical format with an explicit sort toggle.
+#[must_use]
+pub fn format_document_with_config(doc: &OpenDoc, uri: &Url, sort_keys: bool) -> Option<TextEdit> {
     if !doc.low.syntax_errors().is_empty() {
         return None;
     }
     let root = doc.low.root().resolved();
-    if !matches!(root.kind(), ValueKind::Object | ValueKind::Array) {
+    if !matches!(
+        root.kind(),
+        suspect_low::ValueKind::Object | suspect_low::ValueKind::Array
+    ) {
         return None;
     }
-    let value = OverlayValue::from_node(root);
-    let mut text = if uri.path().ends_with(".json") {
-        value.to_json_pretty()
+    // JSON has no comments: pretty-printing through the overlay value is
+    // lossless there and gives canonical JSON. YAML goes through the
+    // CST-based canonicalizer, which preserves comments verbatim.
+    let formatted = if uri.path().ends_with(".json") {
+        let value = suspect_overlay::Value::from_node(doc.low.root().resolved());
+        let mut text = value.to_json_pretty();
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text
     } else {
-        value.to_yaml()
+        crate::format_order::canonical_format(&doc.text, sort_keys)
     };
-    if !text.ends_with('\n') {
-        text.push('\n');
+    if formatted == doc.text {
+        return None;
     }
     let inner = doc.low.inner();
     let range = lsp_range(inner.bytes(), inner.line_index(), 0..inner.bytes().len());
     Some(TextEdit {
         range,
-        new_text: text,
+        new_text: formatted,
     })
 }
 
@@ -1039,22 +1060,22 @@ paths:
 
     #[test]
     fn formatting_round_trips_yaml() {
+        // The API fixture is already canonical: unsorted format is a no-op,
+        // sorted format is a no-op, and both leave valid, semantically
+        // identical YAML behind.
         let d = open(API);
         let uri = url("api.yaml");
-        let edit = format_document(&d, &uri).expect("formats");
-        assert_eq!(edit.range, whole_doc(&d));
-        let formatted = edit.new_text;
+        assert!(format_document(&d, &uri).is_none(), "already canonical");
+        assert!(format_document_with_config(&d, &uri, true).is_none());
         let reparsed = LowDoc::parse(
             Uri::parse(YAML_URI).unwrap(),
-            suspect_source::Source::from_vec(formatted.clone().into_bytes()),
+            suspect_source::Source::from_vec(d.text.clone().into_bytes()),
         );
         assert_eq!(reparsed.sniff_family(), d.low.sniff_family());
-        assert!(reparsed.syntax_errors().is_empty(), "{formatted}");
-        // Lossless semantics: the materialized tree is unchanged.
+        assert!(reparsed.syntax_errors().is_empty());
         assert_eq!(
             OverlayValue::from_node(reparsed.root()),
-            OverlayValue::from_node(d.low.root()),
-            "{formatted}"
+            OverlayValue::from_node(d.low.root())
         );
     }
 
@@ -1191,19 +1212,28 @@ components:
 
     #[test]
     fn formatting_preserves_empty_valued_keys() {
-        let text = "openapi: 3.1.0\ninfo:\n  title: T\ndescription:\n";
+        // description is not a root table key, so it sorts after `info` —
+        // the document changes, and the empty-valued (null) key must
+        // survive the move byte-semantically.
+        let text = "openapi: 3.1.0\ndescription:\ninfo:\n  title: T\n";
         let d = open(text);
         let uri = url("api.yaml");
-        let edit = format_document(&d, &uri).expect("formats");
+        let edit = format_document_with_config(&d, &uri, true).expect("formats");
         assert!(edit.new_text.contains("description:"), "{}", edit.new_text);
         let reparsed = LowDoc::parse(
             Uri::parse(YAML_URI).unwrap(),
             suspect_source::Source::from_vec(edit.new_text.into_bytes()),
         );
-        // The empty-valued key survives as null on both sides.
-        assert_eq!(
-            OverlayValue::from_node(reparsed.root()),
-            OverlayValue::from_node(d.low.root())
-        );
+        // Order-insensitive semantic equality: reordering changes key
+        // order by design; nothing else may change.
+        let before = serde_json::from_str::<serde_json::Value>(
+            &OverlayValue::from_node(d.low.root()).to_json_pretty(),
+        )
+        .unwrap();
+        let after = serde_json::from_str::<serde_json::Value>(
+            &OverlayValue::from_node(reparsed.root()).to_json_pretty(),
+        )
+        .unwrap();
+        assert_eq!(before, after);
     }
 }

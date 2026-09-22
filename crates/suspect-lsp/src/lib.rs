@@ -29,7 +29,10 @@ pub mod commands;
 pub mod completion;
 pub mod config_files;
 pub mod diagnostics;
+pub mod extensions_registry;
+pub mod format_order;
 pub mod hover_detail;
+pub mod keys;
 pub mod links;
 pub mod navigation;
 pub mod pull;
@@ -1521,12 +1524,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         // Formatting options are ignored: the canonical form uses a
-        // two-space indent regardless of editor configuration.
+        // two-space indent regardless of editor configuration. Key
+        // reordering follows `suspect.formatting.sortKeys`.
         let _ = &params.options;
         let Some(url) = to_url(&uri) else {
             return Ok(None);
         };
-        Ok(actions::format_document(doc, &url).map(|e| vec![e]))
+        let sort_keys = st.config.format_sort_keys();
+        Ok(actions::format_document_with_config(doc, &url, sort_keys).map(|e| vec![e]))
     }
 }
 

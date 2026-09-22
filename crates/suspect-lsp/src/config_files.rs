@@ -65,6 +65,11 @@ pub struct FmtCfg {
     /// Indent width in spaces used by canonical formatting
     /// (`suspect.formatting.indent`). `None` means unconfigured.
     pub indent: Option<u8>,
+    /// Reorder object keys into the canonical OpenAPI order
+    /// (`suspect.formatting.sortKeys`). Defaults to true when the
+    /// formatting section is present without the key and to false when no
+    /// formatting configuration exists at all (config-gated behavior).
+    pub sort_keys: Option<bool>,
 }
 
 /// The `suspect.*` configuration tree as sent by clients and accepted via
@@ -103,6 +108,18 @@ impl SuspectConfig {
     #[must_use]
     pub fn format_indent(&self) -> u8 {
         self.formatting.and_then(|f| f.indent).unwrap_or(2)
+    }
+
+    /// Effective canonical key-reordering toggle. Defaults to true when a
+    /// `suspect.formatting` section exists (explicit opt-in to the
+    /// canonical formatter), false when the server is unconfigured —
+    /// format-on-save must never surprise an unconfigured workspace with a
+    /// whole-file reorder.
+    #[must_use]
+    pub fn format_sort_keys(&self) -> bool {
+        self.formatting
+            .map(|f| f.sort_keys.unwrap_or(true))
+            .unwrap_or(false)
     }
 
     /// Effective recommended-ruleset toggle (default on).
@@ -156,6 +173,7 @@ impl SuspectConfig {
         let formatting = match (self.formatting, overlay.formatting) {
             (Some(base), Some(o)) => Some(FmtCfg {
                 indent: o.indent.or(base.indent),
+                sort_keys: o.sort_keys.or(base.sort_keys),
             }),
             (base, Some(o)) => base.or(Some(o)),
             (base, None) => base,
@@ -210,6 +228,10 @@ pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
             .get("indent")
             .and_then(serde_json::Value::as_u64)
             .and_then(|n| u8::try_from(n).ok()),
+        sort_keys: v
+            .get("sortKeys")
+            .or_else(|| v.get("sort_keys"))
+            .and_then(serde_json::Value::as_bool),
     });
     Some(SuspectConfig {
         lint,
@@ -760,7 +782,10 @@ components:
                 rules: HashMap::from([("old-rule".into(), "off".into())]),
                 recommended: Some(true),
             }),
-            formatting: Some(FmtCfg { indent: Some(2) }),
+            formatting: Some(FmtCfg {
+                indent: Some(2),
+                sort_keys: None,
+            }),
         };
         let init = serde_json::json!({
             "ref": {"maxDocs": 100},
