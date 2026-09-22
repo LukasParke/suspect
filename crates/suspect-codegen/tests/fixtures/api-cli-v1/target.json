@@ -1,0 +1,10 @@
+{
+  "module_path": "example.com/widget-cli",
+  "binary_name": "widgetctl",
+  "version": "1.4.0",
+  "go_version": "1.24.0",
+  "go_toolchain": "go1.27.1",
+  "credential_env": { "version": "v1", "schemes": { "apiKey": "WIDGET_API_KEY" } },
+  "runtime": { "request_deadline_ms": 30000, "max_input_bytes": 1048576 },
+  "output": { "format": "compact_json" }
+}

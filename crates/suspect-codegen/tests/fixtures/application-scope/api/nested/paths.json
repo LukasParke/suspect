@@ -1,0 +1,27 @@
+{
+  "$comment": "A Path Item library inside the entry document's own directory tree, reached through a $ref from the entry document's `paths`.",
+  "things": {
+    "get": {
+      "operationId": "getThingByReference",
+      "summary": "Read one thing through a referenced Path Item",
+      "description": "The operation is declared here, not in the entry document's own paths.",
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "responses": {
+        "200": {
+          "description": "The thing",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["id"],
+                "properties": { "id": { "type": "string" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "format": "suspect.application.mcp.v1",
+  "description": "Explicitly mapped widget control-plane operations exposed as MCP tools.",
+  "tools": [
+    {
+      "selector": "getWidget",
+      "name": "read_widget",
+      "title": "Read widget",
+      "description": "Reads exactly one widget and returns its exact JSON representation.",
+      "annotations": {
+        "read_only": true,
+        "destructive": false,
+        "idempotent": true,
+        "open_world": true
+      },
+      "input": {
+        "parameters": {
+          "id": { "property": "id", "description": "Exact widget identifier." },
+          "verbose": { "property": "verbose", "description": "Request the verbose projection." },
+          "limit": { "property": "limit", "description": "Exact maximum number of related records." },
+          "label": { "property": "label", "description": "Exact label filter." },
+          "trace": { "property": "trace", "description": "Caller-supplied trace identifier." }
+        },
+        "body": { "kind": "none" }
+      }
+    },
+    {
+      "selector": "POST /widgets",
+      "name": "create_widget",
+      "title": "Create widget",
+      "description": "Creates exactly one widget from a finite JSON document.",
+      "annotations": {
+        "read_only": false,
+        "destructive": false,
+        "idempotent": false,
+        "open_world": true
+      },
+      "input": {
+        "parameters": {},
+        "body": {
+          "kind": "json_value",
+          "property": "widget",
+          "description": "The complete widget document to create."
+        }
+      }
+    },
+    {
+      "selector": "purgeWidgets",
+      "name": "purge_widgets",
+      "title": "Purge widgets",
+      "description": "Removes every widget in the named scope; this cannot be undone.",
+      "annotations": {
+        "read_only": false,
+        "destructive": true,
+        "idempotent": true,
+        "open_world": true
+      },
+      "input": {
+        "parameters": {
+          "scope": { "property": "scope", "description": "Exact scope name to purge." }
+        },
+        "body": { "kind": "none" }
+      }
+    }
+  ]
+}

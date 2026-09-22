@@ -1,0 +1,41 @@
+{
+  "format": "suspect.application.cli.v1",
+  "description": "Explicitly mapped widget control-plane operations.",
+  "commands": [
+    {
+      "selector": "getWidget",
+      "path": ["widgets", "get"],
+      "summary": "Read one widget",
+      "description": "Reads exactly one widget and writes its exact JSON representation.",
+      "parameters": {
+        "id": { "flag": "id", "description": "Exact widget identifier." },
+        "verbose": { "flag": "verbose", "description": "Request the verbose projection." },
+        "limit": { "flag": "limit", "description": "Exact maximum number of related records." },
+        "label": { "flag": "label", "description": "Exact label filter." },
+        "trace": { "flag": "trace", "description": "Caller-supplied trace identifier." }
+      },
+      "body": { "kind": "none" },
+      "confirmation": { "kind": "not_required" }
+    },
+    {
+      "selector": "POST /widgets",
+      "path": ["widgets", "create"],
+      "summary": "Create one widget",
+      "description": "Sends one finite JSON document read from a file or standard input.",
+      "parameters": {},
+      "body": { "kind": "json_document" },
+      "confirmation": { "kind": "not_required" }
+    },
+    {
+      "selector": "purgeWidgets",
+      "path": ["widgets", "purge"],
+      "summary": "Delete every widget in one scope",
+      "description": "Removes every widget in the named scope; this cannot be undone.",
+      "parameters": {
+        "scope": { "flag": "scope", "description": "Exact scope name to purge." }
+      },
+      "body": { "kind": "none" },
+      "confirmation": { "kind": "required", "token": "purge-widgets" }
+    }
+  ]
+}
