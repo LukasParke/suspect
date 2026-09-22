@@ -16,6 +16,7 @@ suspect-source.workspace = true
 suspect-syntax.workspace = true
 suspect-arazzo.workspace = true
 suspect-overlay.workspace = true
+suspect-schema.workspace = true
 tower-lsp.workspace = true
 tokio = { workspace = true, features = ["io-std"] }
 thiserror.workspace = true

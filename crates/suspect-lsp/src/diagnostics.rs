@@ -169,6 +169,81 @@ pub fn arazzo_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
         .collect()
 }
 
+/// Vendor-extension validation: every `x-*` pair whose key has a
+/// registered schema (builtin or workspace-configured) is validated
+/// against it with the JSON Schema compiler. The schema and the serialized
+/// instance are materialized into one wrapper document — the compiler's
+/// evaluation shares a single lifetime across both, and extension values
+/// are rare enough that per-pair compilation is cheap. Unknown extensions
+/// are legal per the OpenAPI spec and produce nothing.
+#[must_use]
+pub fn extension_diagnostics(
+    low: &LowDoc,
+    extensions: &crate::extensions_config::ExtensionConfig,
+    workspace_root: Option<&std::path::Path>,
+) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let bytes = low.inner().bytes();
+    let li = low.inner().line_index();
+    for n in low.inner().root().descendants() {
+        if n.kind() != suspect_syntax::SyntaxKind::Pair {
+            continue;
+        }
+        let Some(key) = n.child_by_field("key") else {
+            continue;
+        };
+        let key_text = String::from_utf8_lossy(key.content().scalar_bytes()).into_owned();
+        if !key_text.starts_with("x-") {
+            continue;
+        }
+        let Some(value) = n.child_by_field("value") else {
+            continue;
+        };
+        let Some(schema_text) =
+            extensions.schema_text(&key_text, crate::keys::Context::Unknown, workspace_root)
+        else {
+            continue;
+        };
+        // Wrapper document: {"schema": ..., "instance": ...} — one tree,
+        // one lifetime.
+        let instance_json =
+            suspect_overlay::Value::from_node(suspect_low::NodeRef::new(value.content())).to_json();
+        let wrapper_text = format!("{{\"schema\": {schema_text}, \"instance\": {instance_json}}}");
+        let Ok(wrapper_uri) = suspect_source::Uri::parse("mem://extension-check.json") else {
+            continue;
+        };
+        let wrapper = suspect_low::LowDoc::parse(
+            wrapper_uri,
+            suspect_source::Source::from_vec(wrapper_text.clone().into_bytes()),
+        );
+        if !wrapper.syntax_errors().is_empty() {
+            continue; // malformed registered schema: skip silently
+        }
+        let Some(schema_node) = wrapper.root().get("schema") else {
+            continue;
+        };
+        let Some(instance_node) = wrapper.root().get("instance") else {
+            continue;
+        };
+        let Ok(schema) =
+            suspect_schema::Compiler::new(suspect_schema::Config::default()).compile(schema_node)
+        else {
+            continue;
+        };
+        for error in schema.validate(instance_node) {
+            out.push(make(
+                bytes,
+                li,
+                value.content().byte_range(),
+                DiagnosticSeverity::ERROR,
+                "extension-schema",
+                format!("`{key_text}` fails its extension schema: {}", error.message),
+            ));
+        }
+    }
+    out
+}
+
 /// Full battery for one document: syntax, semantic validation (OAS 3.x
 /// only), lint (all families), and Arazzo checks.
 #[must_use]
@@ -177,18 +252,28 @@ pub fn compute_diagnostics(
     low: &LowDoc,
     cfg: &crate::config_files::SuspectConfig,
 ) -> Vec<Diagnostic> {
-    crate::config_files::apply_config(compute_diagnostics_raw(ws, low), cfg)
+    crate::config_files::apply_config(compute_diagnostics_raw(ws, low, cfg), cfg)
 }
 
 /// Unfiltered battery; [`compute_diagnostics`] applies user config on top.
 #[must_use]
-pub fn compute_diagnostics_raw(ws: Option<&Arc<Workspace>>, low: &LowDoc) -> Vec<Diagnostic> {
+pub fn compute_diagnostics_raw(
+    ws: Option<&Arc<Workspace>>,
+    low: &LowDoc,
+    cfg: &crate::config_files::SuspectConfig,
+) -> Vec<Diagnostic> {
     let mut out = syntax_diagnostics(low);
     if let Some(ws) = ws {
         out.extend(validate_diagnostics(ws, low));
     }
     out.extend(lint_diagnostics(low));
     out.extend(arazzo_diagnostics(low));
+    let root = ws.and_then(super::workspace_root);
+    out.extend(extension_diagnostics(
+        low,
+        &cfg.extensions.clone().unwrap_or_default(),
+        root.as_deref(),
+    ));
     out
 }
 

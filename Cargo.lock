@@ -2112,6 +2112,7 @@ dependencies = [
  "suspect-overlay",
  "suspect-ref",
  "suspect-rex",
+ "suspect-schema",
  "suspect-source",
  "suspect-syntax",
  "suspect-test",

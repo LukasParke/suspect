@@ -1,10 +1,11 @@
 //! Canonical reordering: comment preservation, table order, extension
 //! anchors, special sorts, idempotence.
 
+use suspect_lsp::extensions_config::ExtensionConfig;
 use suspect_lsp::format_order::canonical_format;
 
 fn fmt(text: &str) -> String {
-    canonical_format(text, true)
+    canonical_format(text, true, &ExtensionConfig::default())
 }
 
 #[test]
@@ -282,7 +283,7 @@ components:
         kind: {type: string, enum: [dog, cat]}
 ";
     let once = fmt(text);
-    let twice = canonical_format(&once, true);
+    let twice = canonical_format(&once, true, &ExtensionConfig::default());
     assert_eq!(
         once, twice,
         "second pass must be a no-op:\n{once}\n---\n{twice}"
@@ -358,7 +359,7 @@ paths: {}
 zebra: last
 alpha: first
 ";
-    let out = canonical_format(text, false);
+    let out = canonical_format(text, false, &ExtensionConfig::default());
     let alpha = out.find("alpha:").unwrap();
     let zebra = out.find("zebra:").unwrap();
     assert!(

@@ -10,7 +10,7 @@
 use serde_json::json;
 use std::collections::HashMap;
 
-use suspect_low::{LowDoc, ValueKind};
+use suspect_low::LowDoc;
 use suspect_overlay::Value as OverlayValue;
 use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::*;
@@ -124,15 +124,27 @@ pub fn resolve_code_action(
 /// collections survive by construction. Documents with syntax errors are
 /// never formatted.
 /// [`format_document_with_config`] with key reordering off (the
-/// unconfigured default).
+/// unconfigured default) and no custom extension configuration.
 #[must_use]
 pub fn format_document(doc: &OpenDoc, uri: &Url) -> Option<TextEdit> {
-    format_document_with_config(doc, uri, false)
+    format_document_full(doc, uri, false, &Default::default())
 }
 
-/// Canonical format with an explicit sort toggle.
+/// [`format_document_with_config`] with an explicit sort toggle and no
+/// custom extension configuration.
 #[must_use]
 pub fn format_document_with_config(doc: &OpenDoc, uri: &Url, sort_keys: bool) -> Option<TextEdit> {
+    format_document_full(doc, uri, sort_keys, &Default::default())
+}
+
+/// Canonical format with an explicit sort toggle and extension config.
+#[must_use]
+pub fn format_document_full(
+    doc: &OpenDoc,
+    uri: &Url,
+    sort_keys: bool,
+    extensions: &crate::extensions_config::ExtensionConfig,
+) -> Option<TextEdit> {
     if !doc.low.syntax_errors().is_empty() {
         return None;
     }
@@ -154,7 +166,7 @@ pub fn format_document_with_config(doc: &OpenDoc, uri: &Url, sort_keys: bool) ->
         }
         text
     } else {
-        crate::format_order::canonical_format(&doc.text, sort_keys)
+        crate::format_order::canonical_format(&doc.text, sort_keys, extensions)
     };
     if formatted == doc.text {
         return None;

@@ -35,10 +35,15 @@ const MAX_LAYERS: usize = 64;
 /// enabled), then normalize indentation, then apply quote discipline. Each
 /// step re-parses the intermediate text; all three are comment-preserving.
 #[must_use]
-pub fn canonical_format(text: &str, sort_keys: bool) -> String {
+pub fn canonical_format(
+    text: &str,
+    sort_keys: bool,
+    extensions: &crate::extensions_config::ExtensionConfig,
+) -> String {
     let mut text = text.to_owned();
     if sort_keys {
-        text = reorder_layers(&text);
+        let reordered = reorder_layers(&text, extensions);
+        text = reordered;
     }
     let text = normalize_indentation(&text);
     apply_quote_discipline(&text)
@@ -51,10 +56,10 @@ pub fn canonical_format(text: &str, sort_keys: bool) -> String {
 /// Applies reordering layer by layer, innermost mappings first: mappings at
 /// one layer are disjoint siblings, so each layer is one batch of
 /// non-overlapping edits applied before re-parsing for the next.
-fn reorder_layers(text: &str) -> String {
+fn reorder_layers(text: &str, extensions: &crate::extensions_config::ExtensionConfig) -> String {
     let mut text = text.to_owned();
     for _ in 0..MAX_LAYERS {
-        let Some(edits) = deepest_reorder_layer(&text) else {
+        let Some(edits) = deepest_reorder_layer(&text, extensions) else {
             break;
         };
         if edits.is_empty() {
@@ -73,7 +78,10 @@ fn reorder_layers(text: &str) -> String {
 /// needs one. Each mapping's layer is its pointer-token count, which
 /// strictly increases down the tree, so a deeper layer never overlaps a
 /// shallower one.
-fn deepest_reorder_layer(text: &str) -> Option<Vec<(Range<usize>, String)>> {
+fn deepest_reorder_layer(
+    text: &str,
+    extensions: &crate::extensions_config::ExtensionConfig,
+) -> Option<Vec<(Range<usize>, String)>> {
     let uri = suspect_source::Uri::parse("mem://format-order.yaml").ok()?;
     let low = suspect_low::LowDoc::parse(
         uri,
@@ -85,7 +93,15 @@ fn deepest_reorder_layer(text: &str) -> Option<Vec<(Range<usize>, String)>> {
     let bytes = text.as_bytes();
     let mut best: Option<(usize, Vec<(Range<usize>, String)>)> = None;
     let empty: Vec<String> = Vec::new();
-    collect_layer(text, bytes, low.inner().root(), &empty, false, &mut best);
+    collect_layer(
+        text,
+        bytes,
+        low.inner().root(),
+        &empty,
+        false,
+        extensions,
+        &mut best,
+    );
     best.map(|(_, edits)| edits)
 }
 
@@ -97,12 +113,13 @@ fn collect_layer(
     node: SNode<'_>,
     tokens: &[String],
     preserved: bool,
+    extensions: &crate::extensions_config::ExtensionConfig,
     best: &mut Option<(usize, Vec<(Range<usize>, String)>)>,
 ) {
     match node.kind() {
         SyntaxKind::Stream | SyntaxKind::Document => {
             if let Some(child) = node.first_meaningful_child() {
-                collect_layer(text, bytes, child, tokens, preserved, best);
+                collect_layer(text, bytes, child, tokens, preserved, extensions, best);
             }
             return;
         }
@@ -110,7 +127,15 @@ fn collect_layer(
             for (idx, item) in node.sequence_items().into_iter().enumerate() {
                 let mut child_tokens = tokens.to_vec();
                 child_tokens.push(idx.to_string());
-                collect_layer(text, bytes, item, &child_tokens, preserved, best);
+                collect_layer(
+                    text,
+                    bytes,
+                    item,
+                    &child_tokens,
+                    preserved,
+                    extensions,
+                    best,
+                );
             }
             return;
         }
@@ -120,7 +145,7 @@ fn collect_layer(
         ) =>
         {
             if let Some(child) = node.first_meaningful_child() {
-                collect_layer(text, bytes, child, tokens, preserved, best);
+                collect_layer(text, bytes, child, tokens, preserved, extensions, best);
             }
             return;
         }
@@ -139,7 +164,15 @@ fn collect_layer(
         let child_preserved = preserved || key_text == "example" || key_text == "examples";
         let mut child_tokens = tokens.to_vec();
         child_tokens.push(key_text);
-        collect_layer(text, bytes, value, &child_tokens, child_preserved, best);
+        collect_layer(
+            text,
+            bytes,
+            value,
+            &child_tokens,
+            child_preserved,
+            extensions,
+            best,
+        );
     }
 
     if preserved {
@@ -151,10 +184,11 @@ fn collect_layer(
     let context = detect_context(tokens);
     let table = keys::table_for(context);
     let special = special_sort(tokens);
-    if keys_already_canonical(&node, table, context, special) {
+    if keys_already_canonical(&node, table, context, special, extensions) {
         return;
     }
-    let Some((start, end, new_text)) = reorder_mapping(text, node, tokens, bytes) else {
+    let Some((start, end, new_text)) = reorder_mapping(text, node, tokens, bytes, extensions)
+    else {
         return;
     };
     let region = start..end;
@@ -182,6 +216,7 @@ fn reorder_mapping(
     mapping: SNode<'_>,
     tokens: &[String],
     bytes: &[u8],
+    extensions: &crate::extensions_config::ExtensionConfig,
 ) -> Option<(usize, usize, String)> {
     let all: Vec<SNode<'_>> = mapping.children().collect();
     let meaningful: Vec<SNode<'_>> = all
@@ -231,7 +266,7 @@ fn reorder_mapping(
         match special {
             SpecialSort::Path => compare_paths(ka, kb),
             SpecialSort::Numeric => compare_response_codes(ka, kb),
-            SpecialSort::Standard => compare_standard(ka, kb, table, context),
+            SpecialSort::Standard => compare_standard(ka, kb, table, context, extensions),
         }
     });
     if order.iter().enumerate().all(|(i, &b)| i == b) {
@@ -259,6 +294,7 @@ fn keys_already_canonical(
     table: &[&str],
     context: Context,
     special: SpecialSort,
+    extensions: &crate::extensions_config::ExtensionConfig,
 ) -> bool {
     let entries = mapping.mapping_entries();
     let mut last_rank: Option<f64> = None;
@@ -276,7 +312,7 @@ fn keys_already_canonical(
                 .iter()
                 .position(|k| *k == key_text)
                 .map(|i| i as f64)
-                .or_else(|| ext::rank(&key_text, context, table)),
+                .or_else(|| extensions.rank(&key_text, context, table)),
             // Special sorts need the full comparator; be conservative.
             _ => return false,
         };
@@ -515,14 +551,20 @@ fn is_method(token: &str) -> bool {
 
 /// Standard comparator: table index, extension anchors slot at `±0.5`,
 /// unknown keys after the table, alphabetically. Equal ranks keep order.
-fn compare_standard(a: &str, b: &str, table: &[&str], context: Context) -> std::cmp::Ordering {
+fn compare_standard(
+    a: &str,
+    b: &str,
+    table: &[&str],
+    context: Context,
+    extensions: &crate::extensions_config::ExtensionConfig,
+) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     let rank = |key: &str| -> Option<f64> {
         table
             .iter()
             .position(|k| *k == key)
             .map(|i| i as f64)
-            .or_else(|| ext::rank(key, context, table))
+            .or_else(|| extensions.rank(key, context, table))
     };
     match (rank(a), rank(b)) {
         (Some(ra), Some(rb)) => ra.partial_cmp(&rb).unwrap_or(Ordering::Equal),

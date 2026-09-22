@@ -215,6 +215,12 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    /// The workspace root path, when the workspace was built with one.
+    #[must_use]
+    pub fn root_path(&self) -> Option<&std::path::Path> {
+        self.root.as_deref()
+    }
+
     /// Opens an entry (filesystem path or absolute URI) and returns a handle.
     /// Relative paths resolve against the builder root, else the current
     /// directory.

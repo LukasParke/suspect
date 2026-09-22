@@ -29,6 +29,7 @@ pub mod commands;
 pub mod completion;
 pub mod config_files;
 pub mod diagnostics;
+pub mod extensions_config;
 pub mod extensions_registry;
 pub mod format_order;
 pub mod hover_detail;
@@ -155,6 +156,12 @@ impl Backend {
         }
         Some(ws)
     }
+}
+
+/// The workspace root path, when configured.
+#[must_use]
+pub fn workspace_root(ws: &Arc<suspect_ref::Workspace>) -> Option<std::path::PathBuf> {
+    ws.root_path().map(std::path::Path::to_path_buf)
 }
 
 /// Parses a [`Uri`] into an LSP [`Url`], or `None` when it does not parse.
@@ -1531,7 +1538,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let sort_keys = st.config.format_sort_keys();
-        Ok(actions::format_document_with_config(doc, &url, sort_keys).map(|e| vec![e]))
+        let extensions = st.config.extensions.clone().unwrap_or_default();
+        Ok(actions::format_document_full(doc, &url, sort_keys, &extensions).map(|e| vec![e]))
     }
 }
 

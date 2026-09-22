@@ -32,7 +32,7 @@ use crate::state::lsp_range;
 // ---------------------------------------------------------------------------
 
 /// Lint section: ruleset selection and per-rule severity overrides.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LintCfg {
     /// Rule id → severity name (`error`, `warn`, `info`, `off`) overriding
     /// the severity a rule would otherwise produce.
@@ -78,10 +78,12 @@ pub struct FmtCfg {
 /// Parsing is manual over `serde_json::Value` rather than derived so the
 /// crate needs no direct `serde` dependency; unknown keys and sections are
 /// ignored, making forward-compatible with future fields.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SuspectConfig {
     /// Lint configuration (`suspect.lint`).
     pub lint: Option<LintCfg>,
+    /// Vendor-extension configuration (`suspect.extensions`).
+    pub extensions: Option<crate::extensions_config::ExtensionConfig>,
     /// Ref-workspace configuration (`suspect.ref`, also accepted as
     /// `suspect.refs`).
     pub refs: Option<RefCfg>,
@@ -183,6 +185,7 @@ impl SuspectConfig {
             refs,
             inlay_hints,
             formatting,
+            extensions: self.extensions.clone().or(overlay.extensions.clone()),
         }
     }
 }
@@ -223,6 +226,9 @@ pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
             .or_else(|| v.get("ref_targets"))
             .and_then(serde_json::Value::as_bool),
     });
+    let extensions = obj
+        .get("extensions")
+        .map(crate::extensions_config::ExtensionConfig::from_value);
     let formatting = obj.get("formatting").map(|v| FmtCfg {
         indent: v
             .get("indent")
@@ -238,6 +244,7 @@ pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
         refs,
         inlay_hints,
         formatting,
+        extensions,
     })
 }
 
@@ -786,6 +793,7 @@ components:
                 indent: Some(2),
                 sort_keys: None,
             }),
+            extensions: None,
         };
         let init = serde_json::json!({
             "ref": {"maxDocs": 100},
