@@ -272,8 +272,15 @@ pub enum Command {
     Codegen(commands::codegen_cmd::CodegenArgs),
     /// Generate a Terraform provider through explicit lifecycle mappings and the generated Go SDK.
     CodegenTerraform(commands::terraform_cmd::TerraformArgs),
-    /// List the native SDK profiles available in this CLI build.
+    /// Generate a Go/Cobra API CLI application over its own embedded generated Go SDK.
+    CodegenCli(commands::application_cmd::ApplicationArgs),
+    /// Generate a TypeScript stdio MCP server over its own embedded generated TypeScript SDK.
+    CodegenMcp(commands::application_cmd::ApplicationArgs),
+    /// List the native SDK or application profiles available in this CLI build.
     CodegenProfiles {
+        /// Profile family: native SDK backends, or application targets.
+        #[arg(long, value_enum, default_value_t = commands::sdk_profiles::ProfileKind::Sdk)]
+        kind: commands::sdk_profiles::ProfileKind,
         /// Human-readable inventory or versioned JSON for editor integration.
         #[command(flatten)]
         text: TextFormat,
@@ -422,7 +429,18 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::Acquire(args) => commands::acquire_cmd::acquire(args),
         Command::Codegen(args) => commands::codegen_cmd::codegen(args),
         Command::CodegenTerraform(args) => commands::terraform_cmd::generate(args),
-        Command::CodegenProfiles { text } => commands::sdk_profiles::list(text.format),
+        Command::CodegenCli(args) => {
+            commands::application_cmd::generate(commands::application_cmd::Target::Cli, args)
+        }
+        Command::CodegenMcp(args) => {
+            commands::application_cmd::generate(commands::application_cmd::Target::Mcp, args)
+        }
+        Command::CodegenProfiles { kind, text } => match kind {
+            commands::sdk_profiles::ProfileKind::Sdk => commands::sdk_profiles::list(text.format),
+            commands::sdk_profiles::ProfileKind::Applications => {
+                commands::sdk_profiles::list_applications(text.format)
+            }
+        },
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
         Command::Lsp => {

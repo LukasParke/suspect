@@ -11,9 +11,9 @@
 
 use std::collections::HashMap;
 
-use suspect_low::{NodeRef, Pointer};
+use suspect_low::{NodeRef, Pointer, ValueKind};
 use suspect_ref::{ParsedRef, Workspace};
-use suspect_syntax::SyntaxKind;
+use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::{TextEdit, Url, WorkspaceEdit};
 
 use crate::navigation::{node_at, value_anchor};
@@ -213,6 +213,11 @@ pub fn rename(
         if is_home {
             edits.push((site.range.clone(), new_name.to_owned()));
         }
+        // Plain-name uses outside `$ref` edges: discriminator mapping
+        // values name schemas; security requirement keys name schemes.
+        for at in expression_uses(handle.doc(), &site.section, &site.name) {
+            edits.push((at, new_name.to_owned()));
+        }
         if !edits.is_empty() {
             per_doc.insert(uri, edits);
         }
@@ -253,9 +258,106 @@ pub fn rename(
     })
 }
 
+/// Byte ranges of plain-name uses of a renamed component outside `$ref`
+/// edges: `discriminator.mapping` values name schemas and security
+/// requirement keys name schemes. Both are bare identifiers, not pointer
+/// strings, so the ref-edge scan cannot see them.
+fn expression_uses(
+    low: &suspect_low::LowDoc,
+    section: &str,
+    name: &str,
+) -> Vec<std::ops::Range<usize>> {
+    let inner = low.inner();
+    let mut out = Vec::new();
+    let mut stack: Vec<(SNode<'_>, Vec<Box<str>>)> = vec![(inner.root(), Vec::new())];
+    while let Some((node, path)) = stack.pop() {
+        match node.kind() {
+            SyntaxKind::Stream | SyntaxKind::Document => {
+                if let Some(c) = node.first_meaningful_child() {
+                    stack.push((c, path));
+                }
+            }
+            _ if matches!(
+                node.raw_kind(),
+                "block_node" | "flow_node" | "_value" | "block_sequence_item"
+            ) =>
+            {
+                if let Some(c) = node.first_meaningful_child() {
+                    stack.push((c, path));
+                }
+            }
+            SyntaxKind::Mapping => {
+                for child in node.children() {
+                    if child.kind() != SyntaxKind::Pair || child.is_error() {
+                        continue;
+                    }
+                    let Some(key) = child.child_by_field("key") else {
+                        continue;
+                    };
+                    let key_text =
+                        String::from_utf8_lossy(key.content().scalar_bytes()).into_owned();
+                    let mut child_path = path.clone();
+                    child_path.push(key_text.clone().into_boxed_str());
+                    match section {
+                        // `discriminator.mapping.<alias>: <schema name>`
+                        "schemas"
+                            if path.len() >= 2
+                                && path[path.len() - 2].as_ref() == "discriminator"
+                                && path[path.len() - 1].as_ref() == "mapping" =>
+                        {
+                            if let Some(value) = child.child_by_field("value") {
+                                let text = String::from_utf8_lossy(value.content().scalar_bytes());
+                                if text == name {
+                                    out.push(value.content().byte_range());
+                                }
+                            }
+                        }
+                        // `security: - <scheme name>: [scopes]` — the
+                        // requirement mapping's path ends with the
+                        // sequence index under the `security` key.
+                        "securitySchemes"
+                            if path.len() >= 2
+                                && path[path.len() - 2].as_ref() == "security"
+                                && key_text == name =>
+                        {
+                            out.push(key.content().byte_range());
+                        }
+                        _ => {}
+                    }
+                    if let Some(value) = child.child_by_field("value")
+                        && matches!(
+                            NodeRef::new(value.content()).kind(),
+                            ValueKind::Object | ValueKind::Array
+                        )
+                    {
+                        stack.push((value.content(), child_path));
+                    }
+                }
+            }
+            SyntaxKind::Sequence => {
+                for (idx, item) in node.sequence_items().into_iter().enumerate() {
+                    let mut child_path = path.clone();
+                    child_path.push(idx.to_string().into_boxed_str());
+                    // Item mappings are pushed whole so their pairs are
+                    // classified (a bare first pair child would fall
+                    // through the `_` arm).
+                    if item.kind() == SyntaxKind::Mapping {
+                        stack.push((item, child_path));
+                    } else if let Some(first) = item.first_meaningful_child() {
+                        stack.push((first, child_path));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::offset_of_utf16;
     use suspect_ref::WorkspaceBuilder;
     use suspect_source::Uri;
 
@@ -392,6 +494,122 @@ components:
             let err = rename(&ws, &home, bad, off).expect_err("must reject");
             assert!(!err.is_empty());
         }
+    }
+
+    /// Applies byte-range edits (LSP ranges) sequentially in descending
+    /// start order.
+    fn apply_edits(doc: &OpenDoc, text: &str, edits: &[TextEdit]) -> String {
+        let inner = doc.low.inner();
+        let mut out = text.to_owned();
+        let mut resolved: Vec<(usize, usize, String)> = edits
+            .iter()
+            .map(|e| {
+                (
+                    offset_of_utf16(
+                        inner.bytes(),
+                        inner.line_index(),
+                        e.range.start.line,
+                        e.range.start.character,
+                    )
+                    .unwrap(),
+                    offset_of_utf16(
+                        inner.bytes(),
+                        inner.line_index(),
+                        e.range.end.line,
+                        e.range.end.character,
+                    )
+                    .unwrap(),
+                    e.new_text.clone(),
+                )
+            })
+            .collect();
+        resolved.sort_by_key(|(s, _, _)| std::cmp::Reverse(*s));
+        for (s, en, new_text) in resolved.iter() {
+            out.replace_range(s..en, new_text);
+        }
+        out
+    }
+
+    #[test]
+    fn rename_rewrites_discriminator_mapping_values() {
+        let text = "\
+openapi: 3.1.0
+info: {title: t, version: '1'}
+paths: {}
+components:
+  schemas:
+    Pet:
+      type: object
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: Dog
+    Dog:
+      properties:
+        kind:
+          type: string
+";
+        let dir = std::env::temp_dir().join("suspect-lsp-rename-discriminator");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("spec.yaml"), text).unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        ws.load_all("spec.yaml").unwrap();
+        let uri = Uri::from_path(&dir.join("spec.yaml")).unwrap();
+        let home = OpenDoc::parse(uri, text.to_owned());
+        let off = text.find("    Dog:").unwrap() + 4;
+        let edit = rename(&ws, &home, "Canine", off).expect("rename ok");
+        let changes = edit.changes.expect("changes present");
+        let url = Url::parse(home.low.uri().as_str()).unwrap();
+        let edits = &changes[&url];
+        // Declaration key + discriminator mapping value.
+        assert_eq!(edits.len(), 2, "{edits:?}");
+        let applied = apply_edits(&home, text, edits);
+        assert!(applied.contains("dog: Canine"), "{applied}");
+        assert!(applied.contains("    Canine:"), "{applied}");
+    }
+
+    #[test]
+    fn rename_rewrites_security_requirement_keys() {
+        let text = "\
+openapi: 3.1.0
+info: {title: t, version: '1'}
+security:
+  - ApiKeyAuth: []
+paths:
+  /p:
+    get:
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200': {description: ok}
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+";
+        let dir = std::env::temp_dir().join("suspect-lsp-rename-security");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("spec.yaml"), text).unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        ws.load_all("spec.yaml").unwrap();
+        let uri = Uri::from_path(&dir.join("spec.yaml")).unwrap();
+        let home = OpenDoc::parse(uri, text.to_owned());
+        let off = text.find("    ApiKeyAuth:").unwrap() + 4;
+        let edit = rename(&ws, &home, "KeyAuth", off).expect("rename ok");
+        let changes = edit.changes.expect("changes present");
+        let url = Url::parse(home.low.uri().as_str()).unwrap();
+        let edits = &changes[&url];
+        // Declaration + root requirement + operation requirement.
+        assert_eq!(edits.len(), 3, "{edits:?}");
+        let applied = apply_edits(&home, text, edits);
+        assert!(applied.contains("  - KeyAuth: []"), "{applied}");
+        assert!(applied.contains("        - KeyAuth: []"), "{applied}");
+        assert!(
+            applied.contains("    KeyAuth:\n      type: apiKey"),
+            "{applied}"
+        );
     }
 
     #[test]

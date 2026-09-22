@@ -10,10 +10,11 @@
 use serde_json::json;
 use std::collections::HashMap;
 
-use suspect_low::LowDoc;
+use suspect_low::{LowDoc, NodeRef, ValueKind};
 use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::*;
 
+use crate::completion::ref_candidates;
 use crate::navigation;
 use crate::state::{OpenDoc, lsp_range, offset_of_utf16};
 
@@ -39,6 +40,7 @@ pub fn code_actions(
     uri: &Url,
     range: Range,
     diagnostics: &[Diagnostic],
+    ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
     defer_fix_all: bool,
 ) -> Vec<CodeAction> {
     let mut actions = Vec::new();
@@ -50,17 +52,19 @@ pub fn code_actions(
             continue;
         }
         let Some(code) = string_code(d) else { continue };
-        let Some(fix) = fix_for(doc, &code, d) else {
-            continue;
-        };
-        let title = fix.title;
-        actions.push(CodeAction {
-            title,
-            kind: Some(CodeActionKind::QUICKFIX),
-            diagnostics: Some(vec![d.clone()]),
-            edit: Some(workspace_edit(uri, vec![fix.edit])),
-            ..CodeAction::default()
-        });
+        for fix in fixes_for(doc, ws.map(std::sync::Arc::as_ref), &code, d) {
+            if actions.len() >= MAX_ACTIONS {
+                break;
+            }
+            let title = fix.title;
+            actions.push(CodeAction {
+                title,
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: Some(vec![d.clone()]),
+                edit: Some(workspace_edit(uri, vec![fix.edit])),
+                ..CodeAction::default()
+            });
+        }
     }
     if covers_document(doc, range) {
         // The whole-document sweep recomputes the diagnostic battery and
@@ -73,7 +77,7 @@ pub fn code_actions(
             ..CodeAction::default()
         };
         if !defer_fix_all {
-            let edits = all_edits(doc, diagnostics);
+            let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), diagnostics);
             if !edits.is_empty() {
                 action.edit = Some(workspace_edit(uri, edits));
             }
@@ -98,7 +102,7 @@ pub fn resolve_code_action(
     cfg: &crate::config_files::SuspectConfig,
 ) -> Option<CodeAction> {
     let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg);
-    let edits = all_edits(doc, &diags);
+    let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), &diags);
     if edits.is_empty() {
         return None;
     }
@@ -189,31 +193,58 @@ struct Fix {
     edit: TextEdit,
 }
 
-/// Builds the fix for one diagnostic code, or `None` when the code is
-/// unknown or its CST anchor cannot be located.
-fn fix_for(doc: &OpenDoc, code: &str, diag: &Diagnostic) -> Option<Fix> {
+/// Builds the fixes for one diagnostic code, or an empty vec when the code
+/// is unknown or its CST anchor cannot be located. Codes with multiple
+/// sensible repairs (e.g. `oas-parameter-missing-in`) return one fix per
+/// choice so the editor offers a picker.
+fn fixes_for(
+    doc: &OpenDoc,
+    ws: Option<&suspect_ref::Workspace>,
+    code: &str,
+    diag: &Diagnostic,
+) -> Vec<Fix> {
     let inner = doc.low.inner();
     let bytes = inner.bytes();
     let li = inner.line_index();
-    let start = offset_of_utf16(bytes, li, diag.range.start.line, diag.range.start.character)?;
-    let end = offset_of_utf16(bytes, li, diag.range.end.line, diag.range.end.character)?;
+    let Some(start) = offset_of_utf16(bytes, li, diag.range.start.line, diag.range.start.character)
+    else {
+        return Vec::new();
+    };
+    let Some(end) = offset_of_utf16(bytes, li, diag.range.end.line, diag.range.end.character)
+    else {
+        return Vec::new();
+    };
+    let br = start..end;
+    let one = |fix: Option<Fix>| fix.into_iter().collect::<Vec<_>>();
     match code {
-        "oas-path-trailing-slash" => trailing_slash_fix(doc, start..end),
-        "oas-operation-missing-operationId" => operation_id_fix(doc, start..end),
-        "oas-operation-missing-responses" => pair_insert_fix(
+        "oas-path-trailing-slash" | "path-keys-no-trailing-slash" => {
+            one(trailing_slash_fix(doc, br))
+        }
+        "oas-operation-missing-operationId" => one(operation_id_fix(doc, br)),
+        "oas-operation-missing-responses" => one(pair_insert_fix(
             doc,
-            start..end,
+            br,
             &HTTP_METHODS,
             &["responses:", "  default:", "    description: Responses"],
             "Add default responses",
-        ),
-        "oas-response-missing-description" => response_description_fix(doc, start..end),
-        "oas-parameter-missing-name" => {
-            any_insert_fix(doc, start..end, &[], &["name: "], "Add parameter name")
-        }
-        "info-contact" => pair_insert_fix(
+        )),
+        "oas-response-missing-description" => one(response_description_fix(doc, br)),
+        "oas-parameter-missing-name" => one(any_insert_fix(
             doc,
-            start..end,
+            br,
+            &[],
+            &["name: "],
+            "Add parameter name",
+        )),
+        "oas-parameter-missing-in" => PARAM_IN_CHOICES
+            .iter()
+            .filter_map(|(loc, title)| {
+                any_insert_fix(doc, br.clone(), &[], &[&format!("in: {loc}")], title)
+            })
+            .collect(),
+        "info-contact" => one(pair_insert_fix(
+            doc,
+            br,
             &["info"],
             &[
                 "contact:",
@@ -221,22 +252,55 @@ fn fix_for(doc: &OpenDoc, code: &str, diag: &Diagnostic) -> Option<Fix> {
                 "  email: support@example.com",
             ],
             "Add contact to info",
-        ),
-        "info-license" => pair_insert_fix(
+        )),
+        "info-license" => one(pair_insert_fix(
             doc,
-            start..end,
+            br,
             &["info"],
             &["license:", "  name: MIT"],
             "Add license to info",
-        ),
-        "operation-tags" => pair_insert_fix(
+        )),
+        "operation-tags" => one(pair_insert_fix(
             doc,
-            start..end,
+            br,
             &HTTP_METHODS,
             &["tags:", "  - default"],
             "Add tags to operation",
-        ),
-        _ => None,
+        )),
+        "operation-summary" => one(any_insert_fix(
+            doc,
+            br,
+            &HTTP_METHODS,
+            &["summary: "],
+            "Add operation summary",
+        )),
+        "operation-description" => one(any_insert_fix(
+            doc,
+            br,
+            &HTTP_METHODS,
+            &["description: "],
+            "Add operation description",
+        )),
+        "oas-license-missing-url" | "license-url" => one(pair_insert_fix(
+            doc,
+            br,
+            &["license"],
+            &["url: https://opensource.org/licenses/MIT"],
+            "Add license URL",
+        )),
+        "oas-discriminator-missing-property" => one(key_anchored_insert_fix(
+            doc,
+            br,
+            "discriminator",
+            &["propertyName: "],
+            "Add discriminator propertyName",
+        )),
+        "oas3-api-servers" => one(servers_fix(doc, br)),
+        "openapi-tags" => one(openapi_tags_fix(doc, br)),
+        "oas-tag-undeclared" => one(undeclared_tag_fix(doc, br)),
+        "oas-security-unknown-scheme" => one(declare_scheme_fix(doc, br)),
+        "unresolved-ref" => one(unresolved_ref_fix(doc, ws, br)),
+        _ => Vec::new(),
     }
 }
 
@@ -490,6 +554,329 @@ fn pascal(word: &str) -> String {
         .collect()
 }
 
+/// Parameter locations offered as distinct quick fixes for
+/// `oas-parameter-missing-in`, each with its action title.
+const PARAM_IN_CHOICES: &[(&str, &str)] = &[
+    ("query", "Add `in: query`"),
+    ("path", "Add `in: path`"),
+    ("header", "Add `in: header`"),
+    ("cookie", "Add `in: cookie`"),
+];
+
+/// The document's root mapping node (descends through `block_node` and
+/// stream wrappers to the first mapping).
+fn root_mapping<'d>(low: &'d LowDoc) -> Option<SNode<'d>> {
+    let mut cur = low.inner().root().first_meaningful_child()?;
+    while cur.kind() != SyntaxKind::Mapping {
+        cur = cur.first_meaningful_child()?;
+    }
+    Some(cur)
+}
+
+/// Syntax pair node of the root-level mapping entry whose key is `name`.
+fn root_key_pair<'d>(low: &'d LowDoc, name: &str) -> Option<SNode<'d>> {
+    let map = root_mapping(low)?;
+    for (key, _) in map.mapping_entries() {
+        if scalar_text(&key) == name {
+            return ancestor_of_kind(key, SyntaxKind::Pair);
+        }
+    }
+    None
+}
+
+/// Appends a new top-level mapping entry after the last root-level pair.
+///
+/// Lines are emitted at indentation zero in document order; the insertion
+/// point is the end of the last root pair's final *content* line (walking
+/// back over any trailing newline the node range includes), so no blank
+/// line is introduced and trailing comments stay intact.
+fn root_append(doc: &OpenDoc, lines: &[&str], title: &str) -> Option<Fix> {
+    let bytes = doc.low.inner().bytes();
+    let map = root_mapping(&doc.low)?;
+    let (key, _) = map.mapping_entries().pop()?;
+    let pair = ancestor_of_kind(key, SyntaxKind::Pair)?;
+    let at = line_end(bytes, pair.end_byte().saturating_sub(1));
+    let mut new_text = String::new();
+    for line in lines {
+        new_text.push('\n');
+        new_text.push_str(line);
+    }
+    Some(make_fix(doc, title, at..at, new_text))
+}
+
+/// Like [`pair_insert_fix`] but also accepts a diagnostic anchored on the
+/// owner pair's *key* (null-valued pairs have no value node to anchor): the
+/// fix walks up from the range start to a pair with key `owner_key` and
+/// inserts under it.
+fn key_anchored_insert_fix(
+    doc: &OpenDoc,
+    br: std::ops::Range<usize>,
+    owner_key: &str,
+    lines: &[&str],
+    title: &str,
+) -> Option<Fix> {
+    if let Some(fix) = pair_insert_fix(doc, br.clone(), &[owner_key], lines, title) {
+        return Some(fix);
+    }
+    let node = navigation::node_at(&doc.low, br.start)?;
+    let mut cur = node;
+    loop {
+        if cur.kind() == SyntaxKind::Pair {
+            let key = cur.child_by_field("key")?;
+            if scalar_text(&key) != owner_key {
+                return None;
+            }
+            if inside_flow_collection(&key) {
+                return None;
+            }
+            return Some(insert_after_key_line(doc, &key, lines, title));
+        }
+        cur = cur.parent()?;
+    }
+}
+
+/// Repairs an absent, null, or empty root `servers` entry: inserts a server
+/// URL under an existing pair whose value is null, or appends the whole
+/// skeleton at the end of the document.
+fn servers_fix(doc: &OpenDoc, br: std::ops::Range<usize>) -> Option<Fix> {
+    if let Some(fix) = pair_insert_fix(
+        doc,
+        br,
+        &["servers"],
+        &["- url: https://example.com/api"],
+        "Add server URL",
+    ) {
+        return Some(fix);
+    }
+    if let Some(pair) = root_key_pair(&doc.low, "servers") {
+        let key = pair.child_by_field("key")?;
+        let empty = match pair.child_by_field("value") {
+            None => true,
+            Some(v) => matches!(NodeRef::new(v.content()).kind(), ValueKind::Null),
+        };
+        if !empty || inside_flow_collection(&key) {
+            return None;
+        }
+        return Some(insert_after_key_line(
+            doc,
+            &key,
+            &["- url: https://example.com/api"],
+            "Add root server URL",
+        ));
+    }
+    root_append(
+        doc,
+        &["servers:", "  - url: https://example.com/api"],
+        "Add root servers",
+    )
+}
+
+/// Repairs an absent, null, or empty root `tags` entry with one default tag.
+fn openapi_tags_fix(doc: &OpenDoc, br: std::ops::Range<usize>) -> Option<Fix> {
+    if let Some(fix) = pair_insert_fix(doc, br, &["tags"], &["- name: default"], "Add root tag") {
+        return Some(fix);
+    }
+    if let Some(pair) = root_key_pair(&doc.low, "tags") {
+        let key = pair.child_by_field("key")?;
+        let empty = match pair.child_by_field("value") {
+            None => true,
+            Some(v) => matches!(NodeRef::new(v.content()).kind(), ValueKind::Null),
+        };
+        if !empty || inside_flow_collection(&key) {
+            return None;
+        }
+        return Some(insert_after_key_line(
+            doc,
+            &key,
+            &["- name: default"],
+            "Add root tag",
+        ));
+    }
+    root_append(doc, &["tags:", "  - name: default"], "Add root tags")
+}
+
+/// Declares an operation tag in the root `tags` list: appends a sequence
+/// item when the list exists, creates the list at the end of the document
+/// otherwise.
+fn undeclared_tag_fix(doc: &OpenDoc, br: std::ops::Range<usize>) -> Option<Fix> {
+    let node = navigation::node_at(&doc.low, br.start)?;
+    let name = scalar_text(&node);
+    if name.is_empty() || name.contains(['\n', '#']) {
+        return None;
+    }
+    let title = format!("Declare tag `{name}`");
+    if let Some(pair) = root_key_pair(&doc.low, "tags") {
+        let value = pair.child_by_field("value")?.content();
+        if value.kind() != SyntaxKind::Sequence {
+            return None;
+        }
+        let items = value.sequence_items();
+        let last = items.last()?;
+        let bytes = doc.low.inner().bytes();
+        // Item content nodes start after the `- ` marker; the marker column
+        // is two columns to the left.
+        let col = column_of(bytes, last.start_byte()).saturating_sub(2);
+        let at = line_end(bytes, last.end_byte().saturating_sub(1));
+        return Some(make_fix(
+            doc,
+            &title,
+            at..at,
+            format!("\n{}- {name}", " ".repeat(col)),
+        ));
+    }
+    root_append(doc, &["tags:", &format!("  - {name}")], &title)
+}
+
+/// Declares an unknown security scheme referenced by a requirement: inserts
+/// a bearer skeleton under `components.securitySchemes`, under
+/// `components`, or appends the full `components` tree when absent.
+fn declare_scheme_fix(doc: &OpenDoc, br: std::ops::Range<usize>) -> Option<Fix> {
+    let node = navigation::node_at(&doc.low, br.start)?;
+    let mut cur = node;
+    while cur.kind() != SyntaxKind::Mapping {
+        cur = cur.parent()?;
+    }
+    let (key, _) = cur.mapping_entries().into_iter().next()?;
+    let name = scalar_text(&key);
+    if name.is_empty() {
+        return None;
+    }
+    let title = format!("Declare security scheme `{name}`");
+    let scheme = [&format!("{name}:"), "  type: http", "  scheme: bearer"];
+    // components.securitySchemes exists: insert the scheme under it.
+    if let Some(pair) = root_key_pair(&doc.low, "components") {
+        let cmap = pair.child_by_field("value")?.content();
+        if cmap.kind() != SyntaxKind::Mapping {
+            return None;
+        }
+        for (k, v) in cmap.mapping_entries() {
+            if scalar_text(&k) != "securitySchemes" {
+                continue;
+            }
+            let Some(ss_value) = v else {
+                // Empty `securitySchemes:` pair — insert entries under it.
+                let ss_pair = ancestor_of_kind(k, SyntaxKind::Pair)?;
+                let ss_key = ss_pair.child_by_field("key")?;
+                if inside_flow_collection(&ss_key) {
+                    return None;
+                }
+                return Some(insert_after_key_line(doc, &ss_key, &scheme, &title));
+            };
+            if ss_value.kind() != SyntaxKind::Mapping {
+                return None;
+            }
+            let ss_pair = ancestor_of_kind(k, SyntaxKind::Pair)?;
+            let ss_key = ss_pair.child_by_field("key")?;
+            if inside_flow_collection(&ss_key) {
+                return None;
+            }
+            return Some(insert_after_key_line(doc, &ss_key, &scheme, &title));
+        }
+        // `components` exists without `securitySchemes`: insert the section
+        // under the components pair.
+        let components_key = pair.child_by_field("key")?;
+        if inside_flow_collection(&components_key) {
+            return None;
+        }
+        let lines = [
+            "securitySchemes:".to_owned(),
+            format!("  {name}:"),
+            "    type: http".to_owned(),
+            "    scheme: bearer".to_owned(),
+        ];
+        let line_refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        return Some(insert_after_key_line(
+            doc,
+            &components_key,
+            &line_refs,
+            &title,
+        ));
+    }
+    root_append(
+        doc,
+        &[
+            "components:",
+            "  securitySchemes:",
+            &format!("    {name}:"),
+            "      type: http",
+            "      scheme: bearer",
+        ],
+        &title,
+    )
+}
+
+/// Rewrites an unresolvable `$ref` value to the nearest declared component
+/// pointer, comparing candidate names by edit distance over the pointer
+/// tail. Offers nothing when no candidate is close enough.
+fn unresolved_ref_fix(
+    doc: &OpenDoc,
+    ws: Option<&suspect_ref::Workspace>,
+    br: std::ops::Range<usize>,
+) -> Option<Fix> {
+    let ws = ws?;
+    // The `$ref` value: walk up from the range to the owning pair and take
+    // its value (unquoted), so quoted and plain styles both resolve.
+    let node = navigation::node_at(&doc.low, br.start)?;
+    let mut cur = node;
+    let value = loop {
+        if cur.kind() == SyntaxKind::Pair {
+            let key = cur.child_by_field("key")?;
+            if scalar_text(&key) != "$ref" {
+                return None;
+            }
+            break cur.child_by_field("value")?.content();
+        }
+        cur = cur.parent()?;
+    };
+    let raw = scalar_text(&value);
+    let raw_name = raw.rsplit('/').next().unwrap_or("").trim_end_matches('#');
+    if raw_name.is_empty() {
+        return None;
+    }
+    let mut best: Option<(usize, String)> = None;
+    for candidate in ref_candidates(ws, doc.low.uri()) {
+        let name = candidate.rsplit('/').next().unwrap_or(&candidate);
+        let d = levenshtein(raw_name, name);
+        let better = match &best {
+            Some((bd, bc)) => d < *bd || (d == *bd && candidate < *bc),
+            None => true,
+        };
+        if better {
+            best = Some((d, candidate));
+        }
+    }
+    let (d, candidate) = best?;
+    // Accept near-misses only: at most half the name's length, and never
+    // the exact text already in the buffer.
+    if d >= raw_name.len().max(1) || raw == candidate {
+        return None;
+    }
+    Some(make_fix(
+        doc,
+        &format!("Change reference to `{candidate}`"),
+        value.byte_range(),
+        candidate,
+    ))
+}
+
+/// Classic Levenshtein edit distance over chars; inputs are component
+/// names (short strings), so the O(len_a × len_b) table is fine.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for i in 1..=a.len() {
+        cur[0] = i;
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
 /// Sorts fixes into descending positional order (the LSP requirement) and
 /// drops every fix whose replaced span intersects an already-accepted
 /// edit's span — overlapping or coincident — returning the surviving
@@ -518,10 +905,18 @@ fn merge_fixes(mut fixes: Vec<Fix>) -> Vec<TextEdit> {
 
 /// Merges every applicable fix across `diagnostics` into one edit list
 /// via [`merge_fixes`].
-fn all_edits(doc: &OpenDoc, diagnostics: &[Diagnostic]) -> Vec<TextEdit> {
+fn all_edits(
+    doc: &OpenDoc,
+    ws: Option<&suspect_ref::Workspace>,
+    diagnostics: &[Diagnostic],
+) -> Vec<TextEdit> {
     let fixes = diagnostics
         .iter()
-        .filter_map(|d| fix_for(doc, &string_code(d)?, d))
+        .filter_map(|d| {
+            let code = string_code(d)?;
+            Some(fixes_for(doc, ws, &code, d))
+        })
+        .flatten()
         .collect();
     merge_fixes(fixes)
 }
@@ -734,7 +1129,7 @@ paths:
         let d = open(API);
         let diag = diag_on_value(&d, b"get", "oas-operation-missing-operationId");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         assert_eq!(acts[0].kind, Some(CodeActionKind::QUICKFIX));
         assert_eq!(acts[0].title, "Add operationId `getPetsById`");
@@ -753,7 +1148,7 @@ paths:
         let d = open(API);
         let diag = diag_on_value(&d, b"get", "oas-operation-missing-responses");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add default responses");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -781,7 +1176,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"200", "oas-response-missing-description");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add description for `200` response");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -805,7 +1200,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"/pets/", "oas-path-trailing-slash");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Remove trailing slash");
         let edits = edits_of(&acts, &uri);
@@ -829,7 +1224,7 @@ components:
         let d = open(text);
         let diag = diag_on_value(&d, b"Limit", "oas-parameter-missing-name");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add parameter name");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -851,7 +1246,7 @@ paths:
         let d = open(text);
         let diag = diag_on_seq_item(&d, "in:", "oas-parameter-missing-name");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         let fixed = apply(&d, &edits_of(&acts, &uri));
         assert!(fixed.contains("- name: \n          in: query\n"), "{fixed}");
@@ -872,7 +1267,7 @@ paths:
             let d = open(API);
             let diag = diag_on_value(&d, b"info", code);
             let uri = url("api.yaml");
-            let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+            let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
             assert_eq!(acts.len(), 1, "{code}");
             let fixed = apply(&d, &edits_of(&acts, &uri));
             assert!(fixed.contains(expect), "{code}: {fixed}");
@@ -884,7 +1279,7 @@ paths:
         let d = open(API);
         let diag = diag_on_value(&d, b"get", "operation-tags");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1);
         assert_eq!(acts[0].title, "Add tags to operation");
         let fixed = apply(&d, &edits_of(&acts, &uri));
@@ -900,7 +1295,7 @@ paths:
         let d = open(API);
         let uri = url("api.yaml");
         let diag = byte_diag(&d, 0..5, "totally-unknown-code");
-        assert!(code_actions(&d, &uri, diag.range, &[diag], false).is_empty());
+        assert!(code_actions(&d, &uri, diag.range, &[diag], None, false).is_empty());
         // Malformed buffer: anchors cannot be located, nothing panics.
         let bad = open("{: ::\n  - ]]\n\t: [\n");
         for code in [
@@ -914,7 +1309,7 @@ paths:
             "operation-tags",
         ] {
             let diag = byte_diag(&bad, 0..bad.text.len(), code);
-            let acts = code_actions(&bad, &uri, whole_doc(&bad), &[diag], false);
+            let acts = code_actions(&bad, &uri, whole_doc(&bad), &[diag], None, false);
             assert!(
                 acts.iter()
                     .all(|a| a.kind != Some(CodeActionKind::QUICKFIX)),
@@ -934,6 +1329,7 @@ paths:
             &uri,
             Range::new(Position::new(0, 0), Position::new(0, 0)),
             &[diag],
+            None,
             false,
         );
         assert!(acts.is_empty(), "{acts:?}");
@@ -959,7 +1355,7 @@ paths:
         ];
         diags.push(diags[3].clone()); // exact duplicate must be skipped too
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, false);
+        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, None, false);
         let fix_all = acts
             .iter()
             .find(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect")))
@@ -1007,14 +1403,14 @@ paths:
             "oas-operation-missing-operationId",
         )];
         // Deferred mode: the action is advertised without its edit.
-        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, true);
+        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, None, true);
         let deferred = acts
             .iter()
             .find(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect")))
             .expect("fixAll action present");
         assert!(deferred.edit.is_none(), "edit must be resolved lazily");
         // Eager mode keeps the edit inline (clients without resolve support).
-        let eager = code_actions(&d, &uri, whole_doc(&d), &diags, false);
+        let eager = code_actions(&d, &uri, whole_doc(&d), &diags, None, false);
         let inline = eager
             .iter()
             .find(|a| a.kind == Some(CodeActionKind::new("source.fixAll.suspect")))
@@ -1039,7 +1435,7 @@ paths:
         let d = open(API);
         let uri = url("api.yaml");
         let diags = vec![diag_on_value(&d, b"get", "operation-tags")];
-        let acts = code_actions(&d, &uri, diags[0].range, &diags, false);
+        let acts = code_actions(&d, &uri, diags[0].range, &diags, None, false);
         assert!(
             acts.iter()
                 .all(|a| a.kind == Some(CodeActionKind::QUICKFIX))
@@ -1058,7 +1454,7 @@ paths:
         let diags = diags_on_values(&d, b"get", "oas-operation-missing-responses");
         assert_eq!(diags.len(), 30);
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, false);
+        let acts = code_actions(&d, &uri, whole_doc(&d), &diags, None, false);
         let quick = acts
             .iter()
             .filter(|a| a.kind == Some(CodeActionKind::QUICKFIX))
@@ -1147,7 +1543,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"/pets//", "oas-path-trailing-slash");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         // Minimal edit: `/pets//` → `/pets/`, not an over-stripped `/pets`.
         assert_eq!(edits_of(&acts, &uri)[0].new_text, "/pets/");
@@ -1169,7 +1565,7 @@ paths:
         let d = open(text);
         let diag = diag_on_value(&d, b"//", "oas-path-trailing-slash");
         let uri = url("api.yaml");
-        let acts = code_actions(&d, &uri, diag.range, &[diag], false);
+        let acts = code_actions(&d, &uri, diag.range, &[diag], None, false);
         assert_eq!(acts.len(), 1, "{acts:?}");
         assert_eq!(edits_of(&acts, &uri)[0].new_text, "/");
     }
@@ -1183,7 +1579,7 @@ paths:
             "{\n  \"openapi\": \"3.1.0\",\n  \"info\":\n    {\n      \"title\": \"T\"\n    }\n}\n";
         let d = OpenDoc::parse("mem://actions-test.json".into(), text.to_owned());
         let diag = diag_on_value(&d, b"info", "info-contact");
-        let acts = code_actions(&d, &url("api.json"), diag.range, &[diag], false);
+        let acts = code_actions(&d, &url("api.json"), diag.range, &[diag], None, false);
         assert!(acts.is_empty(), "{acts:?}");
     }
 
@@ -1198,7 +1594,7 @@ components:
 ";
         let d = open(text);
         let diag = diag_on_seq_item(&d, "name", "oas-parameter-missing-name");
-        let acts = code_actions(&d, &url("api.yaml"), diag.range, &[diag], false);
+        let acts = code_actions(&d, &url("api.yaml"), diag.range, &[diag], None, false);
         assert!(acts.is_empty(), "{acts:?}");
     }
 
@@ -1247,5 +1643,424 @@ components:
         )
         .unwrap();
         assert_eq!(before, after);
+    }
+
+    // -- new fix coverage ---------------------------------------------------
+
+    fn quickfix(d: &OpenDoc, diag: Diagnostic) -> Vec<CodeAction> {
+        let ws: Option<&std::sync::Arc<suspect_ref::Workspace>> = None;
+        code_actions(d, &url("api.yaml"), diag.range, &[diag], ws, false)
+    }
+
+    #[test]
+    fn parameter_in_quick_fix_offers_four_locations() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  /p:
+    get:
+      parameters:
+        - name: q
+";
+        let d = open(text);
+        let diag = diag_on_seq_item(&d, "name:", "oas-parameter-missing-in");
+        let acts = quickfix(&d, diag);
+        assert_eq!(acts.len(), 4, "{acts:?}");
+        let titles: Vec<&str> = acts.iter().map(|a| a.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            [
+                "Add `in: query`",
+                "Add `in: path`",
+                "Add `in: header`",
+                "Add `in: cookie`",
+            ]
+        );
+        let edits = edits_of(&acts[0..1], &url("api.yaml"));
+        let fixed = apply(&d, &edits);
+        assert!(
+            fixed.contains("- in: query\n          name: q\n"),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn license_url_quick_fix_inserts_under_license() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+  license:
+    name: MIT
+paths: {}
+";
+        let d = open(text);
+        let diag = diag_on_value(&d, b"license", "oas-license-missing-url");
+        let acts = quickfix(&d, diag);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let fixed = apply(&d, &edits_of(&acts, &url("api.yaml")));
+        assert!(
+            fixed.contains("  license:\n    url: https://opensource.org/licenses/MIT\n"),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn discriminator_property_quick_fix_adds_property_name() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+components:
+  schemas:
+    Pet:
+      discriminator:
+";
+        let d = open(text);
+        // Null-valued `discriminator:`: anchor the diagnostic on the key.
+        let inner = d.low.inner();
+        let node = inner
+            .root()
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::Scalar && scalar_text(n) == "discriminator")
+            .unwrap();
+        let diag = byte_diag(&d, node.byte_range(), "oas-discriminator-missing-property");
+        let acts = quickfix(&d, diag);
+        let quick: Vec<_> = acts
+            .iter()
+            .filter(|a| a.kind == Some(CodeActionKind::QUICKFIX))
+            .collect();
+        assert_eq!(quick.len(), 1, "{quick:?}");
+        let edits: Vec<&TextEdit> = quick
+            .iter()
+            .filter_map(|a| a.edit.as_ref())
+            .flat_map(|w| {
+                w.changes
+                    .as_ref()
+                    .unwrap()
+                    .get(&url("api.yaml"))
+                    .unwrap()
+                    .iter()
+            })
+            .collect();
+        let fixed = apply(&d, &edits);
+        assert!(
+            fixed.contains("      discriminator:\n        propertyName: \n"),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn undeclared_tag_quick_fix_appends_to_the_root_list() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+tags:
+  - name: alpha
+paths:
+  /p:
+    get:
+      tags:
+        - beta
+";
+        let d = open(text);
+        // The diagnostic anchors exactly on the undeclared tag scalar.
+        let off = d.text.find("- beta").unwrap() + 2;
+        let node = navigation::node_at(&d.low, off).unwrap();
+        let diag = byte_diag(&d, node.byte_range(), "oas-tag-undeclared");
+        let acts = quickfix(&d, diag);
+        let quick: Vec<_> = acts
+            .iter()
+            .filter(|a| a.kind == Some(CodeActionKind::QUICKFIX))
+            .cloned()
+            .collect::<Vec<CodeAction>>();
+        assert_eq!(quick.len(), 1, "{quick:?}");
+        let fixed = apply(&d, &edits_of(quick.as_slice(), &url("api.yaml")));
+        assert!(
+            fixed.contains("tags:\n  - name: alpha\n  - beta\n"),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn undeclared_tag_quick_fix_creates_the_root_list() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  /p:
+    get:
+      tags:
+        - beta
+";
+        let d = open(text);
+        let inner = d.low.inner();
+        let off = d.text.find("- beta").unwrap() + 2;
+        let node = inner.root().descendants().find(|n| {
+            n.kind() == SyntaxKind::Scalar
+                && n.byte_range().contains(&off)
+                && scalar_text(n) == "beta"
+        });
+        let Some(node) = node else {
+            panic!("tag scalar")
+        };
+        let diag = byte_diag(&d, node.byte_range(), "oas-tag-undeclared");
+        let acts = quickfix(&d, diag);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let fixed = apply(&d, &edits_of(&acts, &url("api.yaml")));
+        assert!(fixed.ends_with("tags:\n  - beta\n"), "{fixed}");
+    }
+
+    #[test]
+    fn unknown_scheme_quick_fix_declares_under_security_schemes() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+paths:
+  /p:
+    get:
+      security:
+        - OAuth2: []
+";
+        let d = open(text);
+        // Anchor on the requirement mapping (its range == the diagnostic's):
+        // the *smallest* mapping containing the offset, since the DFS-ordered
+        // descendants list starts with the root mapping.
+        let inner = d.low.inner();
+        let off = d.text.find("OAuth2:").unwrap();
+        let map = inner
+            .root()
+            .descendants()
+            .filter(|n| n.kind() == SyntaxKind::Mapping && n.byte_range().contains(&off))
+            .min_by_key(|n| n.byte_range().len())
+            .unwrap();
+        let diag = byte_diag(&d, map.byte_range(), "oas-security-unknown-scheme");
+        let acts = quickfix(&d, diag);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let fixed = apply(&d, &edits_of(&acts, &url("api.yaml")));
+        assert!(
+            fixed.contains(
+                "securitySchemes:\n    OAuth2:\n      type: http\n      scheme: bearer\n    ApiKeyAuth:\n      type: apiKey\n"
+            ),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn unknown_scheme_quick_fix_creates_components_when_absent() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  /p:
+    get:
+      security:
+        - OAuth2: []
+";
+        let d = open(text);
+        let inner = d.low.inner();
+        let off = d.text.find("OAuth2:").unwrap();
+        let map = inner
+            .root()
+            .descendants()
+            .filter(|n| n.kind() == SyntaxKind::Mapping && n.byte_range().contains(&off))
+            .min_by_key(|n| n.byte_range().len())
+            .unwrap();
+        let diag = byte_diag(&d, map.byte_range(), "oas-security-unknown-scheme");
+        let acts = quickfix(&d, diag);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let fixed = apply(&d, &edits_of(&acts, &url("api.yaml")));
+        assert!(
+            fixed.ends_with(
+                "components:\n  securitySchemes:\n    OAuth2:\n      type: http\n      scheme: bearer\n"
+            ),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn unresolved_ref_quick_fix_suggests_the_nearest_component() {
+        const MAIN: &str = "\
+openapi: 3.1.0
+info:
+  title: T
+components:
+  schemas:
+    Pet: {}
+    User: {}
+paths:
+  /p:
+    get:
+      responses:
+        '200':
+          $ref: '#/components/schemas/Pst'
+";
+        let dir = std::env::temp_dir().join("suspect-lsp-actions-dym");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("main.yaml"), MAIN).unwrap();
+        let ws = suspect_ref::WorkspaceBuilder::new()
+            .root(&dir)
+            .build()
+            .unwrap();
+        ws.load_all("main.yaml").unwrap();
+        let uri = Uri::from_path(&dir.join("main.yaml")).unwrap();
+        let d = OpenDoc::parse(uri, MAIN.to_owned());
+        let inner = d.low.inner();
+        let off = d.text.find("Pst").unwrap();
+        let node = inner
+            .root()
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::Scalar && n.byte_range().contains(&off))
+            .unwrap();
+        let diag = byte_diag(&d, node.byte_range(), "unresolved-ref");
+        let arc = std::sync::Arc::new(ws);
+        let acts = code_actions(
+            &d,
+            &url("main.yaml"),
+            diag.range,
+            &[diag],
+            Some(&arc),
+            false,
+        );
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let fixed = apply(&d, &edits_of(&acts, &url("main.yaml")));
+        assert!(
+            fixed.contains("$ref: #/components/schemas/Pet\n"),
+            "{fixed}"
+        );
+        // A far-off name gets no suggestion.
+        let diag2 = byte_diag(&d, node.byte_range(), "unresolved-ref");
+        let d2 = OpenDoc::parse(
+            Uri::from_path(&dir.join("main.yaml")).unwrap(),
+            MAIN.replace("Pst", "Zzzzzzzzzz"),
+        );
+        let acts2 = code_actions(
+            &d2,
+            &url("api.yaml"),
+            diag2.range,
+            &[diag2],
+            Some(&arc),
+            false,
+        );
+        assert!(
+            acts2.iter().all(|a| !a.title.contains("Change reference")),
+            "{acts2:?}"
+        );
+    }
+
+    #[test]
+    fn servers_lint_quick_fix_inserts_under_empty_servers() {
+        let text = "\
+openapi: 3.0.0
+info:
+  title: T
+servers:
+paths: {}
+";
+        let d = open(text);
+        // Null-valued `servers:`: the diagnostic anchors on the pair region.
+        let inner = d.low.inner();
+        let off = d.text.find("servers:").unwrap();
+        let node = inner
+            .root()
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::Scalar && scalar_text(n) == "servers")
+            .unwrap();
+        let _ = off;
+        let diag = byte_diag(&d, node.byte_range(), "oas3-api-servers");
+        let acts = quickfix(&d, diag);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let fixed = apply(&d, &edits_of(&acts, &url("api.yaml")));
+        assert!(
+            fixed.contains("servers:\n  - url: https://example.com/api\n"),
+            "{fixed}"
+        );
+    }
+
+    #[test]
+    fn root_lint_quick_fixes_append_at_the_document_end() {
+        // `oas3-api-servers` when `servers` is entirely absent: the fix
+        // appends the skeleton after the last root pair.
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+";
+        let d = open(text);
+        let inner = d.low.inner();
+        let off = d.text.find("title:").unwrap();
+        let map = inner
+            .root()
+            .descendants()
+            .find(|n| n.kind() == SyntaxKind::Mapping && n.byte_range().contains(&off))
+            .unwrap();
+        let diag = byte_diag(&d, map.byte_range(), "oas3-api-servers");
+        let acts = quickfix(&d, diag);
+        let quick: Vec<_> = acts
+            .iter()
+            .filter(|a| a.kind == Some(CodeActionKind::QUICKFIX))
+            .cloned()
+            .collect::<Vec<CodeAction>>();
+        assert_eq!(quick.len(), 1, "{quick:?}");
+        let fixed = apply(&d, &edits_of(quick.as_slice(), &url("api.yaml")));
+        assert!(
+            fixed.ends_with("servers:\n  - url: https://example.com/api\n"),
+            "{fixed}"
+        );
+        // And the same for `openapi-tags`.
+        let diag = byte_diag(&d, map.byte_range(), "openapi-tags");
+        let acts = quickfix(&d, diag);
+        let quick: Vec<_> = acts
+            .iter()
+            .filter(|a| a.kind == Some(CodeActionKind::QUICKFIX))
+            .cloned()
+            .collect::<Vec<CodeAction>>();
+        assert_eq!(quick.len(), 1, "{quick:?}");
+        let fixed = apply(&d, &edits_of(quick.as_slice(), &url("api.yaml")));
+        assert!(fixed.ends_with("tags:\n  - name: default\n"), "{fixed}");
+    }
+
+    #[test]
+    fn operation_summary_and_description_lint_quick_fixes() {
+        let d = open(API);
+        let summary = diag_on_value(&d, b"get", "operation-summary");
+        let acts = quickfix(&d, summary);
+        assert_eq!(acts.len(), 1, "{acts:?}");
+        let fixed = apply(&d, &edits_of(&acts, &url("api.yaml")));
+        assert!(fixed.contains("get:\n      summary: \n"), "{fixed}");
+        let descr = diag_on_value(&d, b"get", "operation-description");
+        let acts = quickfix(&d, descr);
+        assert_eq!(acts.len(), 1);
+        let fixed = apply(&d, &edits_of(&acts, &url("api.yaml")));
+        assert!(fixed.contains("get:\n      description: \n"), "{fixed}");
+    }
+
+    #[test]
+    fn lint_trailing_slash_code_reuses_the_path_rewrite() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+paths:
+  /pets/:
+    get:
+      summary: S
+";
+        let d = open(text);
+        let diag = diag_on_value(&d, b"/pets/", "path-keys-no-trailing-slash");
+        let acts = quickfix(&d, diag);
+        assert_eq!(acts.len(), 1);
+        assert_eq!(edits_of(&acts, &url("api.yaml"))[0].new_text, "/pets");
     }
 }

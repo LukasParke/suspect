@@ -1,0 +1,9 @@
+{
+  "$comment": "A shared Parameter Object library deliberately placed OUTSIDE the entry document's own directory tree, so every manifest position that records it would have to record an absolute URI.",
+  "id": {
+    "name": "id",
+    "in": "path",
+    "required": true,
+    "schema": { "type": "string" }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "$comment": "A shared Parameter Object library inside a subdirectory of the entry document's own directory, so the manifest records it as a relative path.",
+  "id": {
+    "name": "id",
+    "in": "path",
+    "required": true,
+    "schema": { "type": "string" }
+  }
+}

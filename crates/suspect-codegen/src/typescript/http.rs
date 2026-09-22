@@ -87,7 +87,7 @@ mod oauth_emit;
 #[cfg(feature = "http-protocol")]
 mod pagination_emit;
 #[cfg(feature = "http-protocol")]
-mod protocol_emit;
+pub(crate) mod protocol_emit;
 #[cfg(feature = "http-protocol")]
 mod stream_emit;
 #[cfg(feature = "http-protocol")]

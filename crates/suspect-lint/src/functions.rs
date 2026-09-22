@@ -131,6 +131,9 @@ pub(crate) enum Function {
     Undefined { property: Box<str> },
     /// Passes when a matched string matches the compiled regex.
     Pattern(Regex),
+    /// Passes only when a matched string does NOT match the compiled
+    /// regex — Spectral's `notMatch` (forbidden-content rules).
+    NotMatch(Regex),
     /// Passes when a matched string fits the configured casing convention.
     Casing(Casing),
     /// Passes when the string's character count or array's item count lies
@@ -155,6 +158,20 @@ pub(crate) enum Function {
     DefaultResponse,
     /// Native: every operation's `responses` has at least one 2XX entry.
     SuccessResponse,
+    /// Native: every operation's `responses` has an entry in the status
+    /// range (e.g. 400–499 for `operation-4xx-response`).
+    StatusRange { low: u16, high: u16 },
+    /// Native: `operationId` values must be unique across the document.
+    UniqueOperationIds,
+    /// Native: security requirements must name declared schemes
+    /// (`securitySchemes` in 3.x, `securityDefinitions` in 2.0).
+    SecurityDefined,
+    /// Native: path keys must begin with a leading `/`.
+    AbsolutePath,
+    /// Native: path keys must not be identical modulo template variables.
+    NoIdenticalPaths,
+    /// Native: a parameter object must declare `schema` or `content`.
+    ParameterSchemaOrContent,
     /// Native: path keys do not end in `/`.
     NoTrailingSlash,
 }
@@ -168,6 +185,7 @@ impl Function {
             Self::Defined { .. } => "property must be defined",
             Self::Undefined { .. } => "property must not be defined",
             Self::Pattern(_) => "value does not match the required pattern",
+            Self::NotMatch(_) => "value contains forbidden content",
             Self::Casing(_) => "value does not match the required casing convention",
             Self::Length { .. } => "value length is out of bounds",
             Self::Enumeration(_) => "value is not one of the allowed values",
@@ -179,6 +197,14 @@ impl Function {
             Self::DuplicateKeys => "duplicate key",
             Self::DefaultResponse => "operation must define a default or 2XX response",
             Self::SuccessResponse => "operation must define at least one 2XX response",
+            Self::StatusRange { .. } => {
+                "operation must define a response in the required status range"
+            }
+            Self::UniqueOperationIds => "operationId must be unique",
+            Self::SecurityDefined => "security requirement names an undeclared scheme",
+            Self::AbsolutePath => "path must begin with a leading slash",
+            Self::NoIdenticalPaths => "paths must not be identical modulo template variables",
+            Self::ParameterSchemaOrContent => "parameter must define `schema` or `content`",
             Self::NoTrailingSlash => "path must not end with a trailing slash",
         }
     }
@@ -242,6 +268,15 @@ pub(crate) fn apply<'d>(
                 push(out, rule, &node, ptrs);
             }
         }
+        Function::NotMatch(re) => {
+            let resolved = node.resolved();
+            if resolved.kind() == ValueKind::Str
+                && let Some(s) = resolved.as_str()
+                && re.is_match(s)
+            {
+                push(out, rule, &node, ptrs);
+            }
+        }
         Function::Casing(casing) => {
             let resolved = node.resolved();
             if resolved.kind() == ValueKind::Str
@@ -287,6 +322,16 @@ pub(crate) fn apply<'d>(
         Function::DuplicateKeys => check_duplicate_keys(&node, rule, ptrs, out),
         Function::DefaultResponse => check_response(&node, rule, ptrs, out, true),
         Function::SuccessResponse => check_response(&node, rule, ptrs, out, false),
+        Function::StatusRange { low, high } => {
+            check_status_range(&node, rule, ptrs, out, *low, *high);
+        }
+        Function::UniqueOperationIds => check_unique_operation_ids(&node, rule, ptrs, out),
+        Function::SecurityDefined => check_security_defined(&node, rule, ptrs, out),
+        Function::AbsolutePath => check_absolute_path(&node, rule, ptrs, out),
+        Function::NoIdenticalPaths => check_no_identical_paths(&node, rule, ptrs, out),
+        Function::ParameterSchemaOrContent => {
+            check_parameter_schema_or_content(&node, rule, ptrs, out);
+        }
         Function::NoTrailingSlash => check_no_trailing_slash(&node, rule, ptrs, out),
     }
 }
@@ -542,6 +587,169 @@ fn check_response<'d>(
     if !ok {
         push(out, rule, node, ptrs);
     }
+}
+
+fn check_status_range<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+    low: u16,
+    high: u16,
+) {
+    let ok = node.get("responses").is_some_and(|responses| {
+        let resolved = responses.resolved();
+        resolved.kind() == ValueKind::Object
+            && resolved.entries().iter().any(|e| {
+                e.key
+                    .parse::<u16>()
+                    .is_ok_and(|status| (low..=high).contains(&status))
+            })
+    });
+    if !ok {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// First occurrence of each `operationId`; later duplicates are findings.
+fn check_unique_operation_ids<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    // `node` is the `paths` mapping; walk every operation under it.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for path_entry in node.resolved().entries() {
+        let Some(path_item) = path_entry.value else {
+            continue;
+        };
+        for method in HTTP_METHODS {
+            let Some(op) = path_item.get(method) else {
+                continue;
+            };
+            let Some(id) = op.get("operationId") else {
+                continue;
+            };
+            let Some(text) = id.resolved().as_str() else {
+                continue;
+            };
+            if !seen.insert(text.to_owned()) {
+                push(out, rule, &id, ptrs);
+            }
+        }
+    }
+}
+
+/// Every scheme named in the security array must exist under the doc's
+/// declared schemes (`components/securitySchemes` in 3.x,
+/// `securityDefinitions` in 2.0).
+fn check_security_defined<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let doc_root = NodeRef::new(node.syntax().doc().root());
+    let Some(known) = doc_root
+        .get("components")
+        .and_then(|c| c.get("securitySchemes"))
+        .or_else(|| doc_root.get("securityDefinitions"))
+        .map(|schemes| {
+            schemes
+                .resolved()
+                .entries()
+                .into_iter()
+                .map(|e| e.key.to_owned())
+                .collect::<Vec<_>>()
+        })
+    else {
+        return; // no declared schemes at all: nothing can be checked here
+    };
+    let resolved = node.resolved();
+    if resolved.kind() != ValueKind::Array {
+        return;
+    }
+    for requirement in resolved.items() {
+        for entry in requirement.resolved().entries() {
+            if !known.iter().any(|k| k == entry.key) {
+                push(out, rule, &entry.key_node, ptrs);
+            }
+        }
+    }
+}
+
+/// Path keys must begin with `/`.
+fn check_absolute_path<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let starts_ok = match ptrs.own_key(node) {
+        Some(k) => k.first() == Some(&b'/'),
+        None => node
+            .path_from_root()
+            .tokens()
+            .last()
+            .is_some_and(|k| k.starts_with('/')),
+    };
+    if !starts_ok {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Path keys must not collapse to the same shape when `{var}` templates
+/// are erased (`/pets/{id}` vs `/pets/{petId}`).
+fn check_no_identical_paths<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let resolved = node.resolved();
+    if resolved.kind() != ValueKind::Object {
+        return;
+    }
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in resolved.entries() {
+        let normalized = normalize_path_key(entry.key);
+        if !seen.insert(normalized) {
+            push(out, rule, &entry.key_node, ptrs);
+        }
+    }
+}
+
+/// Erases `{var}` templates so `/pets/{id}` and `/pets/{petId}` compare
+/// equal.
+fn normalize_path_key(key: &str) -> String {
+    let mut out = String::with_capacity(key.len());
+    let mut rest = key;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let Some(close_rel) = rest[open + 1..].find('}') else {
+            out.push_str(&rest[open..]);
+            return out;
+        };
+        out.push_str("{}");
+        rest = &rest[open + 1 + close_rel + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A parameter object must declare `schema` (3.0/2.0 style) or `content`
+/// (3.1 style); `$ref` parameters pass (their target carries the shape).
+fn check_parameter_schema_or_content<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    if node.get("$ref").is_some() || node.get("schema").is_some() || node.get("content").is_some() {
+        return;
+    }
+    push(out, rule, node, ptrs);
 }
 
 fn check_no_trailing_slash<'d>(
