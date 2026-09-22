@@ -366,8 +366,8 @@ components:
         nullable: {type: boolean}
         items: {type: array, items: {type: string}}
       x-annotation: {required: []}
-      example: {const: 7, nullable: 'yes'}
-      default: {nullable: 'yes'}
+      example: [{const: 7, nullable: 'yes'}]
+      default: [{nullable: 'yes'}]
     UntypedItems: {items: {}}
     ReferenceSiblings: {$ref: '#/components/schemas/Valid', nullable: 'yes', type: array}
     MissingItems: {type: array}

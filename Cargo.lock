@@ -2278,9 +2278,12 @@ dependencies = [
  "criterion",
  "rayon",
  "rustc-hash",
+ "serde_json",
  "suspect-low",
  "suspect-oas",
+ "suspect-overlay",
  "suspect-ref",
+ "suspect-schema",
  "suspect-source",
  "thiserror",
 ]

@@ -34,6 +34,7 @@ pub mod extensions_registry;
 pub mod format_order;
 pub mod hover_detail;
 pub mod keys;
+pub mod keyword_docs;
 pub mod links;
 pub mod navigation;
 pub mod pull;

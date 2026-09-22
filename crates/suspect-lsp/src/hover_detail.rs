@@ -8,14 +8,213 @@ use suspect_low::{NodeRef, ValueKind};
 /// `components/<section>/<Name>`.
 #[must_use]
 pub fn try_rich_hover(section: &str, name: &str, low: &suspect_low::LowDoc) -> Option<String> {
-    if section != "schemas" {
-        return None;
-    }
     // Navigate to the component in the live document tree.
     let ptr =
         suspect_low::Pointer::from_tokens(vec!["components".into(), section.into(), name.into()]);
     let target = low.root().pointer(&ptr)?;
-    Some(render_schema_node(&target, name))
+    Some(render_component(&target, section, name))
+}
+
+/// Dispatches the rich renderer for one component node — works against
+/// any document, so cross-file `$ref` targets render as richly as local
+/// ones.
+#[must_use]
+pub fn render_component(target: &NodeRef<'_>, section: &str, name: &str) -> String {
+    match section {
+        "schemas" => render_schema_node(target, name),
+        "securitySchemes" => render_security_scheme(target, name),
+        "parameters" | "headers" => render_parameter(target, name),
+        "responses" => render_response(target, name),
+        "examples" => render_example(target, name),
+        "requestBodies" => render_request_body(target, name),
+        _ => String::new(),
+    }
+}
+
+/// True when `section` has a rich renderer.
+#[must_use]
+pub fn has_renderer(section: &str) -> bool {
+    matches!(
+        section,
+        "schemas"
+            | "securitySchemes"
+            | "parameters"
+            | "headers"
+            | "responses"
+            | "examples"
+            | "requestBodies"
+    )
+}
+
+/// Security scheme: type/in/scheme table plus flows.
+pub fn render_security_scheme(scheme: &NodeRef<'_>, name: &str) -> String {
+    let mut md = format!("**🔑 {name}**");
+    if let Some(d) = scheme.get("description").and_then(|n| n.as_str()) {
+        md.push_str(&format!("\n\n{d}"));
+    }
+    md.push_str("\n\n| Field | Value |");
+    md.push_str("\n|---|---|");
+    for (field, label) in [
+        ("type", "Type"),
+        ("in", "In"),
+        ("scheme", "Scheme"),
+        ("bearerFormat", "Bearer format"),
+        ("openIdConnectUrl", "OIDC URL"),
+    ] {
+        if let Some(v) = scheme.get(field).and_then(|n| n.as_str()) {
+            md.push_str(&format!("\n| {label} | `{v}` |"));
+        }
+    }
+    if let Some(flows) = scheme.get("flows") {
+        for (flow_name, _flow) in [
+            ("authorizationCode", "Authorization code"),
+            ("clientCredentials", "Client credentials"),
+            ("implicit", "Implicit"),
+            ("password", "Password"),
+        ] {
+            if let Some(flow) = flows.get(flow_name) {
+                md.push_str(&format!("\n\n**{} flow:**", flow_name));
+                if let Some(url) = flow.get("tokenUrl").and_then(|n| n.as_str()) {
+                    md.push_str(&format!("\n- token: `{url}`"));
+                }
+                if let Some(url) = flow.get("authorizationUrl").and_then(|n| n.as_str()) {
+                    md.push_str(&format!("\n- authorize: `{url}`"));
+                }
+                if let Some(scopes) = flow.get("scopes") {
+                    let scope_names: Vec<&str> = scopes.entries().iter().map(|e| e.key).collect();
+                    if !scope_names.is_empty() {
+                        md.push_str(&format!(
+                            "\n- scopes: {}",
+                            scope_names
+                                .iter()
+                                .map(|s| format!("`{s}`"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                }
+                let _ = flow; // entries used above via get
+            }
+        }
+    }
+    md
+}
+
+/// Parameter/header: location, requirement, schema summary.
+pub fn render_parameter(param: &NodeRef<'_>, name: &str) -> String {
+    let mut md = format!("**{name}**");
+    let loc = param.get("in").and_then(|n| n.as_str());
+    if let Some(loc) = loc {
+        md.push_str(&format!(" (`in: {loc}`)"));
+    }
+    if param.get("required").and_then(|n| n.as_bool()) == Some(true) {
+        md.push_str(" — *required*");
+    }
+    if let Some(d) = param.get("description").and_then(|n| n.as_str()) {
+        md.push_str(&format!("\n\n{d}"));
+    }
+    if let Some(schema) = param.get("schema") {
+        if let Some(ts) = get_type(&schema) {
+            md.push_str(&format!("\n\n**Type:** {}", render_types(&ts)));
+        }
+        if let Some(default) = schema.get("default") {
+            let dv = suspect_overlay::Value::from_node(default).to_json();
+            md.push_str(&format!("\n\n**Default:** `{dv}`"));
+        }
+        if let Some(enum_) = schema.get("enum") {
+            let vals: Vec<String> = enum_
+                .items()
+                .iter()
+                .map(|v| format!("`{}`", String::from_utf8_lossy(v.scalar_bytes())))
+                .collect();
+            if !vals.is_empty() {
+                md.push_str(&format!("\n\n**Enum:** {}", vals.join(" · ")));
+            }
+        }
+    }
+    md
+}
+
+/// Response: description, headers, content types.
+pub fn render_response(response: &NodeRef<'_>, name: &str) -> String {
+    let mut md = format!("**{name}**");
+    if let Some(d) = response.get("description").and_then(|n| n.as_str()) {
+        md.push_str(&format!("\n\n{d}"));
+    }
+    if let Some(headers) = response.get("headers")
+        && !headers.entries().is_empty()
+    {
+        md.push_str("\n\n**Headers:**");
+        md.push_str("\n\n| Name | Type |");
+        md.push_str("\n|---|---|");
+        for h in headers.entries() {
+            let ts = h
+                .value
+                .and_then(|v| v.get("schema"))
+                .and_then(|s| get_type(&s))
+                .map_or_else(|| "—".to_owned(), |t| render_types(&t));
+            md.push_str(&format!("\n| `{}` | {ts} |", h.key));
+        }
+    }
+    if let Some(content) = response.get("content")
+        && !content.entries().is_empty()
+    {
+        md.push_str("\n\n**Content:** ");
+        let media: Vec<String> = content
+            .entries()
+            .iter()
+            .map(|e| format!("`{}`", e.key))
+            .collect();
+        md.push_str(&media.join(", "));
+    }
+    md
+}
+
+/// Example: summary, description, pretty value.
+pub fn render_example(example: &NodeRef<'_>, name: &str) -> String {
+    let mut md = format!("**{name}**");
+    if let Some(s) = example.get("summary").and_then(|n| n.as_str()) {
+        md.push_str(&format!("\n\n{s}"));
+    }
+    if let Some(d) = example.get("description").and_then(|n| n.as_str()) {
+        md.push_str(&format!("\n\n---\n\n{d}"));
+    }
+    if let Some(value) = example.get("value") {
+        let json = suspect_overlay::Value::from_node(value).to_json_pretty();
+        md.push_str(&format!("\n\n```json\n{json}\n```"));
+    }
+    if let Some(external) = example.get("externalValue").and_then(|n| n.as_str()) {
+        md.push_str(&format!("\n\n*External:* `{external}`"));
+    }
+    md
+}
+
+/// Request body: required + content types.
+pub fn render_request_body(body: &NodeRef<'_>, name: &str) -> String {
+    let mut md = format!("**{name}**");
+    if body.get("required").and_then(|n| n.as_bool()) == Some(true) {
+        md.push_str(" — *required*");
+    }
+    if let Some(d) = body.get("description").and_then(|n| n.as_str()) {
+        md.push_str(&format!("\n\n{d}"));
+    }
+    if let Some(content) = body.get("content") {
+        md.push_str("\n\n**Content:** ");
+        let media: Vec<String> = content
+            .entries()
+            .iter()
+            .map(|e| {
+                let type_str = e
+                    .value
+                    .and_then(|v| v.get("schema"))
+                    .and_then(|s| get_type(&s))
+                    .map_or_else(|| "—".to_owned(), |t| render_types(&t));
+                format!("`{}` ({type_str})", e.key)
+            })
+            .collect();
+        md.push_str(&media.join(", "));
+    }
+    md
 }
 
 /// Renders structured markdown for a schema node.

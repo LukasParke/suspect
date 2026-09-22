@@ -90,23 +90,22 @@ impl ExtensionConfig {
     /// builtins, then unknown (the caller's alphabetical fallback).
     #[must_use]
     pub fn rank(&self, key: &str, context: Context, table: &[&str]) -> Option<f64> {
-        if let Some(custom) = self.custom.get(key) {
-            if custom.contexts.is_empty()
+        if let Some(custom) = self.custom.get(key)
+            && (custom.contexts.is_empty()
                 || custom
                     .contexts
                     .iter()
-                    .any(|c| context_name(context) == c.as_str())
+                    .any(|c| context_name(context) == c.as_str()))
+        {
+            if let Some(before) = &custom.before
+                && let Some(idx) = table.iter().position(|k| k == before)
             {
-                if let Some(before) = &custom.before
-                    && let Some(idx) = table.iter().position(|k| k == before)
-                {
-                    return Some(idx as f64 - 0.5);
-                }
-                if let Some(after) = &custom.after
-                    && let Some(idx) = table.iter().position(|k| k == after)
-                {
-                    return Some(idx as f64 + 0.5);
-                }
+                return Some(idx as f64 - 0.5);
+            }
+            if let Some(after) = &custom.after
+                && let Some(idx) = table.iter().position(|k| k == after)
+            {
+                return Some(idx as f64 + 0.5);
             }
         }
         super::extensions_registry::rank(key, context, table)

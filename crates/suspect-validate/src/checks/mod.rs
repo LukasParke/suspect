@@ -25,6 +25,7 @@ mod paths;
 mod references;
 mod responses;
 mod schema_dialect;
+mod schema_instances;
 mod schema_keywords;
 mod schemas;
 mod security;
@@ -66,6 +67,7 @@ fn check_groups() -> Vec<(&'static str, CheckFn)> {
         ("examples",                           examples::check_example_types),
         ("webhooks",                           webhooks::check_webhook_version),
         ("info::license",                      info::check_license),
+        ("schema_instances",                   schema_instances::check_schema_instances),
     ]
 }
 

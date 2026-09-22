@@ -11,7 +11,6 @@ use serde_json::json;
 use std::collections::HashMap;
 
 use suspect_low::LowDoc;
-use suspect_overlay::Value as OverlayValue;
 use suspect_syntax::{SNode, SyntaxKind};
 use tower_lsp::lsp_types::*;
 
@@ -616,6 +615,7 @@ fn covers_document(doc: &OpenDoc, range: Range) -> bool {
 mod tests {
     use super::*;
     use crate::diagnostics::SOURCE;
+    use suspect_overlay::Value as OverlayValue;
     use suspect_source::Uri;
 
     const YAML_URI: &str = "mem://actions-test.yaml";

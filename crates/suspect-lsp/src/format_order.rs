@@ -24,7 +24,6 @@ use std::ops::Range;
 use suspect_syntax::{SNode, ScalarStyle, SyntaxKind};
 use tower_lsp::lsp_types::TextEdit;
 
-use crate::extensions_registry as ext;
 use crate::keys::{self, Context};
 
 /// Maximum reorder passes (one per nesting depth) before giving up; real
@@ -52,6 +51,9 @@ pub fn canonical_format(
 // ---------------------------------------------------------------------------
 // Reordering
 // ---------------------------------------------------------------------------
+
+/// One layer's reorder edits: disjoint `(byte range, replacement)` pairs.
+type LayerEdits = Vec<(Range<usize>, String)>;
 
 /// Applies reordering layer by layer, innermost mappings first: mappings at
 /// one layer are disjoint siblings, so each layer is one batch of
@@ -91,7 +93,7 @@ fn deepest_reorder_layer(
         return None;
     }
     let bytes = text.as_bytes();
-    let mut best: Option<(usize, Vec<(Range<usize>, String)>)> = None;
+    let mut best: Option<(usize, LayerEdits)> = None;
     let empty: Vec<String> = Vec::new();
     collect_layer(
         text,
@@ -114,7 +116,7 @@ fn collect_layer(
     tokens: &[String],
     preserved: bool,
     extensions: &crate::extensions_config::ExtensionConfig,
-    best: &mut Option<(usize, Vec<(Range<usize>, String)>)>,
+    best: &mut Option<(usize, LayerEdits)>,
 ) {
     match node.kind() {
         SyntaxKind::Stream | SyntaxKind::Document => {
@@ -240,9 +242,7 @@ fn reorder_mapping(
     if mapping.raw_kind().contains("flow") {
         return None;
     }
-    let Some(blocks) = build_blocks(text, &meaningful, bytes) else {
-        return None;
-    };
+    let blocks = build_blocks(text, &meaningful, bytes)?;
     // A mapping that is a sequence item carries the `- ` marker on its
     // first line; sorting would put a non-marker line first and break the
     // sequence. Item objects keep author order.
@@ -373,10 +373,10 @@ fn build_blocks(text: &str, children: &[SNode<'_>], bytes: &[u8]) -> Option<Vec<
             pending.push((start, end));
             continue;
         }
-        if let Some(&(last_end, _)) = pending.last() {
-            if separated_by_blank(bytes, last_end, start) {
-                attach_trailing(&mut blocks, &mut pending);
-            }
+        if let Some(&(last_end, _)) = pending.last()
+            && separated_by_blank(bytes, last_end, start)
+        {
+            attach_trailing(&mut blocks, &mut pending);
         }
         let block_start = pending.first().map_or(start, |&(s, _)| s);
         blocks.push(Block {
@@ -409,7 +409,7 @@ struct Block {
 }
 
 /// Attaches pending comment ranges to the last block, extending its start.
-fn attach_trailing(blocks: &mut Vec<Block>, pending: &mut Vec<(usize, usize)>) {
+fn attach_trailing(blocks: &mut [Block], pending: &mut Vec<(usize, usize)>) {
     if let (Some(last), Some(&(s, _))) = (blocks.last_mut(), pending.first()) {
         last.start = last.start.min(s);
     }

@@ -346,16 +346,34 @@ pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) 
         let handle = ws.get(low.uri())?;
         if let Some(Resolution::Node(target)) = resolve_live_ref(&handle, &refv) {
             // Rich hover for component targets: structured markdown tables
-            // instead of raw source excerpts.
+            // instead of raw source excerpts — schemas, security schemes,
+            // parameters, responses, examples, request bodies.
             let ptr = suspect_low::NodeRef::new(*target.syntax()).path_from_root();
             let toks = ptr.tokens();
+            let foreign = *target.syntax().doc().uri() != *low.uri();
             if toks.len() >= 3
                 && toks[0].as_ref() == "components"
-                && toks[1].as_ref() == "schemas"
-                && let Some(md) =
-                    crate::hover_detail::try_rich_hover(toks[1].as_ref(), toks[2].as_ref(), low)
+                && crate::hover_detail::has_renderer(toks[1].as_ref())
             {
-                return Some(md);
+                // Foreign targets render straight from the target node.
+                // Local targets re-express the pointer against the live
+                // buffer first: unsaved edits must be what hover shows.
+                if foreign {
+                    let target_ref = suspect_low::NodeRef::new(*target.syntax());
+                    return Some(crate::hover_detail::render_component(
+                        &target_ref,
+                        toks[1].as_ref(),
+                        toks[2].as_ref(),
+                    ));
+                }
+                if let Some(live_node) = low.root().pointer(&ptr) {
+                    let live_ref = live_node;
+                    return Some(crate::hover_detail::render_component(
+                        &live_ref,
+                        toks[1].as_ref(),
+                        toks[2].as_ref(),
+                    ));
+                }
             }
             let tdoc = target.syntax().doc();
             if *tdoc.uri() == *low.uri() {
@@ -376,10 +394,71 @@ pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) 
             ));
         }
     }
+    // Keyword hover: a cursor on a mapping key that names a known
+    // OpenAPI/JSON-Schema keyword gets the keyword dictionary entry —
+    // meaning, value domain, dialect availability, interactions, example.
+    if let Some(md) = keyword_hover(low, offset) {
+        return Some(md);
+    }
+    // Component-key hover: `components/<section>/<name>` keys render the
+    // rich component documentation at the definition site.
+    if let Some(md) = component_key_hover(low, offset) {
+        return Some(md);
+    }
     let node = node_at(low, offset)?;
     let semantic = NodeRef::new(node);
     let first_line = excerpt(node.doc().bytes(), node.byte_range(), 1);
     Some(format!("`{:?}`\n\n```\n{first_line}\n```", semantic.kind()))
+}
+
+/// Component-key hover: the cursor on `components/<section>/<name>`'s key
+/// renders that component's rich documentation.
+fn component_key_hover(low: &suspect_low::LowDoc, offset: usize) -> Option<String> {
+    let node = node_at(low, offset)?;
+    let mut cur = node;
+    let key = loop {
+        if cur.kind() == SyntaxKind::Pair {
+            let k = cur.child_by_field("key")?;
+            let kr = k.byte_range();
+            if kr.start <= offset && offset <= kr.end {
+                break k;
+            }
+            return None;
+        }
+        cur = cur.parent()?;
+    };
+    let ptr = NodeRef::new(value_anchor(key)).path_from_root();
+    let toks = ptr.tokens();
+    if toks.len() == 3
+        && toks[0].as_ref() == "components"
+        && let Some(md) =
+            crate::hover_detail::try_rich_hover(toks[1].as_ref(), toks[2].as_ref(), low)
+    {
+        return Some(md);
+    }
+    None
+}
+
+/// Keyword-dictionary hover for mapping keys: resolves when the cursor
+/// sits on a key whose text names a documented keyword.
+fn keyword_hover(low: &suspect_low::LowDoc, offset: usize) -> Option<String> {
+    let node = node_at(low, offset)?;
+    // The cursor may be anywhere inside the key token; climb to the pair.
+    let mut cur = node;
+    let key = loop {
+        if cur.kind() == SyntaxKind::Pair {
+            let k = cur.child_by_field("key")?;
+            let kr = k.byte_range();
+            if kr.start <= offset && offset <= kr.end {
+                break k;
+            }
+            return None; // cursor on the value side: not keyword hover
+        }
+        cur = cur.parent()?;
+    };
+    let name = String::from_utf8_lossy(key.content().scalar_bytes());
+    let doc = crate::keyword_docs::lookup(&name)?;
+    Some(crate::keyword_docs::hover_markdown(doc))
 }
 
 /// Code-fence language tag for a document format.
@@ -625,17 +704,19 @@ components:
     fn hover_excerpt_truncates_to_40_lines() {
         let dir = std::env::temp_dir().join("suspect-lsp-nav-hover");
         std::fs::create_dir_all(&dir).unwrap();
-        let mut target = String::from("components:\n  schemas:\n    Big:\n");
+        let mut target = String::from("paths:\n  /big:\n");
         for i in 0..60 {
             target.push_str(&format!("      k{i}: v{i}\n"));
         }
         std::fs::write(dir.join("big.yaml"), &target).unwrap();
         let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
         ws.load_all("big.yaml").unwrap();
-        let text = "schema:\n  $ref: 'big.yaml#/components/schemas/Big'\n";
+        // A paths target has no rich renderer, so the excerpt path runs —
+        // that is what this test pins (40-line truncation + marker).
+        let text = "schema:\n  $ref: 'big.yaml#/paths/~1big'\n";
         let low = low_at(&dir, "h.yaml", text);
         ws.load_all("h.yaml").unwrap();
-        let md = hover_markdown(&ws, &low, offset_in(text, "Big")).unwrap();
+        let md = hover_markdown(&ws, &low, offset_in(text, "big.yaml")).unwrap();
         assert!(md.starts_with("```yaml\n"), "{md}");
         assert!(md.ends_with("\n```"));
         let body = md.trim_start_matches("```yaml\n").trim_end_matches("\n```");
