@@ -1,0 +1,158 @@
+name: application-targets
+
+# Application targets: the Go/Cobra API CLI (`suspect codegen-cli`) and the
+# TypeScript stdio MCP server (`suspect codegen-mcp`). Four explicit jobs run
+# the portable application suites only — never the whole workspace and never
+# all corpus-dependent ignored tests. The two native jobs build and drive real
+# emitted artifacts against loopback HTTP fixtures; no upstream API is
+# contacted. See docs/APPLICATION-TARGETS.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Rust planning, admission, refusal and deterministic-emission coverage for
+  # the shared application contract and both generators. Needs no native
+  # toolchain, so it is the gate that must never be environment-dependent.
+  planning:
+    name: Rust planning and emission
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+          shared-key: application-targets
+
+      - name: Application planning tests
+        run: >-
+          cargo test -p suspect-codegen
+          --test application --test api_cli --test mcp
+
+  # Portable native acceptance for the Go CLI: build the emitted module with
+  # the real Go toolchain under the default -mod=readonly, run its own tests,
+  # then drive the built executable against the python3 loopback fixture.
+  native-go-cli:
+    name: Native Go CLI acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+          shared-key: application-targets
+
+      # The emitted module carries an explicit `toolchain` directive; a stable
+      # release satisfies it without the toolchain downloading a replacement.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      # The loopback HTTP fixtures are the exactness oracle for both native
+      # suites, so python is pinned exactly, as in sdk-session-performance.yml.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.12"
+
+      - name: Report native toolchain versions
+        run: |
+          go version
+          python3 --version
+
+      - name: Go CLI generation and native acceptance
+        run: >-
+          cargo test -p suspect-codegen
+          --test api_cli -- --include-ignored
+
+  # Portable native acceptance for the MCP server: install the emitted
+  # lockfile, compile with the pinned TypeScript, then drive the built stdio
+  # server with the matching official MCP client against the python3 loopback
+  # fixture. This job needs npm registry access.
+  #
+  # The matrix low end is the emitted application's runtime floor, Node 22,
+  # which is also what its emitted `engines.node` declares. The app depends on
+  # the official MCP SDK (own minimum 20) and embeds the canonical Suspect
+  # TypeScript SDK as compiled-in source (`engines.node: ">=22"`, see
+  # crates/suspect-codegen/src/typescript/package.rs), so the real floor is the
+  # stricter of the two; `mcp::NODE_MINIMUM_MAJOR` derives it from that SDK
+  # constant rather than restating it. The high end is the current release the
+  # suite was last witnessed on locally, so the declared floor and a modern
+  # runtime are both really built and run here.
+  native-mcp-server:
+    name: Native MCP server acceptance (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22", "26"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+          shared-key: application-targets
+
+      # npm arrives with the Node distribution.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.12"
+
+      - name: Report native toolchain versions
+        run: |
+          node --version
+          npm --version
+          python3 --version
+
+      - name: MCP generation and native acceptance
+        run: >-
+          cargo test -p suspect-codegen
+          --test mcp -- --include-ignored
+
+  # `suspect codegen-cli` / `suspect codegen-mcp`: argument handling, report
+  # formats, check/current/drift, input failures, ownership conflicts and
+  # application profile discovery.
+  commands:
+    name: Suspect command integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+          shared-key: application-targets
+
+      - name: Application command tests
+        run: cargo test -p suspect-cli --test application_codegen

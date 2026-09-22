@@ -1,0 +1,21 @@
+{
+  "package_name": "widget-mcp-server",
+  "bin_name": "widget-mcp",
+  "server_name": "widget-control-plane",
+  "version": "1.4.0",
+  "node_version": "26.8.1",
+  "node_minimum_major": 22,
+  "npm_version": "11.19.0",
+  "typescript_version": "5.9.3",
+  "node_types_version": "26.6.2",
+  "mcp_server_version": "2.0.0",
+  "mcp_client_version": "2.0.0",
+  "credential_env": { "version": "v1", "schemes": { "apiKey": "WIDGET_API_KEY" } },
+  "server_url_env": "WIDGET_SERVER_URL",
+  "runtime": {
+    "call_deadline_ms": 30000,
+    "max_input_bytes": 262144,
+    "max_result_bytes": 1048576
+  },
+  "logs": { "policy": "calls" }
+}

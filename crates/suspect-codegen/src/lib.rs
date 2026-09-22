@@ -3,6 +3,10 @@
 //! codecs, HTTP clients, documentation and compatibility reports.
 
 pub mod admission;
+#[cfg(feature = "http-protocol")]
+pub mod api_cli;
+#[cfg(feature = "http-protocol")]
+pub mod application;
 pub mod attribution;
 pub mod backend;
 pub mod compatibility;
@@ -42,6 +46,8 @@ pub(crate) mod http_contract;
 mod http_examples;
 #[cfg(feature = "http-protocol")]
 pub mod http_protocol;
+#[cfg(feature = "http-protocol")]
+pub mod mcp;
 mod model_naming;
 pub mod python_codecs;
 pub mod python_http;

@@ -347,7 +347,11 @@ pub(super) fn body_type(body: &BodyPlan, names: &BTreeMap<SchemaId, String>) -> 
         .collect::<Vec<_>>()
         .join(" | ")
 }
-fn statuses(
+/// The concrete HTTP statuses this declared response actually selects, in one
+/// direction, split by whether the status suppresses a body. Native application
+/// targets reuse this exact table so a generated runtime never re-derives
+/// response selection from a generated type name.
+pub(crate) fn statuses(
     operation: &OperationPlan,
     response: &ResponsePlan,
     success: bool,

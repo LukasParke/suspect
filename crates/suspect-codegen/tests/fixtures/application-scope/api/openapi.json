@@ -1,0 +1,51 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Document scope probe", "version": "1.0.0" },
+  "servers": [{ "url": "http://127.0.0.1:1/v1" }],
+  "paths": {
+    "/things/{id}": {
+      "get": {
+        "operationId": "getThingInTree",
+        "summary": "Read one thing by an in-tree shared parameter",
+        "description": "The Parameter Object lives in a subdirectory of the entry document's own directory, so the surface manifest records it as a relative path.",
+        "parameters": [{ "$ref": "nested/identifier.json#/id" }],
+        "responses": {
+          "200": {
+            "description": "The thing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": { "id": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/others/{id}": {
+      "get": {
+        "operationId": "getThingOutsideTree",
+        "summary": "Read one thing by an out-of-tree shared parameter",
+        "description": "The Parameter Object lives above the entry document's own directory, so it has no relative form and generation must refuse it.",
+        "parameters": [{ "$ref": "../shared/identifier.json#/id" }],
+        "responses": {
+          "200": {
+            "description": "The thing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id"],
+                  "properties": { "id": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

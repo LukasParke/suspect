@@ -1,0 +1,166 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Widget control plane", "version": "1.4.0" },
+  "servers": [{ "url": "http://127.0.0.1:1/v1" }],
+  "security": [{ "apiKey": [] }],
+  "components": {
+    "securitySchemes": {
+      "apiKey": { "type": "apiKey", "in": "header", "name": "X-Api-Key" }
+    },
+    "schemas": {
+      "Widget": {
+        "type": "object",
+        "required": ["id", "amount"],
+        "properties": {
+          "id": { "type": "string" },
+          "amount": { "type": "integer" },
+          "active": { "type": "boolean" },
+          "note": { "type": ["string", "null"] },
+          "echo": { "$ref": "#/components/schemas/Echo" }
+        }
+      },
+      "Echo": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": { "type": "string" },
+          "trace": { "type": ["string", "null"] },
+          "apiKey": { "type": ["string", "null"] },
+          "body": { "type": ["string", "null"] }
+        }
+      },
+      "WidgetInput": {
+        "type": "object",
+        "required": ["name", "amount"],
+        "properties": {
+          "name": { "type": "string" },
+          "amount": { "type": "integer" },
+          "active": { "type": "boolean" },
+          "note": { "type": ["string", "null"] },
+          "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string" },
+          "code": { "type": "integer" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/widgets/{id}": {
+      "get": {
+        "operationId": "getWidget",
+        "summary": "Read one widget",
+        "description": "Reads exactly one widget by its exact identifier.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "verbose", "in": "query", "required": false, "schema": { "type": "boolean" } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer" } },
+          { "name": "label", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "trace", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "The widget",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } }
+          },
+          "404": {
+            "description": "No such widget",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+          }
+        }
+      }
+    },
+    "/widgets": {
+      "post": {
+        "operationId": "createWidget",
+        "summary": "Create one widget",
+        "description": "Creates exactly one widget from a finite JSON document.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/WidgetInput" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } }
+          },
+          "422": {
+            "description": "Rejected",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "purgeWidgets",
+        "summary": "Delete every widget in one scope",
+        "description": "Removes every widget in the named scope. This cannot be undone.",
+        "parameters": [
+          { "name": "scope", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "Purged" },
+          "409": {
+            "description": "Refused",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } }
+          }
+        }
+      }
+    },
+    "/blobs/{id}": {
+      "get": {
+        "operationId": "getBlob",
+        "summary": "Read one plain-text blob",
+        "description": "Returns plain text, which no exact JSON command surface can carry.",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Text",
+            "content": { "text/plain": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    },
+    "/matrices/{id}": {
+      "get": {
+        "operationId": "getMatrix",
+        "summary": "Read one widget by a structured selector",
+        "description": "The selector is an object, which no single CLI flag can carry exactly.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "object", "properties": { "row": { "type": "integer" } } }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The widget",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Widget" } } }
+          }
+        }
+      }
+    },
+    "/gadgets": {
+      "post": {
+        "operationId": "dup",
+        "description": "First declaration reusing an operationId on purpose.",
+        "responses": { "204": { "description": "OK" } }
+      }
+    },
+    "/gizmos": {
+      "post": {
+        "operationId": "dup",
+        "description": "Second declaration reusing the same operationId on purpose.",
+        "responses": { "204": { "description": "OK" } }
+      }
+    }
+  }
+}

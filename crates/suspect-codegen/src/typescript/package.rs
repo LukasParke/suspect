@@ -21,6 +21,12 @@ const TYPESCRIPT_VERSION: &str = "5.9.3";
 const NPM_VERSION: &str = "10.9.8";
 const NODE_VERSION: &str = "22.23.1";
 
+/// The Node major this package requires, written into every emitted
+/// `engines.node`. Anything that embeds these sources and compiles them in -
+/// such as the MCP application target - inherits this floor and must not
+/// declare a looser one.
+pub const NODE_MINIMUM_MAJOR: u32 = 22;
+
 /// Identity of a generated private npm package. Registry availability is not checked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageConfig {
@@ -132,7 +138,7 @@ fn emit_package(
         "type": "module",
         "types": "./dist/source/index.d.ts",
         "files": packed_files,
-        "engines": {"node": ">=22"},
+        "engines": {"node": format!(">={NODE_MINIMUM_MAJOR}")},
         "packageManager": format!("npm@{NPM_VERSION}"),
         "scripts": {"build": "tsc --project tsconfig.json"},
         "devDependencies": {"typescript": TYPESCRIPT_VERSION},
@@ -158,7 +164,8 @@ fn emit_package(
         "lockfileVersion": 3, "requires": true,
         "packages": {
             "": {"name": config.name, "version": config.version,
-                "devDependencies": {"typescript": TYPESCRIPT_VERSION}, "engines": {"node": ">=22"}},
+                "devDependencies": {"typescript": TYPESCRIPT_VERSION},
+                "engines": {"node": format!(">={NODE_MINIMUM_MAJOR}")}},
             "node_modules/typescript": typescript,
         },
     });
