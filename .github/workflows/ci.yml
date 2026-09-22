@@ -31,3 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo bench --workspace -- --test
+  corpus-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo run -p xtask -- fetch-corpus
+      - run: cargo test -p suspect-cli --test corpus_suite
