@@ -12,19 +12,43 @@ use suspect_low::NodeRef;
 use suspect_oas::OpenApi;
 use suspect_overlay::Value as OvValue;
 
-use crate::checks::diag;
 use crate::diagnostic::{Diagnostic, Severity};
+
+/// Validates `definitions/*` instances of a Swagger 2.0 document — the
+/// 2.0 counterpart of the components-schemas walk below.
+pub(crate) fn check_swagger_definition_instances(low: &suspect_low::LowDoc) -> Vec<Diagnostic> {
+    let mut out = Vec::new();
+    let Some(definitions) = low.root().get("definitions") else {
+        return out;
+    };
+    for entry in definitions.entries() {
+        let Some(schema) = entry.value else {
+            continue;
+        };
+        check_one_doc("2.0", schema, schema.byte_range(), &mut out);
+    }
+    out
+}
 
 pub(crate) fn check_schema_instances(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
     // The contract index is reference-closure based; components schemas
     // unreferenced from paths never register. Instance checking is a
     // whole-document guarantee, so walk the raw tree instead: every
-    // `components/schemas/*` entry, plus inline schemas under operations.
+    // `components/schemas/*` entry (3.x) or `definitions/*` entry (2.0),
+    // plus inline schemas under operations.
     let root = api.root();
     if let Some(components) = root.get("components")
         && let Some(schemas) = components.get("schemas")
     {
         for entry in schemas.entries() {
+            if let Some(schema) = entry.value {
+                check_one(api, schema, schema.byte_range(), out);
+            }
+        }
+    }
+    // Swagger 2.0: same guarantee over `definitions`.
+    if let Some(definitions) = root.get("definitions") {
+        for entry in definitions.entries() {
             if let Some(schema) = entry.value {
                 check_one(api, schema, schema.byte_range(), out);
             }
@@ -113,6 +137,25 @@ fn check_one(
     span: std::ops::Range<usize>,
     out: &mut Vec<Diagnostic>,
 ) {
+    let version = if api
+        .root()
+        .get("openapi")
+        .and_then(|v| v.as_str())
+        .is_some_and(|v| v.starts_with("3.0"))
+    {
+        "3.0"
+    } else {
+        "3.1"
+    };
+    check_one_doc(version, schema_node, span, out);
+}
+
+fn check_one_doc(
+    version: &str,
+    schema_node: NodeRef<'_>,
+    span: std::ops::Range<usize>,
+    out: &mut Vec<Diagnostic>,
+) {
     let schema_json = OvValue::from_node(schema_node).to_json();
     let Ok(mut schema) = serde_json::from_str::<serde_json::Value>(&schema_json) else {
         return;
@@ -124,12 +167,7 @@ fn check_one(
     // ignores unknown keywords, so translate it into a type union before
     // the wrapper compiles — otherwise `default: null` falsely violates
     // `type: string`.
-    if api
-        .root()
-        .get("openapi")
-        .and_then(|v| v.as_str())
-        .is_some_and(|v| v.starts_with("3.0"))
-    {
+    if version.starts_with("3.0") || version == "2.0" {
         translate_nullable(&mut schema);
     }
     let mut instances: Vec<(String, &serde_json::Value, &str)> = Vec::new();
@@ -180,8 +218,8 @@ fn check_one(
             continue;
         };
         for error in compiled.validate(instance_node) {
-            out.push(diag(
-                api,
+            out.push(super::diag_at(
+                schema_node,
                 "oas-schema-instance-invalid",
                 Severity::Warning,
                 span.clone(),
