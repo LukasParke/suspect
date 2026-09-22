@@ -1479,6 +1479,178 @@ const SCHEMA_KEYWORDS: &[(&str, KeywordDoc)] = &[
             "pathItems:\n  Media:\n    get: ..."
         ),
     ),
+    // -- Swagger 2.0-only and OpenAPI 3.2-only keywords -----------------------------
+
+    // -- Swagger 2.0-only keywords ---------------------------------------------------
+    (
+        "host",
+        kw!(
+            "host",
+            "Swagger 2.0",
+            "2.0 only",
+            "Host string, optionally with port",
+            "The API host, applied to all paths (3.x replaced this with `servers`).",
+            "Mutually exclusive with the 3.x `servers` array. No scheme — that comes from `schemes`.",
+            "host: plex.example.com\nbasePath: /"
+        ),
+    ),
+    (
+        "basePath",
+        kw!(
+            "basePath",
+            "Swagger 2.0",
+            "2.0 only",
+            "Path prefix string",
+            "The root path all paths are relative to (3.x folded this into each server URL).",
+            "Concatenated as `{scheme}://{host}{basePath}/{path}`. A trailing slash in basePath duplicates in client URLs.",
+            "basePath: /api/v1"
+        ),
+    ),
+    (
+        "schemes",
+        kw!(
+            "schemes",
+            "Swagger 2.0",
+            "2.0 only (3.0 moved to servers)",
+            "Array of `http`, `https`, `ws`, `wss`",
+            "The transfer protocols the API supports — 2.0's per-host equivalent of 3.x server URLs.",
+            "Repeated at operation level to override. 3.x models protocol in each server `url` instead.",
+            "schemes: [https]"
+        ),
+    ),
+    (
+        "consumes",
+        kw!(
+            "consumes",
+            "Swagger 2.0",
+            "2.0 only",
+            "Array of media type strings",
+            "Global default for request payload media types — 2.0's counterpart of 3.x requestBody content keys.",
+            "Operation-level `consumes` fully replaces the global list. `formData` parameters use it to pick the multipart boundary type.",
+            "consumes: [application/json]"
+        ),
+    ),
+    (
+        "produces",
+        kw!(
+            "produces",
+            "Swagger 2.0",
+            "2.0 only",
+            "Array of media type strings",
+            "Global default for response payload media types — 2.0's counterpart of 3.x response `content` keys.",
+            "Operation-level `produces` fully replaces the global list. Generated clients use it for response decoding.",
+            "produces: [application/json, application/xml]"
+        ),
+    ),
+    (
+        "definitions",
+        kw!(
+            "definitions",
+            "Swagger 2.0",
+            "2.0 only",
+            "Map of names to Schemas",
+            "2.0's reusable schema section — renamed `components/schemas` in 3.x.",
+            "Referenced via `$ref: '#/definitions/<name>'`. Dialect checks flag `definitions` under 3.1 documents.",
+            "definitions:\n  Pet:\n    type: object"
+        ),
+    ),
+    (
+        "securityDefinitions",
+        kw!(
+            "securityDefinitions",
+            "Swagger 2.0",
+            "2.0 only",
+            "Map of names to Security Scheme Objects",
+            "2.0's `components/securitySchemes`. Security requirements reference these by name.",
+            "2.0 scheme types add `basic` and `apiKey` spellings; `flow` (singular) replaces 3.x's `flows` map.",
+            "securityDefinitions:\n  ApiKeyAuth:\n    type: apiKey\n    in: header\n    name: X-Api-Key"
+        ),
+    ),
+    (
+        "collectionFormat",
+        kw!(
+            "collectionFormat",
+            "Swagger 2.0",
+            "2.0 only",
+            "One of `csv`, `ssv`, `tsv`, `pipes`, `multi`",
+            "How array parameters serialize: `csv` (comma-joined, the default), `ssv`/`tsv`/`pipes` (joined by space/tab/pipe), `multi` (repeated parameter).",
+            "3.x replaced this with `style` + `explode` — `csv` maps to `form, explode: false`, `multi` to `form, explode: true`.",
+            "type: array\nitems: {type: string}\ncollectionFormat: multi"
+        ),
+    ),
+    (
+        "flow",
+        kw!(
+            "flow",
+            "Swagger 2.0",
+            "2.0 only",
+            "One of `implicit`, `password`, `application`, `accessCode`",
+            "2.0's single-OAuth-flow keyword — 3.x replaced it with the `flows` map (`application` renamed `clientCredentials`, `accessCode` renamed `authorizationCode`).",
+            "Sits directly on the Security Scheme, with `authorizationUrl`/`tokenUrl`/`scopes` as siblings.",
+            "flow: application\ntokenUrl: https://auth.example.com/token"
+        ),
+    ),
+    // -- OpenAPI 3.2-only keywords ---------------------------------------------------
+    (
+        "itemSchema",
+        kw!(
+            "itemSchema",
+            "OpenAPI",
+            "3.2+",
+            "Schema",
+            "On a Media Type Object: the schema for each item of a map-like or streamed payload, distinct from the envelope schema. The 3.2 counterpart of 2020-12 `items` for wire maps.",
+            "The contract planner treats `itemSchema` as the element shape for positional/encoded parts — required there when encodings are positional.",
+            "content:\n  application/json:\n    itemSchema:\n      $ref: '#/components/schemas/Pet'"
+        ),
+    ),
+    (
+        "itemEncoding",
+        kw!(
+            "itemEncoding",
+            "OpenAPI",
+            "3.2+",
+            "Encoding Object or array of them",
+            "Per-item encoding for streamed or map-like payloads, the item-level counterpart of `encoding`.",
+            "Required (or an array schema) when `prefixEncoding` is used positionally — admission flags the combination.",
+            "itemEncoding:\n  contentType: application/json"
+        ),
+    ),
+    (
+        "prefixEncoding",
+        kw!(
+            "prefixEncoding",
+            "OpenAPI",
+            "3.2+",
+            "Array of Encoding Objects",
+            "Positional encodings for the first N entries of a streamed payload; `itemEncoding` covers the remainder.",
+            "Positional entries require `itemSchema` or an explicit array schema so lengths stay checkable.",
+            "prefixEncoding:\n  - contentType: application/json"
+        ),
+    ),
+    (
+        "parent",
+        kw!(
+            "parent",
+            "OpenAPI",
+            "3.2+",
+            "Tag name",
+            "Declares a tag hierarchy — this tag renders nested under the named parent in docs and explorers.",
+            "Forms a tree; cycles or dangling parents are a docs-rendering hazard. Pair with `kind` for visual grouping.",
+            "tags:\n  - name: Library Collections\n    parent: Library"
+        ),
+    ),
+    (
+        "kind",
+        kw!(
+            "kind",
+            "OpenAPI",
+            "3.2+",
+            "Tag kind string",
+            "Classifies a tag for rendering (e.g. `nav`, `registry`) so docs tools can group or style tag families.",
+            "3.2 addition alongside `parent`; tooling that predates 3.2 ignores both.",
+            "tags:\n  - name: Internal\n    kind: registry"
+        ),
+    ),
 ];
 
 /// Resolves documentation for a keyword in either vocabulary.
@@ -1682,6 +1854,37 @@ mod tests {
             missing.is_empty(),
             "keywords missing from the hover dictionary: {missing:?}"
         );
+    }
+
+    #[test]
+    fn swagger2_and_openapi32_keywords_are_covered() {
+        // The two versions with version-specific vocabularies beyond the
+        // shared 3.x core: every version-specific keyword must resolve.
+        const SWAGGER2: &[&str] = &[
+            "swagger",
+            "host",
+            "basePath",
+            "schemes",
+            "consumes",
+            "produces",
+            "definitions",
+            "securityDefinitions",
+            "collectionFormat",
+            "flow",
+        ];
+        const OPENAPI32: &[&str] = &[
+            "itemSchema",
+            "itemEncoding",
+            "prefixEncoding",
+            "parent",
+            "kind",
+        ];
+        for keyword in SWAGGER2.iter().chain(OPENAPI32.iter()) {
+            assert!(
+                lookup(keyword).is_some(),
+                "{keyword}: version-specific keyword missing from the dictionary"
+            );
+        }
     }
 
     #[test]
