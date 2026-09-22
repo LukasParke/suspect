@@ -95,7 +95,58 @@ const CORPUS: &[CorpusEntry] = &[
     },
     CorpusEntry {
         name: "gitlab.yaml",
-        urls: &["https://gitlab.com/gitlab-org/gitlab/-/raw/master/openapi/openapi.v3.yaml"],
+        urls: &[
+            "https://gitlab.com/gitlab-org/gitlab/-/raw/master/openapi/openapi.v3.yaml",
+            // Fallback mirror (CC0): openapi-directory snapshots the same v4 spec.
+            "https://raw.githubusercontent.com/APIs-guru/openapi-directory/main/APIs/gitlab.com/v3/swagger.yaml",
+        ],
+    },
+    // Public example specifications that the broader OpenAPI toolchain
+    // ecosystem (libopenapi, Spectral, Speakeasy) exercises, joined from
+    // their original public homes rather than any toolchain's test tree.
+    // OAI's own conformance examples (Apache-2.0) and real-world API specs
+    // published under CC0 via the APIs.guru openapi-directory.
+    CorpusEntry {
+        name: "petstore.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/_archive_/schemas/v3.0/pass/petstore.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "api-with-examples.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/_archive_/schemas/v3.0/pass/api-with-examples.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "callback-example.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/_archive_/schemas/v3.0/pass/callback-example.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "link-example.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/_archive_/schemas/v3.0/pass/link-example.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "uspto.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/_archive_/schemas/v3.0/pass/uspto.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "docusign.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/APIs-guru/openapi-directory/main/APIs/docusign.net/v2.1/openapi.yaml",
+        ],
+    },
+    CorpusEntry {
+        name: "asana.yaml",
+        urls: &[
+            "https://raw.githubusercontent.com/APIs-guru/openapi-directory/main/APIs/asana.com/1.0/openapi.yaml",
+        ],
     },
 ];
 

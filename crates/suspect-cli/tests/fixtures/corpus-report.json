@@ -1,0 +1,89 @@
+{
+  "entries": {
+    "api-with-examples.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "api.github.com.yaml": {
+      "contract_built": true,
+      "semantic_errors": 1,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "asana.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "callback-example.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 1,
+      "unsupported": false
+    },
+    "digitalocean.yaml": {
+      "contract_built": true,
+      "semantic_errors": 1062,
+      "semantic_warnings": 695,
+      "unsupported": false
+    },
+    "docusign.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "gitlab.yaml": {
+      "contract_built": false,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": true
+    },
+    "kubernetes-swagger.yaml": {
+      "contract_built": false,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": true
+    },
+    "link-example.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "petstore-expanded.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "petstore.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 4,
+      "unsupported": false
+    },
+    "stripe-sdk.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "stripe.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    },
+    "uspto.yaml": {
+      "contract_built": true,
+      "semantic_errors": 0,
+      "semantic_warnings": 0,
+      "unsupported": false
+    }
+  },
+  "format": "suspect.corpus-validation-report.v1"
+}

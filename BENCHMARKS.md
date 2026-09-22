@@ -17,6 +17,26 @@ Corpus: real popular OpenAPI specifications in `corpus/` (gitignored; fetch via
 Plus synthetic `fixtures/`: generated_100x100.json/.yaml, generated_1000x1000.json/.yaml,
 generated_2000x2000.yaml (circular `$ref` chain).
 
+### Corpus provenance
+
+The corpus mirrors the public example specifications the wider toolchain
+ecosystem (libopenapi, Spectral, Speakeasy) tests against, joined from their
+original public homes — never from a toolchain's own test tree:
+
+| Source | License | Specs |
+|---|---|---|
+| OAI OpenAPI-Specification `_archive_/schemas/v3.0/pass/` | Apache-2.0 | petstore, petstore-expanded, api-with-examples, callback-example, link-example, uspto |
+| APIs.guru openapi-directory | CC0-1.0 | docusign (v2.1), asana (1.0), gitlab fallback (v3 snapshot) |
+| Upstream API publishers | vendor terms | stripe, stripe-sdk, api.github.com, digitalocean, kubernetes-swagger, gitlab |
+
+The fetched set is validated on every CI run by
+`cargo test -p suspect-cli --test corpus_suite` (the `corpus-validation` job):
+every spec runs the workspace → semantic-validation → contract pipeline with a
+no-panic guarantee, the six OAI conformance examples must validate error-free,
+and per-spec diagnostic counts are snapshotted in
+`crates/suspect-cli/tests/fixtures/corpus-report.json` (regenerate with
+`SUSPECT_CORPUS_REPORT_WRITE=1 cargo test -p suspect-cli --test corpus_suite`).
+
 Run everything with: `cargo bench --workspace -- --quick` (per suite:
 `cargo bench -p <crate> --bench <name> -- --quick`).
 
