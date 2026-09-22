@@ -989,6 +989,28 @@ fn diff_docs(old: &LowDoc, cur: &LowDoc, ctx: &DiffCtx<'_>, out: &mut Vec<Breaki
         }
     }
 
+    // Webhooks share the path-item shape (methods directly under the
+    // entry); removals and body changes break consumers the same way.
+    if let (Some(ow), Some(cw)) = (o.get("webhooks"), c.get("webhooks")) {
+        let cur_items: BTreeMap<&str, NodeRef<'_>> = cw
+            .entries()
+            .into_iter()
+            .filter_map(|e| Some((e.key, e.value?)))
+            .collect();
+        for oe in ow.entries() {
+            let Some(ov) = oe.value else { continue };
+            match cur_items.get(oe.key) {
+                None => report_start(
+                    out,
+                    ctx,
+                    DiagnosticSeverity::ERROR,
+                    format!("webhook '{}' removed", oe.key),
+                ),
+                Some(cv) => diff_path_item(ov, *cv, oe.key, ctx, out),
+            }
+        }
+    }
+
     let Some(oschemas) = o.get("components").and_then(|x| x.get("schemas")) else {
         return;
     };
@@ -1079,6 +1101,122 @@ fn diff_operation(
     if let (Some(ob), Some(cb)) = (o.get("requestBody"), c.get("requestBody")) {
         diff_media_schemas(ob, cb, &format!("{head}/requestBody"), ctx, out);
     }
+    // Security tightening: a scheme gating the operation that was not
+    // there before (the whole `security` array is new, or an entry within
+    // it) may lock out consumers.
+    let old_schemes: HashSet<Vec<u8>> = o
+        .get("security")
+        .filter(|os| os.kind() == ValueKind::Array)
+        .map(|os| {
+            os.items()
+                .iter()
+                .flat_map(|req| {
+                    req.resolved()
+                        .entries()
+                        .into_iter()
+                        .map(|e| e.key.as_bytes().to_vec())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(cs) = c.get("security")
+        && cs.kind() == ValueKind::Array
+    {
+        for req in cs.items() {
+            for entry in req.resolved().entries() {
+                if !old_schemes.contains(entry.key.as_bytes()) {
+                    report(
+                        out,
+                        ctx,
+                        DiagnosticSeverity::WARNING,
+                        entry.key_node.byte_range(),
+                        format!("{head}: now requires security scheme '{}'", entry.key),
+                    );
+                }
+            }
+        }
+    }
+    // Parameter-level breaks: required-ified parameters and removals of
+    // required ones change what consumers must send.
+    diff_parameters(o, c, head, ctx, out);
+}
+
+/// Collects a node's `parameters` array keyed by `in` + `name`.
+fn params_of<'d>(n: &NodeRef<'d>) -> BTreeMap<(String, String), NodeRef<'d>> {
+    let mut map = BTreeMap::new();
+    if let Some(params) = n.get("parameters")
+        && params.kind() == ValueKind::Array
+    {
+        for p in params.items() {
+            if p.get("$ref").is_some() {
+                continue;
+            }
+            let key = (
+                p.get("in")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
+                p.get("name")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
+            );
+            map.insert(key, p);
+        }
+    }
+    map
+}
+
+/// Diffs the `parameters` arrays two operations (or path items) share,
+/// matched by `in` + `name`.
+fn diff_parameters(
+    o: NodeRef<'_>,
+    c: NodeRef<'_>,
+    head: String,
+    ctx: &DiffCtx<'_>,
+    out: &mut Vec<BreakingChange>,
+) {
+    let (oparams, cparams) = (params_of(&o), params_of(&c));
+    // Removals of required parameters (located at the file start: the old
+    // parameter node lives in the previous revision's coordinates).
+    for (key, old_param) in &oparams {
+        if !cparams.contains_key(key) {
+            let was_required = old_param
+                .get("required")
+                .and_then(|r| r.as_bool())
+                .unwrap_or(false);
+            if was_required {
+                report_start(
+                    out,
+                    ctx,
+                    DiagnosticSeverity::ERROR,
+                    format!("{head}: required parameter '{}' ({}) removed", key.1, key.0),
+                );
+            }
+        }
+    }
+    // Newly-required parameters, including parameters that appeared and
+    // were required from the start.
+    for (key, cur_param) in &cparams {
+        let was_required = oparams
+            .get(key)
+            .and_then(|p| p.get("required"))
+            .and_then(|r| r.as_bool())
+            .unwrap_or(false);
+        let now_required = cur_param
+            .get("required")
+            .and_then(|r| r.as_bool())
+            .unwrap_or(false);
+        if now_required && !was_required {
+            report(
+                out,
+                ctx,
+                DiagnosticSeverity::ERROR,
+                cur_param.byte_range(),
+                format!("{head}: parameter '{}' ({}) is now required", key.1, key.0),
+            );
+        }
+    }
 }
 
 /// Diffs the `content.<media-type>.schema` pairs two response/request-body
@@ -1101,6 +1239,15 @@ fn diff_media_schemas(
     for me in oc.entries() {
         let Some(ov) = me.value else { continue };
         let Some(cv) = cur_types.get(me.key) else {
+            // A media type disappearing changes the wire format consumers
+            // can negotiate.
+            report(
+                out,
+                ctx,
+                DiagnosticSeverity::ERROR,
+                ov.byte_range(),
+                format!("{chain}: media type '{}' removed", me.key),
+            );
             continue;
         };
         if let (Some(os), Some(cs)) = (ov.get("schema"), cv.get("schema")) {
@@ -1190,6 +1337,22 @@ fn diff_schema(
             DiagnosticSeverity::ERROR,
             creq_node_range.clone(),
             format!("{chain}: property '{name}' added to required"),
+        );
+    }
+
+    // Additional-property locking: consumers sending extra fields break.
+    if let Some(ca) = c.get("additionalProperties")
+        && ca.resolved().as_bool() == Some(false)
+        && o.get("additionalProperties")
+            .and_then(|oa| oa.resolved().as_bool())
+            != Some(false)
+    {
+        report(
+            out,
+            ctx,
+            DiagnosticSeverity::WARNING,
+            ca.byte_range(),
+            format!("{chain}: additionalProperties set to false"),
         );
     }
 
@@ -2021,6 +2184,125 @@ components:
         let changes = breaking_changes(&ws, &old);
         let c = find(&changes, "'id' added to required");
         assert_eq!(c.severity, DiagnosticSeverity::ERROR);
+    }
+
+    #[test]
+    fn breaking_new_security_parameter_and_media_are_reported() {
+        // Security: a scheme added to an operation's security is a warning.
+        let text_old = "\
+openapi: 3.1.0
+info: {title: t, version: '1'}
+paths:
+  /p:
+    get:
+      operationId: getP
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+";
+        let text_new = "\
+openapi: 3.1.0
+info: {title: t, version: '1'}
+paths:
+  /p:
+    get:
+      operationId: getP
+      security:
+        - ApiKey: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            text/plain:
+              schema:
+                type: string
+";
+        let dir = std::env::temp_dir().join("suspect-lsp-cmd-br-new");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        std::fs::write(dir.join("api.yaml"), text_new).unwrap();
+        ws.load_all("api.yaml").unwrap();
+        let mut old = HashMap::new();
+        let uri = uri_ending(&ws, "api.yaml");
+        old.insert(uri.as_str().to_owned(), text_old.to_owned());
+        let changes = breaking_changes(&ws, &old);
+        find(&changes, "now requires security scheme 'ApiKey'");
+        find(&changes, "parameter 'q' (query) is now required");
+        find(&changes, "media type 'application/json' removed");
+    }
+
+    #[test]
+    fn breaking_required_parameter_removal_and_additional_properties() {
+        let text_old = "\
+openapi: 3.1.0
+info: {title: t, version: '1'}
+paths:
+  /p:
+    get:
+      operationId: getP
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+";
+        let text_new = "\
+openapi: 3.1.0
+info: {title: t, version: '1'}
+paths:
+  /p:
+    get:
+      operationId: getP
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  id:
+                    type: string
+";
+        let dir = std::env::temp_dir().join("suspect-lsp-cmd-br-rem");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        std::fs::write(dir.join("api.yaml"), text_new).unwrap();
+        ws.load_all("api.yaml").unwrap();
+        let mut old = HashMap::new();
+        let uri = uri_ending(&ws, "api.yaml");
+        old.insert(uri.as_str().to_owned(), text_old.to_owned());
+        let changes = breaking_changes(&ws, &old);
+        let c = find(&changes, "required parameter 'q' (query) removed");
+        assert_eq!(c.severity, DiagnosticSeverity::ERROR);
+        find(&changes, "additionalProperties set to false");
     }
 
     #[test]

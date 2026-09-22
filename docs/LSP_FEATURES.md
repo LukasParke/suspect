@@ -1470,6 +1470,36 @@ record of what was planned and delivered.
 | $ref graph visualization | ✅ Mermaid output via `logMessage` |
 | Hex color swatches (`documentColor`/`colorPresentation`) | ✅ lexical scan of scalar values |
 
+## Depth Upgrades — shipped after the feature matrix was frozen
+
+A second depth pass shipped across the authoring-intelligence surface;
+the matrix above remains accurate, and these additions extend it.
+
+| Area | Upgrade |
+|---|---|
+| Quick fixes | 17 diagnostic codes have CST-anchored repairs (was 4): parameter locations as a four-choice picker, license URL, discriminator `propertyName`, root `servers`/`tags` skeletons (null or absent), undeclared-tag declaration, unknown-scheme declaration (three document shapes), lint codes `operation-summary`/`-description`/`oas3-api-servers`/`openapi-tags`/`path-keys-no-trailing-slash`, and unresolved-`$ref` did-you-mean rewrites with edit-distance suggestions over workspace components |
+| Completion | Schema-shaped: value vocabularies (schema/scheme `type`, parameter `in`/`style`, `format`) with static docs on resolve, security-requirement scheme names, discriminator mapping values, `links.*.operationId` with `METHOD /path` details, root tag names, required-array property names, media-type keys, and scheme-object keys. Empty value positions (`in:` after the colon) complete via a backward probe |
+| Semantic tokens | Legend: 8 types/1 modifier → 13/4 (documentation, declaration, deprecated). `$ref` targets as type references, description/summary as documentation strings, `deprecated: true` carries the modifier, requirement keys are classes, parameter names are parameters, every component section's entries are declared types, enum items are enum members, `x-*` keys are macros, quoted scalars are strings. Fixed the pre-existing walker bug that dropped every sequence-item mapping subtree (parameters, security, allOf) |
+| Inlay hints | `: a · b · c` enum-value summaries (4 + `+N`) and `· required` markers on properties listed in the owning schema's `required` |
+| Lint | Built-in OAS pack 18 → 31 rules (Spectral-parity names); new native functions `StatusRange`, `UniqueOperationIds`, `SecurityDefined`, `AbsolutePath`, `NoIdenticalPaths`, `ParameterSchemaOrContent`, `NotMatch`. Engine fixes: `$..key.*` no longer misclassifies as a literal key (silently dropped rules), and root-level pairs now match descendant-key selections |
+| Validation | New Swagger 2.0 battery (`validate_swagger_low`) — the typed 3.x model cannot load Swagger documents, so 2.0 now gets full semantic checks (info, operations, parameters, path templates, security, definitions, responses) in the same battery. New SDK-readiness notes mirroring the SDK compiler's generation contract: unnamed operations (`METHOD /path` fallback), untyped `text/event-stream` responses, `:var` path templates (compatibility profile) |
+| Breaking changes | Five new break classes: added security schemes (warning), parameters now required including newly-appeared ones (error), required-parameter removal (error, pinned to file start), media-type removal (error), `additionalProperties: false` (warning); webhooks diff like path items |
+| Rename | Follows plain-name expression uses: `discriminator.mapping` values and security requirement keys rewrite alongside `$ref` edges, workspace-wide |
+| Document links | Web URLs (`externalDocs.url`, `license.url`, `contact.url`, `mailto:` for `contact.email`) and `links.*.operationId` in-document jumps to the operation |
+
+### Codegen seam — the boundary and what shipped
+
+The SDK compiler deliberately exposes no public contract API
+(`HttpContract` is `pub(crate)`) and refuses to infer SDK names from
+operation names, so hover cannot honestly predict generated method
+names. The seam that does ship: authoring-time sdk-readiness
+diagnostics mirror the admission refusals (duplicated operationId and
+undeclared security schemes surface as `oas-*` checks; the fallback and
+compatibility-profile behaviors surface as `sdk-*` notes), so
+generation-time failures appear as squiggles while writing the spec.
+The follow-up path is a CLI-driven custom request (`suspect/
+generationContract`) once the compiler gains a public admission API.
+
 ### Deliberately not implemented
 - `notebookDocument/*`: no OpenAPI authoring surface today.
 - `window/showMessage(Request)`: logMessage covers diagnostics narration;

@@ -117,6 +117,66 @@ fn cases() -> Vec<Case> {
             clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets:\n    get: {}\n  /pets/{id}:\n    get: {}\n",
         },
         Case {
+            code: "operation-operationId-unique",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      operationId: same\n  /b:\n    get:\n      operationId: same\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      operationId: getA\n  /b:\n    get:\n      operationId: getB\n",
+        },
+        Case {
+            code: "operation-operationId-valid-in-url",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      operationId: get a!\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      operationId: get-a\n",
+        },
+        Case {
+            code: "operation-4xx-response",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200': {description: ok}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200': {description: ok}\n        '404': {description: nope}\n",
+        },
+        Case {
+            code: "operation-singular-tag",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      tags: [one, two]\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      tags: [one]\n",
+        },
+        Case {
+            code: "info-description",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths: {}\n",
+        },
+        Case {
+            code: "tag-description",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\ntags:\n  - name: pets\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\ntags:\n  - name: pets\n    description: pet routes\npaths: {}\n",
+        },
+        Case {
+            code: "no-eval-in-markdown",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: calls eval( internally}\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: adds things}\npaths: {}\n",
+        },
+        Case {
+            code: "no-script-tags-in-markdown",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: \"<script>alert(1)</script>\"}\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: safe text}\npaths: {}\n",
+        },
+        Case {
+            code: "security-defined",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\ncomponents:\n  securitySchemes:\n    ApiKey: {type: apiKey}\nsecurity:\n  - OAuth: []\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\ncomponents:\n  securitySchemes:\n    ApiKey: {type: apiKey}\nsecurity:\n  - ApiKey: []\npaths: {}\n",
+        },
+        Case {
+            code: "path-declarations-must-exist",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths:\n  pets:\n    get: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths:\n  /pets:\n    get: {}\n",
+        },
+        Case {
+            code: "parameter-schema-or-content",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths:\n  /a:\n    get:\n      parameters:\n        - name: q\n          in: query\n      responses: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths:\n  /a:\n    get:\n      parameters:\n        - name: q\n          in: query\n          schema: {type: string}\n      responses: {}\n",
+        },
+        Case {
+            code: "parameter-description",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths:\n  /a:\n    get:\n      parameters:\n        - name: q\n          in: query\n          schema: {type: string}\n      responses: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths:\n  /a:\n    get:\n      parameters:\n        - name: q\n          in: query\n          description: the limit\n          schema: {type: string}\n      responses: {}\n",
+        },
+        Case {
             code: "overlay-info-description",
             firing: "overlay: \"1.0.0\"\ninfo: {title: t}\nactions: []\n",
             clean: "overlay: \"1.0.0\"\ninfo: {title: t, description: d}\nactions: []\n",

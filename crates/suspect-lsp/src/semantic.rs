@@ -33,10 +33,20 @@ pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::NUMBER,
     SemanticTokenType::REGEXP,
     SemanticTokenType::COMMENT,
+    SemanticTokenType::STRING,
+    SemanticTokenType::CLASS,
+    SemanticTokenType::PARAMETER,
+    SemanticTokenType::ENUM_MEMBER,
+    SemanticTokenType::MACRO,
 ];
 
 /// Token modifiers emitted by [`semantic_tokens_full`], in legend order.
-pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[SemanticTokenModifier::DEFINITION];
+pub const TOKEN_MODIFIERS: &[SemanticTokenModifier] = &[
+    SemanticTokenModifier::DEFINITION,
+    SemanticTokenModifier::new("documentation"),
+    SemanticTokenModifier::new("declaration"),
+    SemanticTokenModifier::new("deprecated"),
+];
 
 // Legend indices into [`TOKEN_TYPES`].
 const NAMESPACE: u32 = 0;
@@ -47,9 +57,17 @@ const PROPERTY: u32 = 4;
 const NUMBER: u32 = 5;
 const REGEXP: u32 = 6;
 const COMMENT: u32 = 7;
+const STRING: u32 = 8;
+const CLASS: u32 = 9;
+const PARAMETER: u32 = 10;
+const ENUM_MEMBER: u32 = 11;
+const MACRO: u32 = 12;
 
-/// Modifier bit for component schema names (`definition`).
-const DEFINITION: u32 = 1;
+/// Modifier bit positions (legend order).
+const DEFINITION: u32 = 1 << 0;
+const DOCUMENTATION: u32 = 1 << 1;
+const DECLARATION: u32 = 1 << 2;
+const DEPRECATED: u32 = 1 << 3;
 
 /// Keys highlighted as keywords wherever they appear.
 const KEYWORDS: &[&str] = &[
@@ -140,8 +158,14 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
                             String::from_utf8_lossy(key.content().scalar_bytes()).into_owned();
                         let mut child_path = path.clone();
                         child_path.push(key_text.clone().into_boxed_str());
-                        if let Some(ty) = key_type(&child_path, &key_text) {
-                            let mods = if ty == TYPE { DEFINITION } else { 0 };
+                        if key_text.starts_with("x-") {
+                            // Extension keys read as directives, not spec keys.
+                            push_token(&mut raw, bytes, li, token_range(&key.content()), MACRO, 0);
+                        } else if let Some(ty) = key_type(&child_path, &key_text) {
+                            let mut mods = 0u32;
+                            if ty == TYPE {
+                                mods |= DEFINITION | DECLARATION;
+                            }
                             push_token(&mut raw, bytes, li, token_range(&key.content()), ty, mods);
                         }
                         if let Some(value) = child.child_by_field("value") {
@@ -153,6 +177,8 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
                                 ValueKind::Int | ValueKind::Float
                             ) {
                                 push_token(&mut raw, bytes, li, token_range(&vc), NUMBER, 0);
+                            } else {
+                                value_tokens(&mut raw, bytes, li, &vc, &key_text, &child_path);
                             }
                             match NodeRef::new(vc).kind() {
                                 suspect_low::ValueKind::Object | suspect_low::ValueKind::Array => {
@@ -167,7 +193,20 @@ fn collect_tokens(doc: &OpenDoc) -> Vec<SemanticToken> {
                     for (idx, item) in node.sequence_items().into_iter().enumerate() {
                         let mut child_path = path.clone();
                         child_path.push(idx.to_string().into_boxed_str());
-                        if let Some(first) = item.first_meaningful_child() {
+                        // Enum members and $ref lists carry their own token
+                        // types even though their items are bare scalars.
+                        if path.last().is_some_and(|t| t.as_ref() == "enum")
+                            && let Some(first) = item.first_meaningful_child()
+                        {
+                            push_token(&mut raw, bytes, li, token_range(&first), ENUM_MEMBER, 0);
+                            continue;
+                        }
+                        // Item mappings are pushed whole so the Mapping arm classifies their
+                        // pairs; pushing a bare first pair child would drop
+                        // the subtree in the walker's `_` arm.
+                        if item.kind() == SyntaxKind::Mapping {
+                            stack.push((item, child_path));
+                        } else if let Some(first) = item.first_meaningful_child() {
                             stack.push((first, child_path));
                         }
                     }
@@ -204,16 +243,84 @@ fn key_type(path_tokens: &[std::boxed::Box<str>], key_text: &str) -> Option<u32>
     if path_tokens.len() == 1 {
         return Some(NAMESPACE);
     }
+    // Named entries of any component section are type-like definitions
+    // (schemas, responses, parameters, securitySchemes, …).
     if path_tokens.len() == 3
         && path_tokens[0].as_ref() == "components"
-        && path_tokens[1].as_ref() == "schemas"
+        && COMPONENT_SECTION_KEYS.contains(&path_tokens[1].as_ref())
     {
         return Some(TYPE);
+    }
+    // Security requirement keys name declared schemes: class-like uses.
+    // The scheme pair sits inside the requirement item mapping, so its
+    // path ends `…/security/<index>/<scheme>`.
+    if path_tokens.len() >= 3 && path_tokens[path_tokens.len() - 3].as_ref() == "security" {
+        return Some(CLASS);
     }
     if path_tokens.len() >= 2 && path_tokens[path_tokens.len() - 2].as_ref() == "properties" {
         return Some(PROPERTY);
     }
     None
+}
+
+/// Component sections whose named entries read as type definitions.
+const COMPONENT_SECTION_KEYS: &[&str] = &[
+    "schemas",
+    "responses",
+    "parameters",
+    "examples",
+    "requestBodies",
+    "headers",
+    "securitySchemes",
+    "links",
+    "callbacks",
+    "pathItems",
+];
+
+/// Token emission for scalar values, classified by the owning key and
+/// pointer path: `$ref` targets read as type references, description and
+/// summary strings as documentation, `deprecated: true` carries the
+/// deprecated modifier, parameter names are parameters, and explicitly
+/// quoted strings are strings. Unquoted plain scalars stay uncolored —
+/// they may be booleans, numbers, or null.
+fn value_tokens(
+    raw: &mut Vec<RawToken>,
+    bytes: &[u8],
+    li: &suspect_source::LineIndex,
+    value: &SNode<'_>,
+    key_text: &str,
+    path: &[std::boxed::Box<str>],
+) {
+    if matches!(
+        NodeRef::new(*value).kind(),
+        ValueKind::Object | ValueKind::Array
+    ) {
+        return;
+    }
+    match key_text {
+        "$ref" => push_token(raw, bytes, li, token_range(value), TYPE, DEFINITION),
+        "description" | "summary" => {
+            push_token(raw, bytes, li, token_range(value), STRING, DOCUMENTATION);
+        }
+        "deprecated" => {
+            if matches!(NodeRef::new(*value).kind(), ValueKind::Bool)
+                && String::from_utf8_lossy(value.scalar_bytes()).trim() == "true"
+            {
+                push_token(raw, bytes, li, token_range(value), KEYWORD, DEPRECATED);
+            }
+        }
+        "name" if path.iter().any(|t| t.as_ref() == "parameters") => {
+            push_token(raw, bytes, li, token_range(value), PARAMETER, 0);
+        }
+        _ => {
+            if matches!(
+                value.scalar_style(),
+                ScalarStyle::DoubleQuoted | ScalarStyle::SingleQuoted
+            ) {
+                push_token(raw, bytes, li, token_range(value), STRING, 0);
+            }
+        }
+    }
 }
 
 /// Byte range a semantic token should cover for scalar node `node`.
@@ -343,10 +450,111 @@ pub fn inlay_hints(doc: &OpenDoc, ws: &Workspace, range: Range) -> Vec<InlayHint
                     data: None,
                 });
             }
+        } else if key_text == "enum" {
+            // `: a · b · c` summary of the declared values, after the key.
+            let vals = enum_value_summary(&NodeRef::new(n));
+            if let Some(summary) = vals {
+                let kc = key.content();
+                let pos = end_position(bytes, li, &kc);
+                if !position_in_range(pos, &range) {
+                    continue;
+                }
+                out.push(InlayHint {
+                    position: pos,
+                    label: InlayHintLabel::String(format!(": {summary}")),
+                    kind: Some(InlayHintKind::TYPE),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: Some(true),
+                    padding_right: None,
+                    data: None,
+                });
+            }
+        } else if required_property(&NodeRef::new(n)) == Some(true) {
+            // `· required` marker on properties listed in the owning
+            // schema's `required` array.
+            let kc = key.content();
+            let pos = end_position(bytes, li, &kc);
+            if !position_in_range(pos, &range) {
+                continue;
+            }
+            out.push(InlayHint {
+                position: pos,
+                label: InlayHintLabel::String("· required".to_owned()),
+                kind: Some(InlayHintKind::TYPE),
+                text_edits: None,
+                tooltip: None,
+                padding_left: Some(true),
+                padding_right: None,
+                data: None,
+            });
         }
     }
     out.truncate(MAX_HINTS);
     out
+}
+
+/// `a · b · c` summary of an `enum:` pair's string values; more than four
+/// values collapse to a `+N` suffix.
+fn enum_value_summary(pair: &NodeRef<'_>) -> Option<String> {
+    let value = NodeRef::new(pair.syntax().child_by_field("value")?.content());
+    if value.kind() != ValueKind::Array {
+        return None;
+    }
+    let names: Vec<String> = value
+        .items()
+        .iter()
+        .filter_map(|i| i.as_str().map(String::from))
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    const SHOWN: usize = 4;
+    if names.len() > SHOWN {
+        Some(format!(
+            "{} · +{}",
+            names[..SHOWN].join(" · "),
+            names.len() - SHOWN
+        ))
+    } else {
+        Some(names.join(" · "))
+    }
+}
+
+/// The `required` membership for a property pair, or `None` when the pair
+/// is not a property of a schema with a `required` array.
+fn required_property(pair: &NodeRef<'_>) -> Option<bool> {
+    let pointer = pair.path_from_root();
+    let tokens = pointer.tokens();
+    if tokens.len() < 2 || tokens[tokens.len() - 2].as_ref() != "properties" {
+        return None;
+    }
+    let name = tokens.last()?.to_string();
+    // Walk up from the property pair to the `properties` pair, then take
+    // its owning mapping (the schema) and look up `required`.
+    let mut cur = pair.syntax().parent();
+    let props_pair = loop {
+        let n = cur?;
+        if n.kind() == SyntaxKind::Pair {
+            break n;
+        }
+        cur = n.parent();
+    };
+    let props_key = props_pair.child_by_field("key")?;
+    if props_key.scalar_bytes() != b"properties" {
+        return None;
+    }
+    let schema_map = props_pair.parent()?;
+    let required = NodeRef::new(schema_map.content()).get("required")?;
+    if required.kind() != ValueKind::Array {
+        return None;
+    }
+    Some(
+        required
+            .items()
+            .iter()
+            .any(|i| i.as_str() == Some(name.as_str())),
+    )
 }
 
 /// Builds the `→ Target (file)` hint for one `$ref` value node.
@@ -787,6 +995,158 @@ components:
     }
 
     #[test]
+    fn extension_keys_are_macros_and_ref_targets_are_type_references() {
+        let text = "\
+openapi: 3.1.0
+info: {title: t, version: \"1\"}
+x-internal: true
+x-rate-limit: 100
+paths:
+  /p:
+    get:
+      responses:
+        \"200\":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+  schemas:
+    Pet: {}
+";
+        let doc = OpenDoc::parse("file:///mem/x.yaml".into(), text.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        let mut saw_macro = false;
+        let mut saw_ref_type = false;
+        for t in &tokens.data {
+            if t.token_type == MACRO {
+                saw_macro = true;
+            }
+            if t.token_type == TYPE
+                && t.token_modifiers_bitset & DEFINITION != 0
+                && t.token_modifiers_bitset & DECLARATION == 0
+            {
+                saw_ref_type = true;
+            }
+        }
+        assert!(saw_macro, "x- keys must be macro tokens");
+        assert!(saw_ref_type, "$ref targets must be type references");
+        // Component entries of every section are declarations.
+        let mut saw_scheme_decl = false;
+        for t in &tokens.data {
+            if t.token_type == TYPE && t.token_modifiers_bitset & DECLARATION != 0 {
+                saw_scheme_decl = true;
+            }
+        }
+        assert!(saw_scheme_decl, "securitySchemes names are declared types");
+    }
+
+    #[test]
+    fn descriptions_and_deprecation_carry_modifiers() {
+        let text = "\
+openapi: 3.1.0
+info: {title: t, version: \"1\"}
+paths:
+  /p:
+    get:
+      description: Find pets by status
+      deprecated: true
+      responses:
+        \"200\":
+          description: ok
+";
+        let doc = OpenDoc::parse("file:///mem/d.yaml".into(), text.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        let mut saw_doc = false;
+        let mut saw_deprecated = false;
+        for t in &tokens.data {
+            if t.token_modifiers_bitset & DOCUMENTATION != 0 {
+                saw_doc = true;
+            }
+            if t.token_modifiers_bitset & DEPRECATED != 0 {
+                saw_deprecated = true;
+            }
+        }
+        assert!(saw_doc, "description/summary values are documentation");
+        assert!(saw_deprecated, "deprecated: true carries the modifier");
+        // `deprecated: false` does not.
+        let text_false = text.replace("deprecated: true", "deprecated: false");
+        let doc2 = OpenDoc::parse("file:///mem/d.yaml".into(), text_false);
+        let tokens2 = semantic_tokens_full(&doc2);
+        assert!(
+            tokens2
+                .data
+                .iter()
+                .all(|t| t.token_modifiers_bitset & DEPRECATED == 0),
+            "false must not be deprecated-marked"
+        );
+    }
+
+    #[test]
+    fn requirement_keys_are_classes_and_parameter_names_are_parameters() {
+        let text = "\
+openapi: 3.1.0
+info: {title: t, version: \"1\"}
+paths:
+  /p:
+    get:
+      parameters:
+        - name: limit
+          in: query
+      security:
+        - ApiKeyAuth: []
+      responses:
+        \"200\":
+          description: ok
+components:
+  securitySchemes:
+    ApiKeyAuth: {}
+";
+        let doc = OpenDoc::parse("file:///mem/r.yaml".into(), text.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        let mut saw_class = false;
+        let mut saw_param = false;
+        for t in &tokens.data {
+            if t.token_type == CLASS {
+                saw_class = true;
+            }
+            if t.token_type == PARAMETER {
+                saw_param = true;
+            }
+        }
+        assert!(saw_class, "requirement keys are class tokens");
+        assert!(saw_param, "parameter names are parameter tokens");
+    }
+
+    #[test]
+    fn enum_items_are_enum_members() {
+        let text = "\
+openapi: 3.1.0
+info: {title: t, version: \"1\"}
+components:
+  schemas:
+    Status:
+      type: string
+      enum:
+        - available
+        - pending
+        - sold
+";
+        let doc = OpenDoc::parse("file:///mem/e.yaml".into(), text.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        let members = tokens
+            .data
+            .iter()
+            .filter(|t| t.token_type == ENUM_MEMBER)
+            .count();
+        assert_eq!(members, 3, "every enum item is an enum member");
+    }
+
+    #[test]
     fn inlay_hint_shows_ref_target() {
         let dir = std::env::temp_dir().join("suspect-lsp-inlay-test");
         let _ = std::fs::remove_dir_all(&dir);
@@ -815,6 +1175,77 @@ components:
         assert!(
             label.contains("\u{2192} Pet"),
             "target name in label: {label}"
+        );
+    }
+
+    #[test]
+    fn inlay_hints_summarize_enums_and_mark_required_properties() {
+        let dir = std::env::temp_dir().join("suspect-lsp-inlay-req");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = "\
+openapi: 3.1.0
+info: {title: t, version: \"1\"}
+components:
+  schemas:
+    Status:
+      type: string
+      enum:
+        - available
+        - pending
+        - sold
+        - archived
+        - removed
+    Pet:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        tag:
+          type: string
+";
+        std::fs::write(dir.join("spec.yaml"), text).unwrap();
+        let uri = suspect_source::Uri::from_path(&dir.join("spec.yaml")).unwrap();
+        let ws = suspect_ref::WorkspaceBuilder::new()
+            .root(&dir)
+            .build()
+            .unwrap();
+        ws.load_all(uri.as_str()).unwrap();
+        let doc = OpenDoc::parse(uri, text.to_owned());
+        let full = Range {
+            start: Position::default(),
+            end: Position {
+                line: u32::MAX,
+                character: u32::MAX,
+            },
+        };
+        let hints = inlay_hints(&doc, &ws, full);
+        let labels: Vec<&str> = hints
+            .iter()
+            .filter_map(|h| match &h.label {
+                InlayHintLabel::String(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        // The enum summary shows four values plus a +1 suffix.
+        assert!(
+            labels
+                .iter()
+                .any(|l| l.contains("available · pending · sold · archived · +1")),
+            "enum summary hint: {labels:?}"
+        );
+        // The required property carries the marker; the optional one does not.
+        assert!(
+            labels.iter().any(|l| l.contains("required")),
+            "required marker: {labels:?}"
+        );
+        // Exactly one required marker (name, not tag).
+        assert_eq!(
+            labels.iter().filter(|l| l.contains("required")).count(),
+            1,
+            "{labels:?}"
         );
     }
 

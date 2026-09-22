@@ -21,7 +21,9 @@ use std::sync::Arc;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use suspect_low::LowDoc;
 use suspect_lsp::completion::{
-    CompletionContext, SCHEMA_KEYS, context_at, key_items, ref_candidates, ref_items,
+    CompletionContext, MEDIA_TYPES, SCHEMA_KEYS, component_name_items, component_names, context_at,
+    key_items, operation_id_candidates, operation_id_items, property_name_items, ref_candidates,
+    ref_items, tag_name_candidates, tag_name_items, value_items,
 };
 use suspect_lsp::diagnostics::compute_diagnostics;
 use suspect_lsp::navigation::{goto_definition, hover_markdown, node_at};
@@ -268,6 +270,16 @@ fn bench_completion(c: &mut Criterion) {
             let items = match ctx {
                 CompletionContext::Refs => ref_items(ref_candidates(&ws, &uri), &uri),
                 CompletionContext::Keys(keys) => key_items(keys),
+                CompletionContext::Values(values) => value_items(values),
+                CompletionContext::ComponentNames(section) => {
+                    component_name_items(component_names(&low, section), section, &uri)
+                }
+                CompletionContext::OperationIds => {
+                    operation_id_items(operation_id_candidates(&low))
+                }
+                CompletionContext::TagNames => tag_name_items(tag_name_candidates(&low)),
+                CompletionContext::SchemaPropertyNames(names) => property_name_items(names),
+                CompletionContext::MediaTypes => value_items(MEDIA_TYPES),
                 CompletionContext::None => Vec::new(),
             };
             black_box(items.len())
@@ -377,7 +389,7 @@ fn bench_feature_ops(c: &mut Criterion) {
                 || LspUrl::parse(uri.as_str()).unwrap(),
                 |lsp_url| {
                     black_box(suspect_lsp::actions::code_actions(
-                        &doc, &lsp_url, range, &diags, false,
+                        &doc, &lsp_url, range, &diags, None, false,
                     ))
                 },
                 criterion::BatchSize::SmallInput,

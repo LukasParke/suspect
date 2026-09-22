@@ -28,8 +28,10 @@ mod schema_dialect;
 mod schema_instances;
 mod schema_keywords;
 mod schemas;
+mod sdk_readiness;
 mod security;
 mod servers;
+pub(crate) mod swagger;
 mod tags;
 mod webhooks;
 
@@ -68,6 +70,7 @@ fn check_groups() -> Vec<(&'static str, CheckFn)> {
         ("webhooks",                           webhooks::check_webhook_version),
         ("info::license",                      info::check_license),
         ("schema_instances",                   schema_instances::check_schema_instances),
+        ("sdk_readiness",                      sdk_readiness::check_sdk_readiness),
     ]
 }
 
