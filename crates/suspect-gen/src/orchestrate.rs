@@ -2,17 +2,17 @@
 //!
 //! A [`Manifest`] lists output rules (template + target path). [`render_manifest`]
 //! renders every target, splices preserved user-code regions from the
-//! existing file back into the freshly rendered content, compares content
-//! hashes, and only rewrites files that actually changed. With
+//! existing file back into the freshly rendered content, compares bytes
+//! directly, and only rewrites files that actually changed. With
 //! `diff_only = true` nothing is written; unified diffs are returned per
 //! changed file instead.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
+use suspect_artifact::{Adoption, Artifact, ArtifactBatch, Change, OwnershipChangeKind};
 
-use crate::{GenError, TemplateEngine};
+use crate::{GenError, PreparedContext, TemplateEngine};
 
 /// Opening marker of a preserved user-code region.
 ///
@@ -198,6 +198,12 @@ pub enum WriteReason {
     Unchanged,
     /// Preserved regions were spliced in before writing.
     PreservedRegionsApplied,
+    /// An obsolete, byte-identical owned artifact was or would be removed.
+    Removed,
+    /// An obsolete ownership entry referred to an already absent file.
+    ObsoleteMissing,
+    /// Ownership or user edits prevent changing this path.
+    OwnershipConflict,
 }
 
 /// The result of rendering one manifest output.
@@ -212,6 +218,8 @@ pub struct RenderOutcome {
     /// Unified diff between the on-disk and rendered content; populated
     /// for changed files when rendering with `diff_only`.
     pub diff: Option<String>,
+    /// Why a user file or retained user content prevents generation.
+    pub conflict: Option<String>,
 }
 
 /// Renders every output in `manifest` under `out_root`.
@@ -219,7 +227,7 @@ pub struct RenderOutcome {
 /// Target paths are template-evaluated against `ctx`. When the target
 /// already exists, user-code regions delimited by [`BEGIN_MARK`] /
 /// [`END_MARK`] markers are carried over into the new content before the
-/// sha256 comparison decides between rewriting and skipping. With
+/// byte comparison decides between rewriting and skipping. With
 /// `diff_only = true` no file is ever written; instead each changed file's
 /// outcome carries a unified diff in [`RenderOutcome::diff`].
 ///
@@ -234,113 +242,203 @@ pub fn render_manifest(
     out_root: &Path,
     diff_only: bool,
 ) -> Result<Vec<RenderOutcome>, GenError> {
-    let out_root = normalize_lexical(out_root);
-    let mut outcomes = Vec::with_capacity(manifest.outputs.len());
+    render_manifest_owned(
+        engine,
+        manifest,
+        ctx,
+        out_root,
+        diff_only,
+        "suspect-gen:default",
+        Adoption::Refuse,
+    )
+}
+
+/// Render one stable logical owner's complete output set. Use distinct owners
+/// when several presets or custom manifests share an output root. Ownership
+/// identity must remain stable when output rules or checkout location change.
+///
+/// `Adoption::Identical` explicitly adopts only byte-identical preexisting files;
+/// the default API never takes over unowned output. Metadata participates in
+/// drift outcomes, and preserved user content is protected from obsolete deletion.
+///
+/// # Errors
+/// Rendering/path/marker errors, invalid ownership metadata, user-file conflicts
+/// in write mode, or filesystem failures. Diff mode never writes output.
+pub fn render_manifest_owned(
+    engine: &dyn TemplateEngine,
+    manifest: &Manifest,
+    ctx: &serde_json::Value,
+    out_root: &Path,
+    diff_only: bool,
+    owner: &str,
+    adoption: Adoption,
+) -> Result<Vec<RenderOutcome>, GenError> {
+    let prepared = engine.prepare_context(ctx);
+    let mut rendered = Vec::with_capacity(manifest.outputs.len());
     for rule in &manifest.outputs {
-        let rel_target = render_inline(&rule.target, ctx)?;
-        if Path::new(&rel_target).is_absolute() {
+        rendered.push((
+            PathBuf::from(render_inline(&rule.target, &prepared)?),
+            engine.render_prepared(&rule.template, &prepared)?,
+        ));
+    }
+    let mut batch = ArtifactBatch::prepare(
+        out_root,
+        rendered.iter().map(|(path, content)| Artifact {
+            path,
+            content: content.as_bytes(),
+        }),
+    )
+    .map_err(|error| GenError(error.to_string()))?;
+    let out_root = batch.root().to_path_buf();
+    let mut preserved_paths = std::collections::BTreeSet::new();
+    for file in batch.files_mut() {
+        let path = out_root.join(file.path());
+        let old = artifact_text(file.existing().unwrap_or(b""), &path)?;
+        let fresh = artifact_text(file.content(), &path)?;
+        let (existing_managed, old_regions) = managed_regions(old)?;
+        let (_, new_regions) = managed_regions(fresh)?;
+        if old_regions > 0 && old_regions != new_regions {
             return Err(GenError(format!(
-                "target {rel_target:?} must be a relative path"
+                "{}: changing the number of preserved user-code regions requires an explicit content migration",
+                path.display()
             )));
         }
-        let path = normalize_lexical(&out_root.join(&rel_target));
-        if !path.starts_with(&out_root) {
-            return Err(GenError(format!(
-                "target {rel_target:?} escapes output root {}",
-                out_root.display()
-            )));
+        let (spliced, count) = splice_preserved_regions(old, fresh)?;
+        let retained = count > 0 && spliced != fresh;
+        let (planned_managed, _) = managed_regions(&spliced)?;
+        if count > 0 {
+            preserved_paths.insert(file.path().to_path_buf());
         }
-        let mut new_content = engine.render(&rule.template, ctx)?;
-
-        let existing = fs::read_to_string(&path).ok();
-        let mut preserved = false;
-        if let Some(old) = &existing {
-            let (spliced, count) = splice_preserved_regions(old, &new_content)?;
-            if count > 0 {
-                new_content = spliced;
-                preserved = true;
+        file.replace_content(spliced.into_bytes());
+        file.set_managed_content(
+            "suspect-user-code-v1",
+            &existing_managed,
+            &planned_managed,
+            retained,
+        );
+    }
+    let batch = batch
+        .with_ownership(owner, adoption)
+        .map_err(|error| GenError(error.to_string()))?;
+    let mut outcomes = Vec::new();
+    for file in batch.files() {
+        let path = out_root.join(file.path());
+        let change = file.change();
+        let finding = batch
+            .report()
+            .changes
+            .iter()
+            .find(|finding| finding.path == file.path())
+            .expect("planned ownership finding");
+        let reason = if finding.kind == OwnershipChangeKind::Conflict {
+            WriteReason::OwnershipConflict
+        } else {
+            match change {
+                Change::Created => WriteReason::Created,
+                Change::Unchanged => WriteReason::Unchanged,
+                Change::Changed if preserved_paths.contains(file.path()) => {
+                    WriteReason::PreservedRegionsApplied
+                }
+                Change::Changed => WriteReason::Changed,
             }
-        }
-
-        let unchanged = existing
-            .as_deref()
-            .is_some_and(|old| content_hash(old) == content_hash(&new_content));
-        let reason = if existing.is_none() {
-            WriteReason::Created
-        } else if unchanged {
-            WriteReason::Unchanged
-        } else if preserved {
-            WriteReason::PreservedRegionsApplied
-        } else {
-            WriteReason::Changed
         };
-
-        if diff_only {
-            let diff = if unchanged {
-                None
-            } else {
-                Some(unified_diff(
-                    existing.as_deref().unwrap_or(""),
-                    &new_content,
-                ))
-            };
-            outcomes.push(RenderOutcome {
-                path,
-                wrote: false,
-                reason,
-                diff,
-            });
-        } else if unchanged {
-            outcomes.push(RenderOutcome {
-                path,
-                wrote: false,
-                reason,
-                diff: None,
-            });
+        let diff = if diff_only && change != Change::Unchanged {
+            Some(unified_diff(
+                artifact_text(file.existing().unwrap_or(b""), &path)?,
+                artifact_text(file.content(), &path)?,
+            ))
         } else {
-            write_new(&path, &new_content)?;
-            outcomes.push(RenderOutcome {
-                path,
-                wrote: true,
-                reason,
-                diff: None,
-            });
+            None
+        };
+        outcomes.push(RenderOutcome {
+            path,
+            wrote: !diff_only && change != Change::Unchanged,
+            reason,
+            diff,
+            conflict: finding.conflict.clone(),
+        });
+    }
+    for finding in &batch.report().changes {
+        if batch.files().iter().any(|file| file.path() == finding.path) {
+            continue;
         }
+        let path = out_root.join(&finding.path);
+        outcomes.push(RenderOutcome {
+            path: path.clone(),
+            wrote: !diff_only && finding.kind == OwnershipChangeKind::Obsolete,
+            reason: match finding.kind {
+                OwnershipChangeKind::Obsolete => WriteReason::Removed,
+                OwnershipChangeKind::MissingObsolete => WriteReason::ObsoleteMissing,
+                _ => WriteReason::OwnershipConflict,
+            },
+            diff: if diff_only && finding.kind == OwnershipChangeKind::Obsolete {
+                Some(unified_diff(
+                    artifact_text(batch.obsolete_content(&finding.path).unwrap_or(b""), &path)?,
+                    "",
+                ))
+            } else {
+                None
+            },
+            conflict: finding.conflict.clone(),
+        });
+    }
+    let metadata = batch.manifest();
+    let path = out_root.join(metadata.path());
+    outcomes.push(RenderOutcome {
+        path: path.clone(),
+        wrote: !diff_only && metadata.change() != Change::Unchanged,
+        reason: match metadata.change() {
+            Change::Created => WriteReason::Created,
+            Change::Changed => WriteReason::Changed,
+            Change::Unchanged => WriteReason::Unchanged,
+        },
+        diff: if diff_only && metadata.change() != Change::Unchanged {
+            Some(unified_diff(
+                artifact_text(metadata.existing().unwrap_or(b""), &path)?,
+                artifact_text(metadata.content(), &path)?,
+            ))
+        } else {
+            None
+        },
+        conflict: None,
+    });
+    if !diff_only {
+        batch
+            .commit()
+            .map_err(|error| GenError(error.to_string()))?;
     }
     Ok(outcomes)
 }
 
-/// Writes `content`, creating parent directories as needed.
-fn write_new(path: &Path, content: &str) -> Result<(), GenError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+fn managed_regions(content: &str) -> Result<(Vec<u8>, usize), GenError> {
+    let lines: Vec<_> = content.split_inclusive('\n').collect();
+    let pairs = marker_pairs(&lines)?;
+    let mut managed = String::new();
+    let mut cursor = 0;
+    for &(begin, end) in &pairs {
+        for line in &lines[cursor..=begin] {
+            managed.push_str(line);
+        }
+        cursor = end;
     }
-    fs::write(path, content)?;
-    Ok(())
+    for line in &lines[cursor..] {
+        managed.push_str(line);
+    }
+    Ok((managed.into_bytes(), pairs.len()))
 }
 
-/// Lexically normalizes a path without touching the filesystem:
-/// collapses `.` components and resolves `..` against the preceding
-/// component.
-fn normalize_lexical(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
+fn artifact_text<'a>(content: &'a [u8], path: &Path) -> Result<&'a str, GenError> {
+    std::str::from_utf8(content)
+        .map_err(|error| GenError(format!("artifact {} is not UTF-8: {error}", path.display())))
 }
 
 /// Evaluates `{{ ... }}` expressions in a target path against `ctx`.
-fn render_inline(template: &str, ctx: &serde_json::Value) -> Result<String, GenError> {
+fn render_inline(template: &str, ctx: &PreparedContext<'_>) -> Result<String, GenError> {
     let mut env = minijinja::Environment::new();
     env.add_template_owned("__target__", template)?;
-    Ok(env.get_template("__target__")?.render(ctx)?)
+    Ok(env
+        .get_template("__target__")?
+        .render(ctx.minijinja_value())?)
 }
 
 /// Recognizes a whole-line marker: after trimming, optionally stripping
@@ -408,8 +506,8 @@ pub(crate) fn splice_preserved_regions(
     old: &str,
     new_content: &str,
 ) -> Result<(String, usize), GenError> {
-    let old_lines: Vec<&str> = old.lines().collect();
-    let new_lines: Vec<&str> = new_content.lines().collect();
+    let old_lines: Vec<&str> = old.split_inclusive('\n').collect();
+    let new_lines: Vec<&str> = new_content.split_inclusive('\n').collect();
     let old_pairs = marker_pairs(&old_lines)?;
     let new_pairs = marker_pairs(&new_lines)?;
     let count = old_pairs.len().min(new_pairs.len());
@@ -424,32 +522,19 @@ pub(crate) fn splice_preserved_regions(
         let (nb, ne) = new_pairs[i];
         for line in &new_lines[cursor..nb] {
             out.push_str(line);
-            out.push('\n');
         }
         out.push_str(new_lines[nb]);
-        out.push('\n');
         // splice the preserved user code
         for line in &old_lines[ob + 1..oe] {
             out.push_str(line);
-            out.push('\n');
         }
         out.push_str(new_lines[ne]);
-        out.push('\n');
         cursor = ne + 1;
     }
     for line in &new_lines[cursor.min(new_lines.len())..] {
         out.push_str(line);
-        out.push('\n');
     }
     Ok((out, count))
-}
-
-/// Computes the sha256 digest of `content`.
-#[must_use]
-fn content_hash(content: &str) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    hasher.finalize().into()
 }
 
 /// One line-level diff operation.

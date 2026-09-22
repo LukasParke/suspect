@@ -1,0 +1,89 @@
+{
+  "openapi": "3.2.0",
+  "info": {"title":"C# scoped native operation witnesses","version":"1.0.0"},
+  "servers": [{"url":"https://scoped.example.test"}],
+  "components": {"schemas": {
+    "Invoice": {
+      "description":"An invoice with source-conditional requirements and patterned numeric metadata.",
+      "type":"object", "required":["id","kind","amount"],
+      "properties": {
+        "id":{"type":"string","minLength":1},
+        "kind":{"type":"string","enum":["business","personal"]},
+        "amount":{"type":"number","minimum":0,"multipleOf":0.000000000000000001},
+        "company":{"type":"string","minLength":1},
+        "note":{"type":["string","null"]},
+        "external":{"type":["string","null"]},
+        "audit":{"type":"boolean"}
+      },
+      "if":{"properties":{"kind":{"const":"business"}},"required":["kind"]},
+      "then":{"required":["company"]},
+      "else":{"not":{"required":["company"]}},
+      "dependentRequired":{"external":["note"]},
+      "dependentSchemas":{"audit":{"properties":{"audit":{"const":true}},"required":["external"]}},
+      "patternProperties":{"^x-":{"type":"integer"},"^x-.*-count$":{"minimum":0}},
+      "additionalProperties":false,
+      "propertyNames":{"anyOf":[{"enum":["id","kind","amount","company","note","external","audit"]},{"pattern":"^x-"}]},
+      "examples":[{"id":"invoice-1","kind":"business","amount":9007199254740993.000000000000000001,"company":"Acme","x-line-count":2e0},{"id":"invoice-2","kind":"personal","amount":0.00,"note":null,"external":null}]
+    },
+    "Settings": {
+      "description":"Conditional fields are retained as extras and evaluated in their own source scopes.",
+      "type":"object","required":["mode","base"],
+      "properties":{"mode":{"type":"string","enum":["basic","extended"]},"base":{"type":"integer"}},
+      "if":{"properties":{"mode":{"const":"extended"}},"required":["mode"]},
+      "then":{"properties":{"extra":{"type":"string"}},"required":["extra"]},
+      "dependentSchemas":{"flag":{"properties":{"flag":{"const":true},"peer":{"type":"string"}},"required":["peer"]}},
+      "unevaluatedProperties":false,
+      "examples":[{"mode":"extended","base":1.00,"extra":"retained","flag":true,"peer":"present"},{"mode":"basic","base":0}]
+    },
+    "Sequence": {
+      "description":"Ordered JSON values with prefix and contains evaluated-index scopes.",
+      "type":"array","minItems":2,"maxItems":4,
+      "prefixItems":[{"type":"string","minLength":1}],
+      "contains":{"type":"integer"},"minContains":1.00,"maxContains":2,
+      "unevaluatedItems":false,
+      "examples":[["lead",9007199254740993e0],["lead",1.0,2e0]]
+    },
+    "Labels": {
+      "type":"object","required":["title"],
+      "properties":{"title":{"type":"string"},"Version":{"type":"integer","maximum":10}},
+      "patternProperties":{"^[A-Z]":{"type":["integer","null"]}},
+      "additionalProperties":{"type":"string"},
+      "propertyNames":{"minLength":1},
+      "examples":[{"title":"labels","Version":2.0,"Upper":9007199254740993e0,"lower":"text","Null":null}]
+    },
+    "ScopedValue": {
+      "description":"A checked JSON carrier for same-instance alternatives with scoped annotations.",
+      "anyOf":[{"properties":{"a":true},"required":["a"]},{"properties":{"b":true},"required":["b"]}],
+      "unevaluatedProperties":false,
+      "examples":[{"a":1.00,"b":null},null]
+    },
+    "Node": {
+      "type":"object","required":["name"],
+      "properties":{"name":{"type":"string","minLength":1},"next":{"$ref":"#/components/schemas/Node"}},
+      "unevaluatedProperties":false,
+      "examples":[{"name":"root","next":{"name":"leaf"}}]
+    },
+    "Maybe": {
+      "type":["object","null"],
+      "properties":{"flag":{"type":"boolean"},"peer":{"type":["string","null"]}},
+      "dependentRequired":{"flag":["peer"]},"additionalProperties":false,
+      "examples":[null,{"flag":false,"peer":null},{}]
+    },
+    "ScopedReference": {
+      "$defs":{"Base":{"properties":{"base":{"type":"integer"}},"required":["base"]}},
+      "$ref":"#/components/schemas/ScopedReference/$defs/Base",
+      "unevaluatedProperties":false,
+      "examples":[{"base":1e0}]
+    }
+  }},
+  "paths": {
+    "/invoices":{"post":{"operationId":"createInvoice","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Invoice"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Invoice"}}}},"422":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Invoice"}}}}}}},
+    "/settings":{"put":{"operationId":"replaceSettings","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Settings"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Settings"}}}}}}},
+    "/sequences":{"put":{"operationId":"replaceSequence","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Sequence"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Sequence"}}}}}}},
+    "/labels":{"put":{"operationId":"replaceLabels","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Labels"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Labels"}}}}}}},
+    "/values":{"post":{"operationId":"evaluateValue","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ScopedValue"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ScopedValue"}}}}}}},
+    "/nodes":{"put":{"operationId":"replaceNode","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Node"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Node"}}}}}}},
+    "/optional":{"post":{"operationId":"optionalValue","requestBody":{"required":false,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Maybe"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Maybe"}}}}}}},
+    "/references":{"post":{"operationId":"evaluateReference","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ScopedReference"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ScopedReference"}}}}}}}
+  }
+}

@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: Split recursive measurement
+  version: '1'
+servers:
+  - url: https://example.test/v1
+security:
+  - token: []
+components:
+  securitySchemes:
+    token:
+      type: http
+      scheme: bearer
+paths:
+  /trees/{id}:
+    post:
+      operationId: createTree
+      description: Create a tree in a split reference closure.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        $ref: split-resources.yaml#/Request
+      responses:
+        '201':
+          $ref: split-resources.yaml#/Reply

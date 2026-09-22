@@ -8,17 +8,29 @@ license.workspace = true
 
 [dependencies]
 suspect-low.workspace = true
+suspect-ir.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 regex.workspace = true
 rustc-hash.workspace = true
 smallvec.workspace = true
+iri-string = { version = "0.7.14", default-features = false, features = ["alloc"] }
 thiserror.workspace = true
+num-bigint = "0.4.8"
+num-traits = "0.2.19"
 
 [dev-dependencies]
 suspect-source.workspace = true
 suspect-syntax.workspace = true
+suspect-ref.workspace = true
+tempfile.workspace = true
 
 criterion.workspace = true
 
 [[bench]]
 name = "schema"
+harness = false
+
+[[bench]]
+name = "numeric"
 harness = false

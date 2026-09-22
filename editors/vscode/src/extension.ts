@@ -2,10 +2,14 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
+import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 import { parseArazzo } from './parse';
 import { registerNotebook } from './notebook';
 import { errorMessage, gatewayPort, spawnSuspectRun, suspectBinary } from './runner';
+import {
+	Generation, generationArgs, isSdkProfile, SDK_PROFILE_DIRECTORIES, SdkProfile, availableSdkProfiles, runGeneration, readCurrentSdkArtifact, readSdkSessionIdentity,
+	SdkCompatibilityProfile, readSdkCompatibilityProfiles, SdkSessionHandle, SdkSessionIdentity, SdkSessionRecord, startSdkSession,
+} from './generation';
 import { registerTestExplorer } from './testExplorer';
 import { registerWorkflowsView } from './workflowsView';
 
@@ -18,16 +22,16 @@ interface GatewayState {
 let client: LanguageClient | undefined;
 let gateway: GatewayState | undefined;
 let gatewayStatus: vscode.StatusBarItem | undefined;
+let sdkGeneration: SdkGenerationController | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(
-		vscode.commands.registerCommand('suspect.runWorkflow', (uri?: vscode.Uri, workflow?: string) =>
+		vscode.commands.registerCommand('suspect.runWorkflow', (uri?: vscode.Uri | string, workflow?: string) =>
 			runWorkflowCommand(uri, workflow),
 		),
 		vscode.commands.registerCommand('suspect.startGateway', () => startGateway()),
 		vscode.commands.registerCommand('suspect.stopGateway', () => stopGateway()),
 		vscode.commands.registerCommand('_suspect.toggleGateway', () => (gateway ? stopGateway() : void startGateway())),
-		vscode.commands.registerCommand('suspect.genPreset', () => genPresetCommand()),
 		vscode.commands.registerCommand('suspect.openNotebook', (uri?: vscode.Uri) => openNotebook(uri)),
 	);
 
@@ -39,6 +43,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerTestExplorer(context);
 	registerWorkflowsView(context);
 	registerNotebook(context);
+	sdkGeneration = registerSdkGeneration(context);
 
 	startClient();
 	context.subscriptions.push(
@@ -56,6 +61,7 @@ export async function deactivate(): Promise<void> {
 		tasks.push(Promise.resolve(client.stop()).catch(() => undefined));
 	}
 	stopGateway();
+	if (sdkGeneration) tasks.push(sdkGeneration.stop());
 	await Promise.all(tasks);
 }
 
@@ -63,7 +69,8 @@ function startClient(): void {
 	const serverOptions: ServerOptions = {
 		command: suspectBinary(),
 		args: ['lsp'],
-		transport: TransportKind.stdio,
+		// Executables use stdio by default. An explicit transport makes the client
+		// append --stdio, which the canonical `suspect lsp` command does not accept.
 	};
 	const clientOptions: LanguageClientOptions = {
 		documentSelector: [
@@ -72,6 +79,15 @@ function startClient(): void {
 		],
 	};
 	client = new LanguageClient('suspect', 'Suspect', serverOptions, clientOptions);
+	// Both the LSP and the editor advertise this workflow action. Keep the editor's
+	// picker/progress implementation as its single owner, including for LSP lenses,
+	// while registering every other server command normally.
+	const commands = client.getFeature('workspace/executeCommand');
+	const registerCommands = commands.register.bind(commands);
+	commands.register = (data) => registerCommands({
+		...data,
+		registerOptions: { ...data.registerOptions, commands: data.registerOptions.commands.filter((command) => command !== 'suspect.runWorkflow') },
+	});
 	void Promise.resolve(client.start()).catch((err: unknown) => {
 		vscode.window.showWarningMessage(`Suspect language server failed to start: ${errorMessage(err)}`);
 		client = undefined;
@@ -132,8 +148,8 @@ async function pickWorkflowId(uri: vscode.Uri): Promise<string | undefined> {
 	return pick?.label;
 }
 
-async function runWorkflowCommand(uriHint?: vscode.Uri, workflowHint?: string): Promise<void> {
-	const uri = await pickArazzoDocument(uriHint);
+async function runWorkflowCommand(uriHint?: vscode.Uri | string, workflowHint?: string): Promise<void> {
+	const uri = await pickArazzoDocument(typeof uriHint === 'string' ? vscode.Uri.parse(uriHint) : uriHint);
 	if (!uri) {
 		return;
 	}
@@ -267,10 +283,70 @@ function updateGatewayStatus(): void {
 	gatewayStatus.show();
 }
 
+/** Prompts for explicit package identity and exact selectors shared by the canonical HTTP profiles. */
+async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, profile: SdkProfile): Promise<{ packageName: string; packageVersion: string; importName?: string; compatibilityProfiles: SdkCompatibilityProfile[]; operationIds: string[] } | undefined> {
+    const compatibilityProfiles = readSdkCompatibilityProfiles(config.get<unknown>('sdk.compatibilityProfiles', []));
+    const packagePrompts: Record<SdkProfile, string> = {
+        'typescript-http': 'Explicit npm package name (independent of the API title)',
+        'rust-http': 'Explicit Cargo package name (independent of the API title)',
+        'python-http': 'Explicit Python distribution name; the CLI derives its import name by replacing hyphens with underscores',
+        'go-http': 'Explicit Go module path, e.g. example.com/team/sdk; the generated Go package is named sdk',
+        'swift-http': 'Swift package name: a valid Swift identifier, e.g. ExampleSDK; the default module has the same name',
+        'java-http': 'Explicit Maven group:artifact coordinates, e.g. com.example:widgets-sdk',
+        'csharp-http': 'Explicit NuGet package ID, e.g. Example.Widgets',
+        'kotlin-http': 'Explicit Maven group:artifact coordinates, e.g. com.example:widgets-sdk',
+        'ruby-http': 'Explicit gem name, e.g. widgets-sdk; require path defaults to widgets_sdk',
+        'php-http': 'Explicit Composer vendor/package name, e.g. example/widgets-sdk',
+        'dart-http': 'Explicit lowercase pub package name, e.g. widgets_sdk',
+        'cpp-http': 'Explicit CMake target/include identifier, e.g. widgets_sdk',
+    };
+    const packageName = await vscode.window.showInputBox({
+        prompt: packagePrompts[profile],
+        value: config.get<string>('sdk.packageName', ''),
+        validateInput: (value) => value.length ? undefined : 'A package name is required',
+    });
+    if (packageName === undefined) return undefined;
+    const packageVersion = await vscode.window.showInputBox({
+        prompt: profile === 'python-http'
+            ? `Explicit package SemVer; default Python import: ${packageName.replace(/-/g, '_')}. Configure sdk.importNames for an override.`
+            : profile === 'swift-http'
+            ? `Exact stable SemVer (no prerelease/build metadata); default Swift module: ${packageName}. Configure sdk.importNames for an override.`
+            : 'Explicit package SemVer (independent of the API version)',
+        value: config.get<string>('sdk.packageVersion', ''),
+        validateInput: (value) => value.length ? undefined : 'A package version is required',
+    });
+    if (packageVersion === undefined) return undefined;
+    const selectors = await vscode.window.showInputBox({
+        prompt: 'Exact operation IDs as a JSON string array; [] attempts every operation',
+        value: JSON.stringify(config.get<string[]>('sdk.operationIds', [])),
+        validateInput: (value) => {
+            try {
+                const ids: unknown = JSON.parse(value);
+                if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) return undefined;
+            } catch { /* Show the same actionable validation message for invalid JSON. */ }
+            return 'Enter a JSON array of exact operation ID strings, or [] for all';
+        },
+    });
+    if (selectors === undefined) return undefined;
+    const importName = config.get<Record<string, string>>('sdk.importNames', {})[profile];
+    return { packageName, packageVersion, ...(importName ? { importName } : {}), compatibilityProfiles, operationIds: JSON.parse(selectors) };
+}
+
 async function genPresetCommand(): Promise<void> {
-	const presetPick = await vscode.window.showQuickPick(['docs-md', 'ts-sdk', 'rust-sdk'], {
-		placeHolder: 'Suspect: choose a generation preset',
-	});
+    const binary = suspectBinary();
+    let profiles;
+    try { profiles = await availableSdkProfiles(binary); }
+    catch (error) { vscode.window.showErrorMessage(`Suspect profile discovery failed: ${errorMessage(error)}`); return; }
+    const labels: Record<SdkProfile, string> = {
+        'typescript-http': 'TypeScript / JavaScript', 'rust-http': 'Rust', 'python-http': 'Python',
+        'go-http': 'Go', 'swift-http': 'Swift', 'java-http': 'Java', 'csharp-http': 'C#',
+        'kotlin-http': 'Kotlin', 'ruby-http': 'Ruby', 'php-http': 'PHP', 'dart-http': 'Dart', 'cpp-http': 'C++',
+    };
+    const presetPick = await vscode.window.showQuickPick([
+        ...profiles.map((profile) => ({ label: `${labels[profile.profile]} HTTP SDK`, generationKind: profile.profile, description: profile.description })),
+        { label: 'Markdown documentation', generationKind: 'docs-md' as const },
+        { label: 'Custom template manifest', generationKind: 'custom' as const },
+    ], { placeHolder: 'Suspect: choose generation output' });
 	if (!presetPick) {
 		return;
 	}
@@ -285,38 +361,38 @@ async function genPresetCommand(): Promise<void> {
 		vscode.window.showErrorMessage('No workspace folder is open.');
 		return;
 	}
-	const outDir = path.join(folder.uri.fsPath, 'gen-out', presetPick);
-	try {
-		await vscode.window.withProgress(
-			{ location: vscode.ProgressLocation.Notification, title: `Suspect gen: ${presetPick}` },
-			() =>
-				new Promise<void>((resolve, reject) => {
-					const child: cp.ChildProcess = cp.spawn(
-						suspectBinary(),
-						['gen', spec.fsPath, '--preset', presetPick, '--out', outDir],
-						{ stdio: ['ignore', 'ignore', 'pipe'] },
-					);
-					let stderrTail = '';
-					child.stderr?.on('data', (chunk: Buffer) => {
-						stderrTail = (stderrTail + chunk.toString()).slice(-2000);
-					});
-					child.on('error', (err: Error) => reject(err));
-					child.on('exit', (code) => {
-						if (code === 0) {
-							resolve();
-							return;
-						}
-						reject(new Error(`suspect gen exited with code ${code}${stderrTail.trim() ? `: ${stderrTail.trim()}` : ''}`));
-					});
-				}),
-		);
+    const outDir = path.join(folder.uri.fsPath, 'gen-out', presetPick.generationKind);
+    let generation: Generation;
+    try {
+        if (isSdkProfile(presetPick.generationKind)) {
+            const identity = await promptPackageIdentity(
+                vscode.workspace.getConfiguration('suspect', spec),
+                presetPick.generationKind,
+            );
+            if (!identity) return;
+            generation = { kind: presetPick.generationKind, ...identity };
+        } else if (presetPick.generationKind === 'custom') {
+            const manifests = await vscode.window.showOpenDialog({
+                canSelectMany: false, openLabel: 'Select generation manifest', filters: { 'Generation manifest': ['toml'] },
+            });
+            if (!manifests?.[0]) return;
+            generation = { kind: 'custom', manifest: manifests[0].fsPath };
+        } else {
+            generation = { kind: presetPick.generationKind };
+        }
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Suspect: ${presetPick.label}` },
+            () => runGeneration(binary, generationArgs(spec.fsPath, outDir, generation), folder.uri.fsPath),
+        );
 	} catch (err) {
-		vscode.window.showErrorMessage(`Suspect gen failed: ${errorMessage(err)}`);
+        vscode.window.showErrorMessage(`Suspect generation failed: ${errorMessage(err)}`);
 		return;
 	}
-	const produced = await firstFileRecursive(outDir);
+	const produced = isSdkProfile(generation.kind)
+		? path.join(outDir, SDK_PROFILE_DIRECTORIES[generation.kind], 'README.md')
+		: await firstFileRecursive(outDir);
 	if (!produced) {
-		vscode.window.showWarningMessage(`suspect gen produced no files under gen-out/${presetPick}.`);
+        vscode.window.showWarningMessage(`Suspect produced no files under ${outDir}.`);
 		return;
 	}
 	const doc = await vscode.workspace.openTextDocument(produced);
@@ -344,6 +420,398 @@ async function firstFileRecursive(dir: string): Promise<string | undefined> {
 		}
 	}
 	return undefined;
+}
+
+const SDK_PREVIEW_SCHEME = 'suspect-sdk-preview';
+const SDK_OUTPUT_LIMIT = 64 * 1024;
+type SdkAction = 'preview' | 'check' | 'watch';
+
+interface SdkEditorSession {
+	identity: SdkSessionIdentity;
+	action: SdkAction;
+	epoch: number;
+	handle?: SdkSessionHandle;
+	diskWatcher?: vscode.Disposable;
+	running: boolean;
+	record?: SdkSessionRecord;
+	selectedPath?: string;
+	openDiff: boolean;
+	initialPickerShown: boolean;
+	revision: number;
+	refreshing: boolean;
+	update: Promise<void>;
+}
+
+/** A single read-only diff pair. Replaced/failed sessions invalidate already-open documents. */
+class SdkPreviewDocuments implements vscode.TextDocumentContentProvider, vscode.Disposable {
+	private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
+	readonly onDidChange = this.emitter.event;
+	private contents = new Map<string, { uri: vscode.Uri; text: string }>();
+	private unavailable = 'This SDK preview has expired. Use Suspect: Show Latest SDK Preview.';
+
+	provideTextDocumentContent(uri: vscode.Uri): string {
+		return this.contents.get(uri.toString())?.text ?? this.unavailable;
+	}
+
+	set(session: SdkEditorSession, artifact: string, current: string, generated: string): [vscode.Uri, vscode.Uri] {
+		const identity = session.identity;
+		const query = new URLSearchParams({
+			session: String(session.epoch), config: identity.configPath,
+			source: identity.sourcePath ?? '', output: identity.outDirectory,
+		}).toString();
+		const left = vscode.Uri.from({ scheme: SDK_PREVIEW_SCHEME, authority: 'current', path: `/${artifact}`, query });
+		const right = vscode.Uri.from({ scheme: SDK_PREVIEW_SCHEME, authority: 'generated', path: `/${artifact}`, query });
+		const next = new Map([
+			[left.toString(), { uri: left, text: current }],
+			[right.toString(), { uri: right, text: generated }],
+		]);
+		const previous = this.contents;
+		this.contents = next;
+		this.unavailable = 'This SDK preview has expired. Use Suspect: Show Latest SDK Preview.';
+		for (const [key, value] of previous) if (!next.has(key)) this.emitter.fire(value.uri);
+		for (const [key, value] of next) if (previous.get(key)?.text !== value.text) this.emitter.fire(value.uri);
+		return [left, right];
+	}
+
+	clear(message: string): void {
+		this.unavailable = message;
+		const previous = this.contents;
+		this.contents = new Map();
+		for (const value of previous.values()) this.emitter.fire(value.uri);
+	}
+
+	dispose(): void {
+		this.clear('SDK preview disposed.');
+		this.emitter.dispose();
+	}
+}
+
+/** Register separately so process/UI seam tests use the real command handlers without an LSP. */
+export function registerSdkGeneration(context: vscode.ExtensionContext): SdkGenerationController {
+	const controller = new SdkGenerationController();
+	context.subscriptions.push(controller);
+	return controller;
+}
+
+class SdkGenerationController implements vscode.Disposable {
+	private readonly output = vscode.window.createOutputChannel('Suspect SDK');
+	private readonly status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 89);
+	private readonly documents = new SdkPreviewDocuments();
+	private readonly disposables: vscode.Disposable[];
+	private session: SdkEditorSession | undefined;
+	private epoch = 0;
+	private disposed = false;
+	private stopping: Promise<void> = Promise.resolve();
+
+	constructor() {
+		this.status.name = 'Suspect SDK Session';
+		this.status.command = 'suspect.showSdkPreview';
+		this.disposables = [
+			vscode.workspace.registerTextDocumentContentProvider(SDK_PREVIEW_SCHEME, this.documents),
+			vscode.commands.registerCommand('suspect.genPreset', () => genPresetCommand()),
+			vscode.commands.registerCommand('suspect.previewSdk', (uri?: vscode.Uri) => this.run('preview', uri)),
+			vscode.commands.registerCommand('suspect.checkSdk', (uri?: vscode.Uri) => this.run('check', uri)),
+			vscode.commands.registerCommand('suspect.watchSdk', (uri?: vscode.Uri) => this.run('watch', uri)),
+			vscode.commands.registerCommand('suspect.stopSdkWatch', () => this.stop()),
+			vscode.commands.registerCommand('suspect.showSdkPreview', () => this.showLatest()),
+			vscode.workspace.onDidChangeConfiguration((event) => {
+				if (['suspect.basePath', 'suspect.sdk.sessionConfig', 'suspect.sdk.sessionOutput'].some((key) => event.affectsConfiguration(key))) {
+					void this.stop('SDK settings changed. Start an SDK preview or watch again.');
+				}
+			}),
+		];
+	}
+
+	private isCurrent(session: SdkEditorSession): boolean {
+		return !this.disposed && this.session === session && this.epoch === session.epoch;
+	}
+
+	private release(message: string): Promise<void> {
+		const previous = this.session;
+		this.session = undefined;
+		previous?.diskWatcher?.dispose();
+		this.documents.clear(message);
+		this.status.hide();
+		this.output.clear();
+		this.output.appendLine(message);
+		if (previous?.handle) {
+			previous.handle.dispose();
+			// Every later action also waits for a process already being terminated.
+			this.stopping = Promise.all([this.stopping, previous.handle.done.catch(() => undefined)]).then(() => undefined);
+		}
+		return this.stopping;
+	}
+
+	async stop(message = 'SDK watch/preview stopped.'): Promise<void> {
+		this.epoch += 1;
+		await this.release(message);
+	}
+
+	dispose(): void {
+		if (this.disposed) return;
+		this.disposed = true;
+		this.epoch += 1;
+		void this.release('SDK preview disposed.');
+		for (const disposable of this.disposables) disposable.dispose();
+		this.documents.dispose();
+		this.status.dispose();
+		this.output.dispose();
+	}
+
+	private async pickIdentity(hint?: vscode.Uri): Promise<SdkSessionIdentity | undefined> {
+		let configUri = hint;
+		if (!configUri) {
+			const active = vscode.window.activeTextEditor?.document.uri;
+			let folder = active ? vscode.workspace.getWorkspaceFolder(active) : undefined;
+			if (!folder && vscode.workspace.workspaceFolders?.length === 1) folder = vscode.workspace.workspaceFolders[0];
+			let configured = vscode.workspace.getConfiguration('suspect', folder?.uri).get<string>('sdk.sessionConfig', '');
+			if (configured && !path.isAbsolute(configured) && !folder) {
+				folder = await vscode.window.showWorkspaceFolderPick({ placeHolder: 'Workspace containing the SDK session config' });
+				if (!folder) return undefined;
+				configured = vscode.workspace.getConfiguration('suspect', folder.uri).get<string>('sdk.sessionConfig', '');
+			}
+			if (configured) {
+				configUri = vscode.Uri.file(path.resolve(folder?.uri.fsPath ?? '', configured));
+			} else {
+				configUri = (await vscode.window.showOpenDialog({
+					canSelectMany: false, canSelectFiles: true, canSelectFolders: false,
+					openLabel: 'Select SDK session config', filters: { 'SDK session config': ['json'] },
+					defaultUri: active?.scheme === 'file' ? active : folder?.uri,
+				}))?.[0];
+			}
+		}
+		if (!configUri) return undefined;
+		if (configUri.scheme !== 'file') throw new Error('Select a local JSON SDK session config.');
+		const settings = vscode.workspace.getConfiguration('suspect', configUri);
+		const out = await vscode.window.showInputBox({
+			prompt: `SDK output directory to compare; relative paths resolve from ${path.dirname(configUri.fsPath)}`,
+			value: settings.get<string>('sdk.sessionOutput', 'sdk-out'),
+			validateInput: (value) => value.length && !value.includes('\0') ? undefined : 'Enter an output directory',
+		});
+		if (out === undefined) return undefined;
+		return readSdkSessionIdentity(configUri.fsPath, out);
+	}
+
+	private async run(action: SdkAction, hint?: vscode.Uri): Promise<void> {
+		if (this.disposed) return;
+		const epoch = ++this.epoch;
+		await this.release('Selecting SDK session configuration…');
+		try {
+			if (epoch !== this.epoch || this.disposed) return;
+			const identity = await this.pickIdentity(hint);
+			if (epoch !== this.epoch || this.disposed) return;
+			if (!identity) { this.output.clear(); this.output.appendLine('SDK action cancelled.'); return; }
+			const session: SdkEditorSession = {
+				identity, action, epoch, running: true, openDiff: false, initialPickerShown: false,
+				revision: 0, refreshing: false, update: Promise.resolve(),
+			};
+			this.session = session;
+			this.report(session, 'Starting canonical CLI session…');
+			const launch = async (token?: vscode.CancellationToken) => {
+				if (!this.isCurrent(session)) return;
+				if (token?.isCancellationRequested) { await this.stop('SDK action cancelled.'); return; }
+				session.handle = startSdkSession(suspectBinary(), identity, {
+					watch: action === 'watch', check: action === 'check', preview: action !== 'check',
+				}, (record) => this.receive(session, record));
+				const cancel = token?.onCancellationRequested(() => {
+					if (this.isCurrent(session)) void this.stop('SDK action cancelled.');
+				});
+				try {
+					await session.handle.done;
+					await session.update;
+					if (!this.isCurrent(session)) return;
+					session.running = false;
+					if (action === 'watch') throw new Error('SDK watch ended. Start Watch SDK Preview to resume.');
+					this.report(session);
+					if (action === 'preview' && session.record?.status !== 'planning-error') await this.showLatest();
+					else this.output.show(true);
+				} catch (error) {
+					if (this.isCurrent(session)) this.failed(session, error);
+				} finally { cancel?.dispose(); }
+			};
+			if (action === 'watch') {
+				void launch();
+			} else {
+				await vscode.window.withProgress({
+					location: vscode.ProgressLocation.Notification, title: `Suspect: SDK ${action}`, cancellable: true,
+				}, (_progress, token) => launch(token));
+			}
+		} catch (error) {
+			if (epoch === this.epoch && !this.disposed) {
+				this.documents.clear('SDK preview unavailable. See Suspect SDK output.');
+				this.output.clear();
+				this.output.appendLine(errorMessage(error).slice(0, SDK_OUTPUT_LIMIT));
+				vscode.window.showErrorMessage(`Suspect SDK: ${errorMessage(error).slice(0, 2000)}`);
+			}
+		}
+	}
+
+	private receive(session: SdkEditorSession, record: SdkSessionRecord): void {
+		if (!this.isCurrent(session)) return;
+		if (record.source && record.source !== session.identity.sourcePath) {
+			this.documents.clear('SDK source identity changed. Waiting for the new preview.');
+			session.identity = { ...session.identity, sourcePath: record.source, sourceRoot: path.dirname(record.source) };
+			session.openDiff = session.selectedPath !== undefined;
+		}
+		session.record = record;
+		if (record.status === 'planning-error') this.documents.clear('SDK planning failed. See Suspect SDK output for the latest diagnostics.');
+		else if (session.selectedPath && !this.artifactPaths(record).includes(session.selectedPath)) {
+			this.documents.clear('This artifact is no longer in the SDK preview. Use Suspect: Show Latest SDK Preview.');
+			session.selectedPath = undefined;
+			session.diskWatcher?.dispose();
+			session.diskWatcher = undefined;
+		}
+		this.report(session);
+		this.refresh(session);
+		if (session.action === 'watch' && !session.initialPickerShown && record.status !== 'planning-error') {
+			session.initialPickerShown = true;
+			void session.update.then(() => this.isCurrent(session) ? this.showLatest() : undefined).catch((error) => {
+				if (this.isCurrent(session)) this.failed(session, error);
+			});
+		}
+	}
+
+	private artifactPaths(record: SdkSessionRecord): string[] {
+		return [...new Set([...(record.artifacts ?? []).map((file) => file.path), ...record.changedArtifacts])];
+	}
+
+	private report(session: SdkEditorSession, detail?: string): void {
+		const { identity, record } = session;
+		const state = record?.status ?? (session.running ? 'starting' : 'error');
+		const lines = [
+			`SDK ${session.action}${session.action === 'watch' && session.running ? ' (watching saved files)' : ''}: ${state}${record ? ` · generation ${record.generation}` : ''}`,
+			`Config: ${identity.configPath}`, `Config directory / CLI cwd: ${identity.configDirectory}`,
+			`${record?.status === 'planning-error' ? 'Last resolved source' : 'Source'}: ${identity.sourcePath ?? '(unresolved; see CLI diagnostics)'}`,
+			`Source root: ${identity.sourceRoot ?? '(unresolved)'}`, `Output root: ${identity.outDirectory}`,
+		];
+		if (record) {
+			if (record.revision) lines.push(`Revision: ${record.revision}`);
+			if (record.compatibilityProfiles) lines.push(`Compatibility profiles: ${JSON.stringify(record.compatibilityProfiles)}`);
+			lines.push(`Success: ${record.success}`, `Delta: ${JSON.stringify(record.delta)}`, `Stats: ${JSON.stringify(record.stats)}`,
+				`Changed artifacts: ${record.changedArtifacts.length}`, `New documents: ${record.newDocuments.length}`);
+			let size = lines.join('\n').length;
+			for (const diagnostic of record.diagnostics) {
+				const line = JSON.stringify(diagnostic);
+				lines.push(line);
+				size += line.length + 1;
+				if (size > SDK_OUTPUT_LIMIT) break;
+			}
+		}
+		if (detail) lines.push(detail);
+		const text = lines.join('\n');
+		const bytes = Buffer.from(text);
+		const suffix = '\n[Latest report truncated to 64 KiB]';
+		this.output.clear();
+		this.output.appendLine(bytes.length < SDK_OUTPUT_LIMIT ? text : `${bytes.subarray(0, SDK_OUTPUT_LIMIT - Buffer.byteLength(suffix) - 4).toString('utf8')}${suffix}`);
+		const icon = state === 'planning-error' || state === 'write-conflict' || state === 'error' ? 'error' :
+			state === 'drift' ? 'warning' : session.running ? 'sync~spin' : 'check';
+		this.status.text = `$(${icon}) SDK${record ? ` #${record.generation}` : ''} · ${state}`;
+		this.status.tooltip = `${lines.slice(0, 6).join('\n').slice(0, 8192)}\nClick for latest SDK preview/diagnostics.`;
+		this.status.show();
+	}
+
+	private failed(session: SdkEditorSession, error: unknown): void {
+		session.handle?.dispose();
+		session.diskWatcher?.dispose();
+		session.diskWatcher = undefined;
+		session.running = false;
+		session.record = undefined;
+		session.revision += 1;
+		this.documents.clear('SDK preview unavailable. See Suspect SDK output for the latest error.');
+		this.report(session, errorMessage(error));
+		this.output.show(true);
+		vscode.window.showErrorMessage(`Suspect SDK: ${errorMessage(error).slice(0, 2000)}`);
+	}
+
+	private async showLatest(): Promise<void> {
+		const session = this.session;
+		const record = session?.record;
+		if (!session || !record || record.status === 'planning-error' || !record.artifacts) {
+			this.output.show(true);
+			return;
+		}
+		const changed = new Set(record.changedArtifacts);
+		const desired = new Set(record.artifacts.map((file) => file.path));
+		const paths = this.artifactPaths(record).sort((a, b) => {
+			const order = Number(changed.has(b)) - Number(changed.has(a));
+			return order || a.localeCompare(b);
+		});
+		if (!paths.length) { this.output.show(true); return; }
+		const source = session.identity.sourcePath;
+		const pick = await vscode.window.showQuickPick(paths.map((artifact) => ({
+			label: artifact,
+			description: !desired.has(artifact) ? 'removed from desired output' :
+				changed.has(artifact) ? 'disk drift / ownership change' : 'current artifact',
+		})), { placeHolder: `SDK generation ${record.generation}: ${record.status} — ${session.identity.configPath}` });
+		if (!pick || !this.isCurrent(session) || source !== session.identity.sourcePath) return;
+		// The picker may outlive several watch iterations. Use only the latest record.
+		if (!session.record?.artifacts || session.record.status === 'planning-error' || !this.artifactPaths(session.record).includes(pick.label)) return;
+		session.selectedPath = pick.label;
+		session.openDiff = true;
+		this.watchCurrentArtifact(session);
+		this.refresh(session);
+		await session.update;
+	}
+
+	private watchCurrentArtifact(session: SdkEditorSession): void {
+		session.diskWatcher?.dispose();
+		session.diskWatcher = undefined;
+		if (session.action !== 'watch' || !session.selectedPath) return;
+		const filename = path.join(session.identity.outDirectory, session.selectedPath);
+		// A second user edit can leave the CLI's drift status/path list unchanged.
+		// Observe only the selected disk file so its left-hand snapshot remains current.
+		const literalName = path.basename(filename).replace(/[\[\]{}*?]/g, (character) => `[${character}]`);
+		const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(path.dirname(filename), literalName));
+		const changed = (uri: vscode.Uri) => {
+			if (this.isCurrent(session) && uri.fsPath === filename) this.refresh(session);
+		};
+		const subscriptions = [watcher.onDidChange(changed), watcher.onDidCreate(changed), watcher.onDidDelete(changed)];
+		session.diskWatcher = { dispose: () => { subscriptions.forEach((subscription) => subscription.dispose()); watcher.dispose(); } };
+	}
+
+	/** Coalesce frequent records/selection changes into at most one in-flight disk read. */
+	private refresh(session: SdkEditorSession, invalidate = true): void {
+		if (invalidate) session.revision += 1;
+		if (session.refreshing) return;
+		session.refreshing = true;
+		let processedRevision = 0;
+		session.update = (async () => {
+			let revision: number;
+			do {
+				revision = session.revision;
+				processedRevision = revision;
+				const record = session.record;
+				const selected = session.selectedPath;
+				if (!this.isCurrent(session) || !record || record.status === 'planning-error' || !record.artifacts || !selected) return;
+				try {
+					const current = await readCurrentSdkArtifact(session.identity.outDirectory, selected);
+					if (!this.isCurrent(session)) return;
+					if (revision !== session.revision) continue;
+					const artifact = record.artifacts.find((file) => file.path === selected);
+					const [left, right] = this.documents.set(session, selected, current.content, artifact?.content ?? '');
+					if (session.openDiff) {
+						session.openDiff = false;
+						await vscode.commands.executeCommand('vscode.diff', left, right,
+							`${selected} — disk${current.exists ? '' : ' (missing)'} ↔ SDK${artifact ? '' : ' (removed)'} · ${path.basename(session.identity.configPath)}`,
+							{ preview: true });
+					}
+				} catch (error) {
+					if (!this.isCurrent(session)) return;
+					if (revision !== session.revision) continue;
+					this.documents.clear('SDK diff unavailable. See Suspect SDK output.');
+					this.report(session, `Cannot read current artifact ${selected}: ${errorMessage(error)}`);
+					this.output.show(true);
+				}
+			} while (this.isCurrent(session) && revision !== session.revision);
+		})().finally(() => {
+			session.refreshing = false;
+			// A new record can arrive after an early return but before this microtask.
+			if (this.isCurrent(session) && processedRevision !== session.revision) {
+				this.refresh(session, false);
+				return session.update;
+			}
+		});
+	}
 }
 
 async function openNotebook(uriHint?: vscode.Uri): Promise<void> {

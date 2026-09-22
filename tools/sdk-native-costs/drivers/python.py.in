@@ -1,0 +1,42 @@
+import json
+import os
+from pathlib import Path
+import sys
+import @@IMPORT@@ as sdk
+from @@IMPORT@@ import models, model_codecs
+
+assert Path(sdk.__file__).resolve().parent == Path(os.environ["SUSPECT_COSTS_PACKAGE"]).resolve()
+phase, count = sys.argv[1], int(sys.argv[2])
+fixture = @@FIXTURE@@
+codec = model_codecs.@@CODEC@@
+
+def checked(value: models.@@MODEL@@) -> None:
+    assert isinstance(value, models.@@MODEL@@)
+    assert value.data.total_credits.token == "@@PRECISION@@"
+    assert value.data.total_usage.token == "25.75"
+
+result = {"phase": phase, "iterations": count}
+if phase == "import":
+    assert count == 1 and callable(sdk.Client) and callable(codec.decode)
+    result.update(loaded=True, module=str(Path(sdk.__file__).resolve()))
+elif phase == "codec":
+    encoded_bytes = 0
+    for _ in range(count):
+        value: models.@@MODEL@@ = codec.decode(fixture)
+        checked(value)
+        encoded = codec.encode(value)
+        assert '"total_credits":@@PRECISION@@' in encoded
+        encoded_bytes += len(encoded.encode("utf-8"))
+    result.update(precision="@@PRECISION@@", encodedBytes=encoded_bytes)
+elif phase == "request":
+    base = sys.argv[3]
+    assert base.startswith("http://127.0.0.1:") and base.endswith("/api/v1")
+    with sdk.Client(auth={"apiKey": "@@TOKEN@@"}, server_url=base) as client:
+        for _ in range(count):
+            response = client.@@METHOD@@()
+            assert response.status == 200
+            checked(response.data)
+    result.update(precision="@@PRECISION@@")
+else:
+    raise AssertionError("unknown phase")
+print("SUSPECT_NATIVE_COSTS " + json.dumps(result, sort_keys=True))

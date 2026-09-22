@@ -1,0 +1,61 @@
+{
+  "entry":"http://requested.csharp.test/openapi.json",
+  "documents":[
+    {
+      "requested":"http://requested.csharp.test/openapi.json",
+      "effective":"http://api.csharp.test/v1/spec/openapi.json",
+      "value":{
+        "openapi":"3.2.0",
+        "$self":"https://logical.csharp.test/catalog/api.json#sdk",
+        "info":{"title":"Resource-bound native SDK","version":"1"},
+        "servers":[{"url":"../Api%2Fv3"}],
+        "paths":{
+          "/tree":{"post":{"operationId":"sendTree","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/tree"},"example":{"name":"root","amount":9007199254740993,"children":[{"name":"leaf","amount":9007199254740994}]}}}},"responses":{"200":{"description":"Tree","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/tree"},"example":{"name":"root","amount":9007199254740993,"children":[{"name":"leaf","amount":9007199254740994}]}}}}}}},
+          "/strict":{"post":{"operationId":"sendStrictTree","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/strict"},"example":{"name":"strict","amount":9007199254740993,"children":[{"name":"leaf","amount":9007199254740994}]}}}},"responses":{"200":{"description":"Strict tree","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/strict"},"example":{"name":"strict","amount":9007199254740993}}}},"422":{"description":"Checked rejected tree payload","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/strict"},"example":{"name":"rejected","amount":9007199254740993}}}}}}},
+          "/envelope":{"post":{"operationId":"sendEnvelope","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/envelope"},"example":{"id":"env","value":12,"other":13}}}},"responses":{"200":{"description":"Envelope","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/envelope"},"example":{"id":"env","value":12,"other":13}}}}}}},
+          "/nullable":{"post":{"operationId":"sendNullableEnvelope","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/nullable-envelope"},"examples":{"absent":{"value":{"id":"absent"}},"null":{"value":{"id":"present","value":null}},"integer":{"value":{"id":"integer","value":2}}}}}},"responses":{"200":{"description":"Context-bound optional union","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/nullable-envelope"},"example":{"id":"present","value":null}}}}}}},
+          "/choice":{"post":{"operationId":"sendChoice","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/choice"},"example":"standalone"}}},"responses":{"200":{"description":"Standalone dynamic union","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/choice"},"example":"standalone"}}}}}},
+          "/fallback":{"post":{"operationId":"sendFallback","requestBody":{"required":true,"content":{"application/json":{"schema":{"$dynamicRef":"https://schemas.csharp.test/fallback#value"},"example":"fallback"}}},"responses":{"200":{"description":"Initial fallback","content":{"application/json":{"schema":{"$dynamicRef":"https://schemas.csharp.test/fallback#value"},"example":"fallback"}}}}}},
+          "/integer":{"post":{"operationId":"sendInteger","parameters":[{"name":"X-Revision","in":"header","required":true,"schema":{"$ref":"https://schemas.csharp.test/catalog#/$defs/a~1b~0%25%20%23%C3%A9"},"example":9007199254740993}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/catalog#/$defs/a~1b~0%25%20%23%C3%A9"},"example":9007199254740993}}},"responses":{"200":{"description":"Exact resource integer","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/catalog#/$defs/a~1b~0%25%20%23%C3%A9"},"example":9007199254740993}}}}}},
+          "/nested":{"post":{"operationId":"sendNested","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/detached#/$defs/start"},"example":7}}},"responses":{"200":{"description":"Nested resource entry","content":{"application/json":{"schema":{"$ref":"https://schemas.csharp.test/detached#/$defs/start"},"example":7}}}}}}
+        },
+        "components":{"schemas":{
+          "Tree":{"$id":"https://schemas.csharp.test/tree","$dynamicAnchor":"node","description":"Typed tree with dynamically bound JSON child values.","type":"object","required":["name","amount"],"properties":{"name":{"type":"string"},"amount":{"type":"number","minimum":9007199254740993},"children":{"type":"array","items":{"$dynamicRef":"#node"}},"note":{"type":["string","null"]}}},
+          "Strict":{"$id":"https://schemas.csharp.test/strict","$dynamicAnchor":"node","description":"Recursive closure applies at every dynamically selected child.","$ref":"tree","unevaluatedProperties":false},
+          "Envelope":{"$id":"https://schemas.csharp.test/envelope","type":"object","required":["id","value"],"properties":{"id":{"type":"string"},"value":{"$ref":"https://schemas.csharp.test/value"}},"additionalProperties":{"$ref":"https://schemas.csharp.test/value"},"$defs":{"Binding":{"$dynamicAnchor":"value","type":"integer","minimum":10}}},
+          "NullableEnvelope":{"$id":"https://schemas.csharp.test/nullable-envelope","type":"object","required":["id"],"properties":{"id":{"type":"string"},"value":{"$ref":"https://schemas.csharp.test/choice"}},"additionalProperties":false,"$defs":{"Binding":{"$dynamicAnchor":"value","type":["integer","null"]}}}
+        }}
+      }
+    },
+    {
+      "requested":"http://requested.csharp.test/fallback.json",
+      "effective":"http://storage.csharp.test/schema/fallback.json",
+      "value":{"$id":"https://schemas.csharp.test/fallback","$dynamicAnchor":"value","type":"string","examples":["fallback annotation must not become an overriding value"]}
+    },
+    {
+      "requested":"http://requested.csharp.test/value.json",
+      "effective":"http://storage.csharp.test/schema/value.json",
+      "value":{"$id":"https://schemas.csharp.test/value","$dynamicRef":"https://schemas.csharp.test/fallback#value"}
+    },
+    {
+      "requested":"http://requested.csharp.test/choice.json",
+      "effective":"http://storage.csharp.test/schema/choice.json",
+      "value":{"$id":"https://schemas.csharp.test/choice","anyOf":[{"$dynamicRef":"https://schemas.csharp.test/fallback#value"},{"type":"boolean"}]}
+    },
+    {
+      "requested":"http://requested.csharp.test/catalog.json",
+      "effective":"http://storage.csharp.test/schema/catalog.json",
+      "value":{"$id":"https://schemas.csharp.test/catalog","$defs":{"a/b~% #é":{"type":"integer","minimum":9007199254740993,"examples":[9007199254740993]}}}
+    },
+    {
+      "requested":"http://requested.csharp.test/detached.json",
+      "effective":"http://storage.csharp.test/schema/detached.json",
+      "value":{"$id":"https://schemas.csharp.test/detached","const":false,"$defs":{"Binding":{"$dynamicAnchor":"value","type":"integer","minimum":7},"start":{"$ref":"https://schemas.csharp.test/base#/$defs/use"}}}
+    },
+    {
+      "requested":"http://requested.csharp.test/base.json",
+      "effective":"http://storage.csharp.test/schema/base.json",
+      "value":{"$id":"https://schemas.csharp.test/base","$defs":{"value":{"$dynamicAnchor":"value","type":"string"},"use":{"$dynamicRef":"#value"}}}
+    }
+  ]
+}

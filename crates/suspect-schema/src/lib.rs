@@ -3,13 +3,20 @@
 //!
 //! [`Compiler`] turns a schema [`NodeRef`] from the
 //! `suspect-low` spine into a [`Schema`]: an eagerly compiled program of
-//! checks. `$ref` targets compile lazily on first use (memoized in a
-//! thread-local cache), so recursive schemas work out of the box.
+//! checks. `$ref` targets compile lazily on first use and are cached on the
+//! compiled schema, including compilation failures.
 //!
-//! `$dynamicRef`/`$dynamicAnchor` implement RFC 3093 *basic* semantics: the
-//! dynamic scope is walked outermost-first and the first fragment declaring
-//! the anchor wins, falling back to static resolution through the document's
-//! `$dynamicAnchor` registry.
+//! References resolve within indexed schema resources. `$dynamicRef` first
+//! resolves statically; a dynamic-anchor fragment can then rebind through the
+//! outermost resource in evaluation scope (2020-12 Core §8.2.3.2). External
+//! loading is not configured by this API and produces an evaluation failure.
+//! This source-bound engine is not a complete OpenAPI dialect validator.
+//!
+//! [`OwnedCompiler`] provides a separate immutable boundary over an owned
+//! OpenAPI Contract, suitable for concurrent validation without source-document
+//! lifetimes. It compiles an explicit static subset and rejects unsupported
+//! features; [`OwnedOutcome`] separates proven invalidity from incomplete
+//! evaluation.
 //!
 //! ```no_run
 //! # use suspect_schema::{Compiler, Config};
@@ -26,9 +33,14 @@
 
 mod compile;
 mod config;
+mod equality;
 mod errors;
 mod exec;
 mod keywords;
+mod number;
+mod owned;
+mod pattern;
+mod resources;
 
 pub use compile::Compiler;
 use std::cell::RefCell;
@@ -37,38 +49,38 @@ use rustc_hash::FxHashMap;
 use suspect_low::{NodeRef, Pointer};
 
 pub use config::Config;
-pub use errors::{CompileError, SchemaError};
+pub use errors::{CompileError, SchemaError, SchemaErrorKind};
+pub use owned::{
+    OwnedCompileError, OwnedCompileErrorKind, OwnedCompiler, OwnedFinding, OwnedOutcome,
+    OwnedProgram, OwnedSchema, ProgramCheck, ProgramCheckError, ProgramCountTarget,
+    ProgramInstruction, ProgramLimits, ProgramNode, ProgramProperty, ProgramResource,
+    ProgramResourceContext, ProgramRoot, ProgramSource, ProgramType,
+};
+pub use pattern::{PatternError, PatternErrorKind, PatternProgram, PatternState, compile_pattern};
 
-use compile::{Prg, Scan};
+use compile::Prg;
+use resources::Scan;
 
 /// A compiled JSON Schema 2020-12 validator bound to its source document.
 ///
 /// **Not `Sync` and not `Send`:** `$ref` targets resolve lazily at first use
-/// into a `RefCell<FxHashMap<Pointer, Option<Schema>>>` cache. Use the
+/// into a `RefCell` cache that also retains compilation failures. Use the
 /// `Schema` by reference within one thread; compile one per thread for
 /// parallel validation of the same document.
 pub struct Schema<'d> {
     root: NodeRef<'d>,
     program: Prg<'d>,
     scan: Scan,
-    root_base: String,
     config: Config,
-    cache: RefCell<FxHashMap<Pointer, Option<Prg<'d>>>>,
+    cache: RefCell<FxHashMap<Pointer, Result<Option<Prg<'d>>, CompileError>>>,
 }
 
 impl<'d> Schema<'d> {
-    pub(crate) fn new(
-        root: NodeRef<'d>,
-        program: Prg<'d>,
-        scan: Scan,
-        root_base: String,
-        config: Config,
-    ) -> Self {
+    pub(crate) fn new(root: NodeRef<'d>, program: Prg<'d>, scan: Scan, config: Config) -> Self {
         Self {
             root,
             program,
             scan,
-            root_base,
             config,
             cache: RefCell::new(FxHashMap::default()),
         }
@@ -83,14 +95,24 @@ impl<'d> Schema<'d> {
         let mut ctx = exec::Ctx {
             sch: self,
             cap: self.config.max_errors,
-            masks: exec::Masks::default(),
             out: Vec::new(),
+            evaluation_error: None,
+            equality: keywords::types::EqualityBudget::new(&self.config),
+            remaining_steps: self.config.max_evaluation_steps,
             aborted: false,
             depth: 0,
             dyn_scope: Vec::new(),
         };
         let mut st = exec::Stack::new();
         exec::eval(&mut ctx, &self.program, instance, &mut st);
+        if let Some(error) = ctx.evaluation_error {
+            // Evaluation failure takes precedence and is never hidden by the
+            // error cap or a diverted logical branch.
+            ctx.out.insert(0, error);
+            if ctx.cap != 0 {
+                ctx.out.truncate(ctx.cap);
+            }
+        }
         ctx.out
     }
 
@@ -101,15 +123,17 @@ impl<'d> Schema<'d> {
         let mut ctx = exec::Ctx {
             sch: self,
             cap: 1,
-            masks: exec::Masks::default(),
             out: Vec::new(),
+            evaluation_error: None,
+            equality: keywords::types::EqualityBudget::new(&self.config),
+            remaining_steps: self.config.max_evaluation_steps,
             aborted: false,
             depth: 0,
             dyn_scope: Vec::new(),
         };
         let mut st = exec::Stack::new();
         exec::eval(&mut ctx, &self.program, instance, &mut st);
-        ctx.out.into_iter().next()
+        ctx.evaluation_error.or_else(|| ctx.out.into_iter().next())
     }
 
     /// The schema node this validator was compiled from.
@@ -127,8 +151,5 @@ impl<'d> Schema<'d> {
     }
     pub(crate) fn root_node(&self) -> NodeRef<'d> {
         self.root
-    }
-    pub(crate) fn root_base(&self) -> &str {
-        &self.root_base
     }
 }

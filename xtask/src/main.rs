@@ -1,5 +1,8 @@
 //! Workspace automation: corpus fetch, fixture generation, benches.
 
+mod sdk_full;
+mod sdk_m3_m6;
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -7,6 +10,8 @@ use anyhow::{Context, Result, bail};
 
 const USAGE: &str = "\
 tasks:
+  sdk-full [options]              Verify the maintained twelve-language full SDK plan.
+  sdk-m3-m6 [options]             Verify the current native SDK and iteration milestones.
   fetch-corpus [--force]          Download real-world OpenAPI specs into corpus/ (gitignored).
   gen-fixtures [options]          Generate deterministic synthetic OpenAPI 3.1 fixtures.
     --paths N                     Number of path items (default 100).
@@ -26,6 +31,8 @@ fn main() -> Result<()> {
     match task {
         "fetch-corpus" => fetch_corpus(rest),
         "gen-fixtures" => gen_fixtures(rest),
+        "sdk-full" => sdk_full::run(rest),
+        "sdk-m3-m6" => sdk_m3_m6::run(rest),
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
             Ok(())

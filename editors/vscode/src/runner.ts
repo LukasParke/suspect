@@ -1,4 +1,5 @@
 import * as cp from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -60,6 +61,11 @@ export function suspectBinary(): string {
 	if (/[/\\]suspect$/.test(base)) {
 		return base;
 	}
+	try {
+		// Explicit executables may be versioned, renamed, or symlinks to a pinned
+		// build. The setting accepts the file itself as well as a CLI directory.
+		if (fs.statSync(base).isFile()) return base;
+	} catch { /* Let spawning diagnose an unavailable CLI using the directory form. */ }
 	return path.join(base, 'suspect');
 }
 

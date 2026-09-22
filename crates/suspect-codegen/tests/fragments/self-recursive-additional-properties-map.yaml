@@ -1,0 +1,46 @@
+# INVARIANT: an object schema whose `additionalProperties` is a union that
+# references the map schema again must admit without refusal — the map
+# container resolves as a map of the union value type at every usage site,
+# including the recursion point, instead of being truncated to an empty model.
+openapi: 3.1.0
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /fields:
+    get:
+      operationId: listFields
+      responses:
+        '200':
+          description: A map whose object-kind values nest the same map recursively.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SelfRecursiveFieldMap'
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+  schemas:
+    SelfRecursiveFieldMap:
+      type: object
+      additionalProperties:
+        anyOf:
+          - $ref: '#/components/schemas/SelfRecursiveTextField'
+          - $ref: '#/components/schemas/SelfRecursiveObjectField'
+    SelfRecursiveTextField:
+      type: object
+      required: [type]
+      properties:
+        type: {type: string, enum: [text]}
+        value: {type: string}
+    SelfRecursiveObjectField:
+      type: object
+      required: [type]
+      properties:
+        type: {type: string, enum: [object]}
+        properties:
+          $ref: '#/components/schemas/SelfRecursiveFieldMap'

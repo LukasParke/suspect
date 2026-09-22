@@ -31,7 +31,7 @@ inputs:
     required: false
     default: ''
   preset:
-    description: 'gen: shipped preset name (docs-md | ts-sdk | rust-sdk).'
+    description: 'gen: shipped documentation preset (docs-md).'
     required: false
     default: ''
   manifest:

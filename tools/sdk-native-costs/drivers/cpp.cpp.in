@@ -1,0 +1,46 @@
+#include <@@PACKAGE@@/sdk.hpp>
+#include <cstdlib>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <variant>
+using namespace @@IMPORT@@;
+
+static void check(bool value) { if (!value) throw std::runtime_error("native SDK observation assertion"); }
+static void checked(const @@MODEL@@& value) {
+    check(value.data.total_credits.token() == "@@PRECISION@@");
+    check(value.data.total_usage.token() == "25.75");
+}
+int main(int argc, char** argv) {
+    check(argc >= 3);
+    const std::string phase = argv[1];
+    const int count = std::stoi(argv[2]);
+    const std::string fixture = @@FIXTURE@@;
+    if (phase == "import") {
+        check(count == 1 && sizeof(@@MODEL@@) > 0);
+        std::cout << "SUSPECT_NATIVE_COSTS {\"phase\":\"import\",\"iterations\":1,\"loaded\":true}\n";
+    } else if (phase == "codec") {
+        std::size_t encoded_bytes = 0;
+        for (int i = 0; i < count; ++i) {
+            auto decoded = @@CODEC@@::decode(fixture); check(static_cast<bool>(decoded));
+            const @@MODEL@@& value = decoded.value(); checked(value);
+            auto encoded = @@CODEC@@::encode(value); check(static_cast<bool>(encoded));
+            check(encoded.value().find("\"total_credits\":@@PRECISION@@") != std::string::npos);
+            encoded_bytes += encoded.value().size();
+        }
+        std::cout << "SUSPECT_NATIVE_COSTS {\"phase\":\"codec\",\"iterations\":" << count << ",\"encodedBytes\":" << encoded_bytes << ",\"precision\":\"@@PRECISION@@\"}\n";
+    } else if (phase == "request") {
+        check(argc == 4);
+        const std::string base = argv[3];
+        check(base.starts_with("http://127.0.0.1:") && base.ends_with("/api/v1"));
+        Credentials credentials; credentials.api_key = "@@TOKEN@@";
+        ClientOptions options; options.server_url = base;
+        auto ready = Client::with_curl(credentials, options); check(static_cast<bool>(ready));
+        auto client = std::move(ready).value();
+        for (int i = 0; i < count; ++i) {
+            auto result = client.@@METHOD@@(@@INPUT@@()); check(static_cast<bool>(result));
+            std::visit([](const auto& response) { check(response.response.status == 200); checked(response.data); }, result.value());
+        }
+        std::cout << "SUSPECT_NATIVE_COSTS {\"phase\":\"request\",\"iterations\":" << count << ",\"precision\":\"@@PRECISION@@\"}\n";
+    } else { throw std::runtime_error("unknown phase"); }
+}

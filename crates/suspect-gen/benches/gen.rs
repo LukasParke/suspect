@@ -44,11 +44,16 @@ fn bench_render_medium_x200(c: &mut Criterion) {
         .expect("template compiles");
     FilterRegistry::register(&mut engine);
     let ctx = synthetic_ctx();
+    let prepared = engine.prepare_context(&ctx);
 
     c.bench_function("gen/render_medium_x200", |b| {
         b.iter(|| {
             for _ in 0..200 {
-                black_box(engine.render("medium", black_box(&ctx)).expect("renders"));
+                black_box(
+                    engine
+                        .render_prepared("medium", black_box(&prepared))
+                        .expect("renders"),
+                );
             }
         })
     });

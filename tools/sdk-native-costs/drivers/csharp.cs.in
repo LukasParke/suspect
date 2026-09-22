@@ -1,0 +1,52 @@
+using @@IMPORT@@;
+using System;
+using System.Text;
+using System.Threading.Tasks;
+
+internal static class NativeCosts
+{
+    private static void Check(bool value) { if (!value) throw new Exception("native SDK observation assertion"); }
+    private static void Checked(@@MODEL@@ value)
+    {
+        Check(value.Data.TotalCredits.Token == "@@PRECISION@@");
+        Check(value.Data.TotalUsage.Token == "25.75");
+    }
+    public static async Task Main(string[] args)
+    {
+        string phase = args[0];
+        int count = int.Parse(args[1], System.Globalization.CultureInfo.InvariantCulture);
+        string fixture = @@FIXTURE@@;
+        if (phase == "import")
+        {
+            Check(count == 1 && typeof(Client).Assembly.GetType("@@IMPORT@@.@@MODEL@@") != null);
+            Console.WriteLine("SUSPECT_NATIVE_COSTS {\"phase\":\"import\",\"iterations\":1,\"loaded\":true}");
+        }
+        else if (phase == "codec")
+        {
+            long encodedBytes = 0;
+            for (int i = 0; i < count; i++)
+            {
+                @@MODEL@@ value = Codecs.@@DECODE@@(fixture);
+                Checked(value);
+                string encoded = Codecs.@@ENCODE@@(value);
+                Check(encoded.Contains("\"total_credits\":@@PRECISION@@", StringComparison.Ordinal));
+                encodedBytes += Encoding.UTF8.GetByteCount(encoded);
+            }
+            Console.WriteLine($"SUSPECT_NATIVE_COSTS {{\"phase\":\"codec\",\"iterations\":{count},\"encodedBytes\":{encodedBytes},\"precision\":\"@@PRECISION@@\"}}");
+        }
+        else if (phase == "request")
+        {
+            string url = args[2];
+            Check(url.StartsWith("http://127.0.0.1:", StringComparison.Ordinal) && url.EndsWith("/api/v1", StringComparison.Ordinal));
+            using var client = new Client(new Credentials { @@CREDENTIAL@@ = "@@TOKEN@@" }, new ClientOptions { ServerUrl = url });
+            for (int i = 0; i < count; i++)
+            {
+                var response = await client.@@METHOD@@();
+                Check(response.Status == 200);
+                Checked(response.Data);
+            }
+            Console.WriteLine($"SUSPECT_NATIVE_COSTS {{\"phase\":\"request\",\"iterations\":{count},\"precision\":\"@@PRECISION@@\"}}");
+        }
+        else throw new Exception("unknown phase");
+    }
+}

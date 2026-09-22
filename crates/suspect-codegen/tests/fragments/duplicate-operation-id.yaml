@@ -1,0 +1,33 @@
+# INVARIANT: identical operationIds on two operations must refuse with
+# `DUPLICATE_OPERATION_ID` — generated method names would be indistinguishable
+# in every convention.
+openapi: 3.1.0
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /a:
+    get:
+      operationId: same
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+  /b:
+    get:
+      operationId: same
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer

@@ -1,0 +1,25 @@
+{
+  "openapi":"3.2.0","info":{"title":"Scoped native SDK","version":"1"},
+  "servers":[{"url":"https://example.test/api"}],
+  "components":{"schemas":{
+    "Record":{"type":"object","required":["base","mode"],
+      "properties":{"base":{"type":"integer"},"mode":{"type":"string","enum":["num","zero"]},"next":{"$ref":"#/components/schemas/Node"},"note":{"type":["string","null"]}},
+      "patternProperties":{"^x-":{"type":"integer"},"-positive$":{"minimum":1}},"additionalProperties":false,
+      "propertyNames":{"pattern":"^(base|mode|next|note|x-[a-z-]+)$"},"dependentRequired":{"note":["next"]},
+      "if":{"properties":{"mode":{"const":"num"}},"required":["mode"]},"then":{"properties":{"base":{"minimum":2}}},"else":{"properties":{"base":{"maximum":0}}},
+      "example":{"base":3,"mode":"num","x-positive":7}
+    },
+    "Node":{"type":"object","properties":{"next":{"$ref":"#/components/schemas/Node"}},"patternProperties":{"^x-":{"type":"integer"}},"unevaluatedProperties":false,"example":{"x-one":1,"next":{"x-two":2}}},
+    "Ledger":{"type":"object","required":["count"],"properties":{"count":{"type":"integer"}},"patternProperties":{"^s-":{"type":"string"}},"additionalProperties":{"type":"integer"},"dependentSchemas":{"s-label":{"properties":{"count":{"minimum":1}}}},"example":{"count":1,"s-label":"yes","other":2}},
+    "Choice":{"allOf":[{"properties":{"a":{"type":"integer"}},"required":["a"]},{"if":{"properties":{"a":{"minimum":0}}},"then":{"properties":{"a":{"maximum":9}}},"else":false}],"unevaluatedProperties":false,"example":{"a":2}},
+    "Sequence":{"type":"array","prefixItems":[{"type":"string"}],"contains":{"type":"integer"},"minContains":1,"maxContains":2,"unevaluatedItems":false,"example":["header",1]}
+  }},
+  "paths":{
+    "/record/{mode}":{"post":{"operationId":"applyRecord","parameters":[{"name":"mode","in":"path","required":true,"schema":{"type":"string","example":"ok"}}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Record"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Record"}}}}}}},
+    "/ledger":{"put":{"operationId":"ledger","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Ledger"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Ledger"}}}}}}},
+    "/choice":{"post":{"operationId":"choice","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Choice"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Choice"}}}}}}},
+    "/sequence":{"post":{"operationId":"sequence","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Sequence"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Sequence"}}}}}}},
+    "/node":{"post":{"operationId":"node","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Node"}}}},"responses":{"200":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Node"}}}}}}},
+    "/items":{"get":{"operationId":"items","responses":{"200":{"content":{"application/x-ndjson":{"itemSchema":{"$ref":"#/components/schemas/Ledger"}}}}}}}
+  }
+}

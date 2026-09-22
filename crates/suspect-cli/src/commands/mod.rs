@@ -1,9 +1,14 @@
 //! Command implementations, one module per subcommand.
 
 use suspect_ref::Workspace;
+pub mod acquire;
+pub mod acquire_cmd;
+pub mod admission;
 pub mod bench;
 pub mod check;
 pub mod codegen_cmd;
+pub mod codegen_compare;
+pub mod codegen_session;
 pub mod fmt;
 pub mod fuzz;
 pub mod gateway;
@@ -13,66 +18,41 @@ pub mod lint;
 pub mod overlay;
 pub mod replay;
 pub mod rules;
+pub mod sdk;
+pub mod sdk_profiles;
 pub mod stats;
+pub mod terraform_cmd;
 pub mod test;
+pub mod validate;
 pub mod watch;
 
-/// Loads every YAML/JSON document in `spec`'s directory into one
-/// workspace. Arazzo source descriptions reference sibling files without
-/// `$ref`, so a directory scan is the reliable way to have them loaded.
-pub fn workspace_dir_all(spec: &std::path::Path) -> anyhow::Result<std::sync::Arc<Workspace>> {
+/// Opens the requested entry and the OpenAPI sources explicitly declared
+/// by an Arazzo entry. References resolve on demand; neighboring files are
+/// not workspace inputs merely because they share a directory.
+///
+/// # Errors
+/// Propagates entry and declared-source URI or loading failures.
+pub fn workspace_for_entry(spec: &std::path::Path) -> anyhow::Result<std::sync::Arc<Workspace>> {
+    use anyhow::Context;
     use suspect_ref::WorkspaceBuilder;
+    use suspect_source::Uri;
 
-    // Canonicalize to an absolute path: relative inputs make
-    // Path::parent() return empty/degenerate results.
-    let spec = spec.canonicalize()?;
-    // ...then use the spec's parent (or grandparent for workflow subdirs)
-    // as the workspace root so all referenced documents resolve.
-    let spec_dir = spec
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(std::path::Path::to_path_buf)
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let root = spec_dir.parent().unwrap_or(&spec_dir).to_path_buf();
-
-    let ws = WorkspaceBuilder::new().root(&root).build()?;
-
-    // Collect unique yaml/yml/json paths from both root and spec_dir.
-    let mut seen_paths = std::collections::HashSet::new();
-    let mut all_files = Vec::new();
-    for dir in [&root, &spec_dir] {
-        if let Ok(rd) = std::fs::read_dir(dir) {
-            for entry in rd.flatten() {
-                let p = entry.path();
-                if seen_paths.insert(p.clone())
-                    && matches!(
-                        p.extension().and_then(|e| e.to_str()),
-                        Some("yaml") | Some("yml") | Some("json")
-                    )
-                {
-                    all_files.push(p);
-                }
+    // Use the same lexical identity as callers and preserve the requested
+    // retrieval base for relative references, including symlink spellings.
+    let uri = Uri::from_path(spec)?;
+    let ws = WorkspaceBuilder::new().build()?;
+    let entry = ws.open(uri.as_str())?;
+    if entry.doc().sniff_family() == suspect_low::SpecFamily::Arazzo10 {
+        let doc = suspect_arazzo::ArazzoDoc::new(entry.doc());
+        for source in doc.source_descriptions() {
+            if source.kind != suspect_arazzo::SourceType::OpenApi {
+                continue;
             }
+            let target = uri.join(source.url)?;
+            ws.open(target.as_str()).with_context(|| {
+                format!("load source description '{}' ({})", source.name, source.url)
+            })?;
         }
     }
-    all_files.sort();
-
-    if std::env::var_os("SUSPECT_TRACE").is_some() {
-        for f in &all_files {
-            eprintln!("[files] {}", f.display());
-        }
-    }
-
-    for path in &all_files {
-        // Path relative to the workspace root.
-        let rel_str = path.strip_prefix(&root).ok().and_then(|r| r.to_str());
-        if let Some(rel_str) = rel_str {
-            match ws.load_all(rel_str) {
-                Ok(n) => eprintln!("[ws] loaded {rel_str} ({n} docs)"),
-                Err(e) => eprintln!("[ws] FAILED {rel_str}: {e}"),
-            }
-        }
-    }
-
     Ok(std::sync::Arc::new(ws))
 }

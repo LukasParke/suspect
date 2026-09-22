@@ -1,11 +1,8 @@
 //! Built-in generation presets.
 //!
 //! A [`Preset`] bundles starter templates, a manifest, and an IR-to-context
-//! builder for a known target. Three presets ship out of the box:
-//!
-//! - `docs-md` — Markdown API documentation (`docs/api/`)
-//! - `ts-sdk` — a fetch-based TypeScript client (`sdk/typescript/`)
-//! - `rust-sdk` — a zero-dependency request-builder SDK (`sdk/rust/`)
+//! builder for a known target. The `docs-md` preset generates Markdown API
+//! documentation under `docs/api/`.
 //!
 //! All templates render through [`FilterRegistry`](crate::FilterRegistry)
 //! filters and embed preservation markers around user-owned sections where
@@ -51,41 +48,7 @@ pub static DOCS_MD_TEMPLATES: &[(&str, &str)] = &[
 /// Starter manifest for the `docs-md` preset.
 pub static DOCS_MD_MANIFEST: &str = include_str!("../presets/docs-md/manifest.toml");
 
-/// `ts-sdk` templates: a typed fetch client plus model interfaces.
-pub static TS_SDK_TEMPLATES: &[(&str, &str)] = &[
-    (
-        "ts-sdk/models.ts.j2",
-        include_str!("../presets/ts-sdk/models.ts.j2"),
-    ),
-    (
-        "ts-sdk/client.ts.j2",
-        include_str!("../presets/ts-sdk/client.ts.j2"),
-    ),
-];
-
-/// Starter manifest for the `ts-sdk` preset.
-pub static TS_SDK_MANIFEST: &str = include_str!("../presets/ts-sdk/manifest.toml");
-
-/// `rust-sdk` templates: package manifest, models, and the client lib.
-pub static RUST_SDK_TEMPLATES: &[(&str, &str)] = &[
-    (
-        "rust-sdk/Cargo.toml.j2",
-        include_str!("../presets/rust-sdk/Cargo.toml.j2"),
-    ),
-    (
-        "rust-sdk/lib.rs.j2",
-        include_str!("../presets/rust-sdk/lib.rs.j2"),
-    ),
-    (
-        "rust-sdk/models.rs.j2",
-        include_str!("../presets/rust-sdk/models.rs.j2"),
-    ),
-];
-
-/// Starter manifest for the `rust-sdk` preset.
-pub static RUST_SDK_MANIFEST: &str = include_str!("../presets/rust-sdk/manifest.toml");
-
-/// Serializes `spec` and augments it with the shared derived context keys.
+/// Serializes `spec` and augments it with derived documentation context keys.
 ///
 /// Adds `base_url` (first server or empty string), `operations_by_tag`
 /// (`[{tag, operations}]` in document order, untagged operations grouped
@@ -93,7 +56,9 @@ pub static RUST_SDK_MANIFEST: &str = include_str!("../presets/rust-sdk/manifest.
 /// schema JSON, used by the `example_of` filter), `schema_examples`, and
 /// the precomputed `docs-md` render aids (`rows_params`, `rows_props`,
 /// per-entity `fragment` strings, `type_str`, `example_str`).
-fn common_context(spec: &IrSpec) -> serde_json::Value {
+/// Callers can inspect or extend this full context for custom templates.
+#[must_use]
+pub fn base_context(spec: &IrSpec) -> serde_json::Value {
     let mut ctx = serde_json::to_value(spec).expect("IrSpec serializes to JSON");
     let obj = ctx.as_object_mut().expect("IrSpec serializes to an object");
 
@@ -322,15 +287,6 @@ fn schema_rows_and_type(s: &suspect_ir::IrSchema) -> (serde_json::Value, serde_j
     (rows, type_str)
 }
 
-/// Builds the render context used by every shipped preset.
-///
-/// Exposed as a free function so callers can inspect or extend the exact
-/// context the presets render against.
-#[must_use]
-pub fn base_context(spec: &IrSpec) -> serde_json::Value {
-    common_context(spec)
-}
-
 /// Builds the render context for the `docs-md` preset.
 ///
 /// Identical to [`base_context`] except for keys the shipped `docs-md`
@@ -341,7 +297,7 @@ pub fn base_context(spec: &IrSpec) -> serde_json::Value {
 /// conversion that dominates render startup on large specs.
 #[must_use]
 pub fn docs_md_context(spec: &IrSpec) -> serde_json::Value {
-    let mut ctx = common_context(spec);
+    let mut ctx = base_context(spec);
     if let Some(obj) = ctx.as_object_mut() {
         obj.remove("operations");
         obj.remove("schema_refs");
@@ -366,8 +322,7 @@ pub fn docs_md_context(spec: &IrSpec) -> serde_json::Value {
 
 /// Looks up a preset by name.
 ///
-/// Known names: `"docs-md"`, `"ts-sdk"`, `"rust-sdk"`. Returns `None` for
-/// anything else.
+/// The bundled preset is `"docs-md"`. Returns `None` for any other name.
 #[must_use]
 pub fn get(name: &str) -> Option<Preset> {
     match name {
@@ -375,16 +330,6 @@ pub fn get(name: &str) -> Option<Preset> {
             templates: DOCS_MD_TEMPLATES,
             manifest_toml: DOCS_MD_MANIFEST,
             ctx_builder: docs_md_context,
-        }),
-        "ts-sdk" => Some(Preset {
-            templates: TS_SDK_TEMPLATES,
-            manifest_toml: TS_SDK_MANIFEST,
-            ctx_builder: common_context,
-        }),
-        "rust-sdk" => Some(Preset {
-            templates: RUST_SDK_TEMPLATES,
-            manifest_toml: RUST_SDK_MANIFEST,
-            ctx_builder: common_context,
         }),
         _ => None,
     }

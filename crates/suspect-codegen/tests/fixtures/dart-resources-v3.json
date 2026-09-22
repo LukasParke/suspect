@@ -1,0 +1,34 @@
+{
+  "entry": "https://physical.dart.test/api.json",
+  "documents": [
+    {
+      "requested": "https://physical.dart.test/api.json",
+      "effective": "https://physical.dart.test/api.json",
+      "value": {
+        "openapi": "3.2.0",
+        "$self": "https://logical.dart.test/catalog/api.json",
+        "info": {"title": "Native resource-scoped SDK", "version": "1"},
+        "servers": [{"url": "https://example.test/v3"}],
+        "security": [],
+        "paths": {
+          "/strict": {"post": {"operationId": "strictTree", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "urn:strict"}, "example": {"data": "root", "children": [{"data": "child"}]}}}}, "responses": {"200": {"description": "Strict resource", "content": {"application/json": {"schema": {"$ref": "urn:strict"}, "example": {"data": "root", "children": [{"data": "child"}]}}}}}}},
+          "/loose": {"post": {"operationId": "looseTree", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "urn:tree"}, "example": {"data": "root", "children": [{"data": "child", "extra": null}]}}}}, "responses": {"200": {"description": "Unentered strict resource is inert", "content": {"application/json": {"schema": {"$ref": "urn:tree"}}}}}}},
+          "/number": {"post": {"operationId": "numberEnvelope", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "urn:number-envelope"}, "example": {"payload": 9007199254740993, "note": null}}}}, "responses": {"200": {"description": "Dynamic integer overrides string fallback", "content": {"application/json": {"schema": {"$ref": "urn:number-envelope"}}}}}}},
+          "/counter": {"post": {"operationId": "counter", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "https://download.dart.test/counter.json"}, "example": 9007199254740993}}}, "responses": {"200": {"description": "Original physical schema findings", "content": {"application/json": {"schema": {"$ref": "urn:counter"}, "example": 9007199254740993}}}}}},
+          "/rows": {"get": {"operationId": "resourceRows", "responses": {"200": {"description": "Per-item scoped validation", "content": {"application/x-ndjson": {"itemSchema": {"$ref": "urn:strict"}}}}}}}
+        },
+        "components": {"schemas": {
+          "Tree": {"$id": "urn:tree", "$dynamicAnchor": "node", "type": "object", "required": ["data"], "properties": {"data": {"type": "string"}, "children": {"type": "array", "items": {"$dynamicRef": "#node"}}}, "examples": [{"data": "root", "children": [{"data": "child"}]}]},
+          "Strict": {"$id": "urn:strict", "$dynamicAnchor": "node", "$ref": "urn:tree", "unevaluatedProperties": false, "examples": [{"data": "root", "children": [{"data": "child"}]}]},
+          "Template": {"$id": "urn:template", "type": "object", "required": ["payload"], "properties": {"payload": {"$dynamicRef": "#slot"}, "note": {"type": ["string", "null"]}}, "additionalProperties": false, "$defs": {"fallback": {"$dynamicAnchor": "slot", "type": "string"}}},
+          "NumberEnvelope": {"$id": "urn:number-envelope", "$ref": "urn:template", "$defs": {"binding": {"$dynamicAnchor": "slot", "type": "integer"}}, "examples": [{"payload": 9007199254740993, "note": null}]}
+        }}
+      }
+    },
+    {
+      "requested": "https://download.dart.test/counter.json",
+      "effective": "https://cdn.dart.test/artifacts/counter.json",
+      "value": {"$id": "urn:counter", "type": "integer", "minimum": 9007199254740993}
+    }
+  ]
+}

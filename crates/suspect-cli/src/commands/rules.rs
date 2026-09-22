@@ -45,14 +45,15 @@ fn to_findings(doc: &LowDoc, shown: &str, findings: Vec<suspect_rules::TsFinding
             let (line, col) = f
                 .span
                 .map(|(start, _)| index.line_col(bytes, start))
-                .unwrap_or((1, 0));
+                .unwrap_or((0, 0));
             Finding {
                 file: shown.to_owned(),
                 severity: severity_from_str(f.severity.as_deref()),
                 code: f.rule_id,
                 message: f.message,
-                line,
+                line: line + 1,
                 col: col + 1,
+                range: f.span.map(|(start, end)| start..end),
             }
         })
         .collect()

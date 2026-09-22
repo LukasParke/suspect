@@ -9,6 +9,7 @@ authors.workspace = true
 
 [dependencies]
 suspect-low.workspace = true
+suspect-oas.workspace = true
 suspect-syntax.workspace = true
 suspect-ref.workspace = true
 suspect-overlay.workspace = true

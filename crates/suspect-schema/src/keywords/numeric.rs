@@ -2,37 +2,41 @@
 
 use std::cmp::Ordering;
 
-use suspect_low::{NodeRef, Pointer};
+use suspect_low::{NodeRef, Pointer, ValueKind};
 
-use crate::compile::Num;
-use crate::exec::{Ctx, Stack, inst_num};
+use crate::exec::{Ctx, Stack};
+use crate::number::{Divisor, ExactNumber};
 
-/// Integer path uses exact modulo; the float path checks that the quotient
-/// is (near-)whole with a relative epsilon, so `0.07 / 0.01` counts as a
-/// multiple despite binary floating point.
+fn instance_number<'a, 'd>(
+    ctx: &mut Ctx<'a, 'd>,
+    st: &Stack<'d>,
+    at: &Pointer,
+    inst: &NodeRef<'d>,
+) -> Result<Option<ExactNumber>, ()> {
+    if !matches!(inst.kind(), ValueKind::Int | ValueKind::Float) {
+        return Ok(None);
+    }
+    ExactNumber::parse(inst.scalar_bytes(), ctx.sch.config().max_number_bytes)
+        .map(Some)
+        .map_err(|error| ctx.fail_evaluation(st, at, error.to_string()))
+}
+
+/// Divisibility over exact decimal coefficients and symbolic exponents.
 pub(crate) fn check_multiple_of<'a, 'd>(
     ctx: &mut Ctx<'a, 'd>,
     st: &Stack<'d>,
     at: &Pointer,
     inst: &NodeRef<'d>,
-    d: Num,
+    d: &Divisor,
 ) -> bool {
-    let Some(x) = inst_num(inst) else { return true };
-    let ok = match (x, d) {
-        (Num::I(a), Num::I(b)) => a % b == 0,
-        _ => {
-            let q = x.as_f64() / d.as_f64();
-            let m = (q - q.round()).abs();
-            // Relative epsilon: absolute error of division grows with |q|.
-            m <= 1e-9 * q.abs().max(1.0)
-        }
+    let x = match instance_number(ctx, st, at, inst) {
+        Ok(Some(x)) => x,
+        Ok(None) => return true,
+        Err(()) => return false,
     };
+    let ok = d.contains(&x);
     if !ok {
-        ctx.emit(
-            st,
-            at,
-            format!("value {} is not a multiple of {}", x.as_f64(), d.as_f64()),
-        );
+        ctx.emit(st, at, format!("value {x} is not a multiple of {d}"));
     }
     ok
 }
@@ -43,12 +47,16 @@ pub(crate) fn check_bound<'a, 'd>(
     st: &Stack<'d>,
     at: &Pointer,
     inst: &NodeRef<'d>,
-    bound: Num,
+    bound: &ExactNumber,
     exclusive: bool,
     upper: bool,
 ) -> bool {
-    let Some(x) = inst_num(inst) else { return true };
-    let ord = cmp_num(x, bound);
+    let x = match instance_number(ctx, st, at, inst) {
+        Ok(Some(x)) => x,
+        Ok(None) => return true,
+        Err(()) => return false,
+    };
+    let ord = x.cmp(bound);
     let ok = match (upper, exclusive) {
         (true, false) => ord != Ordering::Greater,
         (true, true) => ord == Ordering::Less,
@@ -57,22 +65,12 @@ pub(crate) fn check_bound<'a, 'd>(
     };
     if !ok {
         let what = match (upper, exclusive) {
-            (true, false) => format!("maximum {}", bound.as_f64()),
-            (true, true) => format!("exclusive maximum {}", bound.as_f64()),
-            (false, false) => format!("minimum {}", bound.as_f64()),
-            (false, true) => format!("exclusive minimum {}", bound.as_f64()),
+            (true, false) => format!("maximum {bound}"),
+            (true, true) => format!("exclusive maximum {bound}"),
+            (false, false) => format!("minimum {bound}"),
+            (false, true) => format!("exclusive minimum {bound}"),
         };
-        ctx.emit(st, at, format!("value {} violates `{}`", x.as_f64(), what));
+        ctx.emit(st, at, format!("value {x} violates `{what}`"));
     }
     ok
-}
-
-fn cmp_num(a: Num, b: Num) -> Ordering {
-    match (a, b) {
-        (Num::I(x), Num::I(y)) => x.cmp(&y),
-        _ => a
-            .as_f64()
-            .partial_cmp(&b.as_f64())
-            .unwrap_or(Ordering::Equal),
-    }
 }

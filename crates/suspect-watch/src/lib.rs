@@ -34,7 +34,9 @@ pub struct WatcherHandle {
 /// A coalesced burst of file modifications.
 #[derive(Debug, Clone)]
 pub enum DebounceEvent {
-    /// Paths modified during one quiet-debounce window, deduplicated.
+    /// Paths modified during one quiet-debounce window, deduplicated and
+    /// canonicalized when they still exist. Deleted paths retain the
+    /// spelling reported by the filesystem watcher.
     Changed(Vec<PathBuf>),
 }
 
@@ -93,7 +95,9 @@ pub fn watch(
                 // window expires, whichever comes first (capped by POLL so
                 // shutdown stays responsive).
                 let wait = match last_fire {
-                    Some(fired) => (debounce - fired.elapsed()).min(POLL),
+                    // The deadline may pass between the flush check and
+                    // this second clock read. A zero wait rechecks it safely.
+                    Some(fired) => debounce.saturating_sub(fired.elapsed()).min(POLL),
                     None => POLL,
                 };
                 match event_rx.recv_timeout(wait) {

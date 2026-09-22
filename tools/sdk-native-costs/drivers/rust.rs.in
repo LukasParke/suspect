@@ -1,0 +1,49 @@
+use sdk_full::{Client, ClientOptions, Credentials, codecs::@@CODEC@@, models::@@MODEL@@};
+use sdk_full::operations::@@MODULE@@::{@@INPUT@@, @@SUCCESS@@};
+
+fn checked(value: &@@MODEL@@) {
+    assert_eq!(value.data.total_credits.as_str(), "@@PRECISION@@");
+    assert_eq!(value.data.total_usage.as_str(), "25.75");
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let phase = args.get(1).expect("phase");
+    let count: usize = args.get(2).expect("count").parse().expect("integer count");
+    let fixture = @@FIXTURE@@;
+    match phase.as_str() {
+        "import" => {
+            assert_eq!(count, 1);
+            assert!(std::mem::size_of::<@@MODEL@@>() > 0);
+            println!("SUSPECT_NATIVE_COSTS {{\"phase\":\"import\",\"iterations\":1,\"loaded\":true}}");
+        }
+        "codec" => {
+            let mut encoded_bytes = 0usize;
+            for _ in 0..count {
+                let value: @@MODEL@@ = @@CODEC@@::decode(std::hint::black_box(fixture)).expect("typed decode");
+                checked(&value);
+                let encoded = @@CODEC@@::encode(std::hint::black_box(&value)).expect("typed encode");
+                assert!(encoded.contains("\"total_credits\":@@PRECISION@@"));
+                encoded_bytes += encoded.len();
+            }
+            println!("SUSPECT_NATIVE_COSTS {{\"phase\":\"codec\",\"iterations\":{count},\"encodedBytes\":{encoded_bytes},\"precision\":\"@@PRECISION@@\"}}");
+        }
+        "request" => {
+            let base = args.get(3).expect("owned loopback URL");
+            assert!(base.starts_with("http://127.0.0.1:") && base.ends_with("/api/v1"));
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("native async runtime");
+            runtime.block_on(async {
+                let client = Client::with_reqwest(Credentials::@@CREDENTIAL@@("@@TOKEN@@")).expect("reqwest adapter")
+                    .with_options(ClientOptions { server_url: Some(base.clone()), ..Default::default() });
+                for _ in 0..count {
+                    let @@SUCCESS@@::@@VARIANT@@(response) = client.@@METHOD@@(@@INPUT@@::new()).await.expect("SDK HTTP request");
+                    assert_eq!(response.status, 200);
+                    checked(&response.data);
+                }
+            });
+            runtime.shutdown_timeout(std::time::Duration::from_secs(2));
+            println!("SUSPECT_NATIVE_COSTS {{\"phase\":\"request\",\"iterations\":{count},\"precision\":\"@@PRECISION@@\"}}");
+        }
+        _ => panic!("unknown phase"),
+    }
+}

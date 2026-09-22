@@ -1,0 +1,22 @@
+{
+  "version": "suspect.runtime-contract.v1",
+  "cases": [
+    {"name":"numbers-are-not-booleans","schema":{"type":"number"},"valid":["1","1.0","1e-400","1e999999999999"],"invalid":["true","null","\"1\""]},
+    {"name":"mathematical-integers","schema":{"type":"integer"},"valid":["1.0","1e3","9007199254740993","-0.0"],"invalid":["0.1","1e-3","false"]},
+    {"name":"prefix-decimal-comparison","schema":{"type":"number","minimum":10,"maximum":15},"valid":["10","15","1.25e1"],"invalid":["1","9.999999999999999999","15.00000000000000001"]},
+    {"name":"negative-decimal-comparison","schema":{"type":"number","minimum":-15,"exclusiveMaximum":-10},"valid":["-15","-1.25e1"],"invalid":["-10","-15.00000000000000001"]},
+    {"name":"exact-divisibility","schema":{"type":"number","multipleOf":0.3},"valid":["0","0.6","3e99999","-0.9"],"invalid":["0.7","0.30000000000000004","1e-400"]},
+    {"name":"structural-numeric-equality","schema":{"const":{"a":[1,null,true]}},"valid":["{\"a\":[1.0,null,true]}","{\"a\":[1e0,null,true]}"],"invalid":["{\"a\":[true,null,true]}","{\"a\":[1,null,false]}"]},
+    {"name":"exclusive-union","schema":{"oneOf":[{"type":"integer"},{"type":"number"}]},"valid":["1.5"],"invalid":["1","1.0","true"]},
+    {"name":"union-keeps-sibling-assertions","schema":{"type":"string","anyOf":[{"const":1},{"const":"x"}]},"valid":["\"x\""],"invalid":["1","\"y\""]},
+    {"name":"negation","schema":{"not":{"type":"number"}},"valid":["true","null","\"a\""],"invalid":["1","1.5"]},
+    {"name":"required-nullable-and-extras","schema":{"type":"object","required":["name"],"properties":{"name":{"type":["string","null"]}},"additionalProperties":{"type":"integer"}},"valid":["{\"name\":null}","{\"name\":\"x\",\"extra\":1.0}"],"invalid":["{}","{\"name\":true}","{\"name\":\"x\",\"extra\":1.5}"]},
+    {"name":"unique-mathematical-values","schema":{"type":"array","uniqueItems":true},"valid":["[1,true]","[1,2]"],"invalid":["[1,1.0]","[{\"a\":1},{\"a\":1e0}]"]},
+    {"name":"unicode-cardinality","schema":{"type":"string","minLength":2,"maxLength":2},"valid":["\"e\\u0301\"","\"😀x\""],"invalid":["\"😀\"","\"abc\""]},
+    {"name":"portable-pattern-strict-anchors","schema":{"type":"string","pattern":"^a[0-9]+$"},"valid":["\"a1\"","\"a123\""],"invalid":["\"xa1\"","\"a1\\n\"","\"a\""]},
+    {"name":"tuple-items","schema":{"type":"array","prefixItems":[{"type":"string"}],"items":{"type":"integer"},"minItems":1},"valid":["[\"a\"]","[\"a\",1.0,2]"],"invalid":["[]","[1]","[\"a\",false]"]},
+    {"name":"closed-object","schema":{"type":"object","properties":{"x":{"type":"string"}},"additionalProperties":false},"valid":["{}","{\"x\":\"a\"}"],"invalid":["{\"y\":1}"]},
+    {"name":"boolean-true","schema":true,"valid":["null","0","[]","{}"],"invalid":[]},
+    {"name":"boolean-false","schema":false,"valid":[],"invalid":["null","0","[]","{}"]}
+  ]
+}

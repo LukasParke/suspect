@@ -1,0 +1,59 @@
+{
+  "openapi": "3.1.2",
+  "info": {"title": "Kotlin scoped SDK", "version": "1"},
+  "servers": [{"url": "https://example.test/api"}],
+  "security": [],
+  "components": {"schemas": {
+    "PatternRecord": {
+      "type": "object", "required": ["kind", "label"],
+      "properties": {
+        "kind": {"type": "string", "const": "record"},
+        "label": {"type": "string"},
+        "remark": {"type": ["string", "null"]}
+      },
+      "patternProperties": {"^n_": {"type": "integer"}, "_even$": {"multipleOf": 2}},
+      "additionalProperties": false, "propertyNames": {"minLength": 1},
+      "example": {"kind": "record", "label": "native", "remark": null, "n_even": 4}
+    },
+    "ConditionalRecord": {
+      "type": "object", "required": ["mode", "value"],
+      "properties": {"mode": {"type": "string", "enum": ["text", "count"]}, "value": true},
+      "if": {"properties": {"mode": {"const": "text"}}, "required": ["mode"]},
+      "then": {"properties": {"value": {"type": "string"}}},
+      "else": {"properties": {"value": {"type": "integer"}}},
+      "dependentSchemas": {"mode": {"properties": {"mode": true, "value": true}}},
+      "unevaluatedProperties": false,
+      "example": {"mode": "text", "value": "source"}
+    },
+    "ConditionalCarrier": {
+      "if": {"type": "string"}, "then": {"minLength": 2},
+      "else": {"type": "integer", "minimum": 0}, "example": "source"
+    },
+    "ScopedComposition": {
+      "type": "object",
+      "allOf": [{"properties": {"a": {"type": "string"}}}, {"properties": {"b": {"type": "integer"}}}],
+      "unevaluatedProperties": false, "example": {"a": "first", "b": 2}
+    },
+    "ScopedArray": {
+      "type": "array", "prefixItems": [{"type": "string"}],
+      "contains": {"type": "integer"}, "minContains": 1, "maxContains": 1,
+      "unevaluatedItems": false, "example": ["head", 2]
+    },
+    "DependenciesRecord": {
+      "type": "object",
+      "properties": {"credit": {"type": ["string", "null"]}, "billing": {"type": "string"}},
+      "dependentRequired": {"credit": ["billing"]},
+      "dependentSchemas": {"billing": {"propertyNames": {"minLength": 1}}},
+      "additionalProperties": {"type": "integer"}, "example": {"credit": null, "billing": "street"}
+    },
+    "Failure": {"type": "object", "required": ["message"], "properties": {"message": {"type": "string"}}, "example": {"message": "failed"}}
+  }},
+  "paths": {
+    "/patterns": {"post": {"operationId": "roundtripPatterns", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PatternRecord"}}}}, "responses": {"200": {"description": "Pattern values", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PatternRecord"}}}}}}},
+    "/conditional": {"post": {"operationId": "roundtripConditional", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConditionalRecord"}}}}, "responses": {"200": {"description": "Conditional values", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConditionalRecord"}}}}}}},
+    "/carrier": {"post": {"operationId": "roundtripCarrier", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConditionalCarrier"}}}}, "responses": {"200": {"description": "Checked carrier", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ConditionalCarrier"}}}}}}},
+    "/composition": {"post": {"operationId": "roundtripComposition", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScopedComposition"}}}}, "responses": {"200": {"description": "Scoped composition", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScopedComposition"}}}}}}},
+    "/array": {"post": {"operationId": "roundtripArray", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScopedArray"}}}}, "responses": {"200": {"description": "Evaluated items", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ScopedArray"}}}}}}},
+    "/dependencies": {"post": {"operationId": "roundtripDependencies", "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DependenciesRecord"}}}}, "responses": {"200": {"description": "Dependency values", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DependenciesRecord"}}}}, "422": {"description": "Declared API failure", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Failure"}}}}}}}
+  }
+}

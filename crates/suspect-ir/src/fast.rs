@@ -191,7 +191,7 @@ fn ref_name(node: &FastValue) -> Option<String> {
 }
 
 /// Materializes any fast value into owned JSON (`None` → JSON null).
-fn json(value: Option<&FastValue>) -> serde_json::Value {
+pub(crate) fn json(value: Option<&FastValue>) -> serde_json::Value {
     let Some(value) = value else {
         return serde_json::Value::Null;
     };
@@ -265,135 +265,53 @@ fn responses_of(op: &FastValue) -> Vec<IrResponse> {
     entries.into_iter().map(|(_, r)| r).collect()
 }
 
-/// Converts a resolved CST node into a [`FastValue`] so the workspace and
-/// fast paths share the same IR walk.
+/// Converts a resolved CST node to the same decoded values as the fast reader.
 ///
-/// Scalar fidelity matches today's CST semantics exactly: plain scalars keep
-/// their raw token, single/double-quoted scalars keep quote-stripped text
-/// (escape sequences unprocessed, exactly what `scalar_bytes` yields), and
-/// block scalars are decoded by the same folding/chomping algorithm the low
-/// layer applies.
-pub(crate) fn value_from_node(node: NodeRef<'_>) -> FastValue {
+/// Invalid string escapes or UTF-8 return a source-linked error instead of
+/// silently changing the scalar's contents.
+pub(crate) fn value_from_node(node: NodeRef<'_>) -> Result<FastValue, String> {
     use suspect_low::ValueKind;
     use suspect_syntax::ScalarStyle;
 
     let resolved = node.resolved();
-    match resolved.kind() {
+    Ok(match resolved.kind() {
         ValueKind::Object => FastValue::Object(
             resolved
                 .entries()
                 .into_iter()
-                .map(|e| {
-                    let v = e
-                        .value
-                        .map_or_else(FastValue::null, |child| value_from_node(child));
-                    (e.key.to_owned(), v)
+                .map(|entry| {
+                    let key = decoded_text(entry.key_node)?;
+                    let value = match entry.value {
+                        Some(child) => value_from_node(child)?,
+                        None => FastValue::null(),
+                    };
+                    Ok((key, value))
                 })
-                .collect(),
+                .collect::<Result<_, String>>()?,
         ),
-        ValueKind::Array => {
-            FastValue::Array(resolved.items().into_iter().map(value_from_node).collect())
-        }
-        _ => {
-            let style = resolved.syntax().scalar_style();
-            match style {
-                ScalarStyle::Block => FastValue::Scalar {
-                    raw: String::from_utf8_lossy(&decode_block_scalar(resolved.raw_text()))
-                        .into_owned(),
-                    quoted: true,
-                },
-                ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted => FastValue::Scalar {
-                    raw: String::from_utf8_lossy(resolved.scalar_bytes()).into_owned(),
-                    quoted: true,
-                },
-                ScalarStyle::Plain => FastValue::Scalar {
-                    raw: String::from_utf8_lossy(resolved.scalar_bytes()).into_owned(),
-                    quoted: false,
-                },
-            }
-        }
-    }
+        ValueKind::Array => FastValue::Array(
+            resolved
+                .items()
+                .into_iter()
+                .map(value_from_node)
+                .collect::<Result<_, _>>()?,
+        ),
+        _ => FastValue::Scalar {
+            raw: decoded_text(resolved)?,
+            quoted: resolved.syntax().scalar_style() != ScalarStyle::Plain,
+        },
+    })
 }
 
-/// Decodes a `|`/`>` block scalar from its raw source slice: strips the
-/// header, removes indentation, applies folding and chomping. Byte-for-byte
-/// the same algorithm as `suspect-low`'s decoder.
-fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
-    let split = text
-        .iter()
-        .position(|&b| b == b'\n')
-        .map_or(text.len(), |i| i + 1);
-    let header = &text[..split.min(text.len())];
-    let body = &text[split..];
-    let folded = header.first() == Some(&b'>');
-    let chomp = header.iter().skip(1).find(|b| **b == b'-' || **b == b'+');
-
-    // Content indent = leading spaces of the first non-empty line.
-    let mut indent = None;
-    for line in body.split_inclusive(|&b| b == b'\n') {
-        let nonspace = line.iter().take_while(|&&b| b == b' ').count();
-        if nonspace < line.len() {
-            indent = Some(nonspace);
-            break;
-        }
-    }
-    let indent = indent.unwrap_or(0);
-
-    let mut raw_lines: Vec<&[u8]> = body.split_inclusive(|&b| b == b'\n').collect();
-    if raw_lines.last().is_some_and(|l| l.ends_with(b"\n"))
-        && let Some(last) = raw_lines.last_mut()
-    {
-        *last = &last[..last.len() - 1];
-    }
-
-    let mut out: Vec<u8> = Vec::with_capacity(body.len());
-    let mut prev_folded_break = false;
-    let mut wrote_any = false;
-    for line in &mut raw_lines {
-        let bare: &[u8] = if line.ends_with(b"\n") {
-            &line[..line.len() - 1]
-        } else {
-            line
-        };
-        let dedented: &[u8] =
-            bare.get(indent..)
-                .unwrap_or(if bare.is_empty() { b"" } else { bare });
-        let is_blank = dedented.iter().all(|&b| b == b' ');
-        if folded && !is_blank && wrote_any && !prev_folded_break {
-            out.push(b' '); // fold: single break between non-empty lines
-        } else if wrote_any {
-            out.push(b'\n');
-        }
-        if is_blank {
-            prev_folded_break = true;
-            continue;
-        }
-        prev_folded_break = false;
-        out.extend_from_slice(dedented);
-        wrote_any = true;
-    }
-
-    // Chomping: clip keeps exactly one trailing break, strip removes all
-    // trailing breaks/spaces, keep preserves everything.
-    match chomp {
-        Some(b'-') => {
-            while out.last() == Some(&b'\n') || out.last() == Some(&b' ') {
-                if out.last() == Some(&b' ')
-                    && !out.ends_with(b"\n ")
-                    && !out.iter().all(|&b| b == b' ')
-                {
-                    break;
-                }
-                out.pop();
-            }
-        }
-        Some(b'+') => {}
-        _ => {
-            while matches!(out.last(), Some(b'\n') | Some(b' ')) {
-                out.pop();
-            }
-            out.push(b'\n');
-        }
-    }
-    out
+fn decoded_text(node: NodeRef<'_>) -> Result<String, String> {
+    let invalid = || {
+        format!(
+            "invalid scalar at {} bytes {}..{}",
+            node.syntax().doc().uri(),
+            node.byte_range().start,
+            node.byte_range().end
+        )
+    };
+    let bytes = node.try_decoded_scalar().ok_or_else(invalid)?;
+    String::from_utf8(bytes.into_owned()).map_err(|_| invalid())
 }

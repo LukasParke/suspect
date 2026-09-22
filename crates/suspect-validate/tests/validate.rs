@@ -24,6 +24,384 @@ fn codes(diags: &[Diagnostic]) -> Vec<&'static str> {
     diags.iter().map(|d| d.code).collect()
 }
 
+#[test]
+fn schema_values_have_valid_kinds_with_dialect_specific_boolean_positions() {
+    for (version, expected) in [
+        ("3.1.0", vec!["17", "[]", "bad", "null"]),
+        ("3.0.3", vec!["17", "[]", "bad", "false", "null", "true"]),
+    ] {
+        let dir = unique_dir(&format!("schema-kinds-{version}"));
+        let source = format!(
+            "openapi: {version}\ninfo: {{title: test, version: '1'}}\npaths: {{}}\ncomponents:\n  schemas:\n    MissingContract: null\n    NumberContract: 17\n    StringContract: bad\n    ArrayContract: []\n    BooleanContract: true\n    Model:\n      type: object\n      additionalProperties: false\n      properties:\n        additionalProperties: false\n"
+        );
+        let session = session_with(&dir, "main.yaml", &source);
+        let findings = validate_entry(&session, "main.yaml").unwrap();
+        let mut invalid: Vec<_> = findings
+            .iter()
+            .filter(|finding| finding.code == "oas-schema-invalid-kind")
+            .map(|finding| &source[finding.range.clone()])
+            .collect();
+        invalid.sort_unstable();
+        assert_eq!(invalid, expected, "{version}: {findings:?}");
+    }
+}
+
+#[test]
+fn type_declarations_require_valid_unique_strings_for_the_openapi_version() {
+    for (index, version, declaration, errors) in [
+        (0, "3.1.0", "type: 42", 1),
+        (1, "3.1.0", "type: null", 1),
+        (2, "3.1.0", "type:", 1),
+        (3, "3.1.0", "type: []", 1),
+        (4, "3.1.0", "type: [string, 7]", 1),
+        (5, "3.1.0", "type: [string, string]", 1),
+        (6, "3.1.0", r#"type: [string, "\u0073tring"]"#, 1),
+        (7, "3.1.0", r#"type: "\u0073tring""#, 0),
+        (8, "3.1.0", "type: [string, 'null']", 0),
+        (9, "3.0.3", "type: [string, 'null']", 1),
+        (10, "3.0.3", "type: 'null'", 1),
+        (11, "3.0.3", "type: string, nullable: true", 0),
+    ] {
+        let dir = unique_dir(&format!("type-shape-{index}"));
+        let source = format!(
+            "openapi: {version}\ninfo: {{title: test, version: '1'}}\npaths: {{}}\ncomponents:\n  schemas:\n    Model: {{{declaration}}}\n"
+        );
+        let session = session_with(&dir, "main.yaml", &source);
+        let findings = validate_entry(&session, "main.yaml").unwrap();
+        let actual = findings
+            .iter()
+            .filter(|finding| {
+                matches!(
+                    finding.code,
+                    "oas-schema-invalid-type" | "oas-schema-unknown-type"
+                )
+            })
+            .count();
+        assert_eq!(actual, errors, "{version} {declaration}: {findings:?}");
+    }
+}
+
+#[test]
+fn library_validation_distinguishes_contract_references_from_instance_data() {
+    let dir = unique_dir("semantic-refs");
+    let source = format!(
+        "{HEADER}paths: {{}}\ncomponents:\n  schemas:\n    Document:\n      type: object\n      properties:\n        $ref: {{type: string}}\n      example: {{$ref: 'missing-example.yaml#/data'}}\n    Broken:\n      $ref: 'missing-schema.yaml#/Model'\n"
+    );
+    let session = session_with(&dir, "main.yaml", &source);
+    let findings = validate_entry(&session, "main.yaml")
+        .expect("a missing contract target is a located finding, not a failed entry load");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].code, "unresolved-ref");
+    assert_eq!(
+        &source[findings[0].range.clone()],
+        "'missing-schema.yaml#/Model'"
+    );
+    assert_eq!(
+        session.workspace().len(),
+        1,
+        "example data must not load a document"
+    );
+}
+
+#[test]
+fn example_type_checks_use_mathematical_numbers_and_versioned_nullability() {
+    for (index, version, schema, example, expected) in [
+        (0, "3.1.0", "{type: integer}", "1.0", 0),
+        (1, "3.1.0", "{type: integer}", "1e400", 0),
+        (
+            2,
+            "3.1.0",
+            "{type: integer}",
+            "1.0000000000000000000000000001",
+            1,
+        ),
+        (3, "3.1.0", "{type: string, nullable: true}", "null", 1),
+        (4, "3.0.3", "{type: string, nullable: true}", "null", 0),
+        (5, "3.1.0", "{type: [string, 'null']}", "null", 0),
+        (6, "3.1.0", "{properties: {id: {type: string}}}", "7", 0),
+        (7, "3.1.0", "{items: {type: string}}", "false", 0),
+        (8, "3.1.0", "{type: integer}", "1e-400", 1),
+        (9, "3.1.0", "{type: string}", "~", 1),
+    ] {
+        let dir = unique_dir(&format!("example-type-{index}"));
+        let source = format!(
+            "openapi: {version}\ninfo: {{title: test, version: '1'}}\npaths:\n  /example:\n    get:\n      operationId: example\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema: {schema}\n              example: {example}\n"
+        );
+        let session = session_with(&dir, "main.yaml", &source);
+        let findings = validate_entry(&session, "main.yaml").unwrap();
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.code == "oas-example-type-mismatch")
+                .count(),
+            expected,
+            "{version} {schema} example {example}: {findings:?}"
+        );
+    }
+}
+
+#[test]
+fn external_response_example_findings_retain_the_example_source() {
+    let dir = unique_dir("external-example-provenance");
+    let session = session_with(
+        &dir,
+        "main.yaml",
+        &format!(
+            "{HEADER}paths:\n  /example:\n    get:\n      operationId: example\n      responses:\n        '200': {{$ref: 'response.yaml#/Response'}}\n"
+        ),
+    );
+    let external = "Response:\n  description: ok\n  content:\n    application/json:\n      schema: {type: string}\n      example: 42\n";
+    std::fs::write(dir.join("response.yaml"), external).unwrap();
+    let findings = validate_entry(&session, "main.yaml").unwrap();
+    let examples: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding.code == "oas-example-type-mismatch")
+        .collect();
+    assert_eq!(examples.len(), 1, "{findings:?}");
+    assert!(examples[0].doc.as_str().ends_with("/response.yaml"));
+    assert_eq!(&external[examples[0].range.clone()], "42");
+}
+
+#[test]
+fn nullable_discriminator_union_preserves_null_without_hiding_an_invalid_variant() {
+    // Reduced from OpenRouter's ORAnthropicNullableCaller. Discriminator
+    // metadata must not make the explicitly permitted null branch invalid.
+    for (tag, alternative, expected_errors) in [
+        ("null", "{type: 'null'}", 0),
+        (
+            "missing",
+            "{type: object, properties: {id: {type: string}}}",
+            1,
+        ),
+    ] {
+        let dir = unique_dir(&format!("nullable-discriminator-{tag}"));
+        let session = session_with(
+            &dir,
+            "main.yaml",
+            &format!(
+                "{HEADER}paths: {{}}\ncomponents:\n  schemas:\n    Caller:\n      discriminator: {{propertyName: type}}\n      oneOf:\n        - type: object\n          required: [type]\n          properties:\n            type: {{type: string, const: direct}}\n        - {alternative}\n"
+            ),
+        );
+        let findings = validate_entry(&session, "main.yaml").unwrap();
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.code == "oas-discriminator-missing-property")
+                .count(),
+            expected_errors,
+            "alternative {tag}: {findings:?}"
+        );
+    }
+}
+
+#[test]
+fn invalid_nested_property_is_reported_once_despite_shared_references() {
+    let dir = unique_dir("nested-shared-property");
+    let source = format!(
+        "{HEADER}paths: {{}}\ncomponents:\n  schemas:\n    Model:\n      properties:\n        suspect_regression_property: {{type: suspect_invalid_type}}\n    WrapperA:\n      allOf: [{{$ref: '#/components/schemas/Model'}}]\n    WrapperB:\n      allOf: [{{$ref: '#/components/schemas/Model'}}]\n"
+    );
+    let session = session_with(&dir, "main.yaml", &source);
+    let findings = validate_entry(&session, "main.yaml").unwrap();
+    let matching: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == "oas-schema-unknown-type")
+        .collect();
+    assert_eq!(
+        matching.len(),
+        1,
+        "one finding per invalid property: {matching:?}"
+    );
+    assert_eq!(&source[matching[0].range.clone()], "suspect_invalid_type");
+}
+
+#[test]
+fn referenced_schema_findings_point_to_the_file_containing_the_defect() {
+    let dir = unique_dir("external-schema-provenance");
+    let session = session_with(
+        &dir,
+        "main.yaml",
+        &format!(
+            "{HEADER}paths: {{}}\ncomponents:\n  schemas:\n    Model: {{$ref: 'shared.yaml#/Model'}}\n"
+        ),
+    );
+    let external = "Model:\n  properties:\n    value: {type: broken}\n";
+    std::fs::write(dir.join("shared.yaml"), external).unwrap();
+    let findings = validate_entry(&session, "main.yaml").unwrap();
+    let matching: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == "oas-schema-unknown-type")
+        .collect();
+    assert_eq!(matching.len(), 1, "{findings:?}");
+    assert!(
+        matching[0].doc.as_str().ends_with("/shared.yaml"),
+        "{matching:?}"
+    );
+    assert_eq!(&external[matching[0].range.clone()], "broken");
+}
+
+#[test]
+fn checks_schema_applicators_without_interpreting_instance_data_as_schemas() {
+    // OpenRouter's provider-monitor schema uses conditional schemas; it also
+    // has properties literally named after schema keywords. Examples/defaults
+    // are instance data, so schema-shaped data there must not produce errors.
+    let dir = unique_dir("schema-applicators");
+    let source = format!(
+        "{HEADER}paths: {{}}\ncomponents:\n  schemas:\n    Monitor:\n      properties:\n        allOf: {{type: string}}\n      if:\n        properties:\n          enabled: {{const: true}}\n      then:\n        properties:\n          provider: {{type: broken_conditional}}\n      additionalProperties: {{type: broken_additional}}\n      dependentSchemas:\n        enabled: {{type: broken_dependent}}\n      patternProperties:\n        '^x-': {{type: broken_pattern}}\n      contains: {{type: broken_contains}}\n      propertyNames: {{type: broken_name}}\n      unevaluatedProperties: {{type: broken_unevaluated}}\n      unevaluatedItems: {{type: broken_items}}\n      $defs:\n        Hidden: {{type: broken_definition}}\n      example: {{type: broken_example, allOf: [{{type: broken_data}}]}}\n      default: {{type: broken_default}}\n"
+    );
+    let session = session_with(&dir, "main.yaml", &source);
+    let findings = validate_entry(&session, "main.yaml").unwrap();
+    let mut invalid_types: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == "oas-schema-unknown-type")
+        .map(|f| &source[f.range.clone()])
+        .collect();
+    invalid_types.sort_unstable();
+    assert_eq!(
+        invalid_types,
+        [
+            "broken_additional",
+            "broken_conditional",
+            "broken_contains",
+            "broken_definition",
+            "broken_dependent",
+            "broken_items",
+            "broken_name",
+            "broken_pattern",
+            "broken_unevaluated",
+        ]
+    );
+}
+
+#[test]
+fn validates_inline_transport_schemas_without_a_components_section() {
+    let dir = unique_dir("inline-transport-schemas");
+    let source = format!(
+        "{HEADER}paths:
+  /items:
+    parameters:
+      - name: q
+        in: query
+        schema: {{type: broken_query}}
+    post:
+      operationId: create
+      requestBody:
+        content:
+          application/json:
+            schema: {{type: broken_body}}
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Rate:
+              schema: {{type: broken_header}}
+          content:
+            application/json:
+              schema: {{type: broken_response}}
+      callbacks:
+        changed:
+          '{{$request.body#/callback}}':
+            post:
+              operationId: changed
+              requestBody:
+                content:
+                  application/json:
+                    schema: {{type: broken_callback}}
+              responses:
+                '204': {{description: ok}}
+webhooks:
+  created:
+    post:
+      operationId: created
+      requestBody:
+        content:
+          application/json:
+            schema: {{type: broken_webhook}}
+      responses:
+        '204': {{description: ok}}
+"
+    );
+    let session = session_with(&dir, "main.yaml", &source);
+    let findings = validate_entry(&session, "main.yaml").unwrap();
+    let mut invalid_types: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == "oas-schema-unknown-type")
+        .map(|f| &source[f.range.clone()])
+        .collect();
+    invalid_types.sort_unstable();
+    assert_eq!(
+        invalid_types,
+        [
+            "broken_body",
+            "broken_callback",
+            "broken_header",
+            "broken_query",
+            "broken_response",
+            "broken_webhook"
+        ]
+    );
+}
+
+#[test]
+fn schema_ref_siblings_are_checked_in_31_and_ignored_in_30() {
+    for (version, expected_errors) in [("3.1.0", 1), ("3.0.3", 0)] {
+        let dir = unique_dir(&format!("ref-siblings-{version}"));
+        let source = format!(
+            "openapi: {version}\ninfo: {{title: t, version: '1'}}\npaths: {{}}\ncomponents:\n  schemas:\n    Base: {{type: object}}\n    Refined:\n      $ref: '#/components/schemas/Base'\n      properties:\n        added: {{type: broken_sibling}}\n"
+        );
+        let session = session_with(&dir, "main.yaml", &source);
+        let findings = validate_entry(&session, "main.yaml").unwrap();
+        let matching: Vec<_> = findings
+            .iter()
+            .filter(|f| f.code == "oas-schema-unknown-type")
+            .collect();
+        assert_eq!(
+            matching.len(),
+            expected_errors,
+            "OpenAPI {version}: {findings:?}"
+        );
+        if let Some(finding) = matching.first() {
+            assert_eq!(&source[finding.range.clone()], "broken_sibling");
+        }
+    }
+}
+
+#[test]
+fn absent_schema_values_are_located_errors() {
+    let dir = unique_dir("missing-schema-values");
+    let source = format!(
+        "{HEADER}paths:
+  /items:
+    get:
+      operationId: items
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+components:
+  schemas:
+    Missing:
+    Object:
+      type: object
+      properties:
+        absent:
+    Array:
+      type: array
+      items:
+"
+    );
+    let session = session_with(&dir, "main.yaml", &source);
+    let findings = validate_entry(&session, "main.yaml").unwrap();
+    let mut missing: Vec<_> = findings
+        .iter()
+        .filter(|f| f.code == "oas-schema-invalid-kind")
+        .map(|f| &source[f.range.clone()])
+        .collect();
+    missing.sort_unstable();
+    assert_eq!(missing, ["Missing", "absent", "items", "schema"]);
+}
+
 const HEADER: &str = "openapi: 3.1.0\ninfo:\n  title: t\n  version: \"1\"\n";
 
 #[test]
@@ -274,6 +652,40 @@ fn discriminator_unknown_mapping_is_error() {
         .unwrap();
     assert_eq!(d.severity, Severity::Error);
     assert!(d.message.contains("Dog"));
+}
+
+#[test]
+fn discriminator_property_in_each_union_variant_is_accepted() {
+    // Reduced from OpenRouter's AnthropicCaller shape: the union delegates
+    // its discriminator field to independently declared component variants.
+    let dir = unique_dir("union-discriminator");
+    let session = session_with(
+        &dir,
+        "main.yaml",
+        &format!(
+            "{HEADER}components:
+  schemas:
+    Caller:
+      discriminator:
+        propertyName: type
+      oneOf:
+        - $ref: '#/components/schemas/Direct'
+        - $ref: '#/components/schemas/Code'
+    Direct:
+      type: object
+      required: [type]
+      properties:
+        type: {{type: string, const: direct}}
+    Code:
+      type: object
+      required: [type]
+      properties:
+        type: {{type: string, const: code}}
+"
+        ),
+    );
+    let diags = validate_entry(&session, "main.yaml").unwrap();
+    assert!(!codes(&diags).contains(&"oas-discriminator-missing-property"));
 }
 
 #[test]

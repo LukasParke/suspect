@@ -1,0 +1,152 @@
+name: SDK Session performance
+
+on:
+  workflow_dispatch:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "tools/sdk-session-perf/**"
+      - ".github/workflows/sdk-session-performance.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Smoke, collect a qualifying baseline, or collect/compare a candidate"
+        type: choice
+        options: [smoke, calibrate, compare]
+        default: smoke
+      baseline_run_id:
+        description: "Required for compare: prior run containing the qualified baseline artifact"
+        type: string
+        required: false
+        default: ""
+      baseline_artifact:
+        description: "Artifact containing baseline.json, including its raw calibration reports"
+        type: string
+        required: false
+        default: "sdk-session-baseline"
+      suite:
+        description: "Must match the calibrated workload exactly"
+        type: choice
+        options: [public, compact]
+        default: public
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTUP_TOOLCHAIN: "1.97.1"
+
+jobs:
+  functional-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.12"
+      - name: Install exact Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target/sdk-session-perf-build"
+          shared-key: sdk-session-perf-1.97.1
+      - name: Build session runner example
+        run: cargo build --locked -p suspect-codegen --example sdk_session_bench --target-dir target/sdk-session-perf-build
+      - name: Comparator adversarial and exit-code tests
+        run: python3 -m unittest discover -s tools/sdk-session-perf -p 'test_*.py' -v
+      - name: Compact five-target Session functional gates (untimed)
+        run: >-
+          python3 tools/sdk-session-perf/run.py
+          --out target/sdk-session-performance-ci
+          --suite compact --functional-only
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sdk-session-smoke-${{ github.run_id }}
+          path: |
+            target/sdk-session-performance-ci/report.json
+            target/sdk-session-performance-ci/failure.json
+            target/sdk-session-performance-ci/attribution.json
+            target/sdk-session-performance-ci/cases/
+            target/sdk-session-performance-ci/logs/
+            target/sdk-session-performance-ci/bin/
+          if-no-files-found: warn
+          retention-days: 14
+
+  collect-and-qualify:
+    # An ordinary hosted smoke runner supplies no numerical performance verdict.
+    # This label denotes a reserved, inventoried host with pinned image/CPU policy.
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      vars.SDK_SESSION_PERF_ENABLED == 'true' && inputs.mode != 'smoke'
+    runs-on: [self-hosted, linux, x64, sdk-session-perf-v1]
+    timeout-minutes: 360
+    concurrency:
+      group: sdk-session-perf-dedicated-v1
+      cancel-in-progress: false
+    env:
+      PERF_RUNNER_SPEC: ${{ vars.SDK_SESSION_PERF_RUNNER_SPEC }}
+      OPENROUTER_WEB_ROOT: ${{ vars.SDK_SESSION_PERF_CORPUS_ROOT }}
+      PERF_SUITE: ${{ inputs.suite }}
+      PERF_MODE: ${{ inputs.mode }}
+      BASELINE_RUN_ID: ${{ inputs.baseline_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.12"
+      - name: Install exact Rust toolchain
+        run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
+      - name: Check collection request
+        run: >-
+          python3 -c 'import os; from pathlib import Path;
+          assert Path(os.environ["PERF_RUNNER_SPEC"]).is_file(), "versioned runner declaration required";
+          assert os.environ["PERF_MODE"] != "compare" or os.environ["BASELINE_RUN_ID"].isdigit(), "compare requires a baseline run ID"'
+      - uses: actions/download-artifact@v4
+        if: inputs.mode == 'compare'
+        with:
+          name: ${{ inputs.baseline_artifact }}
+          run-id: ${{ inputs.baseline_run_id }}
+          github-token: ${{ github.token }}
+          path: target/sdk-session-calibrated-baseline
+      - name: Collect repeated evidence and evaluate qualification/confidence
+        shell: bash
+        run: |
+          extra=()
+          if [[ "$PERF_SUITE" == public ]]; then
+            extra+=(--openrouter-root "$OPENROUTER_WEB_ROOT")
+          fi
+          if [[ "$PERF_MODE" == calibrate ]]; then
+            extra+=(--role baseline --repeats 5 --require-qualified)
+          else
+            extra+=(--role candidate --repeats 3 --gate
+              --baseline target/sdk-session-calibrated-baseline/baseline.json
+              --policy target/sdk-session-calibrated-baseline/policy.json)
+          fi
+          python3 tools/sdk-session-perf/calibrate.py \
+            --out target/sdk-session-performance-dedicated \
+            --suite "$PERF_SUITE" --iterations 200 --warmups 5 \
+            --runner "$PERF_RUNNER_SPEC" "${extra[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ inputs.mode == 'calibrate' && 'sdk-session-baseline' || 'sdk-session-candidate' }}
+          path: |
+            target/sdk-session-performance-dedicated/baseline.json
+            target/sdk-session-performance-dedicated/policy.json
+            target/sdk-session-performance-dedicated/collection.json
+            target/sdk-session-performance-dedicated/comparison.json
+            target/sdk-session-performance-dedicated/failure.json
+            target/sdk-session-performance-dedicated/*.log
+            target/sdk-session-performance-dedicated/run-*/attribution.json
+            target/sdk-session-performance-dedicated/run-*/report.json
+            target/sdk-session-performance-dedicated/run-*/failure.json
+            target/sdk-session-performance-dedicated/run-*/logs/
+            target/sdk-session-performance-dedicated/run-001/bin/
+          if-no-files-found: warn
+          retention-days: 30

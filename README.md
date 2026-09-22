@@ -9,6 +9,15 @@ Design constraints: parse once, view many; zero-copy scalars; arena-indexed
 nodes; lazy memoized resolution. Benchmarks with honest budget verdicts live
 in [BENCHMARKS.md](BENCHMARKS.md).
 
+SDK generation uses one source-addressed contract pipeline for twelve native
+backends — **TypeScript/JavaScript, Python, Go, Rust, Swift, Java, Kotlin, C#,
+Ruby, PHP, Dart and C++** — producing native models, checked codecs, HTTP
+operations, packages, golden-defaults behavior (attribution, pagination,
+OAuth, env-credential defaults) and documentation.
+The [hackathon demo](docs/SDK-DEMO.md) generates SDKs from the real
+OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
+[verified demo scope](docs/SDK-PROGRESS.md).
+
 ## LSP — full-featured editor experience
 
 `suspect lsp` is a complete language server for OpenAPI/Arazzo/Overlay files.
@@ -68,26 +77,31 @@ After applying, every `$ref` is rewritten:
 
 ## Crates
 
-| Crate | Purpose | Tests |
-|---|---|---|
-| `suspect-source` | Loading: mmap, encodings (UTF-8/16, BOM), line indexes, URIs | 16 |
-| `suspect-syntax` | Lossless tree-sitter CSTs (vendored grammars, patched for >32k-line YAML) | 7+1 |
-| `suspect-low` | Ordered model, source maps, YAML 1.2 typing, aliases/merge keys, pointers | 20 |
-| `suspect-ref` | `$ref` engine: workspace graph, cycle census (legal vs illegal), memos | 18 |
-| `suspect-jsonpath` | RFC 9535 JSONPath over low nodes | 28 |
-| `suspect-schema` | JSON Schema 2020-12 (unevaluated*, `$anchor`/`$id`, formats, `$dynamicRef`) | 31 |
-| `suspect-oas` | Typed OpenAPI 3.x views; `$ref`-transparent, cycle-safe | 3 |
-| `suspect-overlay` | Overlay 1.0 models + apply engine | 14 |
-| `suspect-arazzo` | Arazzo 1.0 models, runtime expressions, cross-ref validation | 8 |
-| `suspect-validate` | 22 semantic checks with stable diagnostic codes | 25 |
-| `suspect-lint` | Spectral-compatible rulesets + 21 builtin rules | 31 |
-| `suspect-lsp` | tower-lsp server: diagnostics, goto-def/references, hover, symbols, completion | 27 |
-| `suspect-cli` | `suspect` binary: check, lint, overlay, fmt, stats, bundle, diff, bench, lsp | 15 |
+| Crate | Purpose |
+|---|---|
+| `suspect-source` | Loading: mmap, encodings (UTF-8/16, BOM), line indexes, URIs |
+| `suspect-syntax` | Lossless tree-sitter CSTs (vendored grammars, patched for >32k-line YAML) |
+| `suspect-low` | Ordered model, source maps, YAML 1.2 typing, aliases/merge keys, pointers |
+| `suspect-ref` | `$ref` engine: workspace graph, cycle census (legal vs illegal), memos |
+| `suspect-jsonpath` | RFC 9535 JSONPath over low nodes |
+| `suspect-schema` | Source-bound JSON Schema validation and checked owned programs for SDK codecs |
+| `suspect-oas` | Typed OpenAPI 3.x views; `$ref`-transparent, cycle-safe |
+| `suspect-ir` | Source-addressed SDK `Contract` and indexed platform snapshots |
+| `suspect-codegen` | Native SDK models, codecs, HTTP packages, docs, sessions and compatibility |
+| `suspect-gen` | Markdown documentation preset and custom manifest/template rendering |
+| `suspect-artifact` | Shared ownership-aware output, drift checks and changed-file writes |
+| `suspect-overlay` | Overlay 1.0 models + apply engine |
+| `suspect-arazzo` | Arazzo 1.0 models, runtime expressions, cross-ref validation |
+| `suspect-validate` | Source-located semantic checks with stable diagnostic codes |
+| `suspect-lint` | Spectral-compatible rulesets and builtin rules |
+| `suspect-lsp` | tower-lsp server: diagnostics, goto-def/references, hover, symbols, completion |
+| `suspect-cli` | `suspect` binary: authoring, SDK generation, tests, gateway and editor commands |
 
 ## CLI
 
 ```console
 $ suspect check spec.yaml              # parse + resolve report, cycle census
+$ suspect validate spec.yaml           # source-located semantic findings
 $ suspect lint spec/ --format json     # Spectral-style linting
 $ suspect bundle api.yaml --strategy inline -o bundled.yaml
 $ suspect overlay apply overlay.yaml api.yaml -o out.yaml
@@ -97,6 +111,31 @@ $ suspect fmt api.yaml --json
 $ suspect bench fixture.yaml           # per-stage timings
 $ suspect lsp                          # stdio language server
 ```
+
+## SDK generation
+
+Generate the shared create/update/list/get example contract:
+
+```sh
+suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+  --profile typescript-http --package-name @example/widgets \
+  --package-version 0.1.0 --out generated
+```
+
+Profiles are the twelve registered backends listed by `suspect
+codegen-profiles` (`typescript-http`, `python-http`, `go-http`, `rust-http`,
+`swift-http`, `java-http`, `kotlin-http`, `csharp-http`, `ruby-http`,
+`php-http`, `dart-http`, `cpp-http`). Package identity is explicit
+configuration. Repeat
+`--operation-id NAME` to select exact source operations; omitting it attempts
+all outgoing operations. Unsupported selected contracts produce source-linked
+diagnostics before output. Add `--check --format json` for read-only drift checks.
+
+For multi-target generation, watch and editor previews, use
+[`codegen-session`](docs/SDK-INCREMENTAL-GENERATION.md). Compare source snapshots
+and generated interfaces with [`codegen-compare`](docs/SDK-COMPATIBILITY-REPORTS.md).
+Markdown and custom templates use `suspect gen api.yaml --preset docs-md` or
+`suspect gen api.yaml --manifest FILE`; native SDK docs are emitted by each profile.
 
 ## Notable engineering
 

@@ -1,0 +1,49 @@
+import @@IMPORT@@.*;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+
+public final class NativeCosts {
+    private NativeCosts() {}
+    private static void check(boolean value) { if (!value) throw new AssertionError("native SDK observation assertion"); }
+    private static void checked(@@MODEL@@ value) {
+        check(value.data().totalCredits().token().equals("@@PRECISION@@"));
+        check(value.data().totalUsage().token().equals("25.75"));
+    }
+    public static void main(String[] args) throws Exception {
+        String phase = args[0];
+        int count = Integer.parseInt(args[1]);
+        String fixture = @@FIXTURE@@;
+        switch (phase) {
+            case "import" -> {
+                check(count == 1);
+                check(Class.forName("@@IMPORT@@.@@CLIENT@@") != null);
+                check(@@CODECHOLDER@@.@@CODECFIELD@@ != null);
+                System.out.println("SUSPECT_NATIVE_COSTS {\"phase\":\"import\",\"iterations\":1,\"loaded\":true}");
+            }
+            case "codec" -> {
+                long encodedBytes = 0;
+                for (int i = 0; i < count; i++) {
+                    @@MODEL@@ value = @@CODECHOLDER@@.@@CODECFIELD@@.decode(fixture);
+                    checked(value);
+                    String encoded = @@CODECHOLDER@@.@@CODECFIELD@@.encode(value);
+                    check(encoded.contains("\"total_credits\":@@PRECISION@@"));
+                    encodedBytes += encoded.getBytes(StandardCharsets.UTF_8).length;
+                }
+                System.out.println("SUSPECT_NATIVE_COSTS {\"phase\":\"codec\",\"iterations\":" + count + ",\"encodedBytes\":" + encodedBytes + ",\"precision\":\"@@PRECISION@@\"}");
+            }
+            case "request" -> {
+                String base = args[2];
+                check(base.startsWith("http://127.0.0.1:") && base.endsWith("/api/v1"));
+                try (var client = new @@CLIENT@@(HttpRuntime.Options.builder().credential("apiKey", "@@TOKEN@@").serverUrl(URI.create(base)).build())) {
+                    for (int i = 0; i < count; i++) {
+                        var response = client.@@METHOD@@();
+                        check(response.status() == 200);
+                        checked(response.data());
+                    }
+                }
+                System.out.println("SUSPECT_NATIVE_COSTS {\"phase\":\"request\",\"iterations\":" + count + ",\"precision\":\"@@PRECISION@@\"}");
+            }
+            default -> throw new AssertionError("unknown phase");
+        }
+    }
+}

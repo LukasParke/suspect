@@ -1,0 +1,34 @@
+# INVARIANT: two operationIds that differ only by separator and case
+# (`get-pets` vs `get_pets`) must produce a `naming-method-collision` advice
+# finding while remaining admissible — the generated method names collide
+# under camel, Pascal, and snake conventions alike.
+openapi: 3.1.0
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /a:
+    get:
+      operationId: get-pets
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+  /b:
+    get:
+      operationId: get_pets
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer

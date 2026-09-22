@@ -1,0 +1,47 @@
+{
+  "Create": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["SetExtra", "region", "enabled"],
+    "properties": {
+      "SetExtra": {"type": "string", "minLength": 1, "maxLength": 128, "description": "An intentionally colliding native member; the Terraform name maps to its allocated field."},
+      "region": {"type": "string", "enum": ["east", "west"]},
+      "enabled": {"type": "boolean"},
+      "description": {"type": ["string", "null"]},
+      "memo": {"type": "string"},
+      "secret": {"type": "string", "minLength": 4}
+    }
+  },
+  "Update": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["SetExtra", "enabled"],
+    "properties": {
+      "SetExtra": {"type": "string", "minLength": 1, "maxLength": 128},
+      "enabled": {"type": "boolean"},
+      "description": {"type": ["string", "null"]},
+      "memo": {"type": "string"},
+      "secret": {"type": "string", "minLength": 4}
+    }
+  },
+  "Record": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "SetExtra", "region", "enabled", "description", "credential-fingerprint"],
+    "properties": {
+      "id": {"type": "string", "minLength": 1},
+      "SetExtra": {"type": "string", "minLength": 1},
+      "region": {"type": "string", "enum": ["east", "west"]},
+      "enabled": {"type": "boolean"},
+      "description": {"type": ["string", "null"]},
+      "memo": {"type": "string"},
+      "credential-fingerprint": {"type": "string"}
+    }
+  },
+  "Problem": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["message"],
+    "properties": {"message": {"type": "string"}}
+  }
+}

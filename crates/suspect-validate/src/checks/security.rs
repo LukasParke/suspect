@@ -3,29 +3,41 @@
 use rustc_hash::FxHashSet;
 use suspect_oas::OpenApi;
 
-use super::diag;
+use super::diag_at;
 use crate::diagnostic::{Diagnostic, Severity};
 
 /// `oas-security-unknown-scheme` (Error): every scheme named in a security
 /// requirement (root + operation level) must exist under
 /// `components/securitySchemes`.
 pub(crate) fn check_security_schemes(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
-    let known: FxHashSet<&str> = api
-        .components()
-        .map(|c| {
-            c.security_schemes()
+    let known: FxHashSet<Vec<u8>> = api
+        .root()
+        .get("components")
+        .and_then(|components| components.get("securitySchemes"))
+        .map(|schemes| {
+            schemes
+                .entries()
                 .into_iter()
-                .map(|(name, _)| name)
+                .filter_map(|entry| {
+                    entry
+                        .key_node
+                        .try_decoded_scalar()
+                        .map(|name| name.into_owned())
+                })
                 .collect()
         })
         .unwrap_or_default();
 
     let check_requirement = |req: &suspect_oas::SecurityRequirement<'_>,
                              out: &mut Vec<Diagnostic>| {
-        for (name, _) in req.requirements() {
-            if !known.contains(name) {
-                out.push(diag(
-                    api,
+        for entry in req.node().entries() {
+            let Some(name) = entry.key_node.try_decoded_scalar() else {
+                continue;
+            };
+            if !known.contains(name.as_ref()) {
+                let name = String::from_utf8_lossy(&name);
+                out.push(diag_at(
+                    req.node(),
                     "oas-security-unknown-scheme",
                     Severity::Error,
                     req.node().byte_range(),

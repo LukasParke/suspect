@@ -6,19 +6,26 @@
 //! schemas against deep instances are the intended use). Array elements and
 //! object members are iterated in loops, so only genuine schema descent
 //! costs stack frames (~2 per instance-nesting level).
+//! [`Config::max_evaluation_steps`] additionally bounds schema, keyword and
+//! collection visits across the whole call, including trials and references.
+
+use std::borrow::Cow;
+use std::collections::HashSet;
 
 use smallvec::SmallVec;
 use suspect_low::{NodeRef, Pointer, ValueKind};
 
 use crate::Schema;
-use crate::compile::{Kind, Num, Prg};
-use crate::errors::SchemaError;
-use crate::keywords::{arrays, composition, formats, numeric, objects, refs, strings, types};
+use crate::compile::{Kind, Prg};
+use crate::errors::{SchemaError, SchemaErrorKind};
+use crate::keywords::{
+    arrays, cardinality, composition, formats, numeric, objects, refs, strings, types,
+};
 
 /// One token of the instance location under construction.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) enum Tok<'d> {
-    Key(&'d str),
+    Key(Cow<'d, str>),
     Idx(usize),
 }
 
@@ -30,7 +37,7 @@ impl<'d> Stack<'d> {
     pub(crate) fn new() -> Self {
         Self(SmallVec::new())
     }
-    pub(crate) fn push_key(&mut self, k: &'d str) {
+    pub(crate) fn push_key(&mut self, k: Cow<'d, str>) {
         self.0.push(Tok::Key(k));
     }
     pub(crate) fn push_idx(&mut self, i: usize) {
@@ -44,7 +51,7 @@ impl<'d> Stack<'d> {
             self.0
                 .iter()
                 .map(|t| match t {
-                    Tok::Key(k) => (*k).to_owned().into_boxed_str(),
+                    Tok::Key(k) => k.to_string().into_boxed_str(),
                     Tok::Idx(i) => i.to_string().into_boxed_str(),
                 })
                 .collect(),
@@ -57,56 +64,22 @@ impl<'d> Stack<'d> {
 /// instance level (2020-12 §11).
 #[derive(Clone, Default)]
 pub(crate) struct Ann<'d> {
-    props: SmallVec<[&'d str; 8]>,
-    idxs: SmallVec<[u32; 8]>,
+    props: HashSet<Cow<'d, str>>,
+    idxs: HashSet<usize>,
 }
 
 impl<'d> Ann<'d> {
-    pub(crate) fn prop(&mut self, k: &'d str) {
-        if !self.props.contains(&k) {
-            self.props.push(k);
-        }
+    pub(crate) fn prop(&mut self, k: Cow<'d, str>) {
+        self.props.insert(k);
     }
     pub(crate) fn idx(&mut self, i: usize) {
-        let i = i as u32;
-        if !self.idxs.contains(&i) {
-            self.idxs.push(i);
-        }
+        self.idxs.insert(i);
     }
-    pub(crate) fn merge(&mut self, other: Ann<'d>) {
-        for p in other.props {
-            self.prop(p);
-        }
-        for i in other.idxs {
-            self.idxs.push(i);
-        }
+    pub(crate) fn has_prop(&self, k: &str) -> bool {
+        self.props.contains(k)
     }
-}
-
-/// Union of annotations per instance node, keyed by the node's byte-range
-/// start (unique within a document). Applications record into this table
-/// only when they succeed, per §11.2 ("successfully applied").
-#[derive(Default)]
-pub(crate) struct Masks<'d> {
-    map: rustc_hash::FxHashMap<usize, Ann<'d>>,
-}
-
-impl<'d> Masks<'d> {
-    pub(crate) fn record(&mut self, inst: NodeRef<'d>, ann: Ann<'d>) {
-        self.map
-            .entry(inst.byte_range().start)
-            .or_default()
-            .merge(ann);
-    }
-    pub(crate) fn has_prop(&self, inst: NodeRef<'d>, k: &str) -> bool {
-        self.map
-            .get(&inst.byte_range().start)
-            .is_some_and(|a| a.props.contains(&k))
-    }
-    pub(crate) fn has_idx(&self, inst: NodeRef<'d>, i: usize) -> bool {
-        self.map
-            .get(&inst.byte_range().start)
-            .is_some_and(|a| a.idxs.contains(&(i as u32)))
+    pub(crate) fn has_idx(&self, i: usize) -> bool {
+        self.idxs.contains(&i)
     }
 }
 
@@ -115,16 +88,80 @@ pub(crate) struct Ctx<'a, 'd> {
     pub sch: &'a Schema<'d>,
     /// Error cap for this run (`max_errors`, or 1 for `validate_first`).
     pub cap: usize,
-    pub masks: Masks<'d>,
     pub out: Vec<SchemaError>,
+    /// Outside `out` so branch diversion cannot swallow evaluation failures.
+    pub evaluation_error: Option<SchemaError>,
+    pub equality: types::EqualityBudget,
+    /// Shared across every branch, collection and lazy reference in this call.
+    pub remaining_steps: usize,
     pub aborted: bool,
     pub depth: usize,
-    /// Dynamic scope for `$dynamicRef`: `(anchor, program)` pairs pushed
-    /// outermost-first (RFC 3093 basic semantics).
-    pub dyn_scope: Vec<(std::rc::Rc<str>, Prg<'d>)>,
+    /// Resource scope in evaluation order, searched outermost first.
+    pub dyn_scope: Vec<Pointer>,
 }
 
 impl<'a, 'd> Ctx<'a, 'd> {
+    pub(crate) fn step(&mut self, st: &Stack<'d>, at: &Pointer) -> bool {
+        self.charge(st, at, 1)
+    }
+
+    /// Bulk accounting for already-materialized collection lengths. This is
+    /// a visit limit; LowDoc's collection materialization is not memory-bounded
+    /// by this counter, nor is schema compilation or string byte work.
+    pub(crate) fn charge(&mut self, st: &Stack<'d>, at: &Pointer, steps: usize) -> bool {
+        if self.aborted {
+            return false;
+        }
+        let Some(remaining) = self.remaining_steps.checked_sub(steps) else {
+            self.remaining_steps = 0;
+            self.fail_evaluation(
+                st,
+                at,
+                format!(
+                    "schema evaluation exceeds {} evaluation steps",
+                    self.sch.config().max_evaluation_steps
+                ),
+            );
+            return false;
+        };
+        self.remaining_steps = remaining;
+        true
+    }
+
+    pub(crate) fn merge_annotations(
+        &mut self,
+        st: &Stack<'d>,
+        at: &Pointer,
+        into: &mut Ann<'d>,
+        other: Ann<'d>,
+    ) -> bool {
+        for key in other.props {
+            if !self.step(st, at) {
+                return false;
+            }
+            into.prop(key);
+        }
+        for index in other.idxs {
+            if !self.step(st, at) {
+                return false;
+            }
+            into.idx(index);
+        }
+        !self.aborted
+    }
+
+    pub(crate) fn text(
+        &mut self,
+        node: NodeRef<'d>,
+        st: &Stack<'d>,
+        at: &Pointer,
+    ) -> Option<Cow<'d, str>> {
+        let result = crate::resources::decoded_text(node);
+        if result.is_none() {
+            self.fail_evaluation(st, at, "cannot decode malformed string text".into());
+        }
+        result
+    }
     pub(crate) fn emit(&mut self, st: &Stack<'d>, at: &Pointer, message: String) {
         if self.aborted {
             return;
@@ -134,10 +171,23 @@ impl<'a, 'd> Ctx<'a, 'd> {
             return;
         }
         self.out.push(SchemaError {
+            kind: SchemaErrorKind::Invalid,
             instance_path: st.to_pointer(),
             schema_path: at.clone(),
             message,
         });
+    }
+
+    pub(crate) fn fail_evaluation(&mut self, st: &Stack<'d>, at: &Pointer, message: String) {
+        if self.evaluation_error.is_none() {
+            self.evaluation_error = Some(SchemaError {
+                kind: SchemaErrorKind::Evaluation,
+                instance_path: st.to_pointer(),
+                schema_path: at.clone(),
+                message,
+            });
+        }
+        self.aborted = true;
     }
 
     /// Runs a trial branch with error reporting diverted; returns the result
@@ -148,9 +198,14 @@ impl<'a, 'd> Ctx<'a, 'd> {
         F: FnOnce(&mut Self) -> R,
     {
         let real = std::mem::take(&mut self.out);
+        let real_aborted = self.aborted;
         self.out = Vec::new();
         let r = f(self);
         let trial = std::mem::replace(&mut self.out, real);
+        // A capped mismatch report in one trial must not abort sibling
+        // alternatives or suppress the final union diagnostic. Evaluation
+        // failures remain fatal and survive all logical branch diversion.
+        self.aborted = real_aborted || self.evaluation_error.is_some();
         (r, trial)
     }
 
@@ -182,9 +237,12 @@ pub(crate) fn eval<'a, 'd>(
     inst: NodeRef<'d>,
     st: &mut Stack<'d>,
 ) -> Out<'d> {
+    if !ctx.step(st, &prog.path) {
+        return Out::fail();
+    }
     ctx.depth += 1;
     let r = if ctx.depth > ctx.sch.config().max_depth {
-        ctx.emit(
+        ctx.fail_evaluation(
             st,
             &prog.path,
             format!(
@@ -212,15 +270,16 @@ fn run<'a, 'd>(
     let mut ok = true;
     let mut ann = Ann::default();
 
-    // $dynamicAnchor scope frame (RFC 3093): programs declaring anchors
-    // enter the dynamic scope while they are being evaluated.
-    let pushed = prog.dyn_anchors.len();
-    for name in &prog.dyn_anchors {
-        ctx.dyn_scope.push((name.clone(), prog.clone()));
+    // Every resource contributes its anchor registry, including anchors in
+    // $defs that have not themselves been evaluated.
+    let pushed = ctx.dyn_scope.last() != Some(&prog.resource);
+    if pushed {
+        ctx.dyn_scope.push(prog.resource.clone());
     }
 
     for chk in &prog.checks {
-        if ctx.aborted {
+        if !ctx.step(st, &chk.at) {
+            ok = false;
             break;
         }
         match &chk.kind {
@@ -231,8 +290,15 @@ fn run<'a, 'd>(
             }
             Kind::Type(bits) => {
                 let k = inst.kind();
-                let float_is_int =
-                    k == ValueKind::Float && inst.as_f64().is_some_and(|f| f.fract() == 0.0);
+                // LowDoc also represents YAML .inf/.nan as Float. Such
+                // values lie outside JSON's finite-number domain, and a
+                // logical branch must not invert that evaluation failure.
+                if k == ValueKind::Float && !inst.scalar_bytes().iter().any(u8::is_ascii_digit) {
+                    ctx.fail_evaluation(st, &chk.at, "expected a finite numeric value".into());
+                    ok = false;
+                    continue;
+                }
+                let float_is_int = k == ValueKind::Float && inst.is_integral_number();
                 if !bits.matches(k, float_is_int) {
                     ctx.emit(
                         st,
@@ -247,26 +313,67 @@ fn run<'a, 'd>(
                 }
             }
             Kind::Enum(vals) => {
-                if !vals.iter().any(|v| types::value_eq(inst, *v, 0)) {
-                    ctx.emit(st, &chk.at, "value does not match any `enum` entry".into());
-                    ok = false;
-                }
+                ok &= types::check_enum(ctx, st, &chk.at, inst, vals);
             }
             Kind::Const(v) => {
-                if !types::value_eq(inst, *v, 0) {
-                    ctx.emit(st, &chk.at, "value does not equal the `const` value".into());
-                    ok = false;
-                }
+                ok &= types::check_const(ctx, st, &chk.at, inst, *v);
             }
-            Kind::MultipleOf(d) => ok &= numeric::check_multiple_of(ctx, st, &chk.at, &inst, *d),
+            Kind::UniqueItems => {
+                ok &= types::check_unique_items(ctx, st, &chk.at, inst);
+            }
+            Kind::MultipleOf(d) => ok &= numeric::check_multiple_of(ctx, st, &chk.at, &inst, d),
             Kind::Maximum(b, ex) => {
-                ok &= numeric::check_bound(ctx, st, &chk.at, &inst, *b, *ex, true);
+                ok &= numeric::check_bound(ctx, st, &chk.at, &inst, b, *ex, true);
             }
             Kind::Minimum(b, ex) => {
-                ok &= numeric::check_bound(ctx, st, &chk.at, &inst, *b, *ex, false);
+                ok &= numeric::check_bound(ctx, st, &chk.at, &inst, b, *ex, false);
             }
             Kind::MaxLength(n) => ok &= strings::check_length(ctx, st, &chk.at, &inst, *n, true),
             Kind::MinLength(n) => ok &= strings::check_length(ctx, st, &chk.at, &inst, *n, false),
+            Kind::MaxItems(n) => {
+                ok &= cardinality::check_collection(
+                    ctx,
+                    st,
+                    &chk.at,
+                    inst,
+                    *n,
+                    ValueKind::Array,
+                    true,
+                )
+            }
+            Kind::MinItems(n) => {
+                ok &= cardinality::check_collection(
+                    ctx,
+                    st,
+                    &chk.at,
+                    inst,
+                    *n,
+                    ValueKind::Array,
+                    false,
+                )
+            }
+            Kind::MaxProperties(n) => {
+                ok &= cardinality::check_collection(
+                    ctx,
+                    st,
+                    &chk.at,
+                    inst,
+                    *n,
+                    ValueKind::Object,
+                    true,
+                )
+            }
+            Kind::MinProperties(n) => {
+                ok &= cardinality::check_collection(
+                    ctx,
+                    st,
+                    &chk.at,
+                    inst,
+                    *n,
+                    ValueKind::Object,
+                    false,
+                )
+            }
             Kind::Pattern(re) => ok &= strings::check_pattern(ctx, st, &chk.at, &inst, re),
             Kind::Items(sub, skip) => {
                 ok &= arrays::check_items(ctx, st, &chk.at, &inst, sub, *skip, &mut ann);
@@ -278,10 +385,10 @@ fn run<'a, 'd>(
                 ok &= arrays::check_contains(ctx, st, &chk.at, &inst, schema, *min, *max, &mut ann);
             }
             Kind::Properties(subs) => {
-                ok &= objects::check_properties(ctx, st, &inst, subs, &mut ann);
+                ok &= objects::check_properties(ctx, st, &chk.at, &inst, subs, &mut ann);
             }
             Kind::PatternProperties(subs) => {
-                ok &= objects::check_pattern_properties(ctx, st, &inst, subs, &mut ann);
+                ok &= objects::check_pattern_properties(ctx, st, &chk.at, &inst, subs, &mut ann);
             }
             Kind::AdditionalProperties {
                 except_keys,
@@ -303,13 +410,13 @@ fn run<'a, 'd>(
                 ok &= objects::check_property_names(ctx, st, &chk.at, &inst, sub);
             }
             Kind::DependentSchemas(subs) => {
-                ok &= objects::check_dependent_schemas(ctx, st, &inst, subs, &mut ann);
+                ok &= objects::check_dependent_schemas(ctx, st, &chk.at, &inst, subs, &mut ann);
             }
             Kind::DependentRequired(reqs) => {
                 ok &= objects::check_dependent_required(ctx, st, &chk.at, &inst, reqs);
             }
             Kind::Required(names) => {
-                ok &= objects::check_required(ctx, st, &chk.at, &inst, names, &mut ann);
+                ok &= objects::check_required(ctx, st, &chk.at, &inst, names);
             }
             Kind::UnevaluatedProperties(sub) => {
                 ok &= objects::check_unevaluated_props(
@@ -353,8 +460,13 @@ fn run<'a, 'd>(
             Kind::Ref(target) => {
                 ok &= refs::check_ref(ctx, st, &chk.at, &inst, target, &mut ann);
             }
-            Kind::DynamicRef(name) => {
-                ok &= refs::check_dynamic_ref(ctx, st, &chk.at, &inst, name, &mut ann);
+            Kind::DynamicRef { target, anchor } => {
+                match refs::dynamic_target(ctx, st, &chk.at, target, anchor.as_deref()) {
+                    Some(target) => {
+                        ok &= refs::check_ref(ctx, st, &chk.at, &inst, &target, &mut ann)
+                    }
+                    None => ok = false,
+                }
             }
             Kind::Format(name) => {
                 ok &= formats::check_format(ctx, st, &chk.at, &inst, name);
@@ -362,17 +474,12 @@ fn run<'a, 'd>(
         }
     }
 
-    // Persist this application's own annotations BEFORE running
-    // `unevaluated*`, so the tail sees every sibling's contribution (the
-    // caller above will re-record on success; recording is idempotent).
-    if !(ann.props.is_empty() && ann.idxs.is_empty()) {
-        ctx.masks.record(inst, ann.clone());
-    }
-
-    // unevaluated* run after every sibling (and after sibling applicator
-    // branches recorded their annotations).
+    // Only this schema application's adjacent keywords and successful
+    // in-place applicators contribute. Each child application starts fresh;
+    // cousins, failed alternatives and negated schemas cannot leak annotations.
     for chk in &prog.tail {
-        if ctx.aborted {
+        if !ctx.step(st, &chk.at) {
+            ok = false;
             break;
         }
         match &chk.kind {
@@ -401,17 +508,11 @@ fn run<'a, 'd>(
         }
     }
 
-    for _ in 0..pushed {
+    if pushed {
         ctx.dyn_scope.pop();
     }
-    Out { ok, ann }
-}
-
-/// Numeric value of an instance node, if it has one.
-pub(crate) fn inst_num(inst: &NodeRef<'_>) -> Option<Num> {
-    match inst.kind() {
-        ValueKind::Int => inst.as_i64().map(Num::I),
-        ValueKind::Float => inst.as_f64().map(Num::F),
-        _ => None,
+    Out {
+        ok: ok && !ctx.aborted,
+        ann,
     }
 }

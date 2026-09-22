@@ -1,0 +1,34 @@
+# INVARIANT: a webhook declared in a 3.0 document must refuse with
+# `sdk-incoming-version` — the contract index skips webhooks on 3.0, so the
+# declaration would silently vanish from every generated SDK.
+openapi: 3.0.3
+info: {title: admission fragments, version: '1'}
+servers:
+  - url: https://api.example.com/v1
+security:
+  - apiKey: []
+paths:
+  /a:
+    get:
+      operationId: getA
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+webhooks:
+  petCreated:
+    post:
+      operationId: petCreated
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {type: object}
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer

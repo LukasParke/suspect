@@ -1,4 +1,4 @@
-//! Feature benchmark: exercises all ten platform features against the real
+//! Feature benchmark: exercises eight platform features against the real
 //! corpus (stripe-sdk 10.6 MB, api.github.com 9.4 MB) and the live Plex
 //! server, timing each hot path.
 //!
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use suspect_ir::{IrSchema, IrSpec};
+use suspect_ir::IrSpec;
 
 fn load_ir(root: &str, entry: &str) -> Result<(Arc<suspect_ref::Workspace>, IrSpec), String> {
     let ws = suspect_ref::WorkspaceBuilder::new()
@@ -68,81 +68,6 @@ fn raw_get(host: &str, path: &str) -> Result<(u16, Option<serde_json::Value>), (
     Ok((status, body))
 }
 
-/// Builds a mutated copy of the IR simulating a minor version bump:
-/// adds a schema, adds an optional field to every schema, deprecates 5% of
-/// operations.
-fn mutated_version(ir: &IrSpec) -> IrSpec {
-    let mut new = ir.clone();
-    for (i, schema) in &mut new.schemas.iter_mut().enumerate() {
-        if let Some(props) = schema
-            .json
-            .as_object_mut()
-            .and_then(|obj| obj.get_mut("properties"))
-            .and_then(|p| p.as_object_mut())
-        {
-            props.insert(
-                format!("newField{i}"),
-                serde_json::json!({"type": "string"}),
-            );
-        }
-    }
-    new.schemas.push(IrSchema {
-        name: "BrandNewSchema".to_owned(),
-        json: serde_json::json!({"type": "object", "properties": {}}),
-    });
-    let total = new.operations.len();
-    for (i, op) in new.operations.iter_mut().enumerate() {
-        if i % 20 == 0 && total > 0 {
-            op.deprecated = true;
-        }
-    }
-    new
-}
-
-/// Builds a mutated copy simulating a major (breaking) bump.
-fn breaking_version(ir: &IrSpec) -> IrSpec {
-    let mut new = mutated_version(ir);
-    // Remove the last property from the first 10 schemas
-    for schema in new.schemas.iter_mut().take(10) {
-        if let Some(obj) = schema.json.as_object_mut()
-            && let Some(props) = obj.get_mut("properties").and_then(|p| p.as_object_mut())
-            && let Some(key) = props.keys().next().cloned()
-        {
-            props.remove(&key);
-        }
-    }
-    // Drop the last operation
-    new.operations.pop();
-    new
-}
-
-fn bench_r5_diff(name: &str, ir: &IrSpec, iters: usize) {
-    let new_ir = mutated_version(ir);
-    let breaking = breaking_version(ir);
-
-    let mut t_minor = Vec::new();
-    for _ in 0..iters {
-        let s = Instant::now();
-        let d = suspect_codegen::diff::diff_specs(ir, &new_ir);
-        t_minor.push(s.elapsed());
-        assert!(d.additive > 0);
-    }
-    let mut t_major = Vec::new();
-    let mut last_breaking = 0usize;
-    for _ in 0..iters {
-        let s = Instant::now();
-        let d = suspect_codegen::diff::diff_specs(ir, &breaking);
-        t_major.push(s.elapsed());
-        last_breaking = d.breaking;
-    }
-    println!("  R5  diff {name:<16} {iters} iters \u{b7} breaking deltas: {last_breaking}",);
-    println!(
-        "      └─ minor bump: {}, major bump: {}",
-        fmt_ms(mean(&t_minor)),
-        fmt_ms(mean(&t_major))
-    );
-}
-
 fn bench_r10_quality(name: &str, ir: &IrSpec, iters: usize) {
     let mut times = Vec::new();
     let mut actions = 0usize;
@@ -189,32 +114,6 @@ fn bench_r1_evolution(name: &str, ir: &IrSpec, bodies_per_op: usize) {
         fmt_ms(elapsed),
         per_sec,
         report.proposals.len()
-    );
-}
-
-fn bench_r7_impact(name: &str, ir: &IrSpec, traffic_size: usize) {
-    let new_ir = breaking_version(ir);
-    // Synthetic traffic: consumers hitting the first N operations
-    let mut traffic = Vec::new();
-    for i in 0..traffic_size {
-        let op = &ir.operations[i % ir.operations.len()];
-        traffic.push(suspect_codegen::consumer_impact::RecordedExchange {
-            method: op.method.as_str().to_owned(),
-            path: op.path.clone(),
-            body: Some(serde_json::json!({"x": i})),
-            consumer: format!("consumer-{}", i % 12),
-            source_ip: Some(format!("10.0.{}.{}", i / 255, i % 255)),
-        });
-    }
-    let s = Instant::now();
-    let report = suspect_codegen::consumer_impact::analyze_impact(ir, &new_ir, &traffic);
-    let elapsed = s.elapsed();
-    println!(
-        "  R7  impact {name:<15} {} exchanges vs {} consumers in {} → {} affected",
-        traffic.len(),
-        12,
-        fmt_ms(elapsed),
-        report.affected.len()
     );
 }
 
@@ -387,7 +286,7 @@ fn bench_r3_fuzz(requests: u32) {
 
 fn main() -> Result<(), String> {
     println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║        TEN REVOLUTIONARY FEATURES — BENCHMARK SUITE          ║");
+    println!("║          EIGHT PLATFORM FEATURES — BENCHMARK SUITE           ║");
     println!("╚══════════════════════════════════════════════════════════════╝");
     println!();
 
@@ -406,13 +305,6 @@ fn main() -> Result<(), String> {
     );
     println!();
 
-    // --- R5 semantic diff ---
-    println!("── R5: Wire-format semantic diff ──");
-    bench_r5_diff("stripe-sdk", &stripe, 20);
-    bench_r5_diff("api.github.com", &github, 20);
-    bench_r5_diff("plex", &plex, 20);
-    println!();
-
     // --- R10 quality ---
     println!("── R10: Quality scoring ──");
     bench_r10_quality("stripe-sdk", &stripe, 20);
@@ -425,13 +317,6 @@ fn main() -> Result<(), String> {
     bench_r1_evolution("stripe-sdk", &stripe, 10);
     bench_r1_evolution("api.github.com", &github, 10);
     bench_r1_evolution("plex", &plex, 10);
-    println!();
-
-    // --- R7 consumer impact ---
-    println!("── R7: Consumer impact analysis ──");
-    bench_r7_impact("stripe-sdk", &stripe, 5_000);
-    bench_r7_impact("api.github.com", &github, 5_000);
-    bench_r7_impact("plex", &plex, 5_000);
     println!();
 
     // --- R4 stateful ---
@@ -471,6 +356,6 @@ fn main() -> Result<(), String> {
     bench_r3_fuzz(50);
     println!();
 
-    println!("════════ all ten features benchmarked ════════");
+    println!("════════ all eight features benchmarked ════════");
     Ok(())
 }

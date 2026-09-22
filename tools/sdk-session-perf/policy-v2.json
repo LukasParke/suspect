@@ -1,0 +1,23 @@
+{
+  "format": "suspect-sdk-session-policy-v2",
+  "policy_status": "candidate",
+  "statistic": "nearest-rank-p95",
+  "minimum_runs": 5,
+  "minimum_candidate_runs": 3,
+  "minimum_samples": 200,
+  "minimum_warmups": 5,
+  "confidence_method": "binomial-order-statistic-v1",
+  "confidence_level": 0.95,
+  "noise_multiplier": 2.0,
+  "required_fixtures": ["m2-small", "split-recursive", "openrouter-public-five"],
+  "required_groups": ["typescript-http", "all"],
+  "canonical_backends": ["typescript-http", "rust-http", "python-http", "go-http", "swift-http"],
+  "metrics": {
+    "refresh_ms": { "relative": 0.10, "absolute": 0.5, "maximum_noise_relative": 0.05, "maximum_confidence_relative": 0.05, "maximum_drift_relative": 0.05 },
+    "generate_ms": { "relative": 0.10, "absolute": 0.25, "maximum_noise_relative": 0.05, "maximum_confidence_relative": 0.05, "maximum_drift_relative": 0.05 },
+    "write_ms": { "relative": 0.10, "absolute": 0.25, "maximum_noise_relative": 0.05, "maximum_confidence_relative": 0.05, "maximum_drift_relative": 0.05 },
+    "allocation_calls": { "relative": 0.10, "absolute": 100, "maximum_noise_relative": 0.02, "maximum_confidence_relative": 0.02, "maximum_drift_relative": 0.02 },
+    "allocated_bytes": { "relative": 0.10, "absolute": 16384, "maximum_noise_relative": 0.02, "maximum_confidence_relative": 0.02, "maximum_drift_relative": 0.02 },
+    "artifact_bytes": { "relative": 0.10, "absolute": 1024, "maximum_noise_relative": 0.0, "maximum_confidence_relative": 0.0, "maximum_drift_relative": 0.0 }
+  }
+}

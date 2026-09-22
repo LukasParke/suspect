@@ -1,0 +1,9 @@
+{
+  "format": "suspect-sdk-session-runner-v2",
+  "id": "replace-with-an-inventoried-runner-id",
+  "kind": "observational",
+  "image": "replace-with-an-immutable-host-image-id",
+  "cpu_policy": "record governor, affinity, power mode and virtualization policy",
+  "expected_identity_sha256": null,
+  "notes": "Use run.py --inspect-runner to inventory the intended reserved host, then explicitly pin actual_sha256 here. Dedicated is an inventory declaration, never qualification; repeated collection, sample counts, confidence, drift and noise checks are also mandatory."
+}

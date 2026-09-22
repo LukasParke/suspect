@@ -24,7 +24,7 @@ pub fn test(
     offline_cassette: Option<&Path>,
     ndjson: bool,
 ) -> anyhow::Result<i32> {
-    let ws = super::workspace_dir_all(arazzo)?;
+    let ws = super::workspace_for_entry(arazzo)?;
     let uri = Uri::from_path(arazzo)?;
     let handle = ws
         .get(&uri)

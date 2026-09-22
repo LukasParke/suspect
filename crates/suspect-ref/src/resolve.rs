@@ -15,9 +15,9 @@
 
 use std::ops::Range;
 
-use suspect_low::{NodeRef, Pointer, ValueKind};
+use suspect_low::{NodeRef, Pointer};
 
-use crate::edges::{ParsedRef, parse_ref};
+use crate::edges::{ParsedRef, parse_ref, ref_text};
 use crate::error::RefError;
 use crate::workspace::Workspace;
 
@@ -43,6 +43,28 @@ impl PartialOrd for Step {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
+}
+
+/// The direct address named by one reference, before following the
+/// target's own `$ref`. Useful for preserving graph edges and recursion.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceTarget {
+    /// Owning document, loaded in the workspace.
+    pub doc: crate::DocId,
+    /// JSON Pointer to the direct target within that document.
+    pub pointer: Pointer,
+}
+
+/// Canonically decoded input for one reference, before applying base URIs or
+/// selecting anchors. Vocabulary-specific consumers can scope those steps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceInput {
+    /// Owning workspace document.
+    pub doc: crate::DocId,
+    /// JSON Pointer to the object declaring `$ref`.
+    pub containing: Pointer,
+    /// Decoded reference string.
+    pub raw: String,
 }
 
 /// The outcome of resolving a reference.
@@ -137,14 +159,11 @@ impl Workspace {
 
     /// Follows a chain of `$ref` objects starting at `(doc, ptr)`.
     ///
-    /// A root pointer means the whole document. Iterative; records every
+    /// A root pointer follows the root's own `$ref`, if present. Iterative; records every
     /// landing as a [`Step`]. Revisiting any step yields [`MemoVal::Cycle`].
     /// Plain (non-`$ref`) landing spots are also memoized under their own
     /// keys as shortcuts.
     pub(crate) fn eval_chain(&self, doc: crate::DocId, ptr: &Pointer) -> Result<MemoVal, RefError> {
-        if ptr.is_root() {
-            return Ok(MemoVal::Whole(doc));
-        }
         self.run_chain((doc, ptr.clone()), Vec::new())
     }
 
@@ -158,15 +177,19 @@ impl Workspace {
         containing: &Pointer,
         raw: &str,
     ) -> Result<MemoVal, RefError> {
-        if !containing.is_root() {
-            return self.run_chain((doc, containing.clone()), Vec::new());
-        }
         let d = self.extend_doc(doc).ok_or_else(|| RefError::MissingDoc {
             uri: format!("doc #{doc}"),
         })?;
         let seed = vec![Step {
             doc,
-            at: d.root().byte_range(),
+            at: d
+                .root()
+                .pointer(containing)
+                .ok_or_else(|| RefError::MissingPointer {
+                    doc_uri: d.uri().to_string(),
+                    pointer: containing.to_path(),
+                })?
+                .byte_range(),
         }];
         let next = self.hop(doc, containing, raw)?;
         self.run_chain(next, seed)
@@ -185,9 +208,6 @@ impl Workspace {
                 });
             }
             let (d, p) = &cur;
-            if p.is_root() {
-                return Ok(MemoVal::Whole(*d));
-            }
             let Some(doc_ref) = self.extend_doc(*d) else {
                 return Err(RefError::MissingDoc {
                     uri: format!("doc #{d}"),
@@ -209,23 +229,21 @@ impl Workspace {
             steps.push(step);
 
             match node.get("$ref") {
-                Some(rv) if rv.kind() == ValueKind::Str => {
-                    // Block scalars (Stripe style) must be decoded, not read
-                    // as raw source slices.
-                    let decoded = rv.decoded_scalar();
-                    let raw = std::str::from_utf8(&decoded)
-                        .map(str::trim)
-                        .unwrap_or_default()
-                        .to_owned();
+                Some(rv) => {
+                    let raw = ref_text(rv)?;
                     cur = self.hop(*d, p, &raw)?;
                 }
                 _ => {
                     // Plain landing spot: memoize it as its own shortcut so
                     // later chains passing through here skip re-walking.
                     let key = (*d, p.to_path().into_boxed_str());
-                    let mv = MemoVal::Loc {
-                        doc: *d,
-                        ptr: p.clone(),
+                    let mv = if p.is_root() {
+                        MemoVal::Whole(*d)
+                    } else {
+                        MemoVal::Loc {
+                            doc: *d,
+                            ptr: p.clone(),
+                        }
                     };
                     self.memos.insert(key, mv.clone());
                     return Ok(mv);
@@ -300,6 +318,9 @@ impl Workspace {
                 }
                 Ok(ParsedRef::Local(p))
             }
+            ParsedRef::PlainName(name) if base != self.doc_uri(doc) => {
+                Ok(ParsedRef::ExternalAnchor { uri: base, name })
+            }
             other => Ok(other),
         }
     }
@@ -314,14 +335,19 @@ impl Workspace {
     ) -> Result<(crate::DocId, Pointer), RefError> {
         match parsed {
             ParsedRef::Local(p) => Ok((doc, p.clone())),
-            ParsedRef::PlainName(name) => {
-                let anchors = self.anchors_of(doc);
+            ParsedRef::PlainName(name) | ParsedRef::ExternalAnchor { name, .. } => {
+                let target = match parsed {
+                    ParsedRef::ExternalAnchor { uri, .. } => self.load_uri(uri)?,
+                    _ => doc,
+                };
+                let anchors = self.anchors_of(target);
                 match anchors.get(name.as_ref()) {
-                    Some(ap) => Ok((doc, ap.clone())),
+                    Some(ap) => Ok((target, ap.clone())),
                     None => Err(RefError::InvalidRef {
                         raw: raw_for_errors.to_owned(),
                         reason: format!(
-                            "plain-name fragment `#{name}` matches no `$anchor` or `id` in this document"
+                            "plain-name fragment `#{name}` matches no `$anchor` or `id` in {}",
+                            self.doc_uri(target)
                         ),
                     }),
                 }
@@ -337,16 +363,7 @@ impl Workspace {
     pub(crate) fn materialize<'ws>(&'ws self, mv: &MemoVal) -> Result<Resolution<'ws>, RefError> {
         match mv {
             MemoVal::Loc { doc, ptr } => {
-                let d = self.extend_doc(*doc).ok_or_else(|| RefError::MissingDoc {
-                    uri: format!("doc #{doc}"),
-                })?;
-                let node = d
-                    .root()
-                    .pointer(ptr)
-                    .ok_or_else(|| RefError::MissingPointer {
-                        doc_uri: d.uri().to_string(),
-                        pointer: ptr.to_path(),
-                    })?;
+                let node = self.node_at_pointer(*doc, ptr)?;
                 Ok(Resolution::Node(node))
             }
             MemoVal::Whole(d) => Ok(Resolution::WholeDoc(*d)),

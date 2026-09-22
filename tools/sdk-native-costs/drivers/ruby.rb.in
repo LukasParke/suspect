@@ -1,0 +1,42 @@
+# frozen_string_literal: true
+require '@@REQUIRE@@'
+require 'json'
+include @@IMPORT@@
+
+phase, count = ARGV.fetch(0), Integer(ARGV.fetch(1))
+fixture = @@FIXTURE@@
+def checked(value)
+  raise 'native model type' unless value.is_a?(Models::@@MODEL@@)
+  raise 'exact credits' unless value.data.total_credits.token == '@@PRECISION@@'
+  raise 'usage' unless value.data.total_usage.token == '25.75'
+end
+result = { phase: phase, iterations: count }
+case phase
+when 'import'
+  raise 'import' unless count == 1 && Codecs::@@CODEC@@.respond_to?(:decode_json) && Client.respond_to?(:open)
+  result[:loaded] = true
+when 'codec'
+  encoded_bytes = 0
+  count.times do
+    value = Codecs::@@CODEC@@.decode_json(fixture)
+    checked(value)
+    encoded = Codecs::@@CODEC@@.encode_json(value)
+    raise 'encoded precision' unless encoded.include?('"total_credits":@@PRECISION@@')
+    encoded_bytes += encoded.bytesize
+  end
+  result.merge!(encodedBytes: encoded_bytes, precision: '@@PRECISION@@')
+when 'request'
+  base = ARGV.fetch(2)
+  raise 'owned loopback URL' unless base.start_with?('http://127.0.0.1:') && base.end_with?('/api/v1')
+  Client.open(auth: { 'apiKey' => '@@TOKEN@@' }, server_url: base) do |client|
+    count.times do
+      response = client.@@METHOD@@
+      raise 'response status' unless response.status == 200
+      checked(response.data)
+    end
+  end
+  result[:precision] = '@@PRECISION@@'
+else
+  raise 'unknown phase'
+end
+puts 'SUSPECT_NATIVE_COSTS ' + JSON.generate(result)

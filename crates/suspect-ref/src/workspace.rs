@@ -13,10 +13,12 @@
 //! Cycle safety: file A referencing B referencing A cannot loop — the second
 //! request for A hits the `Uri` map and resolves to the existing slot.
 //!
-//! Remote (`http:`/`https:`) references are always denied in v1.
+//! Remote references require an explicitly supplied immutable byte provider.
+//! This module never performs network I/O.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasherDefault;
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock};
@@ -27,8 +29,9 @@ use suspect_low::{LowDoc, NodeRef, Pointer};
 use suspect_source::{Source, Uri};
 
 use crate::cycles::{self, CycleReport};
-use crate::edges::{EdgeMeta, RefEdge};
+use crate::edges::{EdgeMeta, RefDiagnostic, RefEdge};
 use crate::error::{RefError, WorkspaceError};
+use crate::provider::{DocumentMetadata, DocumentProvider};
 use crate::resolve::{MemoVal, Resolution};
 
 /// Index of a document inside a [`Workspace`]'s slot table.
@@ -36,10 +39,19 @@ pub type DocId = usize;
 
 type FxDashMap<K, V> = DashMap<K, V, BuildHasherDefault<FxHasher>>;
 
+/// A lifetime-free locator within an immutable parsed document. Several
+/// syntax wrappers can share a range, so retain the exact tree node ID too.
+struct NodeLocation {
+    range: std::ops::Range<usize>,
+    syntax_id: usize,
+}
+
 /// Builder for a [`Workspace`].
 #[derive(Debug, Clone)]
 pub struct WorkspaceBuilder {
     root: Option<PathBuf>,
+    allowed_documents: Option<HashSet<Uri>>,
+    document_provider: Option<Arc<DocumentProvider>>,
     max_doc_size: u64,
     max_docs: usize,
     depth_cap: usize,
@@ -58,6 +70,8 @@ impl WorkspaceBuilder {
     pub fn new() -> Self {
         Self {
             root: None,
+            allowed_documents: None,
+            document_provider: None,
             max_doc_size: 64 << 20,
             max_docs: 10_000,
             depth_cap: 256,
@@ -68,6 +82,26 @@ impl WorkspaceBuilder {
     #[must_use]
     pub fn root(mut self, path: impl Into<PathBuf>) -> Self {
         self.root = Some(path.into());
+        self
+    }
+
+    /// Permit loading only these exact retrieval URIs, including the entry.
+    ///
+    /// The default has no local-document allowlist. An empty list denies every
+    /// load. This policy does not enable remote acquisition or verify content
+    /// digests; callers must supply and verify their pinned source snapshots.
+    #[must_use]
+    pub fn allowed_documents(mut self, documents: impl IntoIterator<Item = Uri>) -> Self {
+        self.allowed_documents = Some(documents.into_iter().collect());
+        self
+    }
+
+    /// Supplies an immutable, memory-only document snapshot. All loads, including
+    /// local entry loads, use this provider exclusively; a miss never falls back
+    /// to the filesystem or network. The explicit allowlist is checked first.
+    #[must_use]
+    pub fn document_provider(mut self, provider: Arc<DocumentProvider>) -> Self {
+        self.document_provider = Some(provider);
         self
     }
 
@@ -99,17 +133,22 @@ impl WorkspaceBuilder {
     pub fn build(self) -> Result<Workspace, WorkspaceError> {
         Ok(Workspace {
             root: self.root,
+            allowed_documents: self.allowed_documents,
+            document_provider: self.document_provider,
             max_doc_size: self.max_doc_size,
             max_docs: self.max_docs,
             depth_cap: self.depth_cap,
             slots: RwLock::new(Vec::new()),
             uris: FxDashMap::default(),
             memos: FxDashMap::default(),
+            locations: FxDashMap::default(),
             edges_cache: FxDashMap::default(),
+            ref_diagnostics: FxDashMap::default(),
             edge_meta: FxDashMap::default(),
             anchors: FxDashMap::default(),
             ids: FxDashMap::default(),
             loading: Mutex::new(HashSet::new()),
+            failed_loads: FxDashMap::default(),
             memo_hits: AtomicU64::new(0),
             memo_misses: AtomicU64::new(0),
             cycles_found: AtomicU64::new(0),
@@ -143,29 +182,45 @@ pub struct WorkspaceStats {
 /// and chain following is deterministic, cached hits are exact, and
 /// [`WorkspaceStats`] exposes hit/miss counters.
 ///
-/// Remote policy: `http:`/`https:` references are always rejected with
-/// [`RefError::RemoteDenied`] — v1 never performs network fetches.
+/// Remote references require pinned bytes from a [`DocumentProvider`]; otherwise
+/// they are rejected with [`RefError::RemoteDenied`]. Compilation never fetches.
 pub struct Workspace {
     pub(crate) root: Option<PathBuf>,
+    allowed_documents: Option<HashSet<Uri>>,
+    document_provider: Option<Arc<DocumentProvider>>,
     pub(crate) max_doc_size: u64,
     pub(crate) max_docs: usize,
     pub(crate) depth_cap: usize,
     // SAFETY invariant: append-only; entries are never removed or replaced,
     // which is what justifies extending borrows to 'ws in `extend_doc`.
     pub(crate) slots: RwLock<Vec<Arc<LowDoc>>>,
+    // Publication index contains effective identities only. Requested aliases
+    // are resolved by the immutable provider before consulting this map.
     pub(crate) uris: FxDashMap<Uri, DocId>,
     pub(crate) memos: FxDashMap<(DocId, Box<str>), MemoVal>,
+    // A pointer's syntax range is stable because loaded documents are
+    // immutable. Reconstructing a node by range avoids repeated sibling
+    // scans through wide component mappings, without storing borrowed nodes.
+    locations: FxDashMap<(DocId, Box<str>), NodeLocation>,
     pub(crate) edges_cache: FxDashMap<DocId, Arc<Vec<RefEdge>>>,
+    pub(crate) ref_diagnostics: FxDashMap<DocId, Arc<Vec<RefDiagnostic>>>,
     pub(crate) edge_meta: FxDashMap<DocId, Arc<EdgeMeta>>,
     pub(crate) anchors: FxDashMap<DocId, Arc<HashMap<String, Pointer>>>,
     pub(crate) ids: FxDashMap<DocId, Arc<HashMap<Pointer, String>>>,
     pub(crate) loading: Mutex<HashSet<Uri>>,
+    failed_loads: FxDashMap<Uri, ()>,
     pub(crate) memo_hits: AtomicU64,
     pub(crate) memo_misses: AtomicU64,
     pub(crate) cycles_found: AtomicU64,
 }
 
 impl Workspace {
+    /// The workspace root path, when the workspace was built with one.
+    #[must_use]
+    pub fn root_path(&self) -> Option<&std::path::Path> {
+        self.root.as_deref()
+    }
+
     /// Opens an entry (filesystem path or absolute URI) and returns a handle.
     /// Relative paths resolve against the builder root, else the current
     /// directory.
@@ -181,7 +236,64 @@ impl Workspace {
     /// Returns a handle if this document URI is already loaded.
     #[must_use]
     pub fn get(&self, uri: &Uri) -> Option<DocHandle<'_>> {
-        let id = self.uris.get(uri).map(|e| *e)?;
+        if !self.is_allowed(uri) {
+            return None;
+        }
+        let effective = self
+            .document_provider
+            .as_ref()
+            .and_then(|provider| provider.document(uri))
+            .map_or(uri, |document| document.metadata().effective_uri());
+        if !self.is_allowed(effective) {
+            return None;
+        }
+        let id = self.uris.get(effective).map(|e| *e)?;
+        Some(DocHandle { ws: self, id })
+    }
+
+    /// Immutable pinned metadata for either a requested or effective URI. This
+    /// performs no I/O and does not require that the document has been parsed.
+    #[must_use]
+    pub fn document_metadata(&self, uri: &Uri) -> Option<&DocumentMetadata> {
+        self.document_provider
+            .as_ref()?
+            .document(uri)
+            .map(|document| document.metadata())
+    }
+
+    /// The immutable provider snapshot used by this workspace, if any.
+    #[must_use]
+    pub fn document_provider(&self) -> Option<&Arc<DocumentProvider>> {
+        self.document_provider.as_ref()
+    }
+
+    /// Authorized retrieval names already loaded or supplied by the immutable
+    /// provider. This only enumerates identities: it parses no bytes, performs
+    /// no I/O, and does not authorize additional logical `$id` / `$self` URIs.
+    /// Both a requested alias and its effective identity must satisfy the
+    /// existing allowlist before that alias is included.
+    #[must_use]
+    pub fn available_document_uris(&self) -> Vec<Uri> {
+        let mut uris = self.uris();
+        if let Some(provider) = &self.document_provider {
+            uris.extend(provider.logical_uris().into_iter().filter(|uri| {
+                self.is_allowed(uri)
+                    && provider.document(uri).is_some_and(|document| {
+                        self.is_allowed(document.metadata().effective_uri())
+                    })
+            }));
+        }
+        uris.retain(|uri| self.is_allowed(uri));
+        uris.sort();
+        uris.dedup();
+        uris
+    }
+
+    /// Returns a handle for an already loaded document slot, including a
+    /// [`Resolution::WholeDoc`] target.
+    #[must_use]
+    pub fn get_by_id(&self, id: DocId) -> Option<DocHandle<'_>> {
+        self.extend_doc(id)?;
         Some(DocHandle { ws: self, id })
     }
 
@@ -197,12 +309,26 @@ impl Workspace {
         self.uris.is_empty()
     }
 
-    /// URIs of all loaded documents, sorted for determinism.
+    /// Effective logical URIs of loaded documents, sorted without lookup aliases.
     #[must_use]
     pub fn uris(&self) -> Vec<Uri> {
-        let mut out: Vec<Uri> = self.uris.iter().map(|e| e.key().clone()).collect();
+        let mut out: Vec<Uri> = self.uris.iter().map(|entry| entry.key().clone()).collect();
         out.sort();
         out
+    }
+
+    /// Document URIs requested by resolution but not successfully loaded.
+    /// This is acquisition evidence, not a generic `$ref` scan. Semantic callers
+    /// can track missing dependencies without treating instance data as references.
+    #[must_use]
+    pub fn failed_document_uris(&self) -> Vec<Uri> {
+        let mut uris = self
+            .failed_loads
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect::<Vec<_>>();
+        uris.sort();
+        uris
     }
 
     /// Loads `entry` and every document reachable through its external
@@ -228,7 +354,10 @@ impl Workspace {
                     edges
                         .iter()
                         .filter_map(|e| match &e.parsed {
-                            crate::edges::ParsedRef::External { uri, .. } => Some(uri.clone()),
+                            crate::edges::ParsedRef::External { uri, .. }
+                            | crate::edges::ParsedRef::ExternalAnchor { uri, .. } => {
+                                Some(uri.clone())
+                            }
                             _ => None,
                         })
                         .collect::<Vec<Uri>>()
@@ -239,7 +368,7 @@ impl Workspace {
 
             let mut next = Vec::new();
             for uri in candidates {
-                if self.uris.contains_key(&uri) {
+                if self.get(&uri).is_some() {
                     continue;
                 }
                 if total >= self.max_docs {
@@ -260,12 +389,18 @@ impl Workspace {
     #[must_use]
     pub fn stats(&self) -> WorkspaceStats {
         WorkspaceStats {
-            docs: self.uris.len(),
+            docs: self.len(),
             edges: self.edges_cache.iter().map(|e| e.value().len()).sum(),
             memo_hits: self.memo_hits.load(Ordering::Relaxed),
             memo_misses: self.memo_misses.load(Ordering::Relaxed),
             cycles: self.cycles_found.load(Ordering::Relaxed) as usize,
         }
+    }
+
+    /// Maximum reference-chain depth configured for this workspace.
+    #[must_use]
+    pub fn reference_depth_cap(&self) -> usize {
+        self.depth_cap
     }
 
     // ---- internals -----------------------------------------------------
@@ -285,6 +420,49 @@ impl Workspace {
         Some(unsafe { std::mem::transmute::<&LowDoc, &'ws LowDoc>(r) })
     }
 
+    pub(crate) fn node_at_pointer(
+        &self,
+        id: DocId,
+        pointer: &Pointer,
+    ) -> Result<NodeRef<'_>, RefError> {
+        let doc = self.extend_doc(id).ok_or_else(|| RefError::MissingDoc {
+            uri: format!("doc #{id}"),
+        })?;
+        let key = (id, pointer.to_path().into_boxed_str());
+        if let Some(location) = self.locations.get(&key) {
+            let range = &location.range;
+            let mut raw = doc
+                .inner()
+                .root()
+                .raw()
+                .descendant_for_byte_range(range.start, range.end.saturating_sub(1));
+            while let Some(candidate) = raw {
+                if candidate.byte_range() == *range && candidate.id() == location.syntax_id {
+                    return Ok(NodeRef::new(suspect_syntax::SNode::new(
+                        doc.inner(),
+                        candidate,
+                    )));
+                }
+                raw = candidate.parent();
+            }
+        }
+        let node = doc
+            .root()
+            .pointer(pointer)
+            .ok_or_else(|| RefError::MissingPointer {
+                doc_uri: doc.uri().to_string(),
+                pointer: pointer.to_path(),
+            })?;
+        self.locations.insert(
+            key,
+            NodeLocation {
+                range: node.syntax().byte_range(),
+                syntax_id: node.syntax().raw().id(),
+            },
+        );
+        Ok(node)
+    }
+
     fn resolve_entry(&self, entry: &str) -> Result<Uri, WorkspaceError> {
         if let Ok(uri) = Uri::parse(entry) {
             return Ok(uri);
@@ -298,12 +476,12 @@ impl Workspace {
     /// same `DocId`; re-entrant requests for an in-flight document error
     /// instead of deadlocking.
     pub(crate) fn load_uri(&self, uri: &Uri) -> Result<DocId, RefError> {
-        if let Some(id) = self.uris.get(uri).map(|e| *e) {
-            return Ok(id);
+        if let Some(handle) = self.get(uri) {
+            return Ok(handle.id());
         }
         let mut guard = lock(&self.loading);
-        if let Some(id) = self.uris.get(uri).map(|e| *e) {
-            return Ok(id);
+        if let Some(handle) = self.get(uri) {
+            return Ok(handle.id());
         }
         if !guard.insert(uri.clone()) {
             // Mid-load on this thread's own stack; waiting would deadlock.
@@ -312,35 +490,71 @@ impl Workspace {
             });
         }
         let res = self.load_uncached(uri);
+        if res.is_ok() {
+            self.failed_loads.remove(uri);
+        } else {
+            self.failed_loads.insert(uri.clone(), ());
+        }
         guard.remove(uri);
         res
     }
 
     fn load_uncached(&self, uri: &Uri) -> Result<DocId, RefError> {
-        if uri.is_remote() {
-            return Err(RefError::RemoteDenied {
+        if !self.is_allowed(uri) {
+            return Err(RefError::OutsideAllowlist {
                 uri: uri.to_string(),
             });
         }
-        let Some(path) = uri.as_path() else {
-            return Err(RefError::MissingDoc {
+        if self.len() >= self.max_docs {
+            return Err(RefError::TooManyDocs { max: self.max_docs });
+        }
+        let (effective, bytes, media_type) = if let Some(provider) = &self.document_provider {
+            let document = provider.document(uri).ok_or_else(|| RefError::MissingDoc {
                 uri: uri.to_string(),
-            });
+            })?;
+            let effective = document.metadata().effective_uri();
+            if !self.is_allowed(effective) {
+                return Err(RefError::OutsideAllowlist {
+                    uri: effective.to_string(),
+                });
+            }
+            self.check_size(uri, document.bytes().len() as u64)?;
+            (
+                effective.clone(),
+                document.bytes().to_vec(),
+                document.metadata().media_type(),
+            )
+        } else {
+            if uri.is_remote() {
+                return Err(RefError::RemoteDenied {
+                    uri: uri.to_string(),
+                });
+            }
+            let path = uri.as_path().ok_or_else(|| RefError::MissingDoc {
+                uri: uri.to_string(),
+            })?;
+            let file = std::fs::File::open(&path)?;
+            let metadata = file.metadata()?;
+            if !metadata.is_file() {
+                return Err(RefError::MissingDoc {
+                    uri: uri.to_string(),
+                });
+            }
+            self.check_size(uri, metadata.len())?;
+            let mut bytes = Vec::new();
+            file.take(self.max_doc_size.saturating_add(1))
+                .read_to_end(&mut bytes)?;
+            self.check_size(uri, bytes.len() as u64)?;
+            (uri.clone(), bytes, None)
         };
-        if let Ok(meta) = std::fs::metadata(&path)
-            && meta.len() > self.max_doc_size
-        {
-            return Err(RefError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "document {} exceeds max_doc_size ({})",
-                    path.display(),
-                    self.max_doc_size
-                ),
-            )));
-        }
-        let source = Source::from_path(&path).map_err(RefError::Io)?;
-        let doc = LowDoc::parse(uri.clone(), source);
+        let source = Source::from_vec(bytes);
+        let doc = match media_type {
+            Some(media) if media.ends_with("json") => {
+                LowDoc::with_format(effective.clone(), source, suspect_syntax::Format::Json)
+            }
+            Some(_) => LowDoc::with_format(effective.clone(), source, suspect_syntax::Format::Yaml),
+            None => LowDoc::parse(effective.clone(), source),
+        };
         let mut guard = match self.slots.write() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -348,8 +562,24 @@ impl Workspace {
         let id = guard.len();
         guard.push(Arc::new(doc));
         drop(guard);
-        self.uris.insert(uri.clone(), id);
+        self.uris.insert(effective, id);
         Ok(id)
+    }
+
+    fn is_allowed(&self, uri: &Uri) -> bool {
+        self.allowed_documents
+            .as_ref()
+            .is_none_or(|allowed| allowed.contains(uri))
+    }
+
+    fn check_size(&self, uri: &Uri, size: u64) -> Result<(), RefError> {
+        if size > self.max_doc_size {
+            return Err(RefError::TooLarge {
+                uri: uri.to_string(),
+                limit: self.max_doc_size,
+            });
+        }
+        Ok(())
     }
 
     /// Lazily scans a document once, populating edges, metadata, anchors,
@@ -363,9 +593,9 @@ impl Workspace {
             return;
         };
         let scanned = crate::edges::scan(doc);
-        self.edges_cache
+        self.ref_diagnostics
             .entry(d)
-            .or_insert_with(|| Arc::new(scanned.edges));
+            .or_insert_with(|| Arc::new(scanned.diagnostics));
         self.edge_meta
             .entry(d)
             .or_insert_with(|| Arc::new(scanned.meta));
@@ -373,6 +603,10 @@ impl Workspace {
             .entry(d)
             .or_insert_with(|| Arc::new(scanned.anchors));
         self.ids.entry(d).or_insert_with(|| Arc::new(scanned.ids));
+        // Publish the completion marker only after every auxiliary index.
+        self.edges_cache
+            .entry(d)
+            .or_insert_with(|| Arc::new(scanned.edges));
     }
 
     pub(crate) fn edges_of(&self, d: DocId) -> Arc<Vec<RefEdge>> {
@@ -457,6 +691,20 @@ impl<'ws> DocHandle<'ws> {
         self.ws.edges_of(self.id)
     }
 
+    /// Malformed `$ref` occurrences from the generic document scan.
+    ///
+    /// Includes nonstring values and literal `$ref` keys in arbitrary data;
+    /// consumers must scope diagnostics to their semantic reference positions.
+    #[must_use]
+    pub fn ref_diagnostics(&self) -> Arc<Vec<RefDiagnostic>> {
+        self.ws.ensure_scanned(self.id);
+        self.ws
+            .ref_diagnostics
+            .get(&self.id)
+            .map(|d| d.clone())
+            .unwrap_or_default()
+    }
+
     /// Resolves edge number `edge` of this document, following chains and
     /// consulting the memo cache.
     ///
@@ -488,6 +736,16 @@ impl<'ws> DocHandle<'ws> {
         self.ws.materialize(&mv)
     }
 
+    /// Reads a pointer without following the target's own `$ref`. Repeated
+    /// reads reuse an immutable source-location index; YAML aliases retain
+    /// their normal semantic behavior and original source token location.
+    ///
+    /// # Errors
+    /// The pointer does not name a value in this document.
+    pub fn node_at_pointer(&self, pointer: &Pointer) -> Result<NodeRef<'ws>, RefError> {
+        self.ws.node_at_pointer(self.id, pointer)
+    }
+
     /// Resolves the value of a `$ref` key (`node` must be that string
     /// value). Applies `$id` base inheritance along the node's ancestor
     /// chain.
@@ -495,28 +753,62 @@ impl<'ws> DocHandle<'ws> {
     /// # Errors
     /// See [`Self::resolve_edge`]; additionally [`RefError::InvalidRef`]
     /// when `node` is not a string.
-    pub fn resolve_ref_value(&self, node: NodeRef<'ws>) -> Result<Resolution<'ws>, RefError> {
-        let raw = node.as_str().ok_or_else(|| RefError::InvalidRef {
-            raw: String::from_utf8_lossy(node.scalar_bytes()).into_owned(),
-            reason: "node is not a $ref string value".to_owned(),
+    pub fn resolve_ref_value(&self, node: NodeRef<'_>) -> Result<Resolution<'ws>, RefError> {
+        let (id, containing, raw) = self.ref_context(node)?;
+        let mv = self.ws.resolve_edge_memo(id, &containing, &raw)?;
+        self.ws.materialize(&mv)
+    }
+
+    /// Resolves one reference hop to its direct address, preserving a
+    /// target's own reference and legal recursive graph structure.
+    /// Applies the same scalar decoding and `$id` bases as chain resolution.
+    ///
+    /// # Errors
+    /// Malformed values, missing targets, denied remotes, or load failures.
+    pub fn ref_target(&self, node: NodeRef<'_>) -> Result<crate::ReferenceTarget, RefError> {
+        let (id, containing, raw) = self.ref_context(node)?;
+        let (doc, pointer) = self.ws.hop(id, &containing, &raw)?;
+        self.ws.materialize(&MemoVal::Loc {
+            doc,
+            ptr: pointer.clone(),
         })?;
+        Ok(crate::ReferenceTarget { doc, pointer })
+    }
+
+    /// Canonical scalar decoding and source context without interpreting `$id`
+    /// or anchor declarations. Semantic consumers supply their vocabulary scope.
+    ///
+    /// # Errors
+    /// A malformed reference value or a missing owning document.
+    pub fn reference_input(&self, node: NodeRef<'_>) -> Result<crate::ReferenceInput, RefError> {
+        let (doc, containing, raw) = self.ref_context(node)?;
+        Ok(crate::ReferenceInput {
+            doc,
+            containing,
+            raw,
+        })
+    }
+
+    fn ref_context(&self, node: NodeRef<'_>) -> Result<(DocId, Pointer, String), RefError> {
+        let raw = crate::edges::ref_text(node)?;
         // Locate the owning document via its syntax-level URI.
         let doc_uri = node.syntax().doc().uri();
         let id = self
             .ws
             .uris
-            .iter()
-            .find(|e| e.key() == doc_uri)
+            .get(doc_uri)
             .map(|e| *e.value())
             .ok_or_else(|| RefError::MissingDoc {
                 uri: doc_uri.to_string(),
             })?;
         // The value node's own pointer is one token deeper than the
         // containing mapping; $id inheritance walks mapping prefixes.
-        let full = node.path_from_root();
-        let containing = full.parent().unwrap_or_default();
-        let mv = self.ws.resolve_edge_memo(id, &containing, raw)?;
-        self.ws.materialize(&mv)
+        let meta = self.ws.meta_of(id);
+        let containing = match meta.value_index.get(&node.byte_range()) {
+            Some(&index) => self.ws.edges_of(id)[index].path.clone(),
+            None => node.path_from_root().parent().unwrap_or_default(),
+        };
+        Ok((id, containing, raw))
     }
 
     /// Enumerate and classify the reference cycles among this document's

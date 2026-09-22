@@ -1,0 +1,7 @@
+{
+  "name": "suspect-typescript-http-bundle-gate",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22.23.1" },
+  "dependencies": { "esbuild": "0.28.2" }
+}

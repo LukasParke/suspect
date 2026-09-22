@@ -1,7 +1,9 @@
 use suspect_syntax::{Format, ScalarStyle, SyntaxKind};
 
 use crate::Pointer;
-use crate::scalar::{ValueKind, infer_scalar, parse_float, parse_int};
+use crate::scalar::{
+    ValueKind, decimal_is_integer, infer_scalar, parse_float, parse_int, parse_uint,
+};
 
 /// A semantic view over a CST node: typed scalar access, alias-transparent
 /// navigation, and pointer evaluation. Copyable; borrows its [`LowDoc`](crate::LowDoc).
@@ -16,6 +18,8 @@ pub struct Entry<'d> {
     /// The mapping key with quotes stripped and no escape processing
     /// (what `scalar_bytes` yields for the key node).
     pub key: &'d str,
+    /// Source key node, for checked decoding and source provenance.
+    pub key_node: NodeRef<'d>,
     /// The entry's value, or `None` for an empty value (`key:` with
     /// nothing after it).
     pub value: Option<NodeRef<'d>>,
@@ -127,11 +131,13 @@ impl<'d> NodeRef<'d> {
         }
         let mut merges: smallvec::SmallVec<[NodeRef<'d>; 4]> = smallvec::SmallVec::new();
         for (k, v) in node.raw.mapping_entries() {
-            let kb = k.scalar_bytes();
-            if kb == key.as_bytes() {
+            if NodeRef::new(k)
+                .try_decoded_scalar()
+                .is_some_and(|kb| kb.as_ref() == key.as_bytes())
+            {
                 return v.map(NodeRef::new);
             }
-            if kb == b"<<"
+            if is_merge_key(k)
                 && let Some(v) = v
             {
                 merges.push(NodeRef::new(v));
@@ -165,7 +171,7 @@ impl<'d> NodeRef<'d> {
             let Ok(key) = std::str::from_utf8(key_bytes) else {
                 continue;
             };
-            if key == "<<" {
+            if is_merge_key(key_node) {
                 if let Some(v) = value {
                     merges.push(NodeRef::new(v));
                 }
@@ -174,6 +180,7 @@ impl<'d> NodeRef<'d> {
             seen.push(key);
             out.push(Entry {
                 key,
+                key_node: NodeRef::new(key_node),
                 value: value.map(NodeRef::new),
             });
         }
@@ -201,11 +208,13 @@ impl<'d> NodeRef<'d> {
             .mapping_entries()
             .into_iter()
             .filter_map(|(key_node, value)| {
-                let key = std::str::from_utf8(key_node.scalar_bytes()).ok()?;
-                if key == "<<" {
+                if is_merge_key(key_node) {
                     return None;
                 }
-                Some((key.to_owned(), value.map(NodeRef::new)))
+                let key =
+                    String::from_utf8(NodeRef::new(key_node).try_decoded_scalar()?.into_owned())
+                        .ok()?;
+                Some((key, value.map(NodeRef::new)))
             })
             .collect()
     }
@@ -274,15 +283,33 @@ impl<'d> NodeRef<'d> {
         }
     }
 
+    /// Whether this value is mathematically an integer, regardless of spelling
+    /// or machine numeric limits. For example, `1.0` and `1e400` are integers;
+    /// `1e-400`, quoted numbers, and YAML `.inf`/`.nan` are not.
+    ///
+    /// Unlike [`Self::as_i64`], this performs no bounded numeric conversion.
+    #[must_use]
+    pub fn is_integral_number(&self) -> bool {
+        match self.kind() {
+            ValueKind::Int => true,
+            ValueKind::Float => decimal_is_integer(self.scalar_bytes()),
+            _ => false,
+        }
+    }
+
     /// Scalar as an unsigned 64-bit integer: like [`Self::as_i64`] but
     /// `None` for negative values or values above `u64::MAX`.
     #[must_use]
     pub fn as_u64(&self) -> Option<u64> {
-        self.as_i64().and_then(|v| u64::try_from(v).ok())
+        match self.kind() {
+            ValueKind::Int => parse_uint(self.scalar_bytes(), self.format()),
+            _ => None,
+        }
     }
 
-    /// Scalar as a float. Integers widen losslessly; floats accept YAML
-    /// `.inf`/`.nan` forms and exponent notation.
+    /// Scalar as a float, with possible precision loss. Integer spellings must
+    /// first fit in `i64`; float spellings accept YAML `.inf`/`.nan` forms and
+    /// exponent notation, and may overflow to infinity or underflow to zero.
     #[must_use]
     pub fn as_f64(&self) -> Option<f64> {
         match self.kind() {
@@ -308,27 +335,28 @@ impl<'d> NodeRef<'d> {
     ///   indentation removed, folding applied (`>` folds single breaks into
     ///   spaces), chomping applied (clip default, strip `-`, keep `+`)
     ///
-    /// Multi-line non-block scalars are not produced by either grammar.
+    /// Malformed quoted scalars retain their undecoded bytes. Consumers that
+    /// require valid values should use [`NodeRef::try_decoded_scalar`].
     #[must_use]
     pub fn decoded_scalar(&self) -> std::borrow::Cow<'d, [u8]> {
+        self.try_decoded_scalar()
+            .unwrap_or_else(|| std::borrow::Cow::Borrowed(self.resolved().raw.scalar_bytes()))
+    }
+
+    /// Decodes a scalar without repairing invalid quoted strings or escapes.
+    ///
+    /// Returns `None` for malformed quoted text; otherwise follows
+    /// [`NodeRef::decoded_scalar`]'s JSON/YAML rules.
+    #[must_use]
+    pub fn try_decoded_scalar(&self) -> Option<std::borrow::Cow<'d, [u8]>> {
         let node = self.resolved().raw;
-        match node.scalar_style() {
+        Some(match node.scalar_style() {
             suspect_syntax::ScalarStyle::Plain => std::borrow::Cow::Borrowed(node.scalar_bytes()),
-            ScalarStyle::SingleQuoted => {
-                let inner = strip_outer_quotes(node.text());
-                // '' collapses to '
-                if inner.windows(2).any(|w| w == b"''") {
-                    std::borrow::Cow::Owned(replace_all(inner, b"''", b"'"))
-                } else {
-                    std::borrow::Cow::Borrowed(inner)
-                }
-            }
-            ScalarStyle::DoubleQuoted => {
-                let inner = strip_outer_quotes(node.text());
-                std::borrow::Cow::Owned(unescape_double(inner))
+            style @ (ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted) => {
+                suspect_syntax::decode_quoted_scalar(node.text(), style, self.format())?
             }
             ScalarStyle::Block => std::borrow::Cow::Owned(decode_block_scalar(node.text())),
-        }
+        })
     }
 
     /// Byte range of the resolved content node.
@@ -389,7 +417,7 @@ impl<'d> NodeRef<'d> {
                         });
                     match found {
                         Some(k) => tokens.push(
-                            String::from_utf8_lossy(k.scalar_bytes())
+                            String::from_utf8_lossy(&NodeRef::new(k).decoded_scalar())
                                 .to_string()
                                 .into_boxed_str(),
                         ),
@@ -440,7 +468,7 @@ impl<'d> NodeRef<'d> {
         let mut map: rustc_hash::FxHashMap<String, Vec<std::ops::Range<usize>>> =
             rustc_hash::FxHashMap::default();
         for (key_node, value) in node.raw.mapping_entries() {
-            let key = String::from_utf8_lossy(key_node.scalar_bytes()).to_string();
+            let key = String::from_utf8_lossy(&NodeRef::new(key_node).decoded_scalar()).to_string();
             let range = value
                 .as_ref()
                 .map_or(key_node.byte_range(), |v| v.byte_range());
@@ -468,11 +496,13 @@ fn find_in_merge<'d>(merge: NodeRef<'d>, key: &str) -> Option<NodeRef<'d>> {
     match r.kind() {
         ValueKind::Object => {
             for (k, v) in r.raw.mapping_entries() {
-                let kb = k.scalar_bytes();
-                if kb == key.as_bytes() {
+                if NodeRef::new(k)
+                    .try_decoded_scalar()
+                    .is_some_and(|kb| kb.as_ref() == key.as_bytes())
+                {
                     return v.map(NodeRef::new);
                 }
-                if kb == b"<<"
+                if is_merge_key(k)
                     && let Some(v) = v
                     && let Some(found) = find_in_merge(NodeRef::new(v), key)
                 {
@@ -489,78 +519,10 @@ fn find_in_merge<'d>(merge: NodeRef<'d>, key: &str) -> Option<NodeRef<'d>> {
     }
 }
 
-fn strip_outer_quotes(text: &[u8]) -> &[u8] {
-    if text.len() >= 2
-        && ((text[0] == b'"' && text[text.len() - 1] == b'"')
-            || (text[0] == b'\'' && text[text.len() - 1] == b'\''))
-    {
-        &text[1..text.len() - 1]
-    } else {
-        text
-    }
-}
-
-fn replace_all(haystack: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(haystack.len());
-    let mut i = 0;
-    while i < haystack.len() {
-        if haystack[i..].starts_with(from) {
-            out.extend_from_slice(to);
-            i += from.len();
-        } else {
-            out.push(haystack[i]);
-            i += 1;
-        }
-    }
-    out
-}
-
-fn unescape_double(bytes: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 1 < bytes.len() {
-            i += 1;
-            match bytes[i] {
-                b'n' => out.push(b'\n'),
-                b't' => out.push(b'\t'),
-                b'r' => out.push(b'\r'),
-                b'b' => out.push(0x08),
-                b'f' => out.push(0x0C),
-                b'0' => out.push(0),
-                b'"' => out.push(b'"'),
-                b'\\' => out.push(b'\\'),
-                b'/' => out.push(b'/'),
-                b'u' | b'U' | b'x' => {
-                    let width = match bytes[i] {
-                        b'u' => 4,
-                        b'U' => 8,
-                        _ => 2,
-                    };
-                    if i + width < bytes.len() {
-                        let hex = std::str::from_utf8(&bytes[i + 1..i + 1 + width]).ok();
-                        if let Some(v) = hex
-                            .and_then(|h| u32::from_str_radix(h, 16).ok())
-                            .and_then(char::from_u32)
-                        {
-                            let mut buf = [0u8; 4];
-                            out.extend_from_slice(v.encode_utf8(&mut buf).as_bytes());
-                            i += width;
-                            i += 1;
-                            continue;
-                        }
-                    }
-                    out.push(bytes[i]); // invalid escape: keep literally
-                }
-                other => out.push(other),
-            }
-            i += 1;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    out
+fn is_merge_key(node: suspect_syntax::SNode<'_>) -> bool {
+    node.doc().format() == Format::Yaml
+        && node.scalar_style() == ScalarStyle::Plain
+        && node.scalar_bytes() == b"<<"
 }
 
 /// Decodes a `|`/`>` block scalar: strips the header, removes indentation,
@@ -589,7 +551,7 @@ fn decode_block_scalar(text: &[u8]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::with_capacity(body.len());
     let mut lines = body
         .split(|&b| b == b'\n')
-        .filter(|l| !l.is_empty() || false)
+        .filter(|l| !l.is_empty())
         .peekable();
     // Re-split preserving structure: iterate raw lines without dropping empties.
     let mut raw_lines: Vec<&[u8]> = body.split_inclusive(|&b| b == b'\n').collect();

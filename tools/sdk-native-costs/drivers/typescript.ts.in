@@ -1,0 +1,43 @@
+import { createClient, codecs, models } from "@@PACKAGE@@";
+
+// Only the two Node globals used by this standalone consumer. SDK types are
+// resolved from the installed package's actual declaration exports by tsc.
+declare const process: { argv: string[] };
+const phase = process.argv[2];
+const count = Number(process.argv[3]);
+const fixture = @@FIXTURE@@;
+function check(condition: unknown): asserts condition {
+  if (!condition) throw new Error("native SDK observation assertion");
+}
+function checked(value: models.@@MODEL@@): void {
+  check(value.data.total_credits.toString() === "@@PRECISION@@");
+  check(value.data.total_usage.toString() === "25.75");
+}
+let result: object;
+if (phase === "import") {
+  check(count === 1 && typeof createClient === "function" && typeof codecs.@@CODEC@@.decode === "function");
+  result = { phase, iterations: count, loaded: true };
+} else if (phase === "codec") {
+  let encodedBytes = 0;
+  for (let i = 0; i < count; i++) {
+    const value: models.@@MODEL@@ = codecs.@@CODEC@@.decode(fixture);
+    checked(value);
+    const encoded = codecs.@@CODEC@@.encode(value);
+    check(encoded.includes('"total_credits":@@PRECISION@@'));
+    encodedBytes += new TextEncoder().encode(encoded).length;
+  }
+  result = { phase, iterations: count, encodedBytes, precision: "@@PRECISION@@" };
+} else if (phase === "request") {
+  const base = process.argv[4];
+  check(base !== undefined && base.startsWith("http://127.0.0.1:") && base.endsWith("/api/v1"));
+  const client = createClient({ auth: { apiKey: "@@TOKEN@@" }, serverURL: base });
+  for (let i = 0; i < count; i++) {
+    const response = await client.@@METHOD@@({}, { signal: AbortSignal.timeout(5000) });
+    check(response.status === 200);
+    checked(response.data);
+  }
+  result = { phase, iterations: count, precision: "@@PRECISION@@" };
+} else {
+  throw new Error("unknown phase");
+}
+console.log("SUSPECT_NATIVE_COSTS " + JSON.stringify(result));

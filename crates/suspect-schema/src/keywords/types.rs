@@ -1,9 +1,10 @@
-//! `type`, `enum`, `const`: type membership and deep value equality.
+//! `type`, `enum`, `const`, `uniqueItems`: type membership and deep equality.
 
-use rustc_hash::FxHashMap;
-use suspect_low::{NodeRef, ValueKind};
+use suspect_low::{NodeRef, Pointer, ValueKind};
 
 use crate::compile::TypeBits;
+pub(crate) use crate::equality::EqualityBudget;
+use crate::exec::{Ctx, Stack};
 
 pub(crate) fn kind_name(k: ValueKind) -> &'static str {
     match k {
@@ -45,49 +46,86 @@ pub(crate) fn type_names(bits: TypeBits) -> String {
     names.join("|")
 }
 
-/// Deep structural equality over schema/instance subtrees.
-///
-/// Numbers compare numerically (so `1` equals `1.0`); objects are
-/// order-insensitive; arrays order-sensitive. `depth` guards against
-/// hostile nesting — beyond the cap values are considered unequal, which is
-/// always safe (it can only reject).
-pub(crate) fn value_eq(a: NodeRef<'_>, b: NodeRef<'_>, depth: usize) -> bool {
-    if depth > 256 {
-        return false;
-    }
-    let ka = a.kind();
-    let kb = b.kind();
-    match (ka, kb) {
-        (ValueKind::Int | ValueKind::Float, ValueKind::Int | ValueKind::Float) => {
-            match (a.as_f64(), b.as_f64()) {
-                (Some(x), Some(y)) => x == y,
-                _ => a.scalar_bytes() == b.scalar_bytes(),
-            }
+pub(crate) fn check_enum<'a, 'd>(
+    ctx: &mut Ctx<'a, 'd>,
+    st: &Stack<'d>,
+    at: &Pointer,
+    instance: NodeRef<'d>,
+    values: &[NodeRef<'d>],
+) -> bool {
+    for value in values {
+        if !ctx.step(st, at) {
+            return false;
         }
-        _ if ka != kb => false,
-        (ValueKind::Null, ValueKind::Null) => true,
-        (ValueKind::Bool, ValueKind::Bool) => a.as_bool() == b.as_bool(),
-        (ValueKind::Str, ValueKind::Str) => a.as_str() == b.as_str(),
-        (ValueKind::Array, ValueKind::Array) => {
-            let ai = a.items();
-            let bi = b.items();
-            ai.len() == bi.len() && ai.iter().zip(&bi).all(|(x, y)| value_eq(*x, *y, depth + 1))
-        }
-        (ValueKind::Object, ValueKind::Object) => {
-            let ae = a.entries();
-            let be = b.entries();
-            if ae.len() != be.len() {
+        match ctx.equality.compare(instance, *value) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(message) => {
+                ctx.fail_evaluation(st, at, message);
                 return false;
             }
-            let map: FxHashMap<&str, NodeRef<'_>> = be
-                .into_iter()
-                .filter_map(|e| e.value.map(|v| (e.key, v)))
-                .collect();
-            ae.iter().all(|e| {
-                map.get(e.key)
-                    .is_some_and(|bv| e.value.is_some_and(|av| value_eq(av, *bv, depth + 1)))
-            })
         }
-        _ => false,
     }
+    ctx.emit(st, at, "value does not match any `enum` entry".into());
+    false
+}
+
+pub(crate) fn check_const<'a, 'd>(
+    ctx: &mut Ctx<'a, 'd>,
+    st: &Stack<'d>,
+    at: &Pointer,
+    instance: NodeRef<'d>,
+    value: NodeRef<'d>,
+) -> bool {
+    match ctx.equality.compare(instance, value) {
+        Ok(true) => true,
+        Ok(false) => {
+            ctx.emit(st, at, "value does not equal the `const` value".into());
+            false
+        }
+        Err(message) => {
+            ctx.fail_evaluation(st, at, message);
+            false
+        }
+    }
+}
+
+pub(crate) fn check_unique_items<'a, 'd>(
+    ctx: &mut Ctx<'a, 'd>,
+    st: &Stack<'d>,
+    at: &Pointer,
+    instance: NodeRef<'d>,
+) -> bool {
+    if instance.kind() != ValueKind::Array {
+        return true;
+    }
+    let items = instance.items();
+    for (index, item) in items.iter().enumerate() {
+        if !ctx.step(st, at) {
+            return false;
+        }
+        for (previous_index, previous) in items[..index].iter().enumerate() {
+            if !ctx.step(st, at) {
+                return false;
+            }
+            match ctx.equality.compare(*item, *previous) {
+                Ok(false) => {}
+                Ok(true) => {
+                    ctx.emit(
+                        st,
+                        at,
+                        format!(
+                            "array items {previous_index} and {index} are equal (`uniqueItems`)"
+                        ),
+                    );
+                    return false;
+                }
+                Err(message) => {
+                    ctx.fail_evaluation(st, at, message);
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }

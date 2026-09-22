@@ -139,7 +139,7 @@ fn count_component_refs(ws: &Workspace, home: &Uri, ptr: &Pointer) -> usize {
             let hits = match &edge.parsed {
                 ParsedRef::Local(p) => &uri == home && p == ptr,
                 ParsedRef::External { uri, pointer } => uri == home && pointer == ptr,
-                ParsedRef::PlainName(_) => false,
+                ParsedRef::PlainName(_) | ParsedRef::ExternalAnchor { .. } => false,
             };
             if hits {
                 n += 1;
@@ -193,6 +193,7 @@ pub fn document_link(_ws: &Workspace, doc: &LowDoc) -> Vec<DocumentLink> {
         let (target_uri, frag) = match &r.parsed {
             ParsedRef::Local(p) => (doc.uri().clone(), p.to_path()),
             ParsedRef::External { uri, pointer } => (uri.clone(), pointer.to_path()),
+            ParsedRef::ExternalAnchor { uri, name } => (uri.clone(), name.to_string()),
             // Plain-name fragments name no path or URL; nothing to link.
             ParsedRef::PlainName(_) => continue,
         };
@@ -445,32 +446,7 @@ fn live_refs(low: &LowDoc) -> Vec<LiveRef> {
 /// and fragments percent-decode before RFC 6901 parsing. Unparseable refs
 /// yield `None`.
 pub(crate) fn parse_ref_string(base: &Uri, raw: &str) -> Option<ParsedRef> {
-    /// Percent-decodes a fragment body to UTF-8 (`None` when invalid).
-    fn decode(frag: &str) -> Option<String> {
-        String::from_utf8(suspect_low::percent_decode_fragment(frag)).ok()
-    }
-    let (doc_part, frag) = Uri::split_ref(raw);
-    Some(match doc_part {
-        None => match frag {
-            "" => ParsedRef::Local(Pointer::root()),
-            f if f.starts_with('/') => ParsedRef::Local(Pointer::parse(&decode(f)?).ok()?),
-            f => ParsedRef::PlainName(decode(f)?.into_boxed_str()),
-        },
-        Some(doc) => {
-            let uri = base.join(doc).ok()?;
-            match frag {
-                "" => ParsedRef::External {
-                    uri,
-                    pointer: Pointer::root(),
-                },
-                f if f.starts_with('/') => ParsedRef::External {
-                    uri,
-                    pointer: Pointer::parse(&decode(f)?).ok()?,
-                },
-                f => ParsedRef::PlainName(decode(f)?.into_boxed_str()),
-            }
-        }
-    })
+    suspect_ref::parse_ref(base, raw).ok()
 }
 
 /// Command served by `executeCommand` to reveal a resolved `$ref` target.
@@ -555,7 +531,7 @@ pub fn ref_target_position(ws: &Workspace, base: &Uri, raw: &str) -> Option<(Url
             let (line, character) = inner.line_index().line_col_utf16(inner.bytes(), offset);
             Some((Url::parse(uri.as_str()).ok()?, Position { line, character }))
         }
-        ParsedRef::PlainName(_) => None,
+        ParsedRef::PlainName(_) | ParsedRef::ExternalAnchor { .. } => None,
     }
 }
 
@@ -638,7 +614,7 @@ pub fn resolve_ref_string(ws: &Workspace, base: &Uri, raw: &str) -> Option<RefTa
             let target = handle_for(&uri)?;
             target.resolve_pointer(target.id(), &pointer).ok()?
         }
-        ParsedRef::PlainName(_) => return None,
+        ParsedRef::PlainName(_) | ParsedRef::ExternalAnchor { .. } => return None,
     };
     let (name, file, source_bytes, range, lang) = match resolution {
         Resolution::Node(target) => {

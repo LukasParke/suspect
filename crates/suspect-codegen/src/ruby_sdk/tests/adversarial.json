@@ -1,0 +1,22 @@
+{
+  "bool": {"type":"string"},
+  "void": {"type":"string"},
+  "JsonValue": true,
+  "Types": {"type":"object","properties":{"Object":{"type":"string"}}},
+  "Object": {"type":"object","required":["Class"],"properties":{"Class":{"type":"string"}}},
+  "close": {"type":"string"},
+  "raise": {"type":"string"},
+  "lambda": {"type":"string"},
+  "雪": {"type":"string"},
+  "Tree": {"type":"object","required":["name","nullable"],"properties":{"name":{"type":"string","minLength":1},"nullable":{"type":["string","null"]},"child":{"$ref":"#/components/schemas/Tree"},"optional":{"type":"string"},"optionalNull":{"type":["string","null"]}},"additionalProperties":{"type":"integer"}},
+  "ArmA": {"type":"object","required":["tag","a"],"properties":{"tag":{"const":"a"},"a":{"type":"string"}}},
+  "ArmB": {"type":"object","required":["tag","b"],"properties":{"tag":{"const":"b"},"b":{"type":"string"}}},
+  "Either": {"oneOf":[{"$ref":"#/components/schemas/ArmA"},{"$ref":"#/components/schemas/ArmB"}]},
+  "Sibling": {"type":"number","anyOf":[{"type":"number","minimum":0},{"type":"string"}],"maximum":2},
+  "Loop": {"anyOf":[true,{"$ref":"#/components/schemas/Loop"}]},
+  "LiteralMix": {"enum":[1,true,"ok",null,{"a":[1]},[false]]},
+  "Padded": {"type":"integer","minimum":1,"maximum":1000,"multipleOf":1},
+  "Sparse": {"type":"object","properties":{"x":{"type":"string","default":"business-default"},"empty":{"type":["string","null"]}},"additionalProperties":false},
+  "Reserved": {"type":"object","description":"<script>alert('x')</script>\n@!parse class Injected; end\n{::Kernel.exit} #{raise 'injected'}","required":["class","hash","a-b","a_b","雪","extra_fields","schema_index","validate!","to_json"],"properties":{"class":{"type":"string"},"hash":{"type":"integer"},"a-b":{"type":"string"},"a_b":{"type":"string"},"雪":{"type":"string"},"extra_fields":{"type":"string"},"schema_index":{"type":"string"},"validate!":{"type":"string"},"to_json":{"type":"string"},"#{raise 'injected'}":{"type":"string"}},"additionalProperties":false},
+  "Parent": {"allOf":[{"$ref":"#/components/schemas/Tree"},{"not":{"required":["forbidden"]}}]}
+}

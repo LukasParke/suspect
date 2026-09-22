@@ -29,7 +29,12 @@ pub mod commands;
 pub mod completion;
 pub mod config_files;
 pub mod diagnostics;
+pub mod extensions_config;
+pub mod extensions_registry;
+pub mod format_order;
 pub mod hover_detail;
+pub mod keys;
+pub mod keyword_docs;
 pub mod links;
 pub mod navigation;
 pub mod pull;
@@ -152,6 +157,12 @@ impl Backend {
         }
         Some(ws)
     }
+}
+
+/// The workspace root path, when configured.
+#[must_use]
+pub fn workspace_root(ws: &Arc<suspect_ref::Workspace>) -> Option<std::path::PathBuf> {
+    ws.root_path().map(std::path::Path::to_path_buf)
 }
 
 /// Parses a [`Uri`] into an LSP [`Url`], or `None` when it does not parse.
@@ -1521,12 +1532,15 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         // Formatting options are ignored: the canonical form uses a
-        // two-space indent regardless of editor configuration.
+        // two-space indent regardless of editor configuration. Key
+        // reordering follows `suspect.formatting.sortKeys`.
         let _ = &params.options;
         let Some(url) = to_url(&uri) else {
             return Ok(None);
         };
-        Ok(actions::format_document(doc, &url).map(|e| vec![e]))
+        let sort_keys = st.config.format_sort_keys();
+        let extensions = st.config.extensions.clone().unwrap_or_default();
+        Ok(actions::format_document_full(doc, &url, sort_keys, &extensions).map(|e| vec![e]))
     }
 }
 

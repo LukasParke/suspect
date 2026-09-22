@@ -1,0 +1,44 @@
+import Foundation
+import @@IMPORT@@
+
+@main
+struct NativeCosts {
+    static func checked(_ value: @@MODEL@@) {
+        precondition(value.data.totalCredits.raw == "@@PRECISION@@")
+        precondition(value.data.totalUsage.raw == "25.75")
+    }
+    static func main() async throws {
+        let args = CommandLine.arguments
+        let phase = args[1]
+        let count = Int(args[2])!
+        let fixture = Data((@@FIXTURE@@).utf8)
+        switch phase {
+        case "import":
+            precondition(count == 1 && MemoryLayout<@@MODEL@@>.size > 0)
+            print("SUSPECT_NATIVE_COSTS {\"phase\":\"import\",\"iterations\":1,\"loaded\":true}")
+        case "codec":
+            var encodedBytes = 0
+            for _ in 0..<count {
+                let value: @@MODEL@@ = try Codecs.@@CODEC@@.decode(fixture)
+                checked(value)
+                let encoded = try Codecs.@@CODEC@@.encode(value)
+                precondition(String(decoding: encoded, as: UTF8.self).contains("\"total_credits\":@@PRECISION@@"))
+                encodedBytes += encoded.count
+            }
+            print("SUSPECT_NATIVE_COSTS {\"phase\":\"codec\",\"iterations\":\(count),\"encodedBytes\":\(encodedBytes),\"precision\":\"@@PRECISION@@\"}")
+        case "request":
+            let base = args[3]
+            precondition(base.hasPrefix("http://127.0.0.1:") && base.hasSuffix("/api/v1"))
+            let client = Client(credentials: Credentials(apiKey: "@@TOKEN@@"), options: ClientOptions(serverURL: base))
+            for _ in 0..<count {
+                switch try await client.@@METHOD@@(@@INPUT@@()) {
+                case .status200(let response):
+                    precondition(response.status == 200)
+                    checked(response.data)
+                }
+            }
+            print("SUSPECT_NATIVE_COSTS {\"phase\":\"request\",\"iterations\":\(count),\"precision\":\"@@PRECISION@@\"}")
+        default: preconditionFailure("unknown phase")
+        }
+    }
+}

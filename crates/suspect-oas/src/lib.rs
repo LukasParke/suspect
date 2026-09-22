@@ -11,6 +11,8 @@ mod components;
 mod model;
 mod paths;
 mod schema;
+mod schema_walk;
+mod scoped_refs;
 mod session;
 
 pub use components::Components;
