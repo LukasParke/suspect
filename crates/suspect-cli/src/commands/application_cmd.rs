@@ -432,7 +432,7 @@ pub fn generate(target: Target, args: ApplicationArgs) -> anyhow::Result<i32> {
         ))
     });
     match args.format {
-        OutputFormat::Json => println!(
+        OutputFormat::Json | OutputFormat::Sarif => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "format":target.report_format(), "profile":target.profile(),

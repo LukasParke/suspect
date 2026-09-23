@@ -7,6 +7,7 @@
 //! pragmatic [`CriterionPlan`] model. Steps without explicit success
 //! criteria default to `StatusInRange(2, 2)` per the Arazzo recommendation.
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -47,6 +48,9 @@ pub struct OpKey {
 pub struct Plan {
     /// Compiled workflows, in document order.
     pub workflows: Vec<WfPlan>,
+    /// Component schemas per source document name, for `$ref` resolution
+    /// during response validation (merged across sources).
+    pub components: BTreeMap<String, serde_json::Value>,
 }
 
 /// One compiled workflow.
@@ -97,6 +101,15 @@ pub struct StepPlan {
     pub body_pointers: Vec<String>,
     /// Step ID to jump to when this step fails (`onFailure` goto action).
     pub failure_goto: Option<String>,
+    /// Security requirement alternatives for the target operation: each
+    /// alternative lists the scheme names in one requirement object
+    /// (alternatives ORed, schemes within one alternative ANDed). Empty
+    /// when the operation declares no security.
+    pub security: Vec<Vec<String>>,
+    /// Declared response schemas: `(status or None for default, schema
+    /// JSON)` used by executors to validate responses against the
+    /// contract.
+    pub response_schemas: Vec<(Option<u16>, serde_json::Value)>,
 }
 
 /// Pragmatic success-criterion model compiled from Arazzo condition strings.
@@ -209,6 +222,7 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
     let sources = SourceIndex::load(&doc, arazzo.uri(), ws)?;
 
     let mut workflows = Vec::with_capacity(doc.workflows().len());
+    let mut components: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for wf in doc.workflows() {
         if wf.workflow_id.is_empty() {
             return Err(CompileError("workflow missing workflowId".to_owned()));
@@ -217,6 +231,24 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
         let mut steps = Vec::with_capacity(wf.steps().len());
         for step in wf.steps() {
             steps.push(compile_step(step, &sources)?);
+        }
+        for (_, _, uri) in &sources.specs {
+            if let Some(handle) = sources.ws.get(uri)
+                && let Some(schemas) = handle
+                    .doc()
+                    .root()
+                    .get("components")
+                    .and_then(|c| c.get("schemas"))
+            {
+                for entry in schemas.entries() {
+                    if let Some(schema) = entry.value {
+                        let serialized = suspect_overlay::Value::from_node(schema).to_json();
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&serialized) {
+                            components.entry(entry.key.to_owned()).or_insert(json);
+                        }
+                    }
+                }
+            }
         }
         // Extract schema-declared defaults from `inputs.properties`.
         let mut input_defaults = serde_json::Map::new();
@@ -245,12 +277,16 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
             steps,
         });
     }
-    Ok(Plan { workflows })
+    Ok(Plan {
+        workflows,
+        components,
+    })
 }
 
 /// Maps `sourceDescriptions` names to IR snapshots of their documents.
 struct SourceIndex {
-    specs: Vec<(String, IrSpec)>,
+    specs: Vec<(String, IrSpec, Uri)>,
+    ws: Arc<Workspace>,
 }
 
 impl SourceIndex {
@@ -265,9 +301,141 @@ impl SourceIndex {
             let uri = resolve_source(src, base, &uris)?;
             let ir = IrSpec::from_workspace(ws, &uri)
                 .map_err(|e| CompileError(format!("source '{}': {e}", src.name)))?;
-            specs.push((src.name.to_owned(), ir));
+            specs.push((src.name.to_owned(), ir, uri));
         }
-        Ok(Self { specs })
+        Ok(Self {
+            specs,
+            ws: Arc::clone(ws),
+        })
+    }
+
+    /// The source document containing `key`, walking `paths` operations.
+    fn doc_for_opkey(&self, key: &OpKey) -> Option<Uri> {
+        for (_, ir, uri) in &self.specs {
+            if let Some(op) = ir.operation(OpSelector::MethodPath(
+                match key.method.as_str() {
+                    "GET" => Method::Get,
+                    "POST" => Method::Post,
+                    "PUT" => Method::Put,
+                    "PATCH" => Method::Patch,
+                    "DELETE" => Method::Delete,
+                    "HEAD" => Method::Head,
+                    "OPTIONS" => Method::Options,
+                    "TRACE" => Method::Trace,
+                    _ => Method::Get,
+                },
+                &key.path,
+            )) {
+                let _ = op;
+                return Some(uri.clone());
+            }
+        }
+        None
+    }
+
+    /// Security requirement alternatives for `key`: operation-level
+    /// `security` overrides path-item, which overrides root. Each
+    /// alternative is the list of scheme names in that requirement object.
+    fn security_for(&self, key: &OpKey) -> Vec<Vec<String>> {
+        let Some(uri) = self.doc_for_opkey(key) else {
+            return Vec::new();
+        };
+        let Some(handle) = self.ws.get(&uri) else {
+            return Vec::new();
+        };
+        let root = handle.doc().root();
+        let read_alternatives = |node: suspect_low::NodeRef<'_>| -> Vec<Vec<String>> {
+            let mut out = Vec::new();
+            if let Some(security) = node.get("security")
+                && security.kind() == suspect_low::ValueKind::Array
+            {
+                for requirement in security.items() {
+                    let names: Vec<String> = requirement
+                        .entries()
+                        .iter()
+                        .map(|e| e.key.to_owned())
+                        .collect();
+                    if !names.is_empty() {
+                        out.push(names);
+                    }
+                }
+            }
+            out
+        };
+        // operation > path item > root precedence.
+        if let Some(paths) = root.get("paths")
+            && let Some(path_item) = paths.get(&key.path)
+            && let Some(op) = path_item.get(&key.method.as_str().to_ascii_lowercase())
+        {
+            let operation_level = read_alternatives(op);
+            if !operation_level.is_empty() {
+                return operation_level;
+            }
+            let item_level = read_alternatives(path_item);
+            if !item_level.is_empty() {
+                return item_level;
+            }
+        }
+        read_alternatives(root)
+    }
+
+    /// Response schemas for `key`: `(status or None for default, schema
+    /// JSON)` in declaration order. The JSON is the raw response schema;
+    /// nested `$ref`s resolve at validation time through the components
+    /// tree carried separately.
+    fn response_schemas_for(&self, key: &OpKey) -> Vec<(Option<u16>, serde_json::Value)> {
+        let Some(uri) = self.doc_for_opkey(key) else {
+            return Vec::new();
+        };
+        let Some(handle) = self.ws.get(&uri) else {
+            return Vec::new();
+        };
+        let root = handle.doc().root();
+        let Some(paths) = root.get("paths") else {
+            return Vec::new();
+        };
+        let Some(path_item) = paths.get(&key.path) else {
+            return Vec::new();
+        };
+        let Some(op) = path_item.get(&key.method.as_str().to_ascii_lowercase()) else {
+            return Vec::new();
+        };
+        let Some(responses) = op.get("responses") else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entry in responses.entries() {
+            let Some(resp) = entry.value else {
+                continue;
+            };
+            // Follow one $ref to a components response, then read content.
+            let resp = if let Some(text) = resp.get("$ref").and_then(|n| n.as_str())
+                && let Some(name) = text.strip_prefix("#/components/responses/")
+                && let Some(resolved) = root
+                    .get("components")
+                    .and_then(|c| c.get("responses"))
+                    .and_then(|r| r.get(name))
+            {
+                resolved
+            } else {
+                resp
+            };
+            let status = match entry.key {
+                "default" => None,
+                code => code.parse::<u16>().ok(),
+            };
+            if let Some(content) = resp.get("content")
+                && let Some(json) = content.get("application/json")
+                && let Some(schema) = json.get("schema")
+            {
+                let serialized = suspect_overlay::Value::from_node(schema).to_json();
+                let Ok(schema_json) = serde_json::from_str::<serde_json::Value>(&serialized) else {
+                    continue;
+                };
+                out.push((status, schema_json));
+            }
+        }
+        out
     }
 
     fn spec_for(&self, name: Option<&str>) -> Option<&IrSpec> {
@@ -275,9 +443,9 @@ impl SourceIndex {
             Some(n) => self
                 .specs
                 .iter()
-                .find(|(key, _)| key == n)
-                .map(|(_, ir)| ir),
-            None => self.specs.first().map(|(_, ir)| ir),
+                .find(|(key, _, _)| key == n)
+                .map(|(_, ir, _)| ir),
+            None => self.specs.first().map(|(_, ir, _)| ir),
         }
     }
 }
@@ -347,6 +515,8 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
     }
     let step_id = step.step_id.to_owned();
     let operation = resolve_operation(step, sources)?;
+    let security = sources.security_for(&operation);
+    let response_schemas = sources.response_schemas_for(&operation);
     let mut parameters = Vec::new();
     for p in step.parameters() {
         parameters.push(compile_param(&step_id, p)?);
@@ -413,6 +583,8 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         outputs,
         body_pointers,
         failure_goto,
+        security,
+        response_schemas,
     })
 }
 
@@ -462,7 +634,7 @@ fn resolve_operation(step: &StepView<'_>, sources: &SourceIndex) -> Result<OpKey
             None => vec![id],
         };
         for lookup_id in &lookup_ids {
-            for (_, ir) in &sources.specs {
+            for (_, ir, _) in &sources.specs {
                 if let Some(op) = ir.operation(OpSelector::Id(lookup_id)) {
                     return Ok(OpKey {
                         method: op.method,

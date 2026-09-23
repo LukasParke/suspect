@@ -114,6 +114,7 @@ pub fn lint(
     match format {
         OutputFormat::Text => output::print_findings(&findings),
         OutputFormat::Json => output::print_json(&findings)?,
+        OutputFormat::Sarif => crate::sarif::print_sarif(&findings)?,
     }
 
     let has_error = findings.iter().any(|f| f.severity == Severity::Error);

@@ -113,6 +113,15 @@ pub enum TestEvent {
         /// Exchange duration in milliseconds.
         duration_ms: u64,
     },
+    /// The response body matched the schema declared for its status.
+    ResponseValidated {
+        /// Workflow id.
+        wf: String,
+        /// Step id.
+        step: String,
+        /// Response status code.
+        status: u16,
+    },
     /// One success criterion passed.
     CriterionOk {
         /// Workflow id.
@@ -194,6 +203,27 @@ pub async fn run_plan(
     http: &dyn HttpClient,
     events: mpsc::Sender<TestEvent>,
 ) -> RunSummary {
+    run_plan_with_auth(
+        plan,
+        base_url,
+        http,
+        &crate::auth::AuthState::default(),
+        &crate::auth::AuthConfig::default(),
+        events,
+    )
+    .await
+}
+
+/// Same as [`run_plan`] with explicit credential resolution: configured
+/// schemes inject tokens/API keys into each request before it is sent.
+pub async fn run_plan_with_auth(
+    plan: &Plan,
+    base_url: &str,
+    http: &dyn HttpClient,
+    auth_state: &crate::auth::AuthState,
+    auth_config: &crate::auth::AuthConfig,
+    events: mpsc::Sender<TestEvent>,
+) -> RunSummary {
     let start = Instant::now();
     let base = base_url.trim_end_matches('/').to_owned();
 
@@ -202,7 +232,15 @@ pub async fn run_plan(
     let mut running: Vec<std::pin::Pin<Box<dyn Future<Output = WfCounts> + Send + '_>>> =
         Vec::with_capacity(plan.workflows.len());
     for wf in &plan.workflows {
-        running.push(Box::pin(run_workflow(wf, &base, http, events.clone())));
+        running.push(Box::pin(run_workflow(
+            wf,
+            &base,
+            http,
+            auth_state,
+            auth_config,
+            &plan.components,
+            events.clone(),
+        )));
     }
 
     let mut finished: Vec<WfCounts> = Vec::new();
@@ -240,10 +278,14 @@ pub async fn run_plan(
 }
 
 /// Runs a single workflow sequentially, returning its step counts.
+#[allow(clippy::too_many_arguments)]
 async fn run_workflow(
     wf: &crate::plan::WfPlan,
     base: &str,
     http: &dyn HttpClient,
+    auth_state: &crate::auth::AuthState,
+    auth_config: &crate::auth::AuthConfig,
+    components: &std::collections::BTreeMap<String, serde_json::Value>,
     events: mpsc::Sender<TestEvent>,
 ) -> WfCounts {
     send(
@@ -290,6 +332,9 @@ async fn run_workflow(
             http,
             &effective_inputs,
             &steps_outputs,
+            auth_state,
+            auth_config,
+            components,
             &events,
         )
         .await
@@ -339,6 +384,7 @@ async fn send(events: &mpsc::Sender<TestEvent>, ev: TestEvent) {
 }
 
 /// Builds and executes one step, then evaluates its success criteria.
+#[allow(clippy::too_many_arguments)]
 async fn run_step(
     wf: &crate::plan::WfPlan,
     step: &StepPlan,
@@ -346,6 +392,9 @@ async fn run_step(
     http: &dyn HttpClient,
     inputs: &serde_json::Map<String, serde_json::Value>,
     steps_outputs: &serde_json::Map<String, serde_json::Value>,
+    auth_state: &crate::auth::AuthState,
+    auth_config: &crate::auth::AuthConfig,
+    components: &std::collections::BTreeMap<String, serde_json::Value>,
     events: &mpsc::Sender<TestEvent>,
 ) -> StepOutcome {
     let wf_id = wf.workflow_id.as_str();
@@ -458,13 +507,43 @@ async fn run_step(
         request_headers.push(("Accept".to_owned(), "application/json".to_owned()));
     }
 
+    // Security injection: for every configured scheme named by the
+    // operation's security requirements, resolve credentials and inject
+    // them (explicit step parameters win).
+    let mut injected: Vec<crate::auth::Injected> = Vec::new();
+    for alternative in &step.security {
+        for scheme in alternative {
+            if let Some(credential) = auth_config.schemes.get(scheme) {
+                match auth_state.resolve(http, scheme, credential).await {
+                    Ok(Some(placement)) => injected.push(placement),
+                    Ok(None) => {}
+                    Err(message) => {
+                        send(
+                            events,
+                            TestEvent::CriterionFail {
+                                wf: wf_id.to_owned(),
+                                step: step.step_id.clone(),
+                                crit: format!("auth:{scheme}"),
+                                expected: "credential acquisition".to_owned(),
+                                actual: message,
+                            },
+                        )
+                        .await;
+                        return StepOutcome::Failed;
+                    }
+                }
+            }
+        }
+    }
+
     let url = join_url(base, &path, &query);
-    let request = HttpRequest {
+    let mut request = HttpRequest {
         method: method.to_owned(),
         url: url.clone(),
         headers: request_headers,
         body: Bytes::from(body.unwrap_or_default()),
     };
+    crate::auth::inject(&mut request, &injected);
 
     send(
         events,
@@ -510,8 +589,97 @@ async fn run_step(
 
     let body_text = String::from_utf8_lossy(&response.body).into_owned();
     let body_json: Option<serde_json::Value> = serde_json::from_str(&body_text).ok();
+    let mut response_failures: Vec<String> = Vec::new();
+
+    // Contract validation: the response must match the schema declared for
+    // its status (exact code first, then `default`). This runs whether or
+    // not the step author wrote criteria — a spec violation is a spec
+    // violation even when the criteria happen to pass.
+    if let Some((status, schema)) = step
+        .response_schemas
+        .iter()
+        .find(|(s, _)| *s == Some(response.status))
+        .or_else(|| step.response_schemas.iter().find(|(s, _)| s.is_none()))
+    {
+        // The compiler resolves $refs against the compiled subtree's root,
+        // so a sibling component map in the wrapper does not help — inline
+        // the component graph into the schema instead (depth-capped;
+        // recursive refs collapse to permissive).
+        let inlined = crate::exec::resolve_refs(schema, components, &mut Vec::new(), 0);
+        let schema_serialized = serde_json::to_string(&inlined).unwrap_or_default();
+        let instance_serialized =
+            serde_json::to_string(&body_json).unwrap_or_else(|_| "null".to_owned());
+        let wrapper =
+            format!("{{\"schema\": {schema_serialized}, \"instance\": {instance_serialized}}}");
+        let response_failures_local: Option<Vec<String>> =
+            suspect_source::Uri::parse("mem://response-check.json")
+                .ok()
+                .and_then(|wrapper_uri| {
+                    let doc = suspect_low::LowDoc::parse(
+                        wrapper_uri,
+                        suspect_source::Source::from_vec(wrapper.into_bytes()),
+                    );
+                    if !doc.syntax_errors().is_empty() {
+                        return None;
+                    }
+                    let schema_node = doc.root().get("schema")?;
+                    let instance_node = doc.root().get("instance")?;
+                    let schema = suspect_schema::Compiler::new(suspect_schema::Config::default())
+                        .compile(schema_node)
+                        .ok()?;
+                    let failures: Vec<String> = schema
+                        .validate(instance_node)
+                        .iter()
+                        .map(|e| e.message.clone())
+                        .collect();
+                    Some(failures)
+                });
+        match response_failures_local {
+            None => {
+                send(
+                    events,
+                    TestEvent::CriterionFail {
+                        wf: wf_id.to_owned(),
+                        step: step.step_id.clone(),
+                        crit: format!("response-schema:{status:?}"),
+                        expected: "a compilable response schema".to_owned(),
+                        actual: "schema failed to compile; response not validated".to_owned(),
+                    },
+                )
+                .await;
+            }
+            Some(failures) => {
+                if failures.is_empty() {
+                    send(
+                        events,
+                        TestEvent::ResponseValidated {
+                            wf: wf_id.to_owned(),
+                            step: step.step_id.clone(),
+                            status: response.status,
+                        },
+                    )
+                    .await;
+                }
+                response_failures = failures;
+            }
+        }
+    }
 
     let mut all_ok = true;
+    if !response_failures.is_empty() {
+        all_ok = false;
+        send(
+            events,
+            TestEvent::CriterionFail {
+                wf: wf_id.to_owned(),
+                step: step.step_id.clone(),
+                crit: "response-schema".to_owned(),
+                expected: "response matching the declared schema".to_owned(),
+                actual: response_failures.join("; "),
+            },
+        )
+        .await;
+    }
     for crit in &step.success {
         match eval_criterion(&crit.kind, response.status, body_json.as_ref(), &body_text) {
             Ok(()) => {
@@ -686,4 +854,108 @@ fn encode_component(text: &str) -> String {
         }
     }
     out
+}
+
+/// Substitutes `#/components/schemas/<name>` references in a schema tree
+/// with the referenced component JSON, recursively, so the JSON Schema
+/// compiler (which resolves refs against the compiled subtree's root) sees
+/// a self-contained schema. Depth-capped; recursive references beyond the
+/// cap collapse to `true` (permissive) rather than looping.
+fn resolve_refs(
+    value: &serde_json::Value,
+    components: &std::collections::BTreeMap<String, serde_json::Value>,
+    seen: &mut Vec<String>,
+    depth: usize,
+) -> serde_json::Value {
+    const MAX_DEPTH: usize = 8;
+    if depth > MAX_DEPTH {
+        return serde_json::Value::Bool(true);
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.len() == 1
+                && let Some(target) = map.get("$ref").and_then(|r| r.as_str())
+                && let Some(name) = target.strip_prefix("#/components/schemas/")
+                && let Some(component) = components.get(name)
+            {
+                if seen.iter().any(|s| s == name) {
+                    return serde_json::Value::Bool(true);
+                }
+                seen.push(name.to_owned());
+                let resolved = resolve_refs(component, components, seen, depth + 1);
+                seen.pop();
+                return resolved;
+            }
+            let mut out = serde_json::Map::new();
+            for (key, child) in map {
+                out.insert(key.clone(), resolve_refs(child, components, seen, depth));
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .map(|item| resolve_refs(item, components, seen, depth))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+#[cfg(test)]
+mod debug_wrapper_tests {
+
+    #[tokio::test]
+    async fn wrapper_resolves_component_refs() {
+        let schema: serde_json::Value =
+            serde_json::from_str(r##"{"$ref": "#/components/schemas/Pet"}"##).unwrap();
+        let mut components = std::collections::BTreeMap::new();
+        components.insert(
+            "Pet".to_owned(),
+            serde_json::from_str::<serde_json::Value>(
+                r##"{"type": "object", "required": ["id", "name"]}"##,
+            )
+            .unwrap(),
+        );
+        let mut schemas_section = serde_json::Map::new();
+        for (name, schema_json) in &components {
+            schemas_section.insert(name.clone(), schema_json.clone());
+        }
+        let mut components_json = serde_json::Map::new();
+        components_json.insert(
+            "components".to_owned(),
+            serde_json::Value::Object({
+                let mut top = serde_json::Map::new();
+                top.insert(
+                    "schemas".to_owned(),
+                    serde_json::Value::Object(schemas_section),
+                );
+                top
+            }),
+        );
+        let schema_serialized = serde_json::to_string(&schema).unwrap();
+        let components_serialized =
+            serde_json::to_string(&serde_json::Value::Object(components_json)).unwrap();
+        let (components_body, _) = components_serialized.rsplit_once('}').unwrap_or(("", ""));
+        let wrapper = components_body.to_owned()
+            + ", \"schema\": "
+            + &schema_serialized
+            + ", \"instance\": {}";
+        println!("wrapper: {wrapper}");
+        let uri = suspect_source::Uri::parse("mem://w.json").unwrap();
+        let doc = suspect_low::LowDoc::parse(
+            uri,
+            suspect_source::Source::from_vec(wrapper.as_bytes().to_vec()),
+        );
+        let schema_node = doc.root().get("schema").unwrap();
+        let instance_node = doc.root().get("instance").unwrap();
+        let compiled = suspect_schema::Compiler::new(suspect_schema::Config::default())
+            .compile(schema_node)
+            .unwrap();
+        let errors = compiled.validate(instance_node);
+        assert_eq!(
+            errors.len(),
+            1,
+            "instance {{}} must fail required [id, name]"
+        );
+    }
 }

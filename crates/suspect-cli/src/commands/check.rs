@@ -160,7 +160,7 @@ pub fn check(paths: &[std::path::PathBuf], format: OutputFormat) -> anyhow::Resu
                 );
             }
         }
-        OutputFormat::Json => output::print_json(&reports)?,
+        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&reports)?,
     }
 
     let has_error = reports

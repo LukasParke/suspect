@@ -377,7 +377,9 @@ pub(super) fn generate(args: &SdkArgs) -> anyhow::Result<i32> {
         a.file == b.file && a.pointer == b.pointer && a.code == b.code && a.message == b.message
     });
     match args.text.format {
-        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        OutputFormat::Json | OutputFormat::Sarif => {
+            println!("{}", serde_json::to_string_pretty(&report)?)
+        }
         OutputFormat::Text => {
             for diagnostic in &report.diagnostics {
                 println!(

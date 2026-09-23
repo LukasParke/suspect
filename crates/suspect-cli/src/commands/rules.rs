@@ -129,7 +129,7 @@ async fn check_async(
 
     all.retain(|f| f.severity >= min_severity);
     match text.format {
-        OutputFormat::Json => output::print_json(&all)?,
+        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&all)?,
         OutputFormat::Text => output::print_findings(&all),
     }
 

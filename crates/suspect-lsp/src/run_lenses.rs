@@ -139,6 +139,7 @@ pub(crate) async fn run_workflow_core(
 ) -> (RunSummary, Vec<CriterionFailure>) {
     let plan = Plan {
         workflows: vec![wf.clone()],
+        components: Default::default(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TestEvent>(256);
     let collector = async {
@@ -355,6 +356,13 @@ pub(crate) fn pick_outcome(outcomes: &[suspect_gen::RenderOutcome]) -> Option<&P
 pub(crate) fn describe_event(ev: &TestEvent) -> String {
     match ev {
         TestEvent::WfStarted { id } => format!("workflow '{id}' started"),
+        TestEvent::ResponseValidated {
+            wf: _,
+            step,
+            status,
+        } => {
+            format!("[{step}] response {status} matches contract")
+        }
         TestEvent::StepStarted { wf, step } => format!("[{wf}] step '{step}' started"),
         TestEvent::RequestSent {
             wf,

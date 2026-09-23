@@ -16,7 +16,10 @@ use crate::diagnostic::{Diagnostic, Severity};
 
 /// Validates `definitions/*` instances of a Swagger 2.0 document — the
 /// 2.0 counterpart of the components-schemas walk below.
-pub(crate) fn check_swagger_definition_instances(low: &suspect_low::LowDoc) -> Vec<Diagnostic> {
+pub(crate) fn check_swagger_definition_instances(
+    low: &suspect_low::LowDoc,
+    components: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     // `definitions/*` instances.
     if let Some(definitions) = low.root().get("definitions") {
@@ -24,7 +27,7 @@ pub(crate) fn check_swagger_definition_instances(low: &suspect_low::LowDoc) -> V
             let Some(schema) = entry.value else {
                 continue;
             };
-            check_one_doc("2.0", schema, schema.byte_range(), &mut out);
+            check_one_doc("2.0", schema, schema.byte_range(), components, &mut out);
         }
     }
     // Inline operation schemas: non-body 2.0 parameters carry their
@@ -46,7 +49,7 @@ pub(crate) fn check_swagger_definition_instances(low: &suspect_low::LowDoc) -> V
                 for param in params.items() {
                     let schema = param.get("schema").unwrap_or(param);
                     let span = schema.byte_range();
-                    check_one_doc("2.0", schema, span, &mut out);
+                    check_one_doc("2.0", schema, span, components, &mut out);
                 }
             }
             if let Some(responses) = op.get("responses") {
@@ -56,7 +59,7 @@ pub(crate) fn check_swagger_definition_instances(low: &suspect_low::LowDoc) -> V
                     };
                     if let Some(schema) = resp.get("schema") {
                         let span = schema.byte_range();
-                        check_one_doc("2.0", schema, span, &mut out);
+                        check_one_doc("2.0", schema, span, components, &mut out);
                     }
                 }
             }
@@ -182,13 +185,20 @@ fn check_one(
     } else {
         "3.1"
     };
-    check_one_doc(version, schema_node, span, out);
+    check_one_doc(
+        version,
+        schema_node,
+        span,
+        &std::collections::BTreeMap::new(),
+        out,
+    );
 }
 
 fn check_one_doc(
     version: &str,
     schema_node: NodeRef<'_>,
     span: std::ops::Range<usize>,
+    components: &std::collections::BTreeMap<String, serde_json::Value>,
     out: &mut Vec<Diagnostic>,
 ) {
     let schema_json = OvValue::from_node(schema_node).to_json();
@@ -205,6 +215,7 @@ fn check_one_doc(
     if version.starts_with("3.0") || version == "2.0" {
         translate_nullable(&mut schema);
     }
+    let schema = inline_component_refs(&schema, components, &mut Vec::new(), 0);
     let mut instances: Vec<(String, &serde_json::Value, &str)> = Vec::new();
     if let Some(default) = schema.get("default") {
         instances.push(("default".into(), default, "default"));
@@ -318,5 +329,52 @@ fn check_one_doc(
                 ));
             }
         }
+    }
+}
+
+/// Substitutes `#/components/schemas/<name>` references in a schema tree
+/// with the referenced component JSON (depth-capped; recursive refs
+/// collapse to permissive beyond the cap).
+fn inline_component_refs(
+    value: &serde_json::Value,
+    components: &std::collections::BTreeMap<String, serde_json::Value>,
+    seen: &mut Vec<String>,
+    depth: usize,
+) -> serde_json::Value {
+    const MAX_DEPTH: usize = 8;
+    if depth > MAX_DEPTH {
+        return serde_json::Value::Bool(true);
+    }
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.len() == 1
+                && let Some(target) = map.get("$ref").and_then(|r| r.as_str())
+                && let Some(name) = target.strip_prefix("#/components/schemas/")
+                && let Some(component) = components.get(name)
+            {
+                if seen.iter().any(|s| s == name) {
+                    return serde_json::Value::Bool(true);
+                }
+                seen.push(name.to_owned());
+                let resolved = inline_component_refs(component, components, seen, depth + 1);
+                seen.pop();
+                return resolved;
+            }
+            let mut out = serde_json::Map::new();
+            for (key, child) in map {
+                out.insert(
+                    key.clone(),
+                    inline_component_refs(child, components, seen, depth),
+                );
+            }
+            serde_json::Value::Object(out)
+        }
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .map(|item| inline_component_refs(item, components, seen, depth))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }

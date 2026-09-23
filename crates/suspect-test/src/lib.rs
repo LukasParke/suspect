@@ -30,6 +30,7 @@
 //!
 //! [Arazzo 1.0]: https://spec.openapis.org/arazzo/v1.0.0
 
+pub mod auth;
 pub mod evolved_fuzz;
 pub mod exec;
 pub mod fuzz;

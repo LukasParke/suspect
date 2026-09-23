@@ -148,7 +148,7 @@ pub fn stats(path: &Path, format: OutputFormat) -> anyhow::Result<i32> {
             println!("  workflows:         {}", report.workflows);
             println!("  actions:           {}", report.actions);
         }
-        OutputFormat::Json => output::print_json(&report)?,
+        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&report)?,
     }
     Ok(0)
 }
