@@ -174,6 +174,19 @@ pub(crate) enum Function {
     ParameterSchemaOrContent,
     /// Native: path keys do not end in `/`.
     NoTrailingSlash,
+    /// Native: every key of the matched object is alphabetically sorted.
+    SortedKeys,
+    /// Native: no matched URL is localhost/127.0.0.1/example.com, and none
+    /// ends in `/`.
+    ServerUrls,
+    /// Native: the referenced component is never mentioned by any `\$ref`
+    /// in the document.
+    UnusedComponent,
+    /// Native: the operation carries at least one tag that is declared in
+    /// the root `tags` list.
+    TagDefined,
+    /// Native: path keys contain no `?` query suffix.
+    PathNoQuery,
 }
 
 impl Function {
@@ -206,6 +219,13 @@ impl Function {
             Self::NoIdenticalPaths => "paths must not be identical modulo template variables",
             Self::ParameterSchemaOrContent => "parameter must define `schema` or `content`",
             Self::NoTrailingSlash => "path must not end with a trailing slash",
+            Self::SortedKeys => "keys must be alphabetically sorted",
+            Self::ServerUrls => {
+                "server URL must be concrete (not localhost/example.com) and slash-free"
+            }
+            Self::UnusedComponent => "component is never referenced",
+            Self::TagDefined => "operation tag must be declared in the root tags list",
+            Self::PathNoQuery => "path key must not contain a query string",
         }
     }
 }
@@ -333,6 +353,11 @@ pub(crate) fn apply<'d>(
             check_parameter_schema_or_content(&node, rule, ptrs, out);
         }
         Function::NoTrailingSlash => check_no_trailing_slash(&node, rule, ptrs, out),
+        Function::SortedKeys => check_sorted_keys(&node, rule, ptrs, out),
+        Function::ServerUrls => check_server_urls(&node, rule, ptrs, out),
+        Function::UnusedComponent => check_unused_component(&node, rule, ptrs, out),
+        Function::TagDefined => check_tag_defined(&node, rule, ptrs, out),
+        Function::PathNoQuery => check_path_no_query(&node, rule, ptrs, out),
     }
 }
 
@@ -769,6 +794,196 @@ fn check_no_trailing_slash<'d>(
             .is_some_and(|k| k.ends_with('/')),
     };
     if ends_with_slash {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Keys of the matched object must be alphabetically sorted; an array of
+/// objects sorts by each item's `name` field (the `tags` case).
+fn check_sorted_keys<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let resolved = node.resolved();
+    match resolved.kind() {
+        ValueKind::Object => {
+            let keys: Vec<&str> = resolved.entries().iter().map(|e| e.key).collect();
+            let mut sorted = keys.clone();
+            sorted.sort();
+            if keys != sorted {
+                push(out, rule, node, ptrs);
+            }
+        }
+        ValueKind::Array => {
+            let names: Vec<Option<String>> = resolved
+                .items()
+                .iter()
+                .map(|item| item.get("name").and_then(|n| n.as_str().map(String::from)))
+                .collect();
+            if names.iter().any(|n| n.is_none()) {
+                return;
+            }
+            let mut sorted = names.clone();
+            sorted.sort();
+            if names != sorted {
+                push(out, rule, node, ptrs);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Server URLs must be concrete: no localhost/127.0.0.1/example.com, and
+/// no trailing slash.
+fn check_server_urls<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let resolved = node.resolved();
+    if resolved.kind() != ValueKind::Str {
+        return;
+    }
+    let Some(url) = resolved.as_str() else {
+        return;
+    };
+    let trimmed = url.trim_end_matches('/');
+    if trimmed == url
+        && !url.contains("localhost")
+        && !url.contains("127.0.0.1")
+        && !url.contains("example.com")
+    {
+        return;
+    }
+    push(out, rule, node, ptrs);
+}
+
+/// A component (schemas/parameters/responses/headers/examples/
+/// requestBodies/securitySchemes/links/callbacks) entry that is never
+/// mentioned by any `$ref` in the document.
+fn check_unused_component<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    // `node` is one component section; entries unreferenced by any $ref
+    // are findings.
+    let resolved = node.resolved();
+    if resolved.kind() != ValueKind::Object {
+        return;
+    }
+    // The syntax document root is a stream wrapper; resolve to the actual
+    // root mapping before walking, or entries() yields nothing.
+    let syntax_root = node.syntax().doc().root();
+    let doc_root = NodeRef::new(syntax_root).resolved();
+    let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut stack = vec![doc_root];
+    while let Some(current) = stack.pop() {
+        for entry in current.entries() {
+            if entry.key == "$ref"
+                && let Some(value) = entry.value
+                && let Some(text) = value.as_str()
+            {
+                referenced.insert(text.to_owned());
+            }
+            if let Some(value) = entry.value {
+                stack.push(value);
+            }
+        }
+        for item in current.items() {
+            stack.push(item);
+        }
+    }
+    let section = section_of(node);
+    for entry in resolved.entries() {
+        let pointer = if section == "definitions" {
+            format!("#/definitions/{}", entry.key)
+        } else {
+            format!("#/components/{}/{}", section, entry.key)
+        };
+        if !referenced.contains(&pointer) {
+            push(out, rule, &entry.key_node, ptrs);
+        }
+    }
+}
+
+/// The component section a node belongs to (from its pointer's second
+/// token), for `$ref` text construction.
+fn section_of(node: &NodeRef<'_>) -> &'static str {
+    let pointer = node.path_from_root();
+    let tokens = pointer.tokens();
+    if tokens.first().map(|t| t.as_ref()) == Some("definitions") {
+        return "definitions";
+    }
+    let second = tokens.get(1).map(|t| t.as_ref());
+    match second {
+        Some("schemas") => "schemas",
+        Some("responses") => "responses",
+        Some("parameters") => "parameters",
+        Some("headers") => "headers",
+        Some("examples") => "examples",
+        Some("requestBodies") => "requestBodies",
+        Some("securitySchemes") => "securitySchemes",
+        Some("links") => "links",
+        Some("callbacks") => "callbacks",
+        Some("pathItems") => "pathItems",
+        _ => "schemas",
+    }
+}
+
+/// Every tag on the operation must be declared in the root `tags` list
+/// (Spectral `operation-tag-defined`; stronger than the single-name
+/// check the validate battery does).
+fn check_tag_defined<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let doc_root = NodeRef::new(node.syntax().doc().root());
+    let declared: std::collections::HashSet<String> = doc_root
+        .get("tags")
+        .map(|tags| {
+            tags.items()
+                .iter()
+                .filter_map(|t| t.get("name").and_then(|n| n.as_str().map(String::from)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let resolved = node.resolved();
+    if resolved.kind() != ValueKind::Array {
+        return;
+    }
+    for tag in resolved.items() {
+        let Some(name) = tag.resolved().as_str() else {
+            continue;
+        };
+        if !declared.contains(name) {
+            push(out, rule, &tag, ptrs);
+        }
+    }
+}
+
+/// Path keys must not carry a `?` query suffix.
+fn check_path_no_query<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let has_query = match ptrs.own_key(node) {
+        Some(k) => k.contains(&b'?'),
+        None => node
+            .path_from_root()
+            .tokens()
+            .last()
+            .is_some_and(|k| k.contains('?')),
+    };
+    if has_query {
         push(out, rule, node, ptrs);
     }
 }

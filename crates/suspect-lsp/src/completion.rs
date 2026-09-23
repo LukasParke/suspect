@@ -104,6 +104,100 @@ const SCHEMA_PARENT_KEYS: &[&str] = &[
     "$defs",
 ];
 
+/// Swagger 2.0 root document keys.
+pub const SWAGGER_ROOT_KEYS: &[&str] = &[
+    "swagger",
+    "info",
+    "host",
+    "basePath",
+    "schemes",
+    "consumes",
+    "produces",
+    "paths",
+    "definitions",
+    "parameters",
+    "responses",
+    "securityDefinitions",
+    "security",
+    "tags",
+    "externalDocs",
+];
+
+/// Keys valid inside a Swagger 2.0 operation object.
+pub const SWAGGER_OPERATION_KEYS: &[&str] = &[
+    "tags",
+    "summary",
+    "description",
+    "externalDocs",
+    "operationId",
+    "consumes",
+    "produces",
+    "parameters",
+    "responses",
+    "schemes",
+    "deprecated",
+    "security",
+];
+
+/// Keys valid inside a Swagger 2.0 parameter object (schema-carrying).
+pub const SWAGGER_PARAM_KEYS: &[&str] = &[
+    "name",
+    "in",
+    "description",
+    "required",
+    "schema",
+    "type",
+    "format",
+    "items",
+    "collectionFormat",
+    "default",
+    "minimum",
+    "exclusiveMinimum",
+    "maximum",
+    "exclusiveMaximum",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "minItems",
+    "maxItems",
+    "uniqueItems",
+    "enum",
+    "example",
+];
+
+/// Keys valid inside a Swagger 2.0 definition/schema object.
+pub const SWAGGER_SCHEMA_KEYS: &[&str] = &[
+    "$ref",
+    "format",
+    "title",
+    "description",
+    "default",
+    "example",
+    "enum",
+    "required",
+    "items",
+    "properties",
+    "additionalProperties",
+    "type",
+    "discriminator",
+    "xml",
+    "readOnly",
+    "externalDocs",
+    "minimum",
+    "exclusiveMinimum",
+    "maximum",
+    "exclusiveMaximum",
+    "multipleOf",
+    "minLength",
+    "maxLength",
+    "pattern",
+    "maxItems",
+    "minItems",
+    "uniqueItems",
+    "maxProperties",
+    "minProperties",
+];
+
 /// Keys valid inside a security scheme object.
 pub const SCHEME_KEYS: &[&str] = &[
     "type",
@@ -461,6 +555,14 @@ fn required_item_context(node: SNode<'_>) -> Option<CompletionContext> {
 
 /// Classifies the mapping that owns a key-position pair.
 fn key_context(low: &suspect_low::LowDoc, pair: suspect_syntax::SNode<'_>) -> CompletionContext {
+    // Swagger 2.0 documents route to their own context tree; the root
+    // mapping carries no tokens, so root keys complete the 2.0 vocabulary.
+    if low.sniff_family() == suspect_low::SpecFamily::Oas2 {
+        let ptr = NodeRef::new(pair.parent().map(|p| p.content()).unwrap_or(pair.content()))
+            .path_from_root();
+        let owned: Vec<String> = ptr.tokens().iter().map(|t| t.to_string()).collect();
+        return swagger_context(low, &owned);
+    }
     // The owning mapping is the pair's structural ancestor.
     let mut mapping = pair.parent();
     while let Some(m) = mapping {
@@ -581,6 +683,53 @@ fn relative_ref(from: &Uri, to: &Uri) -> String {
     } else {
         parts.join("/")
     }
+}
+
+/// Spec-shaped key contexts for Swagger 2.0 documents: the `swagger: 2.0`
+/// root key position offers the root vocabulary; deeper positions resolve
+/// by pointer shape (definitions, parameters, operations).
+fn swagger_context(low: &suspect_low::LowDoc, tokens: &[String]) -> CompletionContext {
+    let _ = low;
+    // Root mapping (empty path): the top-level vocabulary.
+    if tokens.is_empty() {
+        return CompletionContext::Keys(SWAGGER_ROOT_KEYS);
+    }
+    if tokens == ["swagger"] {
+        return CompletionContext::Keys(SWAGGER_ROOT_KEYS);
+    }
+    if tokens.len() == 2 && matches!(tokens[1].as_str(), "info" | "externalDocs") {
+        return CompletionContext::None;
+    }
+    if tokens.len() == 3 && tokens[0] == "swagger" && tokens[1] == "paths" {
+        return CompletionContext::Keys(PATH_ITEM_KEYS);
+    }
+    if tokens.len() == 4
+        && tokens[0] == "swagger"
+        && tokens[1] == "paths"
+        && METHODS.contains(&tokens[3].as_str())
+    {
+        return CompletionContext::Keys(SWAGGER_OPERATION_KEYS);
+    }
+    if tokens.len() == 3 && tokens[0] == "swagger" {
+        return match tokens[1].as_str() {
+            "definitions" => CompletionContext::Keys(SWAGGER_SCHEMA_KEYS),
+            "parameters" => CompletionContext::Keys(SWAGGER_PARAM_KEYS),
+            "responses" => CompletionContext::Keys(SWAGGER_SCHEMA_KEYS),
+            _ => CompletionContext::None,
+        };
+    }
+    // Nested parameter objects (operation-level parameters items).
+    for window in tokens.windows(2) {
+        if window[1] == "parameters" {
+            return CompletionContext::Keys(SWAGGER_PARAM_KEYS);
+        }
+    }
+    for token in tokens.iter().rev() {
+        if METHODS.contains(&token.as_str()) {
+            return CompletionContext::Keys(SWAGGER_OPERATION_KEYS);
+        }
+    }
+    CompletionContext::None
 }
 
 /// Builds completion items for a key list.
