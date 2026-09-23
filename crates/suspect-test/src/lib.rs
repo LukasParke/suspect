@@ -34,6 +34,7 @@ pub mod auth;
 pub mod evolved_fuzz;
 pub mod exec;
 pub mod fuzz;
+pub use suspect_faker as faker;
 pub mod plan;
 pub mod reporters;
 pub mod stateful;

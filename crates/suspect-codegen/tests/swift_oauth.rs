@@ -1316,8 +1316,9 @@ fn swiftc() -> Option<std::path::PathBuf> {
 }
 
 fn swift() -> std::path::PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_BIN")
-        .map(std::path::PathBuf::from)
+    // Manifest resolution (`SUSPECT_SWIFT_BIN`, then `PATH`), with the
+    // historical /usr/bin fallback preserved.
+    suspect_codegen::toolchain::resolve_path("swift")
         .unwrap_or_else(|| std::path::PathBuf::from("/usr/bin/swift"))
 }
 

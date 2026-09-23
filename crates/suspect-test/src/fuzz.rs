@@ -195,15 +195,11 @@ pub fn mutant_value(schema: &Value, kind: MutantKind) -> Value {
 }
 
 /// Benign default used for fields not targeted by the current mutant.
+/// Realistic (faker-style) per the field's format/name semantics, so
+/// request bodies read like real traffic.
 #[must_use]
-pub fn default_value(schema: &Value) -> Value {
-    match schema_type(schema) {
-        "integer" | "number" => Value::from(1),
-        "boolean" => Value::Bool(true),
-        "array" => Value::Array(Vec::new()),
-        "object" => Value::Object(serde_json::Map::new()),
-        _ => Value::String("suspect".into()),
-    }
+pub fn default_value(schema: &Value, field_name: &str) -> Value {
+    crate::faker::value(schema, field_name)
 }
 
 /// Generates `runs` mutants cycling deterministically through
@@ -242,7 +238,7 @@ pub fn payload(fields: &[ScalarField], mutant: &Mutant) -> Value {
         let v = if f.name == mutant.field {
             mutant.value.clone()
         } else {
-            default_value(&f.schema)
+            default_value(&f.schema, &f.name)
         };
         match segments.next() {
             None => {

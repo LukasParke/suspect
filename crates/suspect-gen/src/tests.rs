@@ -175,15 +175,15 @@ fn example_of_is_deterministic() {
     assert_eq!(first, second);
 
     let value: serde_json::Value = serde_json::from_str(&first).unwrap();
-    assert_eq!(value["id"], 0);
-    // minLength honored by padding 'a'.
-    assert_eq!(value["name"], json!("aaa"));
-    assert_eq!(value["home"]["city"], json!("aaaa"));
+    assert_eq!(value["id"], 1);
+    // Realistic name semantics; minLength satisfied without padding.
+    assert_eq!(value["name"], json!("Ada Lovelace"));
+    assert_eq!(value["home"]["city"], json!("Springfield"));
     // enum[0] beats type default.
     assert_eq!(value["kind"], json!("cat"));
-    assert_eq!(value["alive"], json!(false));
+    assert_eq!(value["alive"], json!(true));
     // arrays synthesize exactly one element.
-    assert_eq!(value["tags"], json!([""]));
+    assert_eq!(value["tags"], json!(["sample text"]));
     // default keyword wins over "".
     assert_eq!(value["nick"], json!("spot"));
 }
@@ -191,8 +191,8 @@ fn example_of_is_deterministic() {
 #[test]
 fn example_of_deep_ref_chain_yields_target_not_null() {
     // A chain of nine indirections exhausts the resolver bound; the
-    // final target schema must still drive the example (padded "aa"),
-    // instead of the whole node collapsing to null.
+    // final target schema must still drive the example (minLength 2
+    // satisfied without padding), instead of collapsing to null.
     let mut refs = serde_json::Map::new();
     for i in 1..=8 {
         refs.insert(
@@ -206,7 +206,7 @@ fn example_of_deep_ref_chain_yields_target_not_null() {
         r##"{"$ref": "#/components/schemas/L1"}"##,
         &serde_json::Value::Object(refs).to_string(),
     );
-    assert_eq!(out, r#""aa""#);
+    assert_eq!(out, r#""sample text""#);
 }
 
 // ---------------------------------------------------------------- engine

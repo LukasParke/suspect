@@ -8,12 +8,7 @@
 #![cfg(feature = "csharp-sdk")]
 
 use serde_json::{Value, json};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{fs, path::Path, process::Command, sync::Arc};
 use suspect_codegen::{
     OutFile,
     backend::{Backend, GenerationOptions, TargetConfig, generate_with_options},
@@ -320,14 +315,11 @@ fn plan_carries_the_compiled_stream_semantics() {
 }
 
 fn dotnet() -> Option<String> {
-    let path = std::env::var_os("SUSPECT_DOTNET_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Users/luke/.local/share/mise/dotnet-root/dotnet"));
-    let output = Command::new(&path).arg("--version").output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| path.to_string_lossy().into_owned())
+    // Resolution + version gating live in the toolchain manifest; the
+    // `SUSPECT_DOTNET_BIN` override and the mise install are honored there.
+    suspect_codegen::toolchain::gate("dotnet")
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 const DRIVER: &str = r#"
@@ -592,7 +584,10 @@ fn project(config: &str, framework: &str) -> String {
 #[test]
 fn typed_events_drive_stubbed_streams_in_dotnet() {
     let Some(dotnet) = dotnet() else {
-        eprintln!("csharp_stream_typed: dotnet is not installed; degrading to static assertions");
+        eprintln!(
+            "csharp_stream_typed: skipping — {}",
+            suspect_codegen::toolchain::guidance("dotnet")
+        );
         return;
     };
     eprintln!("csharp_stream_typed: {dotnet}");

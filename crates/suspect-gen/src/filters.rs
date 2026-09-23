@@ -414,7 +414,12 @@ fn resolve_ref(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usize
 /// arrays contain exactly one element, strings honor `minLength` by padding
 /// with `'a'`, and `$ref`s resolve through `refs`.
 #[must_use]
-fn synth_example(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usize) -> Json {
+fn synth_example(
+    schema: &Json,
+    refs: &serde_json::Map<String, Json>,
+    depth: usize,
+    name: &str,
+) -> Json {
     if depth > 8 {
         return Json::Null;
     }
@@ -422,20 +427,22 @@ fn synth_example(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usi
     // `component_start` marks the slot before recursing so cycles resolve
     // to null (depth-capped as before) without poisoning the cache, and no
     // borrow is held across the recursive call.
-    if let Some(name) = schema.get("$ref").and_then(Json::as_str).map(ref_name) {
-        let cached = EXAMPLE_CACHE.with(|c| c.borrow().component_hit(&name));
+    if let Some(component) = schema.get("$ref").and_then(Json::as_str).map(ref_name) {
+        let cached = EXAMPLE_CACHE.with(|c| c.borrow().component_hit(&component));
         match cached {
             Some(Some(example)) => return example,
             Some(None) => return Json::Null, // in flight: cycle
             None => {}
         }
-        if refs.contains_key(&name) {
-            EXAMPLE_CACHE.with(|c| c.borrow_mut().component_start(&name));
-            let target = &refs[&name];
+        if refs.contains_key(&component) {
+            EXAMPLE_CACHE.with(|c| c.borrow_mut().component_start(&component));
+            let target = &refs[&component];
             // Same depth: cycle safety comes from the in-flight marker;
             // pure chain length must not eat the synthesis-depth budget.
-            let example = synth_example(target, refs, depth);
-            EXAMPLE_CACHE.with(|c| c.borrow_mut().component_finish(&name, &example));
+            // The caller's field name (not the component name) drives
+            // name-aware realism inside the target.
+            let example = synth_example(target, refs, depth, name);
+            EXAMPLE_CACHE.with(|c| c.borrow_mut().component_finish(&component, &example));
             return example;
         }
         return schema.clone();
@@ -457,7 +464,7 @@ fn synth_example(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usi
             let mut out = serde_json::Map::new();
             if let Some(Json::Object(props)) = schema.get("properties") {
                 for (key, prop) in props {
-                    out.insert(key.clone(), synth_example(prop, refs, depth + 1));
+                    out.insert(key.clone(), synth_example(prop, refs, depth + 1, key));
                 }
             }
             Json::Object(out)
@@ -466,13 +473,13 @@ fn synth_example(schema: &Json, refs: &serde_json::Map<String, Json>, depth: usi
             schema.get("items").unwrap_or(&Json::Null),
             refs,
             depth + 1,
+            // Best-effort singular so item fields keep name semantics.
+            name.strip_suffix('s').unwrap_or(name),
         )]),
-        Some("string") => {
-            let min_len = schema.get("minLength").and_then(Json::as_u64).unwrap_or(0);
-            Json::String("a".repeat(min_len as usize))
+        Some("string") | Some("integer") | Some("number") | Some("boolean") => {
+            // Realistic synthesis: format/name semantics, bounds honored.
+            suspect_faker::value(&schema, name)
         }
-        Some("integer") | Some("number") => Json::Number(0.into()),
-        Some("boolean") => Json::Bool(false),
         _ => Json::Null,
     }
 }
@@ -573,7 +580,7 @@ pub fn examples_for_components(
         }
     });
     for (name, schema) in components {
-        let ex = synth_example(schema, components, 0);
+        let ex = synth_example(schema, components, 0, name);
         out.insert(name.clone(), Json::String(ex.to_string()));
     }
     out
@@ -609,7 +616,7 @@ pub fn example_of(schema_json_str: &str, refs_json_str: &str) -> String {
     }
 
     // Phase 2: synthesize with only short-lived internal borrows.
-    let example = synth_example(&schema, refs_map, 0);
+    let example = synth_example(&schema, refs_map, 0, "");
 
     // Phase 3: store.
     EXAMPLE_CACHE.with(|cache| {

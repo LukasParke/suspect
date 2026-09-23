@@ -8,12 +8,7 @@
 //! implicit and password flows — emit nothing at all.
 #![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{fs, path::PathBuf, process::Command, sync::Arc};
 
 use serde_json::{Value, json};
 use suspect_codegen::{
@@ -368,23 +363,19 @@ fn oauth_file_emits_only_under_a_usable_scheme() {
 
 /// The repository's verified PHP 8.3 interpreter, when available.
 fn php() -> Option<PathBuf> {
-    let candidate = std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools/php-8.3.32/php")
-        });
-    Command::new(&candidate)
-        .arg("-v")
-        .output()
-        .is_ok()
-        .then_some(candidate)
+    // The manifest resolves `SUSPECT_PHP_BIN`, the pinned target-dir
+    // toolchain, then `PATH`, and gates the version (>= 8.2).
+    suspect_codegen::toolchain::gate("php").ok()
 }
 
 #[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_oauth_php_lints() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
+        eprintln!(
+            "php_oauth: skipping — {}",
+            suspect_codegen::toolchain::guidance("php")
+        );
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -507,7 +498,10 @@ fn discovery_schemes_emit_the_discovery_engine_and_the_per_instance_cache() {
 #[test]
 fn emitted_discovery_oauth_php_lints() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
+        eprintln!(
+            "php_oauth: skipping — {}",
+            suspect_codegen::toolchain::guidance("php")
+        );
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -1270,7 +1264,10 @@ fn replaying_credentials_resolve_their_discovery_variant() {
 #[test]
 fn emitted_replay_oauth_php_lints() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
+        eprintln!(
+            "php_oauth: skipping — {}",
+            suspect_codegen::toolchain::guidance("php")
+        );
         return;
     };
     let root = tempfile::tempdir().unwrap();

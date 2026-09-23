@@ -6,13 +6,7 @@
 #![cfg(feature = "csharp-sdk")]
 
 use serde_json::{Value, json};
-use std::{
-    collections::BTreeMap,
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, fs, path::Path, process::Command, sync::Arc};
 use suspect_codegen::{
     OutFile,
     backend::{Backend, GenerationOptions, TargetConfig, generate_with_options},
@@ -353,14 +347,11 @@ fn plan_carries_the_oauth_plan_only_when_configured() {
 }
 
 fn dotnet() -> Option<String> {
-    let path = std::env::var_os("SUSPECT_DOTNET_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Users/luke/.local/share/mise/dotnet-root/dotnet"));
-    let output = Command::new(&path).arg("--version").output().ok()?;
-    output
-        .status
-        .success()
-        .then(|| path.to_string_lossy().into_owned())
+    // Resolution + version gating live in the toolchain manifest; the
+    // `SUSPECT_DOTNET_BIN` override and the mise install are honored there.
+    suspect_codegen::toolchain::gate("dotnet")
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 const DRIVER: &str = r#"
@@ -980,7 +971,10 @@ fn discovery_run(
 #[test]
 fn native_discovery_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
-        eprintln!("csharp_oauth: dotnet is not installed; degrading to static assertions");
+        eprintln!(
+            "csharp_oauth: skipping — {}",
+            suspect_codegen::toolchain::guidance("dotnet")
+        );
         return;
     };
     eprintln!("csharp_oauth: {dotnet}");
@@ -1530,7 +1524,10 @@ sealed class ReplayStub : HttpMessageHandler
 #[test]
 fn replay_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
-        eprintln!("csharp_oauth: dotnet is not installed; degrading to static assertions");
+        eprintln!(
+            "csharp_oauth: skipping — {}",
+            suspect_codegen::toolchain::guidance("dotnet")
+        );
         return;
     };
     eprintln!("csharp_oauth: {dotnet}");
@@ -1657,7 +1654,10 @@ fn replay_lifecycle_drives_a_stubbed_http_handler() {
 #[test]
 fn native_oauth_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
-        eprintln!("csharp_oauth: dotnet is not installed; degrading to static assertions");
+        eprintln!(
+            "csharp_oauth: skipping — {}",
+            suspect_codegen::toolchain::guidance("dotnet")
+        );
         return;
     };
     eprintln!("csharp_oauth: {dotnet}");

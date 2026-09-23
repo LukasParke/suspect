@@ -653,8 +653,11 @@ fn fuzz_payload_defaults_everything_but_target() {
     };
     let payload = fuzz::payload(&fields, &m);
     assert_eq!(payload["id"], Value::Null);
-    assert_eq!(payload["tag"], Value::String("suspect".into()));
-    assert_eq!(payload["owner"]["email"], Value::String("suspect".into()));
+    assert_eq!(payload["tag"], Value::String("sample text".into()));
+    assert_eq!(
+        payload["owner"]["email"],
+        Value::String("ada@example.org".into())
+    );
 
     // Non-targeted runs keep everything benign.
     let benign = fuzz::payload(
@@ -665,5 +668,5 @@ fn fuzz_payload_defaults_everything_but_target() {
             value: Value::Null,
         },
     );
-    assert_eq!(benign["id"], Value::String("suspect".into()));
+    assert_eq!(benign["id"], Value::String("1".into()));
 }
