@@ -1954,6 +1954,7 @@ dependencies = [
  "suspect-source",
  "suspect-syntax",
  "suspect-test",
+ "suspect-upgrade",
  "suspect-validate",
  "suspect-watch",
  "tempfile",
@@ -1982,6 +1983,13 @@ dependencies = [
  "suspect-source",
  "tempfile",
  "url",
+]
+
+[[package]]
+name = "suspect-faker"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -2018,6 +2026,7 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-artifact",
+ "suspect-faker",
  "suspect-ir",
  "tempfile",
  "unicode-ident",
@@ -2263,6 +2272,7 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-arazzo",
+ "suspect-faker",
  "suspect-ir",
  "suspect-journal",
  "suspect-low",
@@ -2273,6 +2283,16 @@ dependencies = [
  "suspect-source",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "suspect-upgrade"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "suspect-low",
+ "suspect-overlay",
+ "suspect-source",
 ]
 
 [[package]]

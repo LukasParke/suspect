@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 suspect-test.workspace = true
+suspect-upgrade.path = "../suspect-upgrade"
 suspect-gen.workspace = true
 suspect-ir.workspace = true
 suspect-journal.workspace = true

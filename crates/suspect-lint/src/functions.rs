@@ -187,6 +187,25 @@ pub(crate) enum Function {
     TagDefined,
     /// Native: path keys contain no `?` query suffix.
     PathNoQuery,
+    /// Native: the matched URL string uses the `https` scheme.
+    HttpsUrl,
+    /// Native: the matched security scheme is not HTTP Basic.
+    NoBasicAuth,
+    /// Native: the matched security scheme is not an API key in the query.
+    NoApiKeyInQuery,
+    /// Native: the matched parameter's name is not credential-like
+    /// (token/key/secret/password/credential).
+    NoSensitiveParams,
+    /// Native: the operation documents rate limiting (a 429 response or
+    /// rate-limit headers).
+    RateLimitDocumented,
+    /// Native: a bearer scheme declares `bearerFormat: JWT` (or the token
+    /// is not a JWT).
+    JwtBearerFormat,
+    /// Native: the matched OAuth flow declares at least one scope.
+    OauthScopesDocumented,
+    /// Native: DELETE targets an id-addressed path, not a bare collection.
+    DeleteRequiresId,
 }
 
 impl Function {
@@ -226,6 +245,14 @@ impl Function {
             Self::UnusedComponent => "component is never referenced",
             Self::TagDefined => "operation tag must be declared in the root tags list",
             Self::PathNoQuery => "path key must not contain a query string",
+            Self::HttpsUrl => "server URL must use HTTPS",
+            Self::NoBasicAuth => "HTTP Basic authentication is discouraged",
+            Self::NoApiKeyInQuery => "API keys must not travel in the query string",
+            Self::NoSensitiveParams => "parameter name looks like a credential",
+            Self::RateLimitDocumented => "rate limiting must be documented",
+            Self::JwtBearerFormat => "bearer token format should be declared",
+            Self::OauthScopesDocumented => "OAuth flows should declare scopes",
+            Self::DeleteRequiresId => "collection-wide DELETE is destructive",
         }
     }
 }
@@ -358,6 +385,14 @@ pub(crate) fn apply<'d>(
         Function::UnusedComponent => check_unused_component(&node, rule, ptrs, out),
         Function::TagDefined => check_tag_defined(&node, rule, ptrs, out),
         Function::PathNoQuery => check_path_no_query(&node, rule, ptrs, out),
+        Function::HttpsUrl => check_https_url(&node, rule, ptrs, out),
+        Function::NoBasicAuth => check_no_basic_auth(&node, rule, ptrs, out),
+        Function::NoApiKeyInQuery => check_no_api_key_in_query(&node, rule, ptrs, out),
+        Function::NoSensitiveParams => check_no_sensitive_params(&node, rule, ptrs, out),
+        Function::RateLimitDocumented => check_rate_limit_documented(&node, rule, ptrs, out),
+        Function::JwtBearerFormat => check_jwt_bearer_format(&node, rule, ptrs, out),
+        Function::OauthScopesDocumented => check_oauth_scopes_documented(&node, rule, ptrs, out),
+        Function::DeleteRequiresId => check_delete_requires_id(&node, rule, ptrs, out),
     }
 }
 
@@ -984,6 +1019,155 @@ fn check_path_no_query<'d>(
             .is_some_and(|k| k.contains('?')),
     };
     if has_query {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Server URLs must use HTTPS.
+fn check_https_url<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let resolved = node.resolved();
+    let Some(url) = resolved.as_str() else {
+        return;
+    };
+    if !url.starts_with("https://") {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Security schemes must not use HTTP Basic (credentials on every request,
+/// no hashing, no expiry).
+fn check_no_basic_auth<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let is_basic = node.get("type").and_then(|t| t.as_str()) == Some("http")
+        && node.get("scheme").and_then(|s| s.as_str()) == Some("basic");
+    if is_basic {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// API keys must not travel in the query string.
+fn check_no_api_key_in_query<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let is_query_key = node.get("type").and_then(|t| t.as_str()) == Some("apiKey")
+        && node.get("in").and_then(|i| i.as_str()) == Some("query");
+    if is_query_key {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Credential-like parameter names (token/key/secret/password/credential)
+/// must not travel in the URL path or query.
+const CREDENTIAL_WORDS: &[&str] = &["token", "key", "secret", "password", "credential", "auth"];
+
+fn check_no_sensitive_params<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let resolved = node.resolved();
+    let Some(name) = resolved.get("name").and_then(|n| n.as_str()) else {
+        return;
+    };
+    let lower = name.to_ascii_lowercase();
+    let location = resolved.get("in").and_then(|i| i.as_str());
+    // Only path/query locations leak into logs and history.
+    let leaks = matches!(location, Some("path") | Some("query") | None);
+    if leaks && CREDENTIAL_WORDS.iter().any(|w| lower.contains(w)) {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Operations should document rate limiting: a 429 response, or
+/// rate-limit headers on the success response.
+fn check_rate_limit_documented<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let has_429 = node
+        .get("responses")
+        .is_some_and(|r| r.get("429").is_some() || r.get("'429'").is_some());
+    let has_limit_headers = node.get("responses").is_some_and(|r| {
+        r.resolved().entries().iter().any(|e| {
+            e.value
+                .and_then(|v| v.get("headers"))
+                .is_some_and(|headers| {
+                    headers.entries().iter().any(|h| {
+                        h.key.to_ascii_lowercase().contains("ratelimit")
+                            || h.key.to_ascii_lowercase().contains("rate-limit")
+                    })
+                })
+        })
+    });
+    if !has_429 && !has_limit_headers {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Bearer schemes should declare `bearerFormat: JWT` when the token is a
+/// JWT (heuristic: any bearer scheme without an explicit other format).
+fn check_jwt_bearer_format<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let is_bearer = node.get("scheme").and_then(|s| s.as_str()) == Some("bearer");
+    let has_format = node.get("bearerFormat").is_some();
+    if is_bearer && !has_format {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// OAuth flows should declare at least one scope.
+fn check_oauth_scopes_documented<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let empty_scopes = node
+        .get("scopes")
+        .is_some_and(|s| s.resolved().entries().is_empty());
+    if empty_scopes {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// DELETE must target an id-addressed path, not a bare collection.
+fn check_delete_requires_id<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let has_id_var = match ptrs.own_key(node) {
+        Some(k) => {
+            let key = String::from_utf8_lossy(k).into_owned();
+            key.split('/')
+                .any(|segment| segment.starts_with('{') && segment.ends_with('}'))
+        }
+        None => node.path_from_root().tokens().last().is_some_and(|k| {
+            k.split('/')
+                .any(|segment| segment.starts_with('{') && segment.ends_with('}'))
+        }),
+    };
+    if !has_id_var {
         push(out, rule, node, ptrs);
     }
 }

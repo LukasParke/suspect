@@ -222,7 +222,7 @@ fn build_request(base_url: &str, plan: &OpPlan, m: &Mutant, place: Place) -> Htt
         let value = if place == Place::Path && t.field.name == m.field {
             render_scalar(&m.value)
         } else {
-            render_scalar(&fuzz::default_value(&t.field.schema))
+            render_scalar(&fuzz::default_value(&t.field.schema, &t.field.name))
         };
         if t.place == Place::Path {
             url = url.replace(&format!("{{{}}}", t.field.name), &encode_component(&value));
@@ -236,7 +236,7 @@ fn build_request(base_url: &str, plan: &OpPlan, m: &Mutant, place: Place) -> Htt
         let value = if place == Place::Query && t.field.name == m.field {
             render_scalar(&m.value)
         } else {
-            render_scalar(&fuzz::default_value(&t.field.schema))
+            render_scalar(&fuzz::default_value(&t.field.schema, &t.field.name))
         };
         if !query.is_empty() {
             query.push('&');
@@ -397,12 +397,12 @@ mod tests {
         let expected_fill = "a".repeat(512);
         assert_eq!(
             req.url,
-            format!("http://localhost:8080/pets/suspect?limit={expected_fill}")
+            format!("http://localhost:8080/pets/1?limit={expected_fill}")
         );
         assert_eq!(req.method, "POST");
         let body: Value = serde_json::from_slice(&req.body).unwrap();
-        assert_eq!(body["name"], Value::String("suspect".into()));
-        assert_eq!(body["tag"], Value::String("suspect".into()));
+        assert_eq!(body["name"], Value::String("sample text".into()));
+        assert_eq!(body["tag"], Value::String("sample text".into()));
 
         // A body-targeted null mutant lands null inside the JSON payload.
         let m = Mutant {

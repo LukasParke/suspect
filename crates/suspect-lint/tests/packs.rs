@@ -212,6 +212,46 @@ fn cases() -> Vec<Case> {
             clean: "swagger: \"2.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          description: ok\n          schema:\n            $ref: '#/definitions/Used'\ndefinitions:\n  Used: {type: object}\n",
         },
         Case {
+            code: "security-server-https-only",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: http://api.example.org}]\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: https://api.example.org}]\npaths: {}\n",
+        },
+        Case {
+            code: "security-no-basic-auth",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    Basic: {type: http, scheme: basic}\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    Bearer: {type: http, scheme: bearer}\npaths: {}\n",
+        },
+        Case {
+            code: "security-no-apikey-in-query",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    Key: {type: apiKey, in: query, name: api_key}\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    Key: {type: apiKey, in: header, name: X-Api-Key}\npaths: {}\n",
+        },
+        Case {
+            code: "security-no-sensitive-params-in-url",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      parameters:\n        - name: user_token\n          in: query\n          schema: {type: string}\n      responses: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      parameters:\n        - name: page\n          in: query\n          schema: {type: integer}\n      responses: {}\n",
+        },
+        Case {
+            code: "security-rate-limit-documented",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      operationId: getA\n      responses:\n        '200': {description: ok}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      operationId: getA\n      responses:\n        '200':\n          description: ok\n          headers:\n            X-RateLimit-Remaining:\n              schema: {type: integer}\n",
+        },
+        Case {
+            code: "security-jwt-bearer-format",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    Bearer: {type: http, scheme: bearer}\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    Bearer: {type: http, scheme: bearer, bearerFormat: JWT}\npaths: {}\n",
+        },
+        Case {
+            code: "security-oauth-scopes-documented",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    OAuth:\n      type: oauth2\n      flows:\n        clientCredentials:\n          tokenUrl: https://auth.example.com/token\n          scopes: {}\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ncomponents:\n  securitySchemes:\n    OAuth:\n      type: oauth2\n      flows:\n        clientCredentials:\n          tokenUrl: https://auth.example.com/token\n          scopes:\n            read: read access\npaths: {}\n",
+        },
+        Case {
+            code: "security-no-delete-without-id",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets:\n    delete:\n      operationId: deleteAllPets\n      responses: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets/{petId}\n    delete:\n      operationId: deletePet\n      responses: {}\n  /pets:\n    delete:\n      operationId: deletePets\n      responses: {}\n",
+        },
+        Case {
             code: "overlay-info-description",
             firing: "overlay: \"1.0.0\"\ninfo: {title: t}\nactions: []\n",
             clean: "overlay: \"1.0.0\"\ninfo: {title: t, description: d}\nactions: []\n",

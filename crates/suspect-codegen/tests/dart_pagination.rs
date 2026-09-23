@@ -8,7 +8,7 @@
 #![cfg(feature = "dart-sdk")]
 
 use serde_json::{Value, json};
-use std::{process::Command, sync::Arc};
+use std::sync::Arc;
 use suspect_codegen::{
     OutFile,
     backend::{Backend, GenerationOptions, TargetConfig, generate_with_options},
@@ -118,8 +118,9 @@ fn source(files: &[OutFile], path: &str) -> String {
 }
 
 fn dart_toolchain() -> Option<String> {
-    let output = Command::new("dart").arg("--version").output().ok()?;
-    output.status.success().then(|| "dart".to_owned())
+    suspect_codegen::toolchain::gate("dart")
+        .ok()
+        .map(|_| "dart".to_owned())
 }
 
 #[ignore = "requires the Dart SDK on the test host"]

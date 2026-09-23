@@ -1,0 +1,14 @@
+[package]
+name = "suspect-upgrade"
+description = "Swagger 2.0 to OpenAPI 3.1 upgrader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+suspect-low.workspace = true
+suspect-overlay.workspace = true
+suspect-source.workspace = true

@@ -2,3 +2,4 @@
 
 pub(crate) mod oas;
 pub(crate) mod overlay_arazzo;
+pub(crate) mod security;

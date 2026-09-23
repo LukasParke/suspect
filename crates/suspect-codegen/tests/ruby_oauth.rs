@@ -1306,32 +1306,12 @@ raise 'the refresh was not attempted exactly once' unless count(transport, 'http
 puts 'replay behavior verified'
 "#;
 
-fn ruby_home() -> std::path::PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
-}
-
 /// The gem requires Ruby >= 3.3; older interpreters cannot even parse the
 /// emitted runtime syntax, so discovery refuses them.
 fn ruby() -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os("SUSPECT_RUBY_BIN") {
-        return Some(std::path::PathBuf::from(path));
-    }
-    let ruby = ruby_home().join("bin/ruby");
-    if !ruby.is_file() {
-        return None;
-    }
-    let output = Command::new(&ruby).arg("--version").output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let minor = text
-        .strip_prefix("ruby ")
-        .and_then(|rest| rest.split('.').nth(1))
-        .and_then(|minor| minor.parse::<u32>().ok())?;
-    (minor >= 3).then_some(ruby)
+    // The manifest resolves `SUSPECT_RUBY_BIN`, `$SUSPECT_RUBY_HOME/bin`,
+    // then `PATH`, and gates the version (>= 3.2).
+    suspect_codegen::toolchain::gate("ruby").ok()
 }
 
 fn checked(command: &mut Command, root: &std::path::Path, label: &str) {

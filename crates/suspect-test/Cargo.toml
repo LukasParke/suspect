@@ -15,6 +15,7 @@ suspect-source.workspace = true
 suspect-arazzo.workspace = true
 suspect-rex.path = "../suspect-rex"
 suspect-ir.path = "../suspect-ir"
+suspect-faker.path = "../suspect-faker"
 suspect-schema.workspace = true
 suspect-journal.path = "../suspect-journal"
 serde.workspace = true

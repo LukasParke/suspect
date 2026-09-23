@@ -23,6 +23,17 @@ pub struct Tool {
     pub min_version: &'static str,
     /// Installation guidance shown when the probe fails.
     pub install_documentation: &'static str,
+    /// Environment variable overriding the executable location
+    /// (`SUSPECT_DOTNET_BIN`, …). Empty when the tool has no override.
+    pub env_override: &'static str,
+    /// Environment variable naming a tool home directory whose
+    /// `bin/<command>` is the executable (`JAVA_HOME`,
+    /// `SUSPECT_RUBY_HOME`). Empty when the tool has none.
+    pub home_env: &'static str,
+    /// Known version-manager install path used when the tool is not on
+    /// `PATH` (mise layouts on the primary dev machine). Empty when the
+    /// tool always lives on `PATH`.
+    pub version_manager_path: &'static str,
 }
 
 /// The manifest, in canonical order.
@@ -34,6 +45,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"go(\d+\.\d+(?:\.\d+)?)",
         min_version: "1.23",
         install_documentation: "Install Go 1.23 or later from https://go.dev/doc/install",
+        env_override: "",
+        home_env: "",
+        version_manager_path: "",
     },
     Tool {
         id: "jdk",
@@ -42,6 +56,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r#""?(\d+\.\d+(?:\.\d+)?)"?"#,
         min_version: "21",
         install_documentation: "Install JDK 21 or later from https://adoptium.net, or point JAVA_HOME at one",
+        env_override: "SUSPECT_JAVA_BIN",
+        home_env: "JAVA_HOME",
+        version_manager_path: "/Users/luke/.local/share/mise/installs/java/temurin-21",
     },
     Tool {
         id: "maven",
@@ -50,6 +67,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"Apache Maven (\d+\.\d+(?:\.\d+)?)",
         min_version: "3.8",
         install_documentation: "Install Maven 3.8 or later from https://maven.apache.org/install.html",
+        env_override: "SUSPECT_MAVEN_BIN",
+        home_env: "",
+        version_manager_path: "/Users/luke/.local/share/mise/installs/maven/3",
     },
     Tool {
         id: "dotnet",
@@ -58,6 +78,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"(\d+\.\d+\.\d+)",
         min_version: "8.0",
         install_documentation: "Install the .NET 8 SDK or later from https://dotnet.microsoft.com/download",
+        env_override: "SUSPECT_DOTNET_BIN",
+        home_env: "",
+        version_manager_path: "/Users/luke/.local/share/mise/dotnet-root/dotnet",
     },
     Tool {
         id: "swift",
@@ -66,6 +89,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"(?:swift-lang-|Swift version )(\d+\.\d+(?:\.\d+)?)",
         min_version: "5.9",
         install_documentation: "Install Swift 5.9 or later from https://www.swift.org/install, or `mise x swift@latest`",
+        env_override: "SUSPECT_SWIFT_BIN",
+        home_env: "",
+        version_manager_path: "",
     },
     Tool {
         id: "dart",
@@ -74,6 +100,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"Dart SDK version: (\d+\.\d+\.\d+)",
         min_version: "3.9",
         install_documentation: "Install the Dart SDK 3.9 or later (`mise x dart@3.9 -- dart --version`)",
+        env_override: "SUSPECT_DART_BIN",
+        home_env: "",
+        version_manager_path: "",
     },
     Tool {
         id: "node",
@@ -82,6 +111,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"v(\d+\.\d+\.\d+)",
         min_version: "20",
         install_documentation: "Install Node.js 20 or later from https://nodejs.org",
+        env_override: "",
+        home_env: "",
+        version_manager_path: "",
     },
     Tool {
         id: "ruby",
@@ -90,6 +122,9 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"ruby (\d+\.\d+\.\d+)",
         min_version: "3.2",
         install_documentation: "Install Ruby 3.2 or later from https://www.ruby-lang.org/en/documentation/installation",
+        env_override: "SUSPECT_RUBY_BIN",
+        home_env: "SUSPECT_RUBY_HOME",
+        version_manager_path: "",
     },
     Tool {
         id: "php",
@@ -98,6 +133,12 @@ pub const TOOLS: &[Tool] = &[
         version_regex: r"PHP (\d+\.\d+\.\d+)",
         min_version: "8.2",
         install_documentation: "Install PHP 8.2 or later from https://www.php.net/manual/en/install.php",
+        env_override: "SUSPECT_PHP_BIN",
+        home_env: "",
+        version_manager_path: concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../target/sdk-php-tools/php-8.3.32/php"
+        ),
     },
 ];
 
@@ -135,7 +176,10 @@ pub fn probe_status(id: &str) -> (ToolStatus, &'static str) {
     let Some(tool) = TOOLS.iter().find(|t| t.id == id) else {
         return (ToolStatus::Missing, "unknown tool id");
     };
-    let output = match std::process::Command::new(tool.version_command[0])
+    let Some(executable) = resolve_path(id) else {
+        return (ToolStatus::Missing, tool.install_documentation);
+    };
+    let output = match std::process::Command::new(&executable)
         .args(&tool.version_command[1..])
         .output()
     {
@@ -164,6 +208,95 @@ pub fn probe_status(id: &str) -> (ToolStatus, &'static str) {
             },
             tool.install_documentation,
         )
+    }
+}
+
+/// Resolves the executable for one tool: the `SUSPECT_*_BIN` override,
+/// then the version-manager path when it exists, then `PATH`.
+///
+/// The returned path is what both the version probe and the actual gate
+/// build run, so "probe says available" and "command runs" can't drift
+/// apart.
+#[must_use]
+pub fn resolve_path(id: &str) -> Option<std::path::PathBuf> {
+    let tool = TOOLS.iter().find(|t| t.id == id)?;
+    if !tool.env_override.is_empty()
+        && let Some(path) = std::env::var_os(tool.env_override)
+        && !path.is_empty()
+    {
+        return Some(std::path::PathBuf::from(path));
+    }
+    if !tool.home_env.is_empty()
+        && let Some(home) = std::env::var_os(tool.home_env)
+        && !home.is_empty()
+    {
+        let candidate = std::path::PathBuf::from(home)
+            .join("bin")
+            .join(tool.version_command[0]);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    if !tool.version_manager_path.is_empty() {
+        let managed = std::path::PathBuf::from(tool.version_manager_path);
+        if managed.is_file() {
+            return Some(managed);
+        }
+        // Directory layouts (e.g. `…/installs/maven/3`) need the binary
+        // name appended.
+        if managed.is_dir() {
+            let candidate = managed.join(tool.version_command[0]);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    find_on_path(tool.version_command[0])
+}
+
+/// Walks `PATH` for an executable with the given name (the `which` dance
+/// without a dependency).
+fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    std::env::split_paths(&path_var)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The acceptance-gate entry point: the resolved executable when the tool
+/// is present and new enough, or the actionable skip message.
+///
+/// ```
+/// let jdk = suspect_codegen::toolchain::gate("jdk");
+/// match jdk {
+///     Ok(java) => { /* run the gate with `java` */ }
+///     Err(skip) => eprintln!("skipping: {skip}"),
+/// }
+/// ```
+///
+/// # Errors
+/// The skip message naming what is missing, what was found, what is
+/// required, and how to install it.
+pub fn gate(id: &str) -> Result<std::path::PathBuf, String> {
+    let (status, install) = probe_status(id);
+    match status {
+        ToolStatus::Available { .. } => {
+            resolve_path(id).ok_or_else(|| format!("`{id}` resolved but not locatable"))
+        }
+        ToolStatus::Missing => Err(format!(
+            "{}: not found; {install}",
+            TOOLS
+                .iter()
+                .find(|t| t.id == id)
+                .map_or(id, |t| t.description)
+        )),
+        ToolStatus::TooOld { found, required } => Err(format!(
+            "{}: found {found}, requires >= {required}; {install}",
+            TOOLS
+                .iter()
+                .find(|t| t.id == id)
+                .map_or(id, |t| t.description)
+        )),
     }
 }
 
@@ -293,5 +426,42 @@ mod tests {
                 "guidance must name what the tool gates: {message}"
             );
         }
+    }
+
+    #[test]
+    fn path_resolution_prefers_override_then_managed_then_path() {
+        // Every tool resolves through one of the three channels without
+        // panicking; a missing tool yields None, not an error.
+        for tool in TOOLS {
+            let resolved = resolve_path(tool.id);
+            if let Some(path) = &resolved {
+                assert!(
+                    path.is_file(),
+                    "{}: resolved path must exist: {}",
+                    tool.id,
+                    path.display()
+                );
+            }
+        }
+        // Unknown ids resolve to nothing.
+        assert!(resolve_path("definitely-not-a-tool").is_none());
+    }
+
+    #[test]
+    fn gate_returns_executable_or_actionable_skip() {
+        // For every tool the Err message must carry the install doc, and
+        // the Ok case must be the same path resolve_path picked.
+        for tool in TOOLS {
+            match gate(tool.id) {
+                Ok(path) => assert_eq!(Some(&path), resolve_path(tool.id).as_ref()),
+                Err(skip) => {
+                    assert!(
+                        skip.contains(tool.install_documentation),
+                        "skip message must carry install guidance: {skip}"
+                    );
+                }
+            }
+        }
+        assert!(gate("definitely-not-a-tool").is_err());
     }
 }
