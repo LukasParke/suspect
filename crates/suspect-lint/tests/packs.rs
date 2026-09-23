@@ -177,6 +177,41 @@ fn cases() -> Vec<Case> {
             clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\", description: d}\npaths:\n  /a:\n    get:\n      parameters:\n        - name: q\n          in: query\n          description: the limit\n          schema: {type: string}\n      responses: {}\n",
         },
         Case {
+            code: "openapi-tags-alphabetical",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ntags: [{name: pets}, {name: adopters}]\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ntags: [{name: adopters}, {name: pets}]\npaths: {}\n",
+        },
+        Case {
+            code: "server-host-not-example",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: https://localhost/v1}]\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: https://api.example.org/v1}]\npaths: {}\n",
+        },
+        Case {
+            code: "server-trailing-slash",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: https://api.example.org/v1/}]\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: https://api.example.org/v1}]\npaths: {}\n",
+        },
+        Case {
+            code: "operation-tag-defined",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      tags: [ghost]\n      responses: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\ntags: [{name: ghost}]\npaths:\n  /a:\n    get:\n      tags: [ghost]\n      responses: {}\n",
+        },
+        Case {
+            code: "path-not-include-query",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  '/pets?limit=5':\n    get: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets:\n    get: {}\n",
+        },
+        Case {
+            code: "oas3-unused-component",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Used'\ncomponents:\n  schemas:\n    Used: {type: object}\n    Orphan: {type: object}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Used'\ncomponents:\n  schemas:\n    Used: {type: object}\n",
+        },
+        Case {
+            code: "oas2-unused-definition",
+            firing: "swagger: \"2.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          description: ok\n          schema:\n            $ref: '#/definitions/Used'\ndefinitions:\n  Used: {type: object}\n  Orphan: {type: object}\n",
+            clean: "swagger: \"2.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          description: ok\n          schema:\n            $ref: '#/definitions/Used'\ndefinitions:\n  Used: {type: object}\n",
+        },
+        Case {
             code: "overlay-info-description",
             firing: "overlay: \"1.0.0\"\ninfo: {title: t}\nactions: []\n",
             clean: "overlay: \"1.0.0\"\ninfo: {title: t, description: d}\nactions: []\n",

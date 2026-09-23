@@ -20,6 +20,9 @@ pub(crate) fn run(low: &LowDoc) -> Vec<Diagnostic> {
     let doc = low.uri().clone();
     let root = low.root().resolved();
 
+    out.extend(super::schema_instances::check_swagger_definition_instances(
+        low,
+    ));
     check_info(&root, &doc, &mut out);
     check_operations(&root, &doc, &mut out);
     check_security(&root, &doc, &mut out);

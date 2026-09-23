@@ -30,6 +30,22 @@ fn codes(dir: &Path, name: &str, spec: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// Swagger 2.0 documents route through the low-tree battery, not the
+/// 3.x Session model.
+fn swagger_codes(dir: &Path, name: &str, spec: &str) -> Vec<&'static str> {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(name), spec).unwrap();
+    let uri = suspect_source::Uri::from_path(&dir.join(name)).unwrap();
+    let low = suspect_low::LowDoc::parse(
+        uri,
+        suspect_source::Source::from_vec(spec.as_bytes().to_vec()),
+    );
+    suspect_validate::validate_swagger_low(&low)
+        .into_iter()
+        .map(|d| d.code)
+        .collect()
+}
+
 #[test]
 fn example_violating_the_schema_is_flagged() {
     let firing = "\
@@ -104,4 +120,105 @@ components:
 ";
     let codes = codes(&unique_dir("inst-ref"), "main.yaml", spec);
     assert!(!codes.contains(&"oas-schema-instance-invalid"), "{codes:?}");
+}
+
+#[test]
+fn swagger_definitions_get_instance_checks() {
+    let firing = "\
+swagger: \"2.0\"
+info: {title: t, version: \"1\"}
+definitions:
+  Port:
+    type: integer
+    minimum: 1
+    example: 0
+paths: {}
+";
+    let firing_codes = swagger_codes(&unique_dir("inst-swagger"), "main.yaml", firing);
+    assert!(
+        firing_codes.contains(&"oas-schema-instance-invalid"),
+        "{firing_codes:?}"
+    );
+
+    let clean = firing.replace("example: 0", "example: 8080");
+    let clean_codes = swagger_codes(&unique_dir("inst-swagger-clean"), "main.yaml", &clean);
+    assert!(
+        !clean_codes.contains(&"oas-schema-instance-invalid"),
+        "{clean_codes:?}"
+    );
+}
+
+#[test]
+fn content_schema_validates_decoded_string_content() {
+    let firing = r#"
+openapi: 3.1.0
+info: {title: t, version: '1'}
+paths: {}
+components:
+  schemas:
+    Config:
+      type: string
+      contentMediaType: application/json
+      contentSchema:
+        type: object
+        required: [name]
+      example: '{"other": 1}'
+"#;
+    let firing_codes = codes(&unique_dir("inst-content"), "main.yaml", firing);
+    assert!(
+        firing_codes.contains(&"oas-schema-instance-invalid"),
+        "{firing_codes:?}"
+    );
+
+    let clean = firing.replace(r#"{"other": 1}"#, r#"{"name": "x"}"#);
+    let clean_codes = codes(&unique_dir("inst-content-clean"), "main.yaml", &clean);
+    assert!(
+        !clean_codes.contains(&"oas-schema-instance-invalid"),
+        "{clean_codes:?}"
+    );
+}
+
+#[test]
+fn tag_parent_references_validate_in_32() {
+    let firing = r#"
+openapi: 3.2.0
+info: {title: t, version: '1'}
+tags:
+  - name: Library Collections
+    parent: Library
+  - name: Ghost
+paths: {}
+"#;
+    let dir = unique_dir("tag-graph");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.yaml"), firing).unwrap();
+    let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+    let session = Session::new(Arc::new(ws));
+    let diags = validate_entry(&session, "main.yaml").unwrap();
+    assert!(
+        diags.iter().any(|d| d.code == "oas-tag-parent-unknown"),
+        "{:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+
+    let clean = r#"
+openapi: 3.2.0
+info: {title: t, version: '1'}
+tags:
+  - name: Library
+  - name: Library Collections
+    parent: Library
+paths: {}
+"#;
+    let dir = unique_dir("tag-graph-clean");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.yaml"), clean).unwrap();
+    let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+    let session = Session::new(Arc::new(ws));
+    let diags = validate_entry(&session, "main.yaml").unwrap();
+    assert!(
+        !diags.iter().any(|d| d.code.starts_with("oas-tag-parent")),
+        "{:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
 }

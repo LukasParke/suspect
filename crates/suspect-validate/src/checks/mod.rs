@@ -32,6 +32,7 @@ mod sdk_readiness;
 mod security;
 mod servers;
 pub(crate) mod swagger;
+mod tag_graph;
 mod tags;
 mod webhooks;
 
@@ -64,6 +65,7 @@ fn check_groups() -> Vec<(&'static str, CheckFn)> {
         ("security::schemes",                  security::check_security_schemes),
         ("servers::variables",                 servers::check_server_variables),
         ("tags::declared",                     tags::check_declared_tags),
+        ("tags::graph",                        tag_graph::check_tag_graph),
         ("schemas",                            schemas::check_schemas),
         ("references",                         references::check_references),
         ("examples",                           examples::check_example_types),
