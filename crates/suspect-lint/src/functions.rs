@@ -1070,9 +1070,7 @@ fn check_no_api_key_in_query<'d>(
 
 /// Credential-like parameter names (token/key/secret/password/credential)
 /// must not travel in the URL path or query.
-const CREDENTIAL_WORDS: &[&str] = &[
-    "token", "key", "secret", "password", "credential", "auth",
-];
+const CREDENTIAL_WORDS: &[&str] = &["token", "key", "secret", "password", "credential", "auth"];
 
 fn check_no_sensitive_params<'d>(
     node: &NodeRef<'d>,
@@ -1161,19 +1159,13 @@ fn check_delete_requires_id<'d>(
     let has_id_var = match ptrs.own_key(node) {
         Some(k) => {
             let key = String::from_utf8_lossy(k).into_owned();
-            key.split('/').any(|segment| {
-                segment.starts_with('{') && segment.ends_with('}')
-            })
+            key.split('/')
+                .any(|segment| segment.starts_with('{') && segment.ends_with('}'))
         }
-        None => node
-            .path_from_root()
-            .tokens()
-            .last()
-            .is_some_and(|k| {
-                k.split('/').any(|segment| {
-                    segment.starts_with('{') && segment.ends_with('}')
-                })
-            }),
+        None => node.path_from_root().tokens().last().is_some_and(|k| {
+            k.split('/')
+                .any(|segment| segment.starts_with('{') && segment.ends_with('}'))
+        }),
     };
     if !has_id_var {
         push(out, rule, node, ptrs);

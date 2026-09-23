@@ -11,9 +11,6 @@
 //! JSON and verifies it with the OpenAPI 3.1 validation battery.
 
 use serde_json::{Map, Value, json};
-use suspect_low::LowDoc;
-use suspect_overlay;
-use suspect_source;
 
 /// Upgrades a materialized Swagger 2.0 document to OpenAPI 3.1.
 ///
@@ -205,7 +202,7 @@ fn upgrade_path_item(
         let params: Vec<Value> = op_obj
             .get("parameters")
             .and_then(Value::as_array)
-            .map(|a| a.clone())
+            .cloned()
             .unwrap_or_default();
 
         let mut upgraded = Map::new();
@@ -492,9 +489,7 @@ fn upgrade_security_definitions(defs: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suspect_low::LowDoc;
-    use suspect_overlay::Value as Ov;
-    use suspect_source::{Source, Uri};
+    use suspect_source::Uri;
 
     const SWAGGER: &str = r#"
 swagger: "2.0"

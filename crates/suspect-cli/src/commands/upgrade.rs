@@ -2,10 +2,6 @@
 
 use std::path::PathBuf;
 
-use suspect_overlay::Value as OverlayValue;
-
-use crate::OutputFormat;
-
 /// One Swagger 2.0 → OpenAPI 3.1 conversion.
 #[derive(Debug, clap::Args)]
 pub struct UpgradeArgs {
@@ -60,8 +56,7 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     }
     // Validate the upgraded document with the 3.1 battery so the user
     // sees the remaining findings when the output is a file.
-    if args.output.is_some() {
-        let out_path = args.output.as_ref().unwrap();
+    if let Some(out_path) = &args.output {
         let findings = crate::commands::validate::validate_file(out_path.as_path(), None);
         let error_count = findings
             .iter()
