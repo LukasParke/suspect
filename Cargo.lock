@@ -1978,6 +1978,8 @@ dependencies = [
  "suspect-artifact",
  "suspect-gen",
  "suspect-ir",
+ "suspect-low",
+ "suspect-overlay",
  "suspect-ref",
  "suspect-schema",
  "suspect-source",

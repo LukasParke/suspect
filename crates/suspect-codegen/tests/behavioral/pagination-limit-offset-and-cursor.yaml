@@ -1,0 +1,128 @@
+# INVARIANT: a limit/offset list operation and a cursor list operation
+# compile into native pagination walkers in every backend that claims the
+# `pagination` feature — page/item iterators, a next-page probe, and the
+# detected pattern recorded in the descriptor table — and none of it is
+# emitted without SDK defaults.
+# INVARIANT: markers are pinned per backend under `x-suspect-behavior`;
+# a backend that stops emitting one fails this fragment.
+x-suspect-feature: pagination
+openapi: 3.1.0
+info: {title: behavioral fragments, version: '1'}
+servers:
+  - url: https://api.pagination.test/v1
+security:
+  - apiKey: []
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      parameters:
+        - name: limit
+          in: query
+          schema: {type: integer}
+        - name: offset
+          in: query
+          schema: {type: integer}
+        - name: filter
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: An offset/limit page.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: {type: string}
+                  total: {type: integer}
+                required: [data, total]
+  /events:
+    get:
+      operationId: listEvents
+      parameters:
+        - name: cursor
+          in: query
+          schema: {type: string}
+      responses:
+        '200':
+          description: A cursor page.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: {type: string}
+                  next_page_token: {type: string}
+                required: [items]
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+x-suspect-behavior:
+  cpp:
+    file: cpp/include/pagination_cpp/pagination.hpp
+    markers:
+      - 'inline ListWidgetsPager Client::list_widgets_pages(const ListWidgetsInput& input, CallOptions options) const'
+      - 'inline Presence<std::string> list_events_page_cursor(const ListEventsStatus200& page)'
+  csharp:
+    file: csharp/src/Client.g.cs
+    markers:
+      - 'public async global::System.Collections.Generic.IAsyncEnumerable<ListWidgetsResult> ListWidgetsPagesAsync(ListWidgetsInput input, [global::System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)'
+      - 'ListEventsPagesAsync(ListEventsInput input, [global::System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)'
+  dart:
+    file: dart/lib/pagination_sdk.dart
+    markers:
+      - "part 'src/pagination.dart';"
+  go:
+    file: go/pagination.go
+    markers:
+      - 'func (c *Client) ListWidgetsPages(ctx context.Context, input ListWidgetsInput) *ListWidgetsPageIterator'
+      - 'func (c *Client) ListEventsNextPage(ctx context.Context, input ListEventsInput) (ListEventsInput, bool)'
+      - 'the server repeated the same continuation cursor'
+  java:
+    file: java/src/main/java/test/suspect/Pagination.java
+    markers:
+      - 'public static ListWidgetsPages listWidgetsPages(Client client, Client.ListWidgetsInput input)'
+      - 'public static final class ListWidgetsItems implements java.util.Iterator<String>, AutoCloseable'
+  kotlin:
+    file: kotlin/src/main/kotlin/test/suspect/pagination_kotlin/Client.kt
+    markers:
+      - 'public fun listWidgetsPages('
+      - 'public suspend fun listEventsNextPage('
+      - 'throw PaginationStalled(token, "listEvents",'
+  php:
+    file: php/src/Client.php
+    markers:
+      - 'listWidgetsPages'
+      - 'listEventsPageCursor'
+  python:
+    file: python/src/pagination_sdk/_client.py
+    markers:
+      - 'iter_list_events_pages'
+      - "_pagination_field(page.data, 'next_page_token')"
+  ruby:
+    file: ruby/lib/pagination_sdk/client.rb
+    markers:
+      - 'def list_events_pages(**kwargs)'
+      - 'request[:offset] = position'
+  rust:
+    file: rust/src/pagination.rs
+    markers:
+      - 'pub fn list_widgets_pages'
+      - '_next_page'
+  swift:
+    file: swift/Sources/PaginationSDK/Pagination.swift
+    markers:
+      - 'func listWidgets_pageItems(_ page: ListWidgetsResponse200) -> [String]?'
+      - 'public struct ListEventsPageSequence: AsyncSequence, AsyncIteratorProtocol, Sendable'
+  typescript:
+    file: typescript/operations.ts
+    markers:
+      - 'export function listWidgetsPages(client: ClientOptions, input: ListWidgetsInput, call?: CallOptions): AsyncIterable<ListWidgetsSuccess>'
+      - 'export function listEventsNextPage(client: ClientOptions, input: ListEventsInput, call?: CallOptions): Promise<ListEventsInput | null>'
