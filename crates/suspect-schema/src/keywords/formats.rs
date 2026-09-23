@@ -32,6 +32,18 @@ pub(crate) fn check_format<'a, 'd>(
     }
 }
 
+/// Standard-alphabet base64 check (padding optional), for OAS `byte`.
+fn base64_ok(s: &str) -> bool {
+    let body = s.trim_end_matches('=');
+    if !s.len().is_multiple_of(4) || s.len() - body.len() > 2 {
+        return false;
+    }
+    !body.is_empty()
+        && body
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+}
+
 pub(crate) fn validate(name: &str, s: &str) -> bool {
     match name {
         "date" => date(s),
@@ -46,6 +58,12 @@ pub(crate) fn validate(name: &str, s: &str) -> bool {
         "uuid" => uuid(s),
         "regex" => regex::Regex::new(s).is_ok(),
         "json-pointer" => json_pointer(s),
+        // OAS-registered formats (asserted under `format_assertion`).
+        "int32" => s.parse::<i32>().is_ok(),
+        "int64" => s.parse::<i64>().is_ok(),
+        "float" | "double" => s.parse::<f64>().is_ok(),
+        "byte" => base64_ok(s),
+        "password" => true,
         "duration" => duration(s),
         // Unknown formats never assert.
         _ => true,
@@ -388,4 +406,25 @@ fn duration(s: &str) -> bool {
     }
 
     any && i == b.len()
+}
+
+#[cfg(test)]
+mod oas_format_tests {
+    use super::*;
+
+    #[test]
+    fn oas_numeric_formats_assert_on_parse() {
+        assert!(validate("int32", "2147483647"));
+        assert!(!validate("int32", "2147483648"));
+        assert!(validate("int64", "9223372036854775807"));
+        assert!(!validate("int64", "abc"));
+        assert!(validate("float", "1.5"));
+        assert!(!validate("double", "not-a-number"));
+    }
+
+    #[test]
+    fn oas_byte_asserts_base64() {
+        assert!(validate("byte", "aGVsbG8="));
+        assert!(!validate("byte", "not base64!"));
+    }
 }

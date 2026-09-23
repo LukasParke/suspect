@@ -1651,6 +1651,214 @@ const SCHEMA_KEYWORDS: &[(&str, KeywordDoc)] = &[
             "tags:\n  - name: Internal\n    kind: registry"
         ),
     ),
+    // -- Arazzo 1.0 and Overlay 1.0 keywords ---------------------------------------
+
+    // -- Arazzo 1.0 keywords ---------------------------------------------------------
+    (
+        "arazzo",
+        kw!(
+            "arazzo",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Semantic version string",
+            "Declares the Arazzo Specification version. Root document key; a document with it is a workflow description.",
+            "The LSP switches batteries on this key: structural validation, run lenses, and workflow execution activate for Arazzo documents.",
+            "arazzo: 1.0.0"
+        ),
+    ),
+    (
+        "sourceDescriptions",
+        kw!(
+            "sourceDescriptions",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Array of Source Description Objects",
+            "Names the API descriptions the workflows operate against. Each carries `name`, `url`, and `type` (`openapi` or `arazzo`).",
+            "Required. Names are the namespace for runtime expressions (`$request.sourceName#...`). Duplicate names surface as `arazzo-duplicate-source-name`.",
+            "sourceDescriptions:\n  - name: plex-api\n    url: ../plex-api-spec.yaml\n    type: openapi"
+        ),
+    ),
+    (
+        "workflows",
+        kw!(
+            "workflows",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Array of Workflow Objects",
+            "The declared workflows: ordered `steps` with preconditions, success criteria, outputs, and failure actions.",
+            "Required, non-empty. `workflowId` must be unique — generated test names and `goto` targets depend on it.",
+            "workflows:\n  - workflowId: browse-library\n    steps: ..."
+        ),
+    ),
+    (
+        "workflowId",
+        kw!(
+            "workflowId",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Unique string",
+            "Names a workflow. Targets of `onSuccess`/`onFailure` `goto` actions and `$workflows.*` expressions.",
+            "Duplicate ids surface as `arazzo-duplicate-workflow-id`; a `goto` to an unknown id as `arazzo-goto-unknown-workflow`.",
+            "workflowId: browse-library"
+        ),
+    ),
+    (
+        "steps",
+        kw!(
+            "steps",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Array of Step Objects",
+            "The ordered operations of a workflow. Each step targets an operation and declares inputs, outputs, and success criteria.",
+            "`stepId` must be unique within the workflow. A step without `operationId`/`operationPath` surfaces as `arazzo-step-missing-operation`.",
+            "steps:\n  - stepId: get-item\n    operationId: getItem"
+        ),
+    ),
+    (
+        "stepId",
+        kw!(
+            "stepId",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Unique string within the workflow",
+            "Names a step for outputs (`$steps.<stepId>.outputs.*`) and `goto` step targets.",
+            "Unknown step references surface as `arazzo-output-unknown-step`.",
+            "stepId: get-item"
+        ),
+    ),
+    (
+        "operationPath",
+        kw!(
+            "operationPath",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Runtime expression to a source + operation",
+            "Addresses an operation by source description and path/method: `{$sourceDescriptions.plex-api#/paths/~1pets/get}`.",
+            "Alternative to `operationId`. Malformed expressions surface as `arazzo-invalid-operation-path`.",
+            "operationPath: '{$sourceDescriptions.plex-api#/paths/~1pets/get}'"
+        ),
+    ),
+    (
+        "successCriteria",
+        kw!(
+            "successCriteria",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Array of Criterion Objects",
+            "Assertions that decide whether a step succeeded — condition + context expression + optional type/match.",
+            "Missing `condition` surfaces as `arazzo-criterion-missing-condition`; malformed expressions as `arazzo-invalid-condition`.",
+            "successCriteria:\n  - condition: '$statusCode == 200'"
+        ),
+    ),
+    (
+        "preconditions",
+        kw!(
+            "preconditions",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Array of Criterion Objects",
+            "Assertions evaluated before the step runs; all must hold for the step to execute.",
+            "Same criterion shape as `successCriteria` — malformed expressions are `arazzo-invalid-condition`.",
+            "preconditions:\n  - condition: '$components.inputs.token != null'"
+        ),
+    ),
+    (
+        "onSuccess",
+        kw!(
+            "onSuccess",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Array of Success Action Objects",
+            "Actions taken when the step's success criteria pass: `goto` another workflow/step, `end`, or a custom named action.",
+            "`goto` requires `workflowId` or `stepId`; unknown targets surface as `arazzo-goto-unknown-workflow`.",
+            "onSuccess:\n  - type: goto\n    workflowId: next-workflow"
+        ),
+    ),
+    (
+        "onFailure",
+        kw!(
+            "onFailure",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Array of Failure Action Objects",
+            "Actions taken when the step fails: retry with `retryAfter`/`retryLimit`, `goto`, or `end`.",
+            "Same target rules as `onSuccess`; retries are the test runner's re-execution policy.",
+            "onFailure:\n  - type: retry\n    retryAfter: 500\n    retryLimit: 3"
+        ),
+    ),
+    (
+        "outputs",
+        kw!(
+            "outputs",
+            "Arazzo",
+            "Arazzo 1.0",
+            "Map of names to runtime expressions",
+            "Values captured from a step's response for later steps (`$steps.<id>.outputs.<name>`).",
+            "Expressions referencing unknown steps/outputs surface as `arazzo-output-unknown-step`.",
+            "outputs:\n  itemId: '$response.body#/id'"
+        ),
+    ),
+    // -- Overlay 1.0 keywords --------------------------------------------------------
+    (
+        "overlay",
+        kw!(
+            "overlay",
+            "OpenAPI Overlay",
+            "Overlay 1.0",
+            "Semantic version string",
+            "Declares the Overlay Specification version. An Overlay applies targeted changes to another document.",
+            "Root key; the apply engine (`suspect overlay`) evaluates `actions` in order against the target document.",
+            "overlay: 1.0.0"
+        ),
+    ),
+    (
+        "actions",
+        kw!(
+            "actions",
+            "Overlay",
+            "Overlay 1.0",
+            "Array of Action Objects",
+            "The ordered changes: each has a JSONPath `target` and either `update` (set/merge) or `remove: true`.",
+            "Actions chain — later actions see earlier results. Missing `update`/`remove` is an invalid action; targets select via RFC 9535 JSONPath.",
+            "actions:\n  - target: $.info\n    update: {title: Overlaid}"
+        ),
+    ),
+    (
+        "target",
+        kw!(
+            "target",
+            "Overlay",
+            "Overlay 1.0",
+            "RFC 9535 JSONPath expression",
+            "Selects the nodes an action applies to. Non-matching targets apply to nothing (silent by spec).",
+            "The engine compiles the query once and applies updates deep-merged into selected nodes.",
+            "target: $.paths.'/pets'.get"
+        ),
+    ),
+    (
+        "update",
+        kw!(
+            "update",
+            "Overlay",
+            "Overlay 1.0",
+            "Any JSON value",
+            "The value set at (objects deep-merged into) each selected node.",
+            "An action carries `update` XOR `remove: true`. Objects merge key-wise; scalars replace.",
+            "update:\n  deprecated: true"
+        ),
+    ),
+    (
+        "remove",
+        kw!(
+            "remove",
+            "Overlay",
+            "Overlay 1.0",
+            "Boolean (must be true when present)",
+            "Deletes each selected node from its parent.",
+            "`remove: false` is invalid; an action carries `update` XOR `remove`.",
+            "remove: true"
+        ),
+    ),
 ];
 
 /// Resolves documentation for a keyword in either vocabulary.

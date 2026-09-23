@@ -147,3 +147,78 @@ paths: {}
         "{clean_codes:?}"
     );
 }
+
+#[test]
+fn content_schema_validates_decoded_string_content() {
+    let firing = r#"
+openapi: 3.1.0
+info: {title: t, version: '1'}
+paths: {}
+components:
+  schemas:
+    Config:
+      type: string
+      contentMediaType: application/json
+      contentSchema:
+        type: object
+        required: [name]
+      example: '{"other": 1}'
+"#;
+    let firing_codes = codes(&unique_dir("inst-content"), "main.yaml", firing);
+    assert!(
+        firing_codes.contains(&"oas-schema-instance-invalid"),
+        "{firing_codes:?}"
+    );
+
+    let clean = firing.replace(r#"{"other": 1}"#, r#"{"name": "x"}"#);
+    let clean_codes = codes(&unique_dir("inst-content-clean"), "main.yaml", &clean);
+    assert!(
+        !clean_codes.contains(&"oas-schema-instance-invalid"),
+        "{clean_codes:?}"
+    );
+}
+
+#[test]
+fn tag_parent_references_validate_in_32() {
+    let firing = r#"
+openapi: 3.2.0
+info: {title: t, version: '1'}
+tags:
+  - name: Library Collections
+    parent: Library
+  - name: Ghost
+paths: {}
+"#;
+    let dir = unique_dir("tag-graph");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.yaml"), firing).unwrap();
+    let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+    let session = Session::new(Arc::new(ws));
+    let diags = validate_entry(&session, "main.yaml").unwrap();
+    assert!(
+        diags.iter().any(|d| d.code == "oas-tag-parent-unknown"),
+        "{:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+
+    let clean = r#"
+openapi: 3.2.0
+info: {title: t, version: '1'}
+tags:
+  - name: Library
+  - name: Library Collections
+    parent: Library
+paths: {}
+"#;
+    let dir = unique_dir("tag-graph-clean");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("main.yaml"), clean).unwrap();
+    let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+    let session = Session::new(Arc::new(ws));
+    let diags = validate_entry(&session, "main.yaml").unwrap();
+    assert!(
+        !diags.iter().any(|d| d.code.starts_with("oas-tag-parent")),
+        "{:?}",
+        diags.iter().map(|d| d.code).collect::<Vec<_>>()
+    );
+}

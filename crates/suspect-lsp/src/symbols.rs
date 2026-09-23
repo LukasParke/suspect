@@ -40,7 +40,8 @@ pub fn document_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
         SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32 => oas_symbols(low),
         SpecFamily::Arazzo10 => arazzo_symbols(low),
         SpecFamily::Overlay10 => overlay_symbols(low),
-        SpecFamily::Oas2 | SpecFamily::Unknown => Vec::new(),
+        SpecFamily::Oas2 => swagger2_symbols(low),
+        SpecFamily::Unknown => Vec::new(),
     }
 }
 
@@ -145,6 +146,70 @@ fn arazzo_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
 
 /// Overlay 1.0 symbols: one symbol per action, named by its `target`
 /// (falling back to `action`) and disambiguated with its index.
+/// Swagger 2.0 outline: paths/methods, definitions as classes, parameter
+/// and response registries, tags.
+fn swagger2_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
+    let bytes = low.inner().bytes();
+    let li = low.inner().line_index();
+    let rng = |n: &NodeRef<'_>| lsp_range(bytes, li, n.byte_range());
+    let root = low.root();
+    let mut out = Vec::new();
+
+    if let Some(paths) = root.get("paths") {
+        for path in paths.entries() {
+            let Some(item) = path.value else { continue };
+            for method in METHODS {
+                if let Some(op) = item.get(method) {
+                    out.push(symbol(
+                        format!("{} {}", method.to_uppercase(), path.key),
+                        SymbolKind::METHOD,
+                        rng(&op),
+                        Vec::new(),
+                    ));
+                }
+            }
+        }
+    }
+
+    for section in ["definitions", "parameters", "responses"] {
+        let Some(map) = root.get(section) else {
+            continue;
+        };
+        let kind = if section == "definitions" {
+            SymbolKind::CLASS
+        } else {
+            SymbolKind::VARIABLE
+        };
+        let children = map
+            .entries()
+            .iter()
+            .filter_map(|e| {
+                let v = e.value?;
+                Some(symbol(e.key.to_owned(), kind, rng(&v), Vec::new()))
+            })
+            .collect();
+        out.push(symbol(
+            section.to_owned(),
+            SymbolKind::MODULE,
+            rng(&map),
+            children,
+        ));
+    }
+
+    if let Some(tags) = root.get("tags") {
+        for tag in tags.items() {
+            let name = tag.get("name").and_then(|n| n.as_str()).unwrap_or("tag");
+            out.push(symbol(
+                name.to_owned(),
+                SymbolKind::VARIABLE,
+                rng(&tag),
+                Vec::new(),
+            ));
+        }
+    }
+    out
+}
+
 fn overlay_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
     let bytes = low.inner().bytes();
     let li = low.inner().line_index();

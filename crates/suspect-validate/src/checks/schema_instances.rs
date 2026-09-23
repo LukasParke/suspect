@@ -18,14 +18,49 @@ use crate::diagnostic::{Diagnostic, Severity};
 /// 2.0 counterpart of the components-schemas walk below.
 pub(crate) fn check_swagger_definition_instances(low: &suspect_low::LowDoc) -> Vec<Diagnostic> {
     let mut out = Vec::new();
-    let Some(definitions) = low.root().get("definitions") else {
+    // `definitions/*` instances.
+    if let Some(definitions) = low.root().get("definitions") {
+        for entry in definitions.entries() {
+            let Some(schema) = entry.value else {
+                continue;
+            };
+            check_one_doc("2.0", schema, schema.byte_range(), &mut out);
+        }
+    }
+    // Inline operation schemas: non-body 2.0 parameters carry their
+    // constraint keywords directly on the parameter object, so the
+    // parameter itself is the schema (name/in are unknown keywords the
+    // compiler skips). Responses carry `schema` directly.
+    let Some(paths) = low.root().get("paths") else {
         return out;
     };
-    for entry in definitions.entries() {
-        let Some(schema) = entry.value else {
+    for path_entry in paths.entries() {
+        let Some(path_item) = path_entry.value else {
             continue;
         };
-        check_one_doc("2.0", schema, schema.byte_range(), &mut out);
+        for method in ["get", "put", "post", "delete", "options", "head", "patch"] {
+            let Some(op) = path_item.get(method) else {
+                continue;
+            };
+            if let Some(params) = op.get("parameters") {
+                for param in params.items() {
+                    let schema = param.get("schema").unwrap_or(param);
+                    let span = schema.byte_range();
+                    check_one_doc("2.0", schema, span, &mut out);
+                }
+            }
+            if let Some(responses) = op.get("responses") {
+                for response in responses.entries() {
+                    let Some(resp) = response.value else {
+                        continue;
+                    };
+                    if let Some(schema) = resp.get("schema") {
+                        let span = schema.byte_range();
+                        check_one_doc("2.0", schema, span, &mut out);
+                    }
+                }
+            }
+        }
     }
     out
 }
@@ -186,7 +221,7 @@ fn check_one_doc(
         return;
     }
     let schema_json = serde_json::to_string(&schema).unwrap_or_default();
-    for (_label, value, kind) in instances {
+    for (_label, value, kind) in &instances {
         // `$ref` values inside examples are data (a string), not
         // references — the wrapper serializes them as-is and the schema
         // sees a string. `default` is checked against the schema's
@@ -225,6 +260,63 @@ fn check_one_doc(
                 span.clone(),
                 format!("{kind} violates the schema: {}", error.message),
             ));
+        }
+    }
+    // contentMediaType + contentSchema: a string instance whose declared
+    // media type is JSON decodes to a value that must satisfy the content
+    // schema. Evaluated in a second wrapper (decoded value + content
+    // schema).
+    if let (Some(media), Some(content_schema)) = (
+        schema.get("contentMediaType").and_then(|v| v.as_str()),
+        schema.get("contentSchema"),
+    ) && media.starts_with("application/json")
+    {
+        let content_json = serde_json::to_string(content_schema).unwrap_or_default();
+        for (_label, value, kind) in &instances {
+            let Some(text) = value.as_str() else {
+                continue;
+            };
+            let Ok(decoded) = serde_json::from_str::<serde_json::Value>(text) else {
+                out.push(super::diag_at(
+                    schema_node,
+                    "oas-schema-instance-invalid",
+                    Severity::Warning,
+                    span.clone(),
+                    format!("{kind} is not decodable {media}: invalid JSON"),
+                ));
+                continue;
+            };
+            let value_json = serde_json::to_string(&decoded).unwrap_or_default();
+            let wrapper = format!(r#"{{"schema": {content_json}, "instance": {value_json}}}"#);
+            let Ok(uri) = suspect_source::Uri::parse("mem://content-schema.json") else {
+                continue;
+            };
+            let doc = suspect_low::LowDoc::parse(
+                uri,
+                suspect_source::Source::from_vec(wrapper.into_bytes()),
+            );
+            let (Some(schema_node), Some(instance_node)) =
+                (doc.root().get("schema"), doc.root().get("instance"))
+            else {
+                continue;
+            };
+            let Ok(compiled) = suspect_schema::Compiler::new(suspect_schema::Config::default())
+                .compile(schema_node)
+            else {
+                continue;
+            };
+            for error in compiled.validate(instance_node) {
+                out.push(super::diag_at(
+                    schema_node,
+                    "oas-schema-instance-invalid",
+                    Severity::Warning,
+                    span.clone(),
+                    format!(
+                        "{kind} decoded as {media} violates the content schema: {}",
+                        error.message
+                    ),
+                ));
+            }
         }
     }
 }
