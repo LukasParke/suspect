@@ -239,7 +239,7 @@ pub fn bench(fixture: &Path, iters: usize, format: OutputFormat) -> anyhow::Resu
             println!("  jsonpath  {:>10.2} ms", report.jsonpath_ms);
             println!("  overlay   {:>10.2} ms", report.overlay_ms);
         }
-        OutputFormat::Json => output::print_json(&report)?,
+        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&report)?,
     }
     Ok(0)
 }

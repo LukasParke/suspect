@@ -35,6 +35,7 @@ suspect-validate.workspace = true
 suspect-lint.workspace = true
 suspect-rules.workspace = true
 suspect-lsp.workspace = true
+tower-lsp = "0.20"
 clap.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -47,6 +48,7 @@ suspect-gateway.workspace = true
 [features]
 default = ["live-http"]
 live-http = ["dep:reqwest", "dep:axum"]
+
 
 [dev-dependencies]
 tempfile.workspace = true

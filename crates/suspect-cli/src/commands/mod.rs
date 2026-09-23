@@ -6,6 +6,7 @@ pub mod acquire_cmd;
 pub mod admission;
 pub mod application_cmd;
 pub mod bench;
+pub mod breaking;
 pub mod check;
 pub mod codegen_cmd;
 pub mod codegen_compare;

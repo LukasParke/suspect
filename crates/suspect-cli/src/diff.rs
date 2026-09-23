@@ -136,7 +136,7 @@ pub fn diff_files(a: &Path, b: &Path, format: OutputFormat) -> anyhow::Result<i3
                 println!("~ {}: {} -> {}", c.path, c.from, c.to);
             }
         }
-        OutputFormat::Json => output::print_json(&report)?,
+        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&report)?,
     }
     Ok(0)
 }

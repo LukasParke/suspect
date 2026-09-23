@@ -20,8 +20,27 @@ pub(crate) fn run(low: &LowDoc) -> Vec<Diagnostic> {
     let doc = low.uri().clone();
     let root = low.root().resolved();
 
+    let components: std::collections::BTreeMap<String, serde_json::Value> = root
+        .get("definitions")
+        .map(|defs| {
+            defs.entries()
+                .iter()
+                .filter_map(|e| {
+                    e.value.map(|v| {
+                        let json = suspect_overlay::Value::from_node(v).to_json();
+                        (
+                            e.key.to_owned(),
+                            serde_json::from_str::<serde_json::Value>(&json)
+                                .unwrap_or(serde_json::Value::Bool(true)),
+                        )
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     out.extend(super::schema_instances::check_swagger_definition_instances(
         low,
+        &components,
     ));
     check_info(&root, &doc, &mut out);
     check_operations(&root, &doc, &mut out);
