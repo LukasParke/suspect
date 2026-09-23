@@ -25,6 +25,7 @@ pub mod sdk_profiles;
 pub mod stats;
 pub mod terraform_cmd;
 pub mod test;
+pub mod upgrade;
 pub mod validate;
 pub mod watch;
 

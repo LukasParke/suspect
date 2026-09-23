@@ -5,7 +5,7 @@
 use crate::functions::Function;
 use crate::rule::{FamilySet, Rule, Severity};
 
-const METHOD_PATHS: [&str; 8] = [
+pub(crate) const METHOD_PATHS: [&str; 8] = [
     "$.paths.*.get",
     "$.paths.*.put",
     "$.paths.*.post",

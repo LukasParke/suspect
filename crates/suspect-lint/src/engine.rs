@@ -40,6 +40,7 @@ impl Linter {
     pub fn spectral_default() -> Self {
         let mut rules = crate::packs::oas::rules();
         rules.extend(crate::packs::overlay_arazzo::rules());
+        rules.extend(crate::packs::security::rules());
         Self { rules }
     }
 

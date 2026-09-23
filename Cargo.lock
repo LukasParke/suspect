@@ -1954,6 +1954,7 @@ dependencies = [
  "suspect-source",
  "suspect-syntax",
  "suspect-test",
+ "suspect-upgrade",
  "suspect-validate",
  "suspect-watch",
  "tempfile",
@@ -2273,6 +2274,16 @@ dependencies = [
  "suspect-source",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "suspect-upgrade"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "suspect-low",
+ "suspect-overlay",
+ "suspect-source",
 ]
 
 [[package]]

@@ -79,6 +79,8 @@ pub enum Command {
     Admission(commands::admission::AdmissionArgs),
     /// Detect consumer-breaking changes between two spec revisions.
     Breaking(commands::breaking::BreakingArgs),
+    /// Upgrade Swagger 2.0 documents to OpenAPI 3.1.
+    Upgrade(commands::upgrade::UpgradeArgs),
     /// Run TS/JS custom rules (Bun sidecar) over documents.
     Rules {
         /// The rules subcommand to run.
@@ -340,6 +342,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         } => commands::validate::validate(&paths, text.format, reference_allowlist.as_deref()),
         Command::Admission(args) => commands::admission::admission(&args),
         Command::Breaking(args) => commands::breaking::breaking(&args),
+        Command::Upgrade(args) => commands::upgrade::upgrade(&args),
         Command::Rules { cmd } => cmd.run().map(|_| 0),
         Command::Lint {
             paths,
