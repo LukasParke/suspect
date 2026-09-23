@@ -55,7 +55,7 @@ pub fn run(
     };
     let mut output = io::stdout().lock();
     match format {
-        OutputFormat::Json => {
+        OutputFormat::Json | OutputFormat::Sarif => {
             serde_json::to_writer_pretty(&mut output, &report)?;
             writeln!(output)?;
         }

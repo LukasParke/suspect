@@ -28,6 +28,20 @@ info:
   version: "1.0"
 paths:
   /pets:
+    post:
+      operationId: createPet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pet'
+      responses:
+        '201':
+          description: created pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
     get:
       operationId: listPets
       parameters:
@@ -172,14 +186,25 @@ async fn mock_gateway(faults: FaultConfig) -> (String, tempfile::TempDir) {
 #[tokio::test]
 async fn mock_synthesizes_pet_for_parameterized_get() {
     let (base, _dir) = mock_gateway(FaultConfig::default()).await;
-    let (status, headers, body) = request(&base, "GET", "/pets/42").await;
+    // Stateful store: unknown ids 404 until created; POST seeds the store
+    // and the created id is then GET-able.
+    let (status, _, _) = request(&base, "GET", "/pets/42").await;
+    assert_eq!(status, 404, "unknown id must 404 in stateful mock");
 
+    let (post_status, _, post_body) = request(&base, "POST", "/pets").await;
+    assert_eq!(post_status, 201);
+    let created: serde_json::Value = serde_json::from_slice(&post_body).expect("json");
+    let id = created
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("1")
+        .to_owned();
+
+    let (status, headers, body) = request(&base, "GET", &format!("/pets/{id}")).await;
     assert_eq!(status, 200);
     assert_eq!(header(&headers, "content-type"), Some("application/json"));
     let pet: serde_json::Value = serde_json::from_slice(&body).expect("json body");
-    assert_eq!(pet["name"], "");
-    assert_eq!(pet["age"], 0);
-    assert_eq!(pet["tags"], serde_json::json!([""]));
+    assert_eq!(pet["id"], id);
 }
 
 #[tokio::test]
@@ -676,7 +701,7 @@ async fn non_utf8_header_values_are_preserved_lossily() {
     // replacement character instead of being dropped entirely.
     let mut request = axum::http::Request::builder()
         .method("GET")
-        .uri("/pets/42")
+        .uri("/pets")
         .body(axum::body::Body::empty())
         .expect("request");
     request.headers_mut().insert(
@@ -862,4 +887,32 @@ async fn mock_startup_over_500_ops_stays_under_budget() {
     assert_eq!(status, 200);
     let parsed: serde_json::Value = serde_json::from_slice(&body).expect("json body");
     assert_eq!(parsed["id"], 0);
+}
+#[tokio::test]
+async fn debug_stateful_flow() {
+    let (base, _dir) = mock_gateway(FaultConfig::default()).await;
+    let (s1, _, b1) = request(&base, "GET", "/pets/42").await;
+    println!(
+        "GET /pets/42 -> {s1} {}",
+        String::from_utf8_lossy(&b1)
+            .chars()
+            .take(80)
+            .collect::<String>()
+    );
+    let (s2, _, b2) = request(&base, "POST", "/pets").await;
+    println!(
+        "POST /pets -> {s2} {}",
+        String::from_utf8_lossy(&b2)
+            .chars()
+            .take(80)
+            .collect::<String>()
+    );
+    let (s3, _, b3) = request(&base, "GET", "/pets/1").await;
+    println!(
+        "GET /pets/1 -> {s3} {}",
+        String::from_utf8_lossy(&b3)
+            .chars()
+            .take(80)
+            .collect::<String>()
+    );
 }

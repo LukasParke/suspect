@@ -48,6 +48,7 @@ pub mod playground;
 pub mod proxy;
 pub mod replay;
 pub mod scenario;
+pub mod stateful_mock;
 
 #[cfg(test)]
 mod tests;
@@ -142,6 +143,8 @@ struct GatewayState {
     seq: AtomicU64,
     journal: Arc<tokio::sync::Mutex<Journal>>,
     mocks: HashMap<(Method, String), Vec<mock::CompiledResponse>>,
+    /// Shared CRUD store for stateful mocking (`Mock` mode only).
+    resources: stateful_mock::ResourceStore,
     replay: Option<ReplayIndex>,
     recorder: Option<Arc<tokio::sync::Mutex<proxy::CassetteAppender>>>,
     redactor: Arc<Redactor>,
@@ -241,6 +244,7 @@ pub async fn build_router(
     ));
 
     let router = router_for_state(Arc::new(GatewayState {
+        resources: stateful_mock::ResourceStore::new(),
         spec: Arc::new(spec),
         mode: cfg.mode.clone(),
         faults,
@@ -448,16 +452,108 @@ async fn process(
             let ir_method = Method::from_key(method.to_ascii_lowercase().as_str());
             let compiled =
                 template.and_then(|t| ir_method.and_then(|m| state.mocks.get(&(m, t.to_owned()))));
-            let response = compiled.map_or_else(
-                || {
-                    problem(
-                        StatusCode::NOT_IMPLEMENTED,
-                        "No synthesized response",
-                        Some(format!("no mock compiled for {method} {template:?}")),
+
+            // Stateful CRUD: POST on a collection synthesizes + stores a
+            // resource; id-addressed requests read/update/remove it. When
+            // the route is id-addressed (or POST on a collection), the
+            // store answers; everything else falls through to the
+            // stateless example response.
+            let stateful = template.and_then(|template| {
+                let crud = matches!(method.as_str(), "GET" | "PUT" | "DELETE" | "PATCH");
+                crud.then(|| {
+                    let collection = stateful_mock::collection_base(template);
+                    stateful_mock::extract_path_id(
+                        template,
+                        target.split('?').next().unwrap_or(&target),
                     )
-                },
-                |c| mock::respond(c),
-            );
+                    .map(|id| (collection, id))
+                })
+                .flatten()
+            });
+            // POST on an id-less collection route synthesizes a resource
+            // from the declared example, stores it under a generated id,
+            // and returns 201 with the stored body.
+            let t_for_post = template.unwrap_or_default().to_owned();
+            let post_creates: Option<(String, Bytes)> = template
+                .filter(|t| method == "POST" && !t.contains('{'))
+                .and_then(|t| ir_method.and_then(|m| state.mocks.get(&(m, t.to_owned()))))
+                .and_then(|compiled| mock::best(compiled).map(|c| c.body.clone()))
+                .map(|example_body| (t_for_post.to_owned(), example_body));
+            if let Some((collection_raw, example_body)) = post_creates {
+                let collection = stateful_mock::collection_base(&t_for_post);
+                let _ = collection_raw;
+                let id = state.resources.next_id(&collection);
+                let body = stateful_mock::with_synthesized_id(&example_body, &id);
+                state.resources.insert(&collection, &id, body.clone());
+                return (
+                    StatusCode::CREATED,
+                    [("content-type", "application/json")],
+                    body,
+                )
+                    .into_response();
+            }
+
+            let stateful_response = if let Some((collection, id)) = stateful {
+                Some(match method.as_str() {
+                    "POST" => {
+                        let id = state.resources.next_id(&collection);
+                        let body = stateful_mock::with_synthesized_id(&body, &id);
+                        state.resources.insert(&collection, &id, body.clone());
+                        (
+                            StatusCode::CREATED,
+                            [("content-type", "application/json")],
+                            body,
+                        )
+                            .into_response()
+                    }
+                    "GET" => match state.resources.get(&collection, &id) {
+                        Some(resource) => (
+                            StatusCode::OK,
+                            [("content-type", "application/json")],
+                            resource.body,
+                        )
+                            .into_response(),
+                        None => problem(
+                            StatusCode::NOT_FOUND,
+                            "Resource not found",
+                            Some(format!("{collection}/{id} was never created")),
+                        ),
+                    },
+                    "DELETE" => match state.resources.remove(&collection, &id) {
+                        Some(_) => StatusCode::NO_CONTENT.into_response(),
+                        None => problem(
+                            StatusCode::NOT_FOUND,
+                            "Resource not found",
+                            Some(format!("{collection}/{id} was never created")),
+                        ),
+                    },
+                    _ => {
+                        let stored = state.resources.insert(&collection, &id, body.clone());
+                        let status = if stored.is_some() {
+                            StatusCode::OK
+                        } else {
+                            StatusCode::CREATED
+                        };
+                        (status, [("content-type", "application/json")], body).into_response()
+                    }
+                })
+            } else {
+                None
+            };
+            let response = if let Some(response) = stateful_response {
+                response
+            } else {
+                compiled.map_or_else(
+                    || {
+                        problem(
+                            StatusCode::NOT_IMPLEMENTED,
+                            "No synthesized response",
+                            Some(format!("no mock compiled for {method} {template:?}")),
+                        )
+                    },
+                    |c| mock::respond(c),
+                )
+            };
             (response, Vec::new())
         }
         Mode::Proxy { upstream } => {

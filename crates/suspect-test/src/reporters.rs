@@ -168,6 +168,9 @@ pub fn event_line(event: &TestEvent) -> String {
         TestEvent::RequestSent { wf, step, .. } => {
             format!("  → {wf}/{step} request sent")
         }
+        TestEvent::ResponseValidated { wf, step, status } => {
+            format!("  ✓ {wf}/{step} response {status} matches contract")
+        }
         TestEvent::ResponseGot {
             wf,
             step,

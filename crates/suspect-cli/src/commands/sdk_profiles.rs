@@ -27,7 +27,7 @@ pub enum ProfileKind {
 pub fn list(format: OutputFormat) -> anyhow::Result<i32> {
     let mut output = io::stdout().lock();
     match format {
-        OutputFormat::Json => {
+        OutputFormat::Json | OutputFormat::Sarif => {
             serde_json::to_writer_pretty(
                 &mut output,
                 &json!({"format":"suspect.sdk.profiles.v1",
@@ -65,7 +65,7 @@ pub fn list_applications(format: OutputFormat) -> anyhow::Result<i32> {
     let mut output = io::stdout().lock();
     let targets = [Target::Cli, Target::Mcp];
     match format {
-        OutputFormat::Json => {
+        OutputFormat::Json | OutputFormat::Sarif => {
             serde_json::to_writer_pretty(
                 &mut output,
                 &json!({"format":"suspect.application.profiles.v1",

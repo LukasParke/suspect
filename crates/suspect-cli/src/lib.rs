@@ -7,6 +7,8 @@ pub mod bundle;
 pub mod commands;
 pub mod diff;
 pub mod output;
+/// SARIF 2.1.0 serialization for CI code-scanning integration.
+pub mod sarif;
 
 use std::path::PathBuf;
 
@@ -22,6 +24,8 @@ pub enum OutputFormat {
     Text,
     /// One pretty-printed JSON document on stdout, machine-consumable.
     Json,
+    /// SARIF 2.1.0 log for code-scanning integrations.
+    Sarif,
 }
 
 /// Document serialization for emitting materialized trees.
@@ -73,6 +77,8 @@ pub enum Command {
     },
     /// Run the generation admission layer over documents without generating.
     Admission(commands::admission::AdmissionArgs),
+    /// Detect consumer-breaking changes between two spec revisions.
+    Breaking(commands::breaking::BreakingArgs),
     /// Run TS/JS custom rules (Bun sidecar) over documents.
     Rules {
         /// The rules subcommand to run.
@@ -333,6 +339,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             text,
         } => commands::validate::validate(&paths, text.format, reference_allowlist.as_deref()),
         Command::Admission(args) => commands::admission::admission(&args),
+        Command::Breaking(args) => commands::breaking::breaking(&args),
         Command::Rules { cmd } => cmd.run().map(|_| 0),
         Command::Lint {
             paths,

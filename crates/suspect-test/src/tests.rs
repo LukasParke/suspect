@@ -15,6 +15,7 @@ use suspect_ref::WorkspaceBuilder;
 use suspect_rex::Rex;
 use suspect_source::Source;
 
+use std::collections::BTreeMap;
 use suspect_ir::{Method, ParamIn};
 
 const OAS: &str = r#"
@@ -356,6 +357,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
     // One workflow, two steps; the first fails its criterion so the second
     // is skipped.
     let plan = crate::plan::Plan {
+        components: BTreeMap::new(),
         workflows: vec![crate::plan::WfPlan {
             workflow_id: "broken-flow".to_owned(),
             inputs: Default::default(),
@@ -376,6 +378,8 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
                     failure_goto: None,
+                    security: Vec::new(),
+                    response_schemas: Vec::new(),
                 },
                 crate::plan::StepPlan {
                     step_id: "never-runs".to_owned(),
@@ -389,6 +393,8 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
                     failure_goto: None,
+                    security: Vec::new(),
+                    response_schemas: Vec::new(),
                 },
             ],
         }],

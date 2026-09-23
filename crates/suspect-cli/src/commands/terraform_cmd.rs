@@ -285,7 +285,7 @@ pub fn generate(args: TerraformArgs) -> anyhow::Result<i32> {
         ))
     });
     match args.format {
-        OutputFormat::Json => println!(
+        OutputFormat::Json | OutputFormat::Sarif => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "format":"suspect.terraform.generation.v1", "profile":terraform::PROFILE,

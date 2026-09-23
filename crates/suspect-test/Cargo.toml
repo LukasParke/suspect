@@ -8,12 +8,14 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+suspect-overlay.workspace = true
 suspect-low.workspace = true
 suspect-ref.workspace = true
 suspect-source.workspace = true
 suspect-arazzo.workspace = true
 suspect-rex.path = "../suspect-rex"
 suspect-ir.path = "../suspect-ir"
+suspect-schema.workspace = true
 suspect-journal.path = "../suspect-journal"
 serde.workspace = true
 serde_json.workspace = true
