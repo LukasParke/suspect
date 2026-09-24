@@ -16,3 +16,7 @@ fragment declares what it pins in the same words the tests look for.
 
 Add a fragment when a new edge case needs coverage; name it in kebab-case
 and state the invariant in the header comment.
+
+For cross-backend *emission* behavior (what each generator must produce),
+see the sibling [`../behavioral/`](../behavioral/README.md) suite, which
+executes fragments through every claiming backend's generator.

@@ -1,0 +1,39 @@
+# INVARIANT: every generated SDK identifies itself on the wire with the
+# ua/v1 attribution grammar — the package descriptor (suspect version,
+# spec version, sdk name, language) and a user-agent resolution runtime —
+# in every backend that claims the `user-agent-attribution` feature.
+# INVARIANT: attribution is core emission, not SDK-defaults-gated; the
+# fragment declares `x-suspect-gated: false`.
+x-suspect-feature: user-agent-attribution
+x-suspect-gated: false
+openapi: 3.1.0
+info: {title: behavioral fragments, version: '1'}
+servers:
+  - url: https://api.attribution.test/v1
+paths:
+  /widgets:
+    get:
+      operationId: listWidgets
+      responses:
+        '200':
+          description: Every widget.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {type: string}
+x-suspect-behavior:
+  python:
+    file: python/src/pagination_sdk/_client.py
+    markers:
+      - '_ATTRIBUTION = {'
+      - "'suspect_version':"
+  rust:
+    file: rust/src/attribution.rs
+    markers:
+      - 'ATTRIBUTION_SUSPECT_VERSION'
+  typescript:
+    file: typescript/runtime.ts
+    markers:
+      - 'resolveUserAgent'
+      - 'applicationId'

@@ -39,6 +39,8 @@ anyhow.workspace = true
 clap.workspace = true
 sha2 = "0.10.9"
 tempfile.workspace = true
+suspect-low.workspace = true
+suspect-overlay.workspace = true
 suspect-ref.workspace = true
 suspect-source.workspace = true
 
