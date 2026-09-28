@@ -59,6 +59,26 @@ pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
             "missing `info.title`",
         ));
     }
+    if let Some(version) = doc.version()
+        && !(version.starts_with("1.0") || version.starts_with("1.1"))
+    {
+        out.push(diag(
+            root.byte_range(),
+            "arazzo-unsupported-version",
+            format!("unsupported Arazzo version `{version}` (supported: 1.0.x, 1.1.x)"),
+        ));
+    }
+    // Arazzo 1.1 `$self`: a URI-reference that MUST NOT carry a fragment.
+    if let Some(self_uri) = doc.self_uri()
+        && self_uri.contains('#')
+    {
+        out.push(diag(
+            root.byte_range(),
+            "arazzo-self-fragment",
+            "`$self` MUST NOT contain a fragment identifier",
+        ));
+    }
+
     if root.get("sourceDescriptions").is_none() {
         out.push(diag(
             root.byte_range(),
@@ -102,6 +122,7 @@ pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
                 "workflow missing `workflowId`",
             ));
         }
+        validate_workflow_dependencies(wf, doc, &workflow_ids, &mut out);
         let mut step_ids: FxHashMap<&str, ()> = FxHashMap::default();
         for step in wf.steps() {
             if step.step_id.is_empty() {
@@ -123,7 +144,11 @@ pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
                 ));
             }
             validate_step(step, &workflow_ids, &mut out);
+            validate_step_dependencies(wf, step, &mut out);
+            validate_step_targets(step, &mut out);
+            validate_step_async_fields(step, doc, &mut out);
         }
+        validate_sequential_outputs(wf, &mut out);
         validate_actions(wf.success_actions(), &workflow_ids, &mut out);
         validate_actions(wf.failure_actions(), &workflow_ids, &mut out);
 
@@ -144,12 +169,15 @@ fn validate_step<'d>(
     out: &mut Vec<ArazzoDiagnostic>,
 ) {
     let _ = workflow_ids;
-    if step.operation_id().is_none() && step.operation_path().is_none() {
+    if step.operation_id().is_none()
+        && step.operation_path().is_none()
+        && step.channel_path().is_none()
+    {
         out.push(diag(
             step.node().byte_range(),
             "arazzo-step-missing-operation",
             format!(
-                "step `{}` must set `operationId` or `operationPath`",
+                "step `{}` must set `operationId`, `operationPath`, or `channelPath`",
                 step.step_id
             ),
         ));
@@ -173,18 +201,12 @@ fn validate_step<'d>(
     for c in step.success_criteria() {
         match c.condition() {
             Some(cond) => {
-                if crate::expr::parse(cond).is_err() {
-                    // criteria conditions may be embedded expressions too
-                    if parse_embedded(cond)
-                        .iter()
-                        .all(|p| matches!(p, crate::ExprPart::Text(_)))
-                    {
-                        out.push(diag(
-                            c.node().byte_range(),
-                            "arazzo-invalid-condition",
-                            format!("condition is not a valid runtime expression: {cond:?}"),
-                        ));
-                    }
+                if !condition_is_valid(cond) {
+                    out.push(diag(
+                        c.node().byte_range(),
+                        "arazzo-invalid-condition",
+                        format!("condition is not a valid runtime expression: {cond:?}"),
+                    ));
                 }
             }
             None => out.push(diag(
@@ -363,4 +385,294 @@ fn diag(
         message: message.into(),
         range,
     }
+}
+
+/// Arazzo 1.1 workflow-level `dependsOn`: names must resolve, and the
+/// workflow dependency graph must be acyclic.
+fn validate_workflow_dependencies(
+    wf: &crate::WorkflowView<'_>,
+    doc: &ArazzoDoc<'_>,
+    workflow_ids: &FxHashSet<&str>,
+    out: &mut Vec<ArazzoDiagnostic>,
+) {
+    for dep in wf.depends_on() {
+        if let Some(local) = dep.strip_prefix('$') {
+            if crate::expr::parse(local).is_err() {
+                out.push(diag(
+                    wf.node().byte_range(),
+                    "arazzo-invalid-depends-on",
+                    format!(
+                        "workflow `{}` dependsOn {dep:?} is not a valid reference",
+                        wf.workflow_id
+                    ),
+                ));
+            }
+        } else if !workflow_ids.contains(dep) {
+            out.push(diag(
+                wf.node().byte_range(),
+                "arazzo-depends-on-unknown-workflow",
+                format!(
+                    "workflow `{}` depends on undeclared workflowId `{dep}`",
+                    wf.workflow_id
+                ),
+            ));
+        }
+    }
+    // Cycle detection across the workflow graph.
+    let mut stack = vec![wf.workflow_id];
+    let mut seen: FxHashSet<&str> = FxHashSet::from_iter([wf.workflow_id]);
+    while let Some(current) = stack.pop() {
+        for other in doc.workflows() {
+            if other.workflow_id != current {
+                continue;
+            }
+            for dep in other.depends_on() {
+                if dep == wf.workflow_id {
+                    out.push(diag(
+                        wf.node().byte_range(),
+                        "arazzo-depends-on-cycle",
+                        format!(
+                            "workflow `{}` participates in a dependsOn cycle",
+                            wf.workflow_id
+                        ),
+                    ));
+                    return;
+                }
+                if seen.insert(dep) {
+                    stack.push(dep);
+                }
+            }
+        }
+    }
+}
+
+/// Arazzo 1.1 step-level `dependsOn`: same-workflow step ids must exist and
+/// appear earlier (sequential satisfiability); expression forms must parse.
+fn validate_step_dependencies(
+    wf: &crate::WorkflowView<'_>,
+    step: &crate::StepView<'_>,
+    out: &mut Vec<ArazzoDiagnostic>,
+) {
+    let earlier: FxHashSet<&str> = wf
+        .steps()
+        .iter()
+        .take_while(|s| s.step_id != step.step_id)
+        .map(|s| s.step_id)
+        .collect();
+    for dep in step.depends_on() {
+        if let Some(path) = dep.strip_prefix('$') {
+            if crate::expr::parse(path).is_err() {
+                out.push(diag(
+                    step.node().byte_range(),
+                    "arazzo-invalid-depends-on",
+                    format!(
+                        "step `{}` dependsOn {dep:?} is not a valid reference",
+                        step.step_id
+                    ),
+                ));
+            }
+        } else if !earlier.contains(dep) {
+            out.push(diag(
+                step.node().byte_range(),
+                "arazzo-depends-on-unknown-step",
+                format!(
+                    "step `{}` depends on `{dep}`, which is not an earlier step in workflow `{}`",
+                    step.step_id, wf.workflow_id
+                ),
+            ));
+        }
+    }
+}
+
+/// Arazzo 1.1 target mutual exclusion and `timeout` well-formedness.
+fn validate_step_targets(step: &crate::StepView<'_>, out: &mut Vec<ArazzoDiagnostic>) {
+    let targets = [
+        step.operation_id().map(|_| "operationId"),
+        step.operation_path().map(|_| "operationPath"),
+        step.channel_path().map(|_| "channelPath"),
+    ]
+    .into_iter()
+    .flatten()
+    .count()
+        + usize::from(step.node().get("workflowId").is_some());
+    if targets > 1 {
+        out.push(diag(
+            step.node().byte_range(),
+            "arazzo-step-multiple-targets",
+            format!(
+                "step `{}` sets multiple of operationId/operationPath/channelPath/workflowId",
+                step.step_id
+            ),
+        ));
+    }
+    if step.node().get("timeout").is_some() && step.timeout_ms().is_none() {
+        out.push(diag(
+            step.node().byte_range(),
+            "arazzo-invalid-timeout",
+            format!(
+                "step `{}` timeout must be a positive integer (milliseconds)",
+                step.step_id
+            ),
+        ));
+    }
+}
+
+/// Arazzo 1.1 AsyncAPI step fields: `action`/`correlationId` belong on
+/// AsyncAPI steps; `channelPath` must reference an asyncapi source.
+fn validate_step_async_fields(
+    step: &crate::StepView<'_>,
+    doc: &ArazzoDoc<'_>,
+    out: &mut Vec<ArazzoDiagnostic>,
+) {
+    if let Some(channel) = step.channel_path() {
+        // `$sourceDescriptions.<name>...` — the source must be asyncapi.
+        let name = channel
+            .trim_start_matches('$')
+            .trim_start_matches("sourceDescriptions.")
+            .split('.')
+            .next()
+            .unwrap_or("");
+        let kind = doc
+            .source_descriptions()
+            .iter()
+            .find(|s| s.name == name)
+            .map(|s| s.kind);
+        if let Some(kind) = kind
+            && kind != crate::SourceType::AsyncApi
+        {
+            out.push(diag(
+                step.node().byte_range(),
+                "arazzo-channel-on-non-asyncapi-source",
+                format!(
+                    "step `{}` channelPath references source `{name}`, which is not asyncapi",
+                    step.step_id
+                ),
+            ));
+        }
+    }
+    if (step.action().is_some() || step.correlation_id().is_some()) && step.channel_path().is_none()
+    {
+        out.push(diag(
+            step.node().byte_range(),
+            "arazzo-async-fields-on-http-step",
+            format!(
+                "step `{}` uses action/correlationId without channelPath (AsyncAPI steps only)",
+                step.step_id
+            ),
+        ));
+    }
+    if let Some(action) = step.action()
+        && !matches!(action, "send" | "receive")
+    {
+        out.push(diag(
+            step.node().byte_range(),
+            "arazzo-invalid-action-kind",
+            format!("step `{}` action must be `send` or `receive`", step.step_id),
+        ));
+    }
+}
+
+/// Arazzo 1.1 §5.8.5.2.5: with purely sequential execution, a step that
+/// references a LATER step's outputs is a forward reference that cannot be
+/// satisfied. Selected-object outputs are also surfaced as unexecutable.
+fn validate_sequential_outputs(wf: &crate::WorkflowView<'_>, out: &mut Vec<ArazzoDiagnostic>) {
+    let steps = wf.steps();
+    let uses_depends_on = steps.iter().any(|s| !s.depends_on().is_empty());
+    if !uses_depends_on {
+        for (idx, step) in steps.iter().enumerate() {
+            let later: FxHashSet<&str> = steps[idx + 1..].iter().map(|s| s.step_id).collect();
+            let mut expressions: Vec<String> = Vec::new();
+            for p in step.parameters() {
+                if let Some(v) = p.value().and_then(|n| n.as_str()) {
+                    expressions.push(v.to_owned());
+                }
+            }
+            for c in step.success_criteria() {
+                if let Some(cond) = c.condition() {
+                    expressions.push(cond.to_owned());
+                }
+            }
+            for (_, expr) in step.outputs() {
+                if let Some(s) = expr.as_str() {
+                    expressions.push(s.to_owned());
+                }
+            }
+            for expr in expressions {
+                if let Some(rest) = expr.split("$steps.").nth(1)
+                    && let Some(after) = rest
+                        .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                        .next()
+                    && later.contains(after)
+                {
+                    out.push(diag(
+                        step.node().byte_range(),
+                        "arazzo-forward-output-reference",
+                        format!(
+                            "step `{}` references outputs of later step `{after}` with no dependsOn to order them",
+                            step.step_id
+                        ),
+                    ));
+                    break;
+                }
+            }
+        }
+    }
+    for step in steps {
+        if step.has_selector_outputs() {
+            out.push(diag(
+                step.node().byte_range(),
+                "arazzo-selector-output-unsupported",
+                format!(
+                    "step `{}` uses Selector Object outputs, which this runner does not execute",
+                    step.step_id
+                ),
+            ));
+        }
+    }
+    // Workflow-level outputs may also use Selector Objects.
+    for (_, value) in wf.outputs() {
+        if value.kind() == suspect_low::ValueKind::Object {
+            out.push(diag(
+                wf.node().byte_range(),
+                "arazzo-selector-output-unsupported",
+                format!(
+                    "workflow `{}` uses Selector Object outputs, which this runner does not execute",
+                    wf.workflow_id
+                ),
+            ));
+        }
+    }
+}
+
+/// Criterion-condition validity per Arazzo §5.8.11: a condition is either a
+/// plain runtime expression, an embedded-expression template, or a
+/// comparison — `<expression> <op> <literal>` with the operators the
+/// Criterion Object defines (`==`, `!=`, `<`, `<=`, `>`, `>=`, `=~`).
+/// `$statusCode == 200` — the canonical Arazzo condition — is a comparison,
+/// not a bare expression, and must not be flagged invalid.
+fn condition_is_valid(cond: &str) -> bool {
+    if crate::expr::parse(cond).is_ok() {
+        return true;
+    }
+    // Embedded-expression templates (e.g. `{.$inputs.token}` mixes) are
+    // valid when at least one part parses.
+    if !parse_embedded(cond)
+        .iter()
+        .all(|p| matches!(p, crate::ExprPart::Text(_)))
+    {
+        return true;
+    }
+    for op in ["=~", "==", "!=", "<=", ">=", "<", ">"] {
+        if let Some((lhs, _rhs)) = cond.split_once(op) {
+            // An operator only counts outside a JSON pointer (`#/a<b`).
+            if lhs.contains('#') && lhs.rsplit('#').next().is_some_and(|tail| tail.contains(op)) {
+                continue;
+            }
+            let lhs = lhs.trim_end_matches(['\'', '"', ' ']);
+            if crate::expr::parse(lhs).is_ok() {
+                return true;
+            }
+        }
+    }
+    false
 }

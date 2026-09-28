@@ -101,6 +101,9 @@ pub struct StepPlan {
     pub body_pointers: Vec<String>,
     /// Step ID to jump to when this step fails (`onFailure` goto action).
     pub failure_goto: Option<String>,
+    /// Arazzo 1.1 `timeout` in milliseconds: the step fails when the HTTP
+    /// exchange exceeds it.
+    pub timeout_ms: Option<u64>,
     /// Security requirement alternatives for the target operation: each
     /// alternative lists the scheme names in one requirement object
     /// (alternatives ORed, schemes within one alternative ANDed). Empty
@@ -579,6 +582,7 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         operation,
         parameters,
         request_body,
+        timeout_ms: step.timeout_ms(),
         success,
         outputs,
         body_pointers,

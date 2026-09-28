@@ -33,6 +33,23 @@ pub enum OverlayError {
         /// Pointer form of the selected scalar node.
         path: String,
     },
+    /// A `copy` source expression selected no nodes in the current state.
+    CopySourceUnresolved {
+        /// Zero-based position of the offending action in `actions`.
+        index: usize,
+        /// The raw copy expression text.
+        source: String,
+    },
+    /// A recursive merge hit an incompatible property combination
+    /// (Overlay 1.1 §4.4.3).
+    MergeConflict {
+        /// Zero-based position of the offending action in `actions`.
+        index: usize,
+        /// The action's target expression.
+        path: String,
+        /// What conflicted.
+        detail: String,
+    },
     /// JSONPath engine failure.
     Path(suspect_jsonpath::PathError),
 }
@@ -59,6 +76,19 @@ impl fmt::Display for OverlayError {
                     f,
                     "action #{index} target must select objects or arrays, got scalar at {path}"
                 )
+            }
+            Self::CopySourceUnresolved { index, source } => {
+                write!(
+                    f,
+                    "action #{index} copy source {source:?} selected no nodes in the target document"
+                )
+            }
+            Self::MergeConflict {
+                index,
+                path,
+                detail,
+            } => {
+                write!(f, "action #{index} merge conflict at {path}: {detail}")
             }
             Self::Path(e) => write!(f, "JSONPath error: {e}"),
         }

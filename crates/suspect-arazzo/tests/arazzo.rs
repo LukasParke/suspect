@@ -1,6 +1,6 @@
 use suspect_arazzo::{
-    ArazzoDoc, ComponentKind, Expr, ExprPart, HttpPart, RuntimeContext, parse, parse_embedded,
-    render_embedded, validate_arazzo,
+    ArazzoDoc, ComponentKind, Expr, ExprPart, HttpPart, RuntimeContext, SourceType, parse,
+    parse_embedded, render_embedded, validate_arazzo,
 };
 use suspect_low::{LowDoc, SpecFamily};
 use suspect_source::Source;
@@ -10,6 +10,10 @@ fn parse_doc(src: &str) -> LowDoc {
         "mem://arazzo.yaml".into(),
         Source::from_vec(src.as_bytes().to_vec()),
     )
+}
+
+fn parse_yaml(src: &str) -> LowDoc {
+    parse_doc(src)
 }
 
 const DOC: &str = r#"
@@ -380,4 +384,132 @@ workflows:
         codes.contains(&"arazzo-output-unknown-workflow"),
         "{codes:?}"
     );
+}
+
+// ------------------------------------------------------------ Arazzo 1.1
+
+const V11_HEADER: &str = "arazzo: 1.1.0\n$self: https://api.example.com/flows.arazzo.yaml\ninfo: {title: t, version: '1'}\nsourceDescriptions:\n  - {name: api, url: openapi.yaml, type: openapi}\n";
+
+#[test]
+fn arazzo_11_document_validates_clean() {
+    let doc = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n        successCriteria:\n          - condition: $statusCode == 200\n      - stepId: b\n        operationId: getPet\n        dependsOn: [a]\n        timeout: 5000\n"
+    ));
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(
+        codes.is_empty(),
+        "a well-formed 1.1 document must validate clean: {codes:?}"
+    );
+    assert_eq!(
+        parsed.self_uri(),
+        Some("https://api.example.com/flows.arazzo.yaml")
+    );
+}
+
+#[test]
+fn arazzo_11_self_fragment_rejected() {
+    let doc = parse_yaml(
+        "arazzo: 1.1.0\n$self: https://api.example.com/flows.yaml#other\ninfo: {title: t, version: '1'}\nsourceDescriptions:\n  - {name: api, url: openapi.yaml, type: openapi}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n",
+    );
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(codes.contains(&"arazzo-self-fragment"), "{codes:?}");
+}
+
+#[test]
+fn depends_on_unknown_or_later_steps_are_rejected() {
+    let doc = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n        dependsOn: [ghost, b]\n      - stepId: b\n        operationId: getPet\n"
+    ));
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(
+        codes.contains(&"arazzo-depends-on-unknown-step"),
+        "{codes:?}"
+    );
+}
+
+#[test]
+fn forward_output_reference_requires_depends_on() {
+    // Arazzo 1.1 5.8.5.2.5: sequential execution cannot satisfy a forward
+    // reference; dependsOn declares the join.
+    let without = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n        parameters:\n          - {{name: q, in: query, value: '$steps.b.outputs.token'}}\n      - stepId: b\n        operationId: getPet\n"
+    ));
+    let parsed = suspect_arazzo::ArazzoDoc::new(&without);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(
+        codes.contains(&"arazzo-forward-output-reference"),
+        "{codes:?}"
+    );
+
+    let with = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n        dependsOn: ['b']\n        parameters:\n          - {{name: q, in: query, value: '$steps.b.outputs.token'}}\n      - stepId: b\n        operationId: getPet\n"
+    ));
+    let parsed = suspect_arazzo::ArazzoDoc::new(&with);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(
+        !codes.contains(&"arazzo-forward-output-reference"),
+        "dependsOn legitimizes the join: {codes:?}"
+    );
+}
+
+#[test]
+fn selector_outputs_are_admission_diagnostics() {
+    let doc = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    outputs:\n      picked:\n        type: jsonpath\n    steps:\n      - stepId: a\n        operationId: listPets\n"
+    ));
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(
+        codes.contains(&"arazzo-selector-output-unsupported"),
+        "{codes:?}"
+    );
+}
+
+#[test]
+fn asyncapi_step_fields_are_validated() {
+    let doc = parse_yaml(
+        "arazzo: 1.1.0\ninfo: {title: t, version: '1'}\nsourceDescriptions:\n  - {name: bus, url: asyncapi.yaml, type: asyncapi}\n  - {name: api, url: openapi.yaml, type: openapi}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: badSource\n        channelPath: '$sourceDescriptions.api.channels/orders'\n      - stepId: okSource\n        channelPath: '$sourceDescriptions.bus.channels/orders'\n        action: receive\n        correlationId: '$inputs.correlationId'\n      - stepId: httpWithAction\n        operationId: listPets\n        action: send\n",
+    );
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(
+        codes.contains(&"arazzo-channel-on-non-asyncapi-source"),
+        "{codes:?}"
+    );
+    assert!(
+        codes.contains(&"arazzo-async-fields-on-http-step"),
+        "{codes:?}"
+    );
+    assert_eq!(
+        parsed
+            .source_descriptions()
+            .iter()
+            .find(|s| s.name == "bus")
+            .map(|s| s.kind),
+        Some(SourceType::AsyncApi)
+    );
+}
+
+#[test]
+fn multiple_step_targets_and_bad_timeout_are_rejected() {
+    let doc = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n        operationPath: '$sourceDescriptions.api#/paths/~1pets/get'\n        timeout: -5\n"
+    ));
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(codes.contains(&"arazzo-step-multiple-targets"), "{codes:?}");
+    assert!(codes.contains(&"arazzo-invalid-timeout"), "{codes:?}");
+}
+
+#[test]
+fn unknown_arazzo_major_is_rejected() {
+    let doc = parse_yaml(
+        "arazzo: 2.0.0\ninfo: {title: t, version: '1'}\nsourceDescriptions:\n  - {name: api, url: openapi.yaml}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n",
+    );
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
+    assert!(codes.contains(&"arazzo-unsupported-version"), "{codes:?}");
 }

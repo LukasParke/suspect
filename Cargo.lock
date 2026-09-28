@@ -2154,6 +2154,7 @@ name = "suspect-overlay"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "serde_json",
  "suspect-jsonpath",
  "suspect-low",
  "suspect-source",

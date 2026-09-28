@@ -1,7 +1,7 @@
 use suspect_low::LowDoc;
 use suspect_source::Source;
 
-use suspect_overlay::{OverlayDoc, apply, validate_overlay};
+use suspect_overlay::{OverlayDoc, apply, explain, synthesize_overlay, validate_overlay};
 
 fn parse_yaml(src: &str) -> LowDoc {
     LowDoc::parse(
@@ -202,11 +202,13 @@ fn invalid_overlay_rejected() {
 }
 
 #[test]
-fn scalar_target_rejected_at_apply() {
+fn scalar_target_with_object_update_conflicts() {
+    // Overlay 1.1: a primitive update replaces a primitive target, but an
+    // object update on a primitive target is an incompatible combination.
     let target = parse_yaml("info:\n  title: A\n");
     let overlay_doc = parse_yaml(
         r#"
-overlay: 1.0.0
+overlay: 1.1.0
 info:
   title: bad
   version: 1.0.0
@@ -220,6 +222,257 @@ actions:
     let err = apply(&overlay, target.root()).unwrap_err();
     assert!(matches!(
         err,
-        suspect_overlay::OverlayError::TargetNotContainer { .. }
+        suspect_overlay::OverlayError::MergeConflict { .. }
     ));
+}
+
+#[test]
+fn scalar_target_replaced_by_scalar_update() {
+    // Overlay 1.1 §4.4.3: "If the target selects primitive nodes, the
+    // value of this field MUST be a primitive value to replace each
+    // selected node."
+    let target = parse_yaml("info:\n  title: A\n  version: 1\n");
+    let overlay_doc = parse_yaml(
+        r#"
+overlay: 1.1.0
+info:
+  title: scalar replace
+  version: 1.0.0
+actions:
+  - target: $.info.title
+    update: B
+"#,
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
+    let applied = apply(&overlay, target.root()).unwrap();
+    assert_eq!(
+        applied.output.to_json(),
+        r#"{"info":{"title":"B","version":1}}"#
+    );
+}
+
+#[test]
+fn copy_moves_and_renames_nodes() {
+    // Overlay 1.1 §4.5.6.3 (Move Example): update-to-exist, copy,
+    // remove-source.
+    let target = parse_yaml(
+        "openapi: 3.1.0\ninfo: {title: Example API, version: '1.0.0'}\npaths:\n  /items:\n    get:\n      responses:\n        '200': {description: OK}\n  /some-items:\n    delete:\n      responses:\n        '200': {description: OK}\n",
+    );
+    let overlay_doc = parse_yaml(
+        r#"
+overlay: 1.1.0
+info:
+  title: move
+  version: 1.0.0
+actions:
+  - target: '$.paths'
+    update: { "/new-items": {} }
+  - target: '$.paths["/new-items"]'
+    copy: '$.paths["/items"]'
+  - target: '$.paths["/items"]'
+    remove: true
+"#,
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
+    let applied = apply(&overlay, target.root()).unwrap();
+    let out = applied.output.to_json();
+    assert!(out.contains(r#""/new-items":{"get":{"responses""#), "{out}");
+    assert!(!out.contains(r#""/items""#), "source path removed: {out}");
+    assert!(
+        out.contains(r#""/some-items""#),
+        "unrelated path kept: {out}"
+    );
+}
+
+#[test]
+fn copy_onto_existing_node_merges_recursively() {
+    // Overlay 1.1 §4.5.6.1: copy into an existing path merges (delete is
+    // preserved, get is added).
+    let target = parse_yaml(
+        "openapi: 3.1.0\ninfo: {title: Example API, version: '1.0.0'}\npaths:\n  /items:\n    get:\n      responses:\n        '200': {description: OK}\n  /some-items:\n    delete:\n      responses:\n        '200': {description: OK}\n",
+    );
+    let overlay_doc = parse_yaml(
+        r#"
+overlay: 1.1.0
+info: {title: copy, version: 1.0.0}
+actions:
+  - target: '$.paths["/some-items"]'
+    copy: '$.paths["/items"]'
+"#,
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
+    let applied = apply(&overlay, target.root()).unwrap();
+    let out = applied.output.to_json();
+    assert!(out.contains(r#""/some-items":{"delete""#), "{out}");
+    assert!(out.contains(r#""get":{"responses""#), "{out}");
+}
+
+#[test]
+fn copy_source_must_resolve() {
+    let target = parse_yaml("paths: {}\n");
+    let overlay_doc = parse_yaml(
+        r#"
+overlay: 1.1.0
+info: {title: bad, version: 1.0.0}
+actions:
+  - target: '$.paths'
+    copy: '$.paths["/missing"]'
+"#,
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
+    let err = apply(&overlay, target.root()).unwrap_err();
+    assert!(matches!(
+        err,
+        suspect_overlay::OverlayError::CopySourceUnresolved { .. }
+    ));
+}
+
+#[test]
+fn array_update_concatenates_instead_of_nesting() {
+    // Overlay 1.1 §4.4.3: "An array value of the update or copy property
+    // is concatenated with an array value of the target property."
+    let target = parse_yaml("tags: [a, b]\n");
+    let overlay_doc = parse_yaml(
+        r#"
+overlay: 1.1.0
+info: {title: concat, version: 1.0.0}
+actions:
+  - target: $.tags
+    update: [c]
+"#,
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
+    let applied = apply(&overlay, target.root()).unwrap();
+    assert_eq!(applied.output.to_json(), r#"{"tags":["a","b","c"]}"#);
+}
+
+#[test]
+fn merge_property_arrays_concatenate() {
+    // Overlay 1.1 §4.4.3: inside a recursive merge, an array-valued
+    // property of update concatenates with the target's array.
+    let target = parse_yaml("info:\n  tags: [a]\n");
+    let overlay_doc = parse_yaml(
+        r#"
+overlay: 1.1.0
+info: {title: m, version: 1.0.0}
+actions:
+  - target: $.info
+    update:
+      tags: [b]
+"#,
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
+    let applied = apply(&overlay, target.root()).unwrap();
+    assert_eq!(applied.output.to_json(), r#"{"info":{"tags":["a","b"]}}"#);
+}
+
+#[test]
+fn explain_reports_per_action_deltas() {
+    let target = parse_yaml("info:\n  title: A\n  version: 1\n");
+    let overlay_doc = parse_yaml(
+        r#"
+overlay: 1.1.0
+info: {title: e, version: 1.0.0}
+actions:
+  - target: $.info.title
+    update: B
+  - target: $.info.missing
+    update: x
+  - target: $.info.version
+    remove: true
+"#,
+    );
+    let overlay = OverlayDoc::parse(&overlay_doc).unwrap();
+    let steps = explain(&overlay, target.root()).unwrap();
+    assert_eq!(steps.len(), 3);
+    assert_eq!(steps[0].kind, "update");
+    assert_eq!(steps[0].matches, 1);
+    assert_eq!(steps[0].before.as_deref(), Some(r#""A""#));
+    assert_eq!(steps[0].after.as_deref(), Some(r#""B""#));
+    assert_eq!(steps[1].matches, 0, "zero-match actions are legal");
+    assert_eq!(steps[2].kind, "remove");
+    assert_eq!(
+        steps[2].after.as_deref(),
+        None,
+        "removed nodes have no after"
+    );
+}
+
+#[test]
+fn synthesized_overlay_round_trips_old_into_new() {
+    let old = parse_yaml(
+        r#"
+openapi: 3.1.0
+info: {title: API, version: '1.0.0', description: old}
+paths:
+  /pets:
+    get:
+      summary: List pets
+      deprecated: true
+  /gone:
+    get: {summary: vanishing}
+  /kept:
+    get: {summary: stays}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties: {name: {type: string}, kind: {type: string}}
+    Old:
+      type: string
+"#,
+    );
+    let new = parse_yaml(
+        r#"
+openapi: 3.1.0
+info: {title: API, version: '1.0.0', description: new description}
+paths:
+  /pets:
+    get:
+      summary: List pets
+      deprecated: false
+      parameters: [{name: limit, in: query, schema: {type: integer}}]
+  /kept:
+    get: {summary: stays}
+  /added:
+    post: {summary: fresh}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties: {name: {type: string}, weight: {type: number}}
+"#,
+    );
+    let overlay = synthesize_overlay(old.root(), new.root(), "evolve API");
+    // The synthesized document is itself a valid overlay.
+    let overlay_doc = parse_yaml(&overlay.to_yaml());
+    let parsed = OverlayDoc::parse(&overlay_doc).unwrap();
+    assert!(parsed.version() == Some("1.1.0"));
+
+    // Applying it to old must produce new (modulo key ordering).
+    let applied = apply(&parsed, old.root()).unwrap();
+    let result: serde_json::Value = serde_json::from_str(&applied.output.to_json()).unwrap();
+    let expected: serde_json::Value =
+        serde_json::from_str(&new_owned(new.root()).to_json()).unwrap();
+    assert_eq!(
+        result,
+        expected,
+        "round trip must converge: {}",
+        applied.output.to_json()
+    );
+}
+
+fn new_owned(root: suspect_low::NodeRef<'_>) -> suspect_overlay::Value {
+    suspect_overlay::Value::from_node(root)
+}
+
+#[test]
+fn synthesized_overlay_reports_action_kinds() {
+    let old = parse_yaml("info: {title: A, note: drop}\npaths: {}\n");
+    let new = parse_yaml("info: {title: B}\npaths: {}\nextra: 1\n");
+    let overlay = synthesize_overlay(old.root(), new.root(), "d");
+    let yaml = overlay.to_yaml();
+    assert!(yaml.contains("overlay: 1.1.0"), "{yaml}");
+    assert!(yaml.contains("remove: true"), "{yaml}");
+    assert!(yaml.contains("title: B"), "{yaml}");
 }

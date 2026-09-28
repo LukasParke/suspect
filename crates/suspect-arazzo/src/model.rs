@@ -1,4 +1,4 @@
-use suspect_low::{LowDoc, NodeRef};
+use suspect_low::{LowDoc, NodeRef, ValueKind};
 
 /// A parsed Arazzo 1.0 document.
 pub struct ArazzoDoc<'d> {
@@ -24,6 +24,8 @@ pub struct SourceDescriptionView<'d> {
 pub enum SourceType {
     /// `openapi` — the entry (and the default when `type` is absent).
     OpenApi,
+    /// `asyncapi` — an AsyncAPI description (Arazzo 1.1 source type).
+    AsyncApi,
     /// `overlay` — an OpenAPI Overlay document.
     Overlay,
     /// `arazzo` — another Arazzo document.
@@ -112,6 +114,7 @@ impl<'d> ArazzoDoc<'d> {
                         kind: match s.get("type").and_then(|v| v.as_str()) {
                             Some("overlay") => SourceType::Overlay,
                             Some("arazzo") => SourceType::Arazzo,
+                            Some("asyncapi") => SourceType::AsyncApi,
                             // absent or "openapi": Arazzo 1.0 default
                             Some("openapi") | None => SourceType::OpenApi,
                             Some(_) => SourceType::Other,
@@ -138,6 +141,12 @@ impl<'d> ArazzoDoc<'d> {
     #[must_use]
     pub fn version(&self) -> Option<&'d str> {
         self.root.get("arazzo").and_then(|n| n.as_str())
+    }
+
+    /// `$self` (Arazzo 1.1): the document's self-assigned URI.
+    #[must_use]
+    pub fn self_uri(&self) -> Option<&'d str> {
+        self.root.get("$self").and_then(|n| n.as_str())
     }
 
     /// `info.title` of the document.
@@ -238,6 +247,18 @@ impl<'d> WorkflowView<'d> {
     }
 }
 
+impl<'d> WorkflowView<'d> {
+    /// `dependsOn` entries (Arazzo 1.1): local `workflowId`s or
+    /// `$sourceDescriptions.<name>.<workflowId>` runtime expressions.
+    #[must_use]
+    pub fn depends_on(&self) -> Vec<&'d str> {
+        self.node
+            .get("dependsOn")
+            .map(|n| n.items().iter().filter_map(|i| i.as_str()).collect())
+            .unwrap_or_default()
+    }
+}
+
 impl<'d> StepView<'d> {
     #[must_use]
     /// The raw step node.
@@ -298,6 +319,53 @@ impl<'d> StepView<'d> {
     /// The step's `onFailure` actions.
     pub fn on_failure(&self) -> Vec<ActionView<'d>> {
         actions_of(self.node, "onFailure")
+    }
+
+    /// `dependsOn` entries (Arazzo 1.1): step ids, `$workflows.<wf>.steps.<step>`,
+    /// or `$sourceDescriptions.<name>.<workflowId>.steps.<step>`.
+    #[must_use]
+    pub fn depends_on(&self) -> Vec<&'d str> {
+        self.node
+            .get("dependsOn")
+            .map(|n| n.items().iter().filter_map(|i| i.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// `timeout` in milliseconds (Arazzo 1.1), when a positive integer.
+    #[must_use]
+    pub fn timeout_ms(&self) -> Option<u64> {
+        let node = self.node.get("timeout")?;
+        let parsed = node
+            .as_i64()
+            .or_else(|| node.as_str().and_then(|s| s.parse().ok()))?;
+        u64::try_from(parsed).ok().filter(|t| *t > 0)
+    }
+
+    /// `channelPath` (Arazzo 1.1 AsyncAPI steps).
+    #[must_use]
+    pub fn channel_path(&self) -> Option<&'d str> {
+        self.node.get("channelPath").and_then(|n| n.as_str())
+    }
+
+    /// `action`: `send` or `receive` (AsyncAPI steps only).
+    #[must_use]
+    pub fn action(&self) -> Option<&'d str> {
+        self.node.get("action").and_then(|n| n.as_str())
+    }
+
+    /// `correlationId` (AsyncAPI receive steps).
+    #[must_use]
+    pub fn correlation_id(&self) -> Option<&'d str> {
+        self.node.get("correlationId").and_then(|n| n.as_str())
+    }
+
+    /// Whether any output value is a Selector Object (an object) rather
+    /// than a runtime-expression string (Arazzo 1.1).
+    #[must_use]
+    pub fn has_selector_outputs(&self) -> bool {
+        self.outputs()
+            .iter()
+            .any(|(_, v)| v.kind() == ValueKind::Object)
     }
 }
 

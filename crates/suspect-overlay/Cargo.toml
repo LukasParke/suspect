@@ -1,6 +1,6 @@
 [package]
 name = "suspect-overlay"
-description = "Overlay 1.0 models and apply engine"
+description = "Overlay 1.0/1.1 models, apply engine, and overlay synthesis"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,6 +13,7 @@ suspect-jsonpath.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 criterion.workspace = true
 
 [[bench]]

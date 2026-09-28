@@ -557,7 +557,23 @@ async fn run_step(
     .await;
 
     let started = Instant::now();
-    let response = match http.execute(request).await {
+    // Arazzo 1.1 step `timeout`: exceeding it fails the step as a
+    // transport error.
+    let dispatched = if let Some(timeout_ms) = step.timeout_ms {
+        tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            http.execute(request),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(TransportError(format!(
+                "step exceeded its {timeout_ms}ms timeout"
+            )))
+        })
+    } else {
+        http.execute(request).await
+    };
+    let response = match dispatched {
         Ok(resp) => resp,
         Err(e) => {
             send(

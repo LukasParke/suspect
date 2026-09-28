@@ -310,6 +310,19 @@ pub enum Command {
     CodegenSession(commands::codegen_session::SessionArgs),
     /// Compare wire contracts and native SDK interfaces with migration notes.
     CodegenCompare(commands::codegen_compare::CompareArgs),
+    /// Recommend a release version and changelog from two spec revisions.
+    #[command(name = "release-plan")]
+    ReleasePlan(commands::release::ReleasePlanArgs),
+    /// Evaluate recorded traffic against a candidate contract revision.
+    #[command(name = "impact")]
+    Impact(commands::impact::ImpactArgs),
+    /// Build and check a suspect project from one manifest.
+    #[command(name = "project")]
+    Project {
+        /// The project subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::project::ProjectCmd,
+    },
     /// Run the language server over stdio.
     Lsp,
 }
@@ -476,6 +489,9 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
+        Command::ReleasePlan(args) => commands::release::release_plan(&args),
+        Command::Impact(args) => commands::impact::impact(&args),
+        Command::Project { cmd } => commands::project::run(cmd),
         Command::Lsp => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(suspect_lsp::run_server());
