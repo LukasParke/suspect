@@ -8,9 +8,11 @@
 mod apply;
 mod error;
 mod model;
+mod synthesize;
 mod value;
 
-pub use apply::{Applied, apply};
+pub use apply::{ActionExplanation, Applied, apply, explain};
 pub use error::OverlayError;
 pub use model::{ActionView, OverlayDiagnostic, OverlayDoc, validate_overlay};
+pub use synthesize::synthesize_overlay;
 pub use value::Value;

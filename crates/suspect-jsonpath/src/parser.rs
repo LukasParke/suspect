@@ -170,7 +170,9 @@ impl<'a> Parser<'a> {
                 let expr = self.parse_or()?;
                 Ok(Selector::Filter(expr))
             }
-            Some(b'\'') => Ok(Selector::Name(self.parse_quoted_string()?.into())),
+            Some(quote @ (b'\'' | b'"')) => {
+                Ok(Selector::Name(self.parse_quoted_string(quote)?.into()))
+            }
             Some(c) if c.is_ascii_digit() || c == b'-' || c == b':' => self.parse_index_or_slice(),
             Some(_) => Err(self.err("unexpected character in bracket selector")),
             None => Err(self.err("unterminated bracket selector")),
@@ -241,13 +243,13 @@ impl<'a> Parser<'a> {
 
     /// Single-quoted string literal with JSON-style escapes (`\'`, `\\`,
     /// `\n`, `\t`, `\r`, `\b`, `\f`, `\/`, `\uXXXX` incl. surrogate pairs).
-    fn parse_quoted_string(&mut self) -> Result<String, PathError> {
-        debug_assert_eq!(self.peek(), Some(b'\''));
+    fn parse_quoted_string(&mut self, quote: u8) -> Result<String, PathError> {
+        debug_assert_eq!(self.peek(), Some(quote));
         self.pos += 1;
         let mut out = String::new();
         loop {
             match self.peek() {
-                Some(b'\'') => {
+                Some(c) if c == quote => {
                     self.pos += 1;
                     return Ok(out);
                 }
@@ -258,7 +260,7 @@ impl<'a> Parser<'a> {
                         .ok_or_else(|| self.err("unterminated string literal"))?;
                     self.pos += 1;
                     match esc {
-                        b'\'' => out.push('\''),
+                        c if c == quote => out.push(c as char),
                         b'"' => out.push('"'),
                         b'\\' => out.push('\\'),
                         b'/' => out.push('/'),
@@ -495,7 +497,7 @@ impl<'a> Parser<'a> {
 
     fn parse_literal(&mut self) -> Result<Lit, PathError> {
         match self.peek() {
-            Some(b'\'') => Ok(Lit::Str(self.parse_quoted_string()?)),
+            Some(q @ (b'\'' | b'"')) => Ok(Lit::Str(self.parse_quoted_string(q)?)),
             Some(b't') if self.s[self.pos..].starts_with("true") => {
                 self.pos += 4;
                 Ok(Lit::Bool(true))
@@ -642,7 +644,7 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some(b'$') | Some(b'@') => self.parse_query_ast().map(FArg::Query),
             Some(b'\'') => Ok(FArg::Comparable(Comparable::Lit(Lit::Str(
-                self.parse_quoted_string()?,
+                self.parse_quoted_string(b'\'')?,
             )))),
             Some(c) if c.is_ascii_digit() || matches!(c, b't' | b'f' | b'n' | b'-') => self
                 .parse_literal()

@@ -2,7 +2,7 @@ use suspect_low::{LowDoc, NodeRef, ValueKind};
 
 use crate::error::OverlayError;
 
-/// A parsed Overlay 1.0 document.
+/// A parsed Overlay 1.0/1.1 document.
 pub struct OverlayDoc<'d> {
     root: NodeRef<'d>,
     actions: Vec<ActionView<'d>>,
@@ -17,6 +17,11 @@ pub struct ActionView<'d> {
     pub parsed: Option<suspect_jsonpath::Path>,
     /// The `update` value node, when present.
     pub update: Option<NodeRef<'d>>,
+    /// The Overlay 1.1 `copy` expression: a JSONPath selecting a single
+    /// node in the document being transformed, merged into each target.
+    pub copy: Option<&'d str>,
+    /// Compiled `copy` expression.
+    pub parsed_copy: Option<suspect_jsonpath::Path>,
     /// The `remove` flag.
     pub remove: bool,
     /// Optional human description.
@@ -72,21 +77,36 @@ impl<'d> OverlayDoc<'d> {
                 }
             })?);
             let update = item.get("update");
+            let copy = item.get("copy").and_then(|n| n.as_str());
             let remove = item
                 .get("remove")
                 .and_then(|n| n.as_bool())
                 .unwrap_or(false);
-            if update.is_none() && !remove {
+            // Overlay 1.1 §4.4.3: `update` has no impact when `remove` is
+            // true or `copy` is present, so exactly one modifier drives the
+            // action — at least one of the three MUST be set.
+            if update.is_none() && copy.is_none() && !remove {
                 return Err(OverlayError::InvalidAction {
                     index: i,
-                    reason: "must set `update` or `remove: true`".into(),
+                    reason: "must set `update`, `copy`, or `remove: true`".into(),
                 });
             }
+            let parsed_copy = copy
+                .map(|expr| {
+                    suspect_jsonpath::Path::parse(expr).map_err(|e| OverlayError::InvalidTarget {
+                        index: i,
+                        input: expr.to_owned(),
+                        reason: e.to_string(),
+                    })
+                })
+                .transpose()?;
             let description = item.get("description").and_then(|n| n.as_str());
             actions.push(ActionView {
                 target,
                 parsed,
                 update,
+                copy,
+                parsed_copy,
                 remove,
                 description,
             });
