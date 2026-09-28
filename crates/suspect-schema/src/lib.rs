@@ -58,6 +58,7 @@ pub use owned::{
 };
 pub use pattern::{PatternError, PatternErrorKind, PatternProgram, PatternState, compile_pattern};
 
+pub use compile::DocumentRefs;
 use compile::Prg;
 use resources::Scan;
 
@@ -74,8 +75,8 @@ pub struct Schema<'d> {
     config: Config,
     cache: RefCell<FxHashMap<Pointer, Result<Option<Prg<'d>>, CompileError>>>,
     /// Enclosing-document fallback for local `$ref`s that miss the
-    /// compiled subtree, with that document's resource scan.
-    document_fallback: Option<(NodeRef<'d>, Scan)>,
+    /// compiled subtree, with that document's shared resource scan.
+    document_fallback: Option<(NodeRef<'d>, std::sync::Arc<Scan>)>,
 }
 
 impl<'d> Schema<'d> {
@@ -84,7 +85,7 @@ impl<'d> Schema<'d> {
         program: Prg<'d>,
         scan: Scan,
         config: Config,
-        document_fallback: Option<(NodeRef<'d>, Scan)>,
+        document_fallback: Option<(NodeRef<'d>, std::sync::Arc<Scan>)>,
     ) -> Self {
         Self {
             document_fallback,
@@ -165,6 +166,6 @@ impl<'d> Schema<'d> {
     pub(crate) fn document_fallback(&self) -> Option<(NodeRef<'d>, &Scan)> {
         self.document_fallback
             .as_ref()
-            .map(|(root, scan)| (*root, scan))
+            .map(|(root, scan)| (*root, scan.as_ref()))
     }
 }

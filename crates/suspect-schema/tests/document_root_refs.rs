@@ -26,8 +26,9 @@ fn sibling_and_recursive_refs_resolve_through_the_document_root() {
     let pet = root
         .pointer(&suspect_low::Pointer::parse("/components/schemas/Pet").unwrap())
         .unwrap();
+    let refs = suspect_schema::DocumentRefs::scan(root, usize::MAX).unwrap();
     let compiled = suspect_schema::Compiler::new(suspect_schema::Config::default())
-        .compile_with_document_root(pet, Some(root))
+        .compile_with_document_root(pet, Some(&refs))
         .expect("compiles");
 
     // Direct sibling-style data.

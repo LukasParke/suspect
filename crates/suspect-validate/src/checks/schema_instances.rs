@@ -22,6 +22,7 @@ pub(crate) fn check_swagger_definition_instances(
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     let original_doc = low.root().syntax().doc().uri().clone();
+    let shared_refs = swagger_shared_refs(components);
     // `definitions/*` instances.
     if let Some(definitions) = low.root().get("definitions") {
         for entry in definitions.entries() {
@@ -33,10 +34,10 @@ pub(crate) fn check_swagger_definition_instances(
                 "2.0",
                 schema,
                 schema.byte_range(),
-                components,
                 &mut out,
                 false,
                 &original_doc,
+                shared_refs.as_ref(),
             );
         }
     }
@@ -63,10 +64,10 @@ pub(crate) fn check_swagger_definition_instances(
                         "2.0",
                         schema,
                         span,
-                        components,
                         &mut out,
                         false,
                         &original_doc,
+                        shared_refs.as_ref(),
                     );
                 }
             }
@@ -81,10 +82,10 @@ pub(crate) fn check_swagger_definition_instances(
                             "2.0",
                             schema,
                             span,
-                            components,
                             &mut out,
                             false,
                             &original_doc,
+                            shared_refs.as_ref(),
                         );
                     }
                 }
@@ -106,6 +107,10 @@ pub(crate) fn check_format_assertions(api: &OpenApi<'_>, out: &mut Vec<Diagnosti
 }
 
 fn check_instances_inner(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>, format_assertion: bool) {
+    // One shared components-document fallback per run: the scan is
+    // computed once, not per instance check (quadratic on large
+    // component sections otherwise).
+    let shared_refs = shared_component_refs(api);
     // The contract index is reference-closure based; components schemas
     // unreferenced from paths never register. Instance checking is a
     // whole-document guarantee, so walk the raw tree instead: every
@@ -117,7 +122,14 @@ fn check_instances_inner(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>, format_as
     {
         for entry in schemas.entries() {
             if let Some(schema) = entry.value {
-                check_one(api, schema, schema.byte_range(), out, format_assertion);
+                check_one(
+                    api,
+                    schema,
+                    schema.byte_range(),
+                    out,
+                    format_assertion,
+                    shared_refs.as_ref(),
+                );
             }
         }
     }
@@ -125,7 +137,14 @@ fn check_instances_inner(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>, format_as
     if let Some(definitions) = root.get("definitions") {
         for entry in definitions.entries() {
             if let Some(schema) = entry.value {
-                check_one(api, schema, schema.byte_range(), out, format_assertion);
+                check_one(
+                    api,
+                    schema,
+                    schema.byte_range(),
+                    out,
+                    format_assertion,
+                    shared_refs.as_ref(),
+                );
             }
         }
     }
@@ -142,7 +161,14 @@ fn check_instances_inner(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>, format_as
                 };
                 for schema in inline_operation_schemas(&op) {
                     let span = schema.byte_range();
-                    check_one(api, schema, span, out, format_assertion);
+                    check_one(
+                        api,
+                        schema,
+                        span,
+                        out,
+                        format_assertion,
+                        shared_refs.as_ref(),
+                    );
                 }
             }
         }
@@ -212,6 +238,7 @@ fn check_one(
     span: std::ops::Range<usize>,
     out: &mut Vec<Diagnostic>,
     format_assertion: bool,
+    shared_refs: Option<&suspect_schema::DocumentRefs<'_>>,
 ) {
     let version = if api
         .root()
@@ -224,16 +251,44 @@ fn check_one(
         "3.1"
     };
     let original_doc = api.root().syntax().doc().uri().clone();
-    let components = document_components(api);
     check_one_doc(
         version,
         schema_node,
         span,
-        &components,
         out,
         format_assertion,
         &original_doc,
+        shared_refs,
     );
+}
+
+/// The 2.0 battery's shared fallback, built from the already-extracted
+/// `definitions` map.
+fn swagger_shared_refs(
+    components: &std::collections::BTreeMap<String, serde_json::Value>,
+) -> Option<suspect_schema::DocumentRefs<'static>> {
+    let json = serde_json::json!({ "definitions": components }).to_string();
+    let uri = suspect_source::Uri::parse("mem://swagger-definitions.json").ok()?;
+    let doc: &'static suspect_low::LowDoc = Box::leak(Box::new(suspect_low::LowDoc::parse(
+        uri,
+        suspect_source::Source::from_vec(json.into_bytes()),
+    )));
+    suspect_schema::DocumentRefs::scan(doc.root(), usize::MAX).ok()
+}
+
+/// The enclosing-document `$ref` fallback: a synthetic document holding
+/// just `components/schemas`, scanned once and shared by every compile.
+/// `NodeRef` is covariant, so the long-lived root coerces into each
+/// per-instance compile's shorter lifetime.
+fn shared_component_refs(api: &OpenApi<'_>) -> Option<suspect_schema::DocumentRefs<'static>> {
+    let components = document_components(api);
+    let json = serde_json::json!({ "components": { "schemas": components } }).to_string();
+    let uri = suspect_source::Uri::parse("mem://instance-components.json").ok()?;
+    let doc: &'static suspect_low::LowDoc = Box::leak(Box::new(suspect_low::LowDoc::parse(
+        uri,
+        suspect_source::Source::from_vec(json.into_bytes()),
+    )));
+    suspect_schema::DocumentRefs::scan(doc.root(), usize::MAX).ok()
 }
 
 /// The document's `components/schemas` map as JSON, so the wrapper the
@@ -261,10 +316,10 @@ fn check_one_doc(
     version: &str,
     schema_node: NodeRef<'_>,
     span: std::ops::Range<usize>,
-    components: &std::collections::BTreeMap<String, serde_json::Value>,
     out: &mut Vec<Diagnostic>,
     format_assertion: bool,
     original_doc: &suspect_source::Uri,
+    shared_refs: Option<&suspect_schema::DocumentRefs<'_>>,
 ) {
     let schema_json = OvValue::from_node(schema_node).to_json();
     let Ok(mut schema) = serde_json::from_str::<serde_json::Value>(&schema_json) else {
@@ -280,13 +335,10 @@ fn check_one_doc(
     if version.starts_with("3.0") || version == "2.0" {
         translate_nullable(&mut schema);
     }
-    // Components ride along in the wrapper; the compiler resolves local
-    // `$ref`s against the wrapper root when the schema subtree misses
-    // (compile_with_document_root), so component graphs — including
+    // Local `$ref`s resolve against the shared components document via
+    // compile_with_document_root, so component graphs — including
     // recursive schemas — validate without pre-inlining. Refs inside
     // examples are data (a string) and stay as-is.
-    let wrapped = serde_json::json!({"schema": schema, "components": {"schemas": components}});
-    let schema = wrapped["schema"].clone();
     let mut instances: Vec<(String, &serde_json::Value, &str)> = Vec::new();
     if let Some(default) = schema.get("default") {
         instances.push(("default".into(), default, "default"));
@@ -303,12 +355,9 @@ fn check_one_doc(
         return;
     }
     let schema_json = serde_json::to_string(&schema).unwrap_or_default();
-    let components_json = serde_json::to_string(components).unwrap_or_default();
     for (_label, value, kind) in &instances {
         let value_json = serde_json::to_string(value).unwrap_or_default();
-        let wrapper = format!(
-            r#"{{"schema": {schema_json}, "components": {{"schemas": {components_json}}}, "instance": {value_json}}}"#
-        );
+        let wrapper = format!(r#"{{"schema": {schema_json}, "instance": {value_json}}}"#);
         let Ok(uri) = suspect_source::Uri::parse("mem://schema-instance.json") else {
             continue;
         };
@@ -328,7 +377,7 @@ fn check_one_doc(
         })
         // Components live at the wrapper root, so `$ref`s into the
         // component graph — recursive ones included — resolve here.
-        .compile_with_document_root(schema_node, Some(doc.root())) else {
+        .compile_with_document_root(schema_node, shared_refs) else {
             // Malformed schema keywords surface through the schema battery;
             // instance checking has nothing to say.
             continue;
