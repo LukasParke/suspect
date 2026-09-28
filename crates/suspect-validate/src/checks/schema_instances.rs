@@ -21,13 +21,23 @@ pub(crate) fn check_swagger_definition_instances(
     components: &std::collections::BTreeMap<String, serde_json::Value>,
 ) -> Vec<Diagnostic> {
     let mut out = Vec::new();
+    let original_doc = low.root().syntax().doc().uri().clone();
     // `definitions/*` instances.
     if let Some(definitions) = low.root().get("definitions") {
         for entry in definitions.entries() {
             let Some(schema) = entry.value else {
                 continue;
             };
-            check_one_doc("2.0", schema, schema.byte_range(), components, &mut out);
+            let original_doc = low.root().syntax().doc().uri().clone();
+            check_one_doc(
+                "2.0",
+                schema,
+                schema.byte_range(),
+                components,
+                &mut out,
+                false,
+                &original_doc,
+            );
         }
     }
     // Inline operation schemas: non-body 2.0 parameters carry their
@@ -49,7 +59,15 @@ pub(crate) fn check_swagger_definition_instances(
                 for param in params.items() {
                     let schema = param.get("schema").unwrap_or(param);
                     let span = schema.byte_range();
-                    check_one_doc("2.0", schema, span, components, &mut out);
+                    check_one_doc(
+                        "2.0",
+                        schema,
+                        span,
+                        components,
+                        &mut out,
+                        false,
+                        &original_doc,
+                    );
                 }
             }
             if let Some(responses) = op.get("responses") {
@@ -59,7 +77,15 @@ pub(crate) fn check_swagger_definition_instances(
                     };
                     if let Some(schema) = resp.get("schema") {
                         let span = schema.byte_range();
-                        check_one_doc("2.0", schema, span, components, &mut out);
+                        check_one_doc(
+                            "2.0",
+                            schema,
+                            span,
+                            components,
+                            &mut out,
+                            false,
+                            &original_doc,
+                        );
                     }
                 }
             }
@@ -69,6 +95,17 @@ pub(crate) fn check_swagger_definition_instances(
 }
 
 pub(crate) fn check_schema_instances(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
+    check_instances_inner(api, out, false);
+}
+
+/// The opt-in `format` assertion pass: identical walk, but schemas compile
+/// with `format_assertion: true` so declared formats validate instances
+/// (RFC 2020-12 makes them annotations by default).
+pub(crate) fn check_format_assertions(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
+    check_instances_inner(api, out, true);
+}
+
+fn check_instances_inner(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>, format_assertion: bool) {
     // The contract index is reference-closure based; components schemas
     // unreferenced from paths never register. Instance checking is a
     // whole-document guarantee, so walk the raw tree instead: every
@@ -80,7 +117,7 @@ pub(crate) fn check_schema_instances(api: &OpenApi<'_>, out: &mut Vec<Diagnostic
     {
         for entry in schemas.entries() {
             if let Some(schema) = entry.value {
-                check_one(api, schema, schema.byte_range(), out);
+                check_one(api, schema, schema.byte_range(), out, format_assertion);
             }
         }
     }
@@ -88,7 +125,7 @@ pub(crate) fn check_schema_instances(api: &OpenApi<'_>, out: &mut Vec<Diagnostic
     if let Some(definitions) = root.get("definitions") {
         for entry in definitions.entries() {
             if let Some(schema) = entry.value {
-                check_one(api, schema, schema.byte_range(), out);
+                check_one(api, schema, schema.byte_range(), out, format_assertion);
             }
         }
     }
@@ -105,7 +142,7 @@ pub(crate) fn check_schema_instances(api: &OpenApi<'_>, out: &mut Vec<Diagnostic
                 };
                 for schema in inline_operation_schemas(&op) {
                     let span = schema.byte_range();
-                    check_one(api, schema, span, out);
+                    check_one(api, schema, span, out, format_assertion);
                 }
             }
         }
@@ -174,6 +211,7 @@ fn check_one(
     schema_node: NodeRef<'_>,
     span: std::ops::Range<usize>,
     out: &mut Vec<Diagnostic>,
+    format_assertion: bool,
 ) {
     let version = if api
         .root()
@@ -185,13 +223,38 @@ fn check_one(
     } else {
         "3.1"
     };
+    let original_doc = api.root().syntax().doc().uri().clone();
+    let components = document_components(api);
     check_one_doc(
         version,
         schema_node,
         span,
-        &std::collections::BTreeMap::new(),
+        &components,
         out,
+        format_assertion,
+        &original_doc,
     );
+}
+
+/// The document's `components/schemas` map as JSON, so the wrapper the
+/// schema compiles from can resolve `#/components/schemas/...` refs.
+fn document_components(api: &OpenApi<'_>) -> std::collections::BTreeMap<String, serde_json::Value> {
+    api.root()
+        .get("components")
+        .and_then(|c| c.get("schemas"))
+        .map(|schemas| {
+            schemas
+                .entries()
+                .iter()
+                .filter_map(|entry| {
+                    let schema = entry.value?;
+                    let json = OvValue::from_node(schema).to_json();
+                    let value = serde_json::from_str(&json).ok()?;
+                    Some((entry.key.to_owned(), value))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn check_one_doc(
@@ -200,6 +263,8 @@ fn check_one_doc(
     span: std::ops::Range<usize>,
     components: &std::collections::BTreeMap<String, serde_json::Value>,
     out: &mut Vec<Diagnostic>,
+    format_assertion: bool,
+    original_doc: &suspect_source::Uri,
 ) {
     let schema_json = OvValue::from_node(schema_node).to_json();
     let Ok(mut schema) = serde_json::from_str::<serde_json::Value>(&schema_json) else {
@@ -215,7 +280,13 @@ fn check_one_doc(
     if version.starts_with("3.0") || version == "2.0" {
         translate_nullable(&mut schema);
     }
-    let schema = inline_component_refs(&schema, components, &mut Vec::new(), 0);
+    // Components ride along in the wrapper; the compiler resolves local
+    // `$ref`s against the wrapper root when the schema subtree misses
+    // (compile_with_document_root), so component graphs — including
+    // recursive schemas — validate without pre-inlining. Refs inside
+    // examples are data (a string) and stay as-is.
+    let wrapped = serde_json::json!({"schema": schema, "components": {"schemas": components}});
+    let schema = wrapped["schema"].clone();
     let mut instances: Vec<(String, &serde_json::Value, &str)> = Vec::new();
     if let Some(default) = schema.get("default") {
         instances.push(("default".into(), default, "default"));
@@ -232,17 +303,12 @@ fn check_one_doc(
         return;
     }
     let schema_json = serde_json::to_string(&schema).unwrap_or_default();
+    let components_json = serde_json::to_string(components).unwrap_or_default();
     for (_label, value, kind) in &instances {
-        // `$ref` values inside examples are data (a string), not
-        // references — the wrapper serializes them as-is and the schema
-        // sees a string. `default` is checked against the schema's
-        // non-$ref assertions only: a `$ref`-bearing schema cannot be
-        // inlined into the wrapper without a resolver, so skip those.
-        if schema.get("$ref").is_some() {
-            continue;
-        }
         let value_json = serde_json::to_string(value).unwrap_or_default();
-        let wrapper = format!(r#"{{"schema": {schema_json}, "instance": {value_json}}}"#);
+        let wrapper = format!(
+            r#"{{"schema": {schema_json}, "components": {{"schemas": {components_json}}}, "instance": {value_json}}}"#
+        );
         let Ok(uri) = suspect_source::Uri::parse("mem://schema-instance.json") else {
             continue;
         };
@@ -256,16 +322,20 @@ fn check_one_doc(
         else {
             continue;
         };
-        let Ok(compiled) =
-            suspect_schema::Compiler::new(suspect_schema::Config::default()).compile(schema_node)
-        else {
+        let Ok(compiled) = suspect_schema::Compiler::new(suspect_schema::Config {
+            format_assertion,
+            ..suspect_schema::Config::default()
+        })
+        // Components live at the wrapper root, so `$ref`s into the
+        // component graph — recursive ones included — resolve here.
+        .compile_with_document_root(schema_node, Some(doc.root())) else {
             // Malformed schema keywords surface through the schema battery;
             // instance checking has nothing to say.
             continue;
         };
         for error in compiled.validate(instance_node) {
-            out.push(super::diag_at(
-                schema_node,
+            out.push(super::diag_for(
+                original_doc,
                 "oas-schema-instance-invalid",
                 Severity::Warning,
                 span.clone(),
@@ -288,8 +358,8 @@ fn check_one_doc(
                 continue;
             };
             let Ok(decoded) = serde_json::from_str::<serde_json::Value>(text) else {
-                out.push(super::diag_at(
-                    schema_node,
+                out.push(super::diag_for(
+                    original_doc,
                     "oas-schema-instance-invalid",
                     Severity::Warning,
                     span.clone(),
@@ -311,14 +381,16 @@ fn check_one_doc(
             else {
                 continue;
             };
-            let Ok(compiled) = suspect_schema::Compiler::new(suspect_schema::Config::default())
-                .compile(schema_node)
-            else {
+            let Ok(compiled) = suspect_schema::Compiler::new(suspect_schema::Config {
+                format_assertion,
+                ..suspect_schema::Config::default()
+            })
+            .compile(schema_node) else {
                 continue;
             };
             for error in compiled.validate(instance_node) {
-                out.push(super::diag_at(
-                    schema_node,
+                out.push(super::diag_for(
+                    original_doc,
                     "oas-schema-instance-invalid",
                     Severity::Warning,
                     span.clone(),
@@ -329,52 +401,5 @@ fn check_one_doc(
                 ));
             }
         }
-    }
-}
-
-/// Substitutes `#/components/schemas/<name>` references in a schema tree
-/// with the referenced component JSON (depth-capped; recursive refs
-/// collapse to permissive beyond the cap).
-fn inline_component_refs(
-    value: &serde_json::Value,
-    components: &std::collections::BTreeMap<String, serde_json::Value>,
-    seen: &mut Vec<String>,
-    depth: usize,
-) -> serde_json::Value {
-    const MAX_DEPTH: usize = 8;
-    if depth > MAX_DEPTH {
-        return serde_json::Value::Bool(true);
-    }
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.len() == 1
-                && let Some(target) = map.get("$ref").and_then(|r| r.as_str())
-                && let Some(name) = target.strip_prefix("#/components/schemas/")
-                && let Some(component) = components.get(name)
-            {
-                if seen.iter().any(|s| s == name) {
-                    return serde_json::Value::Bool(true);
-                }
-                seen.push(name.to_owned());
-                let resolved = inline_component_refs(component, components, seen, depth + 1);
-                seen.pop();
-                return resolved;
-            }
-            let mut out = serde_json::Map::new();
-            for (key, child) in map {
-                out.insert(
-                    key.clone(),
-                    inline_component_refs(child, components, seen, depth),
-                );
-            }
-            serde_json::Value::Object(out)
-        }
-        serde_json::Value::Array(items) => serde_json::Value::Array(
-            items
-                .iter()
-                .map(|item| inline_component_refs(item, components, seen, depth))
-                .collect(),
-        ),
-        other => other.clone(),
     }
 }

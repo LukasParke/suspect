@@ -24,8 +24,25 @@ pub use diagnostic::{Diagnostic, Severity};
 /// to `api`'s source document. Reference-shaped instance data is not traversed.
 #[must_use]
 pub fn validate_openapi(api: &OpenApi<'_>) -> Vec<Diagnostic> {
+    validate_openapi_with(api, &ValidationOptions::default())
+}
+
+/// Per-run validation options.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ValidationOptions {
+    /// Assert JSON-Schema `format` keywords (RFC 2020-12 defaults to
+    /// annotation-only; this turns declared formats into validation).
+    pub format_assertion: bool,
+}
+
+/// Validates with explicit options.
+#[must_use]
+pub fn validate_openapi_with(api: &OpenApi<'_>, options: &ValidationOptions) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     checks::run_all(api, &mut out);
+    if options.format_assertion {
+        checks::run_format_assertions(api, &mut out);
+    }
     finish(out)
 }
 

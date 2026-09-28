@@ -16,8 +16,12 @@ use crate::output::{self, Finding, Severity};
 /// validation can still report problems in the other documents.
 /// An explicit document allowlist also applies to the entry itself.
 #[must_use]
-pub fn validate_file(path: &Path, allowed_documents: Option<&[Uri]>) -> Vec<Finding> {
-    match validate_loaded(path, allowed_documents) {
+pub fn validate_file(
+    path: &Path,
+    allowed_documents: Option<&[Uri]>,
+    strict_format: bool,
+) -> Vec<Finding> {
+    match validate_loaded(path, allowed_documents, strict_format) {
         Ok(findings) => findings,
         Err(message) => vec![Finding {
             file: path.display().to_string(),
@@ -31,7 +35,11 @@ pub fn validate_file(path: &Path, allowed_documents: Option<&[Uri]>) -> Vec<Find
     }
 }
 
-fn validate_loaded(path: &Path, allowed_documents: Option<&[Uri]>) -> Result<Vec<Finding>, String> {
+fn validate_loaded(
+    path: &Path,
+    allowed_documents: Option<&[Uri]>,
+    strict_format: bool,
+) -> Result<Vec<Finding>, String> {
     let absolute = path.canonicalize().map_err(|e| e.to_string())?;
     let entry = absolute.to_str().ok_or("path is not UTF-8")?;
     let mut builder = WorkspaceBuilder::new();
@@ -58,7 +66,10 @@ fn validate_loaded(path: &Path, allowed_documents: Option<&[Uri]>) -> Result<Vec
     if !findings.is_empty() {
         return Ok(findings);
     }
-    let diagnostics = suspect_validate::validate_openapi(&api);
+    let options = suspect_validate::ValidationOptions {
+        format_assertion: strict_format,
+    };
+    let diagnostics = suspect_validate::validate_openapi_with(&api, &options);
     for diagnostic in diagnostics {
         let owner = workspace
             .get(&diagnostic.doc)
@@ -150,13 +161,14 @@ pub fn validate(
     paths: &[PathBuf],
     format: OutputFormat,
     reference_allowlist: Option<&Path>,
+    strict_format: bool,
 ) -> anyhow::Result<i32> {
     let allowed = reference_allowlist
         .map(load_reference_allowlist)
         .transpose()?;
     let mut findings: Vec<Finding> = paths
         .par_iter()
-        .flat_map(|path| validate_file(path, allowed.as_deref()))
+        .flat_map(|path| validate_file(path, allowed.as_deref(), strict_format))
         .collect();
     findings.sort_by(|a, b| {
         (&a.file, a.line, a.col, &a.code, &a.message)

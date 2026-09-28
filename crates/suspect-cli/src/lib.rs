@@ -71,6 +71,10 @@ pub enum Command {
         /// JSON array of absolute document paths; deny every unlisted reference load.
         #[arg(long)]
         reference_allowlist: Option<PathBuf>,
+        /// Assert JSON-Schema `format` keywords (RFC 2020-12 makes them
+        /// annotations by default; this validates declared formats).
+        #[arg(long)]
+        strict_format: bool,
         /// Output format for the finding list.
         #[command(flatten)]
         text: TextFormat,
@@ -347,8 +351,14 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::Validate {
             paths,
             reference_allowlist,
+            strict_format,
             text,
-        } => commands::validate::validate(&paths, text.format, reference_allowlist.as_deref()),
+        } => commands::validate::validate(
+            &paths,
+            text.format,
+            reference_allowlist.as_deref(),
+            strict_format,
+        ),
         Command::Admission(args) => commands::admission::admission(&args),
         Command::Breaking(args) => commands::breaking::breaking(&args),
         Command::DocsGen(args) => commands::docs_gen_cmd::docs_gen(&args),

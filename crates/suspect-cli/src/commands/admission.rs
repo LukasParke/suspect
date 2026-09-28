@@ -34,7 +34,7 @@ pub struct AdmissionArgs {
 /// a contract surface one finding describing why.
 #[must_use]
 pub fn admission_file(path: &std::path::Path) -> Vec<Finding> {
-    let mut findings = validate_file(path, None);
+    let mut findings = validate_file(path, None, false);
     if findings.iter().any(|f| f.severity == Severity::Error) {
         // Syntax and semantic validation errors would corrupt the contract;
         // admission runs only on documents validation accepts.

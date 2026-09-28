@@ -57,7 +57,7 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     // Validate the upgraded document with the 3.1 battery so the user
     // sees the remaining findings when the output is a file.
     if let Some(out_path) = &args.output {
-        let findings = crate::commands::validate::validate_file(out_path.as_path(), None);
+        let findings = crate::commands::validate::validate_file(out_path.as_path(), None, false);
         let error_count = findings
             .iter()
             .filter(|f| f.severity == crate::output::Severity::Error)

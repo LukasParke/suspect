@@ -73,11 +73,21 @@ pub struct Schema<'d> {
     scan: Scan,
     config: Config,
     cache: RefCell<FxHashMap<Pointer, Result<Option<Prg<'d>>, CompileError>>>,
+    /// Enclosing-document fallback for local `$ref`s that miss the
+    /// compiled subtree, with that document's resource scan.
+    document_fallback: Option<(NodeRef<'d>, Scan)>,
 }
 
 impl<'d> Schema<'d> {
-    pub(crate) fn new(root: NodeRef<'d>, program: Prg<'d>, scan: Scan, config: Config) -> Self {
+    pub(crate) fn with_document_root(
+        root: NodeRef<'d>,
+        program: Prg<'d>,
+        scan: Scan,
+        config: Config,
+        document_fallback: Option<(NodeRef<'d>, Scan)>,
+    ) -> Self {
         Self {
+            document_fallback,
             root,
             program,
             scan,
@@ -151,5 +161,10 @@ impl<'d> Schema<'d> {
     }
     pub(crate) fn root_node(&self) -> NodeRef<'d> {
         self.root
+    }
+    pub(crate) fn document_fallback(&self) -> Option<(NodeRef<'d>, &Scan)> {
+        self.document_fallback
+            .as_ref()
+            .map(|(root, scan)| (*root, scan))
     }
 }

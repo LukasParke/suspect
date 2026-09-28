@@ -173,10 +173,10 @@ pub fn extract(low: &LowDoc) -> DocModel {
     // Declared tags keep their order and appear even when unused.
     if let Some(declared) = root.get("tags") {
         for tag in declared.items() {
-            if let Some(name) = tag.get("name").and_then(|n| n.as_str()) {
-                if !tag_order.contains(&name.to_owned()) {
-                    tag_order.push(name.to_owned());
-                }
+            if let Some(name) = tag.get("name").and_then(|n| n.as_str())
+                && !tag_order.contains(&name.to_owned())
+            {
+                tag_order.push(name.to_owned());
             }
         }
     }
@@ -216,7 +216,7 @@ pub fn extract(low: &LowDoc) -> DocModel {
                         }
                     }
                 }
-                let request_body = op.get("requestBody").and_then(|body| {
+                let request_body: Option<BodySpec> = op.get("requestBody").map(|body| {
                     let content_entries =
                         body.get("content").map(|c| c.entries()).unwrap_or_default();
                     let content_type = content_entries
@@ -233,11 +233,11 @@ pub fn extract(low: &LowDoc) -> DocModel {
                         .get("required")
                         .and_then(|r| r.as_str())
                         .is_some_and(|v| v == "true");
-                    Some(BodySpec {
+                    BodySpec {
                         content_type,
                         type_desc,
                         required,
-                    })
+                    }
                 });
                 let mut responses = Vec::new();
                 if let Some(resps) = op.get("responses") {
@@ -375,10 +375,10 @@ pub fn extract(low: &LowDoc) -> DocModel {
 /// property counts, `any` for untyped.
 #[must_use]
 pub fn type_desc(schema: &NodeRef<'_>) -> String {
-    if let Some(r#ref) = schema.get("$ref").and_then(|r| r.as_str()) {
-        if let Some(name) = r#ref.rsplit('/').next() {
-            return name.to_owned();
-        }
+    if let Some(r#ref) = schema.get("$ref").and_then(|r| r.as_str())
+        && let Some(name) = r#ref.rsplit('/').next()
+    {
+        return name.to_owned();
     }
     let format = schema.get("format").and_then(|f| f.as_str());
     match schema.get("type").and_then(|t| t.as_str()) {

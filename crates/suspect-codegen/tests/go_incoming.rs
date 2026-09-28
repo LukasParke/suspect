@@ -345,13 +345,14 @@ fn plan_carries_the_incoming_receipts_only_when_emission_happens() {
 }
 
 fn go_toolchain() -> Option<String> {
-    // The manifest carries the version command, regex, minimum, and install
-    // guidance; the skip message below quotes it verbatim.
-    let (status, _) = suspect_codegen::toolchain::probe_status("go");
-    match status {
-        suspect_codegen::toolchain::ToolStatus::Available { version } => Some(version),
-        _ => None,
-    }
+    // The manifest resolves the tool (`SUSPECT_GO_BIN`-style overrides,
+    // then `PATH`) and gates the version (>= 1.23); the skip message
+    // below quotes its install guidance verbatim.
+    suspect_codegen::toolchain::gate("go").ok().map(|path| {
+        path.to_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| "go".to_owned())
+    })
 }
 
 #[test]
@@ -363,10 +364,11 @@ fn native_module_builds_with_the_incoming_file() {
         );
         return;
     };
+    let go = go_toolchain().unwrap();
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate_document(incoming_document()), root.path()).unwrap();
     for arguments in [["build", "./..."], ["vet", "."]] {
-        let output = Command::new("go")
+        let output = Command::new(&go)
             .args(arguments)
             .current_dir(root.path().join("go"))
             .env("GOWORK", "off")
@@ -384,17 +386,17 @@ fn native_module_builds_with_the_incoming_file() {
 
 #[test]
 fn fake_webhook_deliveries_drive_the_decoder_and_constructor() {
-    let Some(version) = go_toolchain() else {
+    let Some(go) = go_toolchain() else {
         eprintln!(
             "go_incoming: Go toolchain (>= 1.23) not installed; degrading to static assertions"
         );
         return;
     };
-    eprintln!("go_incoming: {version}");
+    eprintln!("go_incoming: {go}");
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate_document(incoming_document()), root.path()).unwrap();
     std::fs::write(root.path().join("go/incoming_behavior_test.go"), BEHAVIOR).unwrap();
-    let output = Command::new("go")
+    let output = Command::new(&go)
         .args(["test", "-count=1", "-timeout=120s", "."])
         .current_dir(root.path().join("go"))
         .env("GOWORK", "off")

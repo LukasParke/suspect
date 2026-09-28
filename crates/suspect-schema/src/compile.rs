@@ -232,6 +232,28 @@ impl Compiler {
     /// Returns [`CompileError`] for malformed keyword values, nesting beyond
     /// [`Config::max_depth`], or invalid regular expressions.
     pub fn compile<'d>(&self, schema: NodeRef<'d>) -> Result<Schema<'d>, CompileError> {
+        self.compile_with_document_root(schema, None)
+    }
+
+    /// Compiles a schema subtree with an enclosing-document fallback for
+    /// local `$ref`s.
+    ///
+    /// Local pointers resolve against the compiled subtree first (the
+    /// historical behavior, matching standalone schema documents). When a
+    /// pointer misses — the case when a schema is compiled from inside a
+    /// larger OpenAPI document where `#/components/schemas/...` lives
+    /// outside the subtree — resolution falls back to `document_root`,
+    /// making component graphs and recursive schemas resolvable without
+    /// pre-inlining.
+    ///
+    /// # Errors
+    /// Returns [`CompileError`] for malformed keyword values, nesting beyond
+    /// [`Config::max_depth`], or invalid regular expressions.
+    pub fn compile_with_document_root<'d>(
+        &self,
+        schema: NodeRef<'d>,
+        document_root: Option<NodeRef<'d>>,
+    ) -> Result<Schema<'d>, CompileError> {
         let doc_uri = schema.syntax().doc().uri().as_str().to_owned();
         let scan = scan_doc(schema, &doc_uri, self.config.max_depth)?;
         let root_base = scan.base_for(&Pointer::root()).to_owned();
@@ -244,7 +266,21 @@ impl Compiler {
             0,
             &Pointer::root(),
         )?;
-        Ok(Schema::new(schema, program, scan, self.config.clone()))
+        let fallback = document_root.and_then(|root| {
+            let uri = root.syntax().doc().uri().as_str().to_owned();
+            // An unscannable document root (pathological depth) simply
+            // disables the fallback; subtree semantics apply.
+            scan_doc(root, &uri, self.config.max_depth)
+                .ok()
+                .map(|scan| (root, scan))
+        });
+        Ok(Schema::with_document_root(
+            schema,
+            program,
+            scan,
+            self.config.clone(),
+            fallback,
+        ))
     }
 }
 

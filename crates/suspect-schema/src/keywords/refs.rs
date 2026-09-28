@@ -19,10 +19,35 @@ pub(crate) fn resolve_target<'a, 'd>(
     if let Some(hit) = ctx.sch.cache.borrow().get(target) {
         return hit.clone();
     }
-    let Some(node) = ctx.sch.root_node().pointer(target) else {
-        return Ok(None);
+    if let Some(node) = ctx.sch.root_node().pointer(target) {
+        return compile_target(ctx, target, node, false);
+    }
+    // Subtree miss: fall back to the enclosing document root so schemas
+    // compiled from inside a larger document can reach sibling resources
+    // (`#/components/schemas/...`) without pre-inlining.
+    if let Some((root, _scan)) = ctx.sch.document_fallback()
+        && let Some(node) = root.pointer(target)
+    {
+        return compile_target(ctx, target, node, true);
+    }
+    Ok(None)
+}
+
+/// Compiles one `$ref` target as its own resource, cached by pointer.
+fn compile_target<'a, 'd>(
+    ctx: &Ctx<'a, 'd>,
+    target: &Pointer,
+    node: NodeRef<'d>,
+    from_document_fallback: bool,
+) -> Result<Option<Prg<'d>>, CompileError> {
+    let scan = if from_document_fallback {
+        ctx.sch
+            .document_fallback()
+            .map(|(_, scan)| scan)
+            .unwrap_or_else(|| ctx.sch.scan())
+    } else {
+        ctx.sch.scan()
     };
-    let scan = ctx.sch.scan();
     let base = scan.base_for(target);
     let res_ptr = scan.resource_for(target);
     let compiler = Compiler::new(ctx.sch.config().clone());

@@ -76,6 +76,11 @@ fn check_groups() -> Vec<(&'static str, CheckFn)> {
     ]
 }
 
+/// The opt-in `format` assertion pass (see [`schema_instances`]).
+pub(crate) fn run_format_assertions(api: &OpenApi<'_>, out: &mut Vec<Diagnostic>) {
+    schema_instances::check_format_assertions(api, out);
+}
+
 /// Runs every check group against `api`, appending findings to `out` in
 /// module order; the caller sorts the accumulated diagnostics.
 ///
@@ -145,6 +150,27 @@ pub(crate) fn diag(
 }
 
 /// Builds a diagnostic anchored to the node's actual source document.
+/// Like [`diag_at`], but attributes the diagnostic to an explicit
+/// document — used when the schema is compiled in a synthetic wrapper
+/// document and the finding must land in the original file.
+pub(crate) fn diag_for(
+    doc: &suspect_source::Uri,
+    code: &'static str,
+    severity: Severity,
+    range: std::ops::Range<usize>,
+    message: impl Into<String>,
+) -> Diagnostic {
+    Diagnostic {
+        code,
+        severity,
+        message: message.into(),
+        range,
+        doc: doc.clone(),
+        summary: crate::guidance::summary(code),
+        how_to_fix: crate::guidance::how_to_fix(code),
+    }
+}
+
 pub(crate) fn diag_at(
     node: NodeRef<'_>,
     code: &'static str,
