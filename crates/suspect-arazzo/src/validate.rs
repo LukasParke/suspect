@@ -146,7 +146,7 @@ pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
             validate_step(step, &workflow_ids, &mut out);
             validate_step_dependencies(wf, step, &mut out);
             validate_step_targets(step, &mut out);
-            validate_step_async_fields(wf, step, doc, &mut out);
+            validate_step_async_fields(step, doc, &mut out);
         }
         validate_sequential_outputs(wf, &mut out);
         validate_actions(wf.success_actions(), &workflow_ids, &mut out);
@@ -520,7 +520,6 @@ fn validate_step_targets(step: &crate::StepView<'_>, out: &mut Vec<ArazzoDiagnos
 /// Arazzo 1.1 AsyncAPI step fields: `action`/`correlationId` belong on
 /// AsyncAPI steps; `channelPath` must reference an asyncapi source.
 fn validate_step_async_fields(
-    wf: &crate::WorkflowView<'_>,
     step: &crate::StepView<'_>,
     doc: &ArazzoDoc<'_>,
     out: &mut Vec<ArazzoDiagnostic>,

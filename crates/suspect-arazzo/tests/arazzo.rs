@@ -409,9 +409,9 @@ fn arazzo_11_document_validates_clean() {
 
 #[test]
 fn arazzo_11_self_fragment_rejected() {
-    let doc = parse_yaml(&format!(
-        "arazzo: 1.1.0\n$self: https://api.example.com/flows.yaml#other\ninfo: {{title: t, version: '1'}}\nsourceDescriptions:\n  - {{name: api, url: openapi.yaml, type: openapi}}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n"
-    ));
+    let doc = parse_yaml(
+        "arazzo: 1.1.0\n$self: https://api.example.com/flows.yaml#other\ninfo: {title: t, version: '1'}\nsourceDescriptions:\n  - {name: api, url: openapi.yaml, type: openapi}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n",
+    );
     let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
     let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
     assert!(codes.contains(&"arazzo-self-fragment"), "{codes:?}");
@@ -470,9 +470,9 @@ fn selector_outputs_are_admission_diagnostics() {
 
 #[test]
 fn asyncapi_step_fields_are_validated() {
-    let doc = parse_yaml(&format!(
-        "arazzo: 1.1.0\ninfo: {{title: t, version: '1'}}\nsourceDescriptions:\n  - {{name: bus, url: asyncapi.yaml, type: asyncapi}}\n  - {{name: api, url: openapi.yaml, type: openapi}}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: badSource\n        channelPath: '$sourceDescriptions.api.channels/orders'\n      - stepId: okSource\n        channelPath: '$sourceDescriptions.bus.channels/orders'\n        action: receive\n        correlationId: '$inputs.correlationId'\n      - stepId: httpWithAction\n        operationId: listPets\n        action: send\n"
-    ));
+    let doc = parse_yaml(
+        "arazzo: 1.1.0\ninfo: {title: t, version: '1'}\nsourceDescriptions:\n  - {name: bus, url: asyncapi.yaml, type: asyncapi}\n  - {name: api, url: openapi.yaml, type: openapi}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: badSource\n        channelPath: '$sourceDescriptions.api.channels/orders'\n      - stepId: okSource\n        channelPath: '$sourceDescriptions.bus.channels/orders'\n        action: receive\n        correlationId: '$inputs.correlationId'\n      - stepId: httpWithAction\n        operationId: listPets\n        action: send\n",
+    );
     let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
     let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
     assert!(

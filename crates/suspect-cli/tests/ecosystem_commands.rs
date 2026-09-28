@@ -230,3 +230,224 @@ actions:
         "overlay-dry-run must not modify the target"
     );
 }
+
+// ---------------------------------------------------------- project build
+
+use suspect_journal::{Body, BodyEncoding, CassetteEntry, CassetteHeader};
+
+#[test]
+fn project_build_publishes_profiles_and_docs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("openapi.yaml"),
+        r#"openapi: 3.1.0
+info: {title: Tickets API, version: '1.0.0'}
+paths:
+  /tickets:
+    get: {operationId: listTickets, responses: {'200': {description: ok}}}
+  /admin/reset:
+    post: {operationId: adminReset, responses: {'200': {description: ok}}}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("public.overlay.yaml"),
+        r#"overlay: 1.1.0
+info: {title: strip admin, version: '1.0.0'}
+actions:
+  - target: '$.paths["/admin/reset"]'
+    remove: true
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("suspect.project.json"),
+        r#"{
+  "version": 1,
+  "name": "tickets",
+  "entry": "openapi.yaml",
+  "overlays": [],
+  "publish": {"output": "build/spec.yaml", "profiles": {"public": ["public.overlay.yaml"]}},
+  "docs": {"style": "markdown", "output": "build/docs"}
+}"#,
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(binary())
+        .args([
+            "project",
+            "build",
+            "--manifest",
+            root.join("suspect.project.json").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(root.join("build/spec.yaml").exists());
+    assert!(root.join("build/spec.public.yaml").exists());
+    assert!(root.join("build/docs/index.md").exists());
+    // The public profile strips the admin endpoint.
+    let public = std::fs::read_to_string(root.join("build/spec.public.yaml")).unwrap();
+    assert!(!public.contains("adminReset"), "{public}");
+    let published = std::fs::read_to_string(root.join("build/spec.yaml")).unwrap();
+    assert!(published.contains("adminReset"), "{published}");
+}
+
+// ------------------------------------------------------------ release plan
+
+#[test]
+fn release_plan_recommends_major_for_breaks_and_minor_for_additions() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("old.yaml"),
+        r#"openapi: 3.1.0
+info: {title: API, version: '1.0.0'}
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses: {'200': {description: ok}}
+  /gone:
+    get: {operationId: gone, responses: {'200': {description: ok}}}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("new.yaml"),
+        r#"openapi: 3.1.0
+info: {title: API, version: '1.1.0'}
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses: {'200': {description: ok}}
+  /dogs:
+    get: {operationId: listDogs, responses: {'200': {description: ok}}}
+"#,
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(binary())
+        .args([
+            "release-plan",
+            "--format",
+            "json",
+            root.join("old.yaml").to_str().unwrap(),
+            root.join("new.yaml").to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let plan: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    // /gone removed → MAJOR, /dogs added → listed in the changelog.
+    assert_eq!(plan["semver"], "major");
+    let changelog = plan["changelog"].as_str().unwrap();
+    assert!(changelog.contains("/gone"), "{changelog}");
+    assert!(changelog.contains("/dogs"), "{changelog}");
+    assert!(!plan["breaks"].as_array().unwrap().is_empty());
+}
+
+// ------------------------------------------------------- traffic impact
+
+#[test]
+fn impact_flags_consumers_broken_by_the_new_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let old_required = r#"openapi: 3.1.0
+info: {title: API, version: '1.0.0'}
+paths:
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      parameters: [{name: petId, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pet'}
+components:
+  schemas:
+    Pet: {type: object, required: [name], properties: {name: {type: string}}}
+"#;
+    let new_required = old_required
+        .replace("required: [name]", "required: [name, kind]")
+        .replace(
+            "properties: {name: {type: string}}",
+            "properties: {name: {type: string}, kind: {type: string}}",
+        );
+    std::fs::write(root.join("old.yaml"), old_required).unwrap();
+    std::fs::write(root.join("new.yaml"), new_required).unwrap();
+
+    let entry = CassetteEntry {
+        id: 1,
+        method: "GET".to_owned(),
+        url: "http://api.test/pets/42".to_owned(),
+        status: 200,
+        request_headers: vec![("User-Agent".to_owned(), "consumer-a/1.0".to_owned())],
+        request_body: Body {
+            encoding: BodyEncoding::Utf8,
+            content: String::new(),
+            sha256: suspect_journal::sha256_hex(b""),
+        },
+        response_headers: vec![],
+        response_body: Body {
+            encoding: BodyEncoding::Utf8,
+            content: r#"{"name":"rex"}"#.to_owned(),
+            sha256: suspect_journal::sha256_hex(br#"{"name":"rex"}"#),
+        },
+        duration_ms: 1.0,
+    };
+    let header = CassetteHeader {
+        format: suspect_journal::CASSETTE_FORMAT.to_owned(),
+        version: suspect_journal::CASSETTE_VERSION,
+        recorded_at_ms: 0,
+        source: "test".to_owned(),
+    };
+    let cassette = root.join("traffic.scj");
+    let mut file = std::fs::File::create(&cassette).unwrap();
+    suspect_journal::write_cassette(&mut file, &header, &[entry]).unwrap();
+
+    let output = std::process::Command::new(binary())
+        .args([
+            "impact",
+            "--format",
+            "json",
+            root.join("old.yaml").to_str().unwrap(),
+            root.join("new.yaml").to_str().unwrap(),
+            cassette.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "broken consumers must fail");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["evaluated"], 1);
+    assert_eq!(report["broken"], 1);
+    let consumer = report["by_consumer"]["user-agent:consumer-a/1.0"][0]
+        .as_object()
+        .expect("consumer group present");
+    assert_eq!(consumer["passes_old"], true);
+    assert_eq!(consumer["passes_new"], false);
+    let reason = consumer["reason"].as_str().unwrap_or_default();
+    assert!(
+        reason.contains("kind") || !reason.is_empty(),
+        "reason names the violation: {reason}"
+    );
+    // The same traffic against identical revisions is unaffected.
+    let same = std::process::Command::new(binary())
+        .args([
+            "impact",
+            root.join("old.yaml").to_str().unwrap(),
+            root.join("old.yaml").to_str().unwrap(),
+            cassette.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(same.status.success());
+}

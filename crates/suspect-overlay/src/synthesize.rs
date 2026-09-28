@@ -25,7 +25,7 @@ pub fn synthesize_overlay(old_root: NodeRef<'_>, new_root: NodeRef<'_>, title: &
     let old = Value::from_node(old_root);
     let new = Value::from_node(new_root);
     let mut pending: Vec<Pending> = Vec::new();
-    diff_node(&mut Vec::new(), &old, &new, &mut pending);
+    diff_node(&[], &old, &new, &mut pending);
 
     let mut actions: Vec<Value> = Vec::new();
     for p in pending {
@@ -58,6 +58,7 @@ pub fn synthesize_overlay(old_root: NodeRef<'_>, new_root: NodeRef<'_>, title: &
 }
 
 fn diff_node(prefix: &[String], old: &Value, new: &Value, out: &mut Vec<Pending>) {
+    #[allow(clippy::needless_pass_by_ref_mut)] // recursive helper accumulates via `out`
     match (old, new) {
         (Value::Object(old_entries), Value::Object(new_entries)) => {
             // Removals first so subsequent insertions cannot collide with
@@ -72,10 +73,10 @@ fn diff_node(prefix: &[String], old: &Value, new: &Value, out: &mut Vec<Pending>
             // Added keys merge into one update per parent.
             let mut added = Value::Object(Vec::new());
             for (k, nv) in new_entries {
-                if old.get(k).is_none() {
-                    if let Value::Object(entries) = &mut added {
-                        entries.push((k.clone(), nv.clone()));
-                    }
+                if old.get(k).is_none()
+                    && let Value::Object(entries) = &mut added
+                {
+                    entries.push((k.clone(), nv.clone()));
                 }
             }
             if let Value::Object(entries) = &added

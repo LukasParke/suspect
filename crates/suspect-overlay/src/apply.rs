@@ -190,7 +190,7 @@ fn apply_action(
                 index,
                 path: action.target.to_owned(),
             })?;
-            merge_checked(node, &source_value, index, &action.target)?;
+            merge_checked(node, &source_value, index, action.target)?;
         }
         return Ok(true);
     }
@@ -206,7 +206,7 @@ fn apply_action(
             path: action.target.to_owned(),
         })?;
         match node {
-            Value::Object(_) => merge_checked(node, &update, index, &action.target)?,
+            Value::Object(_) => merge_checked(node, &update, index, action.target)?,
             // Overlay 1.1 §4.4.3: an array update concatenates; an object or
             // primitive update appends.
             Value::Array(items) => match &update {
