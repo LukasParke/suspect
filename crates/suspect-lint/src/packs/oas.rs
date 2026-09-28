@@ -156,6 +156,14 @@ pub(crate) fn rules() -> Vec<Rule> {
             Function::NoTrailingSlash,
         ),
         Rule::new(
+            "server-variables",
+            "Templated server URLs must declare every variable they use.",
+            Severity::Error,
+            FamilySet::OAS3,
+            &["$.servers.*"],
+            Function::ServerVariablesDeclared,
+        ),
+        Rule::new(
             "no-$ref-siblings",
             "$ref values must not have siblings other than description/summary (3.0).",
             Severity::Error,

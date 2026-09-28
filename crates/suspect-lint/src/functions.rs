@@ -126,9 +126,13 @@ pub(crate) enum Function {
     /// Passes when the matched node is falsy (`null`, `false`, empty string).
     Falsy,
     /// Key must exist; the given query selects the parent object.
-    Defined { property: Box<str> },
+    Defined {
+        property: Box<str>,
+    },
     /// Passes when the named key does not exist on the matched object.
-    Undefined { property: Box<str> },
+    Undefined {
+        property: Box<str>,
+    },
     /// Passes when a matched string matches the compiled regex.
     Pattern(Regex),
     /// Passes only when a matched string does NOT match the compiled
@@ -138,13 +142,18 @@ pub(crate) enum Function {
     Casing(Casing),
     /// Passes when the string's character count or array's item count lies
     /// within `[min, max]` bounds; non-sized nodes always pass.
-    Length { min: Option<f64>, max: Option<f64> },
+    Length {
+        min: Option<f64>,
+        max: Option<f64>,
+    },
     /// Passes when the node equals one of the allowed scalar values.
     Enumeration(Vec<EnumValue>),
     /// Passes when every key of the matched object is alphabetically sorted.
     Alphabetical,
     /// Passes when exactly one of the named properties is truthy.
-    Xor { properties: Vec<Box<str>> },
+    Xor {
+        properties: Vec<Box<str>>,
+    },
     /// Native: every `{var}` in a path key is declared as an `in: path`
     /// parameter on every operation of the path item.
     PathParams,
@@ -160,7 +169,10 @@ pub(crate) enum Function {
     SuccessResponse,
     /// Native: every operation's `responses` has an entry in the status
     /// range (e.g. 400–499 for `operation-4xx-response`).
-    StatusRange { low: u16, high: u16 },
+    StatusRange {
+        low: u16,
+        high: u16,
+    },
     /// Native: `operationId` values must be unique across the document.
     UniqueOperationIds,
     /// Native: security requirements must name declared schemes
@@ -187,6 +199,7 @@ pub(crate) enum Function {
     TagDefined,
     /// Native: path keys contain no `?` query suffix.
     PathNoQuery,
+    ServerVariablesDeclared,
     /// Native: the matched URL string uses the `https` scheme.
     HttpsUrl,
     /// Native: the matched security scheme is not HTTP Basic.
@@ -245,6 +258,7 @@ impl Function {
             Self::UnusedComponent => "component is never referenced",
             Self::TagDefined => "operation tag must be declared in the root tags list",
             Self::PathNoQuery => "path key must not contain a query string",
+            Self::ServerVariablesDeclared => "server URL variables must be declared",
             Self::HttpsUrl => "server URL must use HTTPS",
             Self::NoBasicAuth => "HTTP Basic authentication is discouraged",
             Self::NoApiKeyInQuery => "API keys must not travel in the query string",
@@ -385,6 +399,9 @@ pub(crate) fn apply<'d>(
         Function::UnusedComponent => check_unused_component(&node, rule, ptrs, out),
         Function::TagDefined => check_tag_defined(&node, rule, ptrs, out),
         Function::PathNoQuery => check_path_no_query(&node, rule, ptrs, out),
+        Function::ServerVariablesDeclared => {
+            check_server_variables_declared(&node, rule, ptrs, out)
+        }
         Function::HttpsUrl => check_https_url(&node, rule, ptrs, out),
         Function::NoBasicAuth => check_no_basic_auth(&node, rule, ptrs, out),
         Function::NoApiKeyInQuery => check_no_api_key_in_query(&node, rule, ptrs, out),
@@ -1168,6 +1185,37 @@ fn check_delete_requires_id<'d>(
         }),
     };
     if !has_id_var {
+        push(out, rule, node, ptrs);
+    }
+}
+
+/// Templated server URLs must declare every `{variable}` they use.
+fn check_server_variables_declared<'d>(
+    node: &NodeRef<'d>,
+    rule: &Rule,
+    ptrs: &super::fast::PtrMap,
+    out: &mut Vec<Finding<'d>>,
+) {
+    let resolved = node.resolved();
+    let Some(url) = resolved.get("url").and_then(|u| u.as_str()) else {
+        return;
+    };
+    let declared: Vec<String> = resolved
+        .get("variables")
+        .map(|v| {
+            v.entries()
+                .iter()
+                .map(|e| e.key.to_ascii_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    let missing: Vec<&str> = url
+        .split(['{', '}'])
+        .skip(1)
+        .step_by(2)
+        .filter(|name| !name.is_empty() && !declared.contains(&name.to_ascii_lowercase()))
+        .collect();
+    if !missing.is_empty() {
         push(out, rule, node, ptrs);
     }
 }

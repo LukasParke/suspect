@@ -17,6 +17,8 @@ use crate::config::Config;
 use crate::errors::CompileError;
 use crate::keywords::cardinality::CountBound;
 use crate::number::{Divisor, ExactNumber, NumberError};
+use std::sync::Arc;
+
 use crate::resources::{self, Scan, resolve_ref_target, scan_doc};
 use crate::{PatternError, PatternErrorKind, PatternProgram, compile_pattern};
 
@@ -232,6 +234,30 @@ impl Compiler {
     /// Returns [`CompileError`] for malformed keyword values, nesting beyond
     /// [`Config::max_depth`], or invalid regular expressions.
     pub fn compile<'d>(&self, schema: NodeRef<'d>) -> Result<Schema<'d>, CompileError> {
+        self.compile_with_document_root(schema, None)
+    }
+
+    /// Compiles a schema subtree with an enclosing-document fallback for
+    /// local `$ref`s.
+    ///
+    /// Local pointers resolve against the compiled subtree first (the
+    /// historical behavior, matching standalone schema documents). When a
+    /// pointer misses — the case when a schema is compiled from inside a
+    /// larger OpenAPI document where `#/components/schemas/...` lives
+    /// outside the subtree — resolution falls back to `refs`, making
+    /// component graphs and recursive schemas resolvable without
+    /// pre-inlining. Build the [`DocumentRefs`] once per enclosing
+    /// document and share it across every compile: the fallback's
+    /// resource scan is computed once, not per compile.
+    ///
+    /// # Errors
+    /// Returns [`CompileError`] for malformed keyword values, nesting beyond
+    /// [`Config::max_depth`], or invalid regular expressions.
+    pub fn compile_with_document_root<'d>(
+        &self,
+        schema: NodeRef<'d>,
+        refs: Option<&DocumentRefs<'d>>,
+    ) -> Result<Schema<'d>, CompileError> {
         let doc_uri = schema.syntax().doc().uri().as_str().to_owned();
         let scan = scan_doc(schema, &doc_uri, self.config.max_depth)?;
         let root_base = scan.base_for(&Pointer::root()).to_owned();
@@ -244,7 +270,32 @@ impl Compiler {
             0,
             &Pointer::root(),
         )?;
-        Ok(Schema::new(schema, program, scan, self.config.clone()))
+        Ok(Schema::with_document_root(
+            schema,
+            program,
+            scan,
+            self.config.clone(),
+            refs.map(|r| (r.root, Arc::clone(&r.scan))),
+        ))
+    }
+}
+
+/// The enclosing-document fallback for local `$ref`s: the document root
+/// node plus its precomputed resource scan, shared across compiles.
+pub struct DocumentRefs<'d> {
+    root: NodeRef<'d>,
+    scan: Arc<Scan>,
+}
+
+impl<'d> DocumentRefs<'d> {
+    /// Scans `root` once for repeated `$ref` fallback resolution.
+    ///
+    /// # Errors
+    /// Returns [`CompileError`] when the document cannot be scanned.
+    pub fn scan(root: NodeRef<'d>, max_depth: usize) -> Result<Self, CompileError> {
+        let uri = root.syntax().doc().uri().as_str().to_owned();
+        let scan = Arc::new(scan_doc(root, &uri, max_depth)?);
+        Ok(Self { root, scan })
     }
 }
 

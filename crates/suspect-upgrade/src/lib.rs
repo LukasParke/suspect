@@ -44,11 +44,16 @@ pub fn upgrade(doc: &Value) -> Result<Value, String> {
 
     // Servers: schemes x host x basePath fold into one server entry per
     // scheme (or a single entry when schemes is absent).
-    let schemes: Vec<&str> = obj
+    let obj_schemes: Vec<Value> = obj
         .get("schemes")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_else(|| vec!["https"]);
+        .cloned()
+        .unwrap_or_default();
+    let schemes: Vec<&str> = if obj_schemes.is_empty() {
+        vec!["https"]
+    } else {
+        obj_schemes.iter().filter_map(Value::as_str).collect()
+    };
     let host = obj.get("host").and_then(Value::as_str).unwrap_or("");
     let base_path = obj.get("basePath").and_then(Value::as_str).unwrap_or("");
     let servers: Vec<Value> = schemes
@@ -68,7 +73,14 @@ pub fn upgrade(doc: &Value) -> Result<Value, String> {
     if let Value::Object(path_map) = &paths {
         let mut upgraded_paths = Map::new();
         for (path_key, path_item) in path_map {
-            if let Some(upgraded) = upgrade_path_item(path_item, &root_consumes, &root_produces) {
+            if let Some(upgraded) = upgrade_path_item(
+                path_item,
+                &root_consumes,
+                &root_produces,
+                host,
+                base_path,
+                &obj_schemes,
+            ) {
                 upgraded_paths.insert(path_key.clone(), upgraded);
             }
         }
@@ -164,10 +176,14 @@ fn media_types(value: Option<&Value>) -> Vec<String> {
 }
 
 /// Upgrades one path item: methods plus path-level parameters.
+#[allow(clippy::too_many_arguments)]
 fn upgrade_path_item(
     path_item: &Value,
     root_consumes: &[String],
     root_produces: &[String],
+    host: &str,
+    base_path: &str,
+    obj_schemes: &[Value],
 ) -> Option<Value> {
     let item = path_item.as_object()?;
     let methods = ["get", "put", "post", "delete", "options", "head", "patch"];
@@ -373,16 +389,20 @@ fn upgrade_path_item(
             upgraded.insert("responses".into(), Value::Object(upgraded_responses));
         }
 
-        // Schemes at operation level fold into a servers override.
-        if let Some(op_schemes) = op_obj.get("schemes").and_then(Value::as_array) {
-            if let Some(host) = host_of(&upgraded) {
-                let _ = host;
+        // 2.0 operation-level `schemes` constrain the protocol; the 3.1
+        // form is per-operation servers derived from the root host and
+        // base path. Skipped when absent or identical to the root set.
+        if let Some(op_schemes) = op_obj.get("schemes").and_then(Value::as_array)
+            && !root_schemes_equivalent(op_schemes, obj_schemes)
+        {
+            let servers: Vec<Value> = op_schemes
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|scheme| json!({"url": format!("{scheme}://{host}{base_path}")}))
+                .collect();
+            if !servers.is_empty() {
+                upgraded.insert("servers".into(), Value::Array(servers));
             }
-            // 2.0 operation schemes constrain the protocol; the 3.1 form is
-            // per-operation servers. We cannot reconstruct the host here
-            // without the root — leave a marker extension.
-            let schemes_list: Vec<Value> = op_schemes.clone();
-            upgraded.insert("x-schemes".into(), Value::Array(schemes_list));
         }
 
         out.insert(method.into(), Value::Object(upgraded));
@@ -398,10 +418,15 @@ fn upgrade_path_item(
     Some(Value::Object(out))
 }
 
-/// Extracts the 2.0 root host (helper for future server-per-operation
-/// overrides).
-fn host_of(_upgraded: &Map<String, Value>) -> Option<&str> {
-    None
+/// Whether the operation's scheme list covers exactly the root scheme
+/// list (same set, order-insensitive), in which case no per-operation
+/// server override is needed.
+fn root_schemes_equivalent(op_schemes: &[Value], root_schemes: &[Value]) -> bool {
+    let op_set: std::collections::BTreeSet<&str> =
+        op_schemes.iter().filter_map(Value::as_str).collect();
+    let root_set: std::collections::BTreeSet<&str> =
+        root_schemes.iter().filter_map(Value::as_str).collect();
+    !op_set.is_empty() && op_set == root_set
 }
 
 /// Upgrades a 2.0 schema object: `discriminator: string` → object form,
@@ -489,7 +514,9 @@ fn upgrade_security_definitions(defs: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use suspect_source::Uri;
+    use suspect_low::LowDoc;
+
+    use suspect_source::{Source, Uri};
 
     const SWAGGER: &str = r#"
 swagger: "2.0"
@@ -579,6 +606,14 @@ definitions:
             obj["components"]["securitySchemes"]["Basic"],
             json!({"type": "http", "scheme": "basic"})
         );
+        // Operation-level schemes narrower than the root become
+        // per-operation servers (not a marker extension).
+        assert!(upgraded["paths"]["/pets"]["post"].get("servers").is_none());
+        let op = upgrade(&doc_with_op_scheme()).unwrap();
+        assert_eq!(
+            op["paths"]["/pets/{petId}"]["delete"]["servers"][0]["url"],
+            "http://api.example.com/v1"
+        );
         // OAuth flow rename application → clientCredentials.
         assert!(
             obj["components"]["securitySchemes"]["OAuth"]["flows"]["clientCredentials"].is_object()
@@ -603,6 +638,33 @@ definitions:
                 .as_str()
                 .is_some_and(|r| r.ends_with("Pet"))
         );
+    }
+
+    /// A document whose delete operation constrains to http while the
+    /// root allows https too.
+    fn doc_with_op_scheme() -> Value {
+        let uri = Uri::parse("mem://s.yaml").unwrap();
+        let low = LowDoc::parse(
+            uri,
+            Source::from_vec(
+                br#"swagger: "2.0"
+info: {title: Pets, version: "1"}
+host: api.example.com
+basePath: /v1
+schemes: [https, http]
+paths:
+  /pets/{petId}:
+    delete:
+      operationId: deletePet
+      schemes: [http]
+      responses:
+        '204': {description: removed}
+"#
+                .to_vec(),
+            ),
+        );
+        let json = suspect_overlay::Value::from_node(low.root()).to_json();
+        serde_json::from_str(&json).unwrap()
     }
 
     #[test]

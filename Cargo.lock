@@ -2130,6 +2130,7 @@ dependencies = [
  "suspect-syntax",
  "suspect-test",
  "suspect-validate",
+ "tempfile",
  "thiserror",
  "tokio",
  "tower-lsp",

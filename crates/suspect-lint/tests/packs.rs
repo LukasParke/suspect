@@ -212,6 +212,11 @@ fn cases() -> Vec<Case> {
             clean: "swagger: \"2.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          description: ok\n          schema:\n            $ref: '#/definitions/Used'\ndefinitions:\n  Used: {type: object}\n",
         },
         Case {
+            code: "server-variables",
+            firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers:\n  - url: 'https://{region}.api.example.com'\npaths: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers:\n  - url: 'https://{region}.api.example.com'\n    variables:\n      region:\n        default: us\npaths: {}\n",
+        },
+        Case {
             code: "security-server-https-only",
             firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: http://api.example.org}]\npaths: {}\n",
             clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\nservers: [{url: https://api.example.org}]\npaths: {}\n",

@@ -23,6 +23,7 @@ tower-lsp.workspace = true
 tokio = { workspace = true, features = ["io-std"] }
 thiserror.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 serde.workspace = true
 suspect-test.workspace = true
 suspect-gen.workspace = true
@@ -45,6 +46,7 @@ suspect-validate.workspace = true
 suspect-codegen.workspace = true
 suspect-ir.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 criterion.workspace = true
 

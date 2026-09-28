@@ -109,11 +109,123 @@ pub fn arazzo_break_findings(
                         message: format!("workflow '{new_id}': step '{step_id}' removed"),
                         severity: "error".into(),
                     });
+                    continue;
+                }
+                let Some(new_step) = new_steps
+                    .iter()
+                    .find(|s| s.get("stepId").and_then(|v| v.as_str()) == Some(step_id))
+                else {
+                    continue;
+                };
+                // Changed operation target: the step now drives a
+                // different operation — replays break.
+                let old_target = step_operation_target(old_step);
+                let new_target = step_operation_target(new_step);
+                if let (Some(old), Some(new)) = (&old_target, &new_target)
+                    && old != new
+                {
+                    breaks.push(ArazzoBreak {
+                        message: format!(
+                            "workflow '{new_id}': step '{step_id}' now targets \
+                             operation '{new}' (was '{old}')"
+                        ),
+                        severity: "error".into(),
+                    });
+                }
+                // Removed workflow inputs: callers supplying them fail.
+                // Arazzo wraps concrete values under `$values`; the input
+                // names live there when present.
+                let old_inputs = input_names(old_wf.get("inputs"));
+                let new_inputs = input_names(new_wf.get("inputs"));
+                for input in &old_inputs - &new_inputs {
+                    breaks.push(ArazzoBreak {
+                        message: format!("workflow '{new_id}': workflow input '{input}' removed"),
+                        severity: "error".into(),
+                    });
+                }
+                // Removed outputs: dependent workflows lose their source.
+                let old_outputs = name_set(old_wf.get("outputs"));
+                let new_outputs = name_set(new_wf.get("outputs"));
+                for output in &old_outputs - &new_outputs {
+                    breaks.push(ArazzoBreak {
+                        message: format!("workflow '{new_id}': workflow output '{output}' removed"),
+                        severity: "error".into(),
+                    });
+                }
+                // Removed step outputs: later steps' expressions dangle.
+                let old_step_outputs = name_set(old_step.get("outputs"));
+                let new_step_outputs = name_set(new_step.get("outputs"));
+                for output in &old_step_outputs - &new_step_outputs {
+                    breaks.push(ArazzoBreak {
+                        message: format!(
+                            "workflow '{new_id}': step '{step_id}' output \
+                             '{output}' removed"
+                        ),
+                        severity: "error".into(),
+                    });
+                }
+                // Changed success criteria: the pass/fail contract moves.
+                if !criteria_equal(
+                    old_step.get("successCriteria"),
+                    new_step.get("successCriteria"),
+                ) {
+                    breaks.push(ArazzoBreak {
+                        message: format!(
+                            "workflow '{new_id}': step '{step_id}' success \
+                             criteria changed"
+                        ),
+                        severity: "warning".into(),
+                    });
                 }
             }
         }
     }
     Ok(breaks)
+}
+
+/// The operation a step drives: `operationPath` (Arazzo) resolved to its
+/// trailing operationId fragment, or the `workflowId` reference.
+fn step_operation_target(step: &serde_json::Value) -> Option<String> {
+    if let Some(operation_path) = step.get("operationPath").and_then(|v| v.as_str()) {
+        // `#/paths/~1pets/get` or `openapi.yaml#/paths/...` — the
+        // decoded operation identity is the fragment tail.
+        let tail = operation_path.rsplit('/').next().unwrap_or(operation_path);
+        return Some(tail.to_owned());
+    }
+    step.get("workflowId")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+}
+
+/// Workflow input names: the keys of `inputs` or of its `$values` map.
+fn input_names(value: Option<&serde_json::Value>) -> std::collections::BTreeSet<String> {
+    let Some(inputs) = value else {
+        return Default::default();
+    };
+    if let Some(values) = inputs.get("$values").and_then(|v| v.as_object()) {
+        return values.keys().cloned().collect();
+    }
+    inputs
+        .as_object()
+        .map(|map| map.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// The set of mapping keys under an `inputs`/`outputs` node.
+fn name_set(value: Option<&serde_json::Value>) -> std::collections::BTreeSet<String> {
+    value
+        .and_then(|v| v.as_object())
+        .map(|map| map.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+/// Structural equality for success criteria (a criterion list).
+fn criteria_equal(old: Option<&serde_json::Value>, new: Option<&serde_json::Value>) -> bool {
+    match (old, new) {
+        (None, None) => true,
+        (Some(old), Some(new)) => old == new,
+        _ => false,
+    }
 }
 
 /// Runs the review and prints the report; exits non-zero on breaks.

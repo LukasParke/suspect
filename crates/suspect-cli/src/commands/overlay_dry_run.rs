@@ -58,10 +58,18 @@ pub fn overlay_dry_run(args: &OverlayDryRunArgs) -> anyhow::Result<i32> {
             eprintln!("action {idx}: no target (skipped)");
             continue;
         };
-        let matches = suspect_jsonpath::Path::parse(target_expr)
-            .map(|path| path.query(target_doc.root()).len())
-            .unwrap_or(0);
-        let update_kind = if action.get("remove").and_then(|r| r.as_bool()) == Some(true) {
+        // Overlay targets conventionally use bare dot segments for keys
+        // with special characters (`$.paths./pets.get`). Normalize the
+        // expression to RFC 9535 bracket form before matching, and count
+        // both forms so a parser regression cannot silently zero out.
+        let normalized = normalize_target(target_expr);
+        let parse = |expr: &str| {
+            suspect_jsonpath::Path::parse(expr)
+                .map(|path| path.query(target_doc.root()).len())
+                .unwrap_or(0)
+        };
+        let matches = std::cmp::max(parse(target_expr), parse(&normalized));
+        let update_kind = if action.get("remove").and_then(|r| r.as_str()) == Some("true") {
             "remove"
         } else {
             "update"
@@ -77,4 +85,46 @@ pub fn overlay_dry_run(args: &OverlayDryRunArgs) -> anyhow::Result<i32> {
         actions.len()
     );
     Ok(i32::from(zero_match > 0))
+}
+
+/// Normalizes an Overlay/JSONPath target so that dot segments naming
+/// keys with special characters become bracket segments:
+/// `$.paths./pets.get` → `$['paths']['/pets'].get`.
+///
+/// Filter expressions (`?(...)`) and descendant probes (`..`) are
+/// returned unchanged — the rewrite only covers the plain member-access
+/// shapes the Overlay spec's examples use.
+#[must_use]
+pub fn normalize_target(expr: &str) -> String {
+    if expr.contains("?(") || expr.contains("..") {
+        return expr.to_owned();
+    }
+    let Some((anchor, rest)) = expr.split_once('$') else {
+        return expr.to_owned();
+    };
+    let _ = anchor;
+    let mut out = String::from("$");
+    for segment in rest.split('.') {
+        if segment.is_empty() {
+            continue;
+        }
+        if segment == "*" {
+            out.push_str(".*");
+            continue;
+        }
+        let simple = segment
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '-')
+            && segment
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$');
+        if simple {
+            out.push('.');
+            out.push_str(segment);
+        } else {
+            out.push_str(&format!("['{}']", segment.replace('\'', "\\'")));
+        }
+    }
+    out
 }
