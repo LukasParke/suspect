@@ -79,7 +79,8 @@ pub enum Command {
     Admission(commands::admission::AdmissionArgs),
     /// Detect consumer-breaking changes between two spec revisions.
     Breaking(commands::breaking::BreakingArgs),
-    /// Generate a static HTML API reference from an OpenAPI document.
+    /// Generate API reference docs (HTML, Markdown, or a SvelteKit site).
+    #[command(name = "docs", alias = "docs-gen")]
     DocsGen(commands::docs_gen_cmd::DocsGenArgs),
     /// Generate typed server stubs from an OpenAPI document.
     Stubs(commands::stubs::StubsArgs),
