@@ -1,15 +1,19 @@
 #![deny(missing_docs)]
-//! suspect-arazzo: Arazzo 1.0 models, runtime expressions, validation.
+//! suspect-arazzo: Arazzo 1.0/1.1 models, runtime expressions, validation.
 //!
 //! The workflow *execution* engine is out of scope by design; this crate
 //! covers document models, the full runtime-expression grammar (parser +
 //! evaluator over a caller-supplied [`RuntimeContext`]), and structural /
 //! cross-reference validation.
 
+pub mod asyncapi;
 mod expr;
 mod model;
 mod validate;
 
+pub use asyncapi::{
+    AsyncApiDoc, AsyncApiError, Channel, ChannelMessage, ChannelRef, parse_channel_path,
+};
 pub use expr::{ComponentKind, Expr, ExprError, ExprPart, HttpPart, parse, parse_embedded};
 pub use model::{
     ActionView, ArazzoDoc, CriterionView, ParameterView, SourceDescriptionView, SourceType,
@@ -97,8 +101,10 @@ pub fn evaluate<'d>(expr: &Expr, ctx: &dyn RuntimeContext<'d>) -> Option<Evaluat
         Expr::Method => ctx.method().map(|m| Evaluated::Text(m.to_owned())),
         Expr::Url => ctx.url().map(|u| Evaluated::Text(u.to_owned())),
         Expr::StatusCode => ctx.status_code().map(|c| Evaluated::Text(c.to_string())),
-        Expr::Request { part } | Expr::Response { part } => {
-            let response = matches!(expr, Expr::Response { .. });
+        // Arazzo 1.1 message steps carry their payload as the current
+        // message body, so `$message.payload` resolves like `$response.body`.
+        Expr::Message { part } | Expr::Request { part } | Expr::Response { part } => {
+            let response = !matches!(expr, Expr::Request { .. });
             Some(match part {
                 HttpPart::Header(name) => Evaluated::Text(ctx.header(response, name)?.to_owned()),
                 HttpPart::Query(name) => Evaluated::Text(ctx.query(response, name)?.to_owned()),
@@ -117,6 +123,11 @@ pub fn evaluate<'d>(expr: &Expr, ctx: &dyn RuntimeContext<'d>) -> Option<Evaluat
         Expr::Component { kind, name } => ctx
             .component(*kind, name)
             .map(|o| Evaluated::Text(o.to_owned())),
+        Expr::CorrelationId => ctx
+            .header(true, "x-correlation-id")
+            .or_else(|| ctx.header(true, "correlationId"))
+            .map(|c| Evaluated::Text(c.to_owned())),
+        Expr::MessageHeader { name } => Some(Evaluated::Text(ctx.header(true, name)?.to_owned())),
         Expr::WorkflowOutput {
             workflow,
             step,

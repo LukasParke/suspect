@@ -1901,8 +1901,10 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "rustc-hash",
+ "serde_json",
  "suspect-jsonpath",
  "suspect-low",
+ "suspect-overlay",
  "suspect-ref",
  "suspect-source",
  "thiserror",

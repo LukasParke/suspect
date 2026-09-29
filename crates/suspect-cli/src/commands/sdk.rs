@@ -299,6 +299,55 @@ fn prepare(args: &SdkArgs) -> Result<Prepared, Vec<Diagnostic>> {
 ///
 /// # Errors
 /// Propagates report serialization failures.
+/// Resolves a profile id (`typescript-http`, `python-http`, …).
+pub fn profile_by_name(name: &str) -> Option<SdkProfile> {
+    SdkProfile::value_variants()
+        .iter()
+        .copied()
+        .find(|p| p.name() == name)
+}
+
+/// Generates one project-declared SDK target from a spec.
+///
+/// The target carries its own package identity, version, selectors and
+/// output root, so a project manifest drives SDK generation through exactly
+/// the same admission and artifact-ownership path as `suspect codegen`.
+pub fn generate_codegen_target(
+    spec: &std::path::Path,
+    target: &super::project::CodegenTarget,
+) -> anyhow::Result<i32> {
+    let Some(profile) = profile_by_name(&target.profile) else {
+        eprintln!(
+            "codegen {}: unknown profile `{}`",
+            target.name, target.profile
+        );
+        return Ok(2);
+    };
+    eprintln!(
+        "codegen {}: {} {} → {}",
+        target.name,
+        target.profile,
+        target.package_version,
+        target.out.display()
+    );
+    generate(&SdkArgs {
+        input: Input::File {
+            path: spec.to_path_buf(),
+        },
+        profile,
+        operation_id: target.operation_id.clone(),
+        package_name: target.package_name.clone(),
+        package_version: target.package_version.clone(),
+        import_name: target.import_name.clone(),
+        generation: GenerationOptions::default(),
+        out: target.out.clone(),
+        check: target.check,
+        text: TextFormat {
+            format: OutputFormat::Text,
+        },
+    })
+}
+
 pub(super) fn generate(args: &SdkArgs) -> anyhow::Result<i32> {
     let mut report = Report {
         format: "suspect.sdk.experimental.v1",

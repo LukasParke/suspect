@@ -88,6 +88,7 @@ fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
             outputs: Vec::new(),
             failure_goto: None,
             timeout_ms: None,
+            message: None,
             security: Vec::new(),
             response_schemas: Vec::new(),
             body_pointers: Vec::new(),

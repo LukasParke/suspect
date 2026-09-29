@@ -203,12 +203,24 @@ pub async fn run_plan(
     http: &dyn HttpClient,
     events: mpsc::Sender<TestEvent>,
 ) -> RunSummary {
-    run_plan_with_auth(
+    run_plan_with_messages(plan, base_url, http, None, events).await
+}
+
+/// [`run_plan`] with a message transport for Arazzo 1.1 AsyncAPI steps.
+pub async fn run_plan_with_messages(
+    plan: &Plan,
+    base_url: &str,
+    http: &dyn HttpClient,
+    messages: Option<&dyn crate::messaging::MessageTransport>,
+    events: mpsc::Sender<TestEvent>,
+) -> RunSummary {
+    run_plan_full(
         plan,
         base_url,
         http,
         &crate::auth::AuthState::default(),
         &crate::auth::AuthConfig::default(),
+        messages,
         events,
     )
     .await
@@ -222,6 +234,21 @@ pub async fn run_plan_with_auth(
     http: &dyn HttpClient,
     auth_state: &crate::auth::AuthState,
     auth_config: &crate::auth::AuthConfig,
+    events: mpsc::Sender<TestEvent>,
+) -> RunSummary {
+    run_plan_full(plan, base_url, http, auth_state, auth_config, None, events).await
+}
+
+/// [`run_plan_with_auth`] plus a message transport for Arazzo 1.1 AsyncAPI
+/// send/receive steps.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_plan_full(
+    plan: &Plan,
+    base_url: &str,
+    http: &dyn HttpClient,
+    auth_state: &crate::auth::AuthState,
+    auth_config: &crate::auth::AuthConfig,
+    messages: Option<&dyn crate::messaging::MessageTransport>,
     events: mpsc::Sender<TestEvent>,
 ) -> RunSummary {
     let start = Instant::now();
@@ -239,6 +266,7 @@ pub async fn run_plan_with_auth(
             auth_state,
             auth_config,
             &plan.components,
+            messages,
             events.clone(),
         )));
     }
@@ -286,6 +314,7 @@ async fn run_workflow(
     auth_state: &crate::auth::AuthState,
     auth_config: &crate::auth::AuthConfig,
     components: &std::collections::BTreeMap<String, serde_json::Value>,
+    messages: Option<&dyn crate::messaging::MessageTransport>,
     events: mpsc::Sender<TestEvent>,
 ) -> WfCounts {
     send(
@@ -335,6 +364,7 @@ async fn run_workflow(
             auth_state,
             auth_config,
             components,
+            messages,
             &events,
         )
         .await
@@ -379,6 +409,349 @@ enum StepOutcome {
     Failed,
 }
 
+/// Runs one Arazzo 1.1 AsyncAPI step: `send` publishes the evaluated
+/// payload, `receive` awaits a matching message. The outcome is projected
+/// onto the response shape the criteria evaluator already understands, so
+/// `$statusCode`, `$message.payload`, and step outputs behave the same for
+/// HTTP and message steps.
+#[allow(clippy::too_many_arguments)]
+async fn run_message_step(
+    wf_id: &str,
+    step: &StepPlan,
+    message_step: &crate::plan::MessageStep,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    steps_outputs: &serde_json::Map<String, serde_json::Value>,
+    messages: Option<&dyn crate::messaging::MessageTransport>,
+    events: &mpsc::Sender<TestEvent>,
+) -> StepOutcome {
+    let state_ctx = || {
+        RexCtx::default()
+            .inputs(inputs)
+            .steps_outputs(steps_outputs)
+    };
+    let Some(transport) = messages else {
+        send(
+            events,
+            TestEvent::CriterionFail {
+                wf: wf_id.to_owned(),
+                step: step.step_id.clone(),
+                crit: "transport".to_owned(),
+                expected: "a message transport".to_owned(),
+                actual: "the run configured no message broker".to_owned(),
+            },
+        )
+        .await;
+        return StepOutcome::Failed;
+    };
+
+    let correlation_id = message_step
+        .correlation_id
+        .as_ref()
+        .and_then(|rex| eval_rex(rex, &state_ctx()))
+        .and_then(|value| match value {
+            serde_json::Value::String(text) => Some(text),
+            serde_json::Value::Null | serde_json::Value::Bool(_) => None,
+            other => Some(other.to_string()),
+        });
+
+    let timeout = std::time::Duration::from_millis(step.timeout_ms.unwrap_or(5000));
+    let outcome = match message_step.direction {
+        crate::plan::MessageDirection::Send => {
+            let payload = match &message_step.payload_template {
+                Some(template) if !template.is_null() => {
+                    resolve_payload_template(template, &state_ctx())
+                }
+                _ => message_step
+                    .payload
+                    .as_ref()
+                    .and_then(|rex| eval_rex(rex, &state_ctx()))
+                    .unwrap_or(serde_json::Value::Null),
+            };
+            transport
+                .send(crate::messaging::Message {
+                    channel: message_step.channel.clone(),
+                    message_type: message_step.message_type.clone(),
+                    correlation_id: correlation_id.clone(),
+                    payload,
+                })
+                .map(|()| crate::messaging::Message {
+                    channel: message_step.channel.clone(),
+                    message_type: message_step.message_type.clone(),
+                    correlation_id: correlation_id.clone(),
+                    payload: serde_json::Value::Null,
+                })
+        }
+        crate::plan::MessageDirection::Receive => {
+            transport.receive(&message_step.channel, correlation_id.as_deref(), timeout)
+        }
+    };
+
+    let message = match outcome {
+        Ok(message) => message,
+        Err(e) => {
+            send(
+                events,
+                TestEvent::CriterionFail {
+                    wf: wf_id.to_owned(),
+                    step: step.step_id.clone(),
+                    crit: "transport".to_owned(),
+                    expected: format!("a message on `{}`", message_step.channel),
+                    actual: e.to_string(),
+                },
+            )
+            .await;
+            return StepOutcome::Failed;
+        }
+    };
+
+    // A received payload must satisfy the AsyncAPI message's declared
+    // schema, exactly like a response body against its contract. A send
+    // step publishes; its payload is the producer's business.
+    if let (crate::plan::MessageDirection::Receive, Some(schema)) =
+        (message_step.direction, &message_step.payload_schema)
+    {
+        let wrapper = format!(
+            "{{\"schema\": {}, \"instance\": {}}}",
+            serde_json::to_string(schema).unwrap_or_else(|_| "null".to_owned()),
+            serde_json::to_string(&message.payload).unwrap_or_else(|_| "null".to_owned())
+        );
+        let mut violations = Vec::new();
+        if let Ok(uri) = suspect_source::Uri::parse("mem://message-check.json") {
+            let doc = suspect_low::LowDoc::parse(
+                uri,
+                suspect_source::Source::from_vec(wrapper.into_bytes()),
+            );
+            if doc.syntax_errors().is_empty()
+                && let (Some(schema_node), Some(instance_node)) =
+                    (doc.root().get("schema"), doc.root().get("instance"))
+                && let Ok(compiled) =
+                    suspect_schema::Compiler::new(suspect_schema::Config::default())
+                        .compile(schema_node)
+            {
+                violations = compiled
+                    .validate(instance_node)
+                    .iter()
+                    .map(|e| e.message.clone())
+                    .collect();
+            }
+        }
+        if !violations.is_empty() {
+            send(
+                events,
+                TestEvent::CriterionFail {
+                    wf: wf_id.to_owned(),
+                    step: step.step_id.clone(),
+                    crit: "payload".to_owned(),
+                    expected: "a payload matching the declared message schema".to_owned(),
+                    actual: violations.join("; "),
+                },
+            )
+            .await;
+            return StepOutcome::Failed;
+        }
+    }
+
+    // Project the message onto a response the criteria evaluator reads:
+    // 200 with the payload as the body and the correlation id as a header.
+    let response = HttpResponse {
+        status: 200,
+        headers: message
+            .correlation_id
+            .as_ref()
+            .map(|id| vec![("x-correlation-id".to_owned(), id.clone())])
+            .unwrap_or_default(),
+        body: Bytes::from(serde_json::to_vec(&message.payload).unwrap_or_default()),
+    };
+    evaluate_response(step, &response, inputs, steps_outputs, events, wf_id).await
+}
+
+/// Shared post-response path: success criteria, then output capture. HTTP
+/// steps and Arazzo 1.1 message steps both end here, so `$message.payload`
+/// and `$response.body#...` resolve through one evaluator.
+async fn evaluate_response(
+    step: &StepPlan,
+    response: &HttpResponse,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    steps_outputs: &serde_json::Map<String, serde_json::Value>,
+    events: &mpsc::Sender<TestEvent>,
+    wf_id: &str,
+) -> StepOutcome {
+    let body_text = String::from_utf8_lossy(&response.body).into_owned();
+    let body_json: Option<serde_json::Value> = serde_json::from_str(&body_text).ok();
+
+    let mut all_ok = true;
+    for crit in &step.success {
+        match eval_criterion(&crit.kind, response.status, body_json.as_ref(), &body_text) {
+            Ok(()) => {
+                send(
+                    events,
+                    TestEvent::CriterionOk {
+                        wf: wf_id.to_owned(),
+                        step: step.step_id.clone(),
+                        crit: crit.describe(),
+                    },
+                )
+                .await;
+            }
+            Err((expected, actual)) => {
+                all_ok = false;
+                send(
+                    events,
+                    TestEvent::CriterionFail {
+                        wf: wf_id.to_owned(),
+                        step: step.step_id.clone(),
+                        crit: crit.describe(),
+                        expected,
+                        actual,
+                    },
+                )
+                .await;
+            }
+        }
+    }
+    if !all_ok {
+        return StepOutcome::Failed;
+    }
+
+    let capture_ctx = RexCtx::default()
+        .method("")
+        .status(response.status)
+        .request_headers(&[])
+        .response_headers(&response.headers)
+        .request_body("")
+        .response_body(&body_text)
+        .inputs(inputs)
+        .steps_outputs(steps_outputs);
+    let mut captured = serde_json::Map::new();
+    for (name, rex) in &step.outputs {
+        if let Some(value) = eval_rex(rex, &capture_ctx) {
+            send(
+                events,
+                TestEvent::OutputSet {
+                    wf: wf_id.to_owned(),
+                    key: name.clone(),
+                    value: value.clone(),
+                },
+            )
+            .await;
+            captured.insert(name.clone(), value);
+        }
+    }
+    StepOutcome::Passed(captured)
+}
+
+/// Materializes a send payload: string leaves starting with `$` are
+/// runtime expressions evaluated against the step context; everything else
+/// is literal, and embedded expressions interpolate into their text.
+fn resolve_payload_template(template: &serde_json::Value, ctx: &RexCtx<'_>) -> serde_json::Value {
+    match template {
+        serde_json::Value::String(text) => {
+            if text.starts_with('$')
+                && let Ok(rex) = suspect_rex::parse_rex(text)
+                && let Some(value) = eval_rex(&rex, ctx)
+            {
+                return value;
+            }
+            let embedded: Option<Vec<suspect_arazzo::ExprPart>> = (!text.contains('{'))
+                .then_some(Vec::new())
+                .or_else(|| Some(suspect_arazzo::parse_embedded(text)))
+                .filter(|parts| !parts.is_empty());
+            if let Some(parts) = embedded {
+                return serde_json::Value::String(
+                    parts
+                        .iter()
+                        .map(|part| match part {
+                            suspect_arazzo::ExprPart::Expr(rex) => {
+                                // Re-parse the source expression text: the
+                                // part carries the parsed form, but the rex
+                                // evaluator works on the rex grammar.
+                                let text = format!("${}", render_expr(rex));
+                                let evaluated = suspect_rex::parse_rex(&text)
+                                    .ok()
+                                    .and_then(|parsed| eval_rex(&parsed, ctx));
+                                evaluated.map_or_else(
+                                    || text.clone(),
+                                    |value| match value {
+                                        serde_json::Value::String(s) => s,
+                                        other => other.to_string(),
+                                    },
+                                )
+                            }
+                            suspect_arazzo::ExprPart::Text(text) => text.clone(),
+                        })
+                        .collect(),
+                );
+            }
+            template.clone()
+        }
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .map(|item| resolve_payload_template(item, ctx))
+                .collect(),
+        ),
+        serde_json::Value::Object(entries) => serde_json::Value::Object(
+            entries
+                .iter()
+                .map(|(key, value)| (key.clone(), resolve_payload_template(value, ctx)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Renders a parsed Arazzo expression back to its `$…` source form.
+fn render_expr(expr: &suspect_arazzo::Expr) -> String {
+    use suspect_arazzo::{ComponentKind, Expr, HttpPart};
+    match expr {
+        Expr::Method => "method".to_owned(),
+        Expr::Url => "url".to_owned(),
+        Expr::StatusCode => "statusCode".to_owned(),
+        Expr::Request { part } | Expr::Response { part } | Expr::Message { part } => {
+            let name = match part {
+                HttpPart::Header(name) => format!("header.{name}"),
+                HttpPart::Query(name) => format!("query.{name}"),
+                HttpPart::Path(name) => format!("path.{name}"),
+                HttpPart::Body(None) => "body".to_owned(),
+                HttpPart::Body(Some(pointer)) => format!("body#{}", pointer.to_path()),
+            };
+            if matches!(expr, Expr::Request { .. }) {
+                format!("request.{name}")
+            } else if matches!(expr, Expr::Response { .. }) {
+                format!("response.{name}")
+            } else {
+                format!("message.{name}")
+            }
+        }
+        Expr::MessageHeader { name } => format!("message.headers.{name}"),
+        Expr::CorrelationId => "message.correlationId".to_owned(),
+        Expr::Outputs { name } => format!("outputs.{name}"),
+        Expr::Inputs { name } => format!("inputs.{name}"),
+        Expr::WorkflowOutput {
+            workflow,
+            step,
+            name,
+        } => format!("workflows.{workflow}.steps.{step}.outputs.{name}"),
+        Expr::Component { kind, name } => {
+            let kind = match kind {
+                ComponentKind::Parameters => "parameters",
+                ComponentKind::SucceedOn => "succeedOn",
+                ComponentKind::FailureOn => "failureOn",
+                ComponentKind::RetryOn => "retryOn",
+            };
+            format!("components.{kind}.{name}")
+        }
+        Expr::SourceDescription { name, path } => {
+            if path.is_empty() {
+                format!("sourceDescriptions.{name}")
+            } else {
+                format!("sourceDescriptions.{name}{path}")
+            }
+        }
+        Expr::Text(text) => text.clone(),
+    }
+}
+
 async fn send(events: &mpsc::Sender<TestEvent>, ev: TestEvent) {
     let _ = events.send(ev).await;
 }
@@ -395,9 +768,26 @@ async fn run_step(
     auth_state: &crate::auth::AuthState,
     auth_config: &crate::auth::AuthConfig,
     components: &std::collections::BTreeMap<String, serde_json::Value>,
+    messages: Option<&dyn crate::messaging::MessageTransport>,
     events: &mpsc::Sender<TestEvent>,
 ) -> StepOutcome {
     let wf_id = wf.workflow_id.as_str();
+
+    // Arazzo 1.1 AsyncAPI step: publish or await a message instead of
+    // issuing an HTTP exchange. The result is shaped like a response so
+    // criteria, outputs and `$message.payload` all evaluate uniformly.
+    if let Some(message_step) = &step.message {
+        return run_message_step(
+            wf_id,
+            step,
+            message_step,
+            inputs,
+            steps_outputs,
+            messages,
+            events,
+        )
+        .await;
+    }
 
     // State-only context: parameters may reference workflow inputs and
     // earlier step outputs but not the exchange currently being built.

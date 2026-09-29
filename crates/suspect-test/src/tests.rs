@@ -379,6 +379,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     body_pointers: Vec::new(),
                     failure_goto: None,
                     timeout_ms: None,
+                    message: None,
                     security: Vec::new(),
                     response_schemas: Vec::new(),
                 },
@@ -395,6 +396,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     body_pointers: Vec::new(),
                     failure_goto: None,
                     timeout_ms: None,
+                    message: None,
                     security: Vec::new(),
                     response_schemas: Vec::new(),
                 },
@@ -671,4 +673,252 @@ fn fuzz_payload_defaults_everything_but_target() {
         },
     );
     assert_eq!(benign["id"], Value::String("1".into()));
+}
+
+// ------------------------------------------- Arazzo 1.1 AsyncAPI message steps
+
+const ASYNCAPI: &str = r#"
+asyncapi: 3.0.0
+info: {title: Orders bus, version: '1'}
+channels:
+  orders:
+    address: orders
+    send:
+      - name: orderPlaced
+        payload:
+          type: object
+          required: [orderId]
+          properties: {orderId: {type: string}}
+    receive:
+      - name: orderConfirmed
+        payload: {$ref: '#/components/schemas/Confirmation'}
+components:
+  schemas:
+    Confirmation:
+      type: object
+      required: [orderId, status]
+      properties:
+        orderId: {type: string}
+        status: {type: string}
+"#;
+
+const MIXED_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Order flow, version: '1'}
+sourceDescriptions:
+  - {name: api, url: spec.yaml, type: openapi}
+  - {name: bus, url: asyncapi.yaml, type: asyncapi}
+workflows:
+  - workflowId: place-and-confirm
+    inputs:
+      type: object
+      properties:
+        orderId: {type: string, default: order-42}
+    steps:
+      - stepId: place
+        operationId: createPet
+        parameters:
+          - {name: name, in: query, value: $inputs.orderId}
+      - stepId: announce
+        channelPath: '$sourceDescriptions.bus.orders'
+        action: send
+        correlationId: $inputs.orderId
+        requestBody:
+          payload:
+            orderId: $inputs.orderId
+      - stepId: await-confirmation
+        channelPath: '$sourceDescriptions.bus.orders'
+        action: receive
+        correlationId: $inputs.orderId
+        timeout: 1000
+        successCriteria:
+          - condition: '$message.payload#/status == "confirmed"'
+        outputs:
+          status: $message.payload#/status
+"#;
+
+/// Workspace with the OpenAPI spec, the AsyncAPI bus, and the flow.
+fn mixed_workspace() -> Arc<suspect_ref::Workspace> {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("spec.yaml"), OAS).expect("spec");
+    std::fs::write(dir.path().join("asyncapi.yaml"), ASYNCAPI).expect("asyncapi");
+    let ws = WorkspaceBuilder::new()
+        .root(dir.path())
+        .build()
+        .expect("ws");
+    ws.load_all("spec.yaml").expect("spec");
+    ws.load_all("asyncapi.yaml").expect("asyncapi");
+    std::mem::forget(dir);
+    Arc::new(ws)
+}
+
+fn mixed_plan() -> crate::plan::Plan {
+    let ws = mixed_workspace();
+    let doc = LowDoc::parse(
+        "mem://mixed.arazzo.yaml".into(),
+        Source::from_vec(MIXED_ARAZZO.as_bytes().to_vec()),
+    );
+    compile_plan(&doc, &ws).expect("mixed flow compiles")
+}
+
+#[test]
+fn asyncapi_steps_compile_into_message_plans() {
+    let plan = mixed_plan();
+    let steps = &plan.workflows[0].steps;
+    assert_eq!(steps.len(), 3);
+    assert!(steps[0].message.is_none(), "HTTP step stays HTTP");
+    let send = steps[1].message.as_ref().expect("send step");
+    assert_eq!(send.direction, crate::plan::MessageDirection::Send);
+    assert_eq!(send.source, "bus");
+    assert_eq!(send.channel, "orders");
+    assert_eq!(send.message_type.as_deref(), Some("orderPlaced"));
+    let receive = steps[2].message.as_ref().expect("receive step");
+    assert_eq!(receive.direction, crate::plan::MessageDirection::Receive);
+    // The AsyncAPI payload schema resolved through its `$ref`.
+    let schema = receive
+        .payload_schema
+        .as_ref()
+        .expect("payload schema from the asyncapi document");
+    assert_eq!(schema["required"], serde_json::json!(["orderId", "status"]));
+}
+
+#[test]
+fn mixed_http_and_message_workflow_executes() {
+    use crate::exec::run_plan_with_messages;
+    use crate::messaging::{LoopbackBroker, Message};
+
+    let plan = mixed_plan();
+    let broker = LoopbackBroker::with_inbox(BTreeMap::from([(
+        "orders".to_owned(),
+        vec![Message {
+            channel: "orders".to_owned(),
+            message_type: Some("orderConfirmed".to_owned()),
+            correlation_id: Some("order-42".to_owned()),
+            payload: serde_json::json!({"orderId": "order-42", "status": "confirmed"}),
+        }],
+    )]));
+    let transport = crate::transports::CannedTransport::new().route(
+        Match {
+            method: Some("POST".to_owned()),
+            path_suffix: "/pets".to_owned(),
+        },
+        HttpResponse {
+            status: 201,
+            headers: Vec::new(),
+            body: Bytes::from_static(br#"{"id":1}"#),
+        },
+    );
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let summary = tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(async {
+            run_plan_with_messages(
+                &plan,
+                "http://api.example.com",
+                &transport,
+                Some(&broker),
+                tx,
+            )
+            .await
+        });
+
+    assert_eq!(summary.failed, 0, "no step failed: {summary:?}");
+    assert_eq!(summary.passed, 3, "{summary:?}");
+
+    // The send step published the evaluated payload.
+    let published = broker.published();
+    assert_eq!(published.len(), 1, "{published:?}");
+    assert_eq!(published[0].channel, "orders");
+    assert_eq!(published[0].payload["orderId"], "order-42");
+    assert_eq!(published[0].correlation_id.as_deref(), Some("order-42"));
+
+    // The receive step's output came from `$message.payload`.
+    let mut saw_output = false;
+    while let Ok(event) = rx.try_recv() {
+        if let TestEvent::OutputSet { key, value, .. } = event
+            && key == "status"
+        {
+            assert_eq!(value, Value::String("confirmed".to_owned()));
+            saw_output = true;
+        }
+    }
+    assert!(saw_output, "the receive step captured its output");
+}
+
+#[test]
+fn received_payload_must_match_the_declared_message_schema() {
+    use crate::exec::run_plan_with_messages;
+    use crate::messaging::{LoopbackBroker, Message};
+
+    let plan = mixed_plan();
+    // A confirmation missing the required `status` field.
+    let broker = LoopbackBroker::with_inbox(BTreeMap::from([(
+        "orders".to_owned(),
+        vec![Message {
+            channel: "orders".to_owned(),
+            message_type: Some("orderConfirmed".to_owned()),
+            correlation_id: Some("order-42".to_owned()),
+            payload: serde_json::json!({"orderId": "order-42"}),
+        }],
+    )]));
+    let transport = crate::transports::CannedTransport::new().route(
+        Match {
+            method: Some("POST".to_owned()),
+            path_suffix: "/pets".to_owned(),
+        },
+        HttpResponse {
+            status: 201,
+            headers: Vec::new(),
+            body: Bytes::from_static(br#"{"id":1}"#),
+        },
+    );
+
+    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let summary = tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(async {
+            run_plan_with_messages(
+                &plan,
+                "http://api.example.com",
+                &transport,
+                Some(&broker),
+                tx,
+            )
+            .await
+        });
+    assert_eq!(
+        summary.failed, 1,
+        "the failing step stops its workflow: {summary:?}"
+    );
+    assert_eq!(summary.passed, 2, "{summary:?}");
+}
+
+#[test]
+fn message_steps_fail_cleanly_without_a_broker() {
+    use crate::exec::run_plan_with_messages;
+
+    let plan = mixed_plan();
+    let transport = crate::transports::CannedTransport::new().route(
+        Match {
+            method: Some("POST".to_owned()),
+            path_suffix: "/pets".to_owned(),
+        },
+        HttpResponse {
+            status: 201,
+            headers: Vec::new(),
+            body: Bytes::from_static(br#"{"id":1}"#),
+        },
+    );
+    let (tx, _rx) = tokio::sync::mpsc::channel(64);
+    let summary = tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(async {
+            run_plan_with_messages(&plan, "http://api.example.com", &transport, None, tx).await
+        });
+    assert_eq!(
+        summary.failed, 1,
+        "the failing step stops its workflow: {summary:?}"
+    );
+    assert_eq!(summary.passed, 1, "{summary:?}");
 }

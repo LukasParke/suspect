@@ -19,6 +19,10 @@ native toolchain runs.
 - `x-suspect-gated:` optional, default `true`. When `false`, the
   no-defaults control generation is skipped (use for behaviors that are
   not SDK-defaults-gated).
+- `x-suspect-sdk-defaults:` optional SDK-defaults configuration the
+  fragment needs, e.g. `{env_prefix: FRAGMENT}` for behaviors driven by the
+  automatic `<ENV_PREFIX>_API_KEY` service identity. Without it the harness
+  generates under plain `SdkDefaults::v1()`.
 - `x-suspect-behavior:` map of backend name (`features.rs::BACKENDS`) to:
   - `file:` the emitted path the markers live in (pins the file contract)
   - `markers:` strings that must appear in that file's generated source.

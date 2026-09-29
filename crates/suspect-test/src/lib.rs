@@ -34,6 +34,7 @@ pub mod auth;
 pub mod evolved_fuzz;
 pub mod exec;
 pub mod fuzz;
+pub mod messaging;
 pub use suspect_faker as faker;
 pub mod plan;
 pub mod reporters;
@@ -45,8 +46,10 @@ mod tests;
 
 pub use exec::{
     HttpClient, HttpRequest, HttpResponse, RunSummary, TestEvent, TransportError, run_plan,
+    run_plan_with_auth, run_plan_with_messages,
 };
+pub use messaging::{FileBroker, LoopbackBroker, Message, MessageError, MessageTransport};
 pub use plan::{
-    CompileError, CriterionKind, CriterionPlan, OpKey, Plan, StepParam, StepPlan, WfPlan,
-    compile_plan,
+    CompileError, CriterionKind, CriterionPlan, MessageDirection, MessageStep, OpKey, Plan,
+    StepParam, StepPlan, WfPlan, compile_plan,
 };

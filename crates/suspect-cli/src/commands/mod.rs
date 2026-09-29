@@ -23,6 +23,7 @@ pub mod lint;
 pub mod overlay;
 pub mod overlay_dry_run;
 pub mod project;
+pub mod publish;
 pub mod release;
 pub mod replay;
 pub mod rules;
@@ -55,7 +56,12 @@ pub fn workspace_for_entry(spec: &std::path::Path) -> anyhow::Result<std::sync::
     if entry.doc().sniff_family() == suspect_low::SpecFamily::Arazzo10 {
         let doc = suspect_arazzo::ArazzoDoc::new(entry.doc());
         for source in doc.source_descriptions() {
-            if source.kind != suspect_arazzo::SourceType::OpenApi {
+            // Arazzo 1.1 also names asyncapi descriptions, which carry the
+            // channel/message metadata message steps compile against.
+            if !matches!(
+                source.kind,
+                suspect_arazzo::SourceType::OpenApi | suspect_arazzo::SourceType::AsyncApi
+            ) {
                 continue;
             }
             let target = uri.join(source.url)?;

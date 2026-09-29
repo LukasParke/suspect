@@ -451,3 +451,105 @@ components:
         .unwrap();
     assert!(same.status.success());
 }
+
+#[test]
+fn project_build_generates_declared_sdk_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("openapi.yaml"),
+        r#"openapi: 3.1.0
+info: {title: Tickets API, version: '1.0.0'}
+paths:
+  /tickets:
+    get:
+      operationId: listTickets
+      responses:
+        '200':
+          description: Every ticket.
+          content:
+            application/json:
+              schema: {type: array, items: {type: string}}
+"#,
+    )
+    .unwrap();
+    let manifest = root.join("suspect.project.json");
+    std::fs::write(
+        &manifest,
+        r#"{
+  "version": 1,
+  "name": "tickets-sdk",
+  "entry": "openapi.yaml",
+  "publish": {"output": "build/spec.yaml"},
+  "codegen": [
+    {"name": "ts", "profile": "typescript-http", "package_name": "@acme/tickets", "package_version": "1.4.0", "out": "sdk/typescript", "operation_id": ["listTickets"]},
+    {"name": "py", "profile": "python-http", "package_name": "acme-tickets", "package_version": "1.4.0", "out": "sdk/python", "operation_id": ["listTickets"]}
+  ]
+}"#,
+    )
+    .unwrap();
+
+    // check passes with only these two declared targets
+    let check = std::process::Command::new(binary())
+        .args(["project", "check", "--manifest", manifest.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    let output = std::process::Command::new(binary())
+        .args(["project", "build", "--manifest", manifest.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // Both SDKs were generated from the published spec, with the declared
+    // package identity and version.
+    let package = std::fs::read_to_string(root.join("sdk/typescript/typescript/package.json"))
+        .expect("typescript package");
+    assert!(package.contains("\"@acme/tickets\""), "{package}");
+    assert!(package.contains("\"version\": \"1.4.0\""), "{package}");
+    let pyproject =
+        std::fs::read_to_string(root.join("sdk/python/python/pyproject.toml")).expect("pyproject");
+    assert!(pyproject.contains("acme-tickets"), "{pyproject}");
+    assert!(pyproject.contains("1.4.0"), "{pyproject}");
+}
+
+#[test]
+fn project_check_rejects_an_unknown_sdk_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join("openapi.yaml"),
+        "openapi: 3.1.0\ninfo: {title: x, version: '1'}\npaths: {}\n",
+    )
+    .unwrap();
+    let manifest = root.join("suspect.project.json");
+    std::fs::write(
+        &manifest,
+        r#"{
+  "version": 1,
+  "entry": "openapi.yaml",
+  "codegen": [
+    {"profile": "cobol-http", "package_name": "x", "package_version": "1.0.0", "out": "sdk/cobol"}
+  ]
+}"#,
+    )
+    .unwrap();
+    let check = std::process::Command::new(binary())
+        .args(["project", "check", "--manifest", manifest.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        !check.status.success(),
+        "an unknown profile must fail check"
+    );
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(stderr.contains("project-unknown-profile"), "{stderr}");
+}

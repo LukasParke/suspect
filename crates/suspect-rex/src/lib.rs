@@ -269,7 +269,39 @@ pub fn parse_rex(input: &str) -> Result<Rex, RexError> {
 
     // The head segment ends at the first `.` or `#`, whichever comes first:
     // `$inputs#/a/b` carries no dot at the boundary, while dots may occur
-    // inside keys, step ids and source description names.
+    // inside keys, step ids and source description names. A named
+    // multi-segment head (`message.payload`) is matched whole first.
+    if let Some(after) = rest.strip_prefix("message.") {
+        let cut = after
+            .find('.')
+            .or_else(|| after.find('#'))
+            .unwrap_or(after.len());
+        let part_src = &after[..cut];
+        let pointer = match after[cut..].strip_prefix('#') {
+            Some(frag) => parse_pointer_fragment(input, frag)?,
+            None => Pointer::root(),
+        };
+        return match part_src {
+            "payload" => Ok(Rex::Response {
+                part: Part::Body,
+                pointer,
+            }),
+            "correlationId" => Ok(Rex::Response {
+                part: Part::Header("x-correlation-id".to_owned()),
+                pointer: Pointer::root(),
+            }),
+            other => {
+                if let Some(name) = other.strip_prefix("headers.") {
+                    return Ok(Rex::Response {
+                        part: Part::Header(name.to_owned()),
+                        pointer: Pointer::root(),
+                    });
+                }
+                err(format!("unknown message part `{other}`"))
+            }
+        };
+    }
+
     let cut = match (rest.find('.'), rest.find('#')) {
         (Some(dot), Some(hash)) => dot.min(hash),
         (Some(dot), None) => dot,
@@ -277,8 +309,8 @@ pub fn parse_rex(input: &str) -> Result<Rex, RexError> {
         (None, None) => {
             return err(format!(
                 "expected `method`, `statusCode`, `url`, `request`, \
-                 `response`, `inputs`, `steps` or `sourceDescriptions` after \
-                 `$`, found `{rest}`"
+                 `response`, `message`, `inputs`, `steps` or \
+                 `sourceDescriptions` after `$`, found `{rest}`"
             ));
         }
     };

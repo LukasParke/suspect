@@ -197,6 +197,11 @@ pub enum Command {
         /// Event stream format: human text or one-JSON-per-line ndjson.
         #[arg(long, value_enum, default_value = "text")]
         report: ReportFormat,
+        /// Message broker directory for Arazzo 1.1 AsyncAPI steps:
+        /// `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl`
+        /// collects what the workflow published.
+        #[arg(long, value_name = "DIR")]
+        message_broker: Option<PathBuf>,
     },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
@@ -316,6 +321,12 @@ pub enum Command {
     /// Evaluate recorded traffic against a candidate contract revision.
     #[command(name = "impact")]
     Impact(commands::impact::ImpactArgs),
+    /// Plan and execute SDK publishing across registries.
+    #[command(name = "release-publish")]
+    ReleasePublish(commands::publish::PublishArgs),
+    /// Render the release manifest as a tag-triggered CI workflow.
+    #[command(name = "release-workflow")]
+    ReleaseWorkflow(commands::publish::WorkflowArgs),
     /// Build and check a suspect project from one manifest.
     #[command(name = "project")]
     Project {
@@ -424,12 +435,14 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             cassette,
             offline: _,
             report,
-        } => commands::test::test(
+            message_broker,
+        } => commands::test::test_with_messages(
             &arazzo,
             &base_url,
             filter.as_deref(),
             cassette.as_deref(),
             matches!(report, ReportFormat::Ndjson),
+            message_broker.as_deref(),
         ),
         Command::Gen {
             spec,
@@ -490,6 +503,8 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
         Command::ReleasePlan(args) => commands::release::release_plan(&args),
+        Command::ReleasePublish(args) => commands::publish::publish(&args),
+        Command::ReleaseWorkflow(args) => commands::publish::workflow(&args),
         Command::Impact(args) => commands::impact::impact(&args),
         Command::Project { cmd } => commands::project::run(cmd),
         Command::Lsp => {
