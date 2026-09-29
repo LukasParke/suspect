@@ -307,7 +307,6 @@ pub async fn run_plan_full(
 
 /// Runs a single workflow sequentially, returning its step counts.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 async fn run_workflow(
     wf: &crate::plan::WfPlan,
     base: &str,

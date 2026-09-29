@@ -285,7 +285,7 @@ impl Parser<'_> {
                         name: self.segment()?,
                     })
                 }
-                other => Err("unknown message part"),
+                _ => Err("unknown message part"),
             };
         }
         if head == "sourceDescriptions" {

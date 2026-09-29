@@ -32,9 +32,32 @@ pub struct ProjectManifest {
     pub profiles: BTreeMap<String, Vec<PathBuf>>,
     /// Documentation target: style + output directory.
     pub docs: Option<(String, PathBuf)>,
+    /// SDK generation targets built from the published spec.
+    pub codegen: Vec<CodegenTarget>,
     /// Contract-test targets: Arazzo documents run against `base_url`
     /// (or offline from `cassette`).
     pub tests: Option<ProjectTests>,
+}
+
+/// One SDK generation target.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenTarget {
+    /// Target name, used in progress output.
+    pub name: String,
+    /// The native profile id (`typescript-http`, `python-http`, …).
+    pub profile: String,
+    /// Native package identity.
+    pub package_name: String,
+    /// Package SemVer.
+    pub package_version: String,
+    /// Output root, relative to the manifest.
+    pub out: PathBuf,
+    /// Exact operationId selectors; empty selects all outgoing operations.
+    pub operation_id: Vec<String>,
+    /// Explicit import/module/namespace identity where the profile needs one.
+    pub import_name: Option<String>,
+    /// When true, only ownership/drift is checked; nothing is written.
+    pub check: bool,
 }
 
 /// Contract-test target configuration.
@@ -133,6 +156,61 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
         let out = d.get("output").and_then(|v| v.as_str()).map(resolve)?;
         Some((style, out))
     });
+    let codegen = object
+        .get("codegen")
+        .and_then(|v| v.as_array())
+        .map(|targets| {
+            targets
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    let field = |name: &str| -> anyhow::Result<String> {
+                        entry
+                            .get(name)
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned)
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("codegen target #{index} is missing `{name}`")
+                            })
+                    };
+                    let profile = field("profile")?;
+                    Ok(CodegenTarget {
+                        name: entry
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| profile.clone()),
+                        profile,
+                        package_name: field("package_name")?,
+                        package_version: field("package_version")?,
+                        out: entry
+                            .get("out")
+                            .and_then(|v| v.as_str())
+                            .map(&resolve)
+                            .unwrap_or_else(|| dir.join("sdk")),
+                        operation_id: entry
+                            .get("operation_id")
+                            .and_then(|v| v.as_array())
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|v| v.as_str())
+                                    .map(str::to_owned)
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        import_name: entry
+                            .get("import_name")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned),
+                        check: entry
+                            .get("check")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    })
+                })
+                .collect::<anyhow::Result<Vec<_>>>()
+        })
+        .transpose()?;
     let tests = object.get("tests").and_then(|t| {
         let arazzo: Vec<PathBuf> = t
             .get("arazzo")?
@@ -172,6 +250,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
         publish_output,
         profiles,
         docs,
+        codegen: codegen.unwrap_or_default(),
         tests,
     })
 }
@@ -196,7 +275,8 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                 "publish": {"output": "build/spec.yaml"},
                 "publish_profiles": {},
                 "docs": {"style": "markdown", "output": "build/docs"},
-                "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"}
+                "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"},
+                "codegen": []
             });
             std::fs::create_dir_all(&dir)?;
             std::fs::write(
@@ -224,7 +304,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
 
 /// Validates every declared input document exists and parses.
 fn check_inputs(project: &ProjectManifest, findings: &mut Vec<Finding>) {
-    let mut check = |path: &Path, kind: &str| {
+    fn check(path: &Path, kind: &str, findings: &mut Vec<Finding>) {
         if !path.exists() {
             findings.push(Finding {
                 file: path.display().to_string(),
@@ -236,19 +316,32 @@ fn check_inputs(project: &ProjectManifest, findings: &mut Vec<Finding>) {
                 range: None,
             });
         }
-    };
-    check(&project.entry, "entry spec");
+    }
+    check(&project.entry, "entry spec", findings);
     for overlay in &project.overlays {
-        check(overlay, "overlay");
+        check(overlay, "overlay", findings);
     }
     for overlays in project.profiles.values() {
         for overlay in overlays {
-            check(overlay, "profile overlay");
+            check(overlay, "profile overlay", findings);
+        }
+    }
+    for target in &project.codegen {
+        if crate::commands::sdk::profile_by_name(&target.profile).is_none() {
+            findings.push(Finding {
+                file: path_label(&target.out),
+                severity: Severity::Error,
+                code: "project-unknown-profile".into(),
+                message: format!("unknown SDK profile `{}`", target.profile),
+                line: 1,
+                col: 1,
+                range: None,
+            });
         }
     }
     if let Some(tests) = &project.tests {
         for arazzo in &tests.arazzo {
-            check(arazzo, "arazzo");
+            check(arazzo, "arazzo", findings);
         }
     }
 }
@@ -334,6 +427,14 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         crate::commands::docs_gen_cmd::docs_gen(&args)?;
     }
 
+    // Stage 4b: SDK generation targets.
+    for target in &project.codegen {
+        let exit = crate::commands::sdk::generate_codegen_target(&project.publish_output, target)?;
+        if exit != 0 {
+            failures += 1;
+        }
+    }
+
     // Stage 5: contract tests.
     if !skip_tests
         && let Some(tests) = &project.tests
@@ -371,6 +472,11 @@ fn doc_root(tree: &suspect_overlay::Value) -> anyhow::Result<suspect_low::NodeRe
         suspect_source::Source::from_vec(yaml.into_bytes()),
     )));
     Ok(doc.root())
+}
+
+/// A stable display label for a path inside a finding.
+fn path_label(path: &Path) -> String {
+    path.display().to_string()
 }
 
 /// Human label for a finding severity.
