@@ -16,12 +16,18 @@ use crate::OutputFormat;
 /// One release-plan review.
 #[derive(Debug, Args)]
 pub struct ReleasePlanArgs {
-    /// The previous spec revision.
-    #[arg(required = true)]
-    pub old: PathBuf,
-    /// The current spec revision.
-    #[arg(required = true)]
-    pub new: PathBuf,
+    /// The previous spec revision (file mode only).
+    pub old: Option<PathBuf>,
+    /// The current spec revision (file mode only).
+    pub new: Option<PathBuf>,
+    /// The current spec revision in baseline mode; the previous revision
+    /// comes from git, so only one file is named.
+    #[arg(long, value_name = "NEW", conflicts_with_all = ["old", "new"])]
+    pub current: Option<PathBuf>,
+    /// Plan against this git ref (tag, branch, or commit) instead of the
+    /// `old` file: the "what did we last release" baseline.
+    #[arg(long, value_name = "REF", requires = "current")]
+    pub baseline: Option<String>,
     /// Output format for the plan.
     #[command(flatten)]
     pub text: crate::TextFormat,
@@ -175,8 +181,32 @@ pub fn plan(old: &Path, new: &Path) -> anyhow::Result<ReleasePlan> {
 /// # Errors
 /// File IO or contract failures.
 pub fn release_plan(args: &ReleasePlanArgs) -> anyhow::Result<i32> {
-    let plan = plan(&args.old, &args.new)?;
-    match args.text.format {
+    if let Some(git_ref) = &args.baseline {
+        let new = args
+            .current
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("--baseline requires --current <NEW>"))?;
+        let staged =
+            crate::baseline::materialize(git_ref, new).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let outcome = render_plan(&staged, new, args.text.format);
+        crate::baseline::cleanup(&staged);
+        return outcome;
+    }
+    let (Some(old), Some(new)) = (args.old.as_deref(), args.new.as_deref()) else {
+        anyhow::bail!(
+            "usage: suspect release-plan <OLD> <NEW> | suspect release-plan --current <NEW> --baseline <REF>"
+        );
+    };
+    render_plan(old, new, args.text.format)
+}
+
+/// Renders a plan for two revisions.
+///
+/// # Errors
+/// IO, contract, or serialization failures.
+pub fn render_plan(old: &Path, new: &Path, format: OutputFormat) -> anyhow::Result<i32> {
+    let plan = plan(old, new)?;
+    match format {
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&plan)?);
         }

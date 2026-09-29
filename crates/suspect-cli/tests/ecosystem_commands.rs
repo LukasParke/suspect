@@ -553,3 +553,334 @@ fn project_check_rejects_an_unknown_sdk_profile() {
     let stderr = String::from_utf8_lossy(&check.stderr);
     assert!(stderr.contains("project-unknown-profile"), "{stderr}");
 }
+
+// ------------------------------------------------------ config + contract
+
+#[test]
+fn config_supplies_defaults_and_explicit_flags_win() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "lint:\n  min_severity: warning\nvalidate:\n  strict_format: true\ndocs:\n  style: markdown\n  out: site/reference\nformat:\n  json: true\n",
+    )
+    .unwrap();
+    let spec = write(
+        root,
+        "api.yaml",
+        "openapi: 3.1.0\ninfo: {title: Config API, version: '1'}\npaths:\n  /x:\n    get:\n      operationId: getX\n      responses: {'200': {description: ok}}\n",
+    );
+
+    // `suspect config` reports the file in effect.
+    let config = std::process::Command::new(binary())
+        .args(["config"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&config.stdout);
+    assert!(stdout.contains(".suspect.yaml"), "{stdout}");
+    assert!(stdout.contains("lint.min_severity: warning"), "{stdout}");
+
+    // Docs picks up the configured style and output with no flags.
+    let docs = std::process::Command::new(binary())
+        .args(["docs", "api.yaml"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        docs.status.success(),
+        "{}",
+        String::from_utf8_lossy(&docs.stderr)
+    );
+    assert!(
+        root.join("site/reference/index.md").is_file(),
+        "the configured docs style and output applied"
+    );
+
+    // An explicit flag overrides the configured output.
+    let explicit = dir.path().join("elsewhere");
+    let docs = std::process::Command::new(binary())
+        .args(["docs", "api.yaml", "--style", "html", "--output"])
+        .arg(&explicit)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(docs.status.success());
+    assert!(explicit.is_file(), "the explicit output flag won");
+
+    // fmt honors the configured JSON default.
+    let fmt = std::process::Command::new(binary())
+        .args(["fmt", spec.to_str().unwrap()])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&fmt.stdout)
+            .trim_start()
+            .starts_with('{'),
+        "configured format.json applied"
+    );
+}
+
+#[test]
+fn contract_package_is_self_contained_and_detects_drift() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("schemas")).unwrap();
+    std::fs::write(
+        root.join("openapi.yaml"),
+        r#"openapi: 3.1.0
+info: {title: Contract API, version: '2.1.0'}
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: A page
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: 'schemas/pet.yaml'}
+components:
+  schemas:
+    Pet: {$ref: 'schemas/pet.yaml'}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("schemas/pet.yaml"),
+        "type: object\nrequired: [id, name]\nproperties:\n  id: {type: string}\n  name: {type: string}\n  friend: {$ref: 'pet.yaml'}\n",
+    )
+    .unwrap();
+
+    let output = std::process::Command::new(binary())
+        .args(["contract", "openapi.yaml", "--out", "pkg"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let description = std::fs::read_to_string(root.join("pkg/openapi.yaml")).unwrap();
+    // The cross-document ref is inlined, so the package stands alone.
+    assert!(
+        !description.contains("$ref: schemas/pet.yaml"),
+        "{description}"
+    );
+    assert!(description.contains("required:"), "{description}");
+    // The recursive schema terminates with a cycle marker.
+    assert!(
+        description.contains("x-suspect-cyclic"),
+        "recursive refs must terminate, not hang: {description}"
+    );
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("pkg/manifest.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["format"], "suspect.contract.v1");
+    assert_eq!(manifest["title"], "Contract API");
+    assert_eq!(manifest["operations"], 1);
+    assert!(
+        manifest["revision"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256-"),
+        "{manifest}"
+    );
+
+    // Fresh: --check passes.
+    let check = std::process::Command::new(binary())
+        .args(["contract", "openapi.yaml", "--out", "pkg", "--check"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "a fresh package must verify: {}",
+        String::from_utf8_lossy(&check.stderr)
+    );
+
+    // Any byte change in the closure invalidates it.
+    std::fs::write(
+        root.join("schemas/pet.yaml"),
+        "type: object\nrequired: [id, name, kind]\nproperties:\n  id: {type: string}\n  name: {type: string}\n  kind: {type: string}\n",
+    )
+    .unwrap();
+    let stale = std::process::Command::new(binary())
+        .args(["contract", "openapi.yaml", "--out", "pkg", "--check"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        !stale.status.success(),
+        "a changed closure must fail --check"
+    );
+    let stderr = String::from_utf8_lossy(&stale.stderr);
+    assert!(stderr.contains("source closure changed"), "{stderr}");
+}
+
+// ------------------------------------------------------------------ ci gate
+
+fn init_git_repo(root: &std::path::Path) {
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "ci@example.test"],
+        vec!["config", "user.name", "ci"],
+        vec!["add", "-A"],
+        vec!["commit", "-qm", "initial"],
+        vec!["tag", "v0.1.0"],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(root)
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?}");
+    }
+}
+
+fn service(root: &std::path::Path, name: &str) {
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("openapi.yaml"),
+        format!(
+            "openapi: 3.1.0\ninfo: {{title: Service {name}, version: '1.0.0'}}\npaths:\n  /things:\n    get: {{operationId: listThings, responses: {{'200': {{description: ok}}}}}}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("suspect.project.json"),
+        format!(
+            r#"{{"version": 1, "name": "{name}", "entry": "openapi.yaml",
+ "publish": {{"output": "build/spec.yaml"}},
+ "contract": {{"output": "build/contract"}},
+ "codegen": [{{"name": "ts", "profile": "typescript-http", "package_name": "@acme/{name}", "package_version": "1.0.0", "out": "sdk", "operation_id": ["listThings"]}}]}}"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn ci_gate_reports_every_project_and_isolates_failures() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    service(root, "svc-a");
+    service(root, "svc-b");
+    init_git_repo(root);
+
+    // Nothing is published yet: every project fails the validate stage.
+    let first = std::process::Command::new(binary())
+        .args(["ci", "."])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        !first.status.success(),
+        "an unpublished workspace must fail"
+    );
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        stdout.contains("svc-a") && stdout.contains("svc-b"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("was never published"), "{stdout}");
+
+    // Build both, then the gate is green.
+    for name in ["svc-a", "svc-b"] {
+        let build = std::process::Command::new(binary())
+            .args([
+                "project",
+                "build",
+                "--manifest",
+                &format!("{name}/suspect.project.json"),
+            ])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+    }
+    let green = std::process::Command::new(binary())
+        .args(["ci", ".", "--baseline", "v0.1.0"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&green.stdout);
+    assert!(
+        green.status.success(),
+        "a published workspace must pass: {stdout}"
+    );
+    assert!(
+        stdout.contains("2 project(s): 2 passed, 0 failed"),
+        "{stdout}"
+    );
+
+    // Break one service only; the other must stay green.
+    std::fs::write(
+        root.join("svc-a/openapi.yaml"),
+        "openapi: 3.1.0\ninfo: {title: Service svc-a, version: '2.0.0'}\npaths:\n  /things: {}\n",
+    )
+    .unwrap();
+    for name in ["svc-a", "svc-b"] {
+        std::process::Command::new(binary())
+            .args([
+                "project",
+                "build",
+                "--manifest",
+                &format!("{name}/suspect.project.json"),
+            ])
+            .current_dir(root)
+            .output()
+            .unwrap();
+    }
+    let mixed = std::process::Command::new(binary())
+        .args(["ci", ".", "--baseline", "v0.1.0"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        !mixed.status.success(),
+        "a broken service must fail the gate"
+    );
+    let stdout = String::from_utf8_lossy(&mixed.stdout);
+    assert!(stdout.contains("FAIL  svc-a"), "{stdout}");
+    assert!(
+        stdout.contains("PASS  svc-b"),
+        "the healthy service still reports: {stdout}"
+    );
+    assert!(stdout.contains("1 passed, 1 failed"), "{stdout}");
+}
+
+#[test]
+fn ci_reports_a_machine_readable_aggregate() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    service(root, "svc-a");
+    init_git_repo(root);
+    let output = std::process::Command::new(binary())
+        .args(["ci", ".", "--format", "json"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["format"], "suspect.ci.v1");
+    assert_eq!(report["projects"].as_array().unwrap().len(), 1);
+    let stages: Vec<&str> = report["projects"][0]["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["stage"].as_str().unwrap())
+        .collect();
+    assert!(stages.contains(&"validate"), "{stages:?}");
+    assert!(stages.contains(&"contract"), "{stages:?}");
+    assert!(stages.contains(&"breaking"), "{stages:?}");
+}

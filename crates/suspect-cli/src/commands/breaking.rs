@@ -15,12 +15,18 @@ use crate::OutputFormat;
 /// One breaking-change review.
 #[derive(Debug, clap::Args)]
 pub struct BreakingArgs {
-    /// The previous spec revision.
-    #[arg(required = true)]
-    pub old: PathBuf,
-    /// The current spec revision.
-    #[arg(required = true)]
-    pub new: PathBuf,
+    /// The previous spec revision (file mode only).
+    pub old: Option<PathBuf>,
+    /// The current spec revision (file mode only).
+    pub new: Option<PathBuf>,
+    /// The current spec revision in baseline mode; the previous revision
+    /// comes from git, so only one file is named.
+    #[arg(long, value_name = "NEW", conflicts_with_all = ["old", "new"])]
+    pub current: Option<PathBuf>,
+    /// Compare against this git ref (tag, branch, or commit) instead of the
+    /// `old` file: the "what did we last publish" baseline.
+    #[arg(long, value_name = "REF", requires = "current")]
+    pub baseline: Option<String>,
     /// Output format for the report.
     #[command(flatten)]
     pub text: crate::TextFormat,
@@ -125,8 +131,36 @@ pub fn break_findings(
 /// # Errors
 /// Propagates output serialization failures.
 pub fn breaking(args: &BreakingArgs) -> anyhow::Result<i32> {
+    if let Some(git_ref) = &args.baseline {
+        let new = args
+            .current
+            .as_deref()
+            .ok_or_else(|| anyhow::anyhow!("--baseline requires --current <NEW>"))?;
+        let staged =
+            crate::baseline::materialize(git_ref, new).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let outcome = breaking_between(&staged, new, args.text.format);
+        crate::baseline::cleanup(&staged);
+        return outcome;
+    }
+    let (Some(old), Some(new)) = (args.old.as_deref(), args.new.as_deref()) else {
+        anyhow::bail!(
+            "usage: suspect breaking <OLD> <NEW> | suspect breaking --current <NEW> --baseline <REF>"
+        );
+    };
+    breaking_between(old, new, args.text.format)
+}
+
+/// Compares two revisions and renders the report.
+///
+/// # Errors
+/// Propagates output serialization failures.
+pub fn breaking_between(
+    old: &std::path::Path,
+    new: &std::path::Path,
+    format: OutputFormat,
+) -> anyhow::Result<i32> {
     use crate::output;
-    let findings = break_findings(&args.old, &args.new)?;
+    let findings = break_findings(old, new)?;
     let rendered: Vec<output::Finding> = findings
         .iter()
         .map(|f| output::Finding {
@@ -145,7 +179,7 @@ pub fn breaking(args: &BreakingArgs) -> anyhow::Result<i32> {
             range: None,
         })
         .collect();
-    match args.text.format {
+    match format {
         OutputFormat::Text => output::print_findings(&rendered),
         OutputFormat::Json => output::print_json(&findings)?,
         OutputFormat::Sarif => {

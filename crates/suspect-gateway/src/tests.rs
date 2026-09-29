@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::Router;
+use axum::http::Request;
 use axum::http::StatusCode;
 use bytes::Bytes;
 use suspect_journal::{
@@ -915,5 +916,47 @@ async fn debug_stateful_flow() {
             .chars()
             .take(80)
             .collect::<String>()
+    );
+}
+
+#[tokio::test]
+async fn gateway_serves_its_own_contract_at_openapi_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = dir.path().join("openapi.yaml");
+    std::fs::write(
+        &spec,
+        "openapi: 3.1.0\ninfo: {title: Contract API, version: '2.1.0'}\npaths:\n  /pets:\n    get:\n      operationId: listPets\n      summary: List pets\n      responses:\n        '200': {description: ok}\ncomponents:\n  schemas:\n    Pet: {type: object, properties: {id: {type: string}}}\n",
+    )
+    .unwrap();
+    let cfg = GatewayConfig {
+        mode: Mode::Mock,
+        spec: spec.clone(),
+        port: 0,
+        faults: FaultConfig::default(),
+    };
+    let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(Box::new(
+        suspect_journal::StdoutSink,
+    ))));
+    let router = build_router(&cfg, journal).await.expect("router");
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/openapi.json")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("response");
+    assert_eq!(response.status(), 200);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let contract: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+    assert_eq!(contract["info"]["title"], "Contract API");
+    assert_eq!(contract["info"]["version"], "2.1.0");
+    assert_eq!(contract["paths"]["/pets"]["get"]["operationId"], "listPets");
+    assert!(
+        contract["components"]["schemas"]["Pet"]["properties"]["id"].is_object(),
+        "the served contract carries the schema graph"
     );
 }

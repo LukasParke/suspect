@@ -34,6 +34,8 @@ pub struct ProjectManifest {
     pub docs: Option<(String, PathBuf)>,
     /// SDK generation targets built from the published spec.
     pub codegen: Vec<CodegenTarget>,
+    /// Where the contract package is written, when the project declares one.
+    pub contract: Option<PathBuf>,
     /// Contract-test targets: Arazzo documents run against `base_url`
     /// (or offline from `cassette`).
     pub tests: Option<ProjectTests>,
@@ -151,6 +153,11 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
             profiles.insert(name.clone(), list);
         }
     }
+    let contract = object
+        .get("contract")
+        .and_then(|c| c.get("output"))
+        .and_then(|v| v.as_str())
+        .map(&resolve);
     let docs = object.get("docs").and_then(|d| {
         let style = d.get("style").and_then(|v| v.as_str())?.to_owned();
         let out = d.get("output").and_then(|v| v.as_str()).map(resolve)?;
@@ -251,6 +258,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
         profiles,
         docs,
         codegen: codegen.unwrap_or_default(),
+        contract,
         tests,
     })
 }
@@ -276,7 +284,8 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                 "publish_profiles": {},
                 "docs": {"style": "markdown", "output": "build/docs"},
                 "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"},
-                "codegen": []
+                "codegen": [],
+                "contract": {"output": "build/contract"}
             });
             std::fs::create_dir_all(&dir)?;
             std::fs::write(
@@ -412,15 +421,29 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         failures += errors;
     }
 
+    // Stage 3b: contract package, when the project declares one.
+    if let Some(out) = &project.contract {
+        let exit = crate::commands::contract::contract(&crate::commands::contract::ContractArgs {
+            input: project.publish_output.clone(),
+            out: out.clone(),
+            json: false,
+            overlays: Vec::new(),
+            check: false,
+        })?;
+        if exit != 0 {
+            failures += 1;
+        }
+    }
+
     // Stage 4: docs.
     if let Some((style, out)) = &project.docs {
         let args = crate::commands::docs_gen_cmd::DocsGenArgs {
             input: project.publish_output.clone(),
-            style: match style.as_str() {
+            style: Some(match style.as_str() {
                 "markdown" => crate::commands::docs_gen_cmd::DocsStyle::Markdown,
                 "sveltekit" => crate::commands::docs_gen_cmd::DocsStyle::Sveltekit,
                 _ => crate::commands::docs_gen_cmd::DocsStyle::Html,
-            },
+            }),
             output: Some(out.clone()),
             title: None,
         };

@@ -3,12 +3,18 @@
 //! command is a testable library function taking plain arguments and
 //! returning an exit code (0 clean, 1 findings at/above Error, 2 usage).
 
+/// Git-ref baselines for comparisons.
+pub mod baseline;
 pub mod bundle;
 pub mod commands;
+/// Project configuration discovery (.suspect.yaml).
+pub mod config;
 pub mod diff;
 pub mod output;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
 pub mod sarif;
+/// FD-level output silencing for machine-readable runs.
+pub mod silence;
 
 use std::path::PathBuf;
 
@@ -108,9 +114,10 @@ pub enum Command {
         /// Ruleset document (default: built-in spectral ruleset).
         #[arg(long)]
         ruleset: Option<PathBuf>,
-        /// Report only findings at or above this severity.
-        #[arg(long, default_value = "hint")]
-        min_severity: output::Severity,
+        /// Report only findings at or above this severity (default: hint,
+        /// or `lint.min_severity` from `.suspect.yaml`).
+        #[arg(long)]
+        min_severity: Option<output::Severity>,
         /// Output format for the finding list.
         #[command(flatten)]
         text: TextFormat,
@@ -327,6 +334,17 @@ pub enum Command {
     /// Render the release manifest as a tag-triggered CI workflow.
     #[command(name = "release-workflow")]
     ReleaseWorkflow(commands::publish::WorkflowArgs),
+    /// Run validate, contract, breaking, codegen, and tests across every
+    /// project in a workspace as one gate.
+    Ci(commands::ci::CiArgs),
+    /// Emit or verify a machine-readable contract package.
+    Contract(commands::contract::ContractArgs),
+    /// Show the project configuration in effect for this invocation.
+    Config {
+        /// Report the configuration that would apply to this input, instead
+        /// of the one above the working directory.
+        input: Option<PathBuf>,
+    },
     /// Build and check a suspect project from one manifest.
     #[command(name = "project")]
     Project {
@@ -336,6 +354,17 @@ pub enum Command {
     },
     /// Run the language server over stdio.
     Lsp,
+}
+
+/// Parses a severity name from a configuration file.
+fn parse_severity(name: &str) -> Option<output::Severity> {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "error" => Some(output::Severity::Error),
+        "warning" => Some(output::Severity::Warning),
+        "info" => Some(output::Severity::Info),
+        "hint" => Some(output::Severity::Hint),
+        _ => None,
+    }
 }
 
 /// `--format json|text` for commands with structured output. Declared per
@@ -377,15 +406,41 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             reference_allowlist,
             strict_format,
             text,
-        } => commands::validate::validate(
-            &paths,
-            text.format,
-            reference_allowlist.as_deref(),
-            strict_format,
-        ),
+        } => {
+            let config = crate::config::for_invocation(paths.first().map(PathBuf::as_path))
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let strict_format =
+                strict_format || config.as_ref().is_some_and(|c| c.validate.strict_format);
+            commands::validate::validate(
+                &paths,
+                text.format,
+                reference_allowlist.as_deref(),
+                strict_format,
+            )
+        }
         Command::Admission(args) => commands::admission::admission(&args),
         Command::Breaking(args) => commands::breaking::breaking(&args),
-        Command::DocsGen(args) => commands::docs_gen_cmd::docs_gen(&args),
+        Command::DocsGen(mut args) => {
+            let config = crate::config::for_invocation(Some(&args.input))
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            if let Some(config) = &config {
+                if args.style.is_none()
+                    && let Some(style) = config.docs.style.as_deref()
+                {
+                    args.style = Some(match style {
+                        "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
+                        "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
+                        _ => commands::docs_gen_cmd::DocsStyle::Html,
+                    });
+                }
+                if args.output.is_none()
+                    && let Some(out) = &config.docs.out
+                {
+                    args.output = Some(out.clone());
+                }
+            }
+            commands::docs_gen_cmd::docs_gen(&args)
+        }
         Command::Stubs(args) => commands::stubs::stubs(&args),
         Command::ArazzoDiff(args) => commands::arazzo_diff::arazzo_diff(&args),
         Command::OverlayDryRun(args) => commands::overlay_dry_run::overlay_dry_run(&args),
@@ -396,14 +451,41 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             ruleset,
             min_severity,
             text,
-        } => commands::lint::lint(&paths, ruleset.as_deref(), min_severity, text.format),
+        } => {
+            // Configuration supplies defaults; an explicit flag wins.
+            let config = crate::config::for_invocation(paths.first().map(PathBuf::as_path))
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let ruleset = ruleset.or_else(|| {
+                config
+                    .as_ref()
+                    .and_then(|c| c.lint.ruleset.as_deref())
+                    .map(std::path::PathBuf::from)
+            });
+            let min_severity = min_severity
+                .or_else(|| {
+                    config
+                        .as_ref()
+                        .and_then(|c| c.lint.min_severity.as_deref())
+                        .and_then(parse_severity)
+                })
+                .unwrap_or(output::Severity::Hint);
+            commands::lint::lint(&paths, ruleset.as_deref(), min_severity, text.format)
+        }
         Command::Overlay { cmd } => commands::overlay::run(cmd),
         Command::Fmt {
             input,
             output,
             json,
             yaml,
-        } => commands::fmt::fmt(&input, output.as_deref(), json, yaml),
+        } => {
+            let config =
+                crate::config::for_invocation(Some(&input)).map_err(|e| anyhow::anyhow!("{e}"))?;
+            let (json, yaml) = match &config {
+                Some(config) if !json && !yaml => (config.format.json, config.format.yaml),
+                _ => (json, yaml),
+            };
+            commands::fmt::fmt(&input, output.as_deref(), json, yaml)
+        }
         Command::Stats { path, text } => commands::stats::stats(&path, text.format),
         Command::Bundle {
             input,
@@ -502,6 +584,18 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
+        Command::Config { input } => {
+            let found = crate::config::for_invocation(input.as_deref())
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!("{}", crate::config::describe(found.as_ref()));
+            Ok(0)
+        }
+        Command::Ci(args) => {
+            // The gate reports its own aggregate, so a failing stage is a
+            // reported verdict rather than a raised error.
+            commands::ci::ci(&args)
+        }
+        Command::Contract(args) => commands::contract::contract(&args),
         Command::ReleasePlan(args) => commands::release::release_plan(&args),
         Command::ReleasePublish(args) => commands::publish::publish(&args),
         Command::ReleaseWorkflow(args) => commands::publish::workflow(&args),

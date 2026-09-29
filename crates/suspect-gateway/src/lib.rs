@@ -315,6 +315,52 @@ fn router_for_state(state: Arc<GatewayState>) -> Router {
             eprintln!("[gw] skipping unregistrable path: {path}");
         }
     }
+    // The running mock is self-describing: any HTTP client can fetch the
+    // contract it is enforcing, without reaching for the source file.
+    let contract_spec = Arc::clone(&state.spec);
+    let router = router.route(
+        "/openapi.json",
+        axum::routing::get(move || {
+            let spec = Arc::clone(&contract_spec);
+            async move {
+                let body = serde_json::json!({
+                    "openapi": "3.1.0",
+                    "info": {"title": spec.title, "version": spec.version},
+                    "paths": spec.operations.iter().map(|op| {
+                        (
+                            op.path.clone(),
+                            // OpenAPI requires the lowercase HTTP method.
+                            serde_json::json!({
+                                op.method.as_str().to_ascii_lowercase(): {
+                                    "operationId": op.id,
+                                    "summary": op.summary,
+                                    "description": op.description,
+                                    "deprecated": op.deprecated,
+                                    "tags": op.tags,
+                                    "responses": op.responses.iter().map(|r| {
+                                        (
+                                            r.status.map(|s| s.to_string())
+                                                .unwrap_or_else(|| "default".to_owned()),
+                                            serde_json::json!({"description": r.description}),
+                                        )
+                                    }).collect::<serde_json::Map<String, serde_json::Value>>(),
+                                }
+                            }),
+                        )
+                    }).collect::<serde_json::Map<String, serde_json::Value>>(),
+                    "components": {
+                        "schemas": spec.schemas.iter().map(|s| (s.name.clone(), s.json.clone()))
+                            .collect::<serde_json::Map<String, serde_json::Value>>(),
+                    },
+                });
+                (
+                    [("content-type", "application/json")],
+                    serde_json::to_string(&body).unwrap_or_else(|_| "{}".to_owned()),
+                )
+                    .into_response()
+            }
+        }),
+    );
     let pg_spec = Arc::clone(&state.spec);
     let router = router.route(
         "/playground",
