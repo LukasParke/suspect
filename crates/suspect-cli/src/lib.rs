@@ -316,6 +316,12 @@ pub enum Command {
     /// Evaluate recorded traffic against a candidate contract revision.
     #[command(name = "impact")]
     Impact(commands::impact::ImpactArgs),
+    /// Plan and execute SDK publishing across registries.
+    #[command(name = "release-publish")]
+    ReleasePublish(commands::publish::PublishArgs),
+    /// Render the release manifest as a tag-triggered CI workflow.
+    #[command(name = "release-workflow")]
+    ReleaseWorkflow(commands::publish::WorkflowArgs),
     /// Build and check a suspect project from one manifest.
     #[command(name = "project")]
     Project {
@@ -490,6 +496,8 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
         Command::ReleasePlan(args) => commands::release::release_plan(&args),
+        Command::ReleasePublish(args) => commands::publish::publish(&args),
+        Command::ReleaseWorkflow(args) => commands::publish::workflow(&args),
         Command::Impact(args) => commands::impact::impact(&args),
         Command::Project { cmd } => commands::project::run(cmd),
         Command::Lsp => {

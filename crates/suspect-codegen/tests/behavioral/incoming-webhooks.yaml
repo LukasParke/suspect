@@ -1,0 +1,109 @@
+# INVARIANT: a 3.1 `webhooks` entry compiles into a typed incoming
+# payload decoder and constructor in every backend that claims
+# `incoming-webhooks` — consumer-side handler types distinct from the
+# outgoing operation surface, with the declared receipt route carried
+# through.
+# INVARIANT: webhook decoding is core emission for an admitted webhook
+# definition, not SDK-defaults-gated; the fragment declares
+# `x-suspect-gated: false`.
+x-suspect-feature: incoming-webhooks
+x-suspect-gated: false
+openapi: 3.1.0
+info: {title: behavioral fragments, version: '1'}
+servers:
+  - url: https://api.hooks.test/v1
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      responses:
+        '200':
+          description: Every order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {type: string}
+webhooks:
+  orderCreated:
+    post:
+      operationId: onOrderCreated
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId: {type: string}
+                total: {type: number}
+              required: [orderId, total]
+      responses:
+        '200':
+          description: Acknowledged.
+  orderCancelled:
+    post:
+      operationId: onOrderCancelled
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                orderId: {type: string}
+                reason: {type: string}
+              required: [orderId]
+      responses:
+        '200':
+          description: Acknowledged.
+x-suspect-behavior:
+  typescript:
+    file: typescript/incoming.ts
+    markers:
+      - 'export function decodeOrderCreatedWebhook'
+      - 'export const OrderCreatedWebhookRoute'
+  python:
+    file: python/src/pagination_sdk/_incoming.py
+    markers:
+      - 'def decode_order_created_webhook'
+  rust:
+    file: rust/src/incoming.rs
+    markers:
+      - 'pub fn decode_order_created_webhook'
+      - 'pub struct IncomingRoute'
+  go:
+    file: go/incoming.go
+    markers:
+      - 'func DecodeOrderCreatedWebhook'
+  swift:
+    file: swift/Sources/PaginationSDK/Incoming.swift
+    markers:
+      - 'func decodeOrderCreatedWebhook'
+      - 'struct OrderCancelledWebhookRoute'
+  java:
+    file: java/src/main/java/test/suspect/Incoming.java
+    markers:
+      - 'public final class Incoming'
+  kotlin:
+    file: kotlin/src/main/kotlin/test/suspect/pagination_kotlin/Incoming.kt
+    markers:
+      - 'class IncomingRoute'
+  csharp:
+    file: csharp/src/Incoming.g.cs
+    markers:
+      - 'public sealed record IncomingRoute'
+  ruby:
+    file: ruby/lib/pagination_sdk/incoming.rb
+    markers:
+      - 'def decode_order_created_webhook'
+  php:
+    file: php/src/Incoming.php
+    markers:
+      - 'function decodeOrderCreatedWebhook'
+  dart:
+    file: dart/lib/src/incoming.dart
+    markers:
+      - 'decodeOrderCreatedWebhook'
+  cpp:
+    file: cpp/include/pagination_cpp/incoming.hpp
+    markers:
+      - 'struct IncomingRoute'

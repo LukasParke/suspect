@@ -54,6 +54,11 @@ struct Fragment {
     gated: bool,
     /// Backend name → (file to scan, required markers).
     behaviors: BTreeMap<String, (String, Vec<String>)>,
+    /// Optional `x-suspect-sdk-defaults` environment prefix: fragments whose
+    /// behavior needs a configured service identity (environment-variable
+    /// credentials) declare it here so the harness generates under the same
+    /// defaults a real project would configure.
+    env_prefix: Option<String>,
 }
 
 /// Parses one fragment from YAML through the low/overlay stack.
@@ -116,12 +121,19 @@ fn load_fragment(name: &str) -> Fragment {
     }
     assert!(!behaviors.is_empty(), "{name} covers no backends");
 
+    let env_prefix = document
+        .get("x-suspect-sdk-defaults")
+        .and_then(|d| d.get("env_prefix"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+
     Fragment {
         name: name.to_owned(),
         document,
         feature,
         gated,
         behaviors,
+        env_prefix,
     }
 }
 
@@ -187,6 +199,18 @@ fn target_for(backend: &str) -> TargetConfig {
     }
 }
 
+/// The SDK defaults a fragment is generated under: the v1 defaults plus any
+/// `x-suspect-sdk-defaults` configuration the fragment declares.
+fn defaults_for(fragment: &Fragment) -> SdkDefaults {
+    match &fragment.env_prefix {
+        Some(prefix) => SdkDefaults {
+            env_prefix: Some(prefix.clone()),
+            ..SdkDefaults::v1()
+        },
+        None => SdkDefaults::v1(),
+    }
+}
+
 /// Generates the fragment for one backend under SDK defaults.
 fn generate_for(fragment: &Fragment, backend: &str) -> Vec<suspect_codegen::OutFile> {
     let directory = tempfile::tempdir().unwrap();
@@ -205,7 +229,7 @@ fn generate_for(fragment: &Fragment, backend: &str) -> Vec<suspect_codegen::OutF
         .map(|operation| operation.source().clone())
         .collect();
     let options = GenerationOptions {
-        sdk_defaults: Some(SdkDefaults::v1()),
+        sdk_defaults: Some(defaults_for(fragment)),
         ..GenerationOptions::default()
     };
     generate_with_options(contract, &selected, &target_for(backend), &options).unwrap_or_else(
@@ -344,82 +368,18 @@ fn markers_hold_under_sdk_defaults_and_stay_absent_without() {
 /// here only when the per-backend native acceptance suite is the evidence;
 /// entries must be removed as fragments grow, and a debt entry a fragment
 /// already covers fails the suite.
-const COVERAGE_DEBT: &[(&str, &str)] = &[
-    // oauth2-client-credentials — exercised natively per backend (*_oauth.rs)
-    ("oauth2-client-credentials", "cpp"),
-    ("oauth2-client-credentials", "csharp"),
-    ("oauth2-client-credentials", "dart"),
-    ("oauth2-client-credentials", "go"),
-    ("oauth2-client-credentials", "java"),
-    ("oauth2-client-credentials", "kotlin"),
-    ("oauth2-client-credentials", "php"),
-    ("oauth2-client-credentials", "python"),
-    ("oauth2-client-credentials", "ruby"),
-    ("oauth2-client-credentials", "rust"),
-    ("oauth2-client-credentials", "swift"),
-    ("oauth2-client-credentials", "typescript"),
-    // auth-replay-401 — same native suites
-    ("auth-replay-401", "cpp"),
-    ("auth-replay-401", "csharp"),
-    ("auth-replay-401", "dart"),
-    ("auth-replay-401", "go"),
-    ("auth-replay-401", "java"),
-    ("auth-replay-401", "kotlin"),
-    ("auth-replay-401", "php"),
-    ("auth-replay-401", "python"),
-    ("auth-replay-401", "ruby"),
-    ("auth-replay-401", "rust"),
-    ("auth-replay-401", "swift"),
-    ("auth-replay-401", "typescript"),
-    // typed-stream-events — *_stream_typed.rs
-    ("typed-stream-events", "cpp"),
-    ("typed-stream-events", "csharp"),
-    ("typed-stream-events", "dart"),
-    ("typed-stream-events", "go"),
-    ("typed-stream-events", "java"),
-    ("typed-stream-events", "kotlin"),
-    ("typed-stream-events", "php"),
-    ("typed-stream-events", "python"),
-    ("typed-stream-events", "ruby"),
-    ("typed-stream-events", "rust"),
-    ("typed-stream-events", "swift"),
-    ("typed-stream-events", "typescript"),
-    // incoming-webhooks — *_incoming.rs
-    ("incoming-webhooks", "cpp"),
-    ("incoming-webhooks", "csharp"),
-    ("incoming-webhooks", "dart"),
-    ("incoming-webhooks", "go"),
-    ("incoming-webhooks", "java"),
-    ("incoming-webhooks", "kotlin"),
-    ("incoming-webhooks", "php"),
-    ("incoming-webhooks", "python"),
-    ("incoming-webhooks", "ruby"),
-    ("incoming-webhooks", "rust"),
-    ("incoming-webhooks", "swift"),
-    ("incoming-webhooks", "typescript"),
-    // env-var-credentials — *_credential_env.rs (csharp unclaimed entirely)
-    ("env-var-credentials", "cpp"),
-    ("env-var-credentials", "dart"),
-    ("env-var-credentials", "go"),
-    ("env-var-credentials", "java"),
-    ("env-var-credentials", "kotlin"),
-    ("env-var-credentials", "php"),
-    ("env-var-credentials", "python"),
-    ("env-var-credentials", "ruby"),
-    ("env-var-credentials", "rust"),
-    ("env-var-credentials", "swift"),
-    ("env-var-credentials", "typescript"),
-    // user-agent-attribution — *_attribution.rs (go unclaimed entirely);
-    // python/rust/typescript are fragment-covered.
-    ("user-agent-attribution", "cpp"),
-    ("user-agent-attribution", "csharp"),
-    ("user-agent-attribution", "dart"),
-    ("user-agent-attribution", "java"),
-    ("user-agent-attribution", "kotlin"),
-    ("user-agent-attribution", "php"),
-    ("user-agent-attribution", "ruby"),
-    ("user-agent-attribution", "swift"),
-];
+/// Feature claims with no behavioral-fragment coverage yet. A claim lands
+/// here only when the per-backend native acceptance suite is the evidence;
+/// entries must be removed as fragments grow, and a debt entry a fragment
+/// already covers fails the suite.
+///
+/// Every `*-auth`, `*-stream`, `*-incoming`, and `*-attribution` claim is
+/// fragment-covered, as is every `env-var-credentials` claim except
+/// TypeScript: its claim is proven through an explicitly configured
+/// `CredentialEnv` policy, not the automatic `<ENV_PREFIX>_API_KEY` service
+/// identity the fragment exercises. C# deliberately claims no
+/// `env-var-credentials` support.
+const COVERAGE_DEBT: &[(&str, &str)] = &[("env-var-credentials", "typescript")];
 
 #[test]
 fn every_feature_claim_has_behavioral_fragment_coverage() {

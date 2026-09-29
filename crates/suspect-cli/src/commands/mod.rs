@@ -23,6 +23,7 @@ pub mod lint;
 pub mod overlay;
 pub mod overlay_dry_run;
 pub mod project;
+pub mod publish;
 pub mod release;
 pub mod replay;
 pub mod rules;

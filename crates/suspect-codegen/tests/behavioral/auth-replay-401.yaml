@@ -1,0 +1,87 @@
+# INVARIANT: a 401 response triggers exactly one credential refresh and one
+# request replay before the failure surfaces, in every backend that claims
+# `auth-replay-401`. Each backend ships a replaying credential/transport
+# that refreshes once on a 401 and never loops.
+# INVARIANT: the replay runtime is core emission for an admitted OAuth
+# scheme, not SDK-defaults-gated; the fragment declares
+# `x-suspect-gated: false`.
+x-suspect-feature: auth-replay-401
+x-suspect-gated: false
+openapi: 3.1.0
+info: {title: behavioral fragments, version: '1'}
+servers:
+  - url: https://api.replay.test/v1
+security:
+  - clientCredentials: []
+paths:
+  /invoices:
+    get:
+      operationId: listInvoices
+      responses:
+        '200':
+          description: Every invoice.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {type: string}
+components:
+  securitySchemes:
+    clientCredentials:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.replay.test/oauth/token
+          refreshUrl: https://auth.replay.test/oauth/token
+          scopes:
+            invoices:read: Read invoices.
+x-suspect-behavior:
+  typescript:
+    file: typescript/oauth.ts
+    markers:
+      - 'createReplayingCredentialsProvider'
+  python:
+    file: python/src/pagination_sdk/_oauth.py
+    markers:
+      - 'replaying'
+  rust:
+    file: rust/src/oauth.rs
+    markers:
+      - 'ReplayCredentials'
+  go:
+    file: go/oauth.go
+    markers:
+      - 'ReplayCredentials'
+  swift:
+    file: swift/Sources/PaginationSDK/OAuth.swift
+    markers:
+      - 'final class OAuthReplayCredentials'
+  java:
+    file: java/src/main/java/test/suspect/OAuth.java
+    markers:
+      - 'final class ReplayingCredentials'
+  kotlin:
+    file: kotlin/src/main/kotlin/test/suspect/pagination_kotlin/OAuth.kt
+    markers:
+      - 'OAuthReplayCredentials'
+  csharp:
+    file: csharp/src/OAuth.g.cs
+    markers:
+      - 'public sealed class ReplayingCredentials'
+  ruby:
+    file: ruby/lib/pagination_sdk/oauth.rb
+    markers:
+      - 'replaying'
+  php:
+    file: php/src/OAuth.php
+    markers:
+      - 'function replayingCredential'
+  dart:
+    file: dart/lib/src/oauth.dart
+    markers:
+      - 'class ReplayingCredentials'
+  cpp:
+    file: cpp/include/pagination_cpp/oauth.hpp
+    markers:
+      - 'class OAuthReplayCredentials'
+      - 'class OAuthReplayTransport'

@@ -37,3 +37,37 @@ x-suspect-behavior:
     markers:
       - 'resolveUserAgent'
       - 'applicationId'
+  cpp:
+    file: cpp/include/pagination_cpp/attribution.hpp
+    markers:
+      - 'attribution_sdk_name'
+      - 'attribution_language'
+  csharp:
+    file: csharp/src/Attribution.g.cs
+    markers:
+      - 'internal static class Attribution'
+  dart:
+    file: dart/lib/src/attribution.dart
+    markers:
+      - 'userAgentSdkName'
+      - 'userAgentSdkVersion'
+  java:
+    file: java/src/main/java/test/suspect/Attribution.java
+    markers:
+      - 'public final class Attribution'
+  kotlin:
+    file: kotlin/src/main/kotlin/test/suspect/pagination_kotlin/Attribution.kt
+    markers:
+      - 'ATTRIBUTION_SPEC_VERSION'
+  php:
+    file: php/src/Http.php
+    markers:
+      - 'userAgent'
+  ruby:
+    file: ruby/lib/pagination_sdk/attribution.rb
+    markers:
+      - 'ATTRIBUTION = {'
+  swift:
+    file: swift/Sources/PaginationSDK/Attribution.swift
+    markers:
+      - 'enum Attribution'

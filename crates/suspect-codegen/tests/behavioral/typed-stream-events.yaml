@@ -1,0 +1,93 @@
+# INVARIANT: a `text/event-stream` response compiles into typed event
+# iteration in every backend that claims `typed-stream-events` — a typed
+# item/event value plus an item stream over decoded events — instead of a
+# raw string body. The fragment uses OAS 3.2 `itemSchema`, the standard
+# stream item declaration.
+# INVARIANT: the stream runtime is core emission for a declared
+# `text/event-stream` media type with an item schema, not SDK-defaults
+# gated; the fragment declares `x-suspect-gated: false`.
+x-suspect-feature: typed-stream-events
+x-suspect-gated: false
+openapi: 3.2.0
+info: {title: behavioral fragments, version: '1'}
+servers:
+  - url: https://api.stream.test/v1
+paths:
+  /events:
+    get:
+      operationId: streamEvents
+      responses:
+        '200':
+          description: A typed event stream.
+          content:
+            text/event-stream:
+              itemSchema:
+                type: object
+                properties:
+                  event: {type: string, enum: [message, done]}
+                  data: {type: string}
+                  id: {type: string}
+                required: [event, data]
+  /ticks:
+    get:
+      operationId: streamTicks
+      responses:
+        '200':
+          description: A typed tick stream.
+          content:
+            text/event-stream:
+              itemSchema:
+                type: object
+                properties:
+                  data: {type: string}
+                required: [data]
+x-suspect-behavior:
+  typescript:
+    file: typescript/http/streams.ts
+    markers:
+      - 'export function streamItems'
+  python:
+    file: python/src/pagination_sdk/_streams.py
+    markers:
+      - 'class SyncStream'
+      - 'class AsyncStream'
+  rust:
+    file: rust/src/http/stream.rs
+    markers:
+      - 'pub struct ItemStream'
+  go:
+    file: go/http_stream.go
+    markers:
+      - 'func httpNewStream'
+  swift:
+    file: swift/Sources/PaginationSDK/HTTPStreams.swift
+    markers:
+      - 'struct HTTPByteStream'
+  java:
+    file: java/src/main/java/test/suspect/EventStream.java
+    markers:
+      - 'final class EventStream'
+  kotlin:
+    file: kotlin/src/main/kotlin/test/suspect/pagination_kotlin/Streaming.kt
+    markers:
+      - 'public interface StreamingTransport'
+  csharp:
+    file: csharp/src/StreamRuntime.cs
+    markers:
+      - 'public sealed class HttpStream'
+  ruby:
+    file: ruby/lib/pagination_sdk/streams.rb
+    markers:
+      - 'class ItemStream'
+  php:
+    file: php/src/Stream.php
+    markers:
+      - 'final class ItemStream'
+  dart:
+    file: dart/lib/src/stream_events.dart
+    markers:
+      - 'class StreamEventsEvent'
+  cpp:
+    file: cpp/include/pagination_cpp/stream.hpp
+    markers:
+      - 'class ItemStream'
