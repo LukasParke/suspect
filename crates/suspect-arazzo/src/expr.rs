@@ -47,6 +47,19 @@ pub enum Expr {
         /// Which part of the message is referenced.
         part: HttpPart,
     },
+    /// `$message.payload[#pointer]` — the payload of the current message
+    /// (Arazzo 1.1 AsyncAPI send/receive steps).
+    Message {
+        /// The message payload, optionally through a JSON pointer.
+        part: HttpPart,
+    },
+    /// `$message.headers.<name>` — one header of the current message.
+    MessageHeader {
+        /// The header name.
+        name: String,
+    },
+    /// `$message.correlationId` — the correlation id of the current message.
+    CorrelationId,
     /// `$outputs.<name>` — a named output of the current workflow.
     Outputs {
         /// The output name after the dot.
@@ -258,6 +271,23 @@ impl Parser<'_> {
                 Expr::Response { part }
             });
         }
+        if head == "message" {
+            self.eat(b'.')?;
+            let part = self.segment()?;
+            return match part.as_str() {
+                "payload" => Ok(Expr::Message {
+                    part: self.pointer_part("payload")?,
+                }),
+                "correlationId" => Ok(Expr::CorrelationId),
+                "headers" => {
+                    self.eat(b'.')?;
+                    Ok(Expr::MessageHeader {
+                        name: self.segment()?,
+                    })
+                }
+                other => Err("unknown message part"),
+            };
+        }
         if head == "sourceDescriptions" {
             self.eat(b'.')?;
             let name = self.segment()?;
@@ -332,22 +362,27 @@ impl Parser<'_> {
                     _ => HttpPart::Path(name),
                 })
             }
-            "body" => {
-                if self.peek() == Some(b'#') {
-                    self.pos += 1; // '#'
-                    let frag_start = self.pos;
-                    while self.peek().is_some() {
-                        self.pos += 1;
-                    }
-                    let frag = String::from_utf8_lossy(&self.input[frag_start..]).to_string();
-                    let pointer = Pointer::parse(&frag)
-                        .map_err(|_| "invalid JSON pointer in body fragment")?;
-                    Ok(HttpPart::Body(Some(pointer)))
-                } else {
-                    Ok(HttpPart::Body(None))
-                }
-            }
+            "body" => self.pointer_part("body"),
             _ => Err("expected header/query/path/body"),
+        }
+    }
+
+    /// Parses a JSON-pointer-suffixed message part: `body` (no pointer) or
+    /// `body#<pointer>`. `label` names the part in the error.
+    fn pointer_part(&mut self, label: &str) -> Result<HttpPart, &'static str> {
+        if self.peek() == Some(b'#') {
+            self.pos += 1; // '#'
+            let frag_start = self.pos;
+            while self.peek().is_some() {
+                self.pos += 1;
+            }
+            let frag = String::from_utf8_lossy(&self.input[frag_start..]).to_string();
+            let pointer =
+                Pointer::parse(&frag).map_err(|_| "invalid JSON pointer in message fragment")?;
+            Ok(HttpPart::Body(Some(pointer)))
+        } else {
+            let _ = label;
+            Ok(HttpPart::Body(None))
         }
     }
 }

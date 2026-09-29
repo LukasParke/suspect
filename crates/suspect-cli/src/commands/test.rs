@@ -24,6 +24,22 @@ pub fn test(
     offline_cassette: Option<&Path>,
     ndjson: bool,
 ) -> anyhow::Result<i32> {
+    test_with_messages(arazzo, base_url, filter, offline_cassette, ndjson, None)
+}
+
+/// [`test`] with an optional message broker directory for Arazzo 1.1
+/// AsyncAPI send/receive steps. The directory holds `inbox.jsonl`
+/// (pre-recorded messages the workflow may receive) and collects
+/// `outbox.jsonl` (what the workflow published).
+#[allow(clippy::too_many_arguments)]
+pub fn test_with_messages(
+    arazzo: &Path,
+    base_url: &str,
+    filter: Option<&str>,
+    offline_cassette: Option<&Path>,
+    ndjson: bool,
+    message_broker: Option<&Path>,
+) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(arazzo)?;
     let uri = Uri::from_path(arazzo)?;
     let handle = ws
@@ -39,14 +55,16 @@ pub fn test(
         return Ok(2);
     }
 
-    rt_run(&plan, base_url, offline_cassette, ndjson)
+    rt_run(&plan, base_url, offline_cassette, ndjson, message_broker)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn rt_run(
     plan: &suspect_test::Plan,
     base_url: &str,
     offline_cassette: Option<&Path>,
     ndjson: bool,
+    message_broker: Option<&Path>,
 ) -> anyhow::Result<i32> {
     let rt = tokio::runtime::Runtime::new()?;
     let outcome = rt.block_on(async move {
@@ -58,6 +76,14 @@ fn rt_run(
             }
             None => Arc::new(LiveTransport::new(std::time::Duration::from_secs(30))?),
         };
+        let broker: Option<Arc<dyn suspect_test::messaging::MessageTransport>> =
+            match message_broker {
+                Some(dir) => Some(Arc::new(
+                    suspect_test::messaging::FileBroker::open(dir)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?,
+                )),
+                None => None,
+            };
         let (tx, mut rx) = tokio::sync::mpsc::channel::<TestEvent>(256);
         // Drain + print events on a side task; run_plan's cooperative
         // workflow futures are deliberately non-Send, so it is awaited in
@@ -77,7 +103,14 @@ fn rt_run(
             }
             events
         });
-        let summary = suspect_test::run_plan(plan, base_url, http.as_ref(), tx).await;
+        let summary = suspect_test::run_plan_with_messages(
+            plan,
+            base_url,
+            http.as_ref(),
+            broker.as_deref(),
+            tx,
+        )
+        .await;
         let events = drainer
             .await
             .map_err(|e| anyhow::anyhow!("drainer panicked: {e}"))?;

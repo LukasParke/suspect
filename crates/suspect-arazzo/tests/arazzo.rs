@@ -513,3 +513,30 @@ fn unknown_arazzo_major_is_rejected() {
     let codes: Vec<&str> = validate_arazzo(&parsed).iter().map(|d| d.code).collect();
     assert!(codes.contains(&"arazzo-unsupported-version"), "{codes:?}");
 }
+
+// ------------------------------------------------- Arazzo 1.1 message steps
+
+#[test]
+fn message_payload_expressions_parse() {
+    let payload = suspect_arazzo::parse("$message.payload").unwrap();
+    assert_eq!(
+        payload,
+        suspect_arazzo::Expr::Message {
+            part: HttpPart::Body(None)
+        }
+    );
+    let pointer = suspect_arazzo::parse("$message.payload#/id").unwrap();
+    let suspect_arazzo::Expr::Message { part } = pointer else {
+        panic!("expected a message payload expression");
+    };
+    assert!(matches!(part, HttpPart::Body(Some(_))));
+    assert_eq!(
+        suspect_arazzo::parse("$message.correlationId").unwrap(),
+        suspect_arazzo::Expr::CorrelationId
+    );
+    assert!(matches!(
+        suspect_arazzo::parse("$message.headers.X-Trace").unwrap(),
+        suspect_arazzo::Expr::MessageHeader { .. }
+    ));
+    assert!(suspect_arazzo::parse("$message.nonsense").is_err());
+}

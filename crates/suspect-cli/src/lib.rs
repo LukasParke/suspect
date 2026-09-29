@@ -197,6 +197,11 @@ pub enum Command {
         /// Event stream format: human text or one-JSON-per-line ndjson.
         #[arg(long, value_enum, default_value = "text")]
         report: ReportFormat,
+        /// Message broker directory for Arazzo 1.1 AsyncAPI steps:
+        /// `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl`
+        /// collects what the workflow published.
+        #[arg(long, value_name = "DIR")]
+        message_broker: Option<PathBuf>,
     },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
@@ -430,12 +435,14 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             cassette,
             offline: _,
             report,
-        } => commands::test::test(
+            message_broker,
+        } => commands::test::test_with_messages(
             &arazzo,
             &base_url,
             filter.as_deref(),
             cassette.as_deref(),
             matches!(report, ReportFormat::Ndjson),
+            message_broker.as_deref(),
         ),
         Command::Gen {
             spec,

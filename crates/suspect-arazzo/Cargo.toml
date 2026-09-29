@@ -8,6 +8,8 @@ license.workspace = true
 
 [dependencies]
 suspect-low.workspace = true
+serde_json.workspace = true
+suspect-overlay.workspace = true
 suspect-ref.workspace = true
 rustc-hash.workspace = true
 suspect-jsonpath.workspace = true

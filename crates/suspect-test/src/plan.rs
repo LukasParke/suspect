@@ -113,6 +113,41 @@ pub struct StepPlan {
     /// JSON)` used by executors to validate responses against the
     /// contract.
     pub response_schemas: Vec<(Option<u16>, serde_json::Value)>,
+    /// Arazzo 1.1 AsyncAPI message step; `None` for ordinary HTTP steps.
+    pub message: Option<MessageStep>,
+}
+
+/// Arazzo 1.1 AsyncAPI message step: `action: send` or `action: receive`
+/// on a `channelPath` of an `asyncapi` source description.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MessageStep {
+    /// `send` publishes a payload; `receive` waits for one.
+    pub direction: MessageDirection,
+    /// The `sourceDescriptions` entry holding the AsyncAPI document.
+    pub source: String,
+    /// The channel address inside that document.
+    pub channel: String,
+    /// The addressed message type, when the channel declares several.
+    pub message_type: Option<String>,
+    /// The payload to publish (send steps) when it is a single expression.
+    pub payload: Option<Rex>,
+    /// A structured payload whose string leaves are runtime expressions,
+    /// materialized at send time.
+    pub payload_template: Option<serde_json::Value>,
+    /// The correlation id the step matches or stamps (Arazzo 1.1).
+    pub correlation_id: Option<Rex>,
+    /// The JSON Schema the AsyncAPI message declares, used to validate a
+    /// received payload before criteria run.
+    pub payload_schema: Option<serde_json::Value>,
+}
+
+/// Which direction a message step runs in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageDirection {
+    /// Publish a payload to the channel.
+    Send,
+    /// Wait for a matching payload on the channel.
+    Receive,
 }
 
 /// Pragmatic success-criterion model compiled from Arazzo condition strings.
@@ -289,6 +324,8 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
 /// Maps `sourceDescriptions` names to IR snapshots of their documents.
 struct SourceIndex {
     specs: Vec<(String, IrSpec, Uri)>,
+    /// Parsed AsyncAPI documents by `sourceDescriptions` name (Arazzo 1.1).
+    asyncapi: std::collections::BTreeMap<String, suspect_arazzo::AsyncApiDoc>,
     ws: Arc<Workspace>,
 }
 
@@ -296,20 +333,38 @@ impl SourceIndex {
     fn load(doc: &ArazzoDoc<'_>, base: &Uri, ws: &Arc<Workspace>) -> Result<Self, CompileError> {
         let uris = ws.uris();
         let mut specs = Vec::new();
+        let mut asyncapi = std::collections::BTreeMap::new();
         for src in doc.source_descriptions() {
-            // Overlays and nested Arazzo descriptions carry no operations.
-            if !matches!(src.kind, suspect_arazzo::SourceType::OpenApi) {
-                continue;
+            match src.kind {
+                // Overlays and nested Arazzo descriptions carry no operations.
+                suspect_arazzo::SourceType::OpenApi => {
+                    let uri = resolve_source(src, base, &uris)?;
+                    let ir = IrSpec::from_workspace(ws, &uri)
+                        .map_err(|e| CompileError(format!("source '{}': {e}", src.name)))?;
+                    specs.push((src.name.to_owned(), ir, uri));
+                }
+                suspect_arazzo::SourceType::AsyncApi => {
+                    let uri = resolve_source(src, base, &uris)?;
+                    let Some(handle) = ws.get(&uri) else {
+                        continue;
+                    };
+                    if let Ok(document) = suspect_arazzo::AsyncApiDoc::parse(handle.doc()) {
+                        asyncapi.insert(src.name.to_owned(), document);
+                    }
+                }
+                _ => {}
             }
-            let uri = resolve_source(src, base, &uris)?;
-            let ir = IrSpec::from_workspace(ws, &uri)
-                .map_err(|e| CompileError(format!("source '{}': {e}", src.name)))?;
-            specs.push((src.name.to_owned(), ir, uri));
         }
         Ok(Self {
             specs,
+            asyncapi,
             ws: Arc::clone(ws),
         })
+    }
+
+    /// The AsyncAPI document declared for a `sourceDescriptions` entry.
+    fn asyncapi(&self, name: &str) -> Option<&suspect_arazzo::AsyncApiDoc> {
+        self.asyncapi.get(name)
     }
 
     /// The source document containing `key`, walking `paths` operations.
@@ -512,12 +567,77 @@ fn workflow_inputs(
     inputs
 }
 
+/// Compiles an Arazzo 1.1 AsyncAPI step into a [`MessageStep`], or
+/// `None` for an ordinary HTTP step.
+fn message_step(step: &StepView<'_>, sources: &SourceIndex) -> Option<MessageStep> {
+    let channel_path = step.channel_path()?;
+    let channel_ref = suspect_arazzo::parse_channel_path(channel_path)?;
+    let direction = match step.action() {
+        Some("send") => MessageDirection::Send,
+        // A channel step without an explicit action subscribes when it
+        // declares a correlation id, otherwise it publishes.
+        _ => {
+            if step.correlation_id().is_some() {
+                MessageDirection::Receive
+            } else {
+                MessageDirection::Send
+            }
+        }
+    };
+    // The AsyncAPI document for the referenced source, when it is loaded.
+    let flow = match direction {
+        MessageDirection::Send => suspect_arazzo::asyncapi::MessageDirection::Outgoing,
+        MessageDirection::Receive => suspect_arazzo::asyncapi::MessageDirection::Incoming,
+    };
+    let resolved = sources
+        .asyncapi(&channel_ref.source)
+        .as_ref()
+        .and_then(|doc| doc.channel(&channel_ref.address))
+        .and_then(|channel| channel.message(flow, None))
+        .cloned();
+    Some(MessageStep {
+        direction,
+        source: channel_ref.source,
+        channel: channel_ref.address,
+        message_type: resolved.as_ref().map(|m| m.name.clone()),
+        // A send step's payload is either a single runtime expression or a
+        // structured template whose string leaves are expressions.
+        payload: step.request_body().and_then(|body| {
+            let payload = body.get("payload").unwrap_or(body);
+            payload
+                .as_str()
+                .and_then(|text| suspect_rex::parse_rex(&text.to_owned()).ok())
+        }),
+        payload_template: step.request_body().map(|body| {
+            let payload = body.get("payload").unwrap_or(body);
+            if payload.kind() == suspect_low::ValueKind::Str {
+                serde_json::Value::Null
+            } else {
+                serde_json::from_str(&suspect_overlay::Value::from_node(payload).to_json())
+                    .unwrap_or(serde_json::Value::Null)
+            }
+        }),
+        correlation_id: step
+            .correlation_id()
+            .and_then(|expr| suspect_rex::parse_rex(&expr.to_owned()).ok()),
+        payload_schema: resolved.and_then(|m| m.payload),
+    })
+}
+
 fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, CompileError> {
     if step.step_id.is_empty() {
         return Err(CompileError("step missing stepId".to_owned()));
     }
     let step_id = step.step_id.to_owned();
-    let operation = resolve_operation(step, sources)?;
+    let message = message_step(step, sources);
+    let operation = match &message {
+        // A message step addresses a channel, not an HTTP operation.
+        Some(_) => OpKey {
+            method: Method::Post,
+            path: step.channel_path().unwrap_or_default().to_owned(),
+        },
+        None => resolve_operation(step, sources)?,
+    };
     let security = sources.security_for(&operation);
     let response_schemas = sources.response_schemas_for(&operation);
     let mut parameters = Vec::new();
@@ -582,6 +702,7 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         operation,
         parameters,
         request_body,
+        message,
         timeout_ms: step.timeout_ms(),
         success,
         outputs,
@@ -899,7 +1020,9 @@ fn classify_target(lhs: &str) -> Option<Target> {
     if lhs.contains("$statusCode") {
         return Some(Target::Status);
     }
-    if lhs.contains("$response.body") {
+    // `$response.body#/x` and the Arazzo 1.1 `$message.payload#/x` address
+    // the same current-message body through a JSON pointer.
+    if lhs.contains("$response.body") || lhs.contains("$message.payload") {
         let frag = fragment_after_hash(lhs).unwrap_or_default();
         return Some(Target::Body(fragment_to_pointer(&frag)));
     }

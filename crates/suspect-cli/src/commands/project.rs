@@ -46,6 +46,8 @@ pub struct ProjectTests {
     pub base_url: String,
     /// When set, run offline against this cassette instead of live HTTP.
     pub cassette: Option<PathBuf>,
+    /// Message broker directory for Arazzo 1.1 AsyncAPI steps.
+    pub message_broker: Option<PathBuf>,
 }
 
 /// `suspect project` subcommands.
@@ -147,6 +149,10 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                 .unwrap_or("http://127.0.0.1:8080")
                 .to_owned(),
             cassette: t.get("cassette").and_then(|v| v.as_str()).map(resolve),
+            message_broker: t
+                .get("message_broker")
+                .and_then(|v| v.as_str())
+                .map(resolve),
         })
     });
 
@@ -334,12 +340,13 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         && !tests.arazzo.is_empty()
     {
         for arazzo in &tests.arazzo {
-            let exit = crate::commands::test::test(
+            let exit = crate::commands::test::test_with_messages(
                 arazzo,
                 &tests.base_url,
                 None,
                 tests.cassette.as_deref(),
                 false,
+                tests.message_broker.as_deref(),
             )?;
             if exit != 0 {
                 failures += 1;
