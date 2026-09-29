@@ -10,6 +10,8 @@ license = "MIT OR Apache-2.0"
 authors = ["Luke"]
 
 [workspace.dependencies]
+sha2 = "0.10"
+libc = "0.2"
 # internal crates
 suspect-source = { path = "crates/suspect-source", version = "0.1.0" }
 suspect-syntax = { path = "crates/suspect-syntax", version = "0.1.0" }

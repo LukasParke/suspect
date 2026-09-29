@@ -23,9 +23,10 @@ pub struct DocsGenArgs {
     /// The OpenAPI document to document.
     #[arg(required = true)]
     pub input: PathBuf,
-    /// Output style (default: a single HTML file).
-    #[arg(long, value_enum, default_value = "html")]
-    pub style: DocsStyle,
+    /// Output style (default: a single HTML file, or `docs.style` from
+    /// `.suspect.yaml`).
+    #[arg(long, value_enum)]
+    pub style: Option<DocsStyle>,
     /// Output path: a file for `html`, a directory for `markdown` and
     /// `sveltekit`.
     #[arg(long)]
@@ -57,7 +58,8 @@ pub fn docs_gen(args: &DocsGenArgs) -> anyhow::Result<i32> {
         model
     };
 
-    match args.style {
+    let style = args.style.unwrap_or(DocsStyle::Html);
+    match style {
         DocsStyle::Html => {
             let html = docs_gen::render_html(&model);
             match &args.output {
