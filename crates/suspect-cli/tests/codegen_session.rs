@@ -152,10 +152,25 @@ fn readonly_watch_publishes_cached_reverts_with_the_same_drift_paths() {
         .spawn()
         .unwrap();
     let mut reader = BufReader::new(child.stdout.take().unwrap());
+    // The watcher may emit records other than iteration results (a start
+    // marker, a summary), and file events can coalesce under load, so read
+    // until an iteration record appears rather than assuming every line is
+    // one. The assertions below are unchanged: the three states must still
+    // arrive in order.
     let read = |reader: &mut BufReader<std::process::ChildStdout>| {
-        let mut line = String::new();
-        reader.read_line(&mut line).unwrap();
-        serde_json::from_str::<Value>(&line).expect("watch result")
+        for _ in 0..64 {
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                break;
+            }
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if value.get("revision").is_some() {
+                return value;
+            }
+        }
+        panic!("no watch iteration record arrived");
     };
     let first = read(&mut reader);
     assert_eq!(first["status"], "drift");
