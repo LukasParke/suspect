@@ -263,6 +263,17 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
     })
 }
 
+/// Builds one project through the whole pipeline.
+///
+/// Split out so `suspect ci --build` reuses exactly this pipeline rather
+/// than a second copy of it: one implementation, one set of behaviors.
+///
+/// # Errors
+/// Manifest or IO failures.
+pub fn build_manifest(manifest: &Path, skip_tests: bool) -> anyhow::Result<i32> {
+    build(&parse_manifest(manifest)?, skip_tests)
+}
+
 /// Runs the project subcommands.
 ///
 /// # Errors

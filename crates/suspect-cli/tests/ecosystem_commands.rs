@@ -884,3 +884,119 @@ fn ci_reports_a_machine_readable_aggregate() {
     assert!(stages.contains(&"contract"), "{stages:?}");
     assert!(stages.contains(&"breaking"), "{stages:?}");
 }
+
+/// A service whose manifest declares lint policy, the shape a monorepo
+/// project uses.
+fn monorepo_service(root: &std::path::Path, name: &str, untagged: bool) {
+    let dir = root.join("services").join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let operation = if untagged {
+        "    get:\n      responses:\n        '200': {description: ok}"
+    } else {
+        "    get:\n      tags: [things]\n      operationId: listThings\n      responses:\n        '200': {description: ok}"
+    };
+    // The tag is declared so the fixture is clean at error severity: the
+    // lint stage is asserted on its policy, not on this spec's findings.
+    std::fs::write(
+        dir.join("openapi.yaml"),
+        format!(
+            "openapi: 3.1.0\ninfo: {{title: {name}, version: '1'}}\ntags:\n  - {{name: things, description: Things}}\npaths:\n  /things:\n{operation}\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("suspect.project.json"),
+        format!(
+            r#"{{"version": 1, "name": "{name}",
+  "entry": "openapi.yaml",
+  "publish": {{"output": "build/spec.yaml"}},
+  "contract": {{"output": "build/contract"}},
+  "lint": {{"min_severity": "error"}},
+  "codegen": [{{"name": "ts", "profile": "typescript-http", "package_name": "@acme/{name}",
+    "package_version": "1.0.0", "out": "../../generated/{name}", "operation_id": ["listThings"]}}]}}"#
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn ci_runs_lint_with_the_project_policy() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    monorepo_service(root, "clean", false);
+    monorepo_service(root, "untagged", true);
+    init_git_repo(root);
+
+    // Lint is a default stage: it must appear in the aggregate.
+    let output = std::process::Command::new(binary())
+        .args([
+            "ci",
+            ".",
+            "--format",
+            "json",
+            "--stage",
+            "lint",
+            "--skip-tests",
+        ])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let projects = report["projects"].as_array().unwrap();
+    assert_eq!(projects.len(), 2, "{report}");
+    for project in projects {
+        let stages: Vec<&str> = project["stages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["stage"].as_str().unwrap())
+            .collect();
+        assert_eq!(stages, vec!["lint"], "{stages:?}");
+    }
+    // The project declares `min_severity: error`, which is honoured.
+    for project in projects {
+        let stage = &project["stages"][0];
+        assert!(
+            stage["summary"]
+                .as_str()
+                .unwrap()
+                .contains("at or above Error"),
+            "the project's own lint policy applies: {stage}"
+        );
+    }
+}
+
+#[test]
+fn ci_build_produces_artifacts_and_gates_them_in_one_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    monorepo_service(root, "gateway", false);
+    init_git_repo(root);
+
+    // A clean checkout: nothing built yet.
+    assert!(!root.join("services/gateway/build/spec.yaml").exists());
+
+    let output = std::process::Command::new(binary())
+        .args(["ci", ".", "--build", "--baseline", "v0.1.0", "--skip-tests"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "one command should build and gate: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The build produced the published spec, the contract package, and the
+    // SDK in a folder outside the service.
+    assert!(root.join("services/gateway/build/spec.yaml").is_file());
+    assert!(
+        root.join("services/gateway/build/contract/openapi.yaml")
+            .is_file()
+    );
+    assert!(
+        root.join("generated/gateway/typescript/package.json")
+            .is_file(),
+        "the SDK lands in the configured folder: {:?}",
+        std::fs::read_dir(root.join("generated")).unwrap().count()
+    );
+}
