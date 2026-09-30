@@ -36,11 +36,16 @@ pub mod extensions_registry;
 pub mod format_order;
 pub mod generation_contract;
 pub mod hover_detail;
+mod impact;
 pub mod keys;
 pub mod keyword_docs;
+mod latency;
 pub mod links;
+mod meaning;
 pub mod navigation;
 pub mod pull;
+mod rank;
+mod refactor;
 pub mod rename;
 pub mod run_lenses;
 pub mod semantic;
@@ -164,6 +169,117 @@ impl Backend {
 }
 
 /// The workspace root path, when configured.
+#[must_use]
+/// The model-derived half of a hover: where the cursor is, and what a
+/// change here would reach.
+///
+/// A competitor's hover stops at the schema. Ours answers the question an
+/// author actually has before editing a definition: who depends on this?
+fn hover_meaning(
+    ws: &Arc<suspect_ref::Workspace>,
+    low: &suspect_low::LowDoc,
+    offset: usize,
+) -> Option<String> {
+    let model = meaning::Model::new(low);
+    let m = model.at(offset)?;
+    let mut out = format!("**{}** in {}", m.kind.label(), model.dialect().label());
+    if m.within(meaning::ObjectKind::Schema) {
+        out.push_str("\n\n_schema position_");
+    }
+    if m.pointer.to_path() != "/" {
+        out.push_str(&format!("\n\n`{}`", m.pointer.to_path()));
+    }
+    if let Some(target) = &m.ref_target {
+        out.push_str(&format!("\n\nresolves to `{}`", target.pointer.to_path()));
+    }
+
+    // Change impact, when the workspace can answer it.
+    let index = meaning::Index::build(ws);
+    let uri = low.uri().as_str();
+    let spec = suspect_ir::IrSpec::from_workspace(ws, low.uri()).ok();
+    let empty: [(String, suspect_arazzo::ArazzoDoc<'_>); 0] = [];
+    let no_artifacts = std::collections::BTreeMap::new();
+    let no_traffic = std::collections::BTreeMap::new();
+    let context = impact::ImpactContext {
+        index: &index,
+        spec: spec.as_ref(),
+        workflows: &empty,
+        artifacts: &no_artifacts,
+        traffic: &no_traffic,
+    };
+    let report = context.impact_of(uri, &m);
+    if !report.is_local() {
+        out.push_str(&format!("\n\n**Impact** — {}\n\n", report.summary()));
+        for entry in report.impacts.iter().take(6) {
+            out.push_str(&format!(
+                "- {} **{}** — {}\n",
+                entry.kind.label(),
+                entry.subject,
+                entry.via
+            ));
+        }
+    }
+    Some(out)
+}
+
+/// Verifies a contract package by invoking the CLI in check mode. The
+/// editor shells out rather than re-implementing: one implementation of
+/// "is the package current", used by both the editor and CI.
+fn suspect_cli_contract_check(spec: &std::path::Path, package: &std::path::Path) -> i32 {
+    let status = std::process::Command::new("suspect")
+        .arg("contract")
+        .arg(spec)
+        .arg("--out")
+        .arg(package)
+        .arg("--check")
+        .output();
+    match status {
+        Ok(output) => output.status.code().unwrap_or(1),
+        // No CLI on PATH: the editor cannot verify, and saying so is better
+        // than reporting the package as current.
+        Err(_) => 1,
+    }
+}
+
+/// One service's gate, run by the CLI so the editor and CI share it.
+fn suspect_cli_service_gate(dir: &std::path::Path) -> GateReport {
+    let output = std::process::Command::new("suspect")
+        .arg("ci")
+        .arg(dir)
+        .arg("--format")
+        .arg("json")
+        .output();
+    match output {
+        Ok(output) => {
+            let parsed: serde_json::Value =
+                serde_json::from_slice(&output.stdout).unwrap_or(serde_json::Value::Null);
+            let passed = parsed["passed"].as_u64().unwrap_or(0);
+            let failed = parsed["failed"].as_u64().unwrap_or(0);
+            GateReport {
+                summary: format!("{passed} project(s) passed, {failed} failed"),
+                value: serde_json::json!({
+                    "passed": passed,
+                    "failed": failed,
+                    "exit": output.status.code().unwrap_or(2),
+                }),
+            }
+        }
+        Err(error) => GateReport {
+            summary: format!("could not run `suspect ci`: {error}"),
+            value: serde_json::json!({ "passed": 0, "failed": 0, "exit": 2 }),
+        },
+    }
+}
+
+/// What a service gate run reported.
+struct GateReport {
+    /// A one-line summary for the progress notification.
+    summary: String,
+    /// Structured data for the client.
+    value: serde_json::Value,
+}
+
+/// The workspace root directory, when the workspace has one on disk.
 #[must_use]
 pub fn workspace_root(ws: &Arc<suspect_ref::Workspace>) -> Option<std::path::PathBuf> {
     ws.root_path().map(std::path::Path::to_path_buf)
@@ -314,6 +430,12 @@ impl LanguageServer for Backend {
                         "suspect.showRefGraph".to_owned(),
                         "suspect.breakingChanges".to_owned(),
                         "suspect.contractCoverage".to_owned(),
+                        "suspect.changeImpact".to_owned(),
+                        "suspect.verifyContract".to_owned(),
+                        "suspect.runService".to_owned(),
+                        "suspect.extractSchema".to_owned(),
+                        "suspect.inlineSchema".to_owned(),
+                        "suspect.editorLatency".to_owned(),
                         run_lenses::RUN_WORKFLOW_COMMAND.to_owned(),
                         run_lenses::RENDER_PREVIEW_COMMAND.to_owned(),
                     ]
@@ -623,15 +745,23 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
-        Ok(
-            navigation::hover_markdown(&ws, &doc.low, offset).map(|value| Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value,
-                }),
-                range: None,
+        let Some(base) = navigation::hover_markdown(&ws, &doc.low, offset) else {
+            return Ok(None);
+        };
+        // The semantic model narrates where the cursor is and what a change
+        // here would cost, on top of whatever the hover already resolved.
+        let value = match hover_meaning(&ws, &doc.low, offset) {
+            Some(extra) if !base.is_empty() => format!("{base}\n\n---\n{extra}"),
+            Some(extra) => extra,
+            None => base,
+        };
+        Ok(Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
             }),
-        )
+            range: None,
+        }))
     }
 
     async fn document_symbol(
@@ -1425,13 +1555,54 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
-        let items = match completion::context_at(&doc.low, offset) {
+        let context = completion::context_at(&doc.low, offset);
+        // The schema's own permitted values lead whenever the position has
+        // a schema: an enum member here is worth more than any keyword.
+        let mut schema_first: Vec<CompletionItem> = Vec::new();
+        if matches!(
+            context,
+            completion::CompletionContext::Values(_)
+                | completion::CompletionContext::SchemaPropertyNames(_)
+        ) {
+            for value in rank::schema_values(&doc.low, offset) {
+                schema_first.push(CompletionItem {
+                    label: value.clone(),
+                    detail: Some(rank::Rank::Exact.label().to_owned()),
+                    kind: Some(tower_lsp::lsp_types::CompletionItemKind::VALUE),
+                    sort_text: Some(format!("0{value}")),
+                    ..CompletionItem::default()
+                });
+            }
+        }
+        let items = match context {
             completion::CompletionContext::Keys(keys) => completion::key_items(keys),
             completion::CompletionContext::Refs => match ws {
-                Some(ws) => completion::ref_items(
-                    completion::ref_candidates(&ws, doc.low.uri()),
-                    doc.low.uri(),
-                ),
+                Some(ws) => {
+                    // Rank by what the workspace actually uses, so the
+                    // components a maintainer reaches for come first.
+                    let all = completion::ref_candidates(&ws, doc.low.uri());
+                    let position = rank::position_at(&doc.low, offset);
+                    let index = meaning::Index::build(&ws);
+                    let expected: &[&str] = if rank::expects_schema(&doc.low, offset) {
+                        &["schemas"]
+                    } else {
+                        &[]
+                    };
+                    rank::rank_refs(&index, doc.low.uri().as_str(), &position, expected, all)
+                        .into_iter()
+                        .map(|proposal| {
+                            let sort_text =
+                                format!("{}{}", rank::rank_level(proposal.rank), proposal.insert);
+                            CompletionItem {
+                                label: proposal.insert,
+                                detail: Some(proposal.detail),
+                                kind: Some(tower_lsp::lsp_types::CompletionItemKind::REFERENCE),
+                                sort_text: Some(sort_text),
+                                ..CompletionItem::default()
+                            }
+                        })
+                        .collect()
+                }
                 None => Vec::new(),
             },
             completion::CompletionContext::Values(values) => completion::value_items(values),
@@ -1449,13 +1620,38 @@ impl LanguageServer for Backend {
                 completion::tag_name_items(completion::tag_name_candidates(&doc.low))
             }
             completion::CompletionContext::SchemaPropertyNames(names) => {
-                completion::property_name_items(names)
+                // Required-and-missing siblings first, then the rest, each
+                // labelled with why it is offered.
+                let written: Vec<String> = names.clone();
+                let ranked = rank::rank_siblings(&doc.low, offset, &written);
+                if ranked.is_empty() {
+                    completion::property_name_items(names)
+                } else {
+                    let mut items: Vec<CompletionItem> = ranked
+                        .into_iter()
+                        .map(|proposal| {
+                            let sort_text =
+                                format!("{}{}", rank::rank_level(proposal.rank), proposal.insert);
+                            CompletionItem {
+                                label: proposal.insert,
+                                detail: Some(proposal.detail),
+                                kind: Some(tower_lsp::lsp_types::CompletionItemKind::PROPERTY),
+                                sort_text: Some(sort_text),
+                                ..CompletionItem::default()
+                            }
+                        })
+                        .collect();
+                    items.extend(completion::property_name_items(written));
+                    items
+                }
             }
             completion::CompletionContext::MediaTypes => {
                 completion::value_items(completion::MEDIA_TYPES)
             }
             completion::CompletionContext::None => return Ok(None),
         };
+        let mut items = items;
+        items.extend(schema_first);
         Ok((!items.is_empty()).then_some(CompletionResponse::Array(items)))
     }
 
@@ -1663,7 +1859,8 @@ impl Backend {
 
     /// Executes a `suspect.*` command; returns a JSON summary for the client.
     async fn run_command(&self, params: ExecuteCommandParams) -> Option<Value> {
-        match params.command.as_str() {
+        let command = params.command.as_str();
+        match command {
             links::SHOW_REFS_COMMAND => {
                 let uri_s = params.arguments.first()?.as_str()?.to_owned();
                 let ptr = params.arguments.get(1)?.as_str()?.to_owned();
@@ -1702,6 +1899,111 @@ impl Backend {
                     .await
                     .ok()?;
                 Some(serde_json::json!({ "applied": true }))
+            }
+            // Extract an inline schema to components/schemas, or inline one
+            // back: structural refactors over the lossless tree.
+            "suspect.extractSchema" | "suspect.inlineSchema" => {
+                let uri_s = params.arguments.first()?.as_str()?.to_owned();
+                let offset = params.arguments.get(1)?.as_u64()? as usize;
+                let name = params
+                    .arguments
+                    .get(2)
+                    .and_then(|value| value.as_str())
+                    .map(str::to_owned);
+                let Ok(uri) = Uri::parse(&uri_s) else {
+                    return None;
+                };
+                let ws = self.workspace_for(&uri).await?;
+                let planned = {
+                    let st = self.state.read().await;
+                    let doc = st.docs.get(&uri)?;
+                    let index = meaning::Index::build(&ws);
+                    if command == "suspect.extractSchema" {
+                        let name = name.unwrap_or_else(|| refactor::suggest_name(&doc.low, offset));
+                        let name = refactor::component_name(&name);
+                        refactor::plan_extract(&doc.low, &index, offset, &name)
+                    } else {
+                        refactor::plan_inline(&doc.low, &index, offset)
+                    }
+                };
+                let plan = match planned {
+                    Ok(plan) if !plan.is_empty() => plan,
+                    Ok(_) => {
+                        return Some(
+                            serde_json::json!({ "applied": false, "reason": "nothing to change" }),
+                        );
+                    }
+                    Err(reason) => {
+                        self.client
+                            .log_message(
+                                MessageType::INFO,
+                                format!("refactor unavailable: {reason:?}"),
+                            )
+                            .await;
+                        return Some(
+                            serde_json::json!({ "applied": false, "reason": format!("{reason:?}") }),
+                        );
+                    }
+                };
+                // Turn each planned pointer edit into a range edit.
+                let mut changes: std::collections::HashMap<Url, Vec<TextEdit>> =
+                    std::collections::HashMap::new();
+                for (document, pointer, text) in &plan.edits {
+                    let st = self.state.read().await;
+                    let Ok(document_uri) = Uri::parse(document) else {
+                        continue;
+                    };
+                    let Some(doc) = st.docs.get(&document_uri) else {
+                        continue;
+                    };
+                    let inner = doc.low.inner();
+                    let node = doc.low.root().pointer(pointer);
+                    let range = node
+                        .map(|node| {
+                            let start = inner
+                                .line_index()
+                                .line_col(inner.bytes(), node.byte_range().start);
+                            let end = inner
+                                .line_index()
+                                .line_col(inner.bytes(), node.byte_range().end);
+                            Range::new(Position::new(start.0, start.1), Position::new(end.0, end.1))
+                        })
+                        .unwrap_or_default();
+                    changes
+                        .entry(Url::parse(document).ok()?)
+                        .or_default()
+                        .push(TextEdit {
+                            range,
+                            new_text: if text.is_empty() {
+                                String::new()
+                            } else {
+                                format!("{text}\n")
+                            },
+                        });
+                }
+                drop(self.state.read().await);
+                self.client
+                    .apply_edit(WorkspaceEdit::new(
+                        changes
+                            .into_iter()
+                            .collect::<std::collections::HashMap<_, _>>(),
+                    ))
+                    .await
+                    .ok()?;
+                Some(serde_json::json!({
+                    "applied": true,
+                    "name": plan.name,
+                    "summary": plan.summary,
+                }))
+            }
+            // The editor-latency budgets, measured on the same machine.
+            "suspect.editorLatency" => {
+                self.progress_begin("suspect.latency", "Measuring editor latency")
+                    .await;
+                let report = latency::report(1000);
+                self.progress_end("suspect.latency", Some("latency measured".to_owned()))
+                    .await;
+                Some(serde_json::json!({ "report": report }))
             }
             "suspect.generateExample" => {
                 let uri_s = params.arguments.first()?.as_str()?.to_owned();
@@ -1803,6 +2105,88 @@ impl Backend {
                 )
                 .await;
                 Some(serde_json::json!({ "operations": gaps.len(), "uncovered": uncovered }))
+            }
+            // What a change here reaches, as structured data a client can
+            // render however it likes.
+            "suspect.changeImpact" => {
+                let uri_s = params.arguments.first()?.as_str()?.to_owned();
+                let uri = Uri::parse(&uri_s).ok()?;
+                let ws = self.workspace_for(&uri).await?;
+                let st = self.state.read().await;
+                let doc = st.docs.get(&uri)?;
+                let offset = params
+                    .arguments
+                    .get(1)
+                    .and_then(|value| value.as_u64())
+                    .map_or(0, |value| value as usize);
+                let model = meaning::Model::new(&doc.low);
+                let m = model.at(offset)?;
+                let index = meaning::Index::build(&ws);
+                let spec = suspect_ir::IrSpec::from_workspace(&ws, &uri).ok();
+                let empty: [(String, suspect_arazzo::ArazzoDoc<'_>); 0] = [];
+                let no_artifacts = std::collections::BTreeMap::new();
+                let no_traffic = std::collections::BTreeMap::new();
+                let context = impact::ImpactContext {
+                    index: &index,
+                    spec: spec.as_ref(),
+                    workflows: &empty,
+                    artifacts: &no_artifacts,
+                    traffic: &no_traffic,
+                };
+                let report = context.impact_of(&uri_s, &m);
+                Some(serde_json::json!({
+                    "origin": report.origin,
+                    "summary": report.summary(),
+                    "operations": report.operations,
+                    "workflows": report.workflows,
+                    "artifacts": report.artifacts,
+                    "traffic": report.traffic,
+                    "impacts": report.impacts,
+                    "hint": refactor::hint_for(&index),
+                }))
+            }
+            // The contract package this document belongs to, verified
+            // against the source the same way CI verifies it.
+            "suspect.verifyContract" => {
+                self.progress_begin("suspect.contract", "Verifying the contract package")
+                    .await;
+                let uri_s = params.arguments.first()?.as_str()?.to_owned();
+                let path = std::path::PathBuf::from(&uri_s);
+                if !path.is_file() {
+                    return None;
+                }
+                let dir = path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .join("contract");
+                let exit = suspect_cli_contract_check(&path, &dir);
+                self.progress_end(
+                    "suspect.contract",
+                    Some(if exit == 0 {
+                        "contract package is current".to_owned()
+                    } else {
+                        "contract package is stale — run `suspect contract`".to_owned()
+                    }),
+                )
+                .await;
+                Some(serde_json::json!({ "current": exit == 0, "package": dir.to_string_lossy() }))
+            }
+            // One service's whole gate, the same way CI runs it.
+            "suspect.runService" => {
+                // An explicit directory, else the workspace the document is in.
+                let dir = match params.arguments.first().and_then(|value| value.as_str()) {
+                    Some(dir) => dir.to_owned(),
+                    None => self.state.read().await.workspace_root().map_or_else(
+                        || ".".to_owned(),
+                        |root| root.to_string_lossy().into_owned(),
+                    ),
+                };
+                self.progress_begin("suspect.service", "Running the service gate")
+                    .await;
+                let report = suspect_cli_service_gate(std::path::Path::new(&dir));
+                self.progress_end("suspect.service", Some(report.summary.clone()))
+                    .await;
+                Some(report.value)
             }
             run_lenses::RUN_WORKFLOW_COMMAND => {
                 let uri_s = params.arguments.first()?.as_str()?.to_owned();
