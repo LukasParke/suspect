@@ -476,3 +476,75 @@ fn synthesized_overlay_reports_action_kinds() {
     assert!(yaml.contains("remove: true"), "{yaml}");
     assert!(yaml.contains("title: B"), "{yaml}");
 }
+
+#[test]
+fn a_fragment_reference_stays_quoted_in_yaml_output() {
+    // Regression, found against a real 63k-line specification: a value
+    // beginning with `#` was emitted unquoted, and in YAML a `#` preceded
+    // by a space starts a comment. `$ref: #/components/headers/X` therefore
+    // round-tripped to a null value, silently corrupting every component
+    // reference in the published document.
+    let tree = suspect_overlay::Value::Object(vec![(
+        "ref".into(),
+        suspect_overlay::Value::Str("#/components/headers/X-Thing".into()),
+    )]);
+    let yaml = tree.to_yaml();
+    assert!(
+        yaml.contains("$ref: \"#/components/headers/X-Thing\"")
+            || yaml.contains("ref: \"#/components/headers/X-Thing\""),
+        "a fragment reference must be quoted: {yaml}"
+    );
+    // And it must survive a YAML parse with its value intact.
+    let doc = suspect_low::LowDoc::parse(
+        "mem://quoting.yaml".into(),
+        suspect_source::Source::from_vec(yaml.clone().into_bytes()),
+    );
+    assert!(
+        doc.syntax_errors().is_empty(),
+        "the emitted YAML must parse"
+    );
+    assert_eq!(
+        doc.root().get("ref").and_then(|node| node.as_str()),
+        Some("#/components/headers/X-Thing"),
+        "the value must survive the round trip: {yaml}"
+    );
+}
+
+#[test]
+fn values_that_yaml_would_misread_are_quoted() {
+    for (input, why) in [
+        (
+            "#/components/schemas/Pet",
+            "a space-preceded # is a comment",
+        ),
+        ("value: with colon", "a colon-space ends the scalar"),
+        ("a # b", "an embedded comment marker"),
+        ("*anchor", "an alias indicator"),
+        ("&anchor", "an anchor indicator"),
+        ("- item", "a sequence indicator"),
+        ("? key", "a mapping indicator"),
+        ("|", "a literal block indicator"),
+        (">", "a folded block indicator"),
+        ("!tag", "a tag indicator"),
+        ("%directive", "a directive indicator"),
+        ("@text", "a reserved indicator"),
+        ("`tick", "a reserved indicator"),
+        ("''", "quotes need care"),
+    ] {
+        let tree = suspect_overlay::Value::Str(input.into());
+        let yaml = tree.to_yaml();
+        let doc = suspect_low::LowDoc::parse(
+            "mem://quoting.yaml".into(),
+            suspect_source::Source::from_vec(yaml.clone().into_bytes()),
+        );
+        assert!(
+            doc.syntax_errors().is_empty(),
+            "{why}: {input:?} emitted {yaml:?}"
+        );
+        assert_eq!(
+            doc.root().as_str(),
+            Some(input),
+            "{why}: {input:?} emitted {yaml:?} and did not round trip"
+        );
+    }
+}

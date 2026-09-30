@@ -184,39 +184,103 @@ fn write_json_string(s: &str, out: &mut String) {
     out.push('"');
 }
 
+/// Whether a scalar must be quoted to survive a YAML parse.
+///
+/// The character whitelist is necessary but not sufficient: YAML also reads
+/// *context*. A `#` preceded by whitespace starts a comment, `:` followed
+/// by whitespace ends a scalar, and the leading indicators turn a value
+/// into an anchor, alias, tag, or block. A real specification's
+/// `$ref: "#/components/schemas/Pet"` is exactly this case — emitted
+/// unquoted, it round-tripped to null and silently corrupted every
+/// reference in the published document.
 fn needs_quoting(s: &str) -> bool {
-    s.is_empty()
-        || s.parse::<i64>().is_ok()
+    if s.is_empty() {
+        return true;
+    }
+    // Values that YAML would read as another type.
+    if s.parse::<i64>().is_ok()
         || s.parse::<f64>().is_ok()
-        || matches!(s, "true" | "false" | "null" | "~")
-        || !s.chars().all(|c| {
-            c.is_alphanumeric()
-                || matches!(
-                    c,
-                    '_' | '-'
-                        | '.'
-                        | '/'
-                        | '@'
-                        | '$'
-                        | '+'
-                        | '('
-                        | ')'
-                        | '?'
-                        | '='
-                        | ':'
-                        | '\''
-                        | '*'
-                        | '&'
-                        | '%'
-                        | '!'
-                        | '#'
-                        | '['
-                        | ']'
-                        | '<'
-                        | '>'
-                        | '~'
-                )
-        })
+        || matches!(
+            s,
+            "true" | "false" | "null" | "~" | "True" | "False" | "Null" | "TRUE" | "FALSE" | "NULL"
+        )
+    {
+        return true;
+    }
+    // Leading indicators: anchors, aliases, tags, directives, blocks,
+    // sequences, mappings, and the reserved `@`/`` ` `` characters.
+    if matches!(
+        s.chars().next(),
+        Some(
+            '#' | '&'
+                | '*'
+                | '!'
+                | '|'
+                | '>'
+                | '-'
+                | '?'
+                | ':'
+                | ','
+                | '['
+                | ']'
+                | '{'
+                | '}'
+                | '"'
+                | '\''
+                | '%'
+                | '@'
+                | '`'
+                | ' '
+        )
+    ) {
+        return true;
+    }
+    // Contextual indicators anywhere in the scalar.
+    let bytes = s.as_bytes();
+    for (index, byte) in bytes.iter().enumerate() {
+        match byte {
+            // `#` only starts a comment after whitespace.
+            b'#' if index == 0 || bytes[index - 1].is_ascii_whitespace() => return true,
+            // `: ` ends the scalar; a trailing `:` does not.
+            b':' => {
+                if index + 1 == bytes.len() || bytes[index + 1] == b' ' || bytes[index + 1] == b'\t'
+                {
+                    return true;
+                }
+            }
+            // Leading and trailing whitespace is stripped by YAML.
+            b' ' | b'\t' if index == 0 || index + 1 == bytes.len() => return true,
+            _ => {}
+        }
+    }
+    // Control characters and anything outside plain-safe ASCII.
+    !s.chars().all(|c| {
+        c.is_alphanumeric()
+            || matches!(
+                c,
+                '_' | '-'
+                    | '.'
+                    | '/'
+                    | '@'
+                    | '$'
+                    | '+'
+                    | '('
+                    | ')'
+                    | '?'
+                    | '='
+                    | ','
+                    | '\''
+                    | '*'
+                    | '&'
+                    | '%'
+                    | '!'
+                    | '['
+                    | ']'
+                    | '<'
+                    | '>'
+                    | '~'
+            )
+    })
 }
 
 fn write_yaml_str(s: &str, out: &mut String) {
