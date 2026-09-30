@@ -31,6 +31,11 @@ pub struct CiArgs {
     /// Skip contract tests (they may need a live server).
     #[arg(long)]
     skip_tests: bool,
+    /// Build every project before gating it: overlays, publication,
+    /// validation, contract, docs and SDK generation, then the gate. One
+    /// command from a clean checkout to a verified workspace.
+    #[arg(long)]
+    build: bool,
     /// Output format for the aggregate report.
     #[command(flatten)]
     pub text: crate::TextFormat,
@@ -147,9 +152,11 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
         return Ok(2);
     }
     let wanted: Vec<&str> = if args.stages.is_empty() {
-        ["validate", "contract", "breaking", "codegen", "test"]
-            .into_iter()
-            .collect()
+        [
+            "validate", "lint", "contract", "breaking", "codegen", "test",
+        ]
+        .into_iter()
+        .collect()
     } else {
         args.stages.iter().map(String::as_str).collect()
     };
@@ -161,9 +168,17 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
 
     let mut results = Vec::new();
     for manifest in &projects {
+        // Building first is what makes this one command rather than two:
+        // the gate then checks artifacts that were just produced.
+        if args.build {
+            build_project(manifest, args.skip_tests);
+        }
         let mut stages = Vec::new();
         if wanted.contains(&"validate") {
             stages.push(validate_stage(manifest));
+        }
+        if wanted.contains(&"lint") {
+            stages.push(lint_stage(manifest));
         }
         if wanted.contains(&"contract") {
             stages.push(contract_stage(manifest));
@@ -264,6 +279,16 @@ fn project_name(manifest: &Path) -> String {
         })
 }
 
+/// The document a stage should check: the published spec once it exists
+/// (that is the artifact consumers actually see), otherwise the entry
+/// spec. Without this fallback, `suspect ci --stage lint` on a clean
+/// checkout could only ever report "never published", which is noise
+/// rather than a finding.
+fn spec_to_check(manifest: &Path) -> Option<PathBuf> {
+    let published = published_spec(manifest).filter(|path| path.exists());
+    published.or_else(|| entry_spec(manifest).filter(|path| path.exists()))
+}
+
 /// The published spec path a manifest declares.
 fn published_spec(manifest: &Path) -> Option<PathBuf> {
     let dir = manifest.parent()?;
@@ -283,6 +308,90 @@ fn stage(name: &str, exit: i32, errors: usize, warnings: usize, summary: String)
         errors,
         warnings,
         summary,
+    }
+}
+
+/// Lints the published spec with the project's ruleset and severity floor.
+///
+/// A project may declare its own `lint:` section; otherwise the shared
+/// `.suspect.yaml` settings apply, exactly as they do for `suspect lint`
+/// run by hand — so CI and a developer see the same findings.
+fn lint_stage(manifest: &Path) -> StageResult {
+    let Some(spec) = spec_to_check(manifest) else {
+        return stage("lint", 0, 0, 0, "no entry or published spec".to_owned());
+    };
+    let (ruleset, floor) = lint_policy(manifest);
+    let findings = match crate::commands::lint::lint_findings(&[spec], ruleset.as_deref(), floor) {
+        Ok(findings) => findings,
+        Err(error) => return stage("lint", 1, 1, 0, error.to_string()),
+    };
+    let errors = findings
+        .iter()
+        .filter(|f| f.severity >= crate::output::Severity::Error)
+        .count();
+    let warnings = findings.len() - errors;
+    stage(
+        "lint",
+        i32::from(errors > 0),
+        errors,
+        warnings,
+        match (&ruleset, floor == crate::output::Severity::Hint) {
+            (Some(ruleset), _) => format!("{} ruleset", ruleset.display()),
+            (None, true) => "built-in ruleset".to_owned(),
+            (None, false) => format!("built-in ruleset, at or above {floor:?}"),
+        },
+    )
+}
+
+/// A project's own lint policy, else the shared configuration file.
+fn lint_policy(manifest: &Path) -> (Option<PathBuf>, crate::output::Severity) {
+    let dir = manifest.parent().unwrap_or(Path::new("."));
+    let declared: Option<serde_json::Value> = std::fs::read_to_string(manifest)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let ruleset = declared
+        .as_ref()
+        .and_then(|value| value.get("lint"))
+        .and_then(|lint| lint.get("ruleset"))
+        .and_then(|v| v.as_str())
+        .map(|rel| dir.join(rel))
+        .or_else(|| {
+            suspect_config::for_invocation(Some(manifest))
+                .ok()
+                .and_then(|loaded| loaded.settings.lint.ruleset)
+        });
+    let floor = declared
+        .as_ref()
+        .and_then(|value| value.get("lint"))
+        .and_then(|lint| lint.get("min_severity"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .or_else(|| {
+            suspect_config::for_invocation(Some(manifest))
+                .ok()
+                .and_then(|loaded| loaded.settings.lint.min_severity)
+        })
+        .and_then(|name| match name.to_ascii_lowercase().as_str() {
+            "error" => Some(crate::output::Severity::Error),
+            "warning" => Some(crate::output::Severity::Warning),
+            "info" => Some(crate::output::Severity::Info),
+            "hint" => Some(crate::output::Severity::Hint),
+            _ => None,
+        })
+        .unwrap_or(crate::output::Severity::Hint);
+    (ruleset, floor)
+}
+
+/// Builds one project through the full pipeline, reporting as it goes.
+///
+/// Failures surface through the gate stages that follow, so a build that
+/// fails is visible as a failing project rather than aborting the
+/// workspace.
+fn build_project(manifest: &Path, skip_tests: bool) {
+    eprintln!("ci: building {}", manifest.display());
+    match crate::commands::project::build_manifest(manifest, skip_tests) {
+        Ok(_) => {}
+        Err(error) => eprintln!("ci: build failed: {error}"),
     }
 }
 
@@ -316,6 +425,15 @@ fn validate_stage(manifest: &Path) -> StageResult {
 }
 
 fn contract_stage(manifest: &Path) -> StageResult {
+    if contract_output(manifest).is_none() {
+        return stage(
+            "contract",
+            0,
+            0,
+            0,
+            "no contract package declared".to_owned(),
+        );
+    }
     let Some(spec) = published_spec(manifest) else {
         return stage("contract", 0, 0, 0, "no published spec declared".to_owned());
     };
