@@ -380,6 +380,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     failure_goto: None,
                     timeout_ms: None,
                     message: None,
+                    depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
                 },
@@ -397,6 +398,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     failure_goto: None,
                     timeout_ms: None,
                     message: None,
+                    depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
                 },
@@ -1063,4 +1065,154 @@ fn conforming_recursive_response_passes() {
         summary.passed, 1,
         "a conforming deep tree passes: {summary:?}"
     );
+}
+
+// ------------------------------------------------- Arazzo 1.1 step dependencies
+
+/// A workflow whose steps are declared out of dependency order: `report`
+/// is listed first but depends on the data step listed last.
+const ORDERED_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Ordered, version: '1'}
+sourceDescriptions:
+  - {name: api, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: ordered
+    steps:
+      - stepId: report
+        operationId: createPet
+        dependsOn: [collect]
+        parameters:
+          - {name: name, in: query, value: $steps.collect.outputs.collected}
+      - stepId: collect
+        operationId: listPets
+        outputs:
+          collected: $response.body
+"#;
+
+/// Records the execution order the scheduler chose.
+#[derive(Default)]
+struct OrderRecorder {
+    paths: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl HttpClient for OrderRecorder {
+    async fn execute(
+        &self,
+        req: crate::exec::HttpRequest,
+    ) -> Result<crate::exec::HttpResponse, crate::exec::TransportError> {
+        self.paths.lock().unwrap().push(req.url.clone());
+        Ok(crate::exec::HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: Bytes::from_static(b"[]"),
+        })
+    }
+}
+
+fn compile_ordered() -> crate::plan::Plan {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("spec.yaml"), OAS).expect("spec");
+    let ws = WorkspaceBuilder::new()
+        .root(dir.path())
+        .build()
+        .expect("ws");
+    ws.load_all("spec.yaml").expect("load");
+    std::mem::forget(dir);
+    let ws = Arc::new(ws);
+    let doc = LowDoc::parse(
+        "mem://ordered.arazzo.yaml".into(),
+        Source::from_vec(ORDERED_ARAZZO.as_bytes().to_vec()),
+    );
+    compile_plan(&doc, &ws).expect("compiles")
+}
+
+#[test]
+fn dependencies_are_compiled_onto_the_plan() {
+    let plan = compile_ordered();
+    let steps = &plan.workflows[0].steps;
+    let report = steps.iter().find(|s| s.step_id == "report").unwrap();
+    // Explicit dependsOn.
+    assert!(report.depends_on.contains(&"collect".to_owned()));
+    // Implicit: the parameter reads $steps.collect.outputs.collected.
+    assert_eq!(report.depends_on, vec!["collect".to_owned()]);
+    let collect = steps.iter().find(|s| s.step_id == "collect").unwrap();
+    assert!(collect.depends_on.is_empty());
+}
+
+#[test]
+fn the_scheduler_runs_dependencies_first() {
+    let plan = compile_ordered();
+    let recorder = OrderRecorder::default();
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let summary = tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(async { run_plan(&plan, "http://api.example.com", &recorder, tx).await });
+    assert_eq!(summary.failed, 0, "{summary:?}");
+
+    // The dependent step ran second even though it is declared first.
+    let started: Vec<String> = std::iter::from_fn(|| rx.try_recv().ok())
+        .filter_map(|event| match event {
+            crate::exec::TestEvent::StepStarted { step, .. } => Some(step),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(started, vec!["collect".to_owned(), "report".to_owned()]);
+}
+
+#[test]
+fn an_unsatisfiable_graph_fails_with_a_diagnosis() {
+    // `b` depends on `c` and `c` depends on `b`: no step can ever run.
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("spec.yaml"), OAS).expect("spec");
+    let ws = WorkspaceBuilder::new()
+        .root(dir.path())
+        .build()
+        .expect("ws");
+    ws.load_all("spec.yaml").expect("load");
+    std::mem::forget(dir);
+    let ws = Arc::new(ws);
+    let doc = LowDoc::parse(
+        "mem://cycle.arazzo.yaml".into(),
+        Source::from_vec(
+            b"arazzo: 1.1.0
+info: {title: Cycle, version: '1'}
+sourceDescriptions:
+  - {name: api, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: cyclic
+    steps:
+      - stepId: b
+        operationId: listPets
+        dependsOn: [c]
+      - stepId: c
+        operationId: listPets
+        dependsOn: [b]
+"
+            .to_vec(),
+        ),
+    );
+    let plan = compile_plan(&doc, &ws).expect("compiles");
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let summary = tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(async {
+            run_plan(&plan, "http://api.example.com", &CannedTransport::new(), tx).await
+        });
+    assert!(
+        summary.passed == 0,
+        "a cyclic graph runs nothing: {summary:?}"
+    );
+    assert!(!summary.passed > 0);
+    let mut diagnosed = false;
+    while let Ok(event) = rx.try_recv() {
+        if let crate::exec::TestEvent::CriterionFail { crit, actual, .. } = event
+            && crit == "depends-on"
+        {
+            assert!(actual.contains("unsatisfied dependencies"), "{actual}");
+            diagnosed = true;
+        }
+    }
+    assert!(diagnosed, "a blocked graph must say why");
 }

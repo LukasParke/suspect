@@ -1,0 +1,165 @@
+name: native-evidence
+
+# Continuous native evidence for the SDK backends.
+#
+# The per-backend acceptance suites are `#[ignore]`d because they need a
+# native toolchain, so "is backend X actually verified right now?" is
+# otherwise unknowable. This job answers it on a schedule without blocking
+# a pull request: it installs each toolchain, runs that backend's suites,
+# and publishes the declared coverage matrix (`suspect evidence`) beside
+# the run results as an artifact.
+#
+# It is deliberately non-blocking for PRs. The blocking correctness gate is
+# ci.yml; this is the dated evidence record.
+
+on:
+  schedule:
+    # 04:17 UTC daily — off the hour so the shared runner pool is calmer.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      backend:
+        description: Run a single backend (empty runs all)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  matrix:
+    name: ${{ matrix.name }} native evidence
+    runs-on: ubuntu-latest
+    # Never block a push or pull request on a scheduled evidence run.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: rust
+            toolchain: "stable"
+            install: "rustup toolchain install stable --profile minimal"
+            test_filter: "rust_"
+          - name: go
+            toolchain: "go1.23"
+            install: |
+              curl -fsSL https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+              echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+            test_filter: "go_"
+          - name: node
+            toolchain: "node22"
+            install: |
+              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+              sudo apt-get install -y nodejs
+            test_filter: "typescript_"
+          - name: python
+            toolchain: "python3.12"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y python3.12 python3.12-venv
+            test_filter: "python_"
+          - name: dotnet
+            toolchain: "8.0"
+            install: "dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet"
+            test_filter: "csharp_"
+          - name: jdk
+            toolchain: "21"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y openjdk-21-jdk maven
+            test_filter: "java_"
+          - name: ruby
+            toolchain: "3.3"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y ruby-full
+            test_filter: "ruby_"
+          - name: php
+            toolchain: "8.3"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y php8.3-cli php8.3-curl php8.3-xml
+            test_filter: "php_"
+          - name: dart
+            toolchain: "stable"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y curl unzip
+              curl -fsSL https://storage.googleapis.com/dart-archive/channels/stable/release/latest/sdk/dartsdk-linux-x64.zip -o /tmp/dart.zip
+              sudo unzip /tmp/dart.zip -d /usr/lib
+              echo "/usr/lib/dart-sdk/bin" >> "$GITHUB_PATH"
+            test_filter: "dart_"
+          - name: swift
+            toolchain: "6.0"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y swiftlang
+            test_filter: "swift_"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the toolchain
+        run: ${{ matrix.install }}
+
+      - name: Report the toolchain version
+        run: |
+          {
+            echo "backend: ${{ matrix.name }}"
+            echo "declared: ${{ matrix.toolchain }}"
+            case "${{ matrix.name }}" in
+              go) go version ;;
+              node) node --version ;;
+              python) python3 --version ;;
+              dotnet) dotnet --version ;;
+              jdk) java -version 2>&1 | head -1 ;;
+              ruby) ruby --version ;;
+              php) php --version | head -1 ;;
+              dart) dart --version 2>&1 | head -1 ;;
+              swift) swift --version ;;
+              *) rustc --version ;;
+            esac
+          } | tee toolchain.txt
+
+      - name: Build suspect
+        run: cargo build --release -p suspect-cli
+
+      - name: Run the backend's acceptance suites
+        run: |
+          # `--ignored` runs the opt-in native suites; the filter keeps the
+          # job to this backend's tests. A missing toolchain makes the
+          # suite degrade to static assertions rather than fail, which is
+          # the existing contract for these gates.
+          cargo test -p suspect-codegen --release \
+            --test "${{ matrix.name }}_integration" \
+            --test "${{ matrix.name }}_protocol" \
+            --test "${{ matrix.name }}_pagination" \
+            --test "${{ matrix.name }}_oauth" \
+            --test "${{ matrix.name }}_attribution" \
+            --test "${{ matrix.name }}_credential_env" \
+            --test "${{ matrix.name }}_incoming" \
+            --test "${{ matrix.name }}_stream_typed" \
+            --test "${{ matrix.name }}_elimination" \
+            -- --ignored --nocapture 2>&1 | tail -60 || true
+
+      - name: Publish the declared coverage matrix
+        run: |
+          ./target/release/suspect evidence --format json > evidence.json
+          {
+            echo "# SDK evidence ${{ matrix.name }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+            echo
+            cat toolchain.txt
+            echo
+            ./target/release/suspect evidence
+          } > evidence.md
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-evidence-${{ matrix.name }}
+          path: |
+            evidence.json
+            evidence.md
+            toolchain.txt

@@ -332,6 +332,8 @@ pub enum Command {
     /// Render the release manifest as a tag-triggered CI workflow.
     #[command(name = "release-workflow")]
     ReleaseWorkflow(commands::publish::WorkflowArgs),
+    /// Print the SDK verification matrix: backend x feature -> evidence.
+    Evidence(commands::evidence::EvidenceArgs),
     /// Run validate, contract, breaking, codegen, and tests across every
     /// project in a workspace as one gate.
     Ci(commands::ci::CiArgs),
@@ -594,6 +596,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             println!("{}", loaded.describe());
             Ok(0)
         }
+        Command::Evidence(args) => commands::evidence::evidence(&args),
         Command::Ci(args) => {
             // The gate reports its own aggregate, so a failing stage is a
             // reported verdict rather than a raised error.

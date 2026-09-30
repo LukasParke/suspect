@@ -11,6 +11,7 @@ authors.workspace = true
 suspect-source.workspace = true
 suspect-ref.workspace = true
 suspect-ir.workspace = true
+suspect-runtime.workspace = true
 suspect-journal.workspace = true
 suspect-gen.workspace = true
 suspect-test.workspace = true

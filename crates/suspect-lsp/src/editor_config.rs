@@ -83,6 +83,20 @@ pub fn for_workspace(
     config
 }
 
+impl EditorConfig {
+    /// The configured minimum severity, defaulting to `hint` (show
+    /// everything).
+    #[must_use]
+    pub fn min_severity(&self) -> tower_lsp::lsp_types::DiagnosticSeverity {
+        match self.settings.lint.min_severity.as_deref() {
+            Some("error") => tower_lsp::lsp_types::DiagnosticSeverity::ERROR,
+            Some("warning") => tower_lsp::lsp_types::DiagnosticSeverity::WARNING,
+            Some("info") => tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION,
+            _ => tower_lsp::lsp_types::DiagnosticSeverity::HINT,
+        }
+    }
+}
+
 /// Layers the client's `suspect.*` initialization options over the file
 /// settings. Only keys the client actually set are applied, so an unset
 /// editor option never clears a committed file value.

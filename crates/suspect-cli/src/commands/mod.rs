@@ -15,6 +15,7 @@ pub mod codegen_compare;
 pub mod codegen_session;
 pub mod contract;
 pub mod docs_gen_cmd;
+pub mod evidence;
 pub mod fmt;
 pub mod fuzz;
 pub mod gateway;

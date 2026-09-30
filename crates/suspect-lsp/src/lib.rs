@@ -766,6 +766,10 @@ impl LanguageServer for Backend {
                 (pull::diagnostics_result_id(&items), items)
             }
         };
+        // The shared severity floor, applied identically in the editor and
+        // on the command line.
+        let floor = self.state.read().await.editor_config.min_severity();
+        let items = diagnostics::filter_at_least(items, floor);
         if params.previous_result_id.as_deref() == Some(id.as_str()) {
             return Ok(unchanged_report(id));
         }
@@ -1200,11 +1204,19 @@ impl LanguageServer for Backend {
             Ok(values) => values.into_iter().next(),
             Err(_) => None,
         };
+        // The shared schema: the workspace's `.suspect.yaml` is the base,
+        // and the client's settings layer on top (an explicit editor
+        // setting still wins — the same precedence the CLI enforces).
+        let file_config = {
+            let st = self.state.read().await;
+            editor_config::for_workspace(st.workspace_root().as_deref(), cfg_json.as_ref())
+        };
         let client_cfg = cfg_json.as_ref().and_then(config_files::parse_config);
         {
             let mut st = self.state.write().await;
             let init_opts = std::mem::take(&mut st.pending_init_options);
             st.config = config_files::merge(init_opts, client_cfg, Default::default());
+            st.editor_config = file_config;
         }
         // Dynamic registration: only clients advertising
         // `didChangeWatchedFiles.dynamicRegistration` need the watcher

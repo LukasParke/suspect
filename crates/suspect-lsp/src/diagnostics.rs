@@ -301,6 +301,15 @@ pub fn compute_diagnostics_raw(
     out
 }
 
+/// Keeps diagnostics at or above `floor`, dropping the rest.
+#[must_use]
+pub fn filter_at_least(diagnostics: Vec<Diagnostic>, floor: DiagnosticSeverity) -> Vec<Diagnostic> {
+    diagnostics
+        .into_iter()
+        .filter(|diagnostic| diagnostic.severity.is_none_or(|severity| severity >= floor))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
