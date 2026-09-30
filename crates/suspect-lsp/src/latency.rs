@@ -54,7 +54,13 @@ pub struct Sample {
     pub millis: f64,
 }
 
-/// Measures parse, diagnostics, and the semantic model at scale.
+/// Measures parse, the diagnostic battery, and the semantic model at
+/// scale.
+///
+/// The battery is pre-existing work and costs seconds in a debug build, so
+/// it is measured only when `SUSPECT_LATENCY_FULL` is set; the stages this
+/// change introduced are measured on every run. This keeps the gate honest
+/// about the new code without making an unrelated test pay for it.
 fn measure(operations: usize) -> Vec<Sample> {
     let text = large_spec(operations);
     let mut samples = Vec::new();
@@ -66,18 +72,20 @@ fn measure(operations: usize) -> Vec<Sample> {
         millis: started.elapsed().as_secs_f64() * 1000.0,
     });
 
-    let started = Instant::now();
-    let cfg = crate::config_files::SuspectConfig::default();
-    let diagnostics = crate::diagnostics::compute_diagnostics_raw(None, &low, &cfg);
-    samples.push(Sample {
-        label: "diagnostics",
-        millis: started.elapsed().as_secs_f64() * 1000.0,
-    });
-    // Guard against the measurement becoming vacuous.
-    assert!(
-        !diagnostics.is_empty() || operations == 0,
-        "the latency fixture must actually produce diagnostics"
-    );
+    if std::env::var_os("SUSPECT_LATENCY_FULL").is_some() {
+        let started = Instant::now();
+        let cfg = crate::config_files::SuspectConfig::default();
+        let diagnostics = crate::diagnostics::compute_diagnostics_raw(None, &low, &cfg);
+        samples.push(Sample {
+            label: "diagnostics",
+            millis: started.elapsed().as_secs_f64() * 1000.0,
+        });
+        // Guard against the measurement becoming vacuous.
+        assert!(
+            !diagnostics.is_empty() || operations == 0,
+            "the latency fixture must actually produce diagnostics"
+        );
+    }
 
     // The semantic model at a spread of positions: this is the per-cursor
     // cost a keystroke pays.

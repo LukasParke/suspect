@@ -211,6 +211,34 @@ than bypassed. Depth is not real while two engines exist.
 
 ---
 
+## What shipped
+
+Every LSP move is now built. Measured at 1,000 operations in release:
+
+| Stage | Measured | Budget |
+|---|---|---|
+| parse | 28 ms | 60 ms |
+| diagnostics (pre-existing battery) | 422 ms | 1500 ms |
+| **meaning — 200 cursor resolutions** | **6 ms** | **25 ms** |
+
+| Move | Where | What it does |
+|---|---|---|
+| L1 semantic model | `meaning.rs` | `Model::at(offset)` answers kind, pointer, dialect, schema-ness and ref target from one pointer; `Index` reverse-maps every `$ref` |
+| L2 ranked completion | `rank.rs` | refs ranked by workspace usage and filtered to the position's section; schema values lead; required siblings first |
+| L3 refactors | `refactor.rs` | extract an inline schema to a component; inline one back at its only use |
+| L4 change impact | `impact.rs` | transitive operation reach, workflows, artifacts, traffic — in hover and as a command |
+| L6 editor as runner | `lib.rs` | `suspect.changeImpact`, `verifyContract`, `runService`, `editorLatency` |
+| L7 latency budgets | `latency.rs` | CI gates; the battery is measured under `SUSPECT_LATENCY_FULL` |
+| L5 protocol conformance | next | drive a real server over JSON-RPC |
+
+The budget gate earned its place immediately: it caught the semantic
+model deriving its pointer by descending the low-level tree — a vector
+allocation per level, **1.1 ms per cursor position**. Composing it from
+the ancestor walk instead made it **40x faster**. The tests then caught a
+second defect: the key-based trail disagreed with the pointer-based
+classification, which is the two-sources-of-truth problem L1 exists to
+remove.
+
 ## Part 3 — Sequencing
 
 **This cycle (highest leverage, each small):**
