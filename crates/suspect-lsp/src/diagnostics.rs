@@ -306,7 +306,12 @@ pub fn compute_diagnostics_raw(
 pub fn filter_at_least(diagnostics: Vec<Diagnostic>, floor: DiagnosticSeverity) -> Vec<Diagnostic> {
     diagnostics
         .into_iter()
-        .filter(|diagnostic| diagnostic.severity.is_none_or(|severity| severity >= floor))
+        // LSP orders severities by urgency, not by rank: ERROR = 1 is the
+        // most severe. "At or above the floor" therefore means the numeric
+        // value is at or below the floor's. Getting this backwards filters
+        // out errors whenever a floor is configured, which is exactly what
+        // happened against a real specification with `min_severity: warning`.
+        .filter(|diagnostic| diagnostic.severity.is_none_or(|severity| severity <= floor))
         .collect()
 }
 
@@ -429,5 +434,63 @@ workflows:
         std::fs::create_dir_all(&dir).unwrap();
         let low = low_at(&dir, "oas.yaml", "openapi: 3.1.0\ninfo: {}\n");
         assert!(arazzo_diagnostics(&low).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod severity_floor_tests {
+    use super::*;
+    use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
+
+    fn diagnostic(severity: DiagnosticSeverity) -> Diagnostic {
+        Diagnostic {
+            range: Range::default(),
+            severity: Some(severity),
+            code: Some(NumberOrString::String("test".into())),
+            ..Diagnostic::default()
+        }
+    }
+
+    #[test]
+    fn a_severity_floor_keeps_everything_at_least_as_severe() {
+        // LSP orders ERROR = 1, WARNING = 2, INFORMATION = 3, HINT = 4: a
+        // lower number is a *worse* problem. An `error` floor must therefore
+        // keep only errors, and a `warning` floor must keep errors and
+        // warnings.
+        let all = || {
+            vec![
+                diagnostic(DiagnosticSeverity::ERROR),
+                diagnostic(DiagnosticSeverity::WARNING),
+                diagnostic(DiagnosticSeverity::INFORMATION),
+                diagnostic(DiagnosticSeverity::HINT),
+            ]
+        };
+        assert_eq!(
+            filter_at_least(all(), DiagnosticSeverity::ERROR).len(),
+            1,
+            "an error floor keeps errors only"
+        );
+        assert_eq!(
+            filter_at_least(all(), DiagnosticSeverity::WARNING).len(),
+            2,
+            "a warning floor keeps errors and warnings"
+        );
+        assert_eq!(
+            filter_at_least(all(), DiagnosticSeverity::HINT).len(),
+            4,
+            "the hint floor keeps everything"
+        );
+    }
+
+    #[test]
+    fn a_diagnostic_without_a_severity_is_kept() {
+        let mut unseverity = diagnostic(DiagnosticSeverity::ERROR);
+        unseverity.severity = None;
+        let kept = filter_at_least(vec![unseverity], DiagnosticSeverity::WARNING);
+        assert_eq!(
+            kept.len(),
+            1,
+            "an unranked finding is never hidden by a floor"
+        );
     }
 }
