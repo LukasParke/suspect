@@ -8,6 +8,7 @@ license.workspace = true
 
 [dependencies]
 suspect-low.workspace = true
+suspect-config.workspace = true
 suspect-ref.workspace = true
 suspect-oas.workspace = true
 suspect-validate.workspace = true

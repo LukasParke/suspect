@@ -1007,12 +1007,11 @@ async fn run_step(
         .find(|(s, _)| *s == Some(response.status))
         .or_else(|| step.response_schemas.iter().find(|(s, _)| s.is_none()))
     {
-        // The compiler resolves $refs against the compiled subtree's root,
-        // so a sibling component map in the wrapper does not help — inline
-        // the component graph into the schema instead (depth-capped;
-        // recursive refs collapse to permissive).
-        let inlined = crate::exec::resolve_refs(schema, components, &mut Vec::new(), 0);
-        let schema_serialized = serde_json::to_string(&inlined).unwrap_or_default();
+        // The schema is compiled with the source components mounted as a
+        // document-root fallback, so `#/components/schemas/...` resolves
+        // natively — including recursive schemas, which the previous
+        // depth-capped inliner collapsed to permissive.
+        let schema_serialized = serde_json::to_string(schema).unwrap_or_default();
         let instance_serialized =
             serde_json::to_string(&body_json).unwrap_or_else(|_| "null".to_owned());
         let wrapper =
@@ -1030,8 +1029,35 @@ async fn run_step(
                     }
                     let schema_node = doc.root().get("schema")?;
                     let instance_node = doc.root().get("instance")?;
+                    // Mount the source components beside the schema so the
+                    // compiler resolves component references itself.
+                    let wrapper_doc = if components.is_empty() {
+                        None
+                    } else {
+                        let mounted = serde_json::json!({
+                            "components": {"schemas": components},
+                        });
+                        suspect_source::Uri::parse("mem://response-components.json")
+                            .ok()
+                            .map(|uri| {
+                                suspect_low::LowDoc::parse(
+                                    uri,
+                                    suspect_source::Source::from_vec(
+                                        mounted.to_string().into_bytes(),
+                                    ),
+                                )
+                            })
+                            .filter(|d| d.syntax_errors().is_empty())
+                    };
+                    let refs = wrapper_doc.as_ref().and_then(|d| {
+                        suspect_schema::DocumentRefs::scan(
+                            d.root(),
+                            suspect_schema::Config::default().max_depth,
+                        )
+                        .ok()
+                    });
                     let schema = suspect_schema::Compiler::new(suspect_schema::Config::default())
-                        .compile(schema_node)
+                        .compile_with_document_root(schema_node, refs.as_ref())
                         .ok()?;
                     let failures: Vec<String> = schema
                         .validate(instance_node)
@@ -1262,51 +1288,6 @@ fn encode_component(text: &str) -> String {
     out
 }
 
-/// Substitutes `#/components/schemas/<name>` references in a schema tree
-/// with the referenced component JSON, recursively, so the JSON Schema
-/// compiler (which resolves refs against the compiled subtree's root) sees
-/// a self-contained schema. Depth-capped; recursive references beyond the
-/// cap collapse to `true` (permissive) rather than looping.
-fn resolve_refs(
-    value: &serde_json::Value,
-    components: &std::collections::BTreeMap<String, serde_json::Value>,
-    seen: &mut Vec<String>,
-    depth: usize,
-) -> serde_json::Value {
-    const MAX_DEPTH: usize = 8;
-    if depth > MAX_DEPTH {
-        return serde_json::Value::Bool(true);
-    }
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.len() == 1
-                && let Some(target) = map.get("$ref").and_then(|r| r.as_str())
-                && let Some(name) = target.strip_prefix("#/components/schemas/")
-                && let Some(component) = components.get(name)
-            {
-                if seen.iter().any(|s| s == name) {
-                    return serde_json::Value::Bool(true);
-                }
-                seen.push(name.to_owned());
-                let resolved = resolve_refs(component, components, seen, depth + 1);
-                seen.pop();
-                return resolved;
-            }
-            let mut out = serde_json::Map::new();
-            for (key, child) in map {
-                out.insert(key.clone(), resolve_refs(child, components, seen, depth));
-            }
-            serde_json::Value::Object(out)
-        }
-        serde_json::Value::Array(items) => serde_json::Value::Array(
-            items
-                .iter()
-                .map(|item| resolve_refs(item, components, seen, depth))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
 #[cfg(test)]
 mod debug_wrapper_tests {
 

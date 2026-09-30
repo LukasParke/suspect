@@ -7,8 +7,6 @@
 pub mod baseline;
 pub mod bundle;
 pub mod commands;
-/// Project configuration discovery (.suspect.yaml).
-pub mod config;
 pub mod diff;
 pub mod output;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
@@ -407,10 +405,13 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             strict_format,
             text,
         } => {
-            let config = crate::config::for_invocation(paths.first().map(PathBuf::as_path))
+            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let strict_format =
-                strict_format || config.as_ref().is_some_and(|c| c.validate.strict_format);
+            let strict_format = suspect_config::resolve_bool(
+                strict_format,
+                "SUSPECT_STRICT_FORMAT",
+                loaded.settings.validate.strict_format,
+            );
             commands::validate::validate(
                 &paths,
                 text.format,
@@ -421,23 +422,22 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::Admission(args) => commands::admission::admission(&args),
         Command::Breaking(args) => commands::breaking::breaking(&args),
         Command::DocsGen(mut args) => {
-            let config = crate::config::for_invocation(Some(&args.input))
+            let loaded = suspect_config::for_invocation(Some(&args.input))
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
-            if let Some(config) = &config {
-                if args.style.is_none()
-                    && let Some(style) = config.docs.style.as_deref()
-                {
-                    args.style = Some(match style {
-                        "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
-                        "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
-                        _ => commands::docs_gen_cmd::DocsStyle::Html,
-                    });
-                }
-                if args.output.is_none()
-                    && let Some(out) = &config.docs.out
-                {
-                    args.output = Some(out.clone());
-                }
+            let settings = &loaded.settings;
+            if args.style.is_none()
+                && let Some(style) = settings.docs.style.as_deref()
+            {
+                args.style = Some(match style {
+                    "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
+                    "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
+                    _ => commands::docs_gen_cmd::DocsStyle::Html,
+                });
+            }
+            if args.output.is_none()
+                && let Some(out) = &settings.docs.out
+            {
+                args.output = Some(out.clone());
             }
             commands::docs_gen_cmd::docs_gen(&args)
         }
@@ -453,22 +453,24 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             text,
         } => {
             // Configuration supplies defaults; an explicit flag wins.
-            let config = crate::config::for_invocation(paths.first().map(PathBuf::as_path))
+            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let ruleset = ruleset.or_else(|| {
-                config
-                    .as_ref()
-                    .and_then(|c| c.lint.ruleset.as_deref())
-                    .map(std::path::PathBuf::from)
-            });
-            let min_severity = min_severity
-                .or_else(|| {
-                    config
-                        .as_ref()
-                        .and_then(|c| c.lint.min_severity.as_deref())
-                        .and_then(parse_severity)
-                })
-                .unwrap_or(output::Severity::Hint);
+            let settings = &loaded.settings;
+            let ruleset = ruleset.or_else(|| settings.lint.ruleset.clone());
+            // flag > env > config > default, decided in one place.
+            let min_severity = suspect_config::resolve::Resolution::new(
+                min_severity,
+                std::env::var("SUSPECT_LINT_MIN_SEVERITY")
+                    .ok()
+                    .and_then(|v| parse_severity(&v)),
+                settings
+                    .lint
+                    .min_severity
+                    .as_deref()
+                    .and_then(parse_severity),
+                output::Severity::Hint,
+            )
+            .value;
             commands::lint::lint(&paths, ruleset.as_deref(), min_severity, text.format)
         }
         Command::Overlay { cmd } => commands::overlay::run(cmd),
@@ -478,11 +480,13 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             json,
             yaml,
         } => {
-            let config =
-                crate::config::for_invocation(Some(&input)).map_err(|e| anyhow::anyhow!("{e}"))?;
-            let (json, yaml) = match &config {
-                Some(config) if !json && !yaml => (config.format.json, config.format.yaml),
-                _ => (json, yaml),
+            let loaded =
+                suspect_config::for_invocation(Some(&input)).map_err(|e| anyhow::anyhow!("{e}"))?;
+            // A typed --json/--yaml flag wins; otherwise the file decides.
+            let (json, yaml) = if json || yaml {
+                (json, yaml)
+            } else {
+                (loaded.settings.format.json, loaded.settings.format.yaml)
             };
             commands::fmt::fmt(&input, output.as_deref(), json, yaml)
         }
@@ -585,9 +589,9 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
         Command::Config { input } => {
-            let found = crate::config::for_invocation(input.as_deref())
+            let loaded = suspect_config::for_invocation(input.as_deref())
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
-            println!("{}", crate::config::describe(found.as_ref()));
+            println!("{}", loaded.describe());
             Ok(0)
         }
         Command::Ci(args) => {

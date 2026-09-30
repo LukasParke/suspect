@@ -26,6 +26,7 @@ bytes.workspace = true
 suspect-source.workspace = true
 suspect-syntax.workspace = true
 suspect-low.workspace = true
+suspect-config.workspace = true
 suspect-ref.workspace = true
 suspect-jsonpath.workspace = true
 suspect-schema.workspace = true

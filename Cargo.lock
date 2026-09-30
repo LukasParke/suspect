@@ -1940,6 +1940,7 @@ dependencies = [
  "sha2",
  "suspect-arazzo",
  "suspect-codegen",
+ "suspect-config",
  "suspect-gateway",
  "suspect-gen",
  "suspect-ir",
@@ -1988,6 +1989,15 @@ dependencies = [
  "suspect-source",
  "tempfile",
  "url",
+]
+
+[[package]]
+name = "suspect-config"
+version = "0.1.0"
+dependencies = [
+ "suspect-low",
+ "suspect-source",
+ "tempfile",
 ]
 
 [[package]]
@@ -2119,6 +2129,7 @@ dependencies = [
  "serde_json",
  "suspect-arazzo",
  "suspect-codegen",
+ "suspect-config",
  "suspect-gen",
  "suspect-ir",
  "suspect-journal",

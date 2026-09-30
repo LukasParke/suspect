@@ -30,6 +30,7 @@ pub mod completion;
 pub mod config_files;
 pub mod diagnostics;
 pub mod docs_gen;
+mod editor_config;
 pub mod extensions_config;
 pub mod extensions_registry;
 pub mod format_order;
