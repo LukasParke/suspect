@@ -15,13 +15,14 @@ suspect-source.workspace = true
 suspect-arazzo.workspace = true
 suspect-rex.path = "../suspect-rex"
 suspect-ir.path = "../suspect-ir"
+suspect-runtime.path = "../suspect-runtime"
 suspect-faker.path = "../suspect-faker"
 suspect-schema.workspace = true
 suspect-journal.path = "../suspect-journal"
 serde.workspace = true
 serde_json.workspace = true
 bytes = "1"
-async-trait = "0.1"
+async-trait.workspace = true
 regex.workspace = true
 rand = "0.8"
 tokio = { workspace = true, features = ["net"] }

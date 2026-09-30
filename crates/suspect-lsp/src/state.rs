@@ -53,9 +53,19 @@ pub struct State {
     /// degrade (e.g. deferring work to `codeAction/resolve` needs
     /// `codeAction.resolveSupport`).
     pub client_caps: Option<tower_lsp::lsp_types::ClientCapabilities>,
+    /// Settings from the shared schema: the workspace's `.suspect.yaml`
+    /// with the client's initialization options layered on top. This is
+    /// the same configuration the CLI reads, so the editor and CI agree.
+    pub editor_config: crate::editor_config::EditorConfig,
 }
 
 impl State {
+    /// The workspace root, when the client declared one.
+    #[must_use]
+    pub fn workspace_root(&self) -> Option<std::path::PathBuf> {
+        self.workspace.as_ref().and_then(super::workspace_root)
+    }
+
     /// Inserts or replaces an open document, reparsing its `LowDoc`.
     /// Drops a closed document from the cache and forgets its generation.
     pub fn close_doc(&mut self, uri: &Uri) {

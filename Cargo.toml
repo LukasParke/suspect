@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "xtask"]
+members = [
+    "crates/suspect-config",
+    "crates/suspect-runtime",
+    "crates/suspect-config","crates/*", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +18,8 @@ libc = "0.2"
 # internal crates
 suspect-source = { path = "crates/suspect-source", version = "0.1.0" }
 suspect-syntax = { path = "crates/suspect-syntax", version = "0.1.0" }
+suspect-config = { path = "crates/suspect-config" }
+suspect-runtime = { path = "crates/suspect-runtime", version = "0.1.0" }
 suspect-low = { path = "crates/suspect-low", version = "0.1.0" }
 suspect-ref = { path = "crates/suspect-ref", version = "0.1.0" }
 suspect-jsonpath = { path = "crates/suspect-jsonpath", version = "0.1.0" }

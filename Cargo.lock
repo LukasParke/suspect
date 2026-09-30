@@ -1940,6 +1940,7 @@ dependencies = [
  "sha2",
  "suspect-arazzo",
  "suspect-codegen",
+ "suspect-config",
  "suspect-gateway",
  "suspect-gen",
  "suspect-ir",
@@ -1991,6 +1992,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "suspect-config"
+version = "0.1.0"
+dependencies = [
+ "suspect-low",
+ "suspect-source",
+ "tempfile",
+]
+
+[[package]]
 name = "suspect-faker"
 version = "0.1.0"
 dependencies = [
@@ -2014,6 +2024,7 @@ dependencies = [
  "suspect-ir",
  "suspect-journal",
  "suspect-ref",
+ "suspect-runtime",
  "suspect-source",
  "suspect-test",
  "tempfile",
@@ -2119,6 +2130,7 @@ dependencies = [
  "serde_json",
  "suspect-arazzo",
  "suspect-codegen",
+ "suspect-config",
  "suspect-gen",
  "suspect-ir",
  "suspect-journal",
@@ -2221,6 +2233,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "suspect-runtime"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "suspect-ir",
+ "suspect-low",
+ "suspect-schema",
+ "suspect-source",
+ "tempfile",
+]
+
+[[package]]
 name = "suspect-schema"
 version = "0.1.0"
 dependencies = [
@@ -2286,6 +2311,7 @@ dependencies = [
  "suspect-overlay",
  "suspect-ref",
  "suspect-rex",
+ "suspect-runtime",
  "suspect-schema",
  "suspect-source",
  "tempfile",

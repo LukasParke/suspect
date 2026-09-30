@@ -115,6 +115,11 @@ pub struct StepPlan {
     pub response_schemas: Vec<(Option<u16>, serde_json::Value)>,
     /// Arazzo 1.1 AsyncAPI message step; `None` for ordinary HTTP steps.
     pub message: Option<MessageStep>,
+    /// Step ids that must complete before this one runs. Combines the
+    /// explicit `dependsOn` list with the implicit dependencies Arazzo
+    /// 1.1 §5.8.5.2.4 requires: a step that reads
+    /// `$steps.<id>.outputs.<name>` depends on `<id>`.
+    pub depends_on: Vec<String>,
 }
 
 /// Arazzo 1.1 AsyncAPI message step: `action: send` or `action: receive`
@@ -567,6 +572,45 @@ fn workflow_inputs(
     inputs
 }
 
+/// The steps that must run before `step`: its declared `dependsOn` plus
+/// every step whose outputs it reads.
+pub fn step_dependencies(step: &StepView<'_>) -> Vec<String> {
+    let mut dependencies: Vec<String> = step.depends_on().into_iter().map(str::to_owned).collect();
+    let mut expressions: Vec<String> = Vec::new();
+    for parameter in step.parameters() {
+        if let Some(value) = parameter.value().and_then(|node| node.as_str()) {
+            expressions.push(value.to_owned());
+        }
+    }
+    for criterion in step.success_criteria() {
+        if let Some(condition) = criterion.condition() {
+            expressions.push(condition.to_owned());
+        }
+    }
+    for (_, value) in step.outputs() {
+        if let Some(text) = value.as_str() {
+            expressions.push(text.to_owned());
+        }
+    }
+    for expression in &expressions {
+        let mut rest: &str = expression;
+        while let Some(after) = rest.split_once("$steps.").map(|(_, tail)| tail) {
+            rest = after;
+            let step_id: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            if step_id.is_empty() {
+                break;
+            }
+            if !dependencies.contains(&step_id) {
+                dependencies.push(step_id);
+            }
+        }
+    }
+    dependencies
+}
+
 /// Compiles an Arazzo 1.1 AsyncAPI step into a [`MessageStep`], or
 /// `None` for an ordinary HTTP step.
 fn message_step(step: &StepView<'_>, sources: &SourceIndex) -> Option<MessageStep> {
@@ -703,6 +747,7 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         parameters,
         request_body,
         message,
+        depends_on: step_dependencies(step),
         timeout_ms: step.timeout_ms(),
         success,
         outputs,
@@ -1112,6 +1157,25 @@ fn literal_value(rhs: &str) -> serde_json::Value {
         .and_then(|s| s.strip_suffix('\''))
         .or_else(|| rhs.strip_prefix('"').and_then(|s| s.strip_suffix('"')));
     serde_json::Value::String(inner.unwrap_or(rhs).to_owned())
+}
+
+impl StepPlan {
+    /// Declared responses as the shared contract runtime consumes them:
+    /// status plus the component name each response's schema resolves to.
+    #[must_use]
+    pub fn declared_responses(&self) -> Vec<suspect_ir::IrResponse> {
+        self.response_schemas
+            .iter()
+            .map(|(status, schema)| suspect_ir::IrResponse {
+                status: *status,
+                description: None,
+                schema: schema
+                    .get("$ref")
+                    .and_then(|r| r.as_str())
+                    .map(|r| r.rsplit('/').next().unwrap_or(r).to_owned()),
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]

@@ -184,6 +184,15 @@ Items 1 and 2 are small and eliminate real risk. Items 3–5 are the
 difference between a broad toolkit and a platform that holds together
 under a large portfolio.
 
+**Status:** all five are now built. Configuration is one schema
+(`suspect-config`) read by the CLI and the language server; the depth-8
+inliner is deleted and recursive response schemas validate natively;
+`dependsOn` is executed by a scheduler; `suspect evidence` plus a daily
+workflow publish the SDK verification matrix; and `suspect-runtime` owns
+the contract decision for the gateway and the executor, replacing two
+bespoke validators. The remaining depth work — LSP first — is planned in
+[LSP-DEPTH-ENRICHMENT.md](LSP-DEPTH-ENRICHMENT.md).
+
 ## Reproducing these numbers
 
 ```sh

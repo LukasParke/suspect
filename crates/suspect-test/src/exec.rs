@@ -342,10 +342,50 @@ async fn run_workflow(
         ok: true,
     };
 
-    let mut idx = 0usize;
+    // Arazzo 1.1 §5.8.5.2.4: explicit `dependsOn` and implicit output
+    // references both order execution. The scheduler takes the first
+    // remaining step whose dependencies are all satisfied, in document
+    // order, so a sequential run still satisfies the graph and a step
+    // whose dependency has not run yet waits rather than reading a
+    // missing output.
+    let mut completed: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut remaining: Vec<usize> = (0..wf.steps.len()).collect();
 
-    while idx < wf.steps.len() {
-        let step = &wf.steps[idx];
+    while !remaining.is_empty() {
+        let ready = remaining.iter().copied().find(|index| {
+            wf.steps[*index]
+                .depends_on
+                .iter()
+                .all(|dependency| completed.contains(dependency))
+        });
+        let Some(index) = ready else {
+            // No remaining step can run: the dependency graph cannot be
+            // satisfied (a cycle, or a dependency on an unrunnable step).
+            let blocked: Vec<&str> = remaining
+                .iter()
+                .map(|index| wf.steps[*index].step_id.as_str())
+                .collect();
+            send(
+                &events,
+                TestEvent::CriterionFail {
+                    wf: wf.workflow_id.clone(),
+                    step: blocked.first().copied().unwrap_or("").to_owned(),
+                    crit: "depends-on".to_owned(),
+                    expected: "a satisfiable step order".to_owned(),
+                    actual: format!(
+                        "blocked by unsatisfied dependencies: {}",
+                        blocked.join(", ")
+                    ),
+                },
+            )
+            .await;
+            counts.skipped += remaining.len();
+            counts.ok = false;
+            remaining.clear();
+            break;
+        };
+        remaining.retain(|candidate| *candidate != index);
+        let step = &wf.steps[index];
         send(
             &events,
             TestEvent::StepStarted {
@@ -371,24 +411,46 @@ async fn run_workflow(
         {
             StepOutcome::Passed(outputs) => {
                 steps_outputs.insert(step.step_id.clone(), serde_json::Value::Object(outputs));
+                completed.insert(step.step_id.clone());
                 counts.passed += 1;
-                idx += 1;
             }
             StepOutcome::Failed => {
                 counts.failed += 1;
                 counts.ok = false;
-                // Follow onFailure goto if the target step exists.
+                // Follow an `onFailure` goto when the target step exists:
+                // the scheduler re-enters at that step next.
                 if let Some(target) = &step.failure_goto
                     && let Some(next) = wf.steps.iter().position(|s| &s.step_id == target)
                 {
-                    idx = next;
+                    if completed.remove(&wf.steps[next].step_id) {
+                        // Re-running a completed step invalidates what
+                        // depended on it.
+                        for dependent in wf.steps.iter() {
+                            if dependent
+                                .depends_on
+                                .iter()
+                                .any(|dependency| dependency == &wf.steps[next].step_id)
+                                && !completed.contains(&dependent.step_id)
+                            {
+                                completed.remove(&dependent.step_id);
+                            }
+                        }
+                    }
+                    // Put the target back at the front of the queue.
+                    remaining.retain(|candidate| *candidate != next);
+                    remaining.insert(0, next);
                     continue;
                 }
-                break;
+                // No recovery path: the rest of the workflow cannot run.
+                counts.skipped += remaining.len();
+                remaining.clear();
+                counts.ok = false;
             }
         }
     }
-    counts.skipped = wf.steps.len().saturating_sub(counts.passed + counts.failed);
+    if counts.skipped == 0 {
+        counts.skipped = wf.steps.len().saturating_sub(counts.passed + counts.failed);
+    }
 
     send(
         &events,
@@ -995,81 +1057,42 @@ async fn run_step(
 
     let body_text = String::from_utf8_lossy(&response.body).into_owned();
     let body_json: Option<serde_json::Value> = serde_json::from_str(&body_text).ok();
-    let mut response_failures: Vec<String> = Vec::new();
 
-    // Contract validation: the response must match the schema declared for
-    // its status (exact code first, then `default`). This runs whether or
-    // not the step author wrote criteria — a spec violation is a spec
-    // violation even when the criteria happen to pass.
-    if let Some((status, schema)) = step
-        .response_schemas
-        .iter()
-        .find(|(s, _)| *s == Some(response.status))
-        .or_else(|| step.response_schemas.iter().find(|(s, _)| s.is_none()))
-    {
-        // The compiler resolves $refs against the compiled subtree's root,
-        // so a sibling component map in the wrapper does not help — inline
-        // the component graph into the schema instead (depth-capped;
-        // recursive refs collapse to permissive).
-        let inlined = crate::exec::resolve_refs(schema, components, &mut Vec::new(), 0);
-        let schema_serialized = serde_json::to_string(&inlined).unwrap_or_default();
-        let instance_serialized =
-            serde_json::to_string(&body_json).unwrap_or_else(|_| "null".to_owned());
-        let wrapper =
-            format!("{{\"schema\": {schema_serialized}, \"instance\": {instance_serialized}}}");
-        let response_failures_local: Option<Vec<String>> =
-            suspect_source::Uri::parse("mem://response-check.json")
-                .ok()
-                .and_then(|wrapper_uri| {
-                    let doc = suspect_low::LowDoc::parse(
-                        wrapper_uri,
-                        suspect_source::Source::from_vec(wrapper.into_bytes()),
-                    );
-                    if !doc.syntax_errors().is_empty() {
-                        return None;
-                    }
-                    let schema_node = doc.root().get("schema")?;
-                    let instance_node = doc.root().get("instance")?;
-                    let schema = suspect_schema::Compiler::new(suspect_schema::Config::default())
-                        .compile(schema_node)
-                        .ok()?;
-                    let failures: Vec<String> = schema
-                        .validate(instance_node)
-                        .iter()
-                        .map(|e| e.message.clone())
-                        .collect();
-                    Some(failures)
-                });
-        match response_failures_local {
-            None => {
-                send(
-                    events,
-                    TestEvent::CriterionFail {
-                        wf: wf_id.to_owned(),
-                        step: step.step_id.clone(),
-                        crit: format!("response-schema:{status:?}"),
-                        expected: "a compilable response schema".to_owned(),
-                        actual: "schema failed to compile; response not validated".to_owned(),
-                    },
-                )
-                .await;
-            }
-            Some(failures) => {
-                if failures.is_empty() {
-                    send(
-                        events,
-                        TestEvent::ResponseValidated {
-                            wf: wf_id.to_owned(),
-                            step: step.step_id.clone(),
-                            status: response.status,
-                        },
-                    )
-                    .await;
-                }
-                response_failures = failures;
-            }
+    // Contract validation: the shared contract runtime owns the decision,
+    // so the runner and the gateway cannot disagree about whether a
+    // response conforms. It runs whether or not the step wrote criteria.
+    let response_failures_local: Option<Vec<String>> = {
+        let schemas = suspect_runtime::Schemas::from_any_map(components.iter());
+        let violations = suspect_runtime::validate_response(
+            &step.declared_responses(),
+            &schemas,
+            response.status,
+            &response.body,
+        );
+        if !declares_response(step, response.status) {
+            // Nothing declared for this status: nothing to check.
+            None
+        } else if violations.is_empty() {
+            send(
+                events,
+                TestEvent::ResponseValidated {
+                    wf: wf_id.to_owned(),
+                    step: step.step_id.clone(),
+                    status: response.status,
+                },
+            )
+            .await;
+            None
+        } else {
+            Some(
+                violations
+                    .iter()
+                    .map(|violation| violation.message.clone())
+                    .collect(),
+            )
         }
-    }
+    };
+    let response_failures: Vec<String> = response_failures_local.unwrap_or_default();
 
     let mut all_ok = true;
     if !response_failures.is_empty() {
@@ -1146,6 +1169,14 @@ async fn run_step(
         }
     }
     StepOutcome::Passed(captured)
+}
+
+/// Whether the step declares any response for this status (exact or
+/// `default`), which is the condition for a conformance check at all.
+fn declares_response(step: &StepPlan, status: u16) -> bool {
+    step.response_schemas
+        .iter()
+        .any(|(declared, _)| *declared == Some(status) || declared.is_none())
 }
 
 /// Evaluates one criterion against a response.
@@ -1262,51 +1293,6 @@ fn encode_component(text: &str) -> String {
     out
 }
 
-/// Substitutes `#/components/schemas/<name>` references in a schema tree
-/// with the referenced component JSON, recursively, so the JSON Schema
-/// compiler (which resolves refs against the compiled subtree's root) sees
-/// a self-contained schema. Depth-capped; recursive references beyond the
-/// cap collapse to `true` (permissive) rather than looping.
-fn resolve_refs(
-    value: &serde_json::Value,
-    components: &std::collections::BTreeMap<String, serde_json::Value>,
-    seen: &mut Vec<String>,
-    depth: usize,
-) -> serde_json::Value {
-    const MAX_DEPTH: usize = 8;
-    if depth > MAX_DEPTH {
-        return serde_json::Value::Bool(true);
-    }
-    match value {
-        serde_json::Value::Object(map) => {
-            if map.len() == 1
-                && let Some(target) = map.get("$ref").and_then(|r| r.as_str())
-                && let Some(name) = target.strip_prefix("#/components/schemas/")
-                && let Some(component) = components.get(name)
-            {
-                if seen.iter().any(|s| s == name) {
-                    return serde_json::Value::Bool(true);
-                }
-                seen.push(name.to_owned());
-                let resolved = resolve_refs(component, components, seen, depth + 1);
-                seen.pop();
-                return resolved;
-            }
-            let mut out = serde_json::Map::new();
-            for (key, child) in map {
-                out.insert(key.clone(), resolve_refs(child, components, seen, depth));
-            }
-            serde_json::Value::Object(out)
-        }
-        serde_json::Value::Array(items) => serde_json::Value::Array(
-            items
-                .iter()
-                .map(|item| resolve_refs(item, components, seen, depth))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
 #[cfg(test)]
 mod debug_wrapper_tests {
 
