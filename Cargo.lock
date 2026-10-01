@@ -2125,6 +2125,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "criterion",
+ "futures",
  "reqwest",
  "serde",
  "serde_json",
@@ -2148,6 +2149,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tower 0.5.3",
  "tower-lsp",
 ]
 

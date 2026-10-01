@@ -412,10 +412,34 @@ pub fn inlay_hints(doc: &OpenDoc, ws: &Workspace, range: Range) -> Vec<InlayHint
     let inner = doc.low.inner();
     let (bytes, li) = (inner.bytes(), inner.line_index());
     let mut out: Vec<InlayHint> = Vec::new();
-    for n in inner.root().descendants() {
+    // Only descend into subtrees that overlap what was asked for. An
+    // editor asks for hints on the few lines it is showing, and walking
+    // the whole tree to answer that cost 7.5 seconds on a 63k-line
+    // specification — a request the editor repeats as you type.
+    let window = match (
+        offset_of_utf16(bytes, li, range.start.line, range.start.character),
+        offset_of_utf16(bytes, li, range.end.line, range.end.character),
+    ) {
+        (Some(start), Some(end)) => Some((start, end)),
+        // A range that does not land on a line cannot be pruned against,
+        // so answer it the old way rather than not at all.
+        _ => None,
+    };
+    let mut stack = vec![inner.root()];
+    while let Some(n) = stack.pop() {
         if out.len() >= MAX_HINTS {
             break;
         }
+        if let Some((start, end)) = window {
+            let span = n.byte_range();
+            if span.end <= start || span.start >= end {
+                continue; // outside the window: do not descend either
+            }
+        }
+        // Push children reversed so the walk visits them in document
+        // order, as the flat descendant walk did.
+        let kids: Vec<SNode<'_>> = n.children().collect();
+        stack.extend(kids.into_iter().rev());
         if n.kind() != SyntaxKind::Pair {
             continue;
         }

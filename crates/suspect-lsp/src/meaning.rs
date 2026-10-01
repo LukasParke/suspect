@@ -572,10 +572,46 @@ impl Index {
     }
 
     /// Indexes one document's references.
+    ///
+    /// The walk carries each node's pointer down with it rather than
+    /// asking every `$ref` to climb back to the root: on the 63k-line
+    /// Plex specification, 5,486 references spent twelve times longer
+    /// climbing than the walk that found them.
+    ///
+    /// A child that arrived from elsewhere — an alias resolved to its
+    /// anchor, or a merge key pulling in another mapping's bytes — lives
+    /// somewhere the carried path cannot honestly describe, so those
+    /// subtrees keep the climb and report exactly what they always did.
     pub fn index_document(&mut self, document: &str, low: &LowDoc) {
-        let mut pending = vec![low.root()];
-        while let Some(node) = pending.pop() {
+        enum Step<'d> {
+            /// Visit a node, pushing `key` onto the path first. The flag
+            /// says the carried path is not trustworthy here.
+            Enter(NodeRef<'d>, Option<Box<str>>, bool),
+            /// Leave a node, popping the key it pushed.
+            Leave,
+        }
+
+        let mut tokens: Vec<Box<str>> = Vec::new();
+        let mut pending = vec![Step::Enter(low.root(), None, false)];
+        while let Some(step) = pending.pop() {
+            let (node, climb) = match step {
+                Step::Leave => {
+                    tokens.pop();
+                    continue;
+                }
+                Step::Enter(node, key, climb) => {
+                    let descended = key.is_some();
+                    tokens.extend(key);
+                    if descended {
+                        pending.push(Step::Leave);
+                    }
+                    (node, climb)
+                }
+            };
+
+            let mut children: Vec<(NodeRef<'_>, Option<Box<str>>, bool)> = Vec::new();
             if node.kind() == suspect_low::ValueKind::Object {
+                let own = node.byte_range();
                 for entry in node.entries() {
                     if entry.key == "$ref"
                         && let Some(value) = entry.value
@@ -584,7 +620,11 @@ impl Index {
                         let reference = Reference {
                             document: document.to_owned(),
                             range: value.byte_range(),
-                            source: node.path_from_root(),
+                            source: if climb {
+                                node.path_from_root()
+                            } else {
+                                Pointer::from_tokens(tokens.clone())
+                            },
                             text: text.clone(),
                         };
                         if let Some(target) = parse_ref(&text) {
@@ -601,11 +641,29 @@ impl Index {
                         self.references.push(reference);
                     }
                     if let Some(child) = entry.value {
-                        pending.push(child);
+                        let child_range = child.byte_range();
+                        let elsewhere = child_range.start < own.start || child_range.end > own.end;
+                        children.push((
+                            child,
+                            Some(entry.key.to_owned().into_boxed_str()),
+                            climb || elsewhere || child.is_alias(),
+                        ));
                     }
                 }
             } else if node.kind() == suspect_low::ValueKind::Array {
-                pending.extend(node.items());
+                let own = node.byte_range();
+                for (position, child) in node.items().into_iter().enumerate() {
+                    let child_range = child.byte_range();
+                    let elsewhere = child_range.start < own.start || child_range.end > own.end;
+                    children.push((
+                        child,
+                        Some(position.to_string().into_boxed_str()),
+                        climb || elsewhere || child.is_alias(),
+                    ));
+                }
+            }
+            for (child, key, inherited) in children.into_iter().rev() {
+                pending.push(Step::Enter(child, key, inherited));
             }
         }
     }

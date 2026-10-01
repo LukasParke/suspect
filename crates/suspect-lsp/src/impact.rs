@@ -18,10 +18,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use suspect_ir::IrSpec;
 use suspect_low::Pointer;
 
 use crate::meaning::{Index, Meaning, ObjectKind};
+
+/// HTTP methods that turn a path item into an operation.
+const METHODS: &[&str] = &[
+    "GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE", "QUERY",
+];
 
 /// One thing a change reaches.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -114,8 +118,6 @@ impl ImpactReport {
 pub struct ImpactContext<'a> {
     /// The reference index.
     pub index: &'a Index,
-    /// The contract snapshot, when one is compiled.
-    pub spec: Option<&'a IrSpec>,
     /// Arazzo documents loaded in the workspace, by name.
     pub workflows: &'a [(String, suspect_arazzo::ArazzoDoc<'a>)],
     /// Generated artifacts keyed by the schema name they contain, when the
@@ -245,50 +247,30 @@ impl ImpactContext<'_> {
 
     /// The operation a pointer belongs to, if any.
     ///
-    /// Pointer tokens may be escaped (`~1pets`) or already decoded
-    /// (`/pets`), depending on how they were produced, so both spellings
-    /// are tried rather than assuming one.
+    /// Read from the pointer alone — `/paths/<templated>/<method>` — so the
+    /// common case costs nothing: an impact question must not compile the
+    /// contract. Pointer tokens may be escaped (`~1pets`) or already
+    /// decoded (`/pets`), so both spellings are normalized.
     fn operation_of(&self, pointer: &Pointer) -> Option<String> {
-        let spec = self.spec?;
         let tokens: Vec<String> = pointer
             .tokens()
             .iter()
             .map(|token| token.to_string())
             .collect();
-        if tokens.len() < 2 || tokens[0] != "paths" {
+        if tokens.len() < 3 || tokens[0] != "paths" {
             return None;
         }
-        // A decoded token already carries its leading slash; an escaped one
-        // does not. Normalize both rather than assuming a spelling.
         let segment = &tokens[1];
-        let (escaped, decoded) = if segment.starts_with('/') {
-            (
-                format!(
-                    "/{}",
-                    segment
-                        .trim_start_matches('/')
-                        .replace('~', "~0")
-                        .replace('/', "~1")
-                ),
-                segment.to_owned(),
-            )
+        let decoded = if segment.starts_with('/') {
+            segment.clone()
         } else {
-            (
-                format!("/{segment}"),
-                format!("/{}", segment.replace('~', "")),
-            )
+            format!("/{}", segment.replace('~', ""))
         };
-        let method = tokens
-            .get(2)
-            .map(|token| token.to_ascii_uppercase())
-            .unwrap_or_default();
-        spec.operations
-            .iter()
-            .find(|operation| {
-                (operation.path == escaped || operation.path == decoded)
-                    && operation.method.as_str() == method
-            })
-            .map(|operation| format!("{} {}", operation.method.as_str(), operation.path))
+        let method = tokens[2].to_ascii_uppercase();
+        if !METHODS.contains(&method.as_str()) {
+            return None;
+        }
+        Some(format!("{method} {decoded}"))
     }
 }
 

@@ -38,10 +38,12 @@ pub struct State {
     pub workspace: Option<Arc<Workspace>>,
     /// Per-open-document cache keyed by canonical URI.
     pub docs: HashMap<Uri, Arc<OpenDoc>>,
-    /// Bumped on every open/change; debounce tasks publish only when their
     /// Per-document edit counters: a debounce task publishes only when its
     /// captured generation still matches the document's current one.
     pub generations: HashMap<Uri, u64>,
+    /// Bumped whenever a document opens, changes, or closes. The index
+    /// cache is keyed on it.
+    content_epoch: u64,
     /// Per-document semantic-token caches for `semanticTokens/full/delta`:
     /// the result id handed to the client plus the encoded tokens.
     pub token_cache: HashMap<Uri, (String, Vec<SemanticToken>)>,
@@ -57,6 +59,13 @@ pub struct State {
     /// with the client's initialization options layered on top. This is
     /// the same configuration the CLI reads, so the editor and CI agree.
     pub editor_config: crate::editor_config::EditorConfig,
+    /// The workspace reference index, cached per document generation.
+    ///
+    /// Rebuilding it walks every document and every `$ref`; doing that per
+    /// hover made a large specification take the better part of a second
+    /// per cursor move. The generation is bumped whenever any open
+    /// document changes, which is exactly when the index goes stale.
+    pub index_cache: Option<(u64, std::sync::Arc<crate::meaning::Index>)>,
 }
 
 impl State {
@@ -66,17 +75,48 @@ impl State {
         self.workspace.as_ref().and_then(super::workspace_root)
     }
 
-    /// Inserts or replaces an open document, reparsing its `LowDoc`.
-    /// Drops a closed document from the cache and forgets its generation.
+    /// The reference index for the current generation, building it once
+    /// and reusing it until a document changes.
+    pub fn index_for(
+        &mut self,
+        ws: &std::sync::Arc<suspect_ref::Workspace>,
+    ) -> std::sync::Arc<crate::meaning::Index> {
+        let generation = self.generation();
+        if let Some((cached, index)) = &self.index_cache
+            && *cached == generation
+        {
+            return index.clone();
+        }
+        let index = std::sync::Arc::new(crate::meaning::Index::build(ws));
+        self.index_cache = Some((generation, index.clone()));
+        index
+    }
+
+    /// A counter that changes whenever any open document does.
+    pub fn generation(&self) -> u64 {
+        self.content_epoch
+    }
+
+    /// Forgets the disk-backed workspace, and with it the index built
+    /// from it: both describe the tree as it was, not as it is.
+    pub fn drop_workspace(&mut self) {
+        self.workspace = None;
+        self.index_cache = None;
+        self.content_epoch = self.content_epoch.wrapping_add(1);
+    }
+
+    /// Drops a closed document's cache and generation entry.
     pub fn close_doc(&mut self, uri: &Uri) {
         self.docs.remove(uri);
         self.generations.remove(uri);
+        self.content_epoch = self.content_epoch.wrapping_add(1);
     }
 
     /// Inserts or replaces a document and reparses it.
     pub fn open_doc(&mut self, uri: Uri, text: String) {
         self.docs
             .insert(uri.clone(), Arc::new(OpenDoc::parse(uri, text)));
+        self.content_epoch = self.content_epoch.wrapping_add(1);
     }
 
     /// Returns the cached workspace, building it against the workspace root
