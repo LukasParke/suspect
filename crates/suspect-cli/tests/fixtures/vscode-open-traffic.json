@@ -1,0 +1,426 @@
+{
+ "note": "Client->server frames captured from a live VS Code 1.140.0 session against plex-api-spec.yaml (63,028 lines, 5,486 refs), by recording every frame between the editor and the server. The opening burst is verbatim: didOpen and fifteen requests inside one 40ms window is the interleaving that wedged the server. Later repeats are an editor re-asking on cursor moves.",
+ "captured": "2026-09-30T10:49:47-07:00",
+ "frames": [
+  {
+   "kind": "REQUEST",
+   "method": "initialize"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "initialized"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "textDocument/didOpen"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/setTrace"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentColor"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentLink"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/inlayHint"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentLink"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/setTrace"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/foldingRange"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentSymbol"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/semanticTokens/full"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeLens"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/semanticTokens/range"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/setTrace"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/setTrace"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentSymbol"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentLink"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/inlayHint"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeLens"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "textDocument/didOpen"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentSymbol"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "textDocument/didOpen"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "textDocument/didOpen"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentSymbol"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentLink"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentColor"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/codeAction"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/documentSymbol"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/foldingRange"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "textDocument/inlayHint"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "workspace/diagnostic"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "$/cancelRequest"
+  },
+  {
+   "kind": "REQUEST",
+   "method": "shutdown"
+  },
+  {
+   "kind": "NOTIFY",
+   "method": "exit"
+  }
+ ]
+}
