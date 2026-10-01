@@ -28,6 +28,7 @@ pub mod colors;
 pub mod commands;
 pub mod completion;
 pub mod config_files;
+pub mod config_schema;
 pub mod diagnostics;
 pub mod docs_gen;
 mod editor_config;
@@ -348,6 +349,13 @@ fn to_url(uri: &Uri) -> Option<Url> {
 /// Converts a navigation target into an LSP `Location`, preferring the open
 /// (possibly dirty) buffer when it is the same document, else the
 /// workspace-loaded copy.
+/// The configuration flavour of a document, when it is one of suspect's own
+/// configuration files.
+fn config_kind(uri: &Uri) -> Option<config_schema::FileKind> {
+    let path = uri.as_path()?;
+    config_schema::kind_of(path.file_name()?.to_str()?)
+}
+
 fn to_location(
     ws: Option<&Arc<suspect_ref::Workspace>>,
     open: Option<&OpenDoc>,
@@ -816,6 +824,19 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
+        // A suspect configuration file is not an API document, and its keys
+        // have documentation no OpenAPI vocabulary carries.
+        if let Some(kind) = config_kind(&uri) {
+            return Ok(
+                config_schema::hover(kind, &doc.low, offset).map(|value| Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value,
+                    }),
+                    range: None,
+                }),
+            );
+        }
         let Some(base) = navigation::hover_markdown(&ws, &doc.low, offset) else {
             return Ok(None);
         };
@@ -1653,6 +1674,18 @@ impl LanguageServer for Backend {
         else {
             return Ok(None);
         };
+        // suspect's own configuration files complete from their schema:
+        // the keys still missing from this section, or the permitted values
+        // of the key under the cursor.
+        if let Some(kind) = config_kind(&uri) {
+            let mut items = config_schema::completions(kind, &doc.low, offset);
+            items.sort_by(|a, b| {
+                a.sort_text
+                    .cmp(&b.sort_text)
+                    .then_with(|| a.label.cmp(&b.label))
+            });
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
         let context = completion::context_at(&doc.low, offset);
         // The schema's own permitted values lead whenever the position has
         // a schema: an enum member here is worth more than any keyword.

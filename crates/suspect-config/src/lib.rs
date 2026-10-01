@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 pub mod file;
 pub mod resolve;
 
-pub use file::{discover, load};
+pub use file::{CONFIG_NAMES, discover, load};
 pub use resolve::{Layer, Resolution, resolve_bool, resolve_str};
 
 /// The toolchain's settings.
