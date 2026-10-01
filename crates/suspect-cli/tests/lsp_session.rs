@@ -19,6 +19,9 @@
 //! What is asserted is *content*, not just "it answered". A server that
 //! answers every request with `null` passes a liveness test and is useless.
 
+// The harness modules compile into more than one test binary, so an item
+// used by the session suite is unused in the bench suite and vice versa.
+#[allow(dead_code)]
 mod support {
     pub mod editor;
     pub mod workspace;

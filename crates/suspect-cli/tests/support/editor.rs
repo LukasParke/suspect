@@ -36,6 +36,17 @@ use std::time::{Duration, Instant};
 /// that a wedged server costs minutes before it is reported.
 pub const BUDGET: Duration = Duration::from_secs(30);
 
+/// One measured request.
+#[derive(Debug)]
+pub struct Timed {
+    /// The request method.
+    pub method: String,
+    /// Whether it was answered, and with what.
+    pub answer: Result<serde_json::Value, NoReply>,
+    /// Wall-clock time from writing the frame to filing the response.
+    pub elapsed: Duration,
+}
+
 /// A request the server has not answered yet.
 #[derive(Debug)]
 pub struct NoReply(pub String);
@@ -84,6 +95,10 @@ impl Drop for Editor {
     }
 }
 
+// The harness surface is deliberately wider than any single test uses: each
+// scenario needs a different part of it, and trimming it to one would make
+// the next scenario reach into another file.
+#[allow(dead_code)]
 impl Editor {
     /// Starts `suspect lsp` and completes the handshake, exactly as an
     /// editor does: `initialize`, wait for the result, then `initialized`.
@@ -308,6 +323,51 @@ impl Editor {
     ) -> Result<serde_json::Value, NoReply> {
         let id = self.issue(method, params);
         self.await_one(id, method)
+    }
+
+    /// Issues one request and reports how long the answer took.
+    ///
+    /// Measured from the moment the frame is written to the moment the
+    /// matching response is filed, so it includes the server's own work and
+    /// the wait behind anything already in flight — which is what an editor
+    /// experiences. A request issued into a queue behind others is slow for
+    /// the user even when the server itself is fast.
+    pub fn request_timed(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> (Result<serde_json::Value, NoReply>, Duration) {
+        let started = Instant::now();
+        let id = self.issue(method, params);
+        let answer = self.await_one(id, method);
+        (answer, started.elapsed())
+    }
+
+    /// Issues a batch before awaiting any, timing each answer.
+    pub fn request_all_timed(&self, calls: &[(String, serde_json::Value)]) -> Vec<Timed> {
+        let started = Instant::now();
+        let issued: Vec<(String, i64)> = calls
+            .iter()
+            .map(|(method, params)| (method.clone(), self.issue(method, params.clone())))
+            .collect();
+        issued
+            .into_iter()
+            .map(|(method, id)| {
+                let answer = self.await_until(id, &method, started + BUDGET);
+                Timed {
+                    method,
+                    answer,
+                    elapsed: started.elapsed(),
+                }
+            })
+            .collect()
+    }
+
+    /// Notifications carry no reply, so they are timed by issuing them.
+    pub fn notify_timed(&self, method: &str, params: serde_json::Value) -> Duration {
+        let started = Instant::now();
+        self.notify(method, params);
+        started.elapsed()
     }
 
     /// Issues every request **before** waiting for any of them.

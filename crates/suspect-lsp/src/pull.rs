@@ -124,6 +124,7 @@ pub fn workspace_pull(
 }
 
 /// One decoded semantic token at an absolute position.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct AbsToken {
     /// Zero-based line.
     line: u32,
@@ -232,8 +233,11 @@ pub fn semantic_tokens_range(
     }
     let inner = doc.low.inner();
     let bytes = inner.bytes();
-    let full = decode_tokens(&crate::semantic::semantic_tokens_full(doc).data);
-    let kept: Vec<AbsToken> = full
+    // Walk only what was asked for, then trim the boundary tokens: the walk
+    // is pruned by subtree, and a token can still straddle an edge of the
+    // requested range.
+    let walked = decode_tokens(&crate::semantic::semantic_tokens_in_range(doc, range.clone()).data);
+    let kept: Vec<AbsToken> = walked
         .into_iter()
         .filter(|t| {
             token_span(bytes, li, t.line, t.col, t.len)
@@ -1024,5 +1028,95 @@ components:
         let s = (r.start.character as usize).min(line.len());
         let e = (r.end.character as usize).min(line.len());
         &line[s..e]
+    }
+
+    /// A ranged semantic-token request must be pruned by the walk, not by a
+    /// filter over the whole document.
+    ///
+    /// Correctness first: a pruned walk must return exactly what filtering
+    /// the full token set would. Cost second, because the bug this guards was
+    /// a performance bug: computing every token to answer a sixty-line window
+    /// took 8.1 seconds on a 63k-line specification, measured through the
+    /// benchmark harness, and the editor repeats the request on every scroll.
+    #[test]
+    fn ranged_semantic_tokens_match_the_filtered_full_set() {
+        let dir = std::env::temp_dir().join("suspect-lsp-semrange-correct");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("main.yaml");
+        std::fs::write(&path, MAIN).unwrap();
+        let uri = Uri::from_path(&path).unwrap();
+        let doc = OpenDoc::parse(uri, MAIN.to_owned());
+        let inner = doc.low.inner();
+        let (bytes, li) = (inner.bytes(), inner.line_index());
+        let whole = crate::semantic::semantic_tokens_full(&doc);
+        let full = decode_tokens(&whole.data);
+
+        for (start_line, end_line) in [(0usize, 8usize), (10, 20), (5, 12)] {
+            let window = crate::state::offset_of_utf16(bytes, li, start_line as u32, 0).unwrap_or(0)
+                ..crate::state::offset_of_utf16(bytes, li, end_line as u32, 0)
+                    .unwrap_or(bytes.len());
+            let expected: Vec<AbsToken> = full
+                .iter()
+                .filter(|t| {
+                    token_span(bytes, li, t.line, t.col, t.len)
+                        .is_some_and(|span| span.end > window.start && span.start < window.end)
+                })
+                .cloned()
+                .collect();
+            let ranged = semantic_tokens_range(&doc, li, window.clone());
+            let got = decode_tokens(&ranged);
+            assert_eq!(
+                got, expected,
+                "lines {start_line}-{end_line}: pruned walk disagreed with the filtered full set"
+            );
+        }
+    }
+
+    /// The cost guard, on a document large enough that an unpruned walk is
+    /// obvious. The bound is deliberately loose — ten times what the pruned
+    /// walk costs here — because its job is to catch a return to walking the
+    /// whole document, not to measure the machine.
+    #[test]
+    fn ranged_semantic_tokens_do_not_walk_the_whole_document() {
+        let dir = std::env::temp_dir().join("suspect-lsp-semrange-cost");
+        std::fs::create_dir_all(&dir).unwrap();
+        // ~45,000 lines: big enough that a full walk is visibly slow in a
+        // debug build, small enough to keep the test quick.
+        let mut text = String::from("openapi: 3.1.0\ninfo:\n  title: T\n  version: '1'\npaths:\n");
+        for index in 0..3000 {
+            text.push_str(&format!(
+                "  /resource{index}:\n    get:\n      operationId: op{index}\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n                  id:\n                    type: string\n                  name:\n                    type: string\n                  tags:\n                    type: array\n                    items:\n                      type: string\n"
+            ));
+        }
+        let path = dir.join("big.yaml");
+        std::fs::write(&path, &text).unwrap();
+        let uri = Uri::from_path(&path).unwrap();
+        let doc = OpenDoc::parse(uri, text.clone());
+        let inner = doc.low.inner();
+        let (bytes, li) = (inner.bytes(), inner.line_index());
+
+        let total_lines = text.lines().count();
+        let window = crate::state::offset_of_utf16(bytes, li, (total_lines / 2) as u32, 0)
+            .unwrap_or(0)
+            ..crate::state::offset_of_utf16(bytes, li, (total_lines / 2 + 40) as u32, 0)
+                .unwrap_or(bytes.len());
+
+        let started = std::time::Instant::now();
+        let ranged = semantic_tokens_range(&doc, li, window);
+        let ranged_cost = started.elapsed();
+
+        let started = std::time::Instant::now();
+        let _full = crate::semantic::semantic_tokens_full(&doc);
+        let full_cost = started.elapsed();
+
+        assert!(
+            !ranged.is_empty(),
+            "the window should have produced tokens; the fixture is wrong, not the server"
+        );
+        assert!(
+            ranged_cost * 10 < full_cost,
+            "a forty-line window took {ranged_cost:?} against {full_cost:?} for the whole \
+             document — the walk is not being pruned"
+        );
     }
 }
