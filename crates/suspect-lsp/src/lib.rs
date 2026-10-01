@@ -155,9 +155,19 @@ impl Backend {
     /// Returns the workspace, building it on first use and making sure the
     /// given document plus its `$ref` closure is loaded. Best-effort.
     async fn workspace_for(&self, uri: &Uri) -> Option<Arc<suspect_ref::Workspace>> {
-        let ws = {
-            let mut st = self.state.write().await;
-            st.ensure_workspace()?
+        // A cached workspace is cloned out under a *read* guard. Taking a
+        // write lock here deadlocked any handler already holding a read
+        // guard: tokio's RwLock is write-preferring, so the writer waits
+        // for a reader that is this same task, and never wakes. One such
+        // call wedged the whole server, because the queued writer then
+        // blocked every later reader too.
+        let cached = self.state.read().await.workspace.clone();
+        let ws = match cached {
+            Some(ws) => ws,
+            None => {
+                let mut st = self.state.write().await;
+                st.ensure_workspace()?
+            }
         };
         if ws.get(uri).is_none()
             && let Some(path) = uri.as_path()
@@ -1335,9 +1345,15 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        // The document is taken and the guard released before the
+        // workspace is asked for: holding one across the other is what
+        // deadlocked this handler, and with it every request behind it.
+        let doc = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            doc.clone()
         };
         let Some(ws) = self.workspace_for(&uri).await else {
             return Ok(Some(Vec::new()));
@@ -2540,7 +2556,17 @@ fn base_url(init_options: Option<&serde_json::Value>) -> String {
 pub async fn run_server() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
-    let (service, socket) = LspService::build(Backend::new)
+    let (service, socket) = service().await;
+    Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+/// Builds the server plus its client socket.
+///
+/// Split out of [`run_server`] so a test can drive the real server — the
+/// one place where lock-ordering between request handlers is observable
+/// at all.
+async fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
+    LspService::build(Backend::new)
         .custom_method(
             <run_lenses::RunWorkflowRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::run_workflow_request,
@@ -2549,8 +2575,7 @@ pub async fn run_server() {
             <generation_contract::GenerationContractRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::generation_contract_request,
         )
-        .finish();
-    Server::new(stdin, stdout, socket).serve(service).await;
+        .finish()
 }
 
 /// Builds a full pull-diagnostics report.
@@ -2736,5 +2761,277 @@ mod hover_latency_tests {
             state.index_cache.is_none(),
             "a dropped workspace must take its index with it"
         );
+    }
+}
+
+#[cfg(test)]
+mod burst_tests {
+    use super::*;
+    use tower::Service;
+
+    /// One request, with the timeout that turns a wedge into a failure
+    /// instead of a hung test run.
+    fn in_flight(
+        service: &mut LspService<Backend>,
+        id: i64,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Answer {
+        // Each request needs its own id: the server tracks in-flight ids
+        // for cancellation, and a duplicate is rejected as invalid. An id
+        // of zero means a notification — and a notification method sent
+        // *with* an id is silently dropped by tower-lsp, so this is not
+        // optional.
+        let mut builder = tower_lsp::jsonrpc::Request::build(method.to_owned()).params(params);
+        if id != 0 {
+            builder = builder.id(id);
+        }
+        let request = builder.finish();
+        // `call` hands back a `'static` future, so the borrow of the
+        // service ends here and the request stays in flight while the
+        // next one is issued.
+        let answer = service.call(request);
+        Box::pin(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(20), answer)
+                .await
+                .ok()
+                .and_then(|result| result.ok())
+                .flatten()
+        })
+    }
+
+    /// One answer, boxed so a batch of in-flight requests borrows nothing.
+    type Answer = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Option<tower_lsp::jsonrpc::Response>> + Send>,
+    >;
+
+    /// A specification with enough references that the parts of the server
+    /// which walk the workspace have something to walk.
+    fn spec_with_refs(operations: usize) -> String {
+        let mut out = String::from("openapi: 3.1.1\ninfo: {title: Burst, version: '1'}\npaths:\n");
+        for index in 0..operations {
+            out.push_str(&format!(
+                "  /resource{index}:\n    get:\n      operationId: op{index}\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema: {{$ref: '#/components/schemas/Model'}}\n"
+            ));
+        }
+        out.push_str(
+            "components:\n  schemas:\n    Model:\n      type: object\n      properties:\n        id: {type: string}\n",
+        );
+        out
+    }
+
+    /// Everything an editor sends when it opens a YAML document, issued
+    /// together the way an editor issues it.
+    ///
+    /// This is the test a request-by-request probe cannot be. Hover alone
+    /// always answered in milliseconds; the server only ever wedged once
+    /// an editor asked for something else first, and then *every* later
+    /// request queued behind a lock that would never be released — which
+    /// is what "loading forever" looked like from the editor's side. One
+    /// handler (`document_link`) held a read guard while asking for a
+    /// write lock, and because tokio's RwLock is write-preferring, its
+    /// queued writer then blocked every later reader too.
+    ///
+    /// All requests are put in flight before any is awaited. Awaiting
+    /// them one at a time would pass: the deadlock needs a second request
+    /// waiting behind the first.
+    #[tokio::test]
+    async fn every_request_an_open_triggers_answers() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let text = spec_with_refs(30);
+        std::fs::write(dir.path().join("openapi.yaml"), &text).expect("write");
+        let path = dir.path().join("openapi.yaml");
+        let uri = Uri::parse(&format!("file://{}", path.display())).expect("uri");
+
+        let (mut service, socket) = service().await;
+        let root = format!("file://{}", dir.path().display());
+
+        // Answer the server's own requests, as an editor does. Without
+        // this the server waits forever on `workspace/configuration`
+        // during `initialized`, and a test that ignores that wait spends
+        // its whole budget in it.
+        let answering = tokio::spawn(async move {
+            use futures::{SinkExt, StreamExt};
+            let mut socket = socket;
+            while let Some(request) = socket.next().await {
+                let result = match request.method() {
+                    "workspace/configuration" => {
+                        let items = request
+                            .params()
+                            .and_then(|p| p.get("items"))
+                            .and_then(|i| i.as_array())
+                            .map_or(0, Vec::len);
+                        serde_json::Value::Array(vec![serde_json::Value::Null; items])
+                    }
+                    "workspace/applyEdit" => serde_json::json!({"applied": true}),
+                    _ => serde_json::Value::Null,
+                };
+                if let Some(id) = request.id().cloned() {
+                    socket
+                        .send(tower_lsp::jsonrpc::Response::from_ok(id, result))
+                        .await
+                        .ok();
+                }
+            }
+        });
+
+        assert!(
+            in_flight(
+                &mut service,
+                1,
+                "initialize",
+                serde_json::json!({
+                    "processId": null,
+                    "rootUri": root,
+                    "capabilities": {"workspace": {"configuration": true}},
+                }),
+            )
+            .await
+            .is_some(),
+            "initialize answered"
+        );
+        // `initialized` is a notification: sent, and its (empty) answer read.
+        let _ = in_flight(&mut service, 0, "initialized", serde_json::json!({})).await;
+        let _ = in_flight(
+            &mut service,
+            0,
+            "textDocument/didOpen",
+            serde_json::json!({"textDocument": {
+                "uri": uri.as_str(), "languageId": "yaml", "version": 1, "text": text,
+            }}),
+        )
+        .await;
+        // Let the warmed index and the first diagnostics finish, so this
+        // measures concurrency rather than cold start.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // Line 11 of the fixture is the `$ref` on the first operation's
+        // 200 response; character 24 is inside the key, which must always
+        // render the keyword entry. The fixture is small on purpose: what
+        // this test reproduces is a lock-ordering bug, which has nothing to
+        // do with how much document there is.
+        let at = serde_json::json!({"line": 11, "character": 24});
+        let td = serde_json::json!({"uri": uri.as_str()});
+        let span = serde_json::json!({
+            "start": {"line": 11, "character": 0},
+            "end": {"line": 12, "character": 0},
+        });
+        let requests: Vec<(&str, serde_json::Value)> = vec![
+            (
+                "textDocument/hover",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/documentSymbol",
+                serde_json::json!({"textDocument": td}),
+            ),
+            (
+                "textDocument/foldingRange",
+                serde_json::json!({"textDocument": td}),
+            ),
+            (
+                "textDocument/semanticTokens/full",
+                serde_json::json!({"textDocument": td}),
+            ),
+            (
+                "textDocument/documentLink",
+                serde_json::json!({"textDocument": td}),
+            ),
+            (
+                "textDocument/inlayHint",
+                serde_json::json!({"textDocument": td, "range": span}),
+            ),
+            (
+                "textDocument/documentHighlight",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/selectionRange",
+                serde_json::json!({"textDocument": td, "positions": [at]}),
+            ),
+            (
+                "textDocument/codeLens",
+                serde_json::json!({"textDocument": td}),
+            ),
+            (
+                "textDocument/documentColor",
+                serde_json::json!({"textDocument": td}),
+            ),
+            (
+                "textDocument/codeAction",
+                serde_json::json!({"textDocument": td, "range": span, "context": {"diagnostics": []}}),
+            ),
+            (
+                "textDocument/completion",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/prepareCallHierarchy",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/prepareTypeHierarchy",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/moniker",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/linkedEditingRange",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/prepareRename",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/diagnostic",
+                serde_json::json!({"textDocument": td}),
+            ),
+            ("workspace/diagnostic", serde_json::json!({})),
+            (
+                "textDocument/definition",
+                serde_json::json!({"textDocument": td, "position": at}),
+            ),
+            (
+                "textDocument/references",
+                serde_json::json!({"textDocument": td, "position": at, "context": {"includeDeclaration": true}}),
+            ),
+        ];
+
+        // Every request put in flight before any is awaited.
+        let mut pending: Vec<(&str, Answer)> = Vec::new();
+        for (n, (method, params)) in requests.iter().enumerate() {
+            pending.push((
+                *method,
+                in_flight(&mut service, 100 + n as i64, method, params.clone()),
+            ));
+        }
+
+        for (method, answer) in pending {
+            let got = answer.await;
+            assert!(
+                got.is_some(),
+                "{method} never answered: the server is wedged"
+            );
+        }
+
+        // And the one an editor sends on every cursor move, afterwards.
+        let after = in_flight(
+            &mut service,
+            900,
+            "textDocument/hover",
+            serde_json::json!({"textDocument": td, "position": at}),
+        )
+        .await
+        .expect("hover answered after the burst");
+        let value = after.result().expect("hover returned a result");
+        assert!(
+            !value.is_null(),
+            "hover must still work once the burst is over"
+        );
+
+        answering.abort();
     }
 }
