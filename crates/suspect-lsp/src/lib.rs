@@ -2189,8 +2189,13 @@ impl Backend {
                 let uri_s = params.arguments.first()?.as_str()?.to_owned();
                 let uri = Uri::parse(&uri_s).ok()?;
                 let ws = self.workspace_for(&uri).await?;
-                let st = self.state.read().await;
-                let doc = st.docs.get(&uri)?;
+                // Clone the document out and drop the guard: `index_for` below takes
+                // the write lock, and `doc` would otherwise keep the read
+                // guard alive across it.
+                let doc = {
+                    let st = self.state.read().await;
+                    st.docs.get(&uri)?.clone()
+                };
                 let offset = params
                     .arguments
                     .get(1)
@@ -2771,6 +2776,35 @@ mod burst_tests {
 
     /// One request, with the timeout that turns a wedge into a failure
     /// instead of a hung test run.
+    /// Hover repeatedly until it answers, or `budget` seconds run out.
+    /// A wedged server never answers no matter how long you wait; a slow
+    /// one answers on a later try. One sample cannot tell those apart.
+    async fn hover_within(
+        service: &mut LspService<Backend>,
+        td: &serde_json::Value,
+        at: &serde_json::Value,
+        budget: f64,
+    ) -> Option<tower_lsp::jsonrpc::Response> {
+        let deadline = std::time::Instant::now() + Duration::from_secs_f64(budget);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            let id = 700 + (budget * 1000.0) as i64 - (left.as_millis() as i64 % 1000);
+            let answer = in_flight(
+                service,
+                id,
+                "textDocument/hover",
+                serde_json::json!({"textDocument": td, "position": at}),
+            );
+            match tokio::time::timeout(left.min(Duration::from_millis(250)), answer).await {
+                Ok(Some(response)) => return Some(response),
+                _ => tokio::time::sleep(Duration::from_millis(50)).await,
+            }
+        }
+    }
+
     fn in_flight(
         service: &mut LspService<Backend>,
         id: i64,
@@ -3030,6 +3064,57 @@ mod burst_tests {
         assert!(
             !value.is_null(),
             "hover must still work once the burst is over"
+        );
+
+        // Every *notification* the client sends while you edit. A
+        // notification carries no id, so it produces no reply to wait on —
+        // which is exactly why a notification that wedges the server is
+        // invisible until the next request also stops answering. `didSave`
+        // is the one that matters: the server advertises `save`, so this
+        // arrives on every save, and a hover afterwards must still work.
+        for (method, params) in [
+            (
+                "textDocument/didSave",
+                serde_json::json!({"textDocument": td}),
+            ),
+            (
+                "workspace/didChangeWatchedFiles",
+                serde_json::json!({"changes": [{"uri": td["uri"], "type": 2}]}),
+            ),
+            (
+                "workspace/didChangeConfiguration",
+                serde_json::json!({"settings": {}}),
+            ),
+        ] {
+            let _ = in_flight(&mut service, 0, method, params.clone()).await;
+            let after = hover_within(&mut service, &td, &at, 20.0)
+                .await
+                .unwrap_or_else(|| panic!("{method} wedged the server: hover never answered"));
+            assert!(
+                !after.result().expect("hover returned a result").is_null(),
+                "{method} wedged the server: hover came back empty"
+            );
+        }
+
+        // And the command that takes the write lock while a document
+        // borrow is live — the same shape, on the other handler.
+        in_flight(
+            &mut service,
+            920,
+            "workspace/executeCommand",
+            serde_json::json!({
+                "command": "suspect.changeImpact",
+                "arguments": [td["uri"], 11, 24],
+            }),
+        )
+        .await
+        .expect("changeImpact answered");
+        let after = hover_within(&mut service, &td, &at, 20.0)
+            .await
+            .expect("changeImpact must not wedge the server");
+        assert!(
+            !after.result().expect("hover returned a result").is_null(),
+            "changeImpact must not wedge the server"
         );
 
         answering.abort();
