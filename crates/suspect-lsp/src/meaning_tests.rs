@@ -215,3 +215,137 @@ fn a_dangling_reference_is_still_indexed() {
         "and the target genuinely does not exist"
     );
 }
+
+/// The reference implementation of the index walk: every `$ref` asks its
+/// own node where it is. It is slow, and it is here because it is
+/// obviously correct — no carried state to get wrong.
+fn index_by_climbing(low: &LowDoc) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
+    let mut pending = vec![low.root()];
+    while let Some(node) = pending.pop() {
+        if node.kind() == suspect_low::ValueKind::Object {
+            for entry in node.entries() {
+                if entry.key == "$ref"
+                    && let Some(value) = entry.value
+                {
+                    out.push((node.path_from_root().to_path(), value.byte_range().start));
+                }
+                if let Some(child) = entry.value {
+                    pending.push(child);
+                }
+            }
+        } else if node.kind() == suspect_low::ValueKind::Array {
+            pending.extend(node.items());
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The same walk as `Index::index_document`, reduced to the pairs that
+/// identify a reference.
+fn index_by_carried_path(low: &LowDoc) -> Vec<(String, usize)> {
+    let mut index = Index::default();
+    index.index_document("mem://model.yaml", low);
+    let mut out: Vec<(String, usize)> = index
+        .references()
+        .iter()
+        .map(|reference| (reference.source.to_path(), reference.range.start))
+        .collect();
+    out.sort();
+    out
+}
+
+/// The carried path must name exactly what climbing does.
+///
+/// `index_document` carries each node's pointer down the walk instead of
+/// climbing to the root per reference, because climbing cost twelve times
+/// the walk itself on the 63k-line Plex specification. Carrying a path is
+/// exactly the kind of optimization that is right everywhere except the
+/// one case it does not model: a YAML merge key, whose bytes live in
+/// another mapping entirely. So the fixtures below are the cases that
+/// could break it, and this is the gate that says they did not.
+#[test]
+fn the_carried_path_agrees_with_climbing_to_the_root() {
+    let fixtures: Vec<(&str, &str)> = vec![
+        (
+            "merge keys",
+            "base: &b\n  $ref: '#/components/schemas/One'\n  name: merged\nchild:\n  <<: *b\n  extra:\n    $ref: '#/components/schemas/Two'\n",
+        ),
+        (
+            "anchors and aliases",
+            "a: &x\n  p:\n    $ref: '#/c/d'\nb: *x\nlist:\n  - $ref: '#/one'\n  - k:\n      - $ref: '#/two'\n",
+        ),
+        (
+            "duplicate keys and empty values",
+            "k: 1\nk:\n  $ref: '#/last'\nempty:\nafter:\n  $ref: '#/after'\n",
+        ),
+        (
+            "a realistic operation",
+            "paths:\n  /a/{id}:\n    get:\n      parameters:\n        - $ref: '#/components/parameters/Id'\n        - in: query\n          $ref: '#/components/parameters/Q'\n      responses:\n        '200':\n          $ref: '#/components/responses/Ok'\n",
+        ),
+    ];
+    for (name, text) in fixtures {
+        let low = doc(text);
+        assert_eq!(
+            index_by_carried_path(&low),
+            index_by_climbing(&low),
+            "the carried path disagrees on {name}"
+        );
+    }
+
+    // JSON resolves to pointers by index, and escaping is its own rule
+    // (`~1` for a slash inside a key).
+    let json = LowDoc::parse(
+        "mem://model.json".into(),
+        Source::from_vec(br##"{"a/b":{"~key":[{"$ref":"#/components/responses/Ok"}]}}"##.to_vec()),
+    );
+    assert_eq!(
+        index_by_carried_path(&json),
+        index_by_climbing(&json),
+        "the carried path disagrees on JSON"
+    );
+    assert!(
+        index_by_carried_path(&json)
+            .iter()
+            .any(|(path, _)| path == "/a~1b/~0key/0"),
+        "escaped keys must survive the walk"
+    );
+}
+
+/// A deep sequence must not recurse: the walk is iterative on purpose,
+/// because a hostile document can nest far deeper than the stack allows.
+#[test]
+fn the_index_walk_survives_a_document_nested_past_the_stack() {
+    let depth = 50_000;
+    let mut text = String::new();
+    for _ in 0..depth {
+        text.push_str("  - ");
+    }
+    text.push_str("$ref: '#/deep'\n");
+    let low = doc(&text);
+    assert_eq!(index_by_carried_path(&low), index_by_climbing(&low));
+}
+
+/// Hover inside a schema says how you get there from the schema.
+///
+/// The full pointer of a property buried in an operation is mostly path
+/// noise — `/paths/~1activities/get/responses/200/content/
+/// application~1json/schema/properties/MediaContainer` — and the part an
+/// author is actually asking about is the tail of it.
+#[test]
+fn the_schema_position_says_how_you_get_there_from_the_schema() {
+    let text = "paths:\n  /activities:\n    get:\n      responses:\n        '200':\n          content:\n            application/json:\n              schema:\n                properties:\n                  MediaContainer:\n                    type: object\n";
+    let low = doc(text);
+    let offset = text.find("type: object").expect("present");
+    let index = Index::default();
+    let rendered = crate::hover_meaning(&low, offset, &index).expect("meaning half");
+    assert!(
+        rendered.contains("inside `properties \u{203a} MediaContainer \u{203a} type`"),
+        "{rendered}"
+    );
+    assert!(
+        !rendered.contains("_schema position_"),
+        "the placeholder must not reach a user: {rendered}"
+    );
+}

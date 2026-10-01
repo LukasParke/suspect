@@ -166,25 +166,73 @@ impl Backend {
         }
         Some(ws)
     }
+
+    /// Builds the reference index before anyone asks for it.
+    ///
+    /// An open document is a near-certainty that a hover follows, so the
+    /// workspace walk happens now — off the interaction path, on the
+    /// blocking pool, without the state lock held while it runs. Editing
+    /// invalidates the result, so the next edit warms it again and the
+    /// build never lands in front of a cursor move.
+    fn warm_index(&self) {
+        let state = Arc::clone(&self.state);
+        tokio::spawn(async move {
+            let (ws, generation) = {
+                let st = state.read().await;
+                let Some(ws) = st.workspace.as_ref() else {
+                    return;
+                };
+                (Arc::clone(ws), st.generation())
+            };
+            let built =
+                tokio::task::spawn_blocking(move || Arc::new(meaning::Index::build(&ws))).await;
+            let Ok(index) = built else {
+                return;
+            };
+            let mut st = state.write().await;
+            // A document changed while we were walking the workspace: what
+            // we built is already stale, so leave the cache to whoever
+            // needs it next.
+            if st.generation() == generation {
+                st.index_cache = Some((generation, index));
+            }
+        });
+    }
 }
 
-/// The workspace root path, when configured.
-#[must_use]
 /// The model-derived half of a hover: where the cursor is, and what a
 /// change here would reach.
 ///
 /// A competitor's hover stops at the schema. Ours answers the question an
 /// author actually has before editing a definition: who depends on this?
 fn hover_meaning(
-    ws: &Arc<suspect_ref::Workspace>,
     low: &suspect_low::LowDoc,
     offset: usize,
+    index: &meaning::Index,
 ) -> Option<String> {
     let model = meaning::Model::new(low);
     let m = model.at(offset)?;
     let mut out = format!("**{}** in {}", m.kind.label(), model.dialect().label());
-    if m.within(meaning::ObjectKind::Schema) {
-        out.push_str("\n\n_schema position_");
+    // The pointer of a property buried in an operation is mostly path
+    // noise: what an author wants is the way down from the schema they
+    // are editing. Everything after the last `schema` keyword is it.
+    let tokens: Vec<&str> = m
+        .pointer
+        .tokens()
+        .iter()
+        .map(|token| token.as_ref())
+        .collect();
+    if m.within(meaning::ObjectKind::Schema)
+        && let Some(at) = tokens.iter().rposition(|token| *token == "schema")
+    {
+        let below: Vec<&str> = tokens[at + 1..]
+            .iter()
+            .copied()
+            .filter(|token| !token.is_empty())
+            .collect();
+        if !below.is_empty() {
+            out.push_str(&format!("\n\ninside `{}`", below.join(" \u{203a} ")));
+        }
     }
     if m.pointer.to_path() != "/" {
         out.push_str(&format!("\n\n`{}`", m.pointer.to_path()));
@@ -193,16 +241,13 @@ fn hover_meaning(
         out.push_str(&format!("\n\nresolves to `{}`", target.pointer.to_path()));
     }
 
-    // Change impact, when the workspace can answer it.
-    let index = meaning::Index::build(ws);
+    // Change impact, from the reference index only: no contract compile.
     let uri = low.uri().as_str();
-    let spec = suspect_ir::IrSpec::from_workspace(ws, low.uri()).ok();
     let empty: [(String, suspect_arazzo::ArazzoDoc<'_>); 0] = [];
     let no_artifacts = std::collections::BTreeMap::new();
     let no_traffic = std::collections::BTreeMap::new();
     let context = impact::ImpactContext {
-        index: &index,
-        spec: spec.as_ref(),
+        index,
         workflows: &empty,
         artifacts: &no_artifacts,
         traffic: &no_traffic,
@@ -597,6 +642,10 @@ impl LanguageServer for Backend {
             let mut st = self.state.write().await;
             st.open_doc(uri.clone(), item.text);
         }
+        // Force the workspace load here rather than letting the first
+        // hover discover it, then warm the index against it.
+        let _ = self.workspace_for(&uri).await;
+        self.warm_index();
         self.schedule_diagnostics(uri);
     }
 
@@ -634,6 +683,7 @@ impl LanguageServer for Backend {
             }
             st.open_doc(uri.clone(), text);
         }
+        self.warm_index();
         self.schedule_diagnostics(uri);
     }
 
@@ -647,14 +697,14 @@ impl LanguageServer for Backend {
         };
         if self.state.read().await.docs.contains_key(&uri) {
             let mut st = self.state.write().await;
-            st.workspace = None;
+            st.drop_workspace();
         }
     }
 
     async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
         // Drop the cached workspace so the next query reloads from disk.
         let mut st = self.state.write().await;
-        st.workspace = None;
+        st.drop_workspace();
     }
 
     async fn goto_definition(
@@ -735,9 +785,20 @@ impl LanguageServer for Backend {
         let Some(ws) = self.workspace_for(&uri).await else {
             return Ok(None);
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        // Take only what the answer needs, then release the lock. Holding
+        // the read guard across the computation blocked the diagnostics
+        // writer and every other hover, which is what a client sees as a
+        // hover that never resolves.
+        let doc = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            doc.clone()
+        };
+        let index = {
+            let mut st = self.state.write().await;
+            st.index_for(&ws)
         };
         let inner = doc.low.inner();
         let Some(offset) =
@@ -750,7 +811,7 @@ impl LanguageServer for Backend {
         };
         // The semantic model narrates where the cursor is and what a change
         // here would cost, on top of whatever the hover already resolved.
-        let value = match hover_meaning(&ws, &doc.low, offset) {
+        let value = match hover_meaning(&doc.low, offset, &index) {
             Some(extra) if !base.is_empty() => format!("{base}\n\n---\n{extra}"),
             Some(extra) => extra,
             None => base,
@@ -2121,14 +2182,15 @@ impl Backend {
                     .map_or(0, |value| value as usize);
                 let model = meaning::Model::new(&doc.low);
                 let m = model.at(offset)?;
-                let index = meaning::Index::build(&ws);
-                let spec = suspect_ir::IrSpec::from_workspace(&ws, &uri).ok();
+                let index = {
+                    let mut st = self.state.write().await;
+                    st.index_for(&ws)
+                };
                 let empty: [(String, suspect_arazzo::ArazzoDoc<'_>); 0] = [];
                 let no_artifacts = std::collections::BTreeMap::new();
                 let no_traffic = std::collections::BTreeMap::new();
                 let context = impact::ImpactContext {
                     index: &index,
-                    spec: spec.as_ref(),
                     workflows: &empty,
                     artifacts: &no_artifacts,
                     traffic: &no_traffic,
@@ -2551,3 +2613,128 @@ mod tests {
 }
 
 // ---------- free plumbing helpers used by Backend handlers ----------
+
+#[cfg(test)]
+mod hover_latency_tests {
+    use super::*;
+
+    /// A spec with a realistic reference count: enough that walking every
+    /// `$ref` is measurable.
+    fn spec_with_refs(operations: usize) -> String {
+        let mut out = String::from("openapi: 3.1.1\ninfo: {title: Hover, version: '1'}\npaths:\n");
+        for index in 0..operations {
+            out.push_str(&format!(
+                "  /resource{index}:\n    get:\n      operationId: op{index}\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema: {{$ref: '#/components/schemas/Model'}}\n"
+            ));
+        }
+        out.push_str(
+            "components:\n  schemas:\n    Model:\n      type: object\n      required: [id]\n      properties:\n        id: {type: string}\n",
+        );
+        out
+    }
+
+    /// Hover must not cost a workspace walk and a contract compile per
+    /// request.
+    ///
+    /// Three bugs met here, all found by driving the real server against a
+    /// real specification: the read guard was held across the computation
+    /// (so concurrent hovers queued behind the diagnostics writer), the
+    /// reference index was rebuilt per hover, and the contract was
+    /// recompiled per hover. Together they made a 63k-line document take
+    /// the better part of a second per cursor move, which a client reports
+    /// as a hover that never resolves.
+    #[test]
+    fn hover_answers_within_a_budget_and_reuses_its_index() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let operations = 400;
+        std::fs::write(dir.path().join("openapi.yaml"), spec_with_refs(operations)).expect("write");
+        let ws = Arc::new(
+            suspect_ref::WorkspaceBuilder::new()
+                .root(dir.path())
+                .build()
+                .expect("workspace"),
+        );
+        ws.load_all("openapi.yaml").expect("load");
+        let low = ws.get(&ws.uris()[0]).expect("handle").doc();
+
+        // Stand in for the server's cached index: built once per generation.
+        let index = std::sync::Arc::new(meaning::Index::build(&ws));
+        let text = spec_with_refs(operations);
+        let line = text
+            .lines()
+            .position(|l| l.contains("$ref"))
+            .expect("a ref line");
+        let byte = text.lines().take(line).map(str::len).sum::<usize>()
+            + text
+                .lines()
+                .nth(line)
+                .expect("line")
+                .find("$ref")
+                .expect("ref")
+            + 2;
+
+        let started = std::time::Instant::now();
+        let first = hover_meaning(low, byte, &index);
+        let first_cost = started.elapsed();
+
+        let started = std::time::Instant::now();
+        let second = hover_meaning(low, byte, &index);
+        let second_cost = started.elapsed();
+
+        assert!(first.is_some(), "hover must say something: {first:?}");
+        assert!(second.is_some());
+
+        // Generous, but it must fail if a per-request workspace walk or a
+        // contract compile returns: both are seconds on a real document.
+        let budget = std::time::Duration::from_millis(250);
+        assert!(
+            first_cost < budget,
+            "first hover took {first_cost:?} over a {operations}-operation spec"
+        );
+        assert!(
+            second_cost < budget / 4,
+            "repeated hover took {second_cost:?}; the index is not being reused"
+        );
+    }
+
+    /// The cache must survive an unrelated read and die with the tree it
+    /// described.
+    ///
+    /// Warming on open only pays off if the answer survives until the user
+    /// asks, and only stays correct if it goes when the workspace does.
+    #[test]
+    fn the_index_cache_is_reused_until_the_documents_change() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("openapi.yaml"), spec_with_refs(4)).expect("write");
+        let ws = Arc::new(
+            suspect_ref::WorkspaceBuilder::new()
+                .root(dir.path())
+                .build()
+                .expect("workspace"),
+        );
+        ws.load_all("openapi.yaml").expect("load");
+
+        let mut state = State::default();
+        let first = state.index_for(&ws);
+        assert!(
+            Arc::ptr_eq(&first, &state.index_for(&ws)),
+            "cache not reused"
+        );
+
+        state.open_doc(
+            Uri::parse("file:///tmp/warm.yaml").expect("uri"),
+            "openapi: 3.1.1\n".to_owned(),
+        );
+        let rebuilt = state.index_for(&ws);
+        assert!(
+            !Arc::ptr_eq(&first, &rebuilt),
+            "an edit must invalidate the cached index"
+        );
+
+        state.drop_workspace();
+        assert!(
+            state.index_cache.is_none(),
+            "a dropped workspace must take its index with it"
+        );
+    }
+}

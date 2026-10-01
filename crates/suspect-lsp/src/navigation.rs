@@ -405,10 +405,51 @@ pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) 
     if let Some(md) = component_key_hover(low, offset) {
         return Some(md);
     }
+    if let Some(md) = key_hover(low, offset) {
+        return Some(md);
+    }
     let node = node_at(low, offset)?;
     let semantic = NodeRef::new(node);
     let first_line = excerpt(node.doc().bytes(), node.byte_range(), 1);
     Some(format!("`{:?}`\n\n```\n{first_line}\n```", semantic.kind()))
+}
+
+/// Cursor on a mapping key that no renderer claimed: name the key and
+/// show what it carries.
+///
+/// Without this the fallback excerpted whatever node happened to contain
+/// the offset, so a key with no value — a property name, an empty object —
+/// reported the *enclosing* mapping and looked like a rendering bug.
+fn key_hover(low: &suspect_low::LowDoc, offset: usize) -> Option<String> {
+    let node = node_at(low, offset)?;
+    let mut cur = node;
+    loop {
+        if cur.kind() == SyntaxKind::Pair {
+            let key = cur.child_by_field("key")?;
+            let key_range = key.byte_range();
+            if !(key_range.start <= offset && offset <= key_range.end) {
+                return None; // the cursor is on the value side
+            }
+            let name = String::from_utf8_lossy(key.content().scalar_bytes()).into_owned();
+            let Some(value) = cur.child_by_field("value") else {
+                return Some(format!("`{name}`\n\n_(no value)_"));
+            };
+            let text = String::from_utf8_lossy(NodeRef::new(value).raw_text())
+                .trim()
+                .to_owned();
+            if text.is_empty() {
+                return Some(format!("`{name}`\n\n_(no value)_"));
+            }
+            if text.len() <= 120 && !text.contains('\n') {
+                return Some(format!("`{name}`: `{text}`"));
+            }
+            return Some(format!(
+                "`{name}`\n\n```\n{}\n```",
+                excerpt(low.inner().bytes(), value.byte_range(), 3)
+            ));
+        }
+        cur = cur.parent()?;
+    }
 }
 
 /// Component-key hover: the cursor on `components/<section>/<name>`'s key
@@ -840,5 +881,37 @@ components:
             "must show edited type: {md}"
         );
         assert!(!md.contains("object"), "must not show stale type: {md}");
+    }
+
+    /// A cursor on a plain key names the key and shows what it carries.
+    ///
+    /// Pinning this because the old fallback excerpted whatever node
+    /// happened to contain the offset, which for a key was its parent
+    /// mapping: hovering a property name printed a sibling's line and
+    /// read like a rendering bug.
+    #[test]
+    fn hover_on_a_key_names_the_key_and_shows_its_value() {
+        let dir = std::env::temp_dir().join("suspect-lsp-nav-key");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = workspace(&dir);
+        let text = "components:\n  schemas:\n    Thing:\n      properties:\n        name:\n          type: string\n";
+        let low = low_at(&dir, "key.yaml", text);
+        let md = hover_markdown(&ws, &low, offset_in(text, "name:")).expect("hover");
+        assert!(md.starts_with("`name`"), "{md}");
+        assert!(md.contains("type: string"), "{md}");
+    }
+
+    /// A key with nothing after it says so, rather than describing the
+    /// mapping that contains it.
+    #[test]
+    fn hover_on_a_valueless_key_says_it_is_empty() {
+        let dir = std::env::temp_dir().join("suspect-lsp-nav-key2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = workspace(&dir);
+        let text = "tags:\n  - one\nempty:\nx:\n  y:\n";
+        let low = low_at(&dir, "key2.yaml", text);
+        let md = hover_markdown(&ws, &low, offset_in(text, "empty:")).expect("hover");
+        assert!(md.starts_with("`empty`"), "{md}");
+        assert!(md.contains("no value"), "{md}");
     }
 }
