@@ -688,7 +688,7 @@ fn swift(
             let wire = parameter.wire();
             json!({"name":parameter.field_name,"type":swift_models::input_type(plan.models(), wire.codec().schema().id(), wire.required()),
                 "hasDefault":!wire.required(),"initialization":{"kind":if wire.required() {"argument"} else {"missing"}}})
-        }).chain(op.body.iter().map(|body|json!({"name":"body","type":body.media.first().filter(|_|!body.is_enum).and_then(&media_schema).map(|id|swift_models::input_type(plan.models(), &id, body.wire.required())).unwrap_or_else(||json!({"kind":"native","name":body.type_name,"optional":!body.wire.required()})),
+        }).chain(op.body.iter().map(|body|json!({"name":"body","type":body.media.first().filter(|_|!body.is_enum).and_then(media_schema).map(|id|swift_models::input_type(plan.models(), &id, body.wire.required())).unwrap_or_else(||json!({"kind":"native","name":body.type_name,"optional":!body.wire.required()})),
             "hasDefault":!body.wire.required(),"initialization":{"kind":if body.wire.required() {"argument"} else {"missing"}}}))).collect::<Vec<_>>();
         snapshot.operations.push(NativeOperation {
             source: Location::at(&contract, &op.source), operation_id: op.operation_id.clone(),
@@ -700,10 +700,10 @@ fn swift(
                     "model":plan.symbols()[p.wire().codec().schema().id()],"type":swift_models::input_type(plan.models(), p.wire().codec().schema().id(), p.wire().required()),"codec":swift_models::codec_name(plan.models(), p.wire().codec().schema().id()),"serialization":p.wire().serialization(),
                     "queryForm":p.query_form.as_ref().map(|form|json!({"encoder":form.encoder_name,"fields":form.wire.fields().iter().map(form_field).collect::<Vec<_>>(),
                         "additional":match form.wire.additional(){crate::http_protocol::AdditionalParts::Forbidden=>None,crate::http_protocol::AdditionalParts::Allowed(p)=>Some(form_field(p))}}))})).collect::<Vec<_>>(),
-                "body":op.body.as_ref().map(|b|{let id=b.media.first().filter(|_|!b.is_enum).and_then(&media_schema);json!({"member":"body","required":b.wire.required(),"model":b.type_name,
+                "body":op.body.as_ref().map(|b|{let id=b.media.first().filter(|_|!b.is_enum).and_then(media_schema);json!({"member":"body","required":b.wire.required(),"model":b.type_name,
                     "type":id.as_ref().map(|id|swift_models::input_type(plan.models(),id,b.wire.required())).unwrap_or_else(||json!({"kind":"native","name":b.type_name})),"codec":id.as_ref().map(|id|swift_models::codec_name(plan.models(),id)),
                     "media":b.media.iter().map(media).collect::<Vec<_>>()})}),
-                "responses":op.responses.iter().map(|r|{let id=r.media.first().filter(|_|!r.is_enum).and_then(&media_schema);json!({"status":match r.wire.status(){crate::http_protocol::ResponseStatus::Exact(s)=>json!(s),_=>json!(r.wire.status_key())},"mediaType":r.media.first().map(|m|m.wire.media_type().declared()),"model":r.type_name,
+                "responses":op.responses.iter().map(|r|{let id=r.media.first().filter(|_|!r.is_enum).and_then(media_schema);json!({"status":match r.wire.status(){crate::http_protocol::ResponseStatus::Exact(s)=>json!(s),_=>json!(r.wire.status_key())},"mediaType":r.media.first().map(|m|m.wire.media_type().declared()),"model":r.type_name,
                     "enum":if r.may_succeed() {&op.success_type} else {&op.error_type},"case":r.case_name,"responseType":r.response_type,"headerType":r.header_type,
                     "successMembership":r.may_succeed(),"errorMembership":r.may_fail(),"mayHaveNoBody":r.may_be_empty,
                     "type":{"kind":"api-response","of":id.as_ref().map(|id|swift_models::type_at(plan.models(),id)).unwrap_or_else(||json!({"kind":"native","name":r.type_name}))},"codec":id.as_ref().map(|id|swift_models::codec_name(plan.models(),id)),

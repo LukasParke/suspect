@@ -953,11 +953,29 @@ impl LanguageServer for Backend {
             return Ok(full_report(None, Vec::new()));
         };
         let ws = self.workspace_for(&uri).await;
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(full_report(None, Vec::new()));
+        // Take everything the report needs and drop the guard before the
+        // lint runs. Holding a read lock across the computation and then
+        // taking a second read for the severity floor deadlocks against
+        // `warm_index`, which `didOpen` spawns and which queues a writer
+        // once its blocking build finishes: tokio's `RwLock` is
+        // write-preferring, so that second read waits for a writer that is
+        // itself waiting for the first guard to drop. The queued writer
+        // then blocks every later reader, so one diagnostic silences the
+        // whole server — and an editor sends this in the same instant as
+        // `didOpen`, so it is every file open rather than a rare race.
+        let (doc, cfg, floor) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(full_report(None, Vec::new()));
+            };
+            // The shared severity floor, applied identically in the editor
+            // and on the command line.
+            (
+                doc.clone(),
+                st.config.clone(),
+                st.editor_config.min_severity(),
+            )
         };
-        let cfg = st.config.clone();
         let (id, items) = match &ws {
             Some(ws) => {
                 pull::pull_diagnostics(ws, &doc.low, params.previous_result_id.clone(), &cfg)
@@ -967,9 +985,6 @@ impl LanguageServer for Backend {
                 (pull::diagnostics_result_id(&items), items)
             }
         };
-        // The shared severity floor, applied identically in the editor and
-        // on the command line.
-        let floor = self.state.read().await.editor_config.min_severity();
         let items = diagnostics::filter_at_least(items, floor);
         if params.previous_result_id.as_deref() == Some(id.as_str()) {
             return Ok(unchanged_report(id));
@@ -981,15 +996,21 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceDiagnosticParams,
     ) -> JsonRpcResult<WorkspaceDiagnosticReportResult> {
-        let st = self.state.read().await;
+        // Same discipline as `diagnostic`: nothing expensive runs while a state
+        // guard is alive, because a queued writer behind it blocks every
+        // later reader — including the hover that follows.
+        let (workspace, cfg) = {
+            let st = self.state.read().await;
+            (st.workspace.clone(), st.config.clone())
+        };
         let mut items = Vec::new();
         let previous: HashMap<String, String> = params
             .previous_result_ids
             .iter()
             .map(|p| (p.uri.to_string(), p.value.clone()))
             .collect();
-        if let Some(ws) = &st.workspace {
-            let cfg = st.config.clone();
+        if let Some(ws) = &workspace {
+            let cfg = cfg.clone();
             for (uri, diags) in pull::workspace_pull(ws, &cfg) {
                 let Ok(url) = Url::parse(uri.as_str()) else {
                     continue;
@@ -2869,10 +2890,20 @@ mod burst_tests {
     /// All requests are put in flight before any is awaited. Awaiting
     /// them one at a time would pass: the deadlock needs a second request
     /// waiting behind the first.
+    ///
+    /// `textDocument/diagnostic` is the one that has to be in this burst.
+    /// It is the only handler that took a read guard across the lint pass
+    /// *and then took a second read* for the severity floor. `didOpen`
+    /// spawns `warm_index`, which queues a writer once its blocking build
+    /// finishes; against that queued writer the second read blocks, and
+    /// since the first guard cannot drop until the second read returns,
+    /// the pair never resolves. An editor sends `didOpen` and
+    /// `textDocument/diagnostic` in the same instant, so this is not a
+    /// race that needs bad luck — it is every file open.
     #[tokio::test]
     async fn every_request_an_open_triggers_answers() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let text = spec_with_refs(30);
+        let text = spec_with_refs(2000);
         std::fs::write(dir.path().join("openapi.yaml"), &text).expect("write");
         let path = dir.path().join("openapi.yaml");
         let uri = Uri::parse(&format!("file://{}", path.display())).expect("uri");
@@ -3115,6 +3146,125 @@ mod burst_tests {
         assert!(
             !after.result().expect("hover returned a result").is_null(),
             "changeImpact must not wedge the server"
+        );
+
+        answering.abort();
+    }
+
+    /// A writer queued while `textDocument/diagnostic` is running must not
+    /// be able to wedge it.
+    ///
+    /// This is the trigger for "hover spins forever" on a large document.
+    /// `didOpen` spawns `warm_index`, which builds the index off the
+    /// interaction path and then queues a `state.write()`. `diagnostic`
+    /// used to hold a read guard across the whole lint pass and then take
+    /// a *second* read for the severity floor. tokio's `RwLock` is
+    /// write-preferring, so with that writer queued the second read waits
+    /// for a writer that is itself waiting for the first guard to drop —
+    /// and because the queued writer also blocks every later reader, one
+    /// diagnostic wedges the entire server, hover included.
+    ///
+    /// Scope of this test, stated honestly: it pins the request ordering
+    /// that triggers the bug (`didOpen` and `textDocument/diagnostic`
+    /// together, which is what an editor sends on every open) and it
+    /// requires both to answer with a live hover afterwards. It does *not*
+    /// reproduce the wedge on a synthetic fixture — `warm_index`'s build
+    /// has to outlast the lint, which only happens at the scale of a real
+    /// 63k-line specification. The deterministic reproduction of that is
+    /// the JSON-RPC bisect against the real spec, which reported
+    /// `textDocument/diagnostic WEDGED, hover afterwards: ALSO DEAD`
+    /// before this fix and `answered` after it.
+    #[tokio::test]
+    async fn a_queued_writer_does_not_wedge_diagnostics() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let text = spec_with_refs(2000);
+        std::fs::write(dir.path().join("openapi.yaml"), &text).expect("write");
+        let path = dir.path().join("openapi.yaml");
+        let uri = Uri::parse(&format!("file://{}", path.display())).expect("uri");
+        let (mut service, socket) = service().await;
+        let answering = tokio::spawn(async move {
+            use futures::{SinkExt, StreamExt};
+            let mut socket = socket;
+            while let Some(request) = socket.next().await {
+                let result = match request.method() {
+                    "workspace/configuration" => {
+                        let items = request
+                            .params()
+                            .and_then(|p| p.get("items"))
+                            .and_then(|i| i.as_array())
+                            .map_or(0, Vec::len);
+                        serde_json::Value::Array(vec![serde_json::Value::Null; items])
+                    }
+                    _ => serde_json::Value::Null,
+                };
+                if let Some(id) = request.id().cloned() {
+                    socket
+                        .send(tower_lsp::jsonrpc::Response::from_ok(id, result))
+                        .await
+                        .ok();
+                }
+            }
+        });
+
+        in_flight(
+            &mut service,
+            1,
+            "initialize",
+            serde_json::json!({
+                "processId": null,
+                "rootUri": format!("file://{}", dir.path().display()),
+                "capabilities": {"workspace": {"configuration": true}},
+            }),
+        )
+        .await
+        .expect("initialize answered");
+        let _ = in_flight(&mut service, 0, "initialized", serde_json::json!({})).await;
+
+        let td = serde_json::json!({"uri": uri.as_str()});
+
+        // The editor sends `didOpen` and `textDocument/diagnostic` in the
+        // same instant, and the order matters: `didOpen` spawns the tasks
+        // that queue a writer, so if the diagnostic is already running
+        // when they arrive it is holding a read guard across the whole
+        // lint. Awaiting `didOpen` first would let those writers finish
+        // first and hide the bug, which is exactly what a request-at-a-
+        // time probe does.
+        let open = in_flight(
+            &mut service,
+            0,
+            "textDocument/didOpen",
+            serde_json::json!({"textDocument": {
+                "uri": uri.as_str(), "languageId": "yaml", "version": 1, "text": text,
+            }}),
+        );
+        let diagnostic = in_flight(
+            &mut service,
+            100,
+            "textDocument/diagnostic",
+            serde_json::json!({"textDocument": td}),
+        );
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            tokio::join!(open, diagnostic)
+        })
+        .await
+        .expect("textDocument/diagnostic never answered: a queued writer wedged it");
+        let answer = joined.1.expect("the diagnostic returned no response");
+        assert!(
+            answer.result().is_some(),
+            "textDocument/diagnostic returned no result"
+        );
+        let at = serde_json::json!({"line": 11, "character": 24});
+        let hover = in_flight(
+            &mut service,
+            200,
+            "textDocument/hover",
+            serde_json::json!({"textDocument": td, "position": at}),
+        )
+        .await
+        .expect("hover never answered: the server is still wedged");
+        assert!(
+            !hover.result().expect("hover result").is_null(),
+            "hover came back empty after the diagnostic"
         );
 
         answering.abort();

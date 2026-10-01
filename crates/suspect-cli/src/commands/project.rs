@@ -133,7 +133,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
     let overlays: Vec<PathBuf> = object
         .get("overlays")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str()).map(&resolve).collect())
+        .map(|a| a.iter().filter_map(|v| v.as_str()).map(resolve).collect())
         .unwrap_or_default();
     let publish_output = object
         .get("publish")
@@ -157,7 +157,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
         .get("contract")
         .and_then(|c| c.get("output"))
         .and_then(|v| v.as_str())
-        .map(&resolve);
+        .map(resolve);
     let docs = object.get("docs").and_then(|d| {
         let style = d.get("style").and_then(|v| v.as_str())?.to_owned();
         let out = d.get("output").and_then(|v| v.as_str()).map(resolve)?;
@@ -193,7 +193,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                         out: entry
                             .get("out")
                             .and_then(|v| v.as_str())
-                            .map(&resolve)
+                            .map(resolve)
                             .unwrap_or_else(|| dir.join("sdk")),
                         operation_id: entry
                             .get("operation_id")
