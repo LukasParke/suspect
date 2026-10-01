@@ -38,10 +38,16 @@ impl FileKind {
 }
 
 /// Recognises suspect's configuration files by file name.
+///
+/// The settings names come from [`suspect_config::CONFIG_NAMES`] itself
+/// rather than a copy, so a new name in the loader cannot leave the editor
+/// validating a file the toolchain ignores — or skipping one it reads.
 #[must_use]
 pub fn kind_of(file_name: &str) -> Option<FileKind> {
+    if suspect_config::CONFIG_NAMES.contains(&file_name) {
+        return Some(FileKind::Settings);
+    }
     match file_name {
-        ".suspect.yaml" | ".suspect.yml" | "suspect.yaml" => Some(FileKind::Settings),
         "suspect.project.json" => Some(FileKind::Project),
         _ => None,
     }
@@ -942,7 +948,9 @@ codegen:
 
     #[test]
     fn recognises_only_suspects_own_files() {
-        assert_eq!(kind_of(".suspect.yaml"), Some(FileKind::Settings));
+        for name in suspect_config::CONFIG_NAMES {
+            assert_eq!(kind_of(name), Some(FileKind::Settings), "{name}");
+        }
         assert_eq!(kind_of("suspect.project.json"), Some(FileKind::Project));
         assert_eq!(kind_of("openapi.yaml"), None);
         assert_eq!(kind_of(".github/workflows/ci.yaml"), None);
