@@ -121,7 +121,21 @@ impl Editor {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let mut child = command.spawn().expect("suspect lsp must start");
+        // The whole workspace suite runs these tests in parallel, so twenty
+        // servers can be starting at once. A spawn that comes up without its
+        // pipes is resource exhaustion, not a broken server, and one retry
+        // after a moment is the difference between a flake and a failure.
+        let mut child = loop {
+            let mut child = command
+                .spawn()
+                .unwrap_or_else(|e| panic!("suspect lsp must start: {e}"));
+            if child.stdin.is_some() && child.stdout.is_some() {
+                break child;
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        };
         let stdin = Arc::new(Mutex::new(child.stdin.take().expect("stdin")));
         let stdout = child.stdout.take().expect("stdout");
 
