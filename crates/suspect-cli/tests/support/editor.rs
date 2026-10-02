@@ -363,6 +363,11 @@ impl Editor {
             .collect()
     }
 
+    /// Waits for an id this caller issued itself, for the bench to time.
+    pub fn await_for_bench(&self, id: i64, method: &str) -> Result<serde_json::Value, NoReply> {
+        self.await_until(id, method, Instant::now() + BUDGET)
+    }
+
     /// Notifications carry no reply, so they are timed by issuing them.
     pub fn notify_timed(&self, method: &str, params: serde_json::Value) -> Duration {
         let started = Instant::now();

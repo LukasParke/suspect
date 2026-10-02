@@ -143,13 +143,7 @@ fn warmed() -> (Workspace, Editor, Site) {
                 .next()
                 .map(|(path, _)| path)
                 .unwrap_or_else(|| root.join("openapi.yaml"));
-            let ws = Workspace {
-                root: root.clone(),
-                openapi: biggest,
-                schemas: root.join("schemas.yaml"),
-                overlay: root.join("overlays/overlay.yaml"),
-                workflow: root.join("workflows/health.arazzo.yaml"),
-            };
+            let ws = Workspace::describing(&root, biggest);
             let site = site_fallback(&ws);
             (ws, editor, site)
         }
@@ -217,7 +211,7 @@ fn record(bench: &mut Bench, scenario: &'static str, batch: &[Timed]) {
 fn bench_open_burst() {
     let (_ws, editor, site) = warmed();
     let mut bench = Bench::new();
-    for _ in 0..10 {
+    for _ in 0..20 {
         editor.notify(
             "textDocument/didChange",
             serde_json::json!({
@@ -263,7 +257,7 @@ fn bench_open_burst() {
         ];
         record(&mut bench, "open_burst", &editor.request_all_timed(&burst));
     }
-    finish(&bench, "open_burst", 10);
+    finish(&bench, "open_burst", 20);
     assert_healthy(&bench, "open_burst");
     assert_under(&bench, "textDocument/hover", 2_000);
     assert_under(&bench, "textDocument/documentSymbol", 4_000);
@@ -280,7 +274,7 @@ fn bench_cursor_sweep() {
     let max_stops: usize = std::env::var("SUSPECT_BENCH_STOPS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(200);
+        .unwrap_or(400);
     for pass in 0..2 {
         let mut line = 20;
         let mut stops = 0usize;
@@ -352,7 +346,7 @@ fn bench_scroll_flood() {
     let max_windows: usize = std::env::var("SUSPECT_BENCH_WINDOWS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(120);
+        .unwrap_or(240);
     let mut top = 1;
     let mut windows = 0usize;
     while top + viewport < site.doc_lines && windows < max_windows {
@@ -404,7 +398,7 @@ fn bench_scroll_flood() {
 fn bench_symbol_poll() {
     let (_ws, editor, site) = warmed();
     let mut bench = Bench::new();
-    for _ in 0..20 {
+    for _ in 0..40 {
         let batch = vec![
             ("textDocument/documentSymbol".to_owned(), doc(&site.uri)),
             ("textDocument/foldingRange".to_owned(), doc(&site.uri)),
@@ -418,7 +412,7 @@ fn bench_symbol_poll() {
         ];
         record(&mut bench, "symbol_poll", &editor.request_all_timed(&batch));
     }
-    finish(&bench, "symbol_poll", 20);
+    finish(&bench, "symbol_poll", 40);
     assert_healthy(&bench, "symbol_poll");
     assert_under(&bench, "textDocument/documentLink", 5_000);
     assert_under(&bench, "textDocument/semanticTokens/full", 5_000);
@@ -430,7 +424,7 @@ fn bench_symbol_poll() {
 fn bench_edit_churn() {
     let (_ws, editor, site) = warmed();
     let mut bench = Bench::new();
-    for round in 2..12 {
+    for round in 2..22 {
         editor.notify_timed(
             "textDocument/didChange",
             serde_json::json!({
@@ -470,7 +464,7 @@ fn bench_edit_churn() {
         ];
         record(&mut bench, "edit_churn", &editor.request_all_timed(&batch));
     }
-    finish(&bench, "edit_churn", 10);
+    finish(&bench, "edit_churn", 20);
     assert_healthy(&bench, "edit_churn");
     // Generous: the full lint pass over a large document is seconds, and
     // this bound is here to catch an order of magnitude, not to police it.
@@ -492,7 +486,7 @@ fn bench_mixed_load() {
     let budget = std::env::var("SUSPECT_BENCH_SECONDS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(20u64);
+        .unwrap_or(40u64);
     while started.elapsed() < Duration::from_secs(budget) {
         round += 1;
         // The editor's whole-document set, in flight together.
@@ -625,7 +619,7 @@ fn bench_soak() {
     let soak_seconds = std::env::var("SUSPECT_BENCH_SECONDS")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(120u64);
+        .unwrap_or(240u64);
     while started.elapsed() < Duration::from_secs(soak_seconds) {
         round += 1;
         let batch = vec![
@@ -682,6 +676,480 @@ fn bench_soak() {
         round >= 10,
         "the soak completed only {round} rounds over {soak_seconds}s"
     );
+}
+
+/// Jumping between files: the Ctrl+P / go-to-symbol loop.
+///
+/// Workspace symbol search, then a definition that crosses into another
+/// document, then references from there. This is the shape of "where is this
+/// used, and what calls it", which is why a real specification gets opened in
+/// more than one tab.
+#[test]
+fn bench_cross_file_navigation() {
+    let (ws, editor, site) = warmed();
+    let mut bench = Bench::new();
+    let schemas = url_of(&ws.schemas);
+    for round in 0usize..40 {
+        let query = if round.is_multiple_of(2) {
+            "Accounts"
+        } else {
+            "List"
+        };
+        timed(
+            &mut bench,
+            &editor,
+            "cross_file_navigation",
+            "workspace/symbol",
+            serde_json::json!({"query": query}),
+        );
+        let batch = vec![
+            (
+                "textDocument/definition".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": site.uri}, "position": at(site.cross_file_ref.0, site.cross_file_ref.1),
+                }),
+            ),
+            (
+                "textDocument/references".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": schemas}, "position": at(30, 6),
+                    "context": {"includeDeclaration": true},
+                }),
+            ),
+            (
+                "textDocument/documentHighlight".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": site.uri}, "position": at(site.cross_file_ref.0, site.cross_file_ref.1),
+                }),
+            ),
+            (
+                "textDocument/hover".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": schemas}, "position": at(30, 6),
+                }),
+            ),
+        ];
+        record(
+            &mut bench,
+            "cross_file_navigation",
+            &editor.request_all_timed(&batch),
+        );
+    }
+    finish(&bench, "cross_file_navigation", 40);
+    assert_healthy(&bench, "cross_file_navigation");
+    assert_under(&bench, "workspace/symbol", 5_000);
+    assert_under(&bench, "textDocument/references", 20_000);
+}
+
+/// Diagnostics re-pulled repeatedly, as an editor does while it watches the
+/// problem panel.
+///
+/// The `previousResultId` fast path is the interesting half: an unchanged
+/// document must not re-lint, and a document that did change must.
+#[test]
+fn bench_diagnostic_churn() {
+    let (_ws, editor, site) = warmed();
+    let mut bench = Bench::new();
+    let mut last_id = String::new();
+    for round in 0usize..40 {
+        let first = editor.request_timed("textDocument/diagnostic", doc(&site.uri));
+        if let Ok(value) = &first.0
+            && let Some(id) = value.get("resultId").and_then(|v| v.as_str())
+        {
+            last_id = id.to_owned();
+        }
+        let recorded = match &first.0 {
+            Ok(value) => Ok(value.clone()),
+            Err(err) => Err(err.to_string()),
+        };
+        bench.record(
+            "diagnostic_churn",
+            "textDocument/diagnostic",
+            first.1,
+            &recorded,
+        );
+        // Re-pull with the id we were just given: the server should answer
+        // "unchanged" without linting again.
+        let (answer, elapsed) = editor.request_timed(
+            "textDocument/diagnostic",
+            serde_json::json!({"textDocument": {"uri": site.uri}, "previousResultId": last_id}),
+        );
+        bench.record(
+            "diagnostic_churn",
+            "textDocument/diagnostic",
+            elapsed,
+            &answer.map_err(|e| e.to_string()),
+        );
+        if round.is_multiple_of(5) {
+            editor.notify_timed(
+                "textDocument/didChange",
+                serde_json::json!({
+                    "textDocument": {"uri": site.uri, "version": 200 + round},
+                    "contentChanges": [],
+                }),
+            );
+        }
+    }
+    finish(&bench, "diagnostic_churn", 40);
+    assert_healthy(&bench, "diagnostic_churn");
+}
+
+/// Editing suspect's own configuration files.
+///
+/// These get the schema treatment added in #23, so the schema path is load
+/// the editor generates rather than a rarely-exercised corner: hover,
+/// completion, diagnostics and quick-fix on `.suspect.yaml` and the manifest.
+#[test]
+fn bench_configuration_files() {
+    let (ws, editor, _site) = warmed();
+    let mut bench = Bench::new();
+    let config = url_of(&ws.config);
+    let manifest = url_of(&ws.manifest);
+    for round in 0usize..40 {
+        let document = if round.is_multiple_of(2) {
+            &config
+        } else {
+            &manifest
+        };
+        let line = if round.is_multiple_of(2) { 5 } else { 12 };
+        let batch = vec![
+            (
+                "textDocument/hover".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": document}, "position": at(line, 4),
+                }),
+            ),
+            (
+                "textDocument/completion".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": document}, "position": at(line, 4),
+                }),
+            ),
+            ("textDocument/diagnostic".to_owned(), doc(document)),
+            ("textDocument/documentSymbol".to_owned(), doc(document)),
+            ("textDocument/foldingRange".to_owned(), doc(document)),
+            ("textDocument/semanticTokens/full".to_owned(), doc(document)),
+            ("textDocument/documentLink".to_owned(), doc(document)),
+            (
+                "textDocument/formatting".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": document},
+                    "options": {"tabSize": 2, "insertSpaces": true},
+                }),
+            ),
+        ];
+        record(
+            &mut bench,
+            "configuration_files",
+            &editor.request_all_timed(&batch),
+        );
+        editor.notify_timed(
+            "textDocument/didChange",
+            serde_json::json!({
+                "textDocument": {"uri": document, "version": 300 + round}, "contentChanges": [],
+            }),
+        );
+    }
+    finish(&bench, "configuration_files", 40);
+    assert_healthy(&bench, "configuration_files");
+    assert_under(&bench, "textDocument/hover", 2_000);
+    assert_under(&bench, "textDocument/completion", 5_000);
+}
+
+/// Arazzo workflows are a separate specification family and get their own
+/// open-time traffic, as a project with contract tests would.
+#[test]
+fn bench_arazzo_workflow() {
+    let (ws, editor, _site) = warmed();
+    let mut bench = Bench::new();
+    let uri = url_of(&ws.workflow);
+    for _ in 0..40 {
+        let batch = vec![
+            ("textDocument/documentSymbol".to_owned(), doc(&uri)),
+            ("textDocument/foldingRange".to_owned(), doc(&uri)),
+            ("textDocument/diagnostic".to_owned(), doc(&uri)),
+            (
+                "textDocument/hover".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(20, 10),
+                }),
+            ),
+            (
+                "textDocument/completion".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(20, 10),
+                }),
+            ),
+            (
+                "textDocument/inlayHint".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri},
+                    "range": {"start": at(1, 1), "end": at(60, 1)},
+                }),
+            ),
+            ("textDocument/semanticTokens/full".to_owned(), doc(&uri)),
+        ];
+        record(
+            &mut bench,
+            "arazzo_workflow",
+            &editor.request_all_timed(&batch),
+        );
+    }
+    finish(&bench, "arazzo_workflow", 40);
+    assert_healthy(&bench, "arazzo_workflow");
+    assert_under(&bench, "textDocument/diagnostic", 20_000);
+}
+
+/// Overlays are a third document family, with their own root keys.
+#[test]
+fn bench_overlay_document() {
+    let (ws, editor, _site) = warmed();
+    let mut bench = Bench::new();
+    let uri = url_of(&ws.overlay);
+    for _ in 0..40 {
+        let batch = vec![
+            ("textDocument/documentSymbol".to_owned(), doc(&uri)),
+            ("textDocument/foldingRange".to_owned(), doc(&uri)),
+            ("textDocument/diagnostic".to_owned(), doc(&uri)),
+            (
+                "textDocument/hover".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(6, 6),
+                }),
+            ),
+            ("textDocument/semanticTokens/full".to_owned(), doc(&uri)),
+            ("textDocument/documentLink".to_owned(), doc(&uri)),
+        ];
+        record(
+            &mut bench,
+            "overlay_document",
+            &editor.request_all_timed(&batch),
+        );
+    }
+    finish(&bench, "overlay_document", 40);
+    assert_healthy(&bench, "overlay_document");
+}
+
+/// Refactor-adjacent traffic: prepare, then commit.
+///
+/// `prepareRename` is advertised with `prepareProvider: true`, so an editor
+/// asks before offering the action; the same request must answer promptly
+/// even where it declines, because the editor blocks on it.
+#[test]
+fn bench_rename_and_lens_resolve() {
+    let (ws, editor, site) = warmed();
+    let mut bench = Bench::new();
+    let schemas = url_of(&ws.schemas);
+    let positions = [
+        (
+            site.uri.as_str(),
+            site.cross_file_ref.0,
+            site.cross_file_ref.1 + 20,
+        ),
+        (schemas.as_str(), 30usize, 6usize),
+        (site.uri.as_str(), site.operation_id.0, site.operation_id.1),
+    ];
+    for round in 0usize..40 {
+        let (uri, line, column) = positions[round % positions.len()];
+        let batch = vec![
+            (
+                "textDocument/prepareRename".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(line, column),
+                }),
+            ),
+            (
+                "textDocument/rename".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(line, column),
+                    "newName": "RenamedThing",
+                }),
+            ),
+            (
+                "textDocument/prepareCallHierarchy".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(line, column),
+                }),
+            ),
+            (
+                "textDocument/prepareTypeHierarchy".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(line, column),
+                }),
+            ),
+            (
+                "textDocument/linkedEditingRange".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(line, column),
+                }),
+            ),
+            ("textDocument/moniker".to_owned(), doc(uri)),
+            (
+                "textDocument/declaration".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(line, column),
+                }),
+            ),
+        ];
+        record(
+            &mut bench,
+            "rename_and_lens_resolve",
+            &editor.request_all_timed(&batch),
+        );
+    }
+    finish(&bench, "rename_and_lens_resolve", 40);
+    assert_healthy(&bench, "rename_and_lens_resolve");
+    assert_under(&bench, "textDocument/prepareRename", 2_000);
+}
+
+/// The cancel storm: a cursor moving fast enough that the editor abandons
+/// most of what it asked for.
+///
+/// Cancellation is the one path where a request is expected *not* to produce
+/// an answer, so this is where a careless implementation can quietly wedge
+/// the session instead.
+#[test]
+fn bench_cancel_storm() {
+    let (_ws, editor, site) = warmed();
+    let mut bench = Bench::new();
+    for round in 0..40 {
+        // Start work, then cancel it while it is still in flight.
+        let abandoned = [
+            (
+                "textDocument/semanticTokens/full".to_owned(),
+                doc(&site.uri),
+            ),
+            ("textDocument/documentLink".to_owned(), doc(&site.uri)),
+            ("textDocument/diagnostic".to_owned(), doc(&site.uri)),
+            ("textDocument/documentSymbol".to_owned(), doc(&site.uri)),
+        ];
+        let issued: Vec<i64> = abandoned
+            .iter()
+            .map(|(method, params)| editor.issue(method, params.clone()))
+            .collect();
+        let keep = [
+            (
+                "textDocument/hover".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": site.uri}, "position": at(site.operation_id.0, site.operation_id.1),
+                }),
+            ),
+            ("textDocument/foldingRange".to_owned(), doc(&site.uri)),
+            (
+                "textDocument/inlayHint".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": site.uri},
+                    "range": {"start": at(1, 1), "end": at(200, 1)},
+                }),
+            ),
+        ];
+        let kept_ids: Vec<i64> = keep
+            .iter()
+            .map(|(method, params)| editor.issue(method, params.clone()))
+            .collect();
+        for id in issued {
+            editor.cancel(id);
+        }
+        // The work that was *not* cancelled must still answer.
+        for (id, (method, _)) in kept_ids.iter().zip(keep.iter()) {
+            let started = Instant::now();
+            let answer = editor.await_for_bench(*id, method);
+            bench.record(
+                "cancel_storm",
+                method,
+                started.elapsed(),
+                &answer.map_err(|e| e.to_string()),
+            );
+        }
+        let _ = round;
+    }
+    finish(&bench, "cancel_storm", 40);
+    assert_healthy(&bench, "cancel_storm");
+}
+
+/// Switching tabs: close and reopen, which drops the cached workspace and
+/// forces a rebuild on the next request.
+#[test]
+fn bench_file_switching() {
+    let (ws, editor, site) = warmed();
+    let mut bench = Bench::new();
+    // A real project need not have every document the fixture generates, so
+    // switch over the ones that are actually there.
+    let mut documents = vec![(ws.openapi.clone(), site.uri.clone())];
+    for path in [
+        ws.schemas.clone(),
+        ws.workflow.clone(),
+        ws.manifest.clone(),
+        ws.overlay.clone(),
+    ] {
+        if path.is_file() {
+            documents.push((path.clone(), url_of(&path)));
+        }
+    }
+    for round in 0usize..40 {
+        let (path, uri) = &documents[round % documents.len()];
+        editor.notify_timed(
+            "textDocument/didClose",
+            serde_json::json!({
+                "textDocument": {"uri": uri}
+            }),
+        );
+        let text = std::fs::read_to_string(path).expect("read");
+        editor.open(path, &text);
+        let batch = vec![
+            ("textDocument/documentSymbol".to_owned(), doc(uri)),
+            ("textDocument/foldingRange".to_owned(), doc(uri)),
+            ("textDocument/diagnostic".to_owned(), doc(uri)),
+            (
+                "textDocument/hover".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(30, 8),
+                }),
+            ),
+            ("textDocument/semanticTokens/full".to_owned(), doc(uri)),
+        ];
+        record(
+            &mut bench,
+            "file_switching",
+            &editor.request_all_timed(&batch),
+        );
+    }
+    finish(&bench, "file_switching", 40);
+    assert_healthy(&bench, "file_switching");
+}
+
+/// A large JSON document alongside the specification: package manifests and
+/// generated data share the session, and JSON highlighting has to keep up.
+#[test]
+fn bench_large_json_document() {
+    let (ws, editor, _site) = warmed();
+    let mut bench = Bench::new();
+    let uri = url_of(&ws.data);
+    for _ in 0..40 {
+        let batch = vec![
+            ("textDocument/semanticTokens/full".to_owned(), doc(&uri)),
+            ("textDocument/documentSymbol".to_owned(), doc(&uri)),
+            ("textDocument/foldingRange".to_owned(), doc(&uri)),
+            ("textDocument/documentLink".to_owned(), doc(&uri)),
+            ("textDocument/documentColor".to_owned(), doc(&uri)),
+            ("textDocument/codeLens".to_owned(), doc(&uri)),
+            ("textDocument/diagnostic".to_owned(), doc(&uri)),
+            (
+                "textDocument/hover".to_owned(),
+                serde_json::json!({
+                    "textDocument": {"uri": uri}, "position": at(40, 8),
+                }),
+            ),
+        ];
+        record(
+            &mut bench,
+            "large_json_document",
+            &editor.request_all_timed(&batch),
+        );
+    }
+    finish(&bench, "large_json_document", 40);
+    assert_healthy(&bench, "large_json_document");
+    assert_under(&bench, "textDocument/semanticTokens/full", 5_000);
 }
 
 /// Prints the table and writes the JSON.

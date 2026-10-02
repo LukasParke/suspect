@@ -20,6 +20,9 @@ pub struct Workspace {
     pub schemas: PathBuf,
     pub overlay: PathBuf,
     pub workflow: PathBuf,
+    pub manifest: PathBuf,
+    pub data: PathBuf,
+    pub config: PathBuf,
 }
 
 const RESOURCES: &[&str] = &[
@@ -72,6 +75,12 @@ impl Workspace {
         let overlay = root.join("overlays").join("internal.overlay.yaml");
         let workflow = root.join("workflows").join("health.arazzo.yaml");
         let config = root.join(".suspect.yaml");
+        let manifest = root.join("suspect.project.json");
+        let data = root.join("catalog.json");
+        let _ = (&manifest, &data);
+        let manifest = root.join("suspect.project.json");
+        let data = root.join("catalog.json");
+        let _ = (&manifest, &data);
 
         std::fs::create_dir_all(root.join("overlays")).expect("overlays dir");
         std::fs::create_dir_all(root.join("workflows")).expect("workflows dir");
@@ -80,6 +89,8 @@ impl Workspace {
         std::fs::write(&overlay, overlay_document()).expect("overlay");
         std::fs::write(&workflow, workflow_document()).expect("workflow");
         std::fs::write(&config, config_document()).expect("config");
+        std::fs::write(&manifest, manifest_document()).expect("manifest");
+        std::fs::write(&data, data_document()).expect("data");
 
         Self {
             root: root.to_path_buf(),
@@ -87,6 +98,24 @@ impl Workspace {
             schemas,
             overlay,
             workflow,
+            manifest,
+            data,
+            config,
+        }
+    }
+
+    /// A workspace description pointing at a real project on disk.
+    #[must_use]
+    pub fn describing(root: &Path, openapi: PathBuf) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            schemas: root.join("schemas.yaml"),
+            overlay: root.join("overlays/internal.overlay.yaml"),
+            workflow: root.join("workflows/health.arazzo.yaml"),
+            manifest: root.join("suspect.project.json"),
+            data: root.join("catalog.json"),
+            config: root.join(".suspect.yaml"),
+            openapi,
         }
     }
 
@@ -222,6 +251,48 @@ fn plural(name: &str) -> String {
         return format!("{name}es");
     }
     format!("{name}s")
+}
+
+/// A project manifest, so the JSON feature set and the configuration
+/// schema both have something real to work on.
+fn manifest_document() -> String {
+    let mut out = String::from(
+        "{\n  \"version\": 1,\n  \"name\": \"session-api\",\n  \"entry\": \"openapi.yaml\",\n  \"overlays\": [\"overlays/internal.overlay.yaml\"],\n  \"publish\": {\n    \"output\": \".suspect/spec.yaml\",\n    \"profiles\": {\n      \"public\": [\"overlays/internal.overlay.yaml\"]\n    }\n  },\n  \"contract\": {\"output\": \".suspect/contract\"},\n  \"lint\": {\"min_severity\": \"warning\"},\n  \"docs\": {\"style\": \"sveltekit\", \"output\": \".suspect/docs\"},\n  \"codegen\": [\n",
+    );
+    for (language, profile, package) in [
+        ("typescript", "typescript-http", "@session/api"),
+        ("python", "python-http", "session-api"),
+        ("go", "go-http", "github.com/session/api"),
+        ("rust", "rust-http", "session-api"),
+    ] {
+        out.push_str(&format!(
+            "    {{\n      \"name\": \"{language}\",\n      \"profile\": \"{profile}\",\n      \"package_name\": \"{package}\",\n      \"package_version\": \"1.0.0\",\n      \"out\": \".suspect/sdk/{language}\",\n      \"operation_id\": [\"AccountsGet\", \"AccountsPut\"]\n    }}{}\n",
+            if language == "rust" { "" } else { "," }
+        ));
+    }
+    out.push_str(
+        "  ],\n  \"tests\": {\n    \"arazzo\": [\"workflows/health.arazzo.yaml\"],\n    \"base_url\": \"http://localhost:32400\"\n  }\n}\n",
+    );
+    out
+}
+
+/// A large JSON document: package manifests, lockfiles and machine-generated
+/// data all sit in the same editor session as the specification, and JSON
+/// highlighting has to keep up with them.
+fn data_document() -> String {
+    let mut out =
+        String::from("{\n  \"generated\": \"fixture\",\n  \"version\": \"1\",\n  \"records\": [\n");
+    for index in 0..600 {
+        out.push_str(&format!(
+            "    {{\"id\": {index}, \"kind\": \"{}\", \"active\": {}, \"score\": {}, \"label\": \"record-{index}\", \"tags\": [\"a\", \"b\"]}}{}\n",
+            if index % 3 == 0 { "primary" } else { "secondary" },
+            index % 2 == 0,
+            index as f64 / 3.0,
+            if index == 599 { "" } else { "," }
+        ));
+    }
+    out.push_str("  ]\n}\n");
+    out
 }
 
 fn pascal(name: &str) -> String {
