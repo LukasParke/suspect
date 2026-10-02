@@ -1106,6 +1106,24 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceDiagnosticParams,
     ) -> JsonRpcResult<WorkspaceDiagnosticReportResult> {
+        // Served from cache when the content and the config are unchanged:
+        // this walks every document in the project, and an editor asks for it
+        // in the same burst as the requests it is waiting on.
+        let cached: Option<(String, Vec<WorkspaceDocumentDiagnosticReport>)> = {
+            let st = self.state.read().await;
+            st.ws_diag_cache
+                .as_ref()
+                .and_then(|(epoch, config, id, items)| {
+                    let fresh = *epoch == st.generation() && *config == st.config;
+                    fresh.then(|| (id.clone(), items.clone()))
+                })
+        };
+        if let Some((_id, items)) = cached {
+            return Ok(WorkspaceDiagnosticReportResult::Report(
+                WorkspaceDiagnosticReport { items },
+            ));
+        }
+
         // Same discipline as `diagnostic`: nothing expensive runs while a state
         // guard is alive, because a queued writer behind it blocks every
         // later reader — including the hover that follows.
@@ -1148,6 +1166,20 @@ impl LanguageServer for Backend {
                     },
                 ));
             }
+        }
+        let id = {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hasher::write(
+                &mut hasher,
+                serde_json::to_string(&items).unwrap_or_default().as_bytes(),
+            );
+            format!("ws-{:016x}", std::hash::Hasher::finish(&hasher))
+        };
+        {
+            let mut st = self.state.write().await;
+            let epoch = st.generation();
+            let config = st.config.clone();
+            st.ws_diag_cache = Some((epoch, config, id.clone(), items.clone()));
         }
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
@@ -1607,6 +1639,9 @@ impl LanguageServer for Backend {
         if !changed {
             return;
         }
+        // The lint floor moved, so anything computed under the old one is
+        // no longer the answer.
+        self.state.write().await.ws_diag_cache = None;
         // The new config re-filters lint findings and inlay tooltips:
         // republish diagnostics for every open document and ask the client
         // to re-pull hints. Semantic tokens and lenses are config-free.

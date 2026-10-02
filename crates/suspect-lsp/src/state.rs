@@ -7,7 +7,7 @@ use std::sync::Arc;
 use suspect_low::LowDoc;
 use suspect_ref::{Workspace, WorkspaceBuilder};
 use suspect_source::{LineIndex, Source, Uri};
-use tower_lsp::lsp_types::Diagnostic;
+use tower_lsp::lsp_types::{Diagnostic, WorkspaceDocumentDiagnosticReport};
 use tower_lsp::lsp_types::{Position, Range, SemanticToken};
 
 /// One editor-open document: the live buffer text plus the `LowDoc` parsed
@@ -58,6 +58,20 @@ pub struct State {
     /// hover queued behind. Keyed on the content epoch, so any edit
     /// invalidates it.
     pub diag_cache: HashMap<Uri, (u64, String, Vec<Diagnostic>)>,
+    /// Whole-workspace diagnostics cache: the content epoch and the config
+    /// they were computed for, the result id, and the reports.
+    ///
+    /// `workspace/diagnostic` re-lints every document in the project on
+    /// every request, which on a 63k-line specification is about four
+    /// seconds — and an editor asks for it as part of the same burst that
+    /// asks for hover, symbols and links. Measured on that burst: seven
+    /// cheap requests finish in 290ms; adding this one takes it to 4.4s.
+    pub ws_diag_cache: Option<(
+        u64,
+        crate::config_files::SuspectConfig,
+        String,
+        Vec<WorkspaceDocumentDiagnosticReport>,
+    )>,
     /// Raw initialization options captured in `initialize` for later merge.
     pub pending_init_options: Option<serde_json::Value>,
     /// Merged server configuration (initialization options < client section).
@@ -118,6 +132,7 @@ impl State {
     pub fn drop_workspace(&mut self) {
         self.workspace = None;
         self.index_cache = None;
+        self.ws_diag_cache = None;
         self.content_epoch = self.content_epoch.wrapping_add(1);
     }
 
