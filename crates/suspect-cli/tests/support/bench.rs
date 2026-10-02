@@ -20,6 +20,11 @@ use serde_json::Value;
 pub struct Sample {
     /// The scenario that produced it.
     pub scenario: &'static str,
+    /// Wall-clock time of the whole batch this sample came from. Equal to
+    /// the sample's own latency for the last request of a batch, and much
+    /// larger for the rest — which is how you tell "this handler is slow"
+    /// from "everything is queued".
+    pub batch: Duration,
     /// The request method.
     pub method: String,
     /// How long the answer took.
@@ -51,12 +56,25 @@ impl Bench {
         elapsed: Duration,
         answer: &Result<Value, String>,
     ) {
+        self.record_in_batch(scenario, method, elapsed, elapsed, answer);
+    }
+
+    /// As [`Bench::record`], with the enclosing batch's wall time.
+    pub fn record_in_batch(
+        &mut self,
+        scenario: &'static str,
+        method: &str,
+        elapsed: Duration,
+        batch: Duration,
+        answer: &Result<Value, String>,
+    ) {
         let (answered, bytes) = match answer {
             Ok(value) => (true, serde_json::to_vec(value).map_or(0, |v| v.len())),
             Err(_) => (false, 0),
         };
         self.samples.push(Sample {
             scenario,
+            batch,
             method: method.to_owned(),
             elapsed,
             answered,
@@ -76,8 +94,15 @@ impl Bench {
                 .as_ref()
                 .map(|v| v.clone())
                 .map_err(|e| e.to_string());
-            self.record(scenario, &entry.method, entry.elapsed, &answer);
+            self.record_in_batch(scenario, &entry.method, entry.elapsed, entry.batch, &answer);
         }
+    }
+
+    /// The longest batch seen — the figure a person waiting for the editor
+    /// to settle actually experiences, as against a single request's latency.
+    #[must_use]
+    pub fn slowest_batch(&self) -> Option<Duration> {
+        self.samples.iter().map(|s| s.batch).max()
     }
 
     /// Every sample taken.

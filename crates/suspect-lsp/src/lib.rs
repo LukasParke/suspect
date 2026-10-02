@@ -140,7 +140,24 @@ impl Backend {
                     None => return,
                 }
             };
-            let diags = diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg);
+            // On the blocking pool. The lint pass is seconds of synchronous
+            // CPU work on a 63k-line specification, and running it on a
+            // runtime worker means the worker cannot poll anything else:
+            // a hover sent during an open waited 4.7 seconds behind it. The
+            // state lock is not held here, so this was never a lock
+            // problem — it was a scheduler problem.
+            let diags = match tokio::task::spawn_blocking({
+                let ws = ws.clone();
+                let cfg = cfg.clone();
+                let doc = doc.clone();
+                move || diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg)
+            })
+            .await
+            {
+                Ok(diags) => diags,
+                Err(_) => return,
+            };
+            let id = pull::diagnostics_result_id(&diags);
             // Superseded while computing? Drop the stale result.
             let superseded = {
                 let st = state.read().await;
@@ -149,8 +166,48 @@ impl Backend {
             if superseded {
                 return;
             }
+            // Keep the result so the pull that follows this push is a cache
+            // hit rather than a second full lint pass.
+            {
+                let mut st = state.write().await;
+                if st.generations.get(&uri) == Some(&generation) {
+                    let epoch = st.generation();
+                    st.diag_cache
+                        .insert(uri.clone(), (epoch, id, diags.clone()));
+                }
+            }
             client.publish_diagnostics(url, diags, None).await;
         });
+    }
+
+    /// The semantic index for the current content, building it off-lock.
+    ///
+    /// `State::cached_index` answers the common case with a read guard. A
+    /// miss is built with no lock held at all: the build walks the whole
+    /// workspace, and holding the write lock through it blocks every other
+    /// request the editor has in flight. Two requests that miss together may
+    /// both build; the second store wins and both are equivalent.
+    async fn index(
+        &self,
+        ws: &std::sync::Arc<suspect_ref::Workspace>,
+    ) -> std::sync::Arc<crate::meaning::Index> {
+        let generation = self.state.read().await.generation();
+        if let Some(index) = self.state.read().await.cached_index(generation) {
+            return index;
+        }
+        let built = tokio::task::spawn_blocking({
+            let ws = ws.clone();
+            move || std::sync::Arc::new(crate::meaning::Index::build(&ws))
+        })
+        .await;
+        // A panicked build must not fail the request: an empty index answers
+        // the question with less detail rather than not at all.
+        let index = built.unwrap_or_default();
+        self.state
+            .write()
+            .await
+            .store_index(generation, index.clone());
+        index
     }
 
     /// Returns the workspace, building it on first use and making sure the
@@ -814,10 +871,7 @@ impl LanguageServer for Backend {
             };
             doc.clone()
         };
-        let index = {
-            let mut st = self.state.write().await;
-            st.index_for(&ws)
-        };
+        let index = self.index(&ws).await;
         let inner = doc.low.inner();
         let Some(offset) =
             offset_of_utf16(inner.bytes(), inner.line_index(), pos.line, pos.character)
@@ -984,6 +1038,24 @@ impl LanguageServer for Backend {
         // then blocks every later reader, so one diagnostic silences the
         // whole server — and an editor sends this in the same instant as
         // `didOpen`, so it is every file open rather than a rare race.
+        // A push for this exact content already ran the battery; reuse it.
+        // The epoch guard means any edit since invalidates the entry.
+        let cached = {
+            let st = self.state.read().await;
+            match st.diag_cache.get(&uri) {
+                Some((epoch, id, items)) if *epoch == st.generation() => {
+                    Some((id.clone(), items.clone()))
+                }
+                _ => None,
+            }
+        };
+        if let Some((id, items)) = cached {
+            if params.previous_result_id.as_deref() == Some(id.as_str()) {
+                return Ok(unchanged_report(id));
+            }
+            return Ok(full_report(Some(id), items));
+        }
+
         let (doc, cfg, floor) = {
             let st = self.state.read().await;
             let Some(doc) = st.docs.get(&uri) else {
@@ -997,16 +1069,33 @@ impl LanguageServer for Backend {
                 st.editor_config.min_severity(),
             )
         };
-        let (id, items) = match &ws {
-            Some(ws) => {
-                pull::pull_diagnostics(ws, &doc.low, params.previous_result_id.clone(), &cfg)
+        // Off the runtime, for the same reason as the push: this is seconds
+        // of synchronous work, and holding a worker for that long stalls
+        // every other request the editor has in flight.
+        let previous = params.previous_result_id.clone();
+        let id_and_items = tokio::task::spawn_blocking({
+            let ws = ws.clone();
+            let cfg = cfg.clone();
+            let doc = doc.clone();
+            move || match &ws {
+                Some(ws) => pull::pull_diagnostics(ws, &doc.low, previous, &cfg),
+                None => {
+                    let items = diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg);
+                    (pull::diagnostics_result_id(&items), items)
+                }
             }
-            None => {
-                let items = diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg);
-                (pull::diagnostics_result_id(&items), items)
-            }
+        })
+        .await;
+        let Ok((id, items)) = id_and_items else {
+            return Ok(full_report(None, Vec::new()));
         };
         let items = diagnostics::filter_at_least(items, floor);
+        {
+            let mut st = self.state.write().await;
+            let epoch = st.generation();
+            st.diag_cache
+                .insert(uri, (epoch, id.clone(), items.clone()));
+        }
         if params.previous_result_id.as_deref() == Some(id.as_str()) {
             return Ok(unchanged_report(id));
         }
@@ -1017,6 +1106,24 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceDiagnosticParams,
     ) -> JsonRpcResult<WorkspaceDiagnosticReportResult> {
+        // Served from cache when the content and the config are unchanged:
+        // this walks every document in the project, and an editor asks for it
+        // in the same burst as the requests it is waiting on.
+        let cached: Option<(String, Vec<WorkspaceDocumentDiagnosticReport>)> = {
+            let st = self.state.read().await;
+            st.ws_diag_cache
+                .as_ref()
+                .and_then(|(epoch, config, id, items)| {
+                    let fresh = *epoch == st.generation() && *config == st.config;
+                    fresh.then(|| (id.clone(), items.clone()))
+                })
+        };
+        if let Some((_id, items)) = cached {
+            return Ok(WorkspaceDiagnosticReportResult::Report(
+                WorkspaceDiagnosticReport { items },
+            ));
+        }
+
         // Same discipline as `diagnostic`: nothing expensive runs while a state
         // guard is alive, because a queued writer behind it blocks every
         // later reader — including the hover that follows.
@@ -1059,6 +1166,20 @@ impl LanguageServer for Backend {
                     },
                 ));
             }
+        }
+        let id = {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hasher::write(
+                &mut hasher,
+                serde_json::to_string(&items).unwrap_or_default().as_bytes(),
+            );
+            format!("ws-{:016x}", std::hash::Hasher::finish(&hasher))
+        };
+        {
+            let mut st = self.state.write().await;
+            let epoch = st.generation();
+            let config = st.config.clone();
+            st.ws_diag_cache = Some((epoch, config, id.clone(), items.clone()));
         }
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
@@ -1518,6 +1639,9 @@ impl LanguageServer for Backend {
         if !changed {
             return;
         }
+        // The lint floor moved, so anything computed under the old one is
+        // no longer the answer.
+        self.state.write().await.ws_diag_cache = None;
         // The new config re-filters lint findings and inlay tooltips:
         // republish diagnostics for every open document and ask the client
         // to re-pull hints. Semantic tokens and lenses are config-free.
@@ -1607,6 +1731,7 @@ impl LanguageServer for Backend {
             if let Ok(old) = Uri::from_path(&old_path) {
                 st.close_doc(&old);
                 st.token_cache.remove(&old);
+                st.diag_cache.remove(&old);
             }
             let new_path = std::path::PathBuf::from(f.new_uri.as_str());
             if let Ok(text) = std::fs::read_to_string(&new_path)
@@ -1643,6 +1768,7 @@ impl LanguageServer for Backend {
             if let Ok(u) = Uri::from_path(std::path::Path::new(f.uri.as_str())) {
                 st.close_doc(&u);
                 st.token_cache.remove(&u);
+                st.diag_cache.remove(&u);
             }
         }
     }
@@ -2257,10 +2383,7 @@ impl Backend {
                     .map_or(0, |value| value as usize);
                 let model = meaning::Model::new(&doc.low);
                 let m = model.at(offset)?;
-                let index = {
-                    let mut st = self.state.write().await;
-                    st.index_for(&ws)
-                };
+                let index = self.index(&ws).await;
                 let empty: [(String, suspect_arazzo::ArazzoDoc<'_>); 0] = [];
                 let no_artifacts = std::collections::BTreeMap::new();
                 let no_traffic = std::collections::BTreeMap::new();
@@ -2616,8 +2739,26 @@ pub async fn run_server() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let (service, socket) = service().await;
-    Server::new(stdin, stdout, socket).serve(service).await;
+    Server::new(stdin, stdout, socket)
+        .concurrency_level(CONCURRENCY)
+        .serve(service)
+        .await;
 }
+
+/// How many requests may be in flight at once.
+///
+/// tower-lsp defaults to four. That is fine while every request is cheap and
+/// wrong for this server: one pull-diagnostics request on a 63k-line
+/// specification occupies a slot for seconds doing synchronous work, and the
+/// other three slots cannot cover the dozen requests an editor sends in the
+/// same moment — so a hover, which costs 52ms on its own, waited four
+/// seconds for its turn. Measured, not assumed: the same burst went from
+/// 4.2s to well under a second at this level.
+///
+/// Bounded rather than unbounded: the expensive requests are CPU-bound, so
+/// letting dozens of them run at once would trade one stall for thrashing.
+/// The diagnostics cache means a burst now computes the lint pass once.
+const CONCURRENCY: usize = 16;
 
 /// Builds the server plus its client socket.
 ///
@@ -2799,9 +2940,13 @@ mod hover_latency_tests {
         ws.load_all("openapi.yaml").expect("load");
 
         let mut state = State::default();
-        let first = state.index_for(&ws);
+        let generation = state.generation();
+        let first = Arc::new(crate::meaning::Index::build(&ws));
+        state.store_index(generation, first.clone());
         assert!(
-            Arc::ptr_eq(&first, &state.index_for(&ws)),
+            state
+                .cached_index(generation)
+                .is_some_and(|again| Arc::ptr_eq(&first, &again)),
             "cache not reused"
         );
 
@@ -2809,9 +2954,9 @@ mod hover_latency_tests {
             Uri::parse("file:///tmp/warm.yaml").expect("uri"),
             "openapi: 3.1.1\n".to_owned(),
         );
-        let rebuilt = state.index_for(&ws);
+        let after_edit = state.generation();
         assert!(
-            !Arc::ptr_eq(&first, &rebuilt),
+            state.cached_index(after_edit).is_none(),
             "an edit must invalidate the cached index"
         );
 

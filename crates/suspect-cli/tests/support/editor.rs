@@ -43,8 +43,11 @@ pub struct Timed {
     pub method: String,
     /// Whether it was answered, and with what.
     pub answer: Result<serde_json::Value, NoReply>,
-    /// Wall-clock time from writing the frame to filing the response.
+    /// Wall-clock time from writing the frame to filing this response.
     pub elapsed: Duration,
+    /// Wall-clock time from the start of the batch, for the caller's own
+    /// batch-level figures. Meaningful on the last entry of a batch.
+    pub batch: Duration,
 }
 
 /// A request the server has not answered yet.
@@ -62,6 +65,11 @@ impl std::error::Error for NoReply {}
 #[derive(Default)]
 struct Inbox {
     answers: HashMap<i64, serde_json::Value>,
+    /// When each answer was filed. Without this, a batch measures every
+    /// request from the batch's start, so each one inherits the wait for
+    /// everything queued ahead of it — which made a 52ms hover look like
+    /// 4.2 seconds.
+    arrived_at: HashMap<i64, Instant>,
     errors: HashMap<i64, String>,
     notifications: Vec<(String, serde_json::Value)>,
     /// Server requests we have seen, so a test can assert the server asked.
@@ -113,7 +121,21 @@ impl Editor {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
-        let mut child = command.spawn().expect("suspect lsp must start");
+        // The whole workspace suite runs these tests in parallel, so twenty
+        // servers can be starting at once. A spawn that comes up without its
+        // pipes is resource exhaustion, not a broken server, and one retry
+        // after a moment is the difference between a flake and a failure.
+        let mut child = loop {
+            let mut child = command
+                .spawn()
+                .unwrap_or_else(|e| panic!("suspect lsp must start: {e}"));
+            if child.stdin.is_some() && child.stdout.is_some() {
+                break child;
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        };
         let stdin = Arc::new(Mutex::new(child.stdin.take().expect("stdin")));
         let stdout = child.stdout.take().expect("stdout");
 
@@ -174,6 +196,7 @@ impl Editor {
                         }
                         (None, Some(id)) => {
                             let mut inbox = lock.lock().expect("inbox");
+                            inbox.arrived_at.insert(id, Instant::now());
                             if let Some(error) = message.get("error") {
                                 inbox.errors.insert(
                                     id,
@@ -343,7 +366,13 @@ impl Editor {
         (answer, started.elapsed())
     }
 
-    /// Issues a batch before awaiting any, timing each answer.
+    /// Issues a batch before awaiting any, timing each answer from when that
+    /// answer actually arrived.
+    ///
+    /// Timing from the batch start instead folds the queue wait into every
+    /// sample, so a 52ms hover inherits the wait for everything issued ahead
+    /// of it and reads as four seconds. [`Timed::batch`] carries the batch's
+    /// own wall time for the figure that genuinely is a batch.
     pub fn request_all_timed(&self, calls: &[(String, serde_json::Value)]) -> Vec<Timed> {
         let started = Instant::now();
         let issued: Vec<(String, i64)> = calls
@@ -354,10 +383,20 @@ impl Editor {
             .into_iter()
             .map(|(method, id)| {
                 let answer = self.await_until(id, &method, started + BUDGET);
+                let elapsed = self
+                    .inbox
+                    .0
+                    .lock()
+                    .expect("inbox")
+                    .arrived_at
+                    .get(&id)
+                    .map_or_else(|| started.elapsed(), |at| at.duration_since(started));
+                let batch = started.elapsed();
                 Timed {
                     method,
                     answer,
-                    elapsed: started.elapsed(),
+                    elapsed,
+                    batch,
                 }
             })
             .collect()
