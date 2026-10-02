@@ -739,10 +739,24 @@ fn a_recorded_vscode_session_is_answered_in_full() {
 
     let fixture: Value = serde_json::from_str(include_str!("fixtures/vscode-open-traffic.json"))
         .expect("the traffic fixture must parse");
-    let frames = fixture["frames"].as_array().cloned().unwrap_or_default();
+    let all = fixture["frames"].as_array().cloned().unwrap_or_default();
     assert!(
-        frames.len() > 50,
-        "the traffic fixture is suspiciously short"
+        all.len() > 100,
+        "the traffic fixture is suspiciously short: {} frames",
+        all.len()
+    );
+    // Replay the *opening*, which is what reproduced the deadlock: `didOpen`
+    // and a burst of requests inside one short window.
+    //
+    // Not the whole recording. VS Code goes on to poll
+    // `workspace/diagnostic` 43 times as its problem panel refreshes, and
+    // each of those is a full workspace lint — replaying all of them needs a
+    // budget no test should have, and says nothing the opening does not.
+    let frames: Vec<Value> = all.iter().take(40).cloned().collect();
+    assert!(
+        frames.len() >= 30,
+        "the recorded opening should span at least thirty frames, got {}",
+        frames.len()
     );
 
     let api_uri = url_of(&ws.openapi);
@@ -791,7 +805,34 @@ fn a_recorded_vscode_session_is_answered_in_full() {
             notifications.push((method, params));
         }
     }
-    assert!(batch.len() >= 10, "expected the fixture's opening burst");
+    assert!(
+        batch.len() >= 10,
+        "expected the recorded opening burst, got {} requests",
+        batch.len()
+    );
+    let burst_methods: Vec<&str> = batch.iter().map(|(m, _)| m.as_str()).collect();
+    // Exactly what an open contains. Deliberately *not* hover: an editor
+    // only asks for a hover when the mouse moves, and this recording opens a
+    // file rather than reading it. Hover is covered by the per-feature tests
+    // above and by `bench_cursor_sweep`.
+    for expected in [
+        "textDocument/diagnostic",
+        "textDocument/documentSymbol",
+        "textDocument/foldingRange",
+        "textDocument/semanticTokens/full",
+        "textDocument/semanticTokens/range",
+        "textDocument/documentLink",
+        "textDocument/inlayHint",
+        "textDocument/codeLens",
+        "textDocument/documentColor",
+        "textDocument/codeAction",
+        "workspace/diagnostic",
+    ] {
+        assert!(
+            burst_methods.contains(&expected),
+            "the recorded opening should include {expected}, got {burst_methods:?}"
+        );
+    }
 
     let answers = editor.request_all(&batch);
     let unanswered: Vec<(String, String)> = answers
