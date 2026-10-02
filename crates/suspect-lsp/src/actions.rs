@@ -197,6 +197,41 @@ struct Fix {
 /// is unknown or its CST anchor cannot be located. Codes with multiple
 /// sensible repairs (e.g. `oas-parameter-missing-in`) return one fix per
 /// choice so the editor offers a picker.
+/// The quick-fix for a configuration diagnostic: replace the offending key
+/// or value with the nearest known one.
+///
+/// The diagnostic message already ends in "Did you mean `x`?", so the action
+/// title says the same thing rather than inventing a second wording.
+fn config_fix(doc: &OpenDoc, br: std::ops::Range<usize>, diag: &Diagnostic) -> Option<Fix> {
+    let suggested = diag.message.rsplit_once("Did you mean `")?.1;
+    let suggested = suggested.split('`').next()?;
+    if suggested.is_empty() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&doc.low.inner().bytes()[br.clone()]).into_owned();
+    // A quoted JSON key or a YAML scalar arrives with its quotes; keep them
+    // so the replacement is still well-formed in its file.
+    let quote = if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
+        "\""
+    } else if text.starts_with('\'') && text.ends_with('\'') && text.len() >= 2 {
+        "'"
+    } else {
+        ""
+    };
+    Some(Fix {
+        title: format!("Change to `{suggested}`"),
+        span: br.clone(),
+        edit: TextEdit {
+            range: crate::state::lsp_range(
+                doc.low.inner().bytes(),
+                doc.low.inner().line_index(),
+                br,
+            ),
+            new_text: format!("{quote}{suggested}{quote}"),
+        },
+    })
+}
+
 fn fixes_for(
     doc: &OpenDoc,
     ws: Option<&suspect_ref::Workspace>,
@@ -217,6 +252,8 @@ fn fixes_for(
     let br = start..end;
     let one = |fix: Option<Fix>| fix.into_iter().collect::<Vec<_>>();
     match code {
+        // A configuration key or value that is one edit away from right.
+        "suspect.config" => one(config_fix(doc, br, diag)),
         "oas-path-trailing-slash" | "path-keys-no-trailing-slash" => {
             one(trailing_slash_fix(doc, br))
         }
@@ -2062,5 +2099,73 @@ paths:
         let acts = quickfix(&d, diag);
         assert_eq!(acts.len(), 1);
         assert_eq!(edits_of(&acts, &url("api.yaml"))[0].new_text, "/pets");
+    }
+
+    /// A mistyped configuration key and a mistyped enumeration value are
+    /// each one edit away from right, and the action says which.
+    #[test]
+    fn a_config_typo_offers_the_correction() {
+        let text = "lint:\n  min_severity: warn\n  min_severty: error\n";
+        // A `file:` URI: the configuration schema keys off the path, and a
+        // `mem:` document has none.
+        let doc = OpenDoc::parse(
+            Uri::parse("file:///workspaces/demo/.suspect.yaml").unwrap(),
+            text.to_owned(),
+        );
+        let url = Url::parse("file:///workspaces/demo/.suspect.yaml").unwrap();
+        let problems =
+            crate::config_schema::problems(crate::config_schema::FileKind::Settings, &doc.low);
+        assert_eq!(problems.len(), 2, "{problems:#?}");
+        let diagnostics = crate::config_schema::diagnostics(&doc.low);
+        assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.code == Some(NumberOrString::String("suspect.config".to_owned()))),
+            "{diagnostics:#?}"
+        );
+
+        let actions = code_actions(&doc, &url, whole(&doc), &diagnostics, None, true);
+        let titles: Vec<&str> = actions
+            .iter()
+            .filter(|a| a.edit.is_some())
+            .map(|a| a.title.as_str())
+            .collect();
+        assert!(titles.contains(&"Change to `warning`"), "{titles:?}");
+        assert!(titles.contains(&"Change to `min_severity`"), "{titles:?}");
+
+        // The edit rewrites only the offending token, not the whole line.
+        let warning = actions
+            .iter()
+            .find(|a| a.title == "Change to `warning`")
+            .expect("severity fix");
+        let edit = warning
+            .edit
+            .as_ref()
+            .unwrap()
+            .changes
+            .as_ref()
+            .unwrap()
+            .get(&url)
+            .expect("an edit for this document")[0]
+            .clone();
+        assert_eq!(edit.new_text, "warning");
+        let start = edit.range.start;
+        assert_eq!(
+            text.split('\n').nth(start.line as usize).unwrap(),
+            "  min_severity: warn"
+        );
+    }
+
+    fn whole(doc: &OpenDoc) -> Range {
+        let li = doc.low.inner().line_index();
+        let last = doc.low.inner().bytes().len();
+        Range {
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: crate::state::lsp_range(doc.low.inner().bytes(), li, last..last).end,
+        }
     }
 }

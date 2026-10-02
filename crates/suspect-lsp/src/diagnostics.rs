@@ -286,6 +286,9 @@ pub fn compute_diagnostics_raw(
     cfg: &crate::config_files::SuspectConfig,
 ) -> Vec<Diagnostic> {
     let mut out = syntax_diagnostics(low);
+    // suspect's own configuration files are checked against their schema, so
+    // a typo in `.suspect.yaml` is reported where it is written.
+    out.extend(crate::config_schema::diagnostics(low));
     if let Some(ws) = ws {
         out.extend(validate_diagnostics(ws, low));
     }
