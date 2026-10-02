@@ -1171,9 +1171,12 @@ fn finish(bench: &Bench, scenario: &str, rounds: usize) {
     bench.write_json(&path);
     if let Some(slowest) = bench.slowest() {
         println!(
-            "  scenario `{scenario}`, {rounds} rounds — slowest request was {} at {:.0}ms",
+            "  scenario `{scenario}`, {rounds} rounds — slowest request {} answered {:.0}ms;              longest batch took {:.0}ms",
             slowest.method,
-            slowest.elapsed.as_secs_f64() * 1000.0
+            slowest.elapsed.as_secs_f64() * 1000.0,
+            bench
+                .slowest_batch()
+                .map_or(0.0, |b| b.as_secs_f64() * 1000.0)
         );
     }
 }

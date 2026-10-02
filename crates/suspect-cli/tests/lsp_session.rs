@@ -67,6 +67,16 @@ fn cross_file_ref(ws: &Workspace) -> (usize, usize) {
     )
 }
 
+/// The 1-based position of the key named by `needle` in `schemas.yaml`.
+///
+/// `Workspace::locate` reports where the *needle* starts, which on a key line
+/// is its indentation. Everything that wants the key itself needs this.
+fn schema_key(ws: &Workspace, needle: &str) -> (usize, usize) {
+    let (line, column) = ws.locate(&ws.schemas, needle);
+    // The needle carries its own indentation, so the key begins at its end.
+    (line, column + needle.trim_start().len())
+}
+
 /// The 1-based position of an operation's `operationId` **value**.
 ///
 /// Hovering the key gives the keyword entry; definition, references,
@@ -216,12 +226,12 @@ fn definition_on_a_ref_resolves_from_the_key_and_the_value() {
 
 /// A component declaration resolves to its own schema, in its own file.
 #[test]
-fn definition_on_an_operation_id_stays_in_the_document() {
+fn definition_on_a_component_declaration_finds_its_schema() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.schemas);
-    let (line, column) = ws.locate(&ws.schemas, "    Meta:");
+    let (line, column) = schema_key(ws, "    Meta:");
     let landed = editor
-        .definition_line(&uri, line, column + 5)
+        .definition_line(&uri, line, column)
         .expect("definition on a component name");
     assert!(
         landed.is_some(),
@@ -611,7 +621,7 @@ fn rename_prepares_over_the_selector() {
     let api = url_of(&ws.openapi);
     let schemas = url_of(&ws.schemas);
     let (ref_line, ref_column) = cross_file_ref(ws);
-    let (meta_line, meta_column) = ws.locate(&ws.schemas, "    Meta:");
+    let (meta_line, meta_column) = schema_key(ws, "    Meta:");
     let (op_line, op_column) = operation_id(ws);
 
     let positions = [
@@ -621,21 +631,32 @@ fn rename_prepares_over_the_selector() {
             ref_line,
             ref_column + "$ref: 'schemas.yaml#/".len(),
         ),
-        (schemas.as_str(), meta_line, meta_column + 5),
+        (schemas.as_str(), meta_line, meta_column),
         (api.as_str(), op_line, op_column),
     ];
     for (uri, line, column) in positions {
-        let answer = editor.request(
-            "textDocument/prepareRename",
-            serde_json::json!({"textDocument": {"uri": uri}, "position": at(line, column)}),
-        );
-        if let Ok(value) = &answer
-            && let Some(range) = value.get("range")
-        {
+        let answer = editor
+            .request(
+                "textDocument/prepareRename",
+                serde_json::json!({"textDocument": {"uri": uri}, "position": at(line, column)}),
+            )
+            .unwrap_or_else(|e| panic!("prepareRename did not answer at {line}:{column}: {e}"));
+        if let Some(range) = answer.get("range") {
             assert!(
                 range["start"]["line"].as_u64().unwrap_or(0) <= (line - 1) as u64,
                 "prepareRename offered a range starting after the cursor: {range}"
             );
+        } else {
+            // Declining is only correct where there is nothing to rename. A
+            // component declaration is the one position kind that must
+            // prepare successfully.
+            if uri.ends_with("schemas.yaml") && line == meta_line {
+                let source = std::fs::read_to_string(&ws.schemas).expect("read");
+                let text = source.lines().nth(line - 1).unwrap_or("<past end>");
+                panic!(
+                    "prepareRename declined a component declaration at {line}:{column}: {text:?}"
+                );
+            }
         }
     }
 }
@@ -1335,5 +1356,42 @@ fn definition_is_not_invented_where_there_is_nothing_to_resolve() {
     assert_eq!(
         landed, None,
         "an operationId produced a definition pointing somewhere arbitrary"
+    );
+}
+
+/// The other direction: from a declaration to everything that uses it.
+///
+/// *including in other documents*. `Accounts` is declared in `schemas.yaml`
+/// and referenced from `openapi.yaml`, so a reverse lookup that reports only
+/// the declaration is not doing its job.
+///
+/// `Meta` is the wrong probe here, and was what made this look broken:
+/// nothing outside `schemas.yaml` refers to `Meta`, so a reverse lookup that
+/// found no uses elsewhere was right.
+#[test]
+fn references_from_a_declaration_find_its_uses() {
+    let (ws, editor) = shared();
+    let uri = url_of(&ws.schemas);
+    let (line, column) = schema_key(ws, "    Accounts:");
+    let value = editor
+        .request(
+            "textDocument/references",
+            serde_json::json!({
+                "textDocument": {"uri": uri},
+                "position": at(line, column),
+                "context": {"includeDeclaration": true},
+            }),
+        )
+        .expect("references from a declaration");
+    let found = value.as_array().cloned().unwrap_or_default();
+    let elsewhere = found
+        .iter()
+        .filter(|location| location.get("uri").and_then(|u| u.as_str()) != Some(uri.as_str()))
+        .count();
+    assert!(
+        elsewhere >= 2,
+        "Accounts is referenced from openapi.yaml; a reverse lookup found \
+         {elsewhere} uses in other documents out of {len} locations",
+        len = found.len()
     );
 }

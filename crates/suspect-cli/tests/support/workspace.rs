@@ -143,7 +143,12 @@ impl Workspace {
         let offset = text
             .find(needle)
             .unwrap_or_else(|| panic!("`{needle}` is not in the document"));
-        let line = text[..offset].lines().count().max(1);
+        // Count the newlines before the offset. `str::lines()` does not
+        // yield a trailing empty element, so `lines().count()` under-reports
+        // by one for any needle that starts a line — which is every
+        // indented key, and silently pointed several probes at the wrong
+        // line.
+        let line = text[..offset].matches('\n').count() + 1;
         let column = offset - text[..offset].rfind('\n').map_or(0, |n| n + 1);
         (line, column + 1)
     }
@@ -325,4 +330,41 @@ pub fn operation_count() -> usize {
                 .count()
         })
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locate_points_at_the_line_and_column_it_names() {
+        let dir = std::env::temp_dir().join("suspect-lsp-locate");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("doc.yaml");
+        // Three lines, so an off-by-one has somewhere to land.
+        let text = "first\n  indented: 1\n    deeper:\n";
+        std::fs::write(&path, text).unwrap();
+        let workspace = Workspace {
+            root: dir.clone(),
+            openapi: path.clone(),
+            schemas: path.clone(),
+            overlay: path.clone(),
+            workflow: path.clone(),
+            manifest: path.clone(),
+            data: path.clone(),
+            config: path.clone(),
+        };
+        for (needle, expected_line, expected_column) in [
+            ("first", 1usize, 1usize),
+            ("  indented", 2, 1),
+            ("    deeper", 3, 1),
+        ] {
+            let (line, column) = workspace.locate(&path, needle);
+            assert_eq!(
+                (line, column),
+                (expected_line, expected_column),
+                "`{needle}` should be at {expected_line}:{expected_column}"
+            );
+        }
+    }
 }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use suspect_low::LowDoc;
 use suspect_ref::{Workspace, WorkspaceBuilder};
 use suspect_source::{LineIndex, Source, Uri};
+use tower_lsp::lsp_types::Diagnostic;
 use tower_lsp::lsp_types::{Position, Range, SemanticToken};
 
 /// One editor-open document: the live buffer text plus the `LowDoc` parsed
@@ -47,6 +48,16 @@ pub struct State {
     /// Per-document semantic-token caches for `semanticTokens/full/delta`:
     /// the result id handed to the client plus the encoded tokens.
     pub token_cache: HashMap<Uri, (String, Vec<SemanticToken>)>,
+    /// Per-document diagnostics cache: the content epoch it was computed
+    /// for, the result id, and the findings.
+    ///
+    /// Diagnostics are both pushed and pulled, so an editor that opens a file
+    /// asks for the same lint pass twice — once the server pushes it 150ms
+    /// after the open, and once because the editor pulls. On a 63k-line
+    /// specification that pass costs seconds, and the second one is what a
+    /// hover queued behind. Keyed on the content epoch, so any edit
+    /// invalidates it.
+    pub diag_cache: HashMap<Uri, (u64, String, Vec<Diagnostic>)>,
     /// Raw initialization options captured in `initialize` for later merge.
     pub pending_init_options: Option<serde_json::Value>,
     /// Merged server configuration (initialization options < client section).
@@ -77,19 +88,24 @@ impl State {
 
     /// The reference index for the current generation, building it once
     /// and reusing it until a document changes.
-    pub fn index_for(
-        &mut self,
-        ws: &std::sync::Arc<suspect_ref::Workspace>,
-    ) -> std::sync::Arc<crate::meaning::Index> {
-        let generation = self.generation();
-        if let Some((cached, index)) = &self.index_cache
-            && *cached == generation
-        {
-            return index.clone();
+    /// The index for `generation`, if one is already built.
+    ///
+    /// Separate from building so the caller can do it *without* the lock:
+    /// `Index::build` walks the whole workspace, and doing that under the
+    /// write lock blocks every other request behind it. On a 63k-line
+    /// specification that turned an eleven-request burst into one long
+    /// queue, with each request waiting seconds for the build ahead of it.
+    #[must_use]
+    pub fn cached_index(&self, generation: u64) -> Option<std::sync::Arc<crate::meaning::Index>> {
+        match &self.index_cache {
+            Some((cached, index)) if *cached == generation => Some(index.clone()),
+            _ => None,
         }
-        let index = std::sync::Arc::new(crate::meaning::Index::build(ws));
-        self.index_cache = Some((generation, index.clone()));
-        index
+    }
+
+    /// Records an index built outside the lock.
+    pub fn store_index(&mut self, generation: u64, index: std::sync::Arc<crate::meaning::Index>) {
+        self.index_cache = Some((generation, index));
     }
 
     /// A counter that changes whenever any open document does.
