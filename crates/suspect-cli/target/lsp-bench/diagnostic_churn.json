@@ -1,1 +1,1 @@
-{"methods":[{"max_ms":12.2,"method":"textDocument/diagnostic","n":80,"p50_ms":4.3,"p90_ms":5.3,"p95_ms":6.7,"p99_ms":12.2}],"requests":80,"unanswered":0}
+{"methods":[{"max_ms":29.5,"method":"textDocument/diagnostic","n":80,"p50_ms":4.8,"p90_ms":7.8,"p95_ms":11.7,"p99_ms":29.5}],"requests":80,"unanswered":0}

@@ -492,6 +492,27 @@ fn bench_edit_churn() {
 fn bench_mixed_load() {
     let (ws, editor, site) = warmed();
     let mut bench = Bench::new();
+
+    // One round before the clock starts, so the caches are warm and this
+    // measures steady state. The cold round is not hidden: it is the only
+    // round that reaches `max` in the report, and `bench_cold_open` measures
+    // it on its own.
+    let warm = vec![
+        ("textDocument/documentSymbol".to_owned(), doc(&site.uri)),
+        (
+            "textDocument/hover".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": site.uri}, "position": at(site.operation_id.0, site.operation_id.1),
+            }),
+        ),
+        ("textDocument/diagnostic".to_owned(), doc(&site.uri)),
+        (
+            "workspace/diagnostic".to_owned(),
+            serde_json::json!({"previousResultIds": []}),
+        ),
+    ];
+    let _ = editor.request_all_timed(&warm);
+
     let started = Instant::now();
     let mut round = 0usize;
 
@@ -1211,4 +1232,67 @@ fn assert_under(bench: &Bench, method: &str, limit_ms: u64) {
         stats.p95.as_millis(),
         stats.count
     );
+}
+
+/// The cold open: the one round that pays for every cache at once.
+///
+/// Separate from the steady-state scenarios because it answers a different
+/// question — what a person waits for the *first* time they open a large
+/// specification, before any of the caching in this branch helps them.
+#[test]
+fn bench_cold_open() {
+    // Same root resolution as every other scenario, so pointing
+    // SUSPECT_BENCH_ROOT at a real project measures that project's cold
+    // open rather than the fixture's.
+    let (root, document) = match bench_root() {
+        Some(root) => {
+            let biggest = real_documents(&root)
+                .into_iter()
+                .next()
+                .map(|(path, _)| path)
+                .unwrap_or_else(|| root.join("openapi.yaml"));
+            (root, biggest)
+        }
+        None => {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let ws = Workspace::build(dir.path());
+            (ws.root, ws.openapi)
+        }
+    };
+    let editor = Editor::start(&root, editor_capabilities());
+    let api_uri = url_of(&document);
+    let text = std::fs::read_to_string(&document).expect("read");
+
+    let mut bench = Bench::new();
+    let opened = std::time::Instant::now();
+    editor.open(&document, &text);
+    let burst = vec![
+        (
+            "textDocument/hover".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri}, "position": at(40, 20),
+            }),
+        ),
+        ("textDocument/documentSymbol".to_owned(), doc(&api_uri)),
+        ("textDocument/foldingRange".to_owned(), doc(&api_uri)),
+        ("textDocument/diagnostic".to_owned(), doc(&api_uri)),
+        (
+            "workspace/diagnostic".to_owned(),
+            serde_json::json!({"previousResultIds": []}),
+        ),
+    ];
+    record(&mut bench, "cold_open", &editor.request_all_timed(&burst));
+    println!(
+        "\n  cold_open: the first burst after opening {} took {:.0}ms",
+        document
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        opened.elapsed().as_secs_f64() * 1000.0
+    );
+    finish(&bench, "cold_open", 1);
+    assert_healthy(&bench, "cold_open");
+    // Generous: this is dominated by the first lint pass over the whole
+    // workspace, whose cost is the thing worth watching, not a bound.
+    assert_under(&bench, "textDocument/hover", 120_000);
 }
