@@ -1,0 +1,1 @@
+{"methods":[{"max_ms":47.5,"method":"textDocument/semanticTokens/full","n":1,"p50_ms":47.5,"p90_ms":47.5,"p95_ms":47.5,"p99_ms":47.5},{"max_ms":50.4,"method":"textDocument/semanticTokens/full/delta","n":40,"p50_ms":3.5,"p90_ms":29.2,"p95_ms":32.8,"p99_ms":50.4}],"requests":41,"unanswered":0}

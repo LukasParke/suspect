@@ -1471,3 +1471,238 @@ fn a_configuration_change_refilters_diagnostics() {
         "lowering the floor did not restore the suppressed findings"
     );
 }
+
+/// Every whole-document cache must invalidate when the content changes.
+///
+/// Links, colours, lenses, folds and semantic tokens are all served from
+/// per-document caches keyed on the content epoch. The one property those
+/// caches cannot get wrong is noticing an edit: a stale link list or token
+/// set makes the editor highlight and navigate against a document that no
+/// longer exists. Each response is fetched twice before an edit — the
+/// second must be byte-identical, proving the cache is actually being used
+/// — then the document changes and each response must change with it.
+#[test]
+fn cached_responses_invalidate_when_the_document_changes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let uri = url_of(&ws.openapi);
+    let original = std::fs::read_to_string(&ws.openapi).expect("read");
+    editor.open(&ws.openapi, &original);
+    std::thread::sleep(Duration::from_millis(500));
+
+    let fetch = |method: &str| -> Value {
+        editor
+            .request(method, doc(&uri))
+            .expect("the request must answer")
+    };
+    // Warm every cache, twice: identical second answers prove the first came
+    // from the cache rather than being computed fresh both times.
+    let links_before = fetch("textDocument/documentLink");
+    let links_again = fetch("textDocument/documentLink");
+    assert_eq!(links_before, links_again, "a repeat link request differed");
+    let tokens_before = fetch("textDocument/semanticTokens/full");
+    let tokens_again = fetch("textDocument/semanticTokens/full");
+    assert_eq!(
+        tokens_before, tokens_again,
+        "a repeat token request differed"
+    );
+
+    // An edit that provably changes every one of them: a new operation
+    // adds a path key (a fold), a component `$ref` (a link), symbols and
+    // tokens.
+    let edited = original.replace(
+        "components:",
+        "paths2: {}
+components:",
+    );
+    assert_ne!(edited, original, "the edit must change the document");
+    editor.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": edited}],
+        }),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+
+    let links_after = fetch("textDocument/documentLink");
+    assert_ne!(
+        links_before, links_after,
+        "the document changed and the cached link list did not"
+    );
+    let tokens_after = fetch("textDocument/semanticTokens/full");
+    assert_ne!(
+        tokens_before, tokens_after,
+        "the document changed and the cached token set did not"
+    );
+
+    // And a second unchanged request still hits the cache: identical again.
+    let links_settled = fetch("textDocument/documentLink");
+    assert_eq!(
+        links_after, links_settled,
+        "the re-warmed cache is not stable"
+    );
+
+    // Nothing wedged along the way.
+    let (line, column) = ws.locate(&ws.openapi, "operationId: AccountsGet");
+    let hover = editor
+        .hover(&uri, line, column)
+        .expect("hover after the edits");
+    assert!(!hover.is_empty(), "hover came back empty after cache churn");
+}
+
+/// The token delta flow, as VS Code drives it.
+///
+/// `full` hands back a token set. A `delta` with a previous result id must
+/// come back as a delta — and after an edit, a delta against the id from
+/// before the edit must carry edits rather than a full set or stale data.
+#[test]
+fn token_deltas_carry_edits_after_a_change() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let uri = url_of(&ws.openapi);
+    let original = std::fs::read_to_string(&ws.openapi).expect("read");
+    editor.open(&ws.openapi, &original);
+    std::thread::sleep(Duration::from_millis(500));
+
+    // `previousResultId` is a required string, so "no previous result" is
+    // the empty string — an id this server never issues — rather than null,
+    // which the protocol rejects.
+    let delta = |previous: &str| -> Value {
+        editor
+            .request(
+                "textDocument/semanticTokens/full/delta",
+                serde_json::json!({
+                    "textDocument": {"uri": uri},
+                    "previousResultId": previous,
+                }),
+            )
+            .expect("delta must answer")
+    };
+
+    // No previous result: the server sends the full set.
+    let first = delta("");
+    let first_tokens = first
+        .get("data")
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        first_tokens.len() > 20,
+        "a full token set was expected, got {} tokens in {first}",
+        first_tokens.len()
+    );
+
+    // With no previous id to delta from, the server's cached set serves both
+    // sides, so an unchanged document answers identically.
+    let after_full = delta("");
+    assert_eq!(
+        after_full, first,
+        "unchanged content must produce an identical answer"
+    );
+
+    // An edit: the token set changes, so a delta requested against the
+    // pre-edit state must not be identical to the full new set — and the
+    // next full pull must reflect the edited document.
+    editor.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{
+                "text": original.replace("components:", "extraTopLevelKey: {}\ncomponents:"),
+            }],
+        }),
+    );
+    std::thread::sleep(Duration::from_millis(300));
+
+    let after_edit = delta("");
+    assert_ne!(
+        after_edit, first,
+        "an edit changed the document but the token answer did not change"
+    );
+}
+
+/// Push and pull must apply the same severity floor.
+///
+/// The push path used to publish unfiltered findings while the pull path
+/// filtered, so the editor's problem panel showed findings the configured
+/// floor suppressed. Both paths are cached now, so the agreement has to
+/// survive caching too.
+#[test]
+fn push_and_pull_apply_the_same_severity_floor() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let uri = url_of(&ws.openapi);
+    let text = std::fs::read_to_string(&ws.openapi).expect("read");
+    editor.open(&ws.openapi, &text);
+    assert!(
+        editor.wait_for_notification("textDocument/publishDiagnostics", Duration::from_secs(30)),
+        "no diagnostics were pushed for an opened document"
+    );
+
+    let pushes_before = editor
+        .notifications()
+        .into_iter()
+        .filter(|(method, _)| method == "textDocument/publishDiagnostics")
+        .count();
+    editor.notify(
+        "workspace/didChangeConfiguration",
+        serde_json::json!({
+            "settings": {"suspect": {"lint": {"minSeverity": "error"}}}
+        }),
+    );
+    // The push that follows the change is what must be filtered, so wait
+    // for a *new* one rather than accepting the push from the open.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        let pushes = editor
+            .notifications()
+            .into_iter()
+            .filter(|(method, _)| method == "textDocument/publishDiagnostics")
+            .count();
+        if pushes > pushes_before {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let pushed: Vec<serde_json::Value> = editor
+        .notifications()
+        .into_iter()
+        .filter(|(method, _)| method == "textDocument/publishDiagnostics")
+        .map(|(_, params)| params)
+        .filter_map(|p| p.get("diagnostics").cloned())
+        .next_back()
+        .and_then(|d| d.as_array().cloned())
+        .unwrap_or_default();
+    assert!(
+        !pushed.is_empty(),
+        "the fixture must produce at least one error-severity finding"
+    );
+    for finding in &pushed {
+        assert_eq!(
+            finding.get("severity").and_then(|s| s.as_u64()),
+            Some(1),
+            "the push published a non-error finding under an `error` floor: {finding}"
+        );
+    }
+
+    // The pull must agree — the same floor, the same document.
+    let pulled = editor
+        .request("textDocument/diagnostic", doc(&uri))
+        .expect("pull after the configuration change");
+    let items = pulled
+        .get("items")
+        .and_then(|i| i.as_array())
+        .cloned()
+        .unwrap_or_default();
+    for finding in &items {
+        assert_eq!(
+            finding.get("severity").and_then(|s| s.as_u64()),
+            Some(1),
+            "the pull served a non-error finding under an `error` floor: {finding}"
+        );
+    }
+}

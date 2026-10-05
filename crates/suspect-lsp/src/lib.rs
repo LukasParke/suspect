@@ -3150,30 +3150,47 @@ mod burst_tests {
         budget: f64,
     ) -> Option<tower_lsp::jsonrpc::Response> {
         let deadline = std::time::Instant::now() + Duration::from_secs_f64(budget);
-        // One unique id per attempt. The id arithmetic this used to derive
-        // from remaining-milliseconds can repeat across retries, and a
-        // request abandoned by a timeout is still in flight in the server —
-        // so the duplicate id is rejected as invalid and the retry reads as
-        // a hover error. On a slow machine, where the first attempt after a
-        // workspace rebuild exceeds the per-attempt timeout, every retry
-        // hits that.
-        let mut attempt = 0i64;
+        // Ids come from a process-wide counter and never repeat. tower-lsp
+        // registers every request id when it arrives and only unregisters
+        // it when the handler completes; abandoning a request by timeout
+        // leaves the id registered, and a later request that reuses it is
+        // answered `InvalidRequest`. A per-call counter was not enough —
+        // each hover_within call restarted it, so a leaked id from one
+        // notification's hover collided with the next one's first attempt.
+        // Reproduced deterministically by shrinking the per-attempt timeout
+        // (HOVER_ATTEMPT_MS) until attempts get abandoned.
+        static NEXT_ID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(20_000);
+        // Each abandoned attempt doubles the next one's budget, so a slow
+        // first attempt cannot starve: given enough retries, one attempt is
+        // always given more time than the request needs. Abandoning also
+        // cancels — a dropped request leaves its id registered in the
+        // server's cancellation map, and cancelling is both the correct
+        // protocol move and what keeps that map clean.
+        let mut attempt_ms = std::env::var("HOVER_ATTEMPT_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(250u64);
         loop {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() {
                 return None;
             }
-            attempt += 1;
-            let id = 20_000 + attempt;
+            let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let answer = in_flight(
                 service,
                 id,
                 "textDocument/hover",
                 serde_json::json!({"textDocument": td, "position": at}),
             );
-            match tokio::time::timeout(left.min(Duration::from_millis(250)), answer).await {
+            let budget = left.min(Duration::from_millis(attempt_ms));
+            match tokio::time::timeout(budget, answer).await {
                 Ok(Some(response)) => return Some(response),
-                _ => tokio::time::sleep(Duration::from_millis(50)).await,
+                _ => {
+                    let _ = in_flight(service, 0, "$/cancelRequest", serde_json::json!({"id": id}))
+                        .await;
+                    attempt_ms = attempt_ms.saturating_mul(2).min(left.as_millis() as u64);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
             }
         }
     }
@@ -3473,8 +3490,16 @@ mod burst_tests {
             let after = hover_within(&mut service, &td, &at, 20.0)
                 .await
                 .unwrap_or_else(|| panic!("{method} wedged the server: hover never answered"));
+            // An error response has no result, and the interesting question
+            // is always which error — so print it rather than guessing.
+            let Some(result) = after.result() else {
+                panic!(
+                    "{method} made hover answer with an error: {:?}",
+                    after.error()
+                );
+            };
             assert!(
-                !after.result().expect("hover returned a result").is_null(),
+                !result.is_null(),
                 "{method} wedged the server: hover came back empty"
             );
         }
