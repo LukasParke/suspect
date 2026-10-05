@@ -470,9 +470,20 @@ fn bench_edit_churn() {
                 "textDocument": {"uri": site.uri}
             }),
         );
+        // Every cached whole-document response, so the cost an edit
+        // actually incurs — invalidate, rebuild once, re-warm — is measured
+        // rather than just the two that happen to be slow.
         let batch = vec![
             ("textDocument/documentSymbol".to_owned(), doc(&site.uri)),
             ("textDocument/diagnostic".to_owned(), doc(&site.uri)),
+            ("textDocument/documentLink".to_owned(), doc(&site.uri)),
+            ("textDocument/foldingRange".to_owned(), doc(&site.uri)),
+            ("textDocument/codeLens".to_owned(), doc(&site.uri)),
+            ("textDocument/documentColor".to_owned(), doc(&site.uri)),
+            (
+                "textDocument/semanticTokens/full".to_owned(),
+                doc(&site.uri),
+            ),
         ];
         record(&mut bench, "edit_churn", &editor.request_all_timed(&batch));
     }
@@ -1303,4 +1314,72 @@ fn bench_cold_open() {
     // Generous: this is dominated by the first lint pass over the whole
     // workspace, whose cost is the thing worth watching, not a bound.
     assert_under(&bench, "textDocument/hover", 120_000);
+}
+
+/// The token delta flow — the path a real editors take.
+///
+/// VS Code asks `full` once and then `full/delta` with the previous result
+/// id, on every scroll and every edit. The delta path used to recompute
+/// every token on each request; this measures the whole flow: full, then
+/// deltas against the id the server handed back, with edits between some
+/// rounds so both the unchanged fast path and the real-delta path run.
+#[test]
+fn bench_token_delta() {
+    let (_ws, editor, site) = warmed();
+    let mut bench = Bench::new();
+    // `full` carries no result id, so the client's first delta has nothing
+    // to reference — the empty string is an id this server never issues.
+    let mut previous = String::new();
+    for round in 0usize..40 {
+        if round == 0 {
+            let (answer, elapsed) =
+                editor.request_timed("textDocument/semanticTokens/full", doc(&site.uri));
+            bench.record(
+                "token_delta",
+                "textDocument/semanticTokens/full",
+                elapsed,
+                &answer.map_err(|e| e.to_string()),
+            );
+        }
+        let (answer, elapsed) = editor.request_timed(
+            "textDocument/semanticTokens/full/delta",
+            serde_json::json!({
+                "textDocument": {"uri": site.uri},
+                "previousResultId": previous,
+            }),
+        );
+        let recorded = match &answer {
+            Ok(value) => Ok(value.clone()),
+            Err(err) => Err(err.to_string()),
+        };
+        bench.record(
+            "token_delta",
+            "textDocument/semanticTokens/full/delta",
+            elapsed,
+            &recorded,
+        );
+        if let Ok(value) = &answer
+            && let Some(id) = value.get("resultId").and_then(|v| v.as_str())
+        {
+            previous = id.to_owned();
+        }
+        // Every fourth round, an edit: the token set changes, the id moves,
+        // and the delta becomes real work.
+        if round.is_multiple_of(4) {
+            editor.notify_timed(
+                "textDocument/didChange",
+                serde_json::json!({
+                    "textDocument": {"uri": site.uri, "version": 400 + round as u64},
+                    "contentChanges": [{
+                        "range": {"start": at(site.operation_id.0, site.operation_id.1 + 5),
+                                  "end": at(site.operation_id.0, site.operation_id.1 + 5)},
+                        "text": "x",
+                    }],
+                }),
+            );
+        }
+    }
+    finish(&bench, "token_delta", 40);
+    assert_healthy(&bench, "token_delta");
+    assert_under(&bench, "textDocument/semanticTokens/full/delta", 30_000);
 }

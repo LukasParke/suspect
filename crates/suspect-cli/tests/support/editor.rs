@@ -114,13 +114,22 @@ impl Editor {
     /// `capabilities` is the client's own advertised capability set; pass
     /// [`editor_capabilities`] for a realistic one.
     pub fn start(root: &Path, capabilities: serde_json::Value) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_suspect"));
+        // The server binary defaults to this crate's own build, and
+        // `SUSPECT_BENCH_EXE` overrides it — which is how a run against an
+        // older revision is compared with a run against this one: the same
+        // scenarios, the same harness, a different server.
+        let default = env!("CARGO_BIN_EXE_suspect");
+        let binary = std::env::var("SUSPECT_BENCH_EXE").unwrap_or_else(|_| default.to_owned());
+        let mut command = Command::new(binary);
         command
             .arg("lsp")
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            // Server stderr goes to the test's stderr when --nocapture is
+            // on, which is how eprintln diagnostics become visible while a
+            // failing test is being chased.
+            .stderr(Stdio::inherit());
         // The whole workspace suite runs these tests in parallel, so twenty
         // servers can be starting at once. A spawn that comes up without its
         // pipes is resource exhaustion, not a broken server, and one retry
