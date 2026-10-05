@@ -46,6 +46,9 @@ const notebook_1 = require("./notebook");
 const runner_1 = require("./runner");
 const generation_1 = require("./generation");
 const testExplorer_1 = require("./testExplorer");
+const overview_1 = require("./overview");
+const status_1 = require("./status");
+const config_1 = require("./config");
 const workflowsView_1 = require("./workflowsView");
 let client;
 let gateway;
@@ -59,6 +62,11 @@ function activate(context) {
     context.subscriptions.push(gatewayStatus);
     (0, testExplorer_1.registerTestExplorer)(context);
     (0, workflowsView_1.registerWorkflowsView)(context);
+    (0, overview_1.registerOverview)(context);
+    (0, status_1.registerStatus)(context);
+    context.subscriptions.push(vscode.commands.registerCommand('suspect.showOverview', () => {
+        void vscode.commands.executeCommand('suspect.overview.focus');
+    }), vscode.commands.registerCommand('suspect.setSeverityFloor', () => (0, config_1.setSeverityFloor)()), vscode.commands.registerCommand('suspect.openSuspectConfig', () => (0, config_1.openSuspectConfig)()));
     (0, notebook_1.registerNotebook)(context);
     sdkGeneration = registerSdkGeneration(context);
     startClient();

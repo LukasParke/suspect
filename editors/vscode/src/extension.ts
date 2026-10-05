@@ -11,6 +11,9 @@ import {
 	SdkCompatibilityProfile, readSdkCompatibilityProfiles, SdkSessionHandle, SdkSessionIdentity, SdkSessionRecord, startSdkSession,
 } from './generation';
 import { registerTestExplorer } from './testExplorer';
+import { registerOverview } from './overview';
+import { registerStatus } from './status';
+import { openSuspectConfig, setSeverityFloor } from './config';
 import { registerWorkflowsView } from './workflowsView';
 
 interface GatewayState {
@@ -42,6 +45,15 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	registerTestExplorer(context);
 	registerWorkflowsView(context);
+	registerOverview(context);
+	registerStatus(context);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('suspect.showOverview', () => {
+			void vscode.commands.executeCommand('suspect.overview.focus');
+		}),
+		vscode.commands.registerCommand('suspect.setSeverityFloor', () => setSeverityFloor()),
+		vscode.commands.registerCommand('suspect.openSuspectConfig', () => openSuspectConfig()),
+	);
 	registerNotebook(context);
 	sdkGeneration = registerSdkGeneration(context);
 

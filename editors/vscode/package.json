@@ -82,6 +82,17 @@
 					"minimum": 1,
 					"maximum": 65535,
 					"description": "TCP port bound by the mock gateway on 127.0.0.1."
+				},
+				"suspect.lint.minSeverity": {
+					"type": "string",
+					"enum": [
+						"error",
+						"warning",
+						"information",
+						"hint"
+					],
+					"default": "",
+					"description": "Minimum severity of findings reported. Empty defers to the committed .suspect.yaml; the committed floor still applies below what this allows."
 				}
 			}
 		},
@@ -129,6 +140,18 @@
 			{
 				"command": "_suspect.toggleGateway",
 				"title": "Suspect: Toggle Gateway"
+			},
+			{
+				"command": "suspect.showOverview",
+				"title": "Suspect: Show Overview"
+			},
+			{
+				"command": "suspect.setSeverityFloor",
+				"title": "Suspect: Set Findings Floor"
+			},
+			{
+				"command": "suspect.openSuspectConfig",
+				"title": "Suspect: Open Configuration"
 			}
 		],
 		"viewsContainers": {
@@ -142,6 +165,10 @@
 		},
 		"views": {
 			"suspect-explorer": [
+				{
+					"id": "suspect.overview",
+					"name": "Overview"
+				},
 				{
 					"id": "suspect.workflows",
 					"name": "Workflows"
