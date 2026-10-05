@@ -3150,12 +3150,21 @@ mod burst_tests {
         budget: f64,
     ) -> Option<tower_lsp::jsonrpc::Response> {
         let deadline = std::time::Instant::now() + Duration::from_secs_f64(budget);
+        // One unique id per attempt. The id arithmetic this used to derive
+        // from remaining-milliseconds can repeat across retries, and a
+        // request abandoned by a timeout is still in flight in the server —
+        // so the duplicate id is rejected as invalid and the retry reads as
+        // a hover error. On a slow machine, where the first attempt after a
+        // workspace rebuild exceeds the per-attempt timeout, every retry
+        // hits that.
+        let mut attempt = 0i64;
         loop {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() {
                 return None;
             }
-            let id = 700 + (budget * 1000.0) as i64 - (left.as_millis() as i64 % 1000);
+            attempt += 1;
+            let id = 20_000 + attempt;
             let answer = in_flight(
                 service,
                 id,
