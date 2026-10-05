@@ -1,12 +1,13 @@
-// Tests for the new native-UI surface: the pure logic behind the Overview
-// view, the status item, and the config commands — plus the manifest
-// contract for everything the new UI contributes.
+// Tests for the native UI surface: the pure logic behind the Project view
+// and the single Testing controller — manifest reading, Arazzo discovery
+// by content, test-ID construction, run grouping, CI stage parsing, the
+// severity-floor resolution — plus the manifest contract for everything
+// the UI contributes.
 
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 
 // The compiled modules import 'vscode', which does not exist outside the
 // extension host. Extract the pure functions by evaluating the source
@@ -14,8 +15,6 @@ const os = require('node:os');
 function loadModule(name, needs, modules = new Map()) {
 	const source = fs.readFileSync(path.join(__dirname, '..', 'dist', `${name}.js`), 'utf8');
 	const module = { exports: {} };
-	// The compiled modules require each other by path; serve those from
-	// the same evaluated-module cache.
 	const cache = modules;
 	const wrapper = new Function('require', 'module', 'exports', source);
 	const stubRequire = (what) => {
@@ -36,108 +35,202 @@ function loadModule(name, needs, modules = new Map()) {
 	return module.exports;
 }
 
-test('severity counting matches the diagnostic scale', () => {
-	const { countSeverities, statusText } = loadModule('status', {});
-	assert.deepEqual(
-		countSeverities([{ severity: 0 }, { severity: 0 }, { severity: 1 }, { severity: 3 }]),
-		{ error: 2, warning: 1, information: 0, hint: 1 },
-	);
-	// The blocking severities lead; a clean document says so.
-	assert.match(statusText({ error: 2, warning: 1, information: 0, hint: 0 }), /error/);
-	assert.match(statusText({ error: 0, warning: 0, information: 0, hint: 0 }), /check/);
-});
+const packageManifest = JSON.parse(
+	fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'),
+);
 
-test('project detection finds the config surface', () => {
-	const { detectProjectFiles } = loadModule('overview', {});
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'suspect-ui-'));
-	fs.writeFileSync(path.join(dir, 'openapi.yaml'), 'openapi: 3.1.0\n');
-	fs.writeFileSync(path.join(dir, '.suspect.yaml'), 'lint: {}\n');
-	fs.writeFileSync(path.join(dir, 'suspect.project.json'), '{}\n');
-	fs.mkdirSync(path.join(dir, 'overlays'));
-	fs.writeFileSync(path.join(dir, 'overlays', 'public.yaml'), 'overlay: 1.0.0\n');
-	fs.mkdirSync(path.join(dir, 'workflows'));
-	fs.writeFileSync(path.join(dir, 'workflows', 'health.arazzo.yaml'), 'arazzo: 1.0.0\n');
+// The shape of the user's real manifest: entry is not `openapi.yaml`, the
+// suites are not `*.arazzo.yaml`.
+const PLEX_LIKE = {
+	version: 1,
+	name: 'plex-api-spec',
+	entry: 'plex-api-spec.yaml',
+	publish: { output: '.suspect/spec.yaml', profiles: { cloud: ['profiles/cloud.overlay.yaml'] } },
+	lint: { min_severity: 'warning' },
+	codegen: [
+		{ name: 'typescript', profile: 'typescript-http', package_name: '@plexapi/plex-api', package_version: '1.1.1', out: '.suspect/sdk/typescript' },
+		{ name: 'go', profile: 'go-http', package_name: 'github.com/plexapi/plex-api', package_version: '1.1.1', out: '.suspect/sdk/go' },
+	],
+	tests: {
+		arazzo: ['workflows/server-health-check.yaml', 'workflows/browse-library.yaml'],
+		base_url: 'http://localhost:32400',
+	},
+};
 
-	const files = detectProjectFiles(dir);
-	assert.equal(files.entry, 'openapi.yaml');
-	assert.equal(files.configs.length, 2);
-	assert.equal(files.overlays.length, 1);
-	assert.equal(files.workflows.length, 1);
+test('the project manifest is read whole: entry, profiles, SDK targets, tests, floor', () => {
+	const { readProjectManifest, readManifestTests } = loadModule('project', {});
+	const manifest = readProjectManifest(JSON.stringify(PLEX_LIKE));
+	assert.equal(manifest.name, 'plex-api-spec');
+	assert.equal(manifest.entry, 'plex-api-spec.yaml');
+	assert.deepEqual(manifest.profiles, [{ name: 'cloud', overlays: ['profiles/cloud.overlay.yaml'] }]);
+	assert.deepEqual(manifest.codegen.map((t) => [t.name, t.profile, t.packageName, t.packageVersion]), [
+		['typescript', 'typescript-http', '@plexapi/plex-api', '1.1.1'],
+		['go', 'go-http', 'github.com/plexapi/plex-api', '1.1.1'],
+	]);
+	assert.deepEqual(manifest.tests, {
+		arazzo: ['workflows/server-health-check.yaml', 'workflows/browse-library.yaml'],
+		base_url: 'http://localhost:32400',
+		cassette: undefined,
+	});
+	assert.equal(manifest.lintMinSeverity, 'warning');
 
-	const empty = detectProjectFiles(fs.mkdtempSync(path.join(os.tmpdir(), 'suspect-empty-')));
-	assert.equal(empty.entry, undefined);
-	assert.equal(empty.configs.length, 0);
-});
-
-test('the manifest carries the new UI surface consistently', () => {
-	const manifest = JSON.parse(
-		fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'),
-	);
-	const commands = new Set(manifest.contributes.commands.map((c) => c.command));
-
-	// The Overview view exists and is first in the container.
-	const views = manifest.contributes.views['suspect-explorer'];
-	assert.equal(views[0].id, 'suspect.overview', 'the Overview leads the activity-bar view list');
-
-	// Every command the code registers is contributed, and none the
-	// manifest contributes is private-underscored without reason.
-	for (const needed of [
-		'suspect.showOverview',
-		'suspect.setSeverityFloor',
-		'suspect.openSuspectConfig',
-	]) {
-		assert.ok(commands.has(needed), `command ${needed} is not in the manifest`);
-	}
-
-	// No menu references a command that does not exist.
-	const menus = manifest.contributes.menus || {};
-	for (const entries of Object.values(menus)) {
-		for (const entry of entries) {
-			if (entry.command !== undefined) {
-				assert.ok(
-					commands.has(entry.command),
-					`menu references unknown command ${entry.command}`,
-				);
-			}
-		}
-	}
-
-	// The floor setting is the shape the server reads live.
-	const floor = manifest.contributes.configuration.properties['suspect.lint.minSeverity'];
-	assert.deepEqual(floor.enum, ['error', 'warning', 'information', 'hint']);
-});
-
-test('contract suite logic: manifest tests and CI stage parsing', () => {
-	const { readManifestTests, parseCiStages } = loadModule('contractSuite', {});
-
-	// The tests section of a real manifest.
-	const manifest = {
-		name: 'demo', entry: 'openapi.yaml',
-		tests: { arazzo: ['workflows/health.arazzo.yaml'], base_url: 'http://localhost:32400' },
-	};
-	const tests = readManifestTests(JSON.stringify(manifest));
-	assert.deepEqual(tests, { arazzo: ['workflows/health.arazzo.yaml'], base_url: 'http://localhost:32400', cassette: undefined });
+	// The tests-only reader is the same reader.
+	assert.deepEqual(readManifestTests(JSON.stringify(PLEX_LIKE)), manifest.tests);
 	assert.equal(readManifestTests('{"name":"x"}'), undefined, 'no tests section → undefined');
-	assert.equal(readManifestTests('{not json'), undefined, 'unparseable → undefined');
+	assert.equal(readProjectManifest('{not json'), undefined, 'unparseable → undefined');
+	assert.equal(readProjectManifest('[1,2]'), undefined, 'non-object → undefined');
 
-	// A cassette turns the suite offline.
-	const offline = readManifestTests(JSON.stringify({
-		tests: { arazzo: ['a.yaml'], base_url: 'http://x', cassette: 'tapes/demo' },
-	}));
-	assert.equal(offline.cassette, 'tapes/demo');
+	// A cassette turns the suite offline; a minimal manifest has empty lists, not crashes.
+	const offline = readProjectManifest(JSON.stringify({ tests: { arazzo: ['a.yaml'], base_url: 'http://x', cassette: 'tapes/demo' } }));
+	assert.equal(offline.tests.cassette, 'tapes/demo');
+	assert.deepEqual(offline.profiles, []);
+	assert.deepEqual(offline.codegen, []);
+	assert.equal(offline.entry, undefined);
+});
 
-	// The ci --format json document shape.
+test('Arazzo documents are recognised by content, not by file name', () => {
+	const { looksLikeArazzo, undeclaredDocuments } = loadModule('project', {});
+	assert.ok(looksLikeArazzo("arazzo: '1.0.0'\ninfo:\n  title: x\n"));
+	assert.ok(looksLikeArazzo('# comment\narazzo: 1.0.1\n'));
+	assert.ok(!looksLikeArazzo('openapi: 3.1.0\ninfo:\n  title: x\n'));
+	assert.ok(!looksLikeArazzo('  arazzo: 1.0.0\n'), 'an indented key is not the document version');
+	assert.ok(!looksLikeArazzo('description: the arazzo: format\n'));
+
+	// Documents the manifest declares are the contract; the rest are listed apart.
+	assert.deepEqual(
+		undeclaredDocuments(['/p/workflows/a.yaml', '/p/workflows/b.yaml', '/p/extra.yaml'], ['/p/workflows/a.yaml', '/p/workflows/b.yaml']),
+		['/p/extra.yaml'],
+	);
+});
+
+test('test IDs never carry the NUL delimiter VS Code rejects', () => {
+	// The exact failure the Testing view showed nothing for:
+	//   Error: Test IDs may not include the "\0" symbol
+	// thrown from createTestItem inside the resolve handler, before
+	// items.replace ever ran.
+	const { testId, TEST_ID_FORBIDDEN } = loadModule('project', {});
+	assert.equal(TEST_ID_FORBIDDEN, '\u0000');
+	const id = testId('suite', '/p/suspect.project.json', '/p/workflows/health.yaml', 'healthCheck', 'checkIdentity');
+	assert.ok(!id.includes('\u0000'));
+	assert.notEqual(
+		testId('suite', '/p/a.yaml', 'wf'),
+		testId('suite', '/p/a.yaml', 'wf', 'step'),
+		'parent and child ids differ',
+	);
+	assert.throws(() => testId('a', 'b\u0000c'), /NUL/);
+});
+
+test('a run selection groups into the fewest suspect test invocations', () => {
+	const { groupJobs } = loadModule('testing', {});
+	const base = { cwd: '/p', baseUrl: 'http://localhost:32400' };
+	const jobs = groupJobs([
+		{ ...base, file: '/p/a.yaml', workflowId: 'one' },
+		{ ...base, file: '/p/a.yaml', workflowId: 'two' },
+		{ ...base, file: '/p/a.yaml', workflowId: 'one' },
+		{ ...base, file: '/p/b.yaml' },
+		{ ...base, file: '/p/b.yaml', workflowId: 'ignored-because-the-document-runs-whole' },
+		{ ...base, file: '/p/c.yaml', workflowId: 'x', cassette: '/p/tapes/c' },
+	]);
+	assert.deepEqual(jobs.map((j) => [j.file, j.workflows, j.cassette]), [
+		['/p/a.yaml', ['one', 'two'], undefined],
+		['/p/b.yaml', undefined, undefined],
+		['/p/c.yaml', ['x'], '/p/tapes/c'],
+	]);
+	assert.deepEqual(groupJobs([]), []);
+});
+
+test('CI stage results are read from suspect ci --format json', () => {
+	const { parseCiStages } = loadModule('testing', {});
 	const ci = parseCiStages(JSON.stringify({
+		format: 'suspect.ci.v1',
 		projects: [{ name: 'demo', stages: [
-			{ stage: 'validate', passed: false, errors: 2, warnings: 58, summary: 'spec.yaml' },
-			{ stage: 'lint', passed: true, errors: 0, warnings: 745, summary: 'ruleset' },
+			{ stage: 'validate', passed: false, errors: 16, warnings: 58, summary: '/p/.suspect/spec.yaml' },
+			{ stage: 'lint', passed: true, errors: 0, warnings: 745, summary: 'built-in ruleset, at or above Warning' },
+			{ stage: 'breaking', passed: true, errors: 0, warnings: 0, summary: 'no --baseline: pass a git ref to gate on' },
 		] }],
 	}));
-	assert.equal(ci.length, 2);
-	assert.equal(ci[0].stage, 'validate');
-	assert.equal(ci[0].passed, false);
-	assert.equal(ci[1].passed, true);
+	assert.deepEqual(ci.map((s) => [s.stage, s.passed, s.errors, s.warnings]), [
+		['validate', false, 16, 58],
+		['lint', true, 0, 745],
+		['breaking', true, 0, 0],
+	]);
+	assert.match(ci[2].summary, /baseline/);
 	// Tolerance for malformed documents: the run still reports honestly.
 	assert.deepEqual(parseCiStages('not json'), []);
 	assert.deepEqual(parseCiStages('{"projects":[]}'), []);
+	assert.deepEqual(parseCiStages('{"projects":[{"stages":"nope"}]}'), []);
+});
+
+test('the severity floor resolves by precedence and names its source', () => {
+	const { resolveFloor } = loadModule('config', {});
+	assert.deepEqual(resolveFloor({}), { value: 'hint', source: 'default' });
+	assert.deepEqual(resolveFloor({ manifest: 'warning' }), { value: 'warning', source: 'suspect.project.json' });
+	assert.deepEqual(
+		resolveFloor({ manifest: 'warning', workspaceYaml: '# policy\nlint:\n  # floor\n  min_severity: error\n' }),
+		{ value: 'error', source: '.suspect.yaml' },
+	);
+	assert.deepEqual(
+		resolveFloor({ setting: 'information', manifest: 'warning', workspaceYaml: 'lint:\n  min_severity: error\n' }),
+		{ value: 'information', source: 'editor setting' },
+	);
+	assert.deepEqual(resolveFloor({ setting: '', workspaceYaml: 'lint: {}\n' }), { value: 'hint', source: 'default' });
+});
+
+test('the extension manifest contributes one view, one controller, and commands that exist', () => {
+	const { contributes } = packageManifest;
+	const commands = new Set(contributes.commands.map((c) => c.command));
+
+	// One side-bar view, with welcome content for workspaces without a manifest.
+	const views = contributes.views['suspect-explorer'];
+	assert.equal(views.length, 1, 'the container holds exactly one view');
+	assert.equal(views[0].id, 'suspect.project');
+	assert.ok(contributes.viewsWelcome.some((w) => w.view === 'suspect.project' && /suspect\.project\.json/.test(w.contents)));
+
+	// The surfaces that were removed stay removed.
+	for (const gone of ['suspect.overview', 'suspect.workflows']) {
+		assert.ok(!views.some((v) => v.id === gone), `${gone} is no longer contributed`);
+	}
+	for (const gone of ['suspect.showOverview', 'suspect.contract.refresh', 'suspect.tests.refresh', 'suspect.workflows.refresh']) {
+		assert.ok(!commands.has(gone), `${gone} is no longer a command`);
+	}
+
+	// Every command the code registers is contributed.
+	const registered = new Set();
+	for (const file of fs.readdirSync(path.join(__dirname, '..', 'src'))) {
+		const source = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
+		for (const match of source.matchAll(/registerCommand\('([^']+)'/g)) registered.add(match[1]);
+	}
+	for (const name of registered) {
+		assert.ok(commands.has(name), `registered command ${name} is not in the manifest`);
+	}
+
+	// No menu references a command that does not exist; implementation
+	// detail stays out of the palette.
+	for (const entries of Object.values(contributes.menus)) {
+		for (const entry of entries) {
+			assert.ok(commands.has(entry.command), `menu references unknown command ${entry.command}`);
+		}
+	}
+	const hidden = new Set(contributes.menus.commandPalette.filter((e) => e.when === 'false').map((e) => e.command));
+	assert.ok(hidden.has('_suspect.toggleGateway'));
+	assert.ok(hidden.has('suspect.project.refresh'));
+
+	// The activation events cover projects without a single *.arazzo.yaml.
+	assert.ok(packageManifest.activationEvents.includes('workspaceContains:**/suspect.project.json'));
+
+	// The settings the Testing view reads exist in the shape the code expects.
+	const props = contributes.configuration.properties;
+	assert.deepEqual(props['suspect.lint.minSeverity'].enum, ['error', 'warning', 'information', 'hint']);
+	assert.equal(props['suspect.ci.baseline'].type, 'string');
+});
+
+test('only one test controller is created', () => {
+	// Two controllers with overlapping content read as two products in the
+	// Testing view; the tree is one controller with groups.
+	const created = [];
+	for (const file of fs.readdirSync(path.join(__dirname, '..', 'src'))) {
+		const source = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
+		for (const match of source.matchAll(/createTestController\('([^']+)',\s*'([^']+)'\)/g)) created.push(match.slice(1));
+	}
+	assert.deepEqual(created, [['suspect', 'Suspect']]);
 });

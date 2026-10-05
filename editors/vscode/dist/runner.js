@@ -90,10 +90,9 @@ function gatewayPort() {
     return config().get('gatewayPort') ?? 8080;
 }
 /**
- * The options-aware runner behind both the live workflow explorer and the
- * contract suite: the contract suite passes the manifest's base URL and
- * cassette so it runs what the project declared, not what the editor has
- * configured.
+ * The options-aware runner behind the Testing view: suites a manifest
+ * declares pass its base URL and cassette so they run what the project
+ * declared, not what the editor has configured.
  */
 function spawnSuspectRunWith(arazzoPath, options, onEvent, binary = suspectBinary()) {
     const args = ['test', arazzoPath, '--base-url', options.baseUrl ?? testBaseUrl(), '--report', 'ndjson'];
@@ -107,7 +106,7 @@ function spawnSuspectRunWith(arazzoPath, options, onEvent, binary = suspectBinar
     let killed = false;
     const done = new Promise((resolve, reject) => {
         try {
-            child = cp.spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+            child = cp.spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: options.cwd });
         }
         catch (err) {
             reject(err instanceof Error ? err : new Error(String(err)));

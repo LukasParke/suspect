@@ -11,7 +11,9 @@
 	"activationEvents": [
 		"onLanguage:yaml",
 		"onLanguage:json",
-		"workspaceContains:**/*.arazzo.yaml"
+		"workspaceContains:**/suspect.project.json",
+		"workspaceContains:**/.suspect.yaml",
+		"workspaceContains:**/*.arazzo.{yaml,yml}"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
@@ -74,7 +76,7 @@
 				"suspect.testBaseUrl": {
 					"type": "string",
 					"default": "http://localhost:8080",
-					"description": "Base URL prepended to operation paths when running workflow tests."
+					"description": "Base URL for Arazzo workflows no project manifest declares. Suites listed under a manifest's tests.arazzo run against that manifest's base_url instead."
 				},
 				"suspect.gatewayPort": {
 					"type": "number",
@@ -93,6 +95,11 @@
 					],
 					"default": "",
 					"description": "Minimum severity of findings reported. Empty defers to the committed .suspect.yaml; the committed floor still applies below what this allows."
+				},
+				"suspect.ci.baseline": {
+					"type": "string",
+					"default": "",
+					"description": "Git ref the Breaking gate stage compares the spec against (passed as `suspect ci --baseline`). Empty runs the stage without a baseline, which passes vacuously."
 				}
 			}
 		},
@@ -103,11 +110,11 @@
 			},
 			{
 				"command": "suspect.startGateway",
-				"title": "Suspect: Start Gateway"
+				"title": "Suspect: Start Mock Gateway"
 			},
 			{
 				"command": "suspect.stopGateway",
-				"title": "Suspect: Stop Gateway"
+				"title": "Suspect: Stop Mock Gateway"
 			},
 			{
 				"command": "suspect.genPreset",
@@ -135,27 +142,24 @@
 			},
 			{
 				"command": "suspect.openNotebook",
-				"title": "Suspect: Open Notebook"
+				"title": "Suspect: Open Workflow as Notebook"
 			},
 			{
 				"command": "_suspect.toggleGateway",
-				"title": "Suspect: Toggle Gateway"
-			},
-			{
-				"command": "suspect.showOverview",
-				"title": "Suspect: Show Overview"
+				"title": "Suspect: Toggle Mock Gateway"
 			},
 			{
 				"command": "suspect.setSeverityFloor",
-				"title": "Suspect: Set Findings Floor"
+				"title": "Suspect: Set Minimum Finding Severity"
 			},
 			{
 				"command": "suspect.openSuspectConfig",
 				"title": "Suspect: Open Configuration"
 			},
 			{
-				"command": "suspect.contract.refresh",
-				"title": "Suspect: Refresh Contract Tests"
+				"command": "suspect.project.refresh",
+				"title": "Suspect: Refresh Project View",
+				"icon": "$(refresh)"
 			}
 		],
 		"viewsContainers": {
@@ -170,12 +174,10 @@
 		"views": {
 			"suspect-explorer": [
 				{
-					"id": "suspect.overview",
-					"name": "Overview"
-				},
-				{
-					"id": "suspect.workflows",
-					"name": "Workflows"
+					"id": "suspect.project",
+					"name": "Project",
+					"icon": "media/suspect.svg",
+					"contextualTitle": "Suspect"
 				}
 			]
 		},
@@ -194,16 +196,20 @@
 			}
 		],
 		"menus": {
-			"view/item/context": [
+			"view/title": [
 				{
-					"command": "suspect.runWorkflow",
-					"when": "view == suspect.workflows && viewItem == suspectWorkflow",
-					"group": "inline@1"
+					"command": "suspect.project.refresh",
+					"when": "view == suspect.project",
+					"group": "navigation"
 				}
 			],
 			"commandPalette": [
 				{
 					"command": "_suspect.toggleGateway",
+					"when": "false"
+				},
+				{
+					"command": "suspect.project.refresh",
 					"when": "false"
 				}
 			]
@@ -262,6 +268,13 @@
 						"string.other"
 					]
 				}
+			}
+		],
+		"viewsWelcome": [
+			{
+				"view": "suspect.project",
+				"contents": "No suspect.project.json in this workspace.\n\nA project manifest names the entry spec, publish profiles, SDK targets and contract-test suites; this view shows them and the Testing view runs them.\n\nArazzo workflows are still discovered by content and listed in the Testing view.\n[Open Testing](command:workbench.view.testing.focus)\n[Open Settings](command:workbench.action.openWorkspaceSettings?%22suspect%22)",
+				"when": "suspect.hasProject == false"
 			}
 		]
 	},

@@ -6,9 +6,9 @@
 // are live controls, not "restart and pray": pick a floor, the editor and
 // the Problems panel re-filter within the session.
 
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { detectProjectFiles } from './overview';
 
 const FLOORS: { label: string; detail: string; value: string }[] = [
 	{ label: 'Error', detail: 'only errors — the publish gate', value: 'error' },
@@ -17,30 +17,47 @@ const FLOORS: { label: string; detail: string; value: string }[] = [
 	{ label: 'Hint', detail: 'show everything', value: 'hint' },
 ];
 
-/** The configured floor, falling back to what a committed `.suspect.yaml` says. */
-export async function currentFloor(): Promise<string> {
-	const fromSettings = vscode.workspace.getConfiguration('suspect').get<string>('lint.minSeverity');
-	if (fromSettings !== undefined && fromSettings !== '') {
-		return fromSettings;
+export interface FloorResolution {
+	value: string;
+	/** Where the value comes from, in the words the UI shows. */
+	source: 'editor setting' | '.suspect.yaml' | 'suspect.project.json' | 'default';
+}
+
+/**
+ * The floor in effect, by precedence: the editor setting, the committed
+ * `.suspect.yaml`, the project manifest, then the server default. Pure.
+ */
+export function resolveFloor(input: { setting?: string; workspaceYaml?: string; manifest?: string }): FloorResolution {
+	if (input.setting) return { value: input.setting, source: 'editor setting' };
+	const fromYaml = input.workspaceYaml?.match(/^\s*min_severity:\s*(\w+)/m)?.[1];
+	if (fromYaml) return { value: fromYaml, source: '.suspect.yaml' };
+	if (input.manifest) return { value: input.manifest, source: 'suspect.project.json' };
+	return { value: 'hint', source: 'default' };
+}
+
+/** `resolveFloor` over the live workspace. */
+export async function effectiveFloor(root: string | undefined, manifestFloor?: string): Promise<FloorResolution> {
+	const setting = vscode.workspace.getConfiguration('suspect').get<string>('lint.minSeverity');
+	let workspaceYaml: string | undefined;
+	if (root !== undefined) {
+		try {
+			workspaceYaml = await fs.promises.readFile(path.join(root, '.suspect.yaml'), 'utf8');
+		} catch {
+			workspaceYaml = undefined;
+		}
 	}
-	// The file's floor is the server's real default; read it so the pick
-	// shows the truth instead of a stale label.
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-	if (root === undefined) return 'hint';
-	try {
-		const document = await vscode.workspace.openTextDocument(path.join(root, '.suspect.yaml'));
-		const match = document.getText().match(/min_severity:\s*(\w+)/);
-		return match ? match[1] : 'hint';
-	} catch {
-		return 'hint';
-	}
+	return resolveFloor({ setting, workspaceYaml, manifest: manifestFloor });
+}
+
+function workspaceRoot(): string | undefined {
+	return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
 export async function setSeverityFloor(): Promise<void> {
-	const current = await currentFloor();
+	const current = await effectiveFloor(workspaceRoot());
 	const picked = await vscode.window.showQuickPick(
-		FLOORS.map((f) => ({ label: f.label, description: f.detail, picked: f.value === current })),
-		{ placeHolder: `Findings floor — currently ${current}` },
+		FLOORS.map((f) => ({ label: f.label, description: f.detail, picked: f.value === current.value })),
+		{ placeHolder: `Minimum severity of reported findings — currently ${current.value} (${current.source})` },
 	);
 	if (picked === undefined) return;
 	const chosen = FLOORS.find((f) => f.label === picked.label);
@@ -49,25 +66,21 @@ export async function setSeverityFloor(): Promise<void> {
 		.getConfiguration('suspect')
 		.update('lint.minSeverity', chosen.value, vscode.ConfigurationTarget.Workspace);
 	void vscode.window.showInformationMessage(
-		`Suspect floor set to ${chosen.label.toLowerCase()}. Findings re-filter in the editor and the Problems panel.`,
+		`Suspect now reports ${chosen.label.toLowerCase()} and above. Findings re-filter in the editor and the Problems panel.`,
 	);
 }
 
-/** Opens the detected config surface: the committed files, or the editor settings when there are none. */
+/** Opens the configuration surface: the committed files, or the editor settings. */
 export async function openSuspectConfig(): Promise<void> {
-	const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+	const root = workspaceRoot();
 	if (root === undefined) {
 		void vscode.window.showWarningMessage('Open a folder first — suspect configuration is per-project.');
 		return;
 	}
-	const files = detectProjectFiles(root);
 	const picks: { label: string; description: string; target: vscode.Uri | 'settings' }[] = [];
-	for (const config of files.configs) {
-		picks.push({
-			label: config.path,
-			description: config.name,
-			target: vscode.Uri.file(path.join(root, config.path)),
-		});
+	for (const [file, description] of [['.suspect.yaml', 'workspace policy'], ['suspect.project.json', 'project manifest']] as const) {
+		const full = path.join(root, file);
+		if (fs.existsSync(full)) picks.push({ label: file, description, target: vscode.Uri.file(full) });
 	}
 	picks.push({ label: 'Editor settings', description: 'suspect.* in settings.json', target: 'settings' });
 	const picked = await vscode.window.showQuickPick(picks, { placeHolder: 'Open suspect configuration' });

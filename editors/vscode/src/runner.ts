@@ -91,15 +91,14 @@ export interface RunOptions {
 	cassette?: string;
 	/** Run only workflows whose id contains this substring. */
 	filter?: string;
-	/** The binary to run. Defaults to the configured suspect CLI. */
-	binary?: string;
+	/** Working directory for the run; relative `sourceDescriptions` resolve from the document regardless. */
+	cwd?: string;
 }
 
 /**
- * The options-aware runner behind both the live workflow explorer and the
- * contract suite: the contract suite passes the manifest's base URL and
- * cassette so it runs what the project declared, not what the editor has
- * configured.
+ * The options-aware runner behind the Testing view: suites a manifest
+ * declares pass its base URL and cassette so they run what the project
+ * declared, not what the editor has configured.
  */
 export function spawnSuspectRunWith(
 	arazzoPath: string,
@@ -120,7 +119,7 @@ export function spawnSuspectRunWith(
 
 	const done = new Promise<RunTotals>((resolve, reject) => {
 		try {
-			child = cp.spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+			child = cp.spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: options.cwd });
 		} catch (err) {
 			reject(err instanceof Error ? err : new Error(String(err)));
 			return;

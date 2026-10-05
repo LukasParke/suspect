@@ -45,12 +45,11 @@ const parse_1 = require("./parse");
 const notebook_1 = require("./notebook");
 const runner_1 = require("./runner");
 const generation_1 = require("./generation");
-const testExplorer_1 = require("./testExplorer");
-const contractSuite_1 = require("./contractSuite");
-const overview_1 = require("./overview");
-const status_1 = require("./status");
+const testing_1 = require("./testing");
+const projectView_1 = require("./projectView");
 const config_1 = require("./config");
-const workflowsView_1 = require("./workflowsView");
+const discover_1 = require("./discover");
+const project_1 = require("./project");
 let client;
 let gateway;
 let gatewayStatus;
@@ -61,14 +60,9 @@ function activate(context) {
     gatewayStatus.command = '_suspect.toggleGateway';
     gatewayStatus.name = 'Suspect Gateway';
     context.subscriptions.push(gatewayStatus);
-    (0, testExplorer_1.registerTestExplorer)(context);
-    (0, contractSuite_1.registerContractSuite)(context, runner_1.suspectBinary);
-    (0, workflowsView_1.registerWorkflowsView)(context);
-    (0, overview_1.registerOverview)(context);
-    (0, status_1.registerStatus)(context);
-    context.subscriptions.push(vscode.commands.registerCommand('suspect.showOverview', () => {
-        void vscode.commands.executeCommand('suspect.overview.focus');
-    }), vscode.commands.registerCommand('suspect.setSeverityFloor', () => (0, config_1.setSeverityFloor)()), vscode.commands.registerCommand('suspect.openSuspectConfig', () => (0, config_1.openSuspectConfig)()));
+    (0, testing_1.registerTesting)(context, runner_1.suspectBinary);
+    (0, projectView_1.registerProjectView)(context);
+    context.subscriptions.push(vscode.commands.registerCommand('suspect.setSeverityFloor', () => (0, config_1.setSeverityFloor)()), vscode.commands.registerCommand('suspect.openSuspectConfig', () => (0, config_1.openSuspectConfig)()));
     (0, notebook_1.registerNotebook)(context);
     sdkGeneration = registerSdkGeneration(context);
     startClient();
@@ -124,17 +118,20 @@ async function restartClient() {
     }
     startClient();
 }
+function isArazzoDocument(document) {
+    return /\.ya?ml$/i.test(document.fileName) && (0, project_1.looksLikeArazzo)(document.getText(new vscode.Range(0, 0, 40, 0)));
+}
 async function pickArazzoDocument(hint) {
     if (hint) {
         return hint;
     }
     const active = vscode.window.activeTextEditor?.document;
-    if (active && /\.arazzo\.ya?ml$/i.test(active.fileName)) {
+    if (active && isArazzoDocument(active)) {
         return active.uri;
     }
-    const uris = await vscode.workspace.findFiles('**/*.arazzo.{yaml,yml}', '**/node_modules/**');
+    const uris = await (0, discover_1.findArazzoDocuments)();
     if (uris.length === 0) {
-        vscode.window.showErrorMessage('No *.arazzo.yaml documents found in the workspace.');
+        vscode.window.showErrorMessage('No Arazzo documents (YAML declaring `arazzo:`) found in the workspace.');
         return undefined;
     }
     if (uris.length === 1) {
@@ -205,14 +202,22 @@ async function runWorkflowCommand(uriHint, workflowHint) {
 }
 async function pickOpenApiSpec() {
     const candidates = new Map();
+    // What the project declares comes first; the conventional names are the fallback.
+    for (const project of await (0, discover_1.findProjects)()) {
+        if (project.manifest.entry !== undefined) {
+            const entry = path.resolve(project.dir, project.manifest.entry);
+            if (fs.existsSync(entry))
+                candidates.set(entry, vscode.Uri.file(entry));
+        }
+    }
     for (const pattern of ['**/*.openapi.{yaml,yml,json}', '**/openapi*.{yaml,yml,json}', '**/swagger*.{yaml,yml,json}']) {
         for (const uri of await vscode.workspace.findFiles(pattern, '**/node_modules/**')) {
             candidates.set(uri.fsPath, uri);
         }
     }
-    const activeUri = vscode.window.activeTextEditor?.document.uri;
-    if (activeUri && !/\.arazzo\.ya?ml$/i.test(activeUri.fsPath) && fs.existsSync(activeUri.fsPath)) {
-        candidates.set(activeUri.fsPath, activeUri);
+    const active = vscode.window.activeTextEditor?.document;
+    if (active && !isArazzoDocument(active) && fs.existsSync(active.uri.fsPath)) {
+        candidates.set(active.uri.fsPath, active.uri);
     }
     if (candidates.size === 0) {
         vscode.window.showErrorMessage('No OpenAPI spec (*.openapi.yaml / openapi.json / swagger.*) found.');
