@@ -774,24 +774,31 @@ pub fn hover(kind: FileKind, low: &LowDoc, offset: usize) -> Option<String> {
 }
 
 /// The hover body for a field.
+///
+/// The same card frame as the OpenAPI hover surfaces: a `### \`key\``
+/// heading, an italic subtitle carrying the qualified path, prose, and
+/// a `| Field | Value |` table for the type/default/allowed facts.
 #[must_use]
 pub fn hover_markdown(kind: FileKind, field: &Field) -> String {
-    let name = field.path.rsplit('.').next().unwrap_or(field.path);
-    let mut out = format!("**{name}**");
+    let name = if field.path.is_empty() {
+        // The root field describes the whole file; its key *is* the file.
+        kind.display()
+    } else {
+        field.path.rsplit('.').next().unwrap_or(field.path)
+    };
+    let mut out = format!("### `{name}`");
     if !field.path.is_empty() {
-        out.push_str(&format!(" — `{}`", display_path(kind, field.path)));
+        out.push_str(&format!("\n\n*`{}`*", display_path(kind, field.path)));
     }
-    out.push_str(&format!(
-        "\n\n{}\n\n**Type:** {}",
-        field.doc,
-        field.kind.type_name()
-    ));
+    out.push_str(&format!("\n\n{}", field.doc));
+    out.push_str("\n\n| Field | Value |\n|---|---|");
+    out.push_str(&format!("\n| Type | {} |", field.kind.type_name()));
     if let Some(default) = field.default {
-        out.push_str(&format!("\n\n**Default:** {default}"));
+        out.push_str(&format!("\n| Default | `{default}` |"));
     }
     if !field.values.is_empty() {
         out.push_str(&format!(
-            "\n\n**One of:** {}",
+            "\n| One of | {} |",
             field
                 .values
                 .iter()
@@ -800,7 +807,7 @@ pub fn hover_markdown(kind: FileKind, field: &Field) -> String {
                 .join(" · ")
         ));
     }
-    out.push_str(&format!("\n\n---\n**{}**", kind.display()));
+    out.push_str(&format!("\n\n---\n\n*{}*", kind.display()));
     out
 }
 
@@ -1029,11 +1036,15 @@ codegen:
             offset(SETTINGS_YAML, "min_severity"),
         )
         .expect("hover");
-        assert!(md.contains("**min_severity**"), "{md}");
-        assert!(md.contains("`lint.min_severity`"), "{md}");
+        assert!(md.starts_with("### `min_severity`"), "{md}");
+        assert!(md.contains("*`lint.min_severity`*"), "{md}");
         assert!(md.contains("Minimum severity"), "{md}");
-        assert!(md.contains("`error` · `warning`"), "{md}");
-        assert!(md.contains(".suspect.yaml"), "{md}");
+        assert!(md.contains("| Type | string |"), "{md}");
+        assert!(
+            md.contains("| One of | `error` · `warning` · `info` · `hint` |"),
+            "{md}"
+        );
+        assert!(md.ends_with("\n\n---\n\n*.suspect.yaml*"), "{md}");
     }
 
     #[test]

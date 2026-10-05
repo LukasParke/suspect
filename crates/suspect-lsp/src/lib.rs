@@ -330,7 +330,10 @@ fn hover_meaning(
 ) -> Option<String> {
     let model = meaning::Model::new(low);
     let m = model.at(offset)?;
-    let mut out = format!("**{}** in {}", m.kind.label(), model.dialect().label());
+    // The italic kind/dialect line matches the subtitle register of the
+    // card it is appended to, so the context reads as the card's footer
+    // rather than a second, clashing design.
+    let mut out = format!("*{} — {}*", m.kind.label(), model.dialect().label());
     // The pointer of a property buried in an operation is mostly path
     // noise: what an author wants is the way down from the schema they
     // are editing. Everything after the last `schema` keyword is it.
@@ -3643,6 +3646,170 @@ mod burst_tests {
             !hover.result().expect("hover result").is_null(),
             "hover came back empty after the diagnostic"
         );
+
+        answering.abort();
+    }
+
+    /// Every hover answer must be markdown-kind on the wire: VS Code
+    /// renders `HoverContents::Markup(Markdown)` as markdown, and any
+    /// plaintext path in any hover surface would show the card's own
+    /// markdown as raw text — precisely the "not visually appealing"
+    /// failure the card redesign set out to fix. This drives the real
+    /// server across every hover surface: a keyword key, a description
+    /// value, a `$ref` value, a component key, a plain key, and a
+    /// configuration key.
+    #[tokio::test]
+    async fn every_hover_answer_is_markdown_kind() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spec = "\
+openapi: 3.1.0
+info:
+  title: T
+  version: '1'
+  description: Rates a **media item**.
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name: {type: string}
+";
+        std::fs::write(dir.path().join("openapi.yaml"), spec).expect("write");
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: warning\n",
+        )
+        .expect("write");
+        let spec_uri = format!("file://{}", dir.path().join("openapi.yaml").display());
+        let conf_uri = format!("file://{}", dir.path().join(".suspect.yaml").display());
+
+        let (mut service, socket) = service().await;
+        let answering = tokio::spawn(async move {
+            use futures::{SinkExt, StreamExt};
+            let mut socket = socket;
+            while let Some(request) = socket.next().await {
+                let result = match request.method() {
+                    "workspace/configuration" => {
+                        let items = request
+                            .params()
+                            .and_then(|p| p.get("items"))
+                            .and_then(|i| i.as_array())
+                            .map_or(0, Vec::len);
+                        serde_json::Value::Array(vec![serde_json::Value::Null; items])
+                    }
+                    _ => serde_json::Value::Null,
+                };
+                if let Some(id) = request.id().cloned() {
+                    socket
+                        .send(tower_lsp::jsonrpc::Response::from_ok(id, result))
+                        .await
+                        .ok();
+                }
+            }
+        });
+
+        in_flight(
+            &mut service,
+            1,
+            "initialize",
+            serde_json::json!({
+                "processId": null,
+                "rootUri": format!("file://{}", dir.path().display()),
+                "capabilities": {"workspace": {"configuration": true}},
+            }),
+        )
+        .await
+        .expect("initialize answered");
+        let _ = in_flight(&mut service, 0, "initialized", serde_json::json!({})).await;
+        let _ = in_flight(
+            &mut service,
+            0,
+            "textDocument/didOpen",
+            serde_json::json!({"textDocument": {
+                "uri": spec_uri, "languageId": "yaml", "version": 1, "text": spec,
+            }}),
+        )
+        .await;
+        let _ = in_flight(
+            &mut service,
+            0,
+            "textDocument/didOpen",
+            serde_json::json!({"textDocument": {
+                "uri": conf_uri, "languageId": "yaml", "version": 1,
+                "text": "lint:\n  min_severity: warning\n",
+            }}),
+        )
+        .await;
+        // Let the opened documents settle (workspace build, first lint)
+        // so this asserts the steady-state answer, not a race with it.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        // One position per hover surface, in the fixture above.
+        let hovers: Vec<(&str, (u32, u32), &str)> = vec![
+            ("keyword key", (0, 4), &spec_uri),
+            ("description value", (4, 20), &spec_uri),
+            ("$ref key", (15, 18), &spec_uri),
+            ("component key", (18, 5), &spec_uri),
+            ("plain key", (21, 10), &spec_uri),
+            ("configuration key", (1, 6), &conf_uri),
+        ];
+        for (n, (index, (line, character), uri)) in hovers.iter().enumerate() {
+            let answer = in_flight(
+                &mut service,
+                300 + n as i64,
+                "textDocument/hover",
+                serde_json::json!({
+                    "textDocument": {"uri": uri},
+                    "position": {"line": line, "character": character},
+                }),
+            )
+            .await
+            .unwrap_or_else(|| panic!("{index}: hover never answered"));
+            let result = answer.result().unwrap_or_else(|| {
+                panic!(
+                    "{index}: hover answered with an error: {:?}",
+                    answer.error()
+                )
+            });
+            let contents = &result["contents"];
+            assert_eq!(
+                contents["kind"], "markdown",
+                "{index}: hover must be markdown-kind, got {contents}"
+            );
+            assert!(
+                contents["value"].as_str().is_some_and(|v| !v.is_empty()),
+                "{index}: hover markdown must be non-empty"
+            );
+        }
+
+        // The $ref card pins the restyled frame on the wire: the heading
+        // the component renderers open with is what the editor receives.
+        let answer = in_flight(
+            &mut service,
+            400,
+            "textDocument/hover",
+            serde_json::json!({
+                "textDocument": {"uri": spec_uri},
+                "position": {"line": 15, "character": 18},
+            }),
+        )
+        .await
+        .expect("$ref hover answered");
+        let value = answer.result().expect("hover result")["contents"]["value"]
+            .as_str()
+            .expect("markdown string");
+        assert!(value.contains("### `Pet`"), "card frame missing: {value}");
 
         answering.abort();
     }
