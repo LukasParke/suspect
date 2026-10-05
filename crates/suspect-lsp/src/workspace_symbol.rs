@@ -15,19 +15,24 @@ pub const SYMBOL_CAP: usize = 200;
 
 /// Per-document collector: applies the query filter and the global cap
 /// while accumulating flat [`SymbolInformation`]s for one file.
-struct Sink {
+///
+/// Borrows the document's bytes and line index rather than cloning them:
+/// this runs once per document on every keystroke of a Ctrl+P search, and
+/// cloning meant copying every loaded document — 2.5MB for one real
+/// specification — on each one.
+struct Sink<'d> {
     /// Lowercased query; empty means match everything.
     query: String,
     /// Parsed URL for `Location`s in this document.
     url: Option<Url>,
     /// Document bytes and line index for range conversion.
-    bytes: Vec<u8>,
-    li: LineIndex,
+    bytes: &'d [u8],
+    li: &'d LineIndex,
     /// Accumulated symbols.
     out: Vec<SymbolInformation>,
 }
 
-impl Sink {
+impl Sink<'_> {
     /// Adds one symbol unless it fails the substring filter or the cap is
     /// already reached. `range` is a byte range inside this document.
     fn push(
@@ -53,7 +58,7 @@ impl Sink {
             deprecated: None,
             location: Location {
                 uri: self.url.clone().unwrap(),
-                range: lsp_range(&self.bytes, &self.li, range),
+                range: lsp_range(self.bytes, self.li, range),
             },
             container_name: container,
         });
@@ -81,8 +86,8 @@ pub fn workspace_symbols(ws: &Workspace, query: &str) -> Vec<SymbolInformation> 
         let mut sink = Sink {
             query: query_lower.clone(),
             url: Url::parse(uri.as_str()).ok(),
-            bytes: inner.bytes().to_vec(),
-            li: inner.line_index().clone(),
+            bytes: inner.bytes(),
+            li: inner.line_index(),
             out: Vec::new(),
         };
         collect_doc(low, &mut sink);
@@ -151,7 +156,7 @@ pub fn resolve_workspace_symbol(sym: WorkspaceSymbol, ws: &Workspace) -> Workspa
 }
 
 /// Emits this document's symbols into `sink`, dispatched by spec family.
-fn collect_doc(low: &LowDoc, sink: &mut Sink) {
+fn collect_doc(low: &LowDoc, sink: &mut Sink<'_>) {
     match low.sniff_family() {
         SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32 => {
             oas_workspace_symbols(low, sink)

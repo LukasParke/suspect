@@ -7,8 +7,29 @@ use std::sync::Arc;
 use suspect_low::LowDoc;
 use suspect_ref::{Workspace, WorkspaceBuilder};
 use suspect_source::{LineIndex, Source, Uri};
-use tower_lsp::lsp_types::{Diagnostic, WorkspaceDocumentDiagnosticReport};
+use tower_lsp::lsp_types::{
+    CodeLens, ColorInformation, Diagnostic, DocumentLink, FoldingRange,
+    WorkspaceDocumentDiagnosticReport,
+};
 use tower_lsp::lsp_types::{Position, Range, SemanticToken};
+
+/// Whole-document responses cached per document, invalidated together by
+/// the content epoch.
+///
+/// Each field is computed on first request and reused while the content is
+/// unchanged. `Option` rather than pre-computed because a session that never
+/// asks for colours should not pay for them.
+#[derive(Debug, Default, Clone)]
+pub struct DocCache {
+    /// `textDocument/documentLink`
+    pub links: Option<Arc<Vec<DocumentLink>>>,
+    /// `textDocument/documentColor`
+    pub colors: Option<Arc<Vec<ColorInformation>>>,
+    /// `textDocument/codeLens`
+    pub lenses: Option<Arc<Vec<CodeLens>>>,
+    /// `textDocument/foldingRange`
+    pub folds: Option<Arc<Vec<FoldingRange>>>,
+}
 
 /// One editor-open document: the live buffer text plus the `LowDoc` parsed
 /// from it. The line index lives inside the parsed document
@@ -46,8 +67,17 @@ pub struct State {
     /// cache is keyed on it.
     content_epoch: u64,
     /// Per-document semantic-token caches for `semanticTokens/full/delta`:
-    /// the result id handed to the client plus the encoded tokens.
-    pub token_cache: HashMap<Uri, (String, Vec<SemanticToken>)>,
+    /// the content epoch they were computed for, the result id handed to the
+    /// client, and the encoded tokens. The epoch matters because the delta
+    /// path used to recompute every token on each request — 272ms on a
+    /// 63k-line specification — with no way to tell whether the cache was
+    /// still current.
+    pub token_cache: HashMap<Uri, (u64, String, Vec<SemanticToken>)>,
+    /// Whole-document responses that are pure functions of the content:
+    /// links, colours, lenses, folds. Each costs 30-270ms to rebuild from an
+    /// unchanged document, and an editor re-requests them whenever a tab
+    /// regains focus or a request repeats.
+    pub doc_cache: HashMap<Uri, (u64, DocCache)>,
     /// Per-document diagnostics cache: the content epoch it was computed
     /// for, the result id, and the findings.
     ///

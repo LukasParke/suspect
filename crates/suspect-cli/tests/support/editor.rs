@@ -120,7 +120,10 @@ impl Editor {
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            // Server stderr goes to the test's stderr when --nocapture is
+            // on, which is how eprintln diagnostics become visible while a
+            // failing test is being chased.
+            .stderr(Stdio::inherit());
         // The whole workspace suite runs these tests in parallel, so twenty
         // servers can be starting at once. A spawn that comes up without its
         // pipes is resource exhaustion, not a broken server, and one retry

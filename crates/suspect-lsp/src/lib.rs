@@ -157,6 +157,15 @@ impl Backend {
                 Ok(diags) => diags,
                 Err(_) => return,
             };
+            // The same severity floor the pull path applies. Publishing the
+            // unfiltered set was a pre-existing inconsistency — the editor's
+            // problem panel showed findings the configured floor suppressed —
+            // and caching the push's result made the pull serve it too.
+            let floor = {
+                let st = state.read().await;
+                st.editor_config.min_severity()
+            };
+            let diags = diagnostics::filter_at_least(diags, floor);
             let id = pull::diagnostics_result_id(&diags);
             // Superseded while computing? Drop the stale result.
             let superseded = {
@@ -208,6 +217,47 @@ impl Backend {
             .await
             .store_index(generation, index.clone());
         index
+    }
+
+    /// A whole-document response from the cache, if the content is unchanged
+    /// since it was computed.
+    ///
+    /// The response types are big — links for a 63k-line specification
+    /// serialise to 1.7MB — so the cache stores `Arc`s and a hit is a
+    /// pointer clone rather than a payload copy.
+    async fn doc_cached<T>(
+        &self,
+        uri: &Uri,
+        pick: fn(&state::DocCache) -> Option<std::sync::Arc<T>>,
+    ) -> Option<std::sync::Arc<T>> {
+        let st = self.state.read().await;
+        let (epoch, cache) = st.doc_cache.get(uri)?;
+        if *epoch != st.generation() {
+            return None;
+        }
+        pick(cache)
+    }
+
+    /// Records a whole-document response against the epoch it was computed
+    /// for. Stale entries are replaced rather than merged: a lookup checks
+    /// the epoch before trusting anything, so an edit landing mid-compute
+    /// cannot resurrect a stale answer.
+    async fn doc_store<T>(
+        &self,
+        uri: &Uri,
+        epoch: u64,
+        set: fn(&mut state::DocCache, Option<std::sync::Arc<T>>),
+        value: std::sync::Arc<T>,
+    ) {
+        let mut st = self.state.write().await;
+        let entry = st
+            .doc_cache
+            .entry(uri.clone())
+            .or_insert_with(|| (epoch, state::DocCache::default()));
+        if entry.0 != epoch {
+            *entry = (epoch, state::DocCache::default());
+        }
+        set(&mut entry.1, Some(value));
     }
 
     /// Returns the workspace, building it on first use and making sure the
@@ -604,13 +654,41 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        // The delta handler keeps the token cache warm on every request, so
+        // this is usually a hit; a miss computes once and stores for both.
+        // One guard for the epoch and the entry: reading them under two
+        // separate guards leaves a window where an edit lands between them
+        // and stale tokens are served as current.
+        if let Some(data) = {
+            let st = self.state.read().await;
+            let epoch = st.generation();
+            st.token_cache
+                .get(&uri)
+                .and_then(|(cached, _id, data)| (*cached == epoch).then(|| data.clone()))
+        } {
+            return Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+                result_id: None,
+                data,
+            })));
+        }
+        let (doc, epoch) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            (doc.clone(), st.generation())
         };
-        Ok(Some(SemanticTokensResult::Tokens(
-            semantic::semantic_tokens_full(doc),
-        )))
+        let tokens = semantic::semantic_tokens_full(doc.as_ref());
+        let id = pull::tokens_result_id(&tokens.data);
+        self.state
+            .write()
+            .await
+            .token_cache
+            .insert(uri, (epoch, id, tokens.data.clone()));
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: tokens.data,
+        })))
     }
 
     async fn inlay_hint(&self, params: InlayHintParams) -> JsonRpcResult<Option<Vec<InlayHint>>> {
@@ -653,11 +731,20 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(Vec::new());
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(Vec::new());
+        if let Some(cached) = self.doc_cached(&uri, |cache| cache.colors.clone()).await {
+            return Ok((*cached).clone());
+        }
+        let (doc, epoch) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(Vec::new());
+            };
+            (doc.clone(), st.generation())
         };
-        Ok(colors::document_colors(doc))
+        let colors_out = std::sync::Arc::new(colors::document_colors(doc.as_ref()));
+        self.doc_store(&uri, epoch, |cache, v| cache.colors = v, colors_out.clone())
+            .await;
+        Ok((*colors_out).clone())
     }
 
     async fn color_presentation(
@@ -932,12 +1019,20 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        if let Some(cached) = self.doc_cached(&uri, |cache| cache.folds.clone()).await {
+            return Ok((!cached.is_empty()).then(|| (*cached).clone()));
+        }
+        let (doc, epoch) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            (doc.clone(), st.generation())
         };
-        let ranges = symbols::folding_ranges(&doc.low);
-        Ok((!ranges.is_empty()).then_some(ranges))
+        let ranges = std::sync::Arc::new(symbols::folding_ranges(&doc.low));
+        self.doc_store(&uri, epoch, |cache, v| cache.folds = v, ranges.clone())
+            .await;
+        Ok((!ranges.is_empty()).then(|| (*ranges).clone()))
     }
 
     async fn prepare_rename(
@@ -1225,12 +1320,39 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        // Read the cached entry before any compute: it is both the
+        // unchanged-content fast path and the "previous" set a delta is
+        // computed from. This path used to recompute every token on each
+        // request — 272ms on a 63k-line specification, per request — with no
+        // way to tell whether the cache was current.
+        let (doc, epoch, cached) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            (
+                doc.clone(),
+                st.generation(),
+                st.token_cache.get(&uri).cloned(),
+            )
         };
-        let full = semantic::semantic_tokens_full(doc);
-        let new_id = pull::tokens_result_id(&full.data);
+        let (new_id, full_data) = match &cached {
+            // Unchanged content: the cached set is the answer.
+            Some((cached_epoch, id, data)) if *cached_epoch == epoch => (id.clone(), data.clone()),
+            // Changed content (or nothing cached): compute, and keep the
+            // previous set around long enough to delta from it below.
+            _ => {
+                let full = semantic::semantic_tokens_full(doc.as_ref());
+                let id = pull::tokens_result_id(&full.data);
+                let data = full.data;
+                self.state
+                    .write()
+                    .await
+                    .token_cache
+                    .insert(uri.clone(), (epoch, id.clone(), data.clone()));
+                (id, data)
+            }
+        };
         if params.previous_result_id == new_id {
             return Ok(Some(SemanticTokensFullDeltaResult::Tokens(
                 SemanticTokens {
@@ -1239,29 +1361,19 @@ impl LanguageServer for Backend {
                 },
             )));
         }
-        let cached = st.token_cache.get(&uri).cloned();
-        drop(st);
-        if let Some((prev_id, prev)) = cached
+        // The client's previous result is one we still hold: delta from it.
+        if let Some((_, prev_id, prev)) = cached
             && prev_id == params.previous_result_id
         {
-            let delta = pull::semantic_tokens_delta(&prev, &full.data);
-            self.state
-                .write()
-                .await
-                .token_cache
-                .insert(uri, (new_id, full.data));
+            let delta = pull::semantic_tokens_delta(&prev, &full_data);
             return Ok(Some(delta));
         }
-        let out_data = full.data.clone();
-        self.state
-            .write()
-            .await
-            .token_cache
-            .insert(uri, (new_id, full.data));
+        // Otherwise the client's previous result is one this server never
+        // held (a restart, or eviction): hand back the full set.
         Ok(Some(SemanticTokensFullDeltaResult::Tokens(
             SemanticTokens {
                 result_id: None,
-                data: out_data,
+                data: full_data,
             },
         )))
     }
@@ -1461,20 +1573,29 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if let Some(cached) = self.doc_cached(&uri, |cache| cache.lenses.clone()).await {
+            return Ok(Some((*cached).clone()));
+        }
         let ws = self.workspace_for(&uri).await;
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        let (doc, epoch) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            (doc.clone(), st.generation())
         };
         // Arazzo documents get workflow run lenses instead of the
-        // OpenAPI component/operation lenses.
+        // OpenAPI component/operation lenses; those are cheap and uncached.
         if doc.low.sniff_family() == suspect_low::SpecFamily::Arazzo10 {
             return Ok(Some(run_lenses::run_lenses(&doc.low)));
         }
-        match ws {
-            Some(ws) => Ok(Some(links::code_lens(&ws, &doc.low))),
-            None => Ok(None),
-        }
+        let Some(ws) = ws else {
+            return Ok(None);
+        };
+        let lenses = std::sync::Arc::new(links::code_lens(&ws, &doc.low));
+        self.doc_store(&uri, epoch, |cache, v| cache.lenses = v, lenses.clone())
+            .await;
+        Ok(Some((*lenses).clone()))
     }
 
     async fn code_lens_resolve(&self, params: CodeLens) -> JsonRpcResult<CodeLens> {
@@ -1518,10 +1639,20 @@ impl LanguageServer for Backend {
             };
             doc.clone()
         };
+        if let Some(cached) = self.doc_cached(&uri, |cache| cache.links.clone()).await {
+            return Ok(Some((*cached).clone()));
+        }
         let Some(ws) = self.workspace_for(&uri).await else {
             return Ok(Some(Vec::new()));
         };
-        Ok(Some(links::document_link(ws.as_ref(), &doc.low)))
+        let epoch = {
+            let st = self.state.read().await;
+            st.generation()
+        };
+        let built = std::sync::Arc::new(links::document_link(ws.as_ref(), &doc.low));
+        self.doc_store(&uri, epoch, |cache, v| cache.links = v, built.clone())
+            .await;
+        Ok(Some((*built).clone()))
     }
 
     async fn document_link_resolve(&self, params: DocumentLink) -> JsonRpcResult<DocumentLink> {
@@ -1626,22 +1757,40 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         let parsed = config_files::parse_config(&params.settings);
+        // The editor-side settings are re-derived too: `lint.min_severity`
+        // lives there, not in `SuspectConfig`, and this handler used to
+        // parse it into one object while the severity floor read the other
+        // — so changing the floor mid-session did nothing until a restart.
+        let file_config = {
+            let st = self.state.read().await;
+            editor_config::for_workspace(st.workspace_root().as_deref(), Some(&params.settings))
+        };
         let changed = {
             let mut st = self.state.write().await;
-            match parsed {
+            let config_changed = match parsed {
                 Some(c) if st.config != c => {
                     st.config = c;
                     true
                 }
                 Some(_) | None => false,
+            };
+            let editor_changed = st.editor_config != file_config;
+            if editor_changed {
+                st.editor_config = file_config;
             }
+            config_changed || editor_changed
         };
         if !changed {
             return;
         }
         // The lint floor moved, so anything computed under the old one is
-        // no longer the answer.
-        self.state.write().await.ws_diag_cache = None;
+        // no longer the answer — including the per-document pull cache,
+        // whose entries are pre-filtered by the floor.
+        {
+            let mut st = self.state.write().await;
+            st.ws_diag_cache = None;
+            st.diag_cache.clear();
+        }
         // The new config re-filters lint findings and inlay tooltips:
         // republish diagnostics for every open document and ask the client
         // to re-pull hints. Semantic tokens and lenses are config-free.
@@ -1732,6 +1881,7 @@ impl LanguageServer for Backend {
                 st.close_doc(&old);
                 st.token_cache.remove(&old);
                 st.diag_cache.remove(&old);
+                st.doc_cache.remove(&old);
             }
             let new_path = std::path::PathBuf::from(f.new_uri.as_str());
             if let Ok(text) = std::fs::read_to_string(&new_path)
@@ -1769,6 +1919,7 @@ impl LanguageServer for Backend {
                 st.close_doc(&u);
                 st.token_cache.remove(&u);
                 st.diag_cache.remove(&u);
+                st.doc_cache.remove(&u);
             }
         }
     }
@@ -1790,9 +1941,16 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let ws = self.workspace_for(&uri).await;
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        // The document is cloned out and the guard released before the
+        // match below: the `Refs` arm needs the semantic index, and taking
+        // the write lock that an index build requires while this read guard
+        // is alive is the exact inversion that used to wedge the server.
+        let doc = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            doc.clone()
         };
         let inner = doc.low.inner();
         let Some(offset) =
@@ -1839,7 +1997,10 @@ impl LanguageServer for Backend {
                     // components a maintainer reaches for come first.
                     let all = completion::ref_candidates(&ws, doc.low.uri());
                     let position = rank::position_at(&doc.low, offset);
-                    let index = meaning::Index::build(&ws);
+                    // The cached index, not a rebuild: this is the
+                    // per-keystroke completion path, and the build walks
+                    // the whole workspace.
+                    let index = self.index(&ws).await;
                     let expected: &[&str] = if rank::expects_schema(&doc.low, offset) {
                         &["schemas"]
                     } else {
@@ -2171,10 +2332,14 @@ impl Backend {
                     return None;
                 };
                 let ws = self.workspace_for(&uri).await?;
+                // The index comes from the cache and the document is cloned
+                // out, so the read guard below is held for pointer work
+                // only. Building the index under it walked the whole
+                // workspace while holding the lock.
+                let index = self.index(&ws).await;
                 let planned = {
                     let st = self.state.read().await;
                     let doc = st.docs.get(&uri)?;
-                    let index = meaning::Index::build(&ws);
                     if command == "suspect.extractSchema" {
                         let name = name.unwrap_or_else(|| refactor::suggest_name(&doc.low, offset));
                         let name = refactor::component_name(&name);

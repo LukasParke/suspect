@@ -1395,3 +1395,79 @@ fn references_from_a_declaration_find_its_uses() {
         len = found.len()
     );
 }
+
+/// A configuration change must re-filter cached diagnostics.
+///
+/// The pull cache stores entries pre-filtered by the severity floor. The
+/// floor lives in the configuration, not the content, so a content-epoch
+/// key alone would keep serving entries filtered under the *old* floor
+/// until the next edit. This pins that it does not: raise the floor and the
+/// warnings disappear without touching the document.
+#[test]
+fn a_configuration_change_refilters_diagnostics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let uri = url_of(&ws.openapi);
+    let text = std::fs::read_to_string(&ws.openapi).expect("read");
+    editor.open(&ws.openapi, &text);
+    // Let the debounced push land so the pull cache is warm — the cached
+    // path is exactly the one under test.
+    assert!(
+        editor.wait_for_notification("textDocument/publishDiagnostics", Duration::from_secs(30)),
+        "no diagnostics were pushed for an opened document"
+    );
+
+    // One pull, so the "before" the new floor is compared against is known.
+    let pull_count = || -> usize {
+        editor
+            .request("textDocument/diagnostic", doc(&uri))
+            .expect("pull")
+            .get("items")
+            .and_then(|items| items.as_array())
+            .map_or(0, Vec::len)
+    };
+    // Config changes are processed asynchronously, so poll until the count
+    // reflects the new floor rather than betting on a fixed delay. Until the
+    // handler runs, the pull stays cached under the old floor, so an
+    // unchanged count simply means "not yet" — and this test's floors are
+    // chosen so the new count always differs from the old one.
+    let count_at = |floor: &str| -> usize {
+        let before = pull_count();
+        editor.notify(
+            "workspace/didChangeConfiguration",
+            serde_json::json!({
+                "settings": {"suspect": {"lint": {"minSeverity": floor}}}
+            }),
+        );
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let count = pull_count();
+            if count != before {
+                return count;
+            }
+            if Instant::now() >= deadline {
+                panic!("a `minSeverity: {floor}` configuration change never reached the pull");
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+
+    let everything = count_at("hint");
+    assert!(
+        everything > 0,
+        "the fixture must produce findings at the lowest floor"
+    );
+    let errors_only = count_at("error");
+    assert!(
+        errors_only < everything,
+        "raising the floor to `error` still reported {errors_only} of {everything} findings — \
+         the cached pull was not re-filtered"
+    );
+    // And back: lowering the floor restores them.
+    let restored = count_at("hint");
+    assert_eq!(
+        restored, everything,
+        "lowering the floor did not restore the suppressed findings"
+    );
+}
