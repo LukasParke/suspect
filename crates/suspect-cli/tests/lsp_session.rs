@@ -140,7 +140,7 @@ fn document_symbol_lists_the_whole_tree() {
 fn hover_on_a_cross_file_ref_explains_where_it_lands() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(&ws);
+    let (line, column) = cross_file_ref(ws);
     let text = editor
         .hover(&uri, line, column + "$ref: 'schem".len())
         .expect("hover on a cross-file ref");
@@ -172,7 +172,7 @@ fn hover_on_an_operation_id_locates_the_operation() {
 fn definition_on_a_ref_resolves_from_the_key_and_the_value() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(&ws);
+    let (line, column) = cross_file_ref(ws);
 
     let from_value = editor
         .definition_line(
@@ -249,7 +249,7 @@ fn definition_on_a_component_declaration_finds_its_schema() {
 fn references_finds_every_use_of_a_shared_schema() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(&ws);
+    let (line, column) = cross_file_ref(ws);
     let value = editor
         .request(
             "textDocument/references",
@@ -275,7 +275,7 @@ fn references_finds_every_use_of_a_shared_schema() {
 fn completion_offers_the_schemas_a_ref_could_name() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(&ws);
+    let (line, column) = cross_file_ref(ws);
     let value = editor
         .request(
             "textDocument/completion",
@@ -476,7 +476,7 @@ fn semantic_tokens_are_produced_full_and_ranged() {
 fn document_highlights_mark_the_current_symbol() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(&ws);
+    let (line, column) = cross_file_ref(ws);
     let value = editor
         .request(
             "textDocument/documentHighlight",
@@ -586,7 +586,7 @@ fn formatting_produces_an_edit() {
 fn call_hierarchy_prepares_for_an_operation() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(&ws);
+    let (line, column) = cross_file_ref(ws);
     let value = editor
         .request(
             "textDocument/prepareCallHierarchy",
