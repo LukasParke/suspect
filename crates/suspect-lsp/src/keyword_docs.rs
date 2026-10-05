@@ -1875,8 +1875,15 @@ pub fn lookup(keyword: &str) -> Option<&'static KeywordDoc> {
 /// Renders one keyword's documentation as hover markdown.
 #[must_use]
 pub fn hover_markdown(doc: &KeywordDoc) -> String {
-    let mut md = format!("**`{}`** — {}\n\n", doc.title, doc.family);
-    md.push_str(&format!("*Availability:* {}\n\n", doc.availability));
+    // The card frame: a `###` heading anchors the title (VS Code renders it
+    // prominently in hover), the family and availability share one italic
+    // subtitle line, and everything after keeps compact bold-label prose.
+    // The content is unchanged from the old frame — only its presentation.
+    let mut md = format!("### `{}`\n\n", doc.title);
+    md.push_str(&format!(
+        "*{} — available in {}*\n\n",
+        doc.family, doc.availability
+    ));
     md.push_str(&format!("**Value:** {}\n\n", doc.value_domain));
     md.push_str(doc.meaning);
     md.push_str("\n\n");
@@ -1906,8 +1913,8 @@ mod tests {
     fn hover_markdown_has_all_sections() {
         let doc = lookup("oneOf").unwrap();
         let md = hover_markdown(doc);
-        assert!(md.contains("**`oneOf`**"));
-        assert!(md.contains("*Availability:*"));
+        assert!(md.contains("### `oneOf`"));
+        assert!(md.contains("— available in"));
         assert!(md.contains("**Value:**"));
         assert!(md.contains("```yaml"));
         assert!(md.contains("EXACTLY ONE"));

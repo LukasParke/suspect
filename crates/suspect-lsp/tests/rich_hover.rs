@@ -50,9 +50,12 @@ components:
         .position(|w| w == b"ApiKeyAuth")
         .unwrap();
     let md = suspect_lsp::navigation::hover_markdown(&ws, &low, key_off + 5).unwrap();
-    assert!(md.contains("🔑 ApiKeyAuth"), "{md}");
-    assert!(md.contains("bearer"), "{md}");
-    assert!(md.contains("JWT"), "{md}");
+    assert!(
+        md.starts_with("### 🔑 `ApiKeyAuth`\n\n*security scheme*"),
+        "{md}"
+    );
+    assert!(md.contains("| Scheme | `bearer` |"), "{md}");
+    assert!(md.contains("| Bearer format | `JWT` |"), "{md}");
     assert!(md.contains("Server-issued JWT"), "{md}");
 }
 
@@ -89,11 +92,11 @@ components:
         .position(|w| w == b"Limit")
         .unwrap();
     let md = suspect_lsp::navigation::hover_markdown(&ws, &low, key_off + 2).unwrap();
-    assert!(md.contains("**Limit**"), "{md}");
-    assert!(md.contains("in: query"), "{md}");
+    assert!(md.starts_with("### `Limit`\n\n*`query` parameter*"), "{md}");
     assert!(md.contains("Max items per page"), "{md}");
-    assert!(md.contains("**Default:** `20`"), "{md}");
-    assert!(md.contains("**Enum:** `10` · `20` · `50`"), "{md}");
+    assert!(md.contains("| Type | `integer` |"), "{md}");
+    assert!(md.contains("| Default | `20` |"), "{md}");
+    assert!(md.contains("| Enum | `10` · `20` · `50` |"), "{md}");
 }
 
 #[test]
@@ -126,7 +129,7 @@ components:
         .position(|w| w == b"NotFound")
         .unwrap();
     let md = suspect_lsp::navigation::hover_markdown(&ws, &low, key_off + 2).unwrap();
-    assert!(md.contains("**NotFound**"), "{md}");
+    assert!(md.starts_with("### `NotFound`\n\n*response*"), "{md}");
     assert!(md.contains("Resource not found"), "{md}");
     assert!(md.contains("**Content:** `application/json`"), "{md}");
     let _ = hover_detail::try_rich_hover;
@@ -162,8 +165,8 @@ components:
         .position(|w| w == b"SamplePet")
         .unwrap();
     let md = suspect_lsp::navigation::hover_markdown(&ws, &low, key_off + 4).unwrap();
-    assert!(md.contains("**SamplePet**"), "{md}");
-    assert!(md.contains("A sample pet"), "{md}");
+    assert!(md.starts_with("### `SamplePet`\n\n*example*"), "{md}");
+    assert!(md.contains("**A sample pet**"), "{md}");
     assert!(md.contains("```json"), "{md}");
     assert!(md.contains("\"name\": \"Rex\""), "{md}");
 }

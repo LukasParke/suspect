@@ -414,6 +414,9 @@ pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) 
     if let Some(md) = key_hover(low, offset) {
         return Some(md);
     }
+    if let Some(md) = docstring_hover(low, offset) {
+        return Some(md);
+    }
     let node = node_at(low, offset)?;
     let semantic = NodeRef::new(node);
     let first_line = excerpt(node.doc().bytes(), node.byte_range(), 1);
@@ -426,6 +429,10 @@ pub fn hover_markdown(ws: &Workspace, low: &suspect_low::LowDoc, offset: usize) 
 /// Without this the fallback excerpted whatever node happened to contain
 /// the offset, so a key with no value — a property name, an empty object —
 /// reported the *enclosing* mapping and looked like a rendering bug.
+///
+/// The card opens with the same `### \`name\`` frame as every other hover
+/// surface, so these most common of hovers do not read as a different,
+/// plainer tool.
 fn key_hover(low: &suspect_low::LowDoc, offset: usize) -> Option<String> {
     let node = node_at(low, offset)?;
     let mut cur = node;
@@ -438,21 +445,50 @@ fn key_hover(low: &suspect_low::LowDoc, offset: usize) -> Option<String> {
             }
             let name = String::from_utf8_lossy(key.content().scalar_bytes()).into_owned();
             let Some(value) = cur.child_by_field("value") else {
-                return Some(format!("`{name}`\n\n_(no value)_"));
+                return Some(format!("### `{name}`\n\n*(no value)*"));
             };
             let text = String::from_utf8_lossy(NodeRef::new(value).raw_text())
                 .trim()
                 .to_owned();
             if text.is_empty() {
-                return Some(format!("`{name}`\n\n_(no value)_"));
+                return Some(format!("### `{name}`\n\n*(no value)*"));
             }
             if text.len() <= 120 && !text.contains('\n') {
-                return Some(format!("`{name}`: `{text}`"));
+                return Some(format!("### `{name}`\n\n`{text}`"));
             }
             return Some(format!(
-                "`{name}`\n\n```\n{}\n```",
+                "### `{name}`\n\n```{}\n{}\n```",
+                lang_tag(low.inner().format()),
                 excerpt(low.inner().bytes(), value.byte_range(), 3)
             ));
+        }
+        cur = cur.parent()?;
+    }
+}
+
+/// A cursor inside a `description` (or `summary`) *value*: the text there
+/// is CommonMark by specification, so it renders as the card body — the
+/// author's bold, links and lists appear the way generated docs render
+/// them, not as a raw source excerpt in a code fence.
+fn docstring_hover(low: &suspect_low::LowDoc, offset: usize) -> Option<String> {
+    let node = node_at(low, offset)?;
+    let mut cur = node;
+    loop {
+        if cur.kind() == SyntaxKind::Pair {
+            let key = cur.child_by_field("key")?;
+            let key_range = key.byte_range();
+            if key_range.start <= offset && offset <= key_range.end {
+                return None; // the key side belongs to the keyword card
+            }
+            let value = cur.child_by_field("value")?;
+            let name = String::from_utf8_lossy(key.content().scalar_bytes());
+            if !matches!(name.as_ref(), "description" | "summary") {
+                return None;
+            }
+            // Block scalars must be decoded, not read as raw source.
+            let decoded = NodeRef::new(value).decoded_scalar();
+            let text = String::from_utf8_lossy(&decoded).trim().to_owned();
+            return (!text.is_empty()).then_some(text);
         }
         cur = cur.parent()?;
     }
@@ -903,7 +939,7 @@ components:
         let text = "components:\n  schemas:\n    Thing:\n      properties:\n        name:\n          type: string\n";
         let low = low_at(&dir, "key.yaml", text);
         let md = hover_markdown(&ws, &low, offset_in(text, "name:")).expect("hover");
-        assert!(md.starts_with("`name`"), "{md}");
+        assert!(md.starts_with("### `name`"), "{md}");
         assert!(md.contains("type: string"), "{md}");
     }
 
@@ -917,8 +953,37 @@ components:
         let text = "tags:\n  - one\nempty:\nx:\n  y:\n";
         let low = low_at(&dir, "key2.yaml", text);
         let md = hover_markdown(&ws, &low, offset_in(text, "empty:")).expect("hover");
-        assert!(md.starts_with("`empty`"), "{md}");
+        assert!(md.starts_with("### `empty`"), "{md}");
         assert!(md.contains("no value"), "{md}");
+    }
+
+    /// A cursor inside a description *value* renders the CommonMark the
+    /// author wrote, not a fenced first line of it — this is the fix for
+    /// "descriptions show as raw text" on values.
+    #[test]
+    fn hover_on_a_description_value_renders_its_markdown() {
+        let dir = std::env::temp_dir().join("suspect-lsp-nav-docstring");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = workspace(&dir);
+        let text = "info:\n  description: Rates a **media item**.\n";
+        let low = low_at(&dir, "d.yaml", text);
+        let md = hover_markdown(&ws, &low, offset_in(text, "media item")).expect("hover");
+        assert!(md.contains("Rates a **media item**."), "{md}");
+        assert!(!md.contains("```"), "must not fence the prose: {md}");
+    }
+
+    /// Block-scalar descriptions decode before they render, so a folded
+    /// or literal block reads as its text, not its YAML source form.
+    #[test]
+    fn hover_on_a_block_description_renders_decoded_text() {
+        let dir = std::env::temp_dir().join("suspect-lsp-nav-docstring2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ws = workspace(&dir);
+        let text = "info:\n  description: >-\n    Rates a media item.\n    Supports lists.\n";
+        let low = low_at(&dir, "d2.yaml", text);
+        let md = hover_markdown(&ws, &low, offset_in(text, "Supports")).expect("hover");
+        assert!(md.contains("Supports lists."), "{md}");
+        assert!(!md.contains(">-"), "{md}");
     }
 
     /// Cmd+click lands on the word `$ref` far more often than on the URI
