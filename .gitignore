@@ -6,3 +6,4 @@ corpus/
 __pycache__/
 *.py[cod]
 .suspect-cache/
+crates/suspect-cli/target/

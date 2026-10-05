@@ -1,1 +1,0 @@
-{"methods":[{"max_ms":474.4,"method":"textDocument/diagnostic","n":80,"p50_ms":1.2,"p90_ms":4.5,"p95_ms":5.1,"p99_ms":474.4}],"requests":80,"unanswered":0}
