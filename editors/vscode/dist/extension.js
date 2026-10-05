@@ -46,6 +46,7 @@ const notebook_1 = require("./notebook");
 const runner_1 = require("./runner");
 const generation_1 = require("./generation");
 const testExplorer_1 = require("./testExplorer");
+const contractSuite_1 = require("./contractSuite");
 const overview_1 = require("./overview");
 const status_1 = require("./status");
 const config_1 = require("./config");
@@ -61,6 +62,7 @@ function activate(context) {
     gatewayStatus.name = 'Suspect Gateway';
     context.subscriptions.push(gatewayStatus);
     (0, testExplorer_1.registerTestExplorer)(context);
+    (0, contractSuite_1.registerContractSuite)(context, runner_1.suspectBinary);
     (0, workflowsView_1.registerWorkflowsView)(context);
     (0, overview_1.registerOverview)(context);
     (0, status_1.registerStatus)(context);

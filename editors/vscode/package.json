@@ -152,6 +152,10 @@
 			{
 				"command": "suspect.openSuspectConfig",
 				"title": "Suspect: Open Configuration"
+			},
+			{
+				"command": "suspect.contract.refresh",
+				"title": "Suspect: Refresh Contract Tests"
 			}
 		],
 		"viewsContainers": {

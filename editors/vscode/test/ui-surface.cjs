@@ -22,6 +22,7 @@ function loadModule(name, needs, modules = new Map()) {
 		if (what === 'vscode') return needs;
 		if (what === 'fs') return require('fs');
 		if (what === 'path') return require('path');
+		if (what === 'child_process') return require('child_process');
 		if (what.startsWith('.')) {
 			const name = path.basename(what);
 			if (!cache.has(name)) {
@@ -104,4 +105,39 @@ test('the manifest carries the new UI surface consistently', () => {
 	// The floor setting is the shape the server reads live.
 	const floor = manifest.contributes.configuration.properties['suspect.lint.minSeverity'];
 	assert.deepEqual(floor.enum, ['error', 'warning', 'information', 'hint']);
+});
+
+test('contract suite logic: manifest tests and CI stage parsing', () => {
+	const { readManifestTests, parseCiStages } = loadModule('contractSuite', {});
+
+	// The tests section of a real manifest.
+	const manifest = {
+		name: 'demo', entry: 'openapi.yaml',
+		tests: { arazzo: ['workflows/health.arazzo.yaml'], base_url: 'http://localhost:32400' },
+	};
+	const tests = readManifestTests(JSON.stringify(manifest));
+	assert.deepEqual(tests, { arazzo: ['workflows/health.arazzo.yaml'], base_url: 'http://localhost:32400', cassette: undefined });
+	assert.equal(readManifestTests('{"name":"x"}'), undefined, 'no tests section → undefined');
+	assert.equal(readManifestTests('{not json'), undefined, 'unparseable → undefined');
+
+	// A cassette turns the suite offline.
+	const offline = readManifestTests(JSON.stringify({
+		tests: { arazzo: ['a.yaml'], base_url: 'http://x', cassette: 'tapes/demo' },
+	}));
+	assert.equal(offline.cassette, 'tapes/demo');
+
+	// The ci --format json document shape.
+	const ci = parseCiStages(JSON.stringify({
+		projects: [{ name: 'demo', stages: [
+			{ stage: 'validate', passed: false, errors: 2, warnings: 58, summary: 'spec.yaml' },
+			{ stage: 'lint', passed: true, errors: 0, warnings: 745, summary: 'ruleset' },
+		] }],
+	}));
+	assert.equal(ci.length, 2);
+	assert.equal(ci[0].stage, 'validate');
+	assert.equal(ci[0].passed, false);
+	assert.equal(ci[1].passed, true);
+	// Tolerance for malformed documents: the run still reports honestly.
+	assert.deepEqual(parseCiStages('not json'), []);
+	assert.deepEqual(parseCiStages('{"projects":[]}'), []);
 });

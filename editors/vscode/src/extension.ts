@@ -11,6 +11,7 @@ import {
 	SdkCompatibilityProfile, readSdkCompatibilityProfiles, SdkSessionHandle, SdkSessionIdentity, SdkSessionRecord, startSdkSession,
 } from './generation';
 import { registerTestExplorer } from './testExplorer';
+import { registerContractSuite } from './contractSuite';
 import { registerOverview } from './overview';
 import { registerStatus } from './status';
 import { openSuspectConfig, setSeverityFloor } from './config';
@@ -44,6 +45,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	context.subscriptions.push(gatewayStatus);
 
 	registerTestExplorer(context);
+	registerContractSuite(context, suspectBinary);
 	registerWorkflowsView(context);
 	registerOverview(context);
 	registerStatus(context);
