@@ -58,6 +58,12 @@ pub enum Strategy {
 pub enum Command {
     /// Acquire a hash-pinned document closure or verify its offline cache.
     Acquire(commands::acquire_cmd::AcquireArgs),
+    /// Manage and verify credentials for the testing flows.
+    Auth {
+        /// The auth subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::auth::AuthCmd,
+    },
     /// Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats.
     Check {
         /// Documents to check.
@@ -207,6 +213,12 @@ pub enum Command {
         /// collects what the workflow published.
         #[arg(long, value_name = "DIR")]
         message_broker: Option<PathBuf>,
+        /// Credentials file for the security schemes the workflows
+        /// exercise. Default: `.suspect/credentials.json` discovered by
+        /// walking up from the Arazzo document; `SUSPECT_CREDENTIALS`
+        /// overrides.
+        #[arg(long, value_name = "FILE")]
+        credentials: Option<PathBuf>,
     },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
@@ -516,6 +528,9 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             upstream,
             diff,
         } => commands::replay::replay(&cassette, &upstream, diff),
+        Command::Auth {
+            cmd: commands::auth::AuthCmd::Check { credentials },
+        } => commands::auth::check(credentials.as_deref()),
         Command::Test {
             arazzo,
             base_url,
@@ -524,6 +539,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             offline: _,
             report,
             message_broker,
+            credentials,
         } => commands::test::test_with_messages(
             &arazzo,
             &base_url,
@@ -531,6 +547,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             cassette.as_deref(),
             matches!(report, ReportFormat::Ndjson),
             message_broker.as_deref(),
+            credentials.as_deref(),
         ),
         Command::Gen {
             spec,

@@ -46,7 +46,7 @@ mod tests;
 
 pub use exec::{
     HttpClient, HttpRequest, HttpResponse, RunSummary, TestEvent, TransportError, run_plan,
-    run_plan_with_auth, run_plan_with_messages,
+    run_plan_with_auth, run_plan_with_auth_and_messages, run_plan_with_messages,
 };
 pub use messaging::{FileBroker, LoopbackBroker, Message, MessageError, MessageTransport};
 pub use plan::{

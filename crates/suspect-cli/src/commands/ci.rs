@@ -607,6 +607,10 @@ fn test_stage(manifest: &Path) -> StageResult {
             .get("message_broker")
             .and_then(|v| v.as_str())
             .map(|b| dir.join(b));
+        let credentials = tests
+            .get("credentials")
+            .and_then(|v| v.as_str())
+            .map(|c| dir.join(c));
         let exit = crate::commands::test::test_with_messages(
             &dir.join(path),
             base_url,
@@ -614,6 +618,7 @@ fn test_stage(manifest: &Path) -> StageResult {
             cassette.as_deref(),
             false,
             broker.as_deref(),
+            credentials.as_deref(),
         )
         .unwrap_or(1);
         if exit != 0 {

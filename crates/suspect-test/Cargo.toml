@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+percent-encoding.workspace = true
 suspect-overlay.workspace = true
 suspect-low.workspace = true
 suspect-ref.workspace = true

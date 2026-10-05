@@ -239,6 +239,31 @@ pub async fn run_plan_with_auth(
     run_plan_full(plan, base_url, http, auth_state, auth_config, None, events).await
 }
 
+/// The full entry point: auth state + config + a message transport, for
+/// callers that have credentials to inject (the CLI's `suspect test`
+/// after loading its credentials file).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_plan_with_auth_and_messages(
+    plan: &Plan,
+    base_url: &str,
+    http: &dyn HttpClient,
+    auth_state: &crate::auth::AuthState,
+    auth_config: &crate::auth::AuthConfig,
+    messages: Option<&dyn crate::messaging::MessageTransport>,
+    events: mpsc::Sender<TestEvent>,
+) -> RunSummary {
+    run_plan_full(
+        plan,
+        base_url,
+        http,
+        auth_state,
+        auth_config,
+        messages,
+        events,
+    )
+    .await
+}
+
 /// [`run_plan_with_auth`] plus a message transport for Arazzo 1.1 AsyncAPI
 /// send/receive steps.
 #[allow(clippy::too_many_arguments)]
