@@ -177,30 +177,62 @@
 				}
 			]
 		},
-		"semanticTokenScopes": {
-			"markdownHeading": [
-				"markup.heading.markdown",
-				"entity.name.section.markdown"
-			],
-			"markdownEmphasis": [
-				"markup.italic.markdown"
-			],
-			"markdownStrong": [
-				"markup.bold.markdown"
-			],
-			"markdownLink": [
-				"markup.underline.link.markdown",
-				"string.link.markdown"
-			],
-			"markdownCode": [
-				"markup.raw.inline.markdown",
-				"string.other"
-			],
-			"markdownBlock": [
-				"markup.raw.block.markdown",
-				"string.other"
-			]
-		}
+		"semanticTokenScopes": [
+			{
+				"language": "yaml",
+				"scopes": {
+					"markdownHeading": [
+						"markup.heading.markdown",
+						"entity.name.section.markdown"
+					],
+					"markdownEmphasis": [
+						"markup.italic.markdown"
+					],
+					"markdownStrong": [
+						"markup.bold.markdown"
+					],
+					"markdownLink": [
+						"markup.underline.link.markdown",
+						"string.link.markdown"
+					],
+					"markdownCode": [
+						"markup.raw.inline.markdown",
+						"string.other"
+					],
+					"markdownBlock": [
+						"markup.raw.block.markdown",
+						"string.other"
+					]
+				}
+			},
+			{
+				"language": "json",
+				"scopes": {
+					"markdownHeading": [
+						"markup.heading.markdown",
+						"entity.name.section.markdown"
+					],
+					"markdownEmphasis": [
+						"markup.italic.markdown"
+					],
+					"markdownStrong": [
+						"markup.bold.markdown"
+					],
+					"markdownLink": [
+						"markup.underline.link.markdown",
+						"string.link.markdown"
+					],
+					"markdownCode": [
+						"markup.raw.inline.markdown",
+						"string.other"
+					],
+					"markdownBlock": [
+						"markup.raw.block.markdown",
+						"string.other"
+					]
+				}
+			}
+		]
 	},
 	"scripts": {
 		"compile": "tsc -p ./",

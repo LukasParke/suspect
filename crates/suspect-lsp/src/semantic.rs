@@ -216,14 +216,26 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                         }
                         if let Some(value) = child.child_by_field("value") {
                             let vc = value.content();
-                            if crate::markdown::MARKDOWN_FIELDS.contains(&key_text.as_str())
-                                && let Some(field) = crate::markdown::MarkdownField::new(vc)
+                            // The description and summary values are
+                            // CommonMark: when one contains constructs,
+                            // those replace the base value token — the base
+                            // would cover the whole value and overlap them,
+                            // and VS Code gives the first token the win. A
+                            // description with no constructs keeps the base
+                            // token and its `documentation` modifier.
+                            let markdown = crate::markdown::MARKDOWN_FIELDS
+                                .contains(&key_text.as_str())
+                                .then(|| {
+                                    crate::markdown::MarkdownField::new(vc).map(|field| {
+                                        let constructs = crate::markdown::constructs(&field);
+                                        (field, constructs)
+                                    })
+                                })
+                                .flatten();
+                            if let Some((field, constructs)) = &markdown
+                                && !constructs.is_empty()
                             {
-                                // The description and summary values are
-                                // CommonMark: highlight their constructs at
-                                // their true file positions, exactly as a
-                                // .md file highlights them.
-                                for (range, construct) in crate::markdown::constructs(&field) {
+                                for (range, construct) in constructs {
                                     let ty = match construct {
                                         crate::markdown::Construct::Heading => MD_HEADING,
                                         crate::markdown::Construct::Emphasis => MD_EMPHASIS,
@@ -232,6 +244,11 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                                         crate::markdown::Construct::CodeSpan => MD_CODE,
                                         crate::markdown::Construct::CodeBlock => MD_BLOCK,
                                     };
+                                    // These tokens live inside a documentation
+                                    // field; they carry the modifier that
+                                    // says so, which the base pass used to
+                                    // give the whole value.
+                                    let mods = DOCUMENTATION;
                                     // A construct spans the whole construct —
                                     // a heading includes its newline, a code
                                     // block spans several lines — but one LSP
@@ -246,7 +263,40 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                                         .position(|&b| b == b'\n')
                                         .map_or(bytes.len(), |at| start + at);
                                     let end = field.map_offset(range.end).min(line_end).max(start);
-                                    push_token(&mut raw, bytes, li, start..end, ty, 0);
+                                    push_token(&mut raw, bytes, li, start..end, ty, mods);
+                                }
+                                // A fence that names a language gets its
+                                // content tokenized as that language — the
+                                // ```json example in a description
+                                // highlights like the JSON it is.
+                                for block in crate::markdown::fenced_blocks(field) {
+                                    if !matches!(block.language.as_str(), "json" | "yaml" | "yml") {
+                                        continue;
+                                    }
+                                    let body = &field.text[block.content.clone()];
+                                    let format = if block.language == "json" {
+                                        suspect_syntax::Format::Json
+                                    } else {
+                                        suspect_syntax::Format::Yaml
+                                    };
+                                    let inner = suspect_low::LowDoc::with_format(
+                                        suspect_source::Uri::parse("file:///embedded").unwrap(),
+                                        suspect_source::Source::from_vec(body.as_bytes().to_vec()),
+                                        format,
+                                    );
+                                    for (range, ty) in embedded_tokens(&inner) {
+                                        let decoded = block.content.start + range.start;
+                                        let start = field.map_offset(decoded);
+                                        let end = field.map_offset(decoded + range.len());
+                                        push_token(
+                                            &mut raw,
+                                            bytes,
+                                            li,
+                                            start..end.max(start),
+                                            ty,
+                                            DOCUMENTATION,
+                                        );
+                                    }
                                 }
                             }
                             if key_text == "pattern" {
@@ -256,7 +306,12 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                                 ValueKind::Int | ValueKind::Float
                             ) {
                                 push_token(&mut raw, bytes, li, token_range(&vc), NUMBER, 0);
-                            } else {
+                            } else if markdown
+                                .as_ref()
+                                .is_none_or(|(_, constructs)| constructs.is_empty())
+                            {
+                                // No constructs: the base token covers the
+                                // plain value and carries `documentation`.
                                 value_tokens(&mut raw, bytes, li, &vc, &key_text, &child_path);
                             }
                             match NodeRef::new(vc).kind() {
@@ -427,8 +482,75 @@ fn token_range(node: &SNode<'_>) -> std::ops::Range<usize> {
     }
 }
 
+/// Tokens for a JSON or YAML body embedded in a description fence, as
+/// byte ranges relative to the body text.
+///
+/// The main walk needs a spec-shaped document to type keys; a fence
+/// holding `{"a": 1}` is not one, so this walk does the generic part
+/// itself: keys, strings, numbers, and the three literals.
+fn embedded_tokens(low: &suspect_low::LowDoc) -> Vec<(std::ops::Range<usize>, u32)> {
+    use suspect_low::{NodeRef, ValueKind};
+
+    let mut out = Vec::new();
+    let mut stack = vec![low.inner().root()];
+    while let Some(node) = stack.pop() {
+        match node.kind() {
+            SyntaxKind::Stream | SyntaxKind::Document => {
+                if let Some(child) = node.first_meaningful_child() {
+                    stack.push(child);
+                }
+            }
+            _ if matches!(
+                node.raw_kind(),
+                "block_node" | "flow_node" | "_value" | "block_sequence_item"
+            ) =>
+            {
+                if let Some(child) = node.first_meaningful_child() {
+                    stack.push(child);
+                }
+            }
+            SyntaxKind::Mapping => {
+                for pair in node.children().collect::<Vec<_>>() {
+                    if pair.kind() != SyntaxKind::Pair {
+                        continue;
+                    }
+                    if let Some(key) = pair.child_by_field("key") {
+                        let key = key.content();
+                        out.push((key.byte_range(), KEYWORD));
+                        stack.push(key);
+                    }
+                    if let Some(value) = pair.child_by_field("value") {
+                        stack.push(value.content());
+                    }
+                }
+            }
+            SyntaxKind::Sequence => {
+                for item in node.children().collect::<Vec<_>>() {
+                    stack.push(item);
+                }
+            }
+            SyntaxKind::Pair => {}
+            _ => {
+                let kind = NodeRef::new(node).kind();
+                let ty = match kind {
+                    ValueKind::Str => Some(STRING),
+                    ValueKind::Int | ValueKind::Float => Some(NUMBER),
+                    ValueKind::Bool | ValueKind::Null => Some(MACRO),
+                    _ => None,
+                };
+                if let Some(ty) = ty {
+                    out.push((node.byte_range(), ty));
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Appends one token over `span` unless it crosses a line break (keys,
 /// numbers, and regexes never do; this guards against block scalars).
+/// The span is clamped to its line's end so a mapped markdown range can
+/// never produce an invalid length.
 fn push_token(
     raw: &mut Vec<RawToken>,
     bytes: &[u8],
@@ -440,6 +562,13 @@ fn push_token(
     if bytes[span.start..span.end].contains(&b'\n') {
         return;
     }
+    // A mapped markdown range can run to the end of the raw line it
+    // started on; clamp to that line so the length is always valid.
+    let line_end = bytes[span.start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(bytes.len(), |at| span.start + at);
+    let span = span.start..line_end.min(span.end);
     let (line, col) = li.line_col_utf16(bytes, span.start);
     let len: u32 = String::from_utf8_lossy(&bytes[span.start..span.end])
         .chars()
@@ -1536,5 +1665,149 @@ paths:
         );
         assert!(decoded.contains(&(REGEXP, "^x$".to_owned())), "{decoded:?}");
         assert!(decoded.contains(&(REGEXP, "^y$".to_owned())), "{decoded:?}");
+    }
+
+    /// Markdown constructs replace the base value token; they must not
+    /// overlap it. The base pass used to emit a STRING token covering the
+    /// whole description alongside the construct tokens, and VS Code
+    /// resolves overlaps first-token-wins — which buried every markdown
+    /// token and was the "zero markdown syntax highlighting" report.
+    #[test]
+    fn markdown_constructs_do_not_overlap_the_base_value_token() {
+        let text = "openapi: 3.1.0\ninfo:\n  description: A `-` separated list\n";
+        let doc = crate::state::OpenDoc::parse("file:///mem/m.yaml".into(), text.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        // Decode every token into absolute (line, col) spans, then check
+        // the description line: the markdown code span must be there, and
+        // nothing may overlap it — the burial bug was exactly an overlap.
+        let mut line = 0u32;
+        let mut col = 0u32;
+        let mut spans = Vec::new();
+        for t in &tokens.data {
+            line += t.delta_line;
+            col = if t.delta_line == 0 {
+                col + t.delta_start
+            } else {
+                t.delta_start
+            };
+            spans.push((line, col, t.length, t.token_type));
+        }
+        let on_line: Vec<_> = spans
+            .iter()
+            .filter(|(l, _, _, ty)| *l == 2 && *ty == MD_CODE)
+            .collect();
+        assert!(
+            !on_line.is_empty(),
+            "the code span must be tokenized: {spans:?}"
+        );
+        let desc: Vec<_> = spans.iter().filter(|(l, _, _, _)| *l == 2).collect();
+        for (i, (_, c1, len1, _)) in desc.iter().enumerate() {
+            for (_, c2, len2, _) in desc.iter().skip(i + 1) {
+                let a = *c1..c1 + len1;
+                let b = *c2..c2 + len2;
+                assert!(
+                    a.end <= b.start || b.end <= a.start,
+                    "tokens overlap on the description line: {a:?} vs {b:?} in {desc:?}"
+                );
+            }
+        }
+    }
+
+    /// A plain description with no markdown keeps the base STRING token
+    /// and its `documentation` modifier, and the constructs carry the
+    /// modifier themselves — the modifier the base pass used to give the
+    /// whole value.
+    #[test]
+    fn markdown_tokens_carry_documentation_and_plain_ones_keep_the_base() {
+        let with_constructs = "openapi: 3.1.0\ninfo:\n  description: Some **bold** text\n";
+        let doc =
+            crate::state::OpenDoc::parse("file:///mem/m.yaml".into(), with_constructs.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        let strong: Vec<_> = tokens
+            .data
+            .iter()
+            .filter(|t| t.token_type == MD_STRONG)
+            .collect();
+        assert!(!strong.is_empty(), "the strong construct must be tokenized");
+        assert!(
+            strong
+                .iter()
+                .all(|t| t.token_modifiers_bitset & DOCUMENTATION != 0),
+            "markdown tokens must carry the documentation modifier"
+        );
+        // And no whole-value STRING token beside them.
+        let string_on_line: Vec<_> = tokens
+            .data
+            .iter()
+            .filter(|t| t.token_type == STRING && t.delta_line == 0)
+            .collect();
+        let _ = string_on_line;
+
+        let plain = "openapi: 3.1.0\ninfo:\n  description: Find pets by status\n";
+        let doc = crate::state::OpenDoc::parse("file:///mem/p.yaml".into(), plain.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        assert!(
+            tokens.data.iter().any(|t| t.token_type == STRING
+                && t.token_modifiers_bitset & DOCUMENTATION != 0
+                && t.delta_line > 0),
+            "a plain description keeps the base documentation token: {:?}",
+            tokens.data
+        );
+    }
+
+    /// A fence that names a language gets its content tokenized as that
+    /// language, at its true file position inside the description.
+    #[test]
+    fn fenced_json_content_is_tokenized_inside_the_description() {
+        let text = "openapi: 3.1.0\ninfo:\n  description: |\n    Example payload:\n\n    ```json\n    {\"kind\": \"show\", \"season\": 3}\n    ```\n";
+        let doc = crate::state::OpenDoc::parse("file:///mem/f.yaml".into(), text.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        let mut line = 0u32;
+        let mut spans = Vec::new();
+        for t in &tokens.data {
+            line += t.delta_line;
+            spans.push((
+                line,
+                t.delta_start,
+                t.length,
+                t.token_type,
+                t.token_modifiers_bitset,
+            ));
+        }
+        // The fence's content line (the JSON object, one line after the
+        // opening fence) holds keys, strings, and a number — none of which
+        // the YAML walk would have produced.
+        let fence_line = 6u32;
+        let on_line: Vec<_> = spans
+            .iter()
+            .filter(|(l, _, _, _, _)| *l == fence_line)
+            .collect();
+        let types: Vec<u32> = on_line.iter().map(|(_, _, _, ty, _)| *ty).collect();
+        assert!(
+            types.contains(&STRING),
+            "the JSON strings must be tokenized: {on_line:?}"
+        );
+        assert!(
+            types.contains(&NUMBER),
+            "the JSON number must be tokenized: {on_line:?}"
+        );
+        // Everything the fence emitted is documentation.
+        assert!(
+            on_line
+                .iter()
+                .all(|(_, _, _, _, mods)| *mods & DOCUMENTATION != 0),
+            "fence tokens are documentation: {on_line:?}"
+        );
+        // And the tokenized text is what the file actually holds there.
+        let source_line = text.lines().nth(fence_line as usize).unwrap();
+        for (_, col, len, _, _) in on_line.iter().filter(|(_, _, _, ty, _)| *ty == STRING) {
+            let start = *col as usize;
+            let end = (start + *len as usize).min(source_line.len());
+            let slice = &source_line[start..end];
+            assert!(
+                slice.contains('\"') || slice.contains("show"),
+                "a STRING token pointed at {slice:?} on {source_line:?}"
+            );
+        }
     }
 }

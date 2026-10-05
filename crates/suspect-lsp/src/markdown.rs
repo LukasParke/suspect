@@ -605,6 +605,58 @@ fn decoded_line_offset(text: &str, line: usize) -> usize {
     text.split('\n').take(line).map(|l| l.len() + 1).sum()
 }
 
+/// A fenced code block inside a CommonMark field, with its declared
+/// language.
+#[derive(Debug)]
+pub struct FencedBlock {
+    /// The fence's info string, lowercased and trimmed: `json`, `yaml`, …
+    pub language: String,
+    /// The decoded-text range of the block's content, between the fences.
+    pub content: std::ops::Range<usize>,
+}
+
+/// Every fenced block in the field, in document order.
+///
+/// Indented code blocks carry no language and are skipped: without a
+/// name there is nothing to tokenize the content as.
+#[must_use]
+pub fn fenced_blocks(field: &MarkdownField<'_>) -> Vec<FencedBlock> {
+    use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag};
+
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    let mut out = Vec::new();
+    let mut open: Option<String> = None;
+    let mut start: Option<usize> = None;
+    let mut end: Option<usize> = None;
+    for (event, range) in Parser::new_ext(&field.text, options).into_offset_iter() {
+        match event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info))) => {
+                open = Some(info.trim().to_ascii_lowercase());
+            }
+            Event::Text(_) if open.is_some() => {
+                if start.is_none() {
+                    start = Some(range.start);
+                }
+                end = Some(range.end);
+            }
+            Event::End(pulldown_cmark::TagEnd::CodeBlock) => {
+                if let (Some(language), Some(start), Some(end)) =
+                    (open.take(), start.take(), end.take())
+                {
+                    out.push(FencedBlock {
+                        language,
+                        content: start..end,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
