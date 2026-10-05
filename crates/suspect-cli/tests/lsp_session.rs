@@ -140,7 +140,7 @@ fn document_symbol_lists_the_whole_tree() {
 fn hover_on_a_cross_file_ref_explains_where_it_lands() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(ws);
+    let (line, column) = cross_file_ref(&ws);
     let text = editor
         .hover(&uri, line, column + "$ref: 'schem".len())
         .expect("hover on a cross-file ref");
@@ -172,7 +172,7 @@ fn hover_on_an_operation_id_locates_the_operation() {
 fn definition_on_a_ref_resolves_from_the_key_and_the_value() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(ws);
+    let (line, column) = cross_file_ref(&ws);
 
     let from_value = editor
         .definition_line(
@@ -249,7 +249,7 @@ fn definition_on_a_component_declaration_finds_its_schema() {
 fn references_finds_every_use_of_a_shared_schema() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(ws);
+    let (line, column) = cross_file_ref(&ws);
     let value = editor
         .request(
             "textDocument/references",
@@ -275,7 +275,7 @@ fn references_finds_every_use_of_a_shared_schema() {
 fn completion_offers_the_schemas_a_ref_could_name() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(ws);
+    let (line, column) = cross_file_ref(&ws);
     let value = editor
         .request(
             "textDocument/completion",
@@ -476,7 +476,7 @@ fn semantic_tokens_are_produced_full_and_ranged() {
 fn document_highlights_mark_the_current_symbol() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(ws);
+    let (line, column) = cross_file_ref(&ws);
     let value = editor
         .request(
             "textDocument/documentHighlight",
@@ -586,7 +586,7 @@ fn formatting_produces_an_edit() {
 fn call_hierarchy_prepares_for_an_operation() {
     let (ws, editor) = shared();
     let uri = url_of(&ws.openapi);
-    let (line, column) = cross_file_ref(ws);
+    let (line, column) = cross_file_ref(&ws);
     let value = editor
         .request(
             "textDocument/prepareCallHierarchy",
@@ -1796,4 +1796,115 @@ fn markdown_fields_are_tokenized_and_linted() {
             "a markdown finding landed outside the description block: {item}"
         );
     }
+}
+
+/// The floor every editor sits on: a client that offers nothing.
+///
+/// Every test in this suite drives VS Code's rich capability set —
+/// dynamic registration, pull diagnostics, semantic-token deltas. Zed,
+/// Helix, and eglot send none of that, and any behaviour gated on a
+/// capability VS Code sends is a feature those editors silently lose.
+/// This strips the handshake to the minimum and asserts the whole
+/// advertised surface still answers with content.
+#[test]
+fn a_minimal_client_gets_everything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start_bare(&ws.root);
+    let api_uri = url_of(&ws.openapi);
+    let (path, text) = (
+        &ws.openapi,
+        std::fs::read_to_string(&ws.openapi).expect("read"),
+    );
+    editor.open(path, &text);
+    std::thread::sleep(Duration::from_millis(500));
+
+    let (line, column) = cross_file_ref(&ws);
+    let value_column = column + "$ref: 'schemas.yaml#/components/schem".len();
+    let calls: Vec<(String, Value)> = vec![
+        (
+            "textDocument/hover".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+        ("textDocument/documentSymbol".to_owned(), doc(&api_uri)),
+        ("textDocument/foldingRange".to_owned(), doc(&api_uri)),
+        ("textDocument/semanticTokens/full".to_owned(), doc(&api_uri)),
+        ("textDocument/documentLink".to_owned(), doc(&api_uri)),
+        ("textDocument/codeLens".to_owned(), doc(&api_uri)),
+        (
+            "textDocument/inlayHint".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "range": {"start": at(1, 1), "end": at(200, 1)},
+            }),
+        ),
+        (
+            "textDocument/documentHighlight".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+        (
+            "textDocument/completion".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+        (
+            "textDocument/references".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+                "context": {"includeDeclaration": true},
+            }),
+        ),
+        (
+            "workspace/symbol".to_owned(),
+            serde_json::json!({"query": "Accounts"}),
+        ),
+        (
+            "textDocument/definition".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+    ];
+    let answers = editor.request_all(&calls);
+    let dead: Vec<&str> = answers
+        .iter()
+        .filter_map(|(method, answer)| match answer {
+            Ok(_) => None,
+            Err(_) => Some(method.as_str()),
+        })
+        .collect();
+    assert!(
+        dead.is_empty(),
+        "{} advertised features went dark for a minimal client: {dead:?}",
+        dead.len()
+    );
+    // And they produce content, not empty shells.
+    let hover = answers
+        .iter()
+        .find(|(method, _)| method == "textDocument/hover")
+        .and_then(|(_, answer)| answer.as_ref().ok())
+        .expect("hover");
+    assert!(
+        !hover.get("contents").unwrap_or(&Value::Null).is_null(),
+        "hover must resolve without workspace/configuration"
+    );
+    let symbols = answers
+        .iter()
+        .find(|(method, _)| method == "textDocument/documentSymbol")
+        .and_then(|(_, answer)| answer.as_ref().ok())
+        .expect("documentSymbol");
+    assert!(
+        symbols.as_array().is_some_and(|s| !s.is_empty()),
+        "symbols must resolve without any client capability"
+    );
 }
