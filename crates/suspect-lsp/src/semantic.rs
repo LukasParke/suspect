@@ -38,6 +38,15 @@ pub const TOKEN_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::PARAMETER,
     SemanticTokenType::ENUM_MEMBER,
     SemanticTokenType::MACRO,
+    // Markdown constructs inside `description`/`summary` values, appended so
+    // existing legend indexes never shift. These need the editor to map
+    // them to markdown TextMate scopes; the VS Code extension does.
+    SemanticTokenType::new("markdownHeading"),
+    SemanticTokenType::new("markdownEmphasis"),
+    SemanticTokenType::new("markdownStrong"),
+    SemanticTokenType::new("markdownLink"),
+    SemanticTokenType::new("markdownCode"),
+    SemanticTokenType::new("markdownBlock"),
 ];
 
 /// Token modifiers emitted by [`semantic_tokens_full`], in legend order.
@@ -62,6 +71,13 @@ const CLASS: u32 = 9;
 const PARAMETER: u32 = 10;
 const ENUM_MEMBER: u32 = 11;
 const MACRO: u32 = 12;
+// Markdown construct token indexes, in legend order after MACRO.
+const MD_HEADING: u32 = 13;
+const MD_EMPHASIS: u32 = 14;
+const MD_STRONG: u32 = 15;
+const MD_LINK: u32 = 16;
+const MD_CODE: u32 = 17;
+const MD_BLOCK: u32 = 18;
 
 /// Modifier bit positions (legend order).
 const DEFINITION: u32 = 1 << 0;
@@ -200,6 +216,39 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                         }
                         if let Some(value) = child.child_by_field("value") {
                             let vc = value.content();
+                            if crate::markdown::MARKDOWN_FIELDS.contains(&key_text.as_str())
+                                && let Some(field) = crate::markdown::MarkdownField::new(vc)
+                            {
+                                // The description and summary values are
+                                // CommonMark: highlight their constructs at
+                                // their true file positions, exactly as a
+                                // .md file highlights them.
+                                for (range, construct) in crate::markdown::constructs(&field) {
+                                    let ty = match construct {
+                                        crate::markdown::Construct::Heading => MD_HEADING,
+                                        crate::markdown::Construct::Emphasis => MD_EMPHASIS,
+                                        crate::markdown::Construct::Strong => MD_STRONG,
+                                        crate::markdown::Construct::Link => MD_LINK,
+                                        crate::markdown::Construct::CodeSpan => MD_CODE,
+                                        crate::markdown::Construct::CodeBlock => MD_BLOCK,
+                                    };
+                                    // A construct spans the whole construct —
+                                    // a heading includes its newline, a code
+                                    // block spans several lines — but one LSP
+                                    // token lives within one line, and
+                                    // `push_token` drops multi-line spans.
+                                    // Highlight the construct's first line:
+                                    // for a heading that is the heading, for a
+                                    // code block the opening fence.
+                                    let start = field.map_offset(range.start);
+                                    let line_end = bytes[start.min(bytes.len())..]
+                                        .iter()
+                                        .position(|&b| b == b'\n')
+                                        .map_or(bytes.len(), |at| start + at);
+                                    let end = field.map_offset(range.end).min(line_end).max(start);
+                                    push_token(&mut raw, bytes, li, start..end, ty, 0);
+                                }
+                            }
                             if key_text == "pattern" {
                                 push_token(&mut raw, bytes, li, token_range(&vc), REGEXP, 0);
                             } else if matches!(

@@ -42,6 +42,7 @@ pub mod keys;
 pub mod keyword_docs;
 mod latency;
 pub mod links;
+pub mod markdown;
 mod meaning;
 pub mod navigation;
 pub mod pull;

@@ -295,6 +295,10 @@ pub fn compute_diagnostics_raw(
     out.extend(lint_diagnostics(low));
     out.extend(swagger_diagnostics(low));
     out.extend(arazzo_diagnostics(low));
+    // The CommonMark fields get markdownlint-compatible rules, at their
+    // true file positions. Style-level: hints unless configured otherwise,
+    // and never above the configured floor.
+    out.extend(markdown_diagnostics(low));
     let root = ws.and_then(super::workspace_root);
     out.extend(extension_diagnostics(
         low,
@@ -315,6 +319,35 @@ pub fn filter_at_least(diagnostics: Vec<Diagnostic>, floor: DiagnosticSeverity) 
         // out errors whenever a floor is configured, which is exactly what
         // happened against a real specification with `min_severity: warning`.
         .filter(|diagnostic| diagnostic.severity.is_none_or(|severity| severity <= floor))
+        .collect()
+}
+
+/// markdownlint-compatible rules over `description`/`summary` values.
+///
+/// Codes match the existing lint battery's naming so per-rule
+/// configuration (`suspect.lint.rules`) and the severity floor treat
+/// these like any other finding.
+pub fn markdown_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
+    let bytes = low.inner().bytes();
+    let li = low.inner().line_index();
+    crate::markdown::fields(low)
+        .into_iter()
+        .flat_map(|field| {
+            crate::markdown::lint_findings(&field)
+                .into_iter()
+                .map(move |f| {
+                    let mut diag = make(
+                        bytes,
+                        li,
+                        f.range,
+                        DiagnosticSeverity::HINT,
+                        f.code,
+                        f.message,
+                    );
+                    diag.source = Some(SOURCE_LINT.to_owned());
+                    diag
+                })
+        })
         .collect()
 }
 

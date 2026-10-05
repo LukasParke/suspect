@@ -1706,3 +1706,94 @@ fn push_and_pull_apply_the_same_severity_floor() {
         );
     }
 }
+
+/// The CommonMark fields get the treatment `.md` files get, on the wire.
+///
+/// `description` and `summary` are CommonMark in every family the server
+/// understands, so markdown constructs must arrive as semantic tokens at
+/// their true file positions, and markdownlint-compatible rules must
+/// arrive as pull diagnostics — both through the real server, not the
+/// library in isolation.
+#[test]
+fn markdown_fields_are_tokenized_and_linted() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    // A spec whose description holds every construct worth highlighting
+    // and every rule worth finding.
+    let source = "openapi: 3.1.0\ninfo:\n  description: |\n    # First heading\n    # A second heading\n\n    Some **bold** and *emphasised* prose with\n    a [link](https://example.com) and a bare\n    https://bare.example plus `code`.\n\n    ```\n    fenced-without-language\n    ```\npaths: {}\n";
+    let dir_path = dir.path().join("openapi.yaml");
+    std::fs::write(&dir_path, source).expect("write");
+    let editor = Editor::start(dir_path.parent().unwrap(), editor_capabilities());
+    let uri = url_of(&dir_path);
+    editor.open(&dir_path, source);
+    assert!(
+        editor.wait_for_notification("textDocument/publishDiagnostics", Duration::from_secs(30)),
+        "no diagnostics were pushed for an opened document"
+    );
+
+    // Tokens: the markdown constructs arrive under their own types.
+    let tokens = editor
+        .request("textDocument/semanticTokens/full", doc(&uri))
+        .expect("semanticTokens/full");
+    // Decode the relative quintuples into absolute (line, type) pairs.
+    let data: Vec<u64> = tokens
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|d| d.iter().filter_map(|v| v.as_u64()).collect())
+        .unwrap_or_default();
+    assert!(
+        !data.is_empty(),
+        "no tokens at all for a document with prose"
+    );
+    // The legend order is fixed by the server: the 13 standard types,
+    // then the six markdown constructs — heading, emphasis, strong, link,
+    // code span, code block. The fixture contains all six, so all six
+    // indexes must appear in the token stream.
+    let mut line = 0u64;
+    let mut types_on_line: Vec<(u64, u64)> = Vec::new();
+    for chunk in data.chunks(5) {
+        line += chunk[0];
+        types_on_line.push((line, chunk[3]));
+    }
+    for expected in 13u64..=18 {
+        assert!(
+            types_on_line
+                .iter()
+                .any(|(l, ty)| *ty == expected && *l >= 2 && *l <= 13),
+            "markdown token type {expected} never appeared inside the description: \
+             {types_on_line:?}"
+        );
+    }
+
+    // Diagnostics: the markdownlint-compatible findings arrive by code.
+    let report = editor
+        .request("textDocument/diagnostic", doc(&uri))
+        .expect("diagnostic");
+    let items = report
+        .get("items")
+        .and_then(|i| i.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let codes: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item.get("code").and_then(|c| c.as_str()))
+        .collect();
+    for expected in ["md-single-h1", "md-bare-url", "md-code-fence-language"] {
+        assert!(
+            codes.contains(&expected),
+            "the pull battery missed {expected}; got {codes:?}"
+        );
+    }
+    // And the findings underline the right lines: the second heading, the
+    // bare URL, and the fence all live inside the description block.
+    for item in items.iter().filter(|item| {
+        item.get("code")
+            .and_then(|c| c.as_str())
+            .is_some_and(|c| c.starts_with("md-"))
+    }) {
+        let line = item["range"]["start"]["line"].as_u64().unwrap_or_default();
+        assert!(
+            (2..=13).contains(&line),
+            "a markdown finding landed outside the description block: {item}"
+        );
+    }
+}
