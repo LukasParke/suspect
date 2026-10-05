@@ -519,8 +519,15 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
-                        will_save: Some(true),
-                        will_save_wait_until: Some(true),
+                        // Advertise only what is implemented: neither
+                        // willSave nor willSaveWaitUntil has a handler, and
+                        // claiming them made editors send `textDocument/willSave`
+                        // on every save and throw the MethodNotFound into
+                        // their extension host log. `save` below is the one
+                        // that is implemented — it asks the client to send
+                        // didSave notifications, which `did_save` handles.
+                        will_save: None,
+                        will_save_wait_until: None,
                         change: Some(TextDocumentSyncKind::INCREMENTAL),
                         save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
                             include_text: Some(false),
