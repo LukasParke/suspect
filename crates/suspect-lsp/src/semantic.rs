@@ -559,6 +559,13 @@ fn push_token(
     ty: u32,
     mods: u32,
 ) {
+    // An empty span is not a token — it is a zero-length token to the
+    // client, and VS Code rejects those outright ("Semantic token with
+    // invalid length"). An empty quoted string (``example: ''``) decodes
+    // to one, so skip rather than send.
+    if span.start >= span.end {
+        return;
+    }
     if bytes[span.start..span.end].contains(&b'\n') {
         return;
     }
@@ -1809,5 +1816,58 @@ paths:
                 "a STRING token pointed at {slice:?} on {source_line:?}"
             );
         }
+    }
+
+    /// No token may extend past its line's end. VS Code warns and drops
+    /// such tokens ("Semantic token with invalid length detected") —
+    /// found in the wild at a key whose value is a nested block mapping
+    /// whose first child is a description.
+    #[test]
+    fn no_token_crosses_its_lines_end() {
+        let cases = [
+            // The wild shape: key with nothing after the colon on its
+            // line, nested mapping, description first.
+            "openapi: 3.1.0\nfilterMovies:\n  description: Filters applied for movies.\n  type:\n    - 'null'\n    - string\n",
+            // The value side of the same shape, and a list-valued type.
+            "openapi: 3.1.0\npaths:\n  /a:\n    get:\n      operationId: listA\n      responses:\n        '200':\n          description: ok\n",
+        ];
+        for text in cases {
+            let doc =
+                crate::state::OpenDoc::parse("file:///mem/lines.yaml".into(), text.to_owned());
+            let tokens = semantic_tokens_full(&doc);
+            let mut line = 0u32;
+            let mut col = 0u32;
+            for t in &tokens.data {
+                line += t.delta_line;
+                col = if t.delta_line == 0 {
+                    col + t.delta_start
+                } else {
+                    t.delta_start
+                };
+                let line_len = text.split('\n').nth(line as usize).map_or(0, |l| l.len());
+                assert!(
+                    (col + t.length) as usize <= line_len,
+                    "token at {line}:{col} len {} crosses line end {line_len}: type {}",
+                    t.length,
+                    t.token_type,
+                );
+            }
+        }
+    }
+
+    /// An empty quoted string decodes to a zero-length value, which must
+    /// not become a token: VS Code rejects zero-length tokens as invalid
+    /// and drops them with a renderer warning. Found in the wild as
+    /// `example: ''` in the Plex spec at line 19150.
+    #[test]
+    fn no_token_is_ever_zero_length() {
+        let text = "openapi: 3.1.0\ninfo:\n  title: T\n  description: with empty\ncomponents:\n  schemas:\n    A:\n      example: ''\n";
+        let doc = crate::state::OpenDoc::parse("file:///mem/empty.yaml".into(), text.to_owned());
+        let tokens = semantic_tokens_full(&doc);
+        assert!(
+            tokens.data.iter().all(|t| t.length > 0),
+            "zero-length token emitted: {:?}",
+            tokens.data.iter().find(|t| t.length == 0)
+        );
     }
 }
