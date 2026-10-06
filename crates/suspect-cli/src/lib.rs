@@ -189,6 +189,32 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
+    /// Extract server framework routes and cross-reference them with the
+    /// spec: undocumented endpoints, spec-only endpoints, method drift.
+    Reverse {
+        /// Server source tree or single file with route registrations.
+        source: PathBuf,
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Structured JSON report instead of human text.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Generate and run stateful dependency-graph test sequences against a
+    /// live server.
+    Stateful {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Base URL prepended to operation paths.
+        #[arg(long, default_value = "http://localhost:8080")]
+        base_url: String,
+        /// Run only sequences whose target operationId contains this.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Print the generated sequences as JSON instead of running them.
+        #[arg(long)]
+        emit: bool,
+    },
     /// Compile an Arazzo document into an executable suite and run it.
     Test {
         /// Arazzo document describing the workflows.
@@ -239,6 +265,16 @@ pub enum Command {
         /// Write the journal to this file (append) instead of stdout.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
+        /// Grammar-evolved, coverage-guided fuzzing: novel response shapes
+        /// become seeds the campaign exploits.
+        #[arg(long)]
+        evolved: bool,
+        /// Evolved fuzzing: rounds per operation.
+        #[arg(long, default_value_t = 8)]
+        rounds: u32,
+        /// Evolved fuzzing: requests per round.
+        #[arg(long, default_value_t = 12)]
+        per_round: u32,
     },
     /// Trace a validation failure to its origin: source location, git
     /// blame, and whether recorded traffic ever passed it.
@@ -578,12 +614,18 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             runs,
             filter,
             journal,
+            evolved,
+            rounds,
+            per_round,
         } => commands::fuzz::fuzz(
             &spec,
             &base_url,
             runs,
             filter.as_deref(),
             journal.as_deref(),
+            evolved,
+            rounds,
+            per_round,
         ),
         Command::Replay {
             cassette,
@@ -591,6 +633,17 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             diff,
             journal,
         } => commands::replay::replay(&cassette, &upstream, diff, journal.as_deref()),
+        Command::Reverse {
+            source,
+            spec,
+            format,
+        } => commands::reverse::reverse(&source, &spec, matches!(format, OutputFormat::Json)),
+        Command::Stateful {
+            spec,
+            base_url,
+            filter,
+            emit,
+        } => commands::stateful::stateful(&spec, &base_url, filter.as_deref(), emit),
         Command::Auth {
             cmd: commands::auth::AuthCmd::Check { credentials },
         } => commands::auth::check(credentials.as_deref()),
