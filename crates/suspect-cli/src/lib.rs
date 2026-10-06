@@ -445,7 +445,12 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
                 args.style = Some(match style {
                     "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
                     "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
-                    _ => commands::docs_gen_cmd::DocsStyle::Html,
+                    "html" => commands::docs_gen_cmd::DocsStyle::Html,
+                    other => {
+                        return Err(anyhow::anyhow!(
+                            "docs style `{other}` is not one of: markdown, sveltekit, html"
+                        ));
+                    }
                 });
             }
             if args.output.is_none()

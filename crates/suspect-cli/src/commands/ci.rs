@@ -556,6 +556,14 @@ fn codegen_stage(manifest: &Path) -> StageResult {
                 .unwrap_or_default(),
             import_name: field("import_name"),
             check: true,
+            generation: match crate::commands::project::generation_options_from(entry, index) {
+                Ok(options) => options,
+                Err(error) => {
+                    drifted += 1;
+                    eprintln!("ci: {error}");
+                    continue;
+                }
+            },
         };
         if crate::commands::sdk::generate_codegen_target(&spec, &target).unwrap_or(1) != 0 {
             drifted += 1;

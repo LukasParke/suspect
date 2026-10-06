@@ -60,6 +60,36 @@ pub struct CodegenTarget {
     pub import_name: Option<String>,
     /// When true, only ownership/drift is checked; nothing is written.
     pub check: bool,
+    /// Generation options: interpretation profiles, credential env mapping,
+    /// and SDK defaults (pagination, OAuth lifecycle) — the same schema
+    /// `suspect codegen --defaults` accepts.
+    pub generation: suspect_codegen::backend::GenerationOptions,
+}
+
+/// Lifts the `compatibility_profiles`/`credential_env`/`sdk_defaults`
+/// keys of one manifest codegen target into its [`GenerationOptions`].
+///
+/// # Errors
+/// Fails when a present key does not parse as generation options.
+pub fn generation_options_from(
+    entry: &serde_json::Value,
+    index: usize,
+) -> anyhow::Result<suspect_codegen::backend::GenerationOptions> {
+    // The three keys form one GenerationOptions document; lift whichever
+    // are present together.
+    let mut options_json = serde_json::Map::new();
+    for key in ["compatibility_profiles", "credential_env", "sdk_defaults"] {
+        if let Some(value) = entry.get(key) {
+            options_json.insert(key.to_owned(), value.clone());
+        }
+    }
+    if options_json.is_empty() {
+        return Ok(suspect_codegen::backend::GenerationOptions::default());
+    }
+    serde_json::from_value::<suspect_codegen::backend::GenerationOptions>(
+        serde_json::Value::Object(options_json),
+    )
+    .map_err(|e| anyhow::anyhow!("codegen target #{index}: invalid generation options: {e}"))
 }
 
 /// Contract-test target configuration.
@@ -174,6 +204,31 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                 .iter()
                 .enumerate()
                 .map(|(index, entry)| {
+                    // A codegen target is a closed object: unknown keys are
+                    // a typo about to be silently ignored, and a manifest
+                    // that says something the builder never reads is worse
+                    // than an error.
+                    const KNOWN: &[&str] = &[
+                        "name",
+                        "profile",
+                        "package_name",
+                        "package_version",
+                        "out",
+                        "operation_id",
+                        "import_name",
+                        "check",
+                        "compatibility_profiles",
+                        "credential_env",
+                        "sdk_defaults",
+                    ];
+                    if let Some(map) = entry.as_object() {
+                        for key in map.keys() {
+                            anyhow::ensure!(
+                                KNOWN.contains(&key.as_str()),
+                                "codegen target #{index}: unknown key `{key}`"
+                            );
+                        }
+                    }
                     let field = |name: &str| -> anyhow::Result<String> {
                         entry
                             .get(name)
@@ -183,6 +238,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                                 anyhow::anyhow!("codegen target #{index} is missing `{name}`")
                             })
                     };
+                    let generation = generation_options_from(entry, index)?;
                     let profile = field("profile")?;
                     Ok(CodegenTarget {
                         name: entry
@@ -216,6 +272,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                             .get("check")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false),
+                        generation,
                     })
                 })
                 .collect::<anyhow::Result<Vec<_>>>()
@@ -295,8 +352,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                     .unwrap_or_else(|| "my-api".to_owned()),
                 "entry": "openapi.yaml",
                 "overlays": [],
-                "publish": {"output": "build/spec.yaml"},
-                "publish_profiles": {},
+                "publish": {"output": "build/spec.yaml", "profiles": {}},
                 "docs": {"style": "markdown", "output": "build/docs"},
                 "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"},
                 "codegen": [],
@@ -450,15 +506,20 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         }
     }
 
-    // Stage 4: docs.
+    // Stage 4: docs. An unrecognized style is a typo, not a silent
+    // fallback to HTML.
     if let Some((style, out)) = &project.docs {
+        let style = match style.as_str() {
+            "markdown" => crate::commands::docs_gen_cmd::DocsStyle::Markdown,
+            "sveltekit" => crate::commands::docs_gen_cmd::DocsStyle::Sveltekit,
+            "html" => crate::commands::docs_gen_cmd::DocsStyle::Html,
+            other => {
+                anyhow::bail!("docs style `{other}` is not one of: markdown, sveltekit, html");
+            }
+        };
         let args = crate::commands::docs_gen_cmd::DocsGenArgs {
             input: project.publish_output.clone(),
-            style: Some(match style.as_str() {
-                "markdown" => crate::commands::docs_gen_cmd::DocsStyle::Markdown,
-                "sveltekit" => crate::commands::docs_gen_cmd::DocsStyle::Sveltekit,
-                _ => crate::commands::docs_gen_cmd::DocsStyle::Html,
-            }),
+            style: Some(style),
             output: Some(out.clone()),
             title: None,
         };
