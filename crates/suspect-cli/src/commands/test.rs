@@ -34,6 +34,7 @@ pub fn test(
         ndjson,
         None,
         None,
+        None,
     )
 }
 
@@ -50,6 +51,7 @@ pub fn test_with_messages(
     ndjson: bool,
     message_broker: Option<&Path>,
     credentials: Option<&Path>,
+    journal: Option<&Path>,
 ) -> anyhow::Result<i32> {
     // Credentials: an explicit file wins; otherwise discover, and only
     // then the SUSPECT_CREDENTIALS override. No file is a valid state —
@@ -100,6 +102,7 @@ pub fn test_with_messages(
         ndjson,
         message_broker,
         &auth,
+        journal,
     )
 }
 
@@ -111,6 +114,7 @@ fn rt_run(
     ndjson: bool,
     message_broker: Option<&Path>,
     auth: &suspect_test::auth::AuthConfig,
+    journal: Option<&Path>,
 ) -> anyhow::Result<i32> {
     let rt = tokio::runtime::Runtime::new()?;
     let outcome = rt.block_on(async move {
@@ -168,7 +172,7 @@ fn rt_run(
     let (summary, events) = outcome;
     print!("{}", reporters::console(&summary, &events));
 
-    let mut journal = Journal::new(Box::new(suspect_journal::StdoutSink));
+    let mut journal = Journal::new(super::sink(journal)?);
     let [passed, failed, skipped] = [summary.passed, summary.failed, summary.skipped];
     journal.run_summary(
         "test",
@@ -177,5 +181,6 @@ fn rt_run(
         u32::try_from(skipped).unwrap_or(u32::MAX),
         summary.duration_ms as f64,
     );
+    journal.flush()?;
     Ok(i32::from(summary.failed > 0))
 }

@@ -483,6 +483,8 @@ fn run_bench(rt: &tokio::runtime::Runtime) -> anyhow::Result<()> {
         spec: stripe.clone(),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let mock_app = rt
         .block_on(suspect_gateway::build_router(
@@ -575,6 +577,8 @@ fn run_bench(rt: &tokio::runtime::Runtime) -> anyhow::Result<()> {
         spec: stripe.clone(),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let replay_app = rt
         .block_on(suspect_gateway::build_router(

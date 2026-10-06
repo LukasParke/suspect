@@ -31,7 +31,39 @@ pub fn gateway(
     delay_pct: u8,
     error_status: Option<u16>,
     error_pct: u8,
+    scenario: Option<&PathBuf>,
+    journal_file: Option<&Path>,
+    redact_headers: &[String],
+    redact_json_keys: &[String],
 ) -> anyhow::Result<i32> {
+    // Scenario mode serves a scripted sequence instead of the spec-derived
+    // router; it needs no spec, no upstream, nothing but the script.
+    if mode == "scenario" {
+        let scenario_path = scenario
+            .ok_or_else(|| anyhow::anyhow!("--scenario <file> is required for scenario mode"))?;
+        let script: suspect_gateway::scenario::Scenario = serde_json::from_str(
+            &std::fs::read_to_string(scenario_path)
+                .map_err(|e| anyhow::anyhow!("read {}: {e}", scenario_path.display()))?,
+        )
+        .map_err(|e| anyhow::anyhow!("invalid scenario {}: {e}", scenario_path.display()))?;
+        anyhow::ensure!(
+            !script.steps.is_empty(),
+            "scenario {} has no steps",
+            scenario_path.display()
+        );
+        let rt = tokio::runtime::Runtime::new()?;
+        eprintln!(
+            "scenario gateway listening on 127.0.0.1:{port} ({} steps)",
+            script.steps.len()
+        );
+        return rt
+            .block_on(suspect_gateway::scenario::serve_scenario(
+                port,
+                script.steps,
+            ))
+            .map(|()| 0)
+            .map_err(|e| anyhow::anyhow!("{e}"));
+    }
     let gw_mode = match mode {
         "mock" => Mode::Mock,
         "proxy" => Mode::Proxy {
@@ -53,7 +85,9 @@ pub fn gateway(
                 None => anyhow::bail!("--cassette <file> is required for replay mode"),
             },
         },
-        other => anyhow::bail!("unknown mode {other:?} (mock|proxy|validate|record|replay)"),
+        other => {
+            anyhow::bail!("unknown mode {other:?} (mock|proxy|validate|record|replay|scenario)")
+        }
     };
 
     let cfg = GatewayConfig {
@@ -66,13 +100,15 @@ pub fn gateway(
             error_status,
             error_pct,
         },
+        redact_headers: redact_headers.to_vec(),
+        redact_json_keys: redact_json_keys.to_vec(),
     };
 
     let rt = tokio::runtime::Runtime::new()?;
     eprintln!("gateway listening on 127.0.0.1:{port} ({mode})");
-    let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(Box::new(
-        suspect_journal::StdoutSink,
-    ))));
+    let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(super::sink(
+        journal_file,
+    )?)));
     // Serve until Ctrl-C: the runtime blocks on serve(); process exit tears
     // everything down.
     rt.block_on(async move {

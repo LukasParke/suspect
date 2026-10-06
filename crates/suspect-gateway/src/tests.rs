@@ -178,6 +178,8 @@ async fn mock_gateway(faults: FaultConfig) -> (String, tempfile::TempDir) {
         spec: write_spec(dir.path()),
         port: 0,
         faults,
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
     // Hold the tempdir alive for the duration of the test.
@@ -254,6 +256,8 @@ async fn record_mode_writes_readable_cassette() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
 
@@ -311,6 +315,8 @@ async fn replay_serves_recorded_entry_binary_safe() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
 
@@ -356,6 +362,8 @@ async fn replay_miss_returns_404_problem_json() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
 
@@ -443,6 +451,8 @@ async fn validate_observe_journals_invalid_without_altering_response() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let (journal_handle, sink) = journal();
     let app = build_router(&cfg, journal_handle).await.expect("router");
@@ -489,6 +499,8 @@ async fn validate_enforce_rejects_invalid_request_before_upstream() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
 
@@ -579,6 +591,8 @@ async fn proxied_requests_carry_upstream_host_header() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
 
@@ -603,6 +617,8 @@ async fn oversized_request_body_is_rejected_with_413() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
 
@@ -646,6 +662,8 @@ async fn record_mode_redacts_credentials_in_cassette() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let base = serve_gateway(&cfg).await;
 
@@ -695,6 +713,8 @@ async fn non_utf8_header_values_are_preserved_lossily() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let (journal_handle, sink) = journal();
     let router = build_router(&cfg, journal_handle).await.expect("router");
@@ -741,6 +761,8 @@ async fn validate_treats_plus_as_literal_in_path_segments() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let (journal_handle, sink) = journal();
     let app = build_router(&cfg, journal_handle).await.expect("router");
@@ -808,6 +830,8 @@ async fn undeclared_method_returns_journaled_405() {
         spec: write_spec(dir.path()),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let (journal_handle, sink) = journal();
     let app = build_router(&cfg, journal_handle).await.expect("router");
@@ -872,6 +896,8 @@ async fn mock_startup_over_500_ops_stays_under_budget() {
         spec: dir.path().join("spec.yaml"),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let start = std::time::Instant::now();
     let (journal, _sink) = journal();
@@ -933,6 +959,8 @@ async fn gateway_serves_its_own_contract_at_openapi_json() {
         spec: spec.clone(),
         port: 0,
         faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
     };
     let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(Box::new(
         suspect_journal::StdoutSink,

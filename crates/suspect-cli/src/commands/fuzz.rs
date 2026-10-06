@@ -76,7 +76,13 @@ enum Verdict {
 /// # Errors
 /// Propagates workspace/IR compilation failures and transport setup errors;
 /// crashes surface through the exit code instead.
-pub fn fuzz(spec: &Path, base_url: &str, runs: usize, filter: Option<&str>) -> anyhow::Result<i32> {
+pub fn fuzz(
+    spec: &Path,
+    base_url: &str,
+    runs: usize,
+    filter: Option<&str>,
+    journal: Option<&Path>,
+) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(spec)?;
     let uri = Uri::from_path(spec)?;
     ws.get(&uri)
@@ -155,8 +161,9 @@ pub fn fuzz(spec: &Path, base_url: &str, runs: usize, filter: Option<&str>) -> a
     println!();
     println!("fuzz complete: {total_sent} mutants, {total_crashes} crashes");
     let elapsed_ms = started.elapsed().as_millis() as f64;
-    let mut journal = Journal::new(Box::new(suspect_journal::StdoutSink));
+    let mut journal = Journal::new(super::sink(journal)?);
     journal.run_summary("fuzz", survivors, total_crashes, 0, elapsed_ms);
+    journal.flush()?;
     Ok(i32::from(total_crashes > 0))
 }
 

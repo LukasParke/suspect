@@ -548,6 +548,7 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
                 false,
                 tests.message_broker.as_deref(),
                 tests.credentials.as_deref(),
+                None,
             )?;
             if exit != 0 {
                 failures += 1;

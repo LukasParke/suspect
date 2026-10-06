@@ -627,6 +627,7 @@ fn test_stage(manifest: &Path) -> StageResult {
             false,
             broker.as_deref(),
             credentials.as_deref(),
+            None,
         )
         .unwrap_or(1);
         if exit != 0 {

@@ -472,9 +472,7 @@ impl CassetteAppender {
             self.wrote_header = true;
         }
         entry.id = self.next_id;
-        let line = serde_json::to_string(entry)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        writeln!(self.file, "{line}")?;
+        suspect_journal::write_entry(&mut self.file, entry)?;
         self.file.flush()?;
         // Commit the id only once the line is durably written.
         self.next_id += 1;

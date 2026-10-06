@@ -219,6 +219,9 @@ pub enum Command {
         /// overrides.
         #[arg(long, value_name = "FILE")]
         credentials: Option<PathBuf>,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
     },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
@@ -233,6 +236,34 @@ pub enum Command {
         /// Run only operations whose operationId contains this substring.
         #[arg(long)]
         filter: Option<String>,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
+    },
+    /// Trace a validation failure to its origin: source location, git
+    /// blame, and whether recorded traffic ever passed it.
+    Why {
+        /// The constraint that fired (e.g. `type` or the diagnostic text).
+        constraint: String,
+        /// Spec file the failure refers to.
+        #[arg(long)]
+        spec: PathBuf,
+        /// Byte offset of the failing constraint in the spec, when known.
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Line of the failing constraint (1-based), with `--why-col`.
+        #[arg(long)]
+        why_line: Option<usize>,
+        /// Column of the failing constraint (1-based), with `--why-line`.
+        #[arg(long)]
+        why_col: Option<usize>,
+        /// Directory of recorded cassettes searched for historical
+        /// traffic (`.jsonl`/`.ndjson`/`.json` files).
+        #[arg(long, value_name = "DIR")]
+        cassette_dir: Option<PathBuf>,
+        /// Human timeline or one JSON document.
+        #[command(flatten)]
+        text: TextFormat,
     },
     /// Re-issue a recorded cassette against an upstream and report drift.
     Replay {
@@ -244,6 +275,9 @@ pub enum Command {
         /// Print unified diffs of drifted UTF-8 response bodies.
         #[arg(long)]
         diff: bool,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
     },
     /// Render documentation or custom template manifests from an OpenAPI document.
     Gen {
@@ -285,9 +319,14 @@ pub enum Command {
         /// TCP port to bind on 127.0.0.1.
         #[arg(long, short = 'p', default_value_t = 8080)]
         port: u16,
-        /// Operating mode: mock | proxy | validate | record | replay.
+        /// Operating mode: mock | proxy | validate | record | replay |
+        /// scenario.
         #[arg(long, default_value = "mock")]
         mode: String,
+        /// Scenario mode: JSON file of scripted steps
+        /// (`{"steps": [{"method", "path_suffix", "status", "body"}]}`).
+        #[arg(long, value_name = "FILE")]
+        scenario: Option<PathBuf>,
         /// Upstream base URL for proxy/validate/record modes.
         #[arg(long)]
         upstream: Option<PathBuf>,
@@ -310,6 +349,17 @@ pub enum Command {
         /// Fault injection: percent of requests faulted.
         #[arg(long, default_value_t = 0)]
         error_pct: u8,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
+        /// Header name redacted from journals and cassettes beyond the
+        /// default denylist (repeatable).
+        #[arg(long = "redact-header", value_name = "NAME")]
+        redact_headers: Vec<String>,
+        /// JSON body key redacted from journals and cassettes beyond the
+        /// default denylist (repeatable).
+        #[arg(long = "redact-json-key", value_name = "KEY")]
+        redact_json_keys: Vec<String>,
     },
     /// Generate a source-selected native SDK package.
     Codegen(commands::codegen_cmd::CodegenArgs),
@@ -527,12 +577,20 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             base_url,
             runs,
             filter,
-        } => commands::fuzz::fuzz(&spec, &base_url, runs, filter.as_deref()),
+            journal,
+        } => commands::fuzz::fuzz(
+            &spec,
+            &base_url,
+            runs,
+            filter.as_deref(),
+            journal.as_deref(),
+        ),
         Command::Replay {
             cassette,
             upstream,
             diff,
-        } => commands::replay::replay(&cassette, &upstream, diff),
+            journal,
+        } => commands::replay::replay(&cassette, &upstream, diff, journal.as_deref()),
         Command::Auth {
             cmd: commands::auth::AuthCmd::Check { credentials },
         } => commands::auth::check(credentials.as_deref()),
@@ -545,6 +603,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             report,
             message_broker,
             credentials,
+            journal,
         } => commands::test::test_with_messages(
             &arazzo,
             &base_url,
@@ -553,6 +612,24 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             matches!(report, ReportFormat::Ndjson),
             message_broker.as_deref(),
             credentials.as_deref(),
+            journal.as_deref(),
+        ),
+        Command::Why {
+            constraint,
+            spec,
+            offset,
+            why_line,
+            why_col,
+            cassette_dir,
+            text,
+        } => commands::why::why(
+            &constraint,
+            &spec,
+            offset,
+            why_line,
+            why_col,
+            cassette_dir.as_deref(),
+            matches!(text.format, OutputFormat::Json),
         ),
         Command::Gen {
             spec,
@@ -575,6 +652,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             spec,
             port,
             mode,
+            scenario,
             upstream,
             cassette,
             enforce,
@@ -582,6 +660,9 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             delay_pct,
             error_status,
             error_pct,
+            journal,
+            redact_headers,
+            redact_json_keys,
         } => commands::gateway::gateway(
             &spec,
             port,
@@ -593,6 +674,10 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             delay_pct,
             error_status,
             error_pct,
+            scenario.as_ref(),
+            journal.as_deref(),
+            &redact_headers,
+            &redact_json_keys,
         ),
         Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
         Command::Acquire(args) => commands::acquire_cmd::acquire(args),

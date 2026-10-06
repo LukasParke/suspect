@@ -40,6 +40,7 @@ pub mod test;
 pub mod upgrade;
 pub mod validate;
 pub mod watch;
+pub mod why;
 
 /// Opens the requested entry and the OpenAPI sources explicitly declared
 /// by an Arazzo entry. References resolve on demand; neighboring files are
@@ -75,4 +76,23 @@ pub fn workspace_for_entry(spec: &std::path::Path) -> anyhow::Result<std::sync::
         }
     }
     Ok(std::sync::Arc::new(ws))
+}
+
+/// Builds the journal sink for a `--journal <file>` flag: append-to-file
+/// when given, stdout otherwise.
+///
+/// # Errors
+/// Propagates open failures for the journal file.
+pub fn sink(journal: Option<&std::path::Path>) -> anyhow::Result<Box<dyn suspect_journal::Sink>> {
+    match journal {
+        Some(path) => {
+            if let Some(parent) = path.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                std::fs::create_dir_all(parent)?;
+            }
+            Ok(Box::new(suspect_journal::FileSink::open(path)?))
+        }
+        None => Ok(Box::new(suspect_journal::StdoutSink)),
+    }
 }

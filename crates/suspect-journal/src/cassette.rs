@@ -129,26 +129,38 @@ pub fn write_cassette<W: Write>(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     writeln!(w, "{header_line}")?;
     for entry in entries {
-        if !entry.duration_ms.is_finite() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("entry {}: duration_ms must be finite", entry.id),
-            ));
-        }
-        if !(100..=599).contains(&entry.status) {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "entry {}: status {} outside 100..=599",
-                    entry.id, entry.status
-                ),
-            ));
-        }
-        let line = serde_json::to_string(entry)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        writeln!(w, "{line}")?;
+        write_entry(w, entry)?;
     }
     Ok(())
+}
+
+/// Validates and writes one cassette entry line. Every cassette writer —
+/// `write_cassette` and the gateway's recording appender — funnels through
+/// here, so a recorded cassette can never contain an entry the reader
+/// would reject.
+///
+/// # Errors
+/// `InvalidData` for a non-finite `duration_ms`, a status outside
+/// `100..=599`, or an unserializable entry.
+pub fn write_entry<W: Write>(w: &mut W, entry: &CassetteEntry) -> std::io::Result<()> {
+    if !entry.duration_ms.is_finite() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("entry {}: duration_ms must be finite", entry.id),
+        ));
+    }
+    if !(100..=599).contains(&entry.status) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "entry {}: status {} outside 100..=599",
+                entry.id, entry.status
+            ),
+        ));
+    }
+    let line = serde_json::to_string(entry)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    writeln!(w, "{line}")
 }
 
 /// Reads a complete cassette from any reader.

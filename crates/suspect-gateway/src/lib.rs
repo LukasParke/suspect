@@ -133,6 +133,12 @@ pub struct GatewayConfig {
     pub port: u16,
     /// Fault injection settings.
     pub faults: FaultConfig,
+    /// Header names to redact beyond the default denylist (matched
+    /// case-insensitively).
+    pub redact_headers: Vec<String>,
+    /// JSON body keys to redact beyond the default denylist (matched
+    /// case-insensitively).
+    pub redact_json_keys: Vec<String>,
 }
 
 /// Shared per-server state handed to every handler.
@@ -231,7 +237,14 @@ pub async fn build_router(
     let mut faults = cfg.faults;
     faults.delay_pct = faults.delay_pct.min(100);
     faults.error_pct = faults.error_pct.min(100);
-    let redactor = Arc::new(Redactor::new());
+    let mut redactor = Redactor::new();
+    for header in &cfg.redact_headers {
+        redactor.deny_header(header);
+    }
+    for key in &cfg.redact_json_keys {
+        redactor.deny_json_key(key);
+    }
+    let redactor = Arc::new(redactor);
     *journal.lock().await.redactor_mut() = (*redactor).clone();
     journal.lock().await.emit(Journal::meta(
         "gateway",
