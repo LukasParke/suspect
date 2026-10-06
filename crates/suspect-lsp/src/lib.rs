@@ -510,6 +510,9 @@ impl LanguageServer for Backend {
                 && let Some(root) = &st.root
                 && let Ok(ws) = suspect_ref::WorkspaceBuilder::new().root(root).build()
             {
+                // The document cap (`suspect.ref.maxDocs`) applies on
+                // rebuilds in `any_workspace`; at initialize time the
+                // merged configuration has not arrived yet.
                 let _ = ws.load_all("main.yaml");
                 st.workspace = Some(Arc::new(ws));
             }
@@ -713,8 +716,16 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let mut hints = semantic::inlay_hints(doc, &ws, params.range);
-        if !st.config.inlay_ref_targets() {
+        // Ref-target hints carry resolve `data`; type-annotation hints
+        // have a `: ` label. Both are user-togglable; the `· required`
+        // markers are not.
+        if !st.config.inlay_refs() {
             hints.retain(|h| h.data.is_none());
+        }
+        if !st.config.inlay_properties() {
+            hints.retain(|h| {
+                !matches!(&h.label, tower_lsp::lsp_types::InlayHintLabel::String(l) if l.starts_with(": "))
+            });
         }
         Ok(Some(hints))
     }
@@ -2272,8 +2283,15 @@ impl Backend {
                 return Some(ws.clone());
             }
         }
-        let root = { self.state.read().await.root.clone() }?;
+        // Apply the configured document cap when rebuilding: without it a
+        // `suspect.ref.maxDocs` setting parses but never limits loading.
+        let (root, max_docs) = {
+            let st = self.state.read().await;
+            (st.root.clone(), st.config.max_docs())
+        };
+        let root = root?;
         let ws = suspect_ref::WorkspaceBuilder::new()
+            .max_docs(max_docs)
             .root(&root)
             .build()
             .ok()?;

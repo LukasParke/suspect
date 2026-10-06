@@ -19,23 +19,10 @@ pub struct EditorConfig {
     pub settings: Settings,
     /// Where the settings were loaded from, for diagnostics.
     pub source: Option<String>,
-    /// Maximum loaded documents in a workspace.
-    pub max_docs: Option<usize>,
-    /// Inlay hint toggles, which remain editor-only.
-    pub inlay_hints: Option<InlayHints>,
     /// Why a configuration file was not applied, when one exists but does
     /// not load. Surfaced in the editor so a broken committed config is
     /// visible instead of silently ignored.
     pub error: Option<String>,
-}
-
-/// Inlay hint toggles.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct InlayHints {
-    /// Show resolved `$ref` types.
-    pub refs: bool,
-    /// Show property types.
-    pub properties: bool,
 }
 
 /// Reads `.suspect.yaml` from the workspace root, then layers the
@@ -74,7 +61,6 @@ pub fn for_workspace(
             )
         }),
         error,
-        ..EditorConfig::default()
     };
 
     if let Some(value) = client_overrides {
@@ -85,13 +71,16 @@ pub fn for_workspace(
 
 impl EditorConfig {
     /// The configured minimum severity, defaulting to `hint` (show
-    /// everything).
+    /// everything). Accepts the LSP/`.suspect.yaml` spellings and the
+    /// `"information"` spelling VS Code's settings enum uses.
     #[must_use]
     pub fn min_severity(&self) -> tower_lsp::lsp_types::DiagnosticSeverity {
         match self.settings.lint.min_severity.as_deref() {
             Some("error") => tower_lsp::lsp_types::DiagnosticSeverity::ERROR,
             Some("warning") => tower_lsp::lsp_types::DiagnosticSeverity::WARNING,
-            Some("info") => tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION,
+            Some("info") | Some("information") => {
+                tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION
+            }
             _ => tower_lsp::lsp_types::DiagnosticSeverity::HINT,
         }
     }
@@ -122,22 +111,6 @@ fn apply_client(config: &mut EditorConfig, value: &serde_json::Value) {
         .and_then(|v| v.as_bool())
     {
         config.settings.validate.strict_format = strict;
-    }
-    if let Some(hints) = section.get("inlayHints").and_then(|v| v.as_object()) {
-        config.inlay_hints = Some(InlayHints {
-            refs: hints.get("refs").and_then(|v| v.as_bool()).unwrap_or(true),
-            properties: hints
-                .get("properties")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true),
-        });
-    }
-    if let Some(max_docs) = section
-        .get("refs")
-        .and_then(|v| v.get("maxDocs"))
-        .and_then(|v| v.as_u64())
-    {
-        config.max_docs = usize::try_from(max_docs).ok();
     }
 }
 
@@ -197,7 +170,25 @@ mod tests {
             Some("warning"),
             "an unset editor option must not clear a committed value"
         );
-        assert_eq!(config.inlay_hints.map(|h| h.refs), Some(false));
+        // The client's inlayHints section flows through the shared config
+        // schema, not the editor overlay.
+        let shared = crate::config_files::parse_config(&client).expect("parses");
+        assert!(!shared.inlay_refs());
+    }
+
+    #[test]
+    fn the_vscode_information_spelling_maps_to_information() {
+        let mut config = EditorConfig::default();
+        config.settings.lint.min_severity = Some("information".to_owned());
+        assert_eq!(
+            config.min_severity(),
+            tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION
+        );
+        config.settings.lint.min_severity = Some("info".to_owned());
+        assert_eq!(
+            config.min_severity(),
+            tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION
+        );
     }
 
     #[test]

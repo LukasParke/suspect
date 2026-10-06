@@ -29,7 +29,6 @@ tempfile.workspace = true
 serde.workspace = true
 suspect-test.workspace = true
 suspect-gen.workspace = true
-suspect-journal.workspace = true
 suspect-rex.workspace = true
 bytes.workspace = true
 reqwest = { version = "0.12", optional = true, default-features = false, features = [
