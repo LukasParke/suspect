@@ -100,6 +100,64 @@
 					"type": "string",
 					"default": "",
 					"description": "Git ref the Breaking gate stage compares the spec against (passed as `suspect ci --baseline`). Empty runs the stage without a baseline, which passes vacuously."
+				},
+				"suspect.lint.recommended": {
+					"type": "boolean",
+					"markdownDescription": "Apply the recommended lint rule set (`lint.recommended` in `.suspect.yaml`).",
+					"default": null,
+					"scope": "resource"
+				},
+				"suspect.lint.rules": {
+					"type": "object",
+					"additionalProperties": {
+						"type": "string",
+						"enum": [
+							"off",
+							"hint",
+							"info",
+							"warning",
+							"error"
+						]
+					},
+					"markdownDescription": "Per-rule severities: rule id → `off` | `hint` | `info` | `warning` | `error` (`lint.rules` in `.suspect.yaml`).",
+					"default": null,
+					"scope": "resource"
+				},
+				"suspect.lint.ruleset": {
+					"type": "string",
+					"markdownDescription": "Path to a custom lint ruleset (`lint.ruleset` in `.suspect.yaml`).",
+					"default": null,
+					"scope": "resource"
+				},
+				"suspect.validate.strictFormat": {
+					"type": "boolean",
+					"markdownDescription": "Treat non-canonical YAML formatting (indentation, key order) as findings.",
+					"default": null,
+					"scope": "resource"
+				},
+				"suspect.ref.maxDocs": {
+					"type": "number",
+					"markdownDescription": "Maximum documents loaded in one ref workspace (default 500).",
+					"default": null,
+					"scope": "resource"
+				},
+				"suspect.inlayHints.refs": {
+					"type": "boolean",
+					"markdownDescription": "Show resolved `$ref` target inlay hints.",
+					"default": null,
+					"scope": "resource"
+				},
+				"suspect.inlayHints.properties": {
+					"type": "boolean",
+					"markdownDescription": "Show property type-annotation inlay hints.",
+					"default": null,
+					"scope": "resource"
+				},
+				"suspect.formatting.sortKeys": {
+					"type": "boolean",
+					"markdownDescription": "Reorder object keys into the canonical OpenAPI order when formatting (`formatting.sortKeys` in `.suspect.yaml`).",
+					"default": null,
+					"scope": "resource"
 				}
 			}
 		},
@@ -160,6 +218,56 @@
 				"command": "suspect.project.refresh",
 				"title": "Suspect: Refresh Project View",
 				"icon": "$(refresh)"
+			},
+			{
+				"command": "suspect.showRefGraph",
+				"title": "Suspect: Show $ref Graph",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.breakingChanges",
+				"title": "Suspect: Breaking Changes (vs base)",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.contractCoverage",
+				"title": "Suspect: Contract Coverage",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.runService",
+				"title": "Suspect: Run the Service Gate",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.verifyContract",
+				"title": "Suspect: Verify Contract Package",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.changeImpact",
+				"title": "Suspect: Change Impact at Cursor",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.generateExample",
+				"title": "Suspect: Generate Example at Cursor",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.extractSchema",
+				"title": "Suspect: Extract $ref into a Component Schema",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.inlineSchema",
+				"title": "Suspect: Inline $ref at Cursor",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.renderPreview",
+				"title": "Suspect: Preview Generated Docs",
+				"category": "Suspect"
 			}
 		],
 		"viewsContainers": {
@@ -211,6 +319,23 @@
 				{
 					"command": "suspect.project.refresh",
 					"when": "false"
+				}
+			],
+			"editor/context": [
+				{
+					"command": "suspect.generateExample",
+					"when": "editorTextFocus && resourceScheme == file",
+					"group": "9_suspect"
+				},
+				{
+					"command": "suspect.extractSchema",
+					"when": "editorTextFocus && resourceScheme == file",
+					"group": "9_suspect"
+				},
+				{
+					"command": "suspect.inlineSchema",
+					"when": "editorTextFocus && resourceScheme == file",
+					"group": "9_suspect"
 				}
 			]
 		},

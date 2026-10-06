@@ -234,3 +234,52 @@ test('only one test controller is created', () => {
 	}
 	assert.deepEqual(created, [['suspect', 'Suspect']]);
 });
+
+test('the server-side commands have editor entry points and the server settings are declared', () => {
+	const { contributes } = packageManifest;
+	const commands = new Set(contributes.commands.map((c) => c.command));
+	// Every command the language server advertises that the extension owns
+	// a surface for is contributed and registered.
+	const serverSurfaces = [
+		'suspect.showRefGraph', 'suspect.breakingChanges', 'suspect.contractCoverage',
+		'suspect.runService', 'suspect.verifyContract', 'suspect.changeImpact',
+		'suspect.generateExample', 'suspect.extractSchema', 'suspect.inlineSchema',
+		'suspect.renderPreview',
+	];
+	for (const name of serverSurfaces) {
+		assert.ok(commands.has(name), `${name} is contributed`);
+	}
+	// The cursor-anchored refactors are reachable from the editor context menu.
+	const context = (contributes.menus['editor/context'] ?? []).map((e) => e.command);
+	for (const name of ['suspect.generateExample', 'suspect.extractSchema', 'suspect.inlineSchema']) {
+		assert.ok(context.includes(name), `${name} is in the editor context menu`);
+	}
+	// The settings the server parses are declared in the Settings UI, in
+	// the shapes its configuration schema accepts.
+	const props = contributes.configuration.properties;
+	assert.equal(props['suspect.lint.recommended'].type, 'boolean');
+	assert.equal(props['suspect.lint.rules'].type, 'object');
+	assert.equal(props['suspect.lint.ruleset'].type, 'string');
+	assert.equal(props['suspect.validate.strictFormat'].type, 'boolean');
+	assert.equal(props['suspect.ref.maxDocs'].type, 'number');
+	assert.equal(props['suspect.inlayHints.refs'].type, 'boolean');
+	assert.equal(props['suspect.inlayHints.properties'].type, 'boolean');
+	assert.equal(props['suspect.formatting.sortKeys'].type, 'boolean');
+});
+
+test('server commands travel over executeCommand and the admission review over its custom request', () => {
+	const surface = fs.readFileSync(path.join(__dirname, '..', 'src', 'serverCommands.ts'), 'utf8');
+	assert.ok(
+		surface.includes("'workspace/executeCommand'"),
+		'server commands route through the running language client',
+	);
+	assert.ok(
+		surface.includes("'suspect/generationContract'"),
+		'the admission review uses its custom request',
+	);
+	const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+	assert.ok(
+		extension.includes('generationContract('),
+		'generation consults the admission review before running',
+	);
+});

@@ -13,6 +13,7 @@ import {
 import { registerTesting } from './testing';
 import { registerProjectView } from './projectView';
 import { openSuspectConfig, setSeverityFloor } from './config';
+import { generationContract, registerServerCommands } from './serverCommands';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
 
@@ -53,6 +54,7 @@ export function activate(context: vscode.ExtensionContext): void {
 	sdkGeneration = registerSdkGeneration(context);
 
 	startClient();
+	context.subscriptions.push(...registerServerCommands(() => client));
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration('suspect.basePath')) {
@@ -380,6 +382,14 @@ async function genPresetCommand(): Promise<void> {
 		return;
 	}
     const outDir = path.join(folder.uri.fsPath, 'gen-out', presetPick.generationKind);
+	// The admission review on the live document: refusing contracts are
+	// reported before a generation attempt, the same way the CLI gates it.
+	const contract = await generationContract(() => client, spec);
+	if (contract && !contract.admissible) {
+		void vscode.window.showWarningMessage(
+			`Suspect: the contract has ${contract.refusals} refusal-class admission finding(s); generation would be refused. Details in the Suspect output.`,
+		);
+	}
     let generation: Generation;
     try {
         if (isSdkProfile(presetPick.generationKind)) {

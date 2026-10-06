@@ -48,6 +48,7 @@ const generation_1 = require("./generation");
 const testing_1 = require("./testing");
 const projectView_1 = require("./projectView");
 const config_1 = require("./config");
+const serverCommands_1 = require("./serverCommands");
 const discover_1 = require("./discover");
 const project_1 = require("./project");
 let client;
@@ -66,6 +67,7 @@ function activate(context) {
     (0, notebook_1.registerNotebook)(context);
     sdkGeneration = registerSdkGeneration(context);
     startClient();
+    context.subscriptions.push(...(0, serverCommands_1.registerServerCommands)(() => client));
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('suspect.basePath')) {
             void restartClient();
@@ -378,6 +380,12 @@ async function genPresetCommand() {
         return;
     }
     const outDir = path.join(folder.uri.fsPath, 'gen-out', presetPick.generationKind);
+    // The admission review on the live document: refusing contracts are
+    // reported before a generation attempt, the same way the CLI gates it.
+    const contract = await (0, serverCommands_1.generationContract)(() => client, spec);
+    if (contract && !contract.admissible) {
+        void vscode.window.showWarningMessage(`Suspect: the contract has ${contract.refusals} refusal-class admission finding(s); generation would be refused. Details in the Suspect output.`);
+    }
     let generation;
     try {
         if ((0, generation_1.isSdkProfile)(presetPick.generationKind)) {
