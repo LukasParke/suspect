@@ -9,6 +9,7 @@ pub mod arazzo_diff;
 pub mod auth;
 pub mod bench;
 pub mod breaking;
+pub mod bridge;
 pub mod check;
 pub mod ci;
 pub mod codegen_cmd;

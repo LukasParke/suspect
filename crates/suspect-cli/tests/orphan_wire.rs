@@ -265,3 +265,46 @@ paths:
 /// Silence the unused warning when Path is only used in cfg(unix) tests.
 #[allow(dead_code)]
 fn _path_used(_: &Path) {}
+
+#[test]
+fn bridge_emits_regeneration_plans_when_the_spec_changes() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    std::fs::write(root.join("api.yaml"), API).expect("api");
+    // First tick: the bridge has never seen the file, so it reloads and
+    // emits a regeneration plan.
+    let output = suspect()
+        .arg("bridge")
+        .arg(root.join("api.yaml"))
+        .args(["--max-ticks", "1"])
+        .output()
+        .expect("run");
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("regenerate mocks docs validators"),
+        "the first tick plans regeneration: {stdout}"
+    );
+    assert!(
+        stdout.contains("1 reload(s)"),
+        "the summary counts the reload: {stdout}"
+    );
+
+    // The JSON channel carries the same plan for scripts.
+    let output = suspect()
+        .arg("bridge")
+        .arg(root.join("api.yaml"))
+        .args(["--max-ticks", "1", "--format", "json"])
+        .output()
+        .expect("run");
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    assert!(
+        parsed["reloaded"].as_bool() == Some(true)
+            && parsed["regen"]["mocks"].as_bool() == Some(true),
+        "the tick record is machine-readable: {parsed}"
+    );
+}

@@ -189,6 +189,21 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
+    /// Run the live contract bridge: watch the spec and emit regeneration
+    /// plans, evolution proposals, and reconciliation conflicts.
+    Bridge {
+        /// Entry OpenAPI document to watch.
+        spec: PathBuf,
+        /// Polling interval in milliseconds.
+        #[arg(long, default_value_t = 250)]
+        interval_ms: u64,
+        /// Stop after this many ticks (for scripts; omit to watch).
+        #[arg(long, hide = true)]
+        max_ticks: Option<u64>,
+        /// Newline-delimited JSON tick records instead of human text.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
     /// Extract server framework routes and cross-reference them with the
     /// spec: undocumented endpoints, spec-only endpoints, method drift.
     Reverse {
@@ -633,6 +648,17 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             diff,
             journal,
         } => commands::replay::replay(&cassette, &upstream, diff, journal.as_deref()),
+        Command::Bridge {
+            spec,
+            interval_ms,
+            max_ticks,
+            format,
+        } => commands::bridge::bridge(
+            &spec,
+            interval_ms,
+            max_ticks,
+            matches!(format, OutputFormat::Json),
+        ),
         Command::Reverse {
             source,
             spec,
