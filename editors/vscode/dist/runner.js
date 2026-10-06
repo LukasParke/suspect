@@ -37,6 +37,7 @@ exports.isSuspectEvent = isSuspectEvent;
 exports.suspectBinary = suspectBinary;
 exports.testBaseUrl = testBaseUrl;
 exports.gatewayPort = gatewayPort;
+exports.spawnSuspectRunWith = spawnSuspectRunWith;
 exports.spawnSuspectRun = spawnSuspectRun;
 exports.errorMessage = errorMessage;
 const cp = __importStar(require("child_process"));
@@ -89,22 +90,23 @@ function gatewayPort() {
     return config().get('gatewayPort') ?? 8080;
 }
 /**
- * Spawn `suspect test <arazzo> [--filter <id>] --base-url <url> --report ndjson`
- * and stream parsed TestEvents to `onEvent`.
- *
- * Exit codes 0 (pass) and 1 (failures) resolve with the run_done totals;
- * anything else (spawn failure, usage error) rejects.
+ * The options-aware runner behind the Testing view: suites a manifest
+ * declares pass its base URL and cassette so they run what the project
+ * declared, not what the editor has configured.
  */
-function spawnSuspectRun(arazzoPath, filter, onEvent) {
-    const args = ['test', arazzoPath, '--base-url', testBaseUrl(), '--report', 'ndjson'];
-    if (filter !== undefined) {
-        args.push('--filter', filter);
+function spawnSuspectRunWith(arazzoPath, options, onEvent, binary = suspectBinary()) {
+    const args = ['test', arazzoPath, '--base-url', options.baseUrl ?? testBaseUrl(), '--report', 'ndjson'];
+    if (options.filter !== undefined) {
+        args.push('--filter', options.filter);
+    }
+    if (options.cassette !== undefined) {
+        args.push('--cassette', options.cassette);
     }
     let child;
     let killed = false;
     const done = new Promise((resolve, reject) => {
         try {
-            child = cp.spawn(suspectBinary(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
+            child = cp.spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: options.cwd });
         }
         catch (err) {
             reject(err instanceof Error ? err : new Error(String(err)));
@@ -169,6 +171,10 @@ function spawnSuspectRun(arazzoPath, filter, onEvent) {
             child?.kill('SIGTERM');
         },
     };
+}
+/** The original signature: the editor's base URL, no cassette. */
+function spawnSuspectRun(arazzoPath, filter, onEvent) {
+    return spawnSuspectRunWith(arazzoPath, { filter }, onEvent);
 }
 function errorMessage(err) {
     return err instanceof Error ? err.message : String(err);

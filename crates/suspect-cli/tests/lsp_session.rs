@@ -1797,3 +1797,114 @@ fn markdown_fields_are_tokenized_and_linted() {
         );
     }
 }
+
+/// The floor every editor sits on: a client that offers nothing.
+///
+/// Every test in this suite drives VS Code's rich capability set —
+/// dynamic registration, pull diagnostics, semantic-token deltas. Zed,
+/// Helix, and eglot send none of that, and any behaviour gated on a
+/// capability VS Code sends is a feature those editors silently lose.
+/// This strips the handshake to the minimum and asserts the whole
+/// advertised surface still answers with content.
+#[test]
+fn a_minimal_client_gets_everything() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start_bare(&ws.root);
+    let api_uri = url_of(&ws.openapi);
+    let (path, text) = (
+        &ws.openapi,
+        std::fs::read_to_string(&ws.openapi).expect("read"),
+    );
+    editor.open(path, &text);
+    std::thread::sleep(Duration::from_millis(500));
+
+    let (line, column) = cross_file_ref(&ws);
+    let value_column = column + "$ref: 'schemas.yaml#/components/schem".len();
+    let calls: Vec<(String, Value)> = vec![
+        (
+            "textDocument/hover".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+        ("textDocument/documentSymbol".to_owned(), doc(&api_uri)),
+        ("textDocument/foldingRange".to_owned(), doc(&api_uri)),
+        ("textDocument/semanticTokens/full".to_owned(), doc(&api_uri)),
+        ("textDocument/documentLink".to_owned(), doc(&api_uri)),
+        ("textDocument/codeLens".to_owned(), doc(&api_uri)),
+        (
+            "textDocument/inlayHint".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "range": {"start": at(1, 1), "end": at(200, 1)},
+            }),
+        ),
+        (
+            "textDocument/documentHighlight".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+        (
+            "textDocument/completion".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+        (
+            "textDocument/references".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+                "context": {"includeDeclaration": true},
+            }),
+        ),
+        (
+            "workspace/symbol".to_owned(),
+            serde_json::json!({"query": "Accounts"}),
+        ),
+        (
+            "textDocument/definition".to_owned(),
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "position": at(line, value_column),
+            }),
+        ),
+    ];
+    let answers = editor.request_all(&calls);
+    let dead: Vec<&str> = answers
+        .iter()
+        .filter_map(|(method, answer)| match answer {
+            Ok(_) => None,
+            Err(_) => Some(method.as_str()),
+        })
+        .collect();
+    assert!(
+        dead.is_empty(),
+        "{} advertised features went dark for a minimal client: {dead:?}",
+        dead.len()
+    );
+    // And they produce content, not empty shells.
+    let hover = answers
+        .iter()
+        .find(|(method, _)| method == "textDocument/hover")
+        .and_then(|(_, answer)| answer.as_ref().ok())
+        .expect("hover");
+    assert!(
+        !hover.get("contents").unwrap_or(&Value::Null).is_null(),
+        "hover must resolve without workspace/configuration"
+    );
+    let symbols = answers
+        .iter()
+        .find(|(method, _)| method == "textDocument/documentSymbol")
+        .and_then(|(_, answer)| answer.as_ref().ok())
+        .expect("documentSymbol");
+    assert!(
+        symbols.as_array().is_some_and(|s| !s.is_empty()),
+        "symbols must resolve without any client capability"
+    );
+}

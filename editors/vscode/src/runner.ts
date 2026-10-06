@@ -84,14 +84,34 @@ export function gatewayPort(): number {
  * Exit codes 0 (pass) and 1 (failures) resolve with the run_done totals;
  * anything else (spawn failure, usage error) rejects.
  */
-export function spawnSuspectRun(
+export interface RunOptions {
+	/** Base URL the suite runs against. Defaults to the editor setting. */
+	baseUrl?: string;
+	/** Recorded cassette: runs the suite offline, replaying the recording. */
+	cassette?: string;
+	/** Run only workflows whose id contains this substring. */
+	filter?: string;
+	/** Working directory for the run; relative `sourceDescriptions` resolve from the document regardless. */
+	cwd?: string;
+}
+
+/**
+ * The options-aware runner behind the Testing view: suites a manifest
+ * declares pass its base URL and cassette so they run what the project
+ * declared, not what the editor has configured.
+ */
+export function spawnSuspectRunWith(
 	arazzoPath: string,
-	filter: string | undefined,
+	options: RunOptions,
 	onEvent: (event: SuspectEvent) => void,
+	binary: string = suspectBinary(),
 ): SuspectRunHandle {
-	const args = ['test', arazzoPath, '--base-url', testBaseUrl(), '--report', 'ndjson'];
-	if (filter !== undefined) {
-		args.push('--filter', filter);
+	const args = ['test', arazzoPath, '--base-url', options.baseUrl ?? testBaseUrl(), '--report', 'ndjson'];
+	if (options.filter !== undefined) {
+		args.push('--filter', options.filter);
+	}
+	if (options.cassette !== undefined) {
+		args.push('--cassette', options.cassette);
 	}
 
 	let child: cp.ChildProcess | undefined;
@@ -99,7 +119,7 @@ export function spawnSuspectRun(
 
 	const done = new Promise<RunTotals>((resolve, reject) => {
 		try {
-			child = cp.spawn(suspectBinary(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
+			child = cp.spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], cwd: options.cwd });
 		} catch (err) {
 			reject(err instanceof Error ? err : new Error(String(err)));
 			return;
@@ -162,6 +182,15 @@ export function spawnSuspectRun(
 			child?.kill('SIGTERM');
 		},
 	};
+}
+
+/** The original signature: the editor's base URL, no cassette. */
+export function spawnSuspectRun(
+	arazzoPath: string,
+	filter: string | undefined,
+	onEvent: (event: SuspectEvent) => void,
+): SuspectRunHandle {
+	return spawnSuspectRunWith(arazzoPath, { filter }, onEvent);
 }
 
 export function errorMessage(err: unknown): string {

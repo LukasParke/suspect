@@ -10,8 +10,11 @@ import {
 	Generation, generationArgs, isSdkProfile, SDK_PROFILE_DIRECTORIES, SdkProfile, availableSdkProfiles, runGeneration, readCurrentSdkArtifact, readSdkSessionIdentity,
 	SdkCompatibilityProfile, readSdkCompatibilityProfiles, SdkSessionHandle, SdkSessionIdentity, SdkSessionRecord, startSdkSession,
 } from './generation';
-import { registerTestExplorer } from './testExplorer';
-import { registerWorkflowsView } from './workflowsView';
+import { registerTesting } from './testing';
+import { registerProjectView } from './projectView';
+import { openSuspectConfig, setSeverityFloor } from './config';
+import { findArazzoDocuments, findProjects } from './discover';
+import { looksLikeArazzo } from './project';
 
 interface GatewayState {
 	child: cp.ChildProcess;
@@ -40,8 +43,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	gatewayStatus.name = 'Suspect Gateway';
 	context.subscriptions.push(gatewayStatus);
 
-	registerTestExplorer(context);
-	registerWorkflowsView(context);
+	registerTesting(context, suspectBinary);
+	registerProjectView(context);
+	context.subscriptions.push(
+		vscode.commands.registerCommand('suspect.setSeverityFloor', () => setSeverityFloor()),
+		vscode.commands.registerCommand('suspect.openSuspectConfig', () => openSuspectConfig()),
+	);
 	registerNotebook(context);
 	sdkGeneration = registerSdkGeneration(context);
 
@@ -103,17 +110,21 @@ async function restartClient(): Promise<void> {
 	startClient();
 }
 
+function isArazzoDocument(document: vscode.TextDocument): boolean {
+	return /\.ya?ml$/i.test(document.fileName) && looksLikeArazzo(document.getText(new vscode.Range(0, 0, 40, 0)));
+}
+
 async function pickArazzoDocument(hint?: vscode.Uri): Promise<vscode.Uri | undefined> {
 	if (hint) {
 		return hint;
 	}
 	const active = vscode.window.activeTextEditor?.document;
-	if (active && /\.arazzo\.ya?ml$/i.test(active.fileName)) {
+	if (active && isArazzoDocument(active)) {
 		return active.uri;
 	}
-	const uris = await vscode.workspace.findFiles('**/*.arazzo.{yaml,yml}', '**/node_modules/**');
+	const uris = await findArazzoDocuments();
 	if (uris.length === 0) {
-		vscode.window.showErrorMessage('No *.arazzo.yaml documents found in the workspace.');
+		vscode.window.showErrorMessage('No Arazzo documents (YAML declaring `arazzo:`) found in the workspace.');
 		return undefined;
 	}
 	if (uris.length === 1) {
@@ -196,14 +207,21 @@ async function runWorkflowCommand(uriHint?: vscode.Uri | string, workflowHint?: 
 
 async function pickOpenApiSpec(): Promise<vscode.Uri | undefined> {
 	const candidates = new Map<string, vscode.Uri>();
+	// What the project declares comes first; the conventional names are the fallback.
+	for (const project of await findProjects()) {
+		if (project.manifest.entry !== undefined) {
+			const entry = path.resolve(project.dir, project.manifest.entry);
+			if (fs.existsSync(entry)) candidates.set(entry, vscode.Uri.file(entry));
+		}
+	}
 	for (const pattern of ['**/*.openapi.{yaml,yml,json}', '**/openapi*.{yaml,yml,json}', '**/swagger*.{yaml,yml,json}']) {
 		for (const uri of await vscode.workspace.findFiles(pattern, '**/node_modules/**')) {
 			candidates.set(uri.fsPath, uri);
 		}
 	}
-	const activeUri = vscode.window.activeTextEditor?.document.uri;
-	if (activeUri && !/\.arazzo\.ya?ml$/i.test(activeUri.fsPath) && fs.existsSync(activeUri.fsPath)) {
-		candidates.set(activeUri.fsPath, activeUri);
+	const active = vscode.window.activeTextEditor?.document;
+	if (active && !isArazzoDocument(active) && fs.existsSync(active.uri.fsPath)) {
+		candidates.set(active.uri.fsPath, active.uri);
 	}
 	if (candidates.size === 0) {
 		vscode.window.showErrorMessage('No OpenAPI spec (*.openapi.yaml / openapi.json / swagger.*) found.');
