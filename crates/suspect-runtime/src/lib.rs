@@ -12,8 +12,8 @@
 //! They agreed on the easy cases and diverged on the hard ones (recursive
 //! schemas, `default` responses, exact numeric types). This crate owns the
 //! decision: given an operation and an exchange, does it conform? The
-//! gateway, the executor, and the docs playground all call here, so
-//! "the toolchain agrees with itself" is a property rather than a hope.
+//! gateway and the executor both call here, so "the toolchain agrees with
+//! itself" is a property rather than a hope.
 //!
 //! Component references resolve through the schema compiler's
 //! document-root fallback, so recursive and cross-document schemas are
@@ -23,7 +23,7 @@
 
 use std::collections::BTreeMap;
 
-use suspect_ir::{IrOperation, IrResponse, IrSpec, Method, ParamIn};
+use suspect_ir::IrResponse;
 
 pub mod request;
 pub mod response;
@@ -66,24 +66,6 @@ pub struct Schemas {
 }
 
 impl Schemas {
-    /// Builds a schema source from a spec snapshot.
-    #[must_use]
-    pub fn from_spec(spec: &IrSpec) -> Self {
-        Self {
-            map: spec
-                .schemas
-                .iter()
-                .map(|schema| (schema.name.clone(), schema.json.clone()))
-                .collect(),
-        }
-    }
-
-    /// Builds a schema source from a name → schema map.
-    #[must_use]
-    pub fn from_map(map: BTreeMap<String, serde_json::Value>) -> Self {
-        Self { map }
-    }
-
     /// Builds a schema source from any map of schemas, preserving no
     /// order: component lookup is by name, so callers holding a
     /// `HashMap` need not convert first.
@@ -98,17 +80,6 @@ impl Schemas {
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect(),
         }
-    }
-
-    /// Whether there is anything to resolve into.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-
-    /// The component schemas, by name.
-    pub fn entries(&self) -> impl Iterator<Item = (&String, &serde_json::Value)> {
-        self.map.iter()
     }
 
     /// The schema declared under `name`, when the map carries one.
@@ -234,46 +205,11 @@ pub fn response_schema_for(responses: &[IrResponse], status: u16) -> Option<&str
         .and_then(|response| response.schema.as_deref())
 }
 
-/// Matches a concrete request path against an operation's path template.
-#[must_use]
-pub fn path_matches(template: &str, path: &str) -> bool {
-    let segments: Vec<String> = template
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned)
-        .collect();
-    let actual: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-    segments.len() == actual.len()
-        && segments
-            .iter()
-            .zip(&actual)
-            .all(|(expected, got)| expected.starts_with('{') || expected == got)
-}
-
-/// The operation serving a request, if the contract declares one.
-#[must_use]
-pub fn operation_for<'s>(spec: &'s IrSpec, method: Method, path: &str) -> Option<&'s IrOperation> {
-    spec.operations
-        .iter()
-        .find(|operation| operation.method == method && path_matches(&operation.path, path))
-}
-
-/// The declared parameter names at a location, for diagnostics.
-#[must_use]
-pub fn parameter_names(operation: &IrOperation, location: ParamIn) -> Vec<&str> {
-    operation
-        .parameters
-        .iter()
-        .filter(|parameter| parameter.location == location)
-        .map(|parameter| parameter.name.as_str())
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::request::{cookie_value, query_value, segment_for};
-    use suspect_ir::IrParameter;
+    use suspect_ir::{IrOperation, IrParameter, IrSpec, Method, ParamIn};
 
     fn spec() -> IrSpec {
         IrSpec {
@@ -330,7 +266,7 @@ mod tests {
     fn a_conforming_request_has_no_violations() {
         let spec = spec();
         let operation = spec.operations.first().unwrap();
-        let schemas = Schemas::from_spec(&spec);
+        let schemas = Schemas::from_any_map(spec.schemas.iter().map(|s| (&s.name, &s.json)));
         let headers = vec![("trace".to_owned(), "true".to_owned())];
         let violations = validate_request(
             operation,
@@ -349,7 +285,7 @@ mod tests {
     fn missing_and_mistyped_parameters_are_reported() {
         let spec = spec();
         let operation = spec.operations.first().unwrap();
-        let schemas = Schemas::from_spec(&spec);
+        let schemas = Schemas::from_any_map(spec.schemas.iter().map(|s| (&s.name, &s.json)));
         let violations = validate_request(
             operation,
             &schemas,
@@ -392,7 +328,7 @@ mod tests {
     #[test]
     fn response_validation_selects_exact_then_default() {
         let spec = spec();
-        let schemas = Schemas::from_spec(&spec);
+        let schemas = Schemas::from_any_map(spec.schemas.iter().map(|s| (&s.name, &s.json)));
         let operation = spec.operations.first().unwrap();
 
         let ok = validate_response(&operation.responses, &schemas, 200, br#"{"name": "rex"}"#);
@@ -426,7 +362,7 @@ mod tests {
             }),
         }];
         spec.operations[0].responses[0].schema = Some("Node".to_owned());
-        let schemas = Schemas::from_spec(&spec);
+        let schemas = Schemas::from_any_map(spec.schemas.iter().map(|s| (&s.name, &s.json)));
         let operation = spec.operations.first().unwrap();
 
         let mut body = String::new();
@@ -464,21 +400,6 @@ mod tests {
                 .any(|v| v.message.contains("not in the component map")),
             "\"we could not check this\" must not read as a pass: {violations:?}"
         );
-    }
-
-    #[test]
-    fn path_templates_match_concrete_paths() {
-        assert!(path_matches("/pets/{petId}", "/pets/42"));
-        assert!(path_matches("/pets", "/pets"));
-        assert!(!path_matches("/pets/{petId}", "/pets"));
-        assert!(!path_matches("/pets/{petId}", "/pets/42/toys"));
-    }
-
-    #[test]
-    fn operation_lookup_uses_method_and_template() {
-        let spec = spec();
-        assert!(operation_for(&spec, Method::Get, "/pets/42").is_some());
-        assert!(operation_for(&spec, Method::Post, "/pets/42").is_none());
     }
 
     #[test]
