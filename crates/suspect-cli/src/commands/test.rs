@@ -24,7 +24,17 @@ pub fn test(
     offline_cassette: Option<&Path>,
     ndjson: bool,
 ) -> anyhow::Result<i32> {
-    test_with_messages(arazzo, base_url, filter, offline_cassette, ndjson, None)
+    // The plain entry point discovers credentials like the CLI does, so
+    // library callers inherit the same secure source without wiring.
+    test_with_messages(
+        arazzo,
+        base_url,
+        filter,
+        offline_cassette,
+        ndjson,
+        None,
+        None,
+    )
 }
 
 /// [`test`] with an optional message broker directory for Arazzo 1.1
@@ -39,7 +49,35 @@ pub fn test_with_messages(
     offline_cassette: Option<&Path>,
     ndjson: bool,
     message_broker: Option<&Path>,
+    credentials: Option<&Path>,
 ) -> anyhow::Result<i32> {
+    // Credentials: an explicit file wins; otherwise discover, and only
+    // then the SUSPECT_CREDENTIALS override. No file is a valid state —
+    // workflows whose operations declare no security run fine without
+    // one — reported distinctly from a file that exists but fails.
+    let auth = match credentials {
+        Some(path) => Some(
+            suspect_test::auth::load_credentials_file(path).map_err(|e| anyhow::anyhow!("{e}"))?,
+        ),
+        None => match std::env::var_os("SUSPECT_CREDENTIALS") {
+            Some(env_path) => {
+                let path = std::path::PathBuf::from(env_path);
+                Some(
+                    suspect_test::auth::load_credentials_file(&path)
+                        .map_err(|e| anyhow::anyhow!("{e}"))?,
+                )
+            }
+            None => {
+                suspect_test::auth::discover_credentials(arazzo.parent().unwrap_or(Path::new(".")))
+                    .map(|path| {
+                        suspect_test::auth::load_credentials_file(&path)
+                            .map_err(|e| anyhow::anyhow!("{e}"))
+                    })
+                    .transpose()?
+            }
+        },
+    };
+    let auth = auth.unwrap_or_default();
     let ws = super::workspace_for_entry(arazzo)?;
     let uri = Uri::from_path(arazzo)?;
     let handle = ws
@@ -55,7 +93,14 @@ pub fn test_with_messages(
         return Ok(2);
     }
 
-    rt_run(&plan, base_url, offline_cassette, ndjson, message_broker)
+    rt_run(
+        &plan,
+        base_url,
+        offline_cassette,
+        ndjson,
+        message_broker,
+        &auth,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -65,6 +110,7 @@ fn rt_run(
     offline_cassette: Option<&Path>,
     ndjson: bool,
     message_broker: Option<&Path>,
+    auth: &suspect_test::auth::AuthConfig,
 ) -> anyhow::Result<i32> {
     let rt = tokio::runtime::Runtime::new()?;
     let outcome = rt.block_on(async move {
@@ -103,10 +149,13 @@ fn rt_run(
             }
             events
         });
-        let summary = suspect_test::run_plan_with_messages(
+        let auth_state = suspect_test::auth::AuthState::default();
+        let summary = suspect_test::run_plan_with_auth_and_messages(
             plan,
             base_url,
             http.as_ref(),
+            &auth_state,
+            auth,
             broker.as_deref(),
             tx,
         )

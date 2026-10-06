@@ -53,6 +53,32 @@ pub enum Credential {
         #[serde(default)]
         header: Option<String>,
     },
+    /// OAuth 2.0 refresh-token grant against `tokenUrl`: for user-context
+    /// tokens acquired out of band (a device-code flow, a manual login).
+    ///
+    /// The refresh token never appears in a request log: it goes to the
+    /// token endpoint over the same transport as the steps, and the
+    /// access token it yields is cached exactly like a client-credentials
+    /// token. Static placement of the refresh token itself is never
+    /// offered on purpose — a refresh token is a long-lived credential,
+    /// and treating it as an API key would put it on every request.
+    RefreshToken {
+        /// Token endpoint URL.
+        token_url: String,
+        /// OAuth client id.
+        client_id: String,
+        /// OAuth client secret.
+        #[serde(default)]
+        client_secret: Option<String>,
+        /// The refresh token acquired out of band.
+        refresh_token: String,
+        /// Optional scope string sent with the grant.
+        #[serde(default)]
+        scope: Option<String>,
+        /// Header override (default `Authorization: Bearer <access_token>`).
+        #[serde(default)]
+        header: Option<String>,
+    },
 }
 
 /// Per-scheme credential configuration: `suspect.extensions`-style JSON
@@ -64,6 +90,54 @@ pub struct AuthConfig {
     pub schemes: BTreeMap<String, Credential>,
 }
 
+/// Interpolates `${VAR}` references in a credentials file's strings.
+///
+/// The committed credentials file names variables; the environment holds
+/// values — so the file can be committed or shared without carrying a
+/// single secret. A missing variable is an error that names the variable,
+/// never the value that referenced it.
+pub fn interpolate_env(value: &serde_json::Value) -> Result<serde_json::Value, String> {
+    match value {
+        serde_json::Value::String(text) => {
+            let mut out = String::with_capacity(text.len());
+            let mut rest = text.as_str();
+            while let Some(open) = rest.find("${") {
+                out.push_str(&rest[..open]);
+                let after = &rest[open + 2..];
+                let Some(close) = after.find('}') else {
+                    return Err(format!("credentials: unterminated ${{ in {text:?}"));
+                };
+                let name = &after[..close];
+                match std::env::var(name) {
+                    Ok(v) => out.push_str(&v),
+                    Err(_) => {
+                        return Err(format!(
+                            "credentials: ${{{name}}} is not set in the environment"
+                        ));
+                    }
+                }
+                rest = &after[close + 1..];
+            }
+            out.push_str(rest);
+            Ok(serde_json::Value::String(out))
+        }
+        serde_json::Value::Object(map) => {
+            let mut out = serde_json::Map::new();
+            for (key, value) in map {
+                out.insert(key.clone(), interpolate_env(value)?);
+            }
+            Ok(serde_json::Value::Object(out))
+        }
+        serde_json::Value::Array(items) => Ok(serde_json::Value::Array(
+            items
+                .iter()
+                .map(interpolate_env)
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        other => Ok(other.clone()),
+    }
+}
+
 /// Runtime auth state: acquired client-credentials tokens keyed by scheme.
 #[derive(Default)]
 pub struct AuthState {
@@ -73,6 +147,92 @@ pub struct AuthState {
 struct CachedToken {
     access_token: String,
     expires_at: Option<Instant>,
+}
+
+/// One OAuth grant, encoded as a form body. The body is percent-encoded
+/// field by field: a secret containing `&`, `=` or `%` is a value, not
+/// structure, and concatenating it into a form string would either corrupt
+/// the grant or inject fields.
+/// The application/x-www-form-urlencoded value set: unreserved marks
+/// (`-._~`) stay literal, everything else is percent-encoded. Encoding the
+/// unreserved marks too would be spec-legal but reads as garbage in token
+/// endpoint logs and breaks naive servers.
+const FORM_ENCODE: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
+enum OAuthGrant<'a> {
+    ClientCredentials {
+        client_id: &'a str,
+        client_secret: &'a str,
+        scope: Option<&'a str>,
+    },
+    RefreshToken {
+        client_id: &'a str,
+        client_secret: Option<&'a str>,
+        refresh_token: &'a str,
+        scope: Option<&'a str>,
+    },
+}
+
+impl OAuthGrant<'_> {
+    const fn name(&self) -> &'static str {
+        match self {
+            Self::ClientCredentials { .. } => "client-credentials",
+            Self::RefreshToken { .. } => "refresh-token",
+        }
+    }
+
+    fn form_body(&self) -> Vec<u8> {
+        let mut fields: Vec<(String, String)> = vec![(
+            "grant_type".to_owned(),
+            match self {
+                Self::ClientCredentials { .. } => "client_credentials".to_owned(),
+                Self::RefreshToken { .. } => "refresh_token".to_owned(),
+            },
+        )];
+        match self {
+            Self::ClientCredentials {
+                client_id,
+                client_secret,
+                scope,
+            } => {
+                fields.push(("client_id".to_owned(), (*client_id).to_owned()));
+                fields.push(("client_secret".to_owned(), (*client_secret).to_owned()));
+                if let Some(scope) = scope {
+                    fields.push(("scope".to_owned(), (*scope).to_owned()));
+                }
+            }
+            Self::RefreshToken {
+                client_id,
+                client_secret,
+                refresh_token,
+                scope,
+            } => {
+                fields.push(("client_id".to_owned(), (*client_id).to_owned()));
+                if let Some(secret) = client_secret {
+                    fields.push(("client_secret".to_owned(), (*secret).to_owned()));
+                }
+                fields.push(("refresh_token".to_owned(), (*refresh_token).to_owned()));
+                if let Some(scope) = scope {
+                    fields.push(("scope".to_owned(), (*scope).to_owned()));
+                }
+            }
+        }
+        let mut body = Vec::new();
+        for (key, value) in &fields {
+            if !body.is_empty() {
+                body.push(b'&');
+            }
+            body.extend_from_slice(key.as_bytes());
+            body.push(b'=');
+            let encoded = percent_encoding::utf8_percent_encode(value, FORM_ENCODE).to_string();
+            body.extend_from_slice(encoded.as_bytes());
+        }
+        body
+    }
 }
 
 /// A credential resolved to concrete wire placement.
@@ -110,13 +270,41 @@ impl AuthState {
                 header,
             } => {
                 let token = self
-                    .client_credentials_token(
+                    .oauth_token(
                         scheme,
                         http,
                         token_url,
-                        client_id,
-                        client_secret,
-                        scope.as_deref(),
+                        &OAuthGrant::ClientCredentials {
+                            client_id,
+                            client_secret,
+                            scope: scope.as_deref(),
+                        },
+                    )
+                    .await?;
+                Ok(Some(Injected::Header(
+                    header.clone().unwrap_or_else(|| "Authorization".to_owned()),
+                    format!("Bearer {token}"),
+                )))
+            }
+            Credential::RefreshToken {
+                token_url,
+                client_id,
+                client_secret,
+                refresh_token,
+                scope,
+                header,
+            } => {
+                let token = self
+                    .oauth_token(
+                        scheme,
+                        http,
+                        token_url,
+                        &OAuthGrant::RefreshToken {
+                            client_id,
+                            client_secret: client_secret.as_deref(),
+                            refresh_token,
+                            scope: scope.as_deref(),
+                        },
                     )
                     .await?;
                 Ok(Some(Injected::Header(
@@ -127,17 +315,16 @@ impl AuthState {
         }
     }
 
-    /// Acquires (or reuses) a client-credentials access token. The grant
-    /// request flows through the same [`HttpClient`] as the steps, so
-    /// canned transports cover it deterministically.
-    async fn client_credentials_token(
+    /// Acquires (or reuses) an OAuth access token. The grant request
+    /// flows through the same [`HttpClient`] as the steps, so canned
+    /// transports cover it deterministically, and the token cache is
+    /// shared by every grant kind.
+    async fn oauth_token(
         &self,
         scheme: &str,
         http: &dyn HttpClient,
         token_url: &str,
-        client_id: &str,
-        client_secret: &str,
-        scope: Option<&str>,
+        grant: &OAuthGrant<'_>,
     ) -> Result<String, String> {
         {
             let cache = self.tokens.lock().await;
@@ -148,13 +335,6 @@ impl AuthState {
                 }
             }
         }
-        let mut form = format!(
-            "grant_type=client_credentials&client_id={client_id}&client_secret={client_secret}"
-        );
-        if let Some(scope) = scope {
-            form.push_str("&scope=");
-            form.push_str(scope);
-        }
         let request = HttpRequest {
             method: "POST".to_owned(),
             url: token_url.to_owned(),
@@ -162,15 +342,16 @@ impl AuthState {
                 "content-type".to_owned(),
                 "application/x-www-form-urlencoded".to_owned(),
             )],
-            body: form.into_bytes().into(),
+            body: grant.form_body().into(),
         };
         let response = http
             .execute(request)
             .await
-            .map_err(|e| format!("client-credentials grant for `{scheme}` failed: {e}"))?;
+            .map_err(|e| format!("{} grant for `{scheme}` failed: {e}", grant.name()))?;
         if response.status != 200 {
             return Err(format!(
-                "client-credentials grant for `{scheme}` returned status {}",
+                "{} grant for `{scheme}` returned status {}",
+                grant.name(),
                 response.status
             ));
         }
@@ -183,26 +364,17 @@ impl AuthState {
             .to_owned();
         let expires_in = parsed.get("expires_in").and_then(|v| v.as_u64());
         let mut cache = self.tokens.lock().await;
-        if let Some(seconds) = expires_in {
-            // Refresh 30s before expiry to avoid clock-skew 401s.
-            cache.insert(
-                scheme.to_owned(),
-                CachedToken {
-                    access_token: access_token.clone(),
-                    expires_at: Some(
-                        Instant::now() + Duration::from_secs(seconds.saturating_sub(30)),
-                    ),
-                },
-            );
-        } else {
-            cache.insert(
-                scheme.to_owned(),
-                CachedToken {
-                    access_token: access_token.clone(),
-                    expires_at: None,
-                },
-            );
-        }
+        let expires_at = expires_in.map(|seconds| {
+            // Refresh before expiry to avoid clock-skew 401s.
+            Instant::now() + Duration::from_secs(seconds.saturating_sub(30).max(1))
+        });
+        cache.insert(
+            scheme.to_owned(),
+            CachedToken {
+                access_token: access_token.clone(),
+                expires_at,
+            },
+        );
         Ok(access_token)
     }
 }
@@ -214,12 +386,20 @@ pub fn inject(request: &mut HttpRequest, injected: &[Injected]) {
     for placement in injected {
         match placement {
             Injected::Header(name, value) => {
-                if !request
+                match request
                     .headers
-                    .iter()
-                    .any(|(k, _)| k.eq_ignore_ascii_case(name))
+                    .iter_mut()
+                    .find(|(k, _)| k.eq_ignore_ascii_case(name))
                 {
-                    request.headers.push((name.clone(), value.clone()));
+                    // An explicit parameter that resolved to nothing — a
+                    // required workflow input that was never supplied —
+                    // leaves the request without a credential; injection
+                    // fills it. A real value always wins.
+                    Some(existing) if existing.1.is_empty() => {
+                        existing.1.clone_from(value);
+                    }
+                    Some(_) => {}
+                    None => request.headers.push((name.clone(), value.clone())),
                 }
             }
             Injected::Query(name, value) => {
@@ -235,6 +415,66 @@ pub fn inject(request: &mut HttpRequest, injected: &[Injected]) {
     }
 }
 
+/// The default credentials file name, relative to the workspace root.
+pub const CREDENTIALS_FILE: &str = ".suspect/credentials.json";
+
+/// Loads and validates the credentials file at `path`.
+///
+/// The file holds an `{"auth": {"schemes": …}}` document — the same shape
+/// the runner's configuration uses — with `${VAR}` references resolved
+/// from the environment. Loose permissions (group/other readable) draw a
+/// warning rather than an error: a credential file that will not work is
+/// still worth reporting, and read-only checkouts sometimes carry modes
+/// that cannot be tightened.
+pub fn load_credentials_file(path: &std::path::Path) -> Result<AuthConfig, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path)
+            && meta.permissions().mode() & 0o077 != 0
+        {
+            eprintln!(
+                "suspect: warning: {display} is readable by group/other; tighten it with `chmod 600`",
+                display = path.display()
+            );
+        }
+    }
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("credentials file {}: {e}", path.display()))?;
+    let raw: serde_json::Value = serde_json::from_str(&text)
+        .map_err(|e| format!("credentials file {}: invalid JSON: {e}", path.display()))?;
+    let interpolated = interpolate_env(&raw)?;
+    let root = interpolated
+        .get("auth")
+        .ok_or_else(|| format!("credentials file {}: no `auth` section", path.display()))?;
+    serde_json::from_value::<AuthConfig>(root.clone()).map_err(|e| {
+        format!(
+            "credentials file {}: invalid auth config: {e}",
+            path.display()
+        )
+    })
+}
+
+/// Discovers the credentials file by walking up from `start` to the
+/// filesystem root, like `.suspect.yaml` discovery, then falls back to the
+/// workspace convention `.suspect/credentials.json`.
+///
+/// An explicit path (`--credentials`, `SUSPECT_CREDENTIALS`) is used as-is.
+/// Discovery returns `None` when no file exists — no credential is a
+/// valid state, reported distinctly from a file that fails to parse.
+pub fn discover_credentials(start: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut dir = Some(start);
+    while let Some(current) = dir {
+        let candidate = current.join(CREDENTIALS_FILE);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        dir = current.parent();
+    }
+    None
+}
+
+/// Parses an [] from the runner-style  JSON document.
 /// Parses `auth` configuration from runner settings JSON
 /// (`{"auth": {"schemes": {...}}}`).
 #[must_use]

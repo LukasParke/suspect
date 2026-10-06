@@ -73,6 +73,9 @@ pub struct ProjectTests {
     pub cassette: Option<PathBuf>,
     /// Message broker directory for Arazzo 1.1 AsyncAPI steps.
     pub message_broker: Option<PathBuf>,
+    /// Credentials file for the security schemes the suites exercise
+    /// (default: discovered `.suspect/credentials.json`).
+    pub credentials: Option<PathBuf>,
 }
 
 /// `suspect project` subcommands.
@@ -238,6 +241,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                 .get("message_broker")
                 .and_then(|v| v.as_str())
                 .map(resolve),
+            credentials: t.get("credentials").and_then(|v| v.as_str()).map(resolve),
         })
     });
 
@@ -482,6 +486,7 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
                 tests.cassette.as_deref(),
                 false,
                 tests.message_broker.as_deref(),
+                tests.credentials.as_deref(),
             )?;
             if exit != 0 {
                 failures += 1;

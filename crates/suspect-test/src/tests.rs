@@ -1216,3 +1216,306 @@ workflows:
     }
     assert!(diagnosed, "a blocked graph must say why");
 }
+
+// --- credentials: grant encoding, caching, files, discovery ---
+
+/// A token endpoint that records the form bodies it receives, serving the
+/// same access token a real one would.
+#[derive(Default)]
+struct TokenEndpoint {
+    bodies: std::sync::Mutex<Vec<String>>,
+}
+
+#[async_trait::async_trait]
+impl HttpClient for TokenEndpoint {
+    async fn execute(&self, req: HttpRequest) -> Result<HttpResponse, crate::exec::TransportError> {
+        self.bodies
+            .lock()
+            .unwrap()
+            .push(String::from_utf8_lossy(&req.body).into_owned());
+        Ok(HttpResponse {
+            status: 200,
+            headers: Vec::new(),
+            body: Bytes::from_static(br#"{"access_token":"tok-xyz","expires_in":3600}"#),
+        })
+    }
+}
+
+/// Resolves one credential against a fresh state and a canned endpoint.
+fn resolve_credential(
+    credential: &crate::auth::Credential,
+    http: &TokenEndpoint,
+) -> crate::auth::Injected {
+    let state = crate::auth::AuthState::default();
+    tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(async {
+            state
+                .resolve(http, "scheme", credential)
+                .await
+                .expect("resolves")
+                .expect("places a header")
+        })
+}
+
+fn credential(json: Value) -> crate::auth::Credential {
+    serde_json::from_value(json).expect("credential parses")
+}
+
+#[test]
+fn oauth_grant_encodes_reserved_characters_in_the_form_body() {
+    // A secret containing `&` and `=` is a value, not form structure: it
+    // must arrive percent-encoded or it would corrupt the grant.
+    let credential = credential(serde_json::json!({
+        "kind": "clientCredentials",
+        "token_url": "https://sso.example.com/token",
+        "client_id": "cid",
+        "client_secret": "p&a=ss",
+    }));
+    let endpoint = TokenEndpoint::default();
+    let placed = resolve_credential(&credential, &endpoint);
+    assert_eq!(
+        placed,
+        crate::auth::Injected::Header("Authorization".to_owned(), "Bearer tok-xyz".to_owned()),
+        "the grant's access token becomes the bearer"
+    );
+    assert_eq!(
+        endpoint.bodies.lock().unwrap().clone(),
+        ["grant_type=client_credentials&client_id=cid&client_secret=p%26a%3Dss".to_owned()],
+        "unreserved marks stay literal, reserved ones are encoded"
+    );
+}
+
+#[test]
+fn refresh_token_grant_uses_the_refresh_grant_and_encodes() {
+    let credential = credential(serde_json::json!({
+        "kind": "refreshToken",
+        "token_url": "https://sso.example.com/token",
+        "client_id": "cid",
+        "client_secret": "s&e",
+        "refresh_token": "r&t",
+        "scope": "read write",
+    }));
+    let endpoint = TokenEndpoint::default();
+    let placed = resolve_credential(&credential, &endpoint);
+    assert_eq!(
+        placed,
+        crate::auth::Injected::Header("Authorization".to_owned(), "Bearer tok-xyz".to_owned())
+    );
+    let bodies = endpoint.bodies.lock().unwrap().clone();
+    assert_eq!(
+        bodies.len(),
+        1,
+        "one grant per resolve, the refresh token goes nowhere else"
+    );
+    assert!(
+        bodies[0].starts_with("grant_type=refresh_token&"),
+        "the grant type is refresh: {}",
+        bodies[0]
+    );
+    assert!(
+        bodies[0].contains("refresh_token=r%26t"),
+        "the refresh token is a value: {}",
+        bodies[0]
+    );
+    assert!(
+        bodies[0].contains("client_secret=s%26e"),
+        "the client secret is a value: {}",
+        bodies[0]
+    );
+    assert!(
+        bodies[0].contains("scope=read%20write"),
+        "spaces encode: {}",
+        bodies[0]
+    );
+}
+
+#[test]
+fn oauth_tokens_are_cached_across_resolves() {
+    let credential = credential(serde_json::json!({
+        "kind": "clientCredentials",
+        "token_url": "https://sso.example.com/token",
+        "client_id": "cid",
+        "client_secret": "sec",
+    }));
+    let endpoint = TokenEndpoint::default();
+    let state = crate::auth::AuthState::default();
+    tokio::runtime::Runtime::new()
+        .expect("runtime")
+        .block_on(async {
+            for _ in 0..2 {
+                let placed = state
+                    .resolve(&endpoint, "scheme", &credential)
+                    .await
+                    .expect("resolves")
+                    .expect("places a header");
+                assert_eq!(
+                    placed,
+                    crate::auth::Injected::Header(
+                        "Authorization".to_owned(),
+                        "Bearer tok-xyz".to_owned()
+                    )
+                );
+            }
+        });
+    assert_eq!(
+        endpoint.bodies.lock().unwrap().len(),
+        1,
+        "the second resolve reuses the cached token"
+    );
+}
+
+#[test]
+fn interpolation_errors_name_the_missing_variable() {
+    let error = crate::auth::interpolate_env(&serde_json::json!({
+        "auth": {"schemes": {"tokenAuth": {"kind": "bearer", "token": "${SUSPECT_ABSENT_VAR_9183}"}}}
+    }))
+    .expect_err("the variable is not set");
+    assert!(
+        error.contains("SUSPECT_ABSENT_VAR_9183"),
+        "the error names the variable: {error}"
+    );
+    assert!(
+        error.contains("not set in the environment"),
+        "the error says what happened: {error}"
+    );
+}
+
+#[test]
+fn interpolation_rejects_unterminated_references() {
+    let error = crate::auth::interpolate_env(&serde_json::json!("${never-closed"))
+        .expect_err("no closing brace");
+    assert!(
+        error.contains("unterminated"),
+        "the error says the reference never closed: {error}"
+    );
+}
+
+#[test]
+fn interpolation_traverses_nested_structures_and_passes_non_strings_through() {
+    // `${SUSPECT_ABSENT_VAR_9184}` inside a nested array still resolves to a
+    // named error; a number survives untouched.
+    let error = crate::auth::interpolate_env(&serde_json::json!({
+        "schemes": {"x": {"y": ["${SUSPECT_ABSENT_VAR_9184}", 7, true]}}
+    }))
+    .expect_err("the variable is not set");
+    assert!(
+        error.contains("SUSPECT_ABSENT_VAR_9184"),
+        "nested strings interpolate: {error}"
+    );
+    assert_eq!(
+        crate::auth::interpolate_env(&serde_json::json!({"n": 7, "b": false})).unwrap(),
+        serde_json::json!({"n": 7, "b": false}),
+        "non-strings pass through unchanged"
+    );
+}
+
+#[test]
+fn credentials_file_round_trips_and_requires_an_auth_section() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("credentials.json");
+    std::fs::write(
+        &path,
+        r#"{"auth": {"schemes": {"tokenAuth": {"kind": "bearer", "token": "tok"}}}}"#,
+    )
+    .expect("write");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("tighten");
+    }
+    let config = crate::auth::load_credentials_file(&path).expect("loads");
+    assert_eq!(
+        config.schemes.len(),
+        1,
+        "the one configured scheme round-trips"
+    );
+
+    std::fs::write(&path, r#"{"nope": 1}"#).expect("write");
+    let error = crate::auth::load_credentials_file(&path).expect_err("no auth section");
+    assert!(
+        error.contains("no `auth` section"),
+        "the error says what is missing: {error}"
+    );
+
+    std::fs::write(&path, "{not json").expect("write");
+    assert!(
+        crate::auth::load_credentials_file(&path).is_err(),
+        "invalid JSON is an error, not a silent empty config"
+    );
+}
+
+#[test]
+fn discover_credentials_walks_up_to_the_nearest_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("a/.suspect")).expect("mkdir");
+    std::fs::create_dir_all(root.join("a/b/c")).expect("mkdir");
+    std::fs::write(
+        root.join("a/.suspect/credentials.json"),
+        r#"{"auth": {"schemes": {}}}"#,
+    )
+    .expect("write");
+    let found = crate::auth::discover_credentials(&root.join("a/b/c")).expect("found");
+    assert_eq!(found, root.join("a/.suspect/credentials.json"));
+    assert!(
+        crate::auth::discover_credentials(root).is_none(),
+        "no file above the start directory means no credentials"
+    );
+}
+
+#[test]
+fn injection_fills_empty_headers_but_never_overrides_values() {
+    let mut request = HttpRequest {
+        method: "GET".to_owned(),
+        url: "http://api.example.com/models".to_owned(),
+        headers: vec![
+            ("X-Plex-Token".to_owned(), String::new()),
+            ("Accept".to_owned(), "application/json".to_owned()),
+        ],
+        body: Bytes::new(),
+    };
+    crate::auth::inject(
+        &mut request,
+        &[crate::auth::Injected::Header(
+            "x-plex-token".to_owned(),
+            "tok-123".to_owned(),
+        )],
+    );
+    assert_eq!(
+        request
+            .headers
+            .iter()
+            .find(|(k, _)| k == "X-Plex-Token")
+            .map(|(_, v)| v.clone()),
+        Some("tok-123".to_owned()),
+        "a header left empty by a missing input reference is filled by the credential"
+    );
+    crate::auth::inject(
+        &mut request,
+        &[crate::auth::Injected::Header(
+            "x-plex-token".to_owned(),
+            "other".to_owned(),
+        )],
+    );
+    assert_eq!(
+        request
+            .headers
+            .iter()
+            .find(|(k, _)| k == "X-Plex-Token")
+            .map(|(_, v)| v.clone()),
+        Some("tok-123".to_owned()),
+        "a real value always wins over injection"
+    );
+    crate::auth::inject(
+        &mut request,
+        &[crate::auth::Injected::Header(
+            "x-api-key".to_owned(),
+            "k".to_owned(),
+        )],
+    );
+    assert!(
+        request.headers.iter().any(|(k, _)| k == "x-api-key"),
+        "absent headers are added"
+    );
+}

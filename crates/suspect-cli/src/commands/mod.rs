@@ -6,6 +6,7 @@ pub mod acquire_cmd;
 pub mod admission;
 pub mod application_cmd;
 pub mod arazzo_diff;
+pub mod auth;
 pub mod bench;
 pub mod breaking;
 pub mod check;
