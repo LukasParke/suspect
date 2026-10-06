@@ -55,16 +55,18 @@ pub struct RefCfg {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InlayCfg {
     /// Whether `$ref` target inlay hints are shown
-    /// (`suspect.inlayHints.refTargets`). `None` means unconfigured.
+    /// (`suspect.inlayHints.refTargets`, also accepted as
+    /// `suspect.inlayHints.refs` — the editor spelling). `None` means
+    /// unconfigured.
     pub ref_targets: Option<bool>,
+    /// Whether property type-annotation inlay hints are shown
+    /// (`suspect.inlayHints.properties`). `None` means unconfigured.
+    pub properties: Option<bool>,
 }
 
 /// Formatting section: output style knobs.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FmtCfg {
-    /// Indent width in spaces used by canonical formatting
-    /// (`suspect.formatting.indent`). `None` means unconfigured.
-    pub indent: Option<u8>,
     /// Reorder object keys into the canonical OpenAPI order
     /// (`suspect.formatting.sortKeys`). Defaults to true when the
     /// formatting section is present without the key and to false when no
@@ -103,13 +105,20 @@ impl SuspectConfig {
     /// Effective `$ref`-target inlay hint toggle (default on).
     #[must_use]
     pub fn inlay_ref_targets(&self) -> bool {
+        self.inlay_refs()
+    }
+
+    /// Effective `$ref`-target inlay hint toggle, reading both spellings
+    /// (`refs` first, then the legacy `refTargets`).
+    #[must_use]
+    pub fn inlay_refs(&self) -> bool {
         self.inlay_hints.and_then(|i| i.ref_targets).unwrap_or(true)
     }
 
-    /// Effective formatting indent width in spaces (default 2).
+    /// Effective property type-annotation inlay hint toggle (default on).
     #[must_use]
-    pub fn format_indent(&self) -> u8 {
-        self.formatting.and_then(|f| f.indent).unwrap_or(2)
+    pub fn inlay_properties(&self) -> bool {
+        self.inlay_hints.and_then(|i| i.properties).unwrap_or(true)
     }
 
     /// Effective canonical key-reordering toggle. Defaults to true when a
@@ -168,13 +177,13 @@ impl SuspectConfig {
         let inlay_hints = match (self.inlay_hints, overlay.inlay_hints) {
             (Some(base), Some(o)) => Some(InlayCfg {
                 ref_targets: o.ref_targets.or(base.ref_targets),
+                properties: o.properties.or(base.properties),
             }),
             (base, Some(o)) => base.or(Some(o)),
             (base, None) => base,
         };
         let formatting = match (self.formatting, overlay.formatting) {
             (Some(base), Some(o)) => Some(FmtCfg {
-                indent: o.indent.or(base.indent),
                 sort_keys: o.sort_keys.or(base.sort_keys),
             }),
             (base, Some(o)) => base.or(Some(o)),
@@ -220,20 +229,21 @@ pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
             .and_then(serde_json::Value::as_u64)
             .and_then(|n| usize::try_from(n).ok()),
     });
-    let inlay_hints = obj.get("inlayHints").map(|v| InlayCfg {
-        ref_targets: v
-            .get("refTargets")
+    let inlay_hints = obj.get("inlayHints").map(|v| {
+        let refs = v
+            .get("refs")
+            .or_else(|| v.get("refTargets"))
             .or_else(|| v.get("ref_targets"))
-            .and_then(serde_json::Value::as_bool),
+            .and_then(serde_json::Value::as_bool);
+        InlayCfg {
+            ref_targets: refs,
+            properties: v.get("properties").and_then(serde_json::Value::as_bool),
+        }
     });
     let extensions = obj
         .get("extensions")
         .map(crate::extensions_config::ExtensionConfig::from_value);
     let formatting = obj.get("formatting").map(|v| FmtCfg {
-        indent: v
-            .get("indent")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|n| u8::try_from(n).ok()),
         sort_keys: v
             .get("sortKeys")
             .or_else(|| v.get("sort_keys"))
@@ -759,13 +769,13 @@ components:
         let direct = serde_json::json!({
             "lint": {"recommended": false, "rules": {"info-contact": "warn"}},
             "ref": {"maxDocs": 50},
-            "inlayHints": {"refTargets": false},
-            "formatting": {"indent": 4}
+            "inlayHints": {"refTargets": false, "properties": false},
+            "formatting": {"sortKeys": true}
         });
         let cfg = parse_config(&direct).unwrap();
         assert_eq!(cfg.max_docs(), 50);
-        assert!(!cfg.inlay_ref_targets());
-        assert_eq!(cfg.format_indent(), 4);
+        assert!(!cfg.inlay_refs());
+        assert!(!cfg.inlay_properties());
         assert!(!cfg.lint_recommended());
         assert_eq!(cfg.lint_rules()["info-contact"], "warn");
 
@@ -784,14 +794,14 @@ components:
             }),
             inlay_hints: Some(InlayCfg {
                 ref_targets: Some(true),
+                properties: Some(true),
             }),
             lint: Some(LintCfg {
                 rules: HashMap::from([("old-rule".into(), "off".into())]),
                 recommended: Some(true),
             }),
             formatting: Some(FmtCfg {
-                indent: Some(2),
-                sort_keys: None,
+                sort_keys: Some(true),
             }),
             extensions: None,
         };
@@ -811,7 +821,7 @@ components:
         assert_eq!(merged.max_docs(), 100);
         assert!(!merged.inlay_ref_targets());
         // base survives where upper layers are silent
-        assert_eq!(merged.format_indent(), 2);
+        assert!(merged.format_sort_keys());
         assert!(merged.lint_recommended());
         // base rules kept when client adds others? No: leaf-level override
         assert_eq!(merged.lint_rules().get("old-rule"), None);
@@ -821,8 +831,8 @@ components:
     fn merge_with_nothing_set_keeps_base_defaults() {
         let merged = merge(None, None, SuspectConfig::default());
         assert_eq!(merged.max_docs(), 500);
-        assert!(merged.inlay_ref_targets());
-        assert_eq!(merged.format_indent(), 2);
+        assert!(merged.inlay_refs());
+        assert!(merged.inlay_properties());
         assert!(merged.lint_recommended());
         assert!(merged.lint_rules().is_empty());
     }

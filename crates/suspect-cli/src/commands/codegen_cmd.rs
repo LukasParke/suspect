@@ -40,6 +40,12 @@ pub struct CodegenArgs {
     /// semantics remain the default, independently of native feature support.
     #[arg(long, value_enum)]
     pub compatibility_profile: Vec<SdkCompatibilityProfile>,
+    /// Generation options file: a JSON document holding
+    /// `compatibility_profiles`, `credential_env` and `sdk_defaults`
+    /// (the same schema `codegen-session` accepts). Flag-declared
+    /// compatibility profiles are added on top.
+    #[arg(long, value_name = "FILE")]
+    pub defaults: Option<PathBuf>,
     /// Output root for generated artifacts.
     #[arg(short, long, default_value = "codegen-out")]
     pub out: PathBuf,
@@ -68,6 +74,22 @@ pub fn codegen(args: CodegenArgs) -> anyhow::Result<i32> {
         _ => anyhow::bail!("choose an OpenAPI input or --pins manifest"),
     }
     .normalized()?;
+    // Generation options: the `--defaults` file carries the policy-shaped
+    // knobs (credential env mapping, SDK defaults incl. pagination and
+    // OAuth lifecycle); the flags add interpretation choices on top.
+    let mut generation = match &args.defaults {
+        Some(path) => {
+            let bytes =
+                std::fs::read(path).map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
+            serde_json::from_slice::<suspect_codegen::backend::GenerationOptions>(&bytes).map_err(
+                |e| anyhow::anyhow!("invalid generation options {}: {e}", path.display()),
+            )?
+        }
+        None => suspect_codegen::backend::GenerationOptions::default(),
+    };
+    for profile in args.compatibility_profile {
+        generation.compatibility_profiles.insert(profile.0);
+    }
     super::sdk::generate(&SdkArgs {
         input,
         profile: args.profile,
@@ -75,14 +97,7 @@ pub fn codegen(args: CodegenArgs) -> anyhow::Result<i32> {
         package_name: args.package_name,
         package_version: args.package_version,
         import_name: args.import_name,
-        generation: suspect_codegen::backend::GenerationOptions {
-            compatibility_profiles: args
-                .compatibility_profile
-                .into_iter()
-                .map(|profile| profile.0)
-                .collect(),
-            ..Default::default()
-        },
+        generation,
         out: args.out,
         check: args.check,
         text: TextFormat {

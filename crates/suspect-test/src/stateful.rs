@@ -50,6 +50,9 @@ pub struct DependencyGraph {
 /// One generated test step.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestStep {
+    /// The step's identifier: `param_sources` reference setup steps as
+    /// `$steps.<id>.response.body#/pointer`.
+    pub id: String,
     /// The operation to invoke.
     pub op: OpRef,
     /// Purpose: `setup` | `exercise` | `verify` | `teardown`.
@@ -164,6 +167,7 @@ pub fn generate_sequences(spec: &IrSpec) -> Vec<TestSequence> {
                 };
                 if let Some(creator) = parent_node.creators.first() {
                     steps.push(TestStep {
+                        id: format!("create_{parent_name}"),
                         op: creator.clone(),
                         phase: "setup".to_owned(),
                         param_sources: path_params_from_graph(&graph, &parent_name),
@@ -172,8 +176,27 @@ pub fn generate_sequences(spec: &IrSpec) -> Vec<TestSequence> {
                 }
             }
 
-            // The target operation itself
+            // The target operation itself. When the target is the
+            // resource's creator, it IS the creation step every later
+            // reference points at — name it accordingly.
+            let target_is_creator = node.creators.iter().any(|c| c == target);
+            // A mutator or deleter needs the resource to exist: create it
+            // after its parents, before the target.
+            if !target_is_creator && let Some(creator) = node.creators.first() {
+                steps.push(TestStep {
+                    id: format!("create_{}", node.name),
+                    op: creator.clone(),
+                    phase: "setup".to_owned(),
+                    param_sources: path_params_from_graph(&graph, &node.name),
+                    body: default_body(spec, creator),
+                });
+            }
             steps.push(TestStep {
+                id: if target_is_creator {
+                    format!("create_{}", node.name)
+                } else {
+                    format!("exercise_{}", node.name)
+                },
                 op: target.clone(),
                 phase: phase.clone(),
                 param_sources: path_params_from_graph(&graph, &node.name),
@@ -183,6 +206,7 @@ pub fn generate_sequences(spec: &IrSpec) -> Vec<TestSequence> {
             // Teardown: delete what we created (reverse order)
             if !node.deleters.is_empty() && target.method != "DELETE" {
                 steps.push(TestStep {
+                    id: format!("teardown_{}", node.name),
                     op: node.deleters[0].clone(),
                     phase: "teardown".to_owned(),
                     param_sources: path_params_from_graph(&graph, &node.name),
@@ -418,10 +442,209 @@ mod tests {
         assert_eq!(target.op.id.as_deref(), Some("createPost"));
     }
 
+    /// Serves POSTs with a fresh id and everything else with 2xx,
+    /// recording request paths.
+    #[derive(Default)]
+    struct RecordingServer {
+        paths: std::sync::Mutex<Vec<String>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::exec::HttpClient for RecordingServer {
+        async fn execute(
+            &self,
+            req: crate::exec::HttpRequest,
+        ) -> Result<crate::exec::HttpResponse, crate::exec::TransportError> {
+            self.paths.lock().unwrap().push(req.url.clone());
+            let body = match req.method.as_str() {
+                "POST" => br#"{"id": 7}"#.to_vec(),
+                _ => br#"{}"#.to_vec(),
+            };
+            Ok(crate::exec::HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: body.into(),
+            })
+        }
+    }
+
+    #[test]
+    fn sequences_thread_created_ids_through_later_steps() {
+        let seqs = generate_sequences(&petstore());
+        let delete_seq = seqs
+            .iter()
+            .find(|s| s.target.id.as_deref() == Some("deletePost"))
+            .expect("deletePost sequence");
+        // The mutator target needs the resource first: its setup creates
+        // the post, after the user.
+        let setup_ids: Vec<&str> = delete_seq.steps.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(
+            setup_ids,
+            vec!["create_user", "create_post", "exercise_post"],
+            "setup creates the resource before the delete target runs; a delete target needs no teardown"
+        );
+        let server = RecordingServer::default();
+        let outcome = tokio::runtime::Runtime::new()
+            .expect("runtime")
+            .block_on(run_sequence(delete_seq, "http://api.test", &server));
+        assert!(outcome.passed, "sequence must pass: {outcome:?}");
+        let paths = server.paths.lock().unwrap().clone();
+        assert_eq!(
+            paths,
+            vec![
+                "http://api.test/users",
+                "http://api.test/users/7/posts",
+                "http://api.test/users/7/posts/7",
+            ],
+            "created ids thread through every later path"
+        );
+    }
+
     #[test]
     fn singularize_variants() {
         assert_eq!(singularize("users"), "user");
         assert_eq!(singularize("entries"), "entry");
         assert_eq!(singularize("status"), "statu"); // acceptable: graph is heuristic
     }
+}
+
+/// Outcome of running one generated sequence against a live server.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SequenceResult {
+    /// The exercised target: operationId when present, else `METHOD path`.
+    pub target: String,
+    /// Steps executed before a failure, or all of them on success.
+    pub steps: usize,
+    /// Whether every step returned a 2xx.
+    pub passed: bool,
+    /// First failure message, when the sequence failed.
+    pub message: Option<String>,
+}
+
+/// Runs one sequence: setup → exercise → teardown, threading each step's
+/// response body into later steps' `$steps.<id>.response.body#/ptr`
+/// parameter sources.
+///
+/// # Errors
+/// Never: transport failures are reported as a failed [`SequenceResult`],
+/// the same way a non-2xx response is.
+pub async fn run_sequence(
+    seq: &TestSequence,
+    base: &str,
+    http: &dyn crate::exec::HttpClient,
+) -> SequenceResult {
+    let target = seq
+        .target
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("{} {}", seq.target.method, seq.target.path));
+    let fail = |steps: usize, message: String| SequenceResult {
+        target: target.clone(),
+        steps,
+        passed: false,
+        message: Some(message),
+    };
+    // Collected response bodies by step id — what param sources read.
+    let mut context: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    for (index, step) in seq.steps.iter().enumerate() {
+        // Path parameters resolve from earlier steps' bodies; parameters
+        // the path does not carry (a creator's own id, say) are ignored.
+        let mut path = step.op.path.clone();
+        for (param, source) in &step.param_sources {
+            let placeholder = format!("{{{param}}}");
+            if !path.contains(&placeholder) {
+                continue;
+            }
+            let Some(value) = resolve_reference(source, &context) else {
+                return fail(
+                    index,
+                    format!(
+                        "step `{}`: parameter {param} unresolvable: {source}",
+                        step.id
+                    ),
+                );
+            };
+            path = path.replace(&placeholder, &value);
+        }
+        let request = crate::exec::HttpRequest {
+            method: step.op.method.to_uppercase(),
+            url: format!(
+                "{}/{}",
+                base.trim_end_matches('/'),
+                path.trim_start_matches('/')
+            ),
+            headers: vec![
+                ("accept".to_owned(), "application/json".to_owned()),
+                ("content-type".to_owned(), "application/json".to_owned()),
+            ],
+            body: step
+                .body
+                .as_ref()
+                .map(|b| serde_json::to_vec(b).unwrap_or_default())
+                .unwrap_or_default()
+                .into(),
+        };
+        match http.execute(request).await {
+            Ok(response) => {
+                if !(200..300).contains(&response.status) {
+                    return fail(
+                        index,
+                        format!(
+                            "step `{}`: {} {} returned {}",
+                            step.id, step.op.method, step.op.path, response.status
+                        ),
+                    );
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&response.body).unwrap_or(serde_json::Value::Null);
+                context.insert(step.id.clone(), body);
+            }
+            Err(e) => {
+                return fail(
+                    index,
+                    format!(
+                        "step `{}`: {} {}: {e}",
+                        step.id, step.op.method, step.op.path
+                    ),
+                );
+            }
+        }
+    }
+    SequenceResult {
+        target,
+        steps: seq.steps.len(),
+        passed: true,
+        message: None,
+    }
+}
+
+/// Resolves one `$steps.<id>.response.body#/pointer` reference against the
+/// collected response bodies.
+fn resolve_reference(
+    source: &str,
+    context: &BTreeMap<String, serde_json::Value>,
+) -> Option<String> {
+    let rest = source.strip_prefix("$steps.")?;
+    let (id, pointer) = rest.split_once(".response.body")?;
+    let body = context.get(id)?;
+    let mut value = body;
+    for segment in pointer
+        .strip_prefix('#')?
+        .split('/')
+        .filter(|s| !s.is_empty())
+    {
+        let segment = segment.replace("~1", "/").replace("~0", "~");
+        value = match value {
+            serde_json::Value::Object(map) => map.get(&segment)?,
+            serde_json::Value::Array(items) => items.get(segment.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    Some(match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Null => String::new(),
+        other => other.to_string(),
+    })
 }

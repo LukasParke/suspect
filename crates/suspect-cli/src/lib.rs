@@ -189,6 +189,47 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
+    /// Run the live contract bridge: watch the spec and emit regeneration
+    /// plans, evolution proposals, and reconciliation conflicts.
+    Bridge {
+        /// Entry OpenAPI document to watch.
+        spec: PathBuf,
+        /// Polling interval in milliseconds.
+        #[arg(long, default_value_t = 250)]
+        interval_ms: u64,
+        /// Stop after this many ticks (for scripts; omit to watch).
+        #[arg(long, hide = true)]
+        max_ticks: Option<u64>,
+        /// Newline-delimited JSON tick records instead of human text.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Extract server framework routes and cross-reference them with the
+    /// spec: undocumented endpoints, spec-only endpoints, method drift.
+    Reverse {
+        /// Server source tree or single file with route registrations.
+        source: PathBuf,
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Structured JSON report instead of human text.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Generate and run stateful dependency-graph test sequences against a
+    /// live server.
+    Stateful {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Base URL prepended to operation paths.
+        #[arg(long, default_value = "http://localhost:8080")]
+        base_url: String,
+        /// Run only sequences whose target operationId contains this.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Print the generated sequences as JSON instead of running them.
+        #[arg(long)]
+        emit: bool,
+    },
     /// Compile an Arazzo document into an executable suite and run it.
     Test {
         /// Arazzo document describing the workflows.
@@ -219,6 +260,9 @@ pub enum Command {
         /// overrides.
         #[arg(long, value_name = "FILE")]
         credentials: Option<PathBuf>,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
     },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
@@ -233,6 +277,44 @@ pub enum Command {
         /// Run only operations whose operationId contains this substring.
         #[arg(long)]
         filter: Option<String>,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
+        /// Grammar-evolved, coverage-guided fuzzing: novel response shapes
+        /// become seeds the campaign exploits.
+        #[arg(long)]
+        evolved: bool,
+        /// Evolved fuzzing: rounds per operation.
+        #[arg(long, default_value_t = 8)]
+        rounds: u32,
+        /// Evolved fuzzing: requests per round.
+        #[arg(long, default_value_t = 12)]
+        per_round: u32,
+    },
+    /// Trace a validation failure to its origin: source location, git
+    /// blame, and whether recorded traffic ever passed it.
+    Why {
+        /// The constraint that fired (e.g. `type` or the diagnostic text).
+        constraint: String,
+        /// Spec file the failure refers to.
+        #[arg(long)]
+        spec: PathBuf,
+        /// Byte offset of the failing constraint in the spec, when known.
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Line of the failing constraint (1-based), with `--why-col`.
+        #[arg(long)]
+        why_line: Option<usize>,
+        /// Column of the failing constraint (1-based), with `--why-line`.
+        #[arg(long)]
+        why_col: Option<usize>,
+        /// Directory of recorded cassettes searched for historical
+        /// traffic (`.jsonl`/`.ndjson`/`.json` files).
+        #[arg(long, value_name = "DIR")]
+        cassette_dir: Option<PathBuf>,
+        /// Human timeline or one JSON document.
+        #[command(flatten)]
+        text: TextFormat,
     },
     /// Re-issue a recorded cassette against an upstream and report drift.
     Replay {
@@ -244,6 +326,9 @@ pub enum Command {
         /// Print unified diffs of drifted UTF-8 response bodies.
         #[arg(long)]
         diff: bool,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
     },
     /// Render documentation or custom template manifests from an OpenAPI document.
     Gen {
@@ -285,9 +370,14 @@ pub enum Command {
         /// TCP port to bind on 127.0.0.1.
         #[arg(long, short = 'p', default_value_t = 8080)]
         port: u16,
-        /// Operating mode: mock | proxy | validate | record | replay.
+        /// Operating mode: mock | proxy | validate | record | replay |
+        /// scenario.
         #[arg(long, default_value = "mock")]
         mode: String,
+        /// Scenario mode: JSON file of scripted steps
+        /// (`{"steps": [{"method", "path_suffix", "status", "body"}]}`).
+        #[arg(long, value_name = "FILE")]
+        scenario: Option<PathBuf>,
         /// Upstream base URL for proxy/validate/record modes.
         #[arg(long)]
         upstream: Option<PathBuf>,
@@ -310,6 +400,17 @@ pub enum Command {
         /// Fault injection: percent of requests faulted.
         #[arg(long, default_value_t = 0)]
         error_pct: u8,
+        /// Write the journal to this file (append) instead of stdout.
+        #[arg(long, value_name = "FILE")]
+        journal: Option<PathBuf>,
+        /// Header name redacted from journals and cassettes beyond the
+        /// default denylist (repeatable).
+        #[arg(long = "redact-header", value_name = "NAME")]
+        redact_headers: Vec<String>,
+        /// JSON body key redacted from journals and cassettes beyond the
+        /// default denylist (repeatable).
+        #[arg(long = "redact-json-key", value_name = "KEY")]
+        redact_json_keys: Vec<String>,
     },
     /// Generate a source-selected native SDK package.
     Codegen(commands::codegen_cmd::CodegenArgs),
@@ -445,7 +546,12 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
                 args.style = Some(match style {
                     "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
                     "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
-                    _ => commands::docs_gen_cmd::DocsStyle::Html,
+                    "html" => commands::docs_gen_cmd::DocsStyle::Html,
+                    other => {
+                        return Err(anyhow::anyhow!(
+                            "docs style `{other}` is not one of: markdown, sveltekit, html"
+                        ));
+                    }
                 });
             }
             if args.output.is_none()
@@ -522,12 +628,48 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             base_url,
             runs,
             filter,
-        } => commands::fuzz::fuzz(&spec, &base_url, runs, filter.as_deref()),
+            journal,
+            evolved,
+            rounds,
+            per_round,
+        } => commands::fuzz::fuzz(
+            &spec,
+            &base_url,
+            runs,
+            filter.as_deref(),
+            journal.as_deref(),
+            evolved,
+            rounds,
+            per_round,
+        ),
         Command::Replay {
             cassette,
             upstream,
             diff,
-        } => commands::replay::replay(&cassette, &upstream, diff),
+            journal,
+        } => commands::replay::replay(&cassette, &upstream, diff, journal.as_deref()),
+        Command::Bridge {
+            spec,
+            interval_ms,
+            max_ticks,
+            format,
+        } => commands::bridge::bridge(
+            &spec,
+            interval_ms,
+            max_ticks,
+            matches!(format, OutputFormat::Json),
+        ),
+        Command::Reverse {
+            source,
+            spec,
+            format,
+        } => commands::reverse::reverse(&source, &spec, matches!(format, OutputFormat::Json)),
+        Command::Stateful {
+            spec,
+            base_url,
+            filter,
+            emit,
+        } => commands::stateful::stateful(&spec, &base_url, filter.as_deref(), emit),
         Command::Auth {
             cmd: commands::auth::AuthCmd::Check { credentials },
         } => commands::auth::check(credentials.as_deref()),
@@ -540,6 +682,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             report,
             message_broker,
             credentials,
+            journal,
         } => commands::test::test_with_messages(
             &arazzo,
             &base_url,
@@ -548,6 +691,24 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             matches!(report, ReportFormat::Ndjson),
             message_broker.as_deref(),
             credentials.as_deref(),
+            journal.as_deref(),
+        ),
+        Command::Why {
+            constraint,
+            spec,
+            offset,
+            why_line,
+            why_col,
+            cassette_dir,
+            text,
+        } => commands::why::why(
+            &constraint,
+            &spec,
+            offset,
+            why_line,
+            why_col,
+            cassette_dir.as_deref(),
+            matches!(text.format, OutputFormat::Json),
         ),
         Command::Gen {
             spec,
@@ -570,6 +731,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             spec,
             port,
             mode,
+            scenario,
             upstream,
             cassette,
             enforce,
@@ -577,6 +739,9 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             delay_pct,
             error_status,
             error_pct,
+            journal,
+            redact_headers,
+            redact_json_keys,
         } => commands::gateway::gateway(
             &spec,
             port,
@@ -588,6 +753,10 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             delay_pct,
             error_status,
             error_pct,
+            scenario.as_ref(),
+            journal.as_deref(),
+            &redact_headers,
+            &redact_json_keys,
         ),
         Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
         Command::Acquire(args) => commands::acquire_cmd::acquire(args),

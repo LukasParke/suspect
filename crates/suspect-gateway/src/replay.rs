@@ -101,24 +101,6 @@ impl ReplayIndex {
         }
     }
 
-    /// Number of indexed exchanges.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.ordered.len()
-    }
-
-    /// Whether the index holds no exchanges.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.ordered.is_empty()
-    }
-
-    /// The indexed entries in cassette order.
-    #[must_use]
-    pub fn entries(&self) -> &[CassetteEntry] {
-        &self.ordered
-    }
-
     /// Looks up the exchange for a request.
     ///
     /// `url_path_and_query` is the request target (`/pets/42?full=1`).
@@ -138,13 +120,6 @@ impl ReplayIndex {
             .iter()
             .find(|e| e.method.eq_ignore_ascii_case(method) && path_only(&url_key(&e.url)) == want)
     }
-}
-
-/// Free-function constructor matching the platform contract:
-/// `replay_index(entries) -> ReplayIndex`.
-#[must_use]
-pub fn replay_index(entries: &[CassetteEntry]) -> ReplayIndex {
-    ReplayIndex::new(entries)
 }
 
 /// Serves one request from the index.

@@ -339,7 +339,7 @@ pub fn generate_codegen_target(
         package_name: target.package_name.clone(),
         package_version: target.package_version.clone(),
         import_name: target.import_name.clone(),
-        generation: GenerationOptions::default(),
+        generation: target.generation.clone(),
         out: target.out.clone(),
         check: target.check,
         text: TextFormat {

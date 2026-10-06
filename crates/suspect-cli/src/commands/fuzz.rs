@@ -76,7 +76,17 @@ enum Verdict {
 /// # Errors
 /// Propagates workspace/IR compilation failures and transport setup errors;
 /// crashes surface through the exit code instead.
-pub fn fuzz(spec: &Path, base_url: &str, runs: usize, filter: Option<&str>) -> anyhow::Result<i32> {
+#[allow(clippy::too_many_arguments)]
+pub fn fuzz(
+    spec: &Path,
+    base_url: &str,
+    runs: usize,
+    filter: Option<&str>,
+    journal: Option<&Path>,
+    evolved: bool,
+    rounds: u32,
+    per_round: u32,
+) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(spec)?;
     let uri = Uri::from_path(spec)?;
     ws.get(&uri)
@@ -106,6 +116,51 @@ pub fn fuzz(spec: &Path, base_url: &str, runs: usize, filter: Option<&str>) -> a
     let mut total_sent: u32 = 0;
     let mut survivors: u32 = 0;
     let mut total_crashes: u32 = 0;
+
+    // Grammar-evolved, coverage-guided fuzzing: payloads that produce
+    // novel response shapes become seeds; the campaign exploits them.
+    if evolved {
+        let handle = rt.handle();
+        for plan in &plans {
+            let fields: Vec<ScalarField> = plan.targets.iter().map(|t| t.field.clone()).collect();
+            let label = plan.label.clone();
+            let http = Arc::clone(&http);
+            let stats = suspect_test::evolved_fuzz::run_campaign(
+                fields,
+                rounds,
+                per_round,
+                &mut |payload| {
+                    let request = build_evolved_request(base_url, plan, payload);
+                    match handle.block_on(http.execute(request)) {
+                        Ok(resp) => suspect_test::evolved_fuzz::RequestOutcome {
+                            status: resp.status,
+                            body: serde_json::from_slice(&resp.body).ok(),
+                            crash: resp.status >= 500,
+                        },
+                        Err(_) => suspect_test::evolved_fuzz::RequestOutcome {
+                            status: 0,
+                            body: None,
+                            crash: true,
+                        },
+                    }
+                },
+            );
+            total_sent += stats.requests;
+            total_crashes += stats.crashes;
+            survivors += stats.requests - stats.crashes;
+            println!(
+                "{label:<44} corpus: {:<4} shapes: {:<4} crashes: {}",
+                stats.corpus_size, stats.shapes, stats.crashes
+            );
+        }
+        println!();
+        println!("evolved fuzz complete: {total_sent} requests, {total_crashes} crashes");
+        let elapsed_ms = started.elapsed().as_millis() as f64;
+        let mut journal = Journal::new(super::sink(journal)?);
+        journal.run_summary("evolved-fuzz", survivors, total_crashes, 0, elapsed_ms);
+        journal.flush()?;
+        return Ok(i32::from(total_crashes > 0));
+    }
 
     rt.block_on(async {
         for plan in &plans {
@@ -155,8 +210,9 @@ pub fn fuzz(spec: &Path, base_url: &str, runs: usize, filter: Option<&str>) -> a
     println!();
     println!("fuzz complete: {total_sent} mutants, {total_crashes} crashes");
     let elapsed_ms = started.elapsed().as_millis() as f64;
-    let mut journal = Journal::new(Box::new(suspect_journal::StdoutSink));
+    let mut journal = Journal::new(super::sink(journal)?);
     journal.run_summary("fuzz", survivors, total_crashes, 0, elapsed_ms);
+    journal.flush()?;
     Ok(i32::from(total_crashes > 0))
 }
 
@@ -304,6 +360,72 @@ fn encode_component(text: &str) -> String {
         }
     }
     out
+}
+
+/// Builds one evolved-campaign request: the payload carries a value for
+/// every field, distributed by place — path substitution, query params, and
+/// a JSON body merged over schema defaults.
+fn build_evolved_request(base_url: &str, plan: &OpPlan, payload: &Value) -> HttpRequest {
+    let field_value = |name: &str| -> Value { payload.get(name).cloned().unwrap_or(Value::Null) };
+    let render = |value: &Value| -> String {
+        match value {
+            Value::String(s) => s.clone(),
+            Value::Null => String::new(),
+            other => other.to_string(),
+        }
+    };
+    let mut url = plan.path.clone();
+    for t in &plan.targets {
+        if t.place != Place::Path {
+            continue;
+        }
+        let value = render(&field_value(&t.field.name));
+        url = url.replace(&format!("{{{}}}", t.field.name), &encode_component(&value));
+    }
+    let mut query = String::new();
+    for t in &plan.targets {
+        if t.place != Place::Query {
+            continue;
+        }
+        if !query.is_empty() {
+            query.push('&');
+        }
+        query.push_str(&encode_component(&t.field.name));
+        query.push('=');
+        query.push_str(&encode_component(&render(&field_value(&t.field.name))));
+    }
+    if !query.is_empty() {
+        url.push('?');
+        url.push_str(&query);
+    }
+    if !url.starts_with('/') {
+        url.insert(0, '/');
+    }
+    let full_url = format!("{}/{}", base_url.trim_end_matches('/'), &url[1..]);
+    let (body, headers) = if plan.body_fields.is_empty() {
+        (Vec::new(), Vec::new())
+    } else {
+        let mut merged = serde_json::Map::new();
+        for field in &plan.body_fields {
+            merged.insert(
+                field.name.clone(),
+                payload
+                    .get(&field.name)
+                    .cloned()
+                    .unwrap_or_else(|| fuzz::default_value(&field.schema, &field.name)),
+            );
+        }
+        (
+            serde_json::to_vec(&Value::Object(merged)).unwrap_or_default(),
+            vec![("content-type".into(), "application/json".into())],
+        )
+    };
+    HttpRequest {
+        method: plan.method.clone(),
+        url: full_url,
+        headers,
+        body: body.into(),
+    }
 }
 
 /// Classifies one executed mutant: any response below 500 survives; 5xx and

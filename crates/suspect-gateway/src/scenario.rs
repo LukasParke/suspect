@@ -7,6 +7,7 @@
 //! get `410 Gone`. This powers deterministic multi-step tests today and
 //! CLI-driven scenario runs later.
 
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -18,7 +19,7 @@ use axum::response::{IntoResponse, Response};
 use crate::problem;
 
 /// One scripted step: the request to expect and the response to give.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StepExpect {
     /// Expected HTTP method (case-insensitive match).
     pub method: String,
@@ -32,7 +33,7 @@ pub struct StepExpect {
 }
 
 /// An ordered script of steps.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Scenario {
     /// Steps in consumption order.
     pub steps: Vec<StepExpect>,

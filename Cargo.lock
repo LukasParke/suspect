@@ -2163,7 +2163,6 @@ dependencies = [
  "suspect-config",
  "suspect-gen",
  "suspect-ir",
- "suspect-journal",
  "suspect-lint",
  "suspect-low",
  "suspect-oas",

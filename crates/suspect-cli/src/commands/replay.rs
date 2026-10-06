@@ -34,7 +34,12 @@ fn replayable(header: &str) -> bool {
 /// # Errors
 /// Propagates cassette IO/parse failures and transport setup errors; drift
 /// surfaces through the exit code instead.
-pub fn replay(cassette: &Path, upstream: &str, diff: bool) -> anyhow::Result<i32> {
+pub fn replay(
+    cassette: &Path,
+    upstream: &str,
+    diff: bool,
+    journal_file: Option<&Path>,
+) -> anyhow::Result<i32> {
     let file = std::fs::File::open(cassette)?;
     let (header, entries) = suspect_journal::read_cassette(file)?;
 
@@ -87,8 +92,9 @@ pub fn replay(cassette: &Path, upstream: &str, diff: bool) -> anyhow::Result<i32
         header.source,
     );
     let elapsed_ms = started.elapsed().as_millis() as f64;
-    let mut journal = Journal::new(Box::new(suspect_journal::StdoutSink));
+    let mut journal = Journal::new(super::sink(journal_file)?);
     journal.run_summary("replay", matched, drifted, 0, elapsed_ms);
+    journal.flush()?;
     Ok(i32::from(drifted > 0))
 }
 
