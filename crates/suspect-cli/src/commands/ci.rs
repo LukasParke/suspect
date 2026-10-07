@@ -519,6 +519,9 @@ fn codegen_stage(manifest: &Path) -> StageResult {
     };
     let dir = manifest.parent().unwrap_or(Path::new("."));
     let mut drifted = 0usize;
+    // Compiled once, shared by every target: N targets no longer pay N
+    // loads and N contract compiles of the same spec.
+    let mut shared: Option<std::sync::Arc<crate::commands::sdk::SharedSpec>> = None;
     for (index, entry) in targets.iter().enumerate() {
         let field = |name: &str| entry.get(name).and_then(|v| v.as_str()).map(str::to_owned);
         let (Some(profile), Some(package_name), Some(package_version)) = (
@@ -531,6 +534,20 @@ fn codegen_stage(manifest: &Path) -> StageResult {
             continue;
         };
         let Some(spec) = published_spec(manifest) else {
+            drifted += 1;
+            continue;
+        };
+        if shared.is_none() {
+            match crate::commands::sdk::SharedSpec::compile(&spec) {
+                Ok(compiled) => shared = Some(std::sync::Arc::new(compiled)),
+                Err(error) => {
+                    eprintln!("ci: {error}");
+                    drifted += 1;
+                    continue;
+                }
+            }
+        }
+        let Some(shared) = shared.as_ref() else {
             drifted += 1;
             continue;
         };
@@ -565,7 +582,7 @@ fn codegen_stage(manifest: &Path) -> StageResult {
                 }
             },
         };
-        if crate::commands::sdk::generate_codegen_target(&spec, &target).unwrap_or(1) != 0 {
+        if crate::commands::sdk::generate_codegen_target_shared(shared, &target).unwrap_or(1) != 0 {
             drifted += 1;
         }
     }

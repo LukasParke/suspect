@@ -132,6 +132,7 @@ pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     });
     super::sdk::generate(&SdkArgs {
         input,
+        shared: None,
         profile,
         operation_id: args.operation_id,
         package_name: args.package_name,

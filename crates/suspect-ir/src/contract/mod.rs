@@ -333,8 +333,9 @@ impl Contract {
     ///
     /// # Errors
     /// Same as [`Contract::from_workspace`]; in `Fast` mode also reader
-    /// declines and (with `SUSPECT_CONTRACT_READER_VERIFY=1`) reported
-    /// fast/lossless value divergence.
+    /// declines, plus reported fast/lossless value divergence (the parity
+    /// check always runs: `Fast` is a verification harness, and the
+    /// historical `SUSPECT_CONTRACT_READER_VERIFY` gate never existed).
     pub fn from_workspace_with_reader(
         workspace: &Arc<Workspace>,
         entry: &Uri,

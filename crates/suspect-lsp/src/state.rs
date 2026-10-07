@@ -43,6 +43,79 @@ pub struct OpenDoc {
     pub low: LowDoc,
 }
 
+/// A snapshot of the per-document workspace-report cache plus the keying
+/// data a pull needs, safe to carry into a blocking task: which workspace
+/// the reports are computed against (its identity) and each open
+/// document's own content version.
+pub struct WsDiagCacheView {
+    cache: std::sync::Arc<std::sync::Mutex<HashMap<Uri, WsDocDiagEntry>>>,
+    identity: usize,
+    doc_versions: HashMap<Uri, u64>,
+}
+
+impl WsDiagCacheView {
+    /// Snapshots the cache and its keys for one pull.
+    #[must_use]
+    pub fn new(
+        cache: std::sync::Arc<std::sync::Mutex<HashMap<Uri, WsDocDiagEntry>>>,
+        identity: usize,
+        doc_versions: HashMap<Uri, u64>,
+    ) -> Self {
+        Self {
+            cache,
+            identity,
+            doc_versions,
+        }
+    }
+
+    fn key(&self, uri: &Uri) -> (usize, u64) {
+        (
+            self.identity,
+            self.doc_versions.get(uri).copied().unwrap_or(0),
+        )
+    }
+
+    /// The cached report for `uri`, when neither the workspace nor the
+    /// document's content moved since it was computed.
+    #[must_use]
+    pub fn get(&self, uri: &Uri) -> Option<Vec<Diagnostic>> {
+        let (identity, version) = self.key(uri);
+        let cache = self.cache.lock().ok()?;
+        let entry = cache.get(uri)?;
+        (entry.identity == identity && entry.version == version).then(|| entry.diagnostics.clone())
+    }
+
+    /// Stores the report computed for `uri` under its current keys.
+    pub fn store(&self, uri: Uri, diagnostics: Vec<Diagnostic>) {
+        let (identity, version) = self.key(&uri);
+        let result_id = crate::pull::diagnostics_result_id(&diagnostics);
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(
+                uri,
+                WsDocDiagEntry {
+                    identity,
+                    version,
+                    result_id,
+                    diagnostics,
+                },
+            );
+        }
+    }
+}
+
+/// One cached per-document workspace report.
+#[derive(Clone)]
+pub struct WsDocDiagEntry {
+    /// The workspace the report was computed against (its pointer).
+    pub identity: usize,
+    /// The document's own content version when computed.
+    pub version: u64,
+    /// The stable result id for the report.
+    pub result_id: String,
+    /// The findings themselves.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 impl OpenDoc {
     /// Parses the buffer text into a [`LowDoc`] (which carries the line
     /// index) and keeps the raw text alongside it.
@@ -117,6 +190,18 @@ pub struct State {
         String,
         Vec<WorkspaceDocumentDiagnosticReport>,
     )>,
+    /// Per-document content versions: a document's own epoch bumps only
+    /// when THAT document changes, so caches keyed on it survive edits to
+    /// every other file. Absent means "never opened" (disk state).
+    pub doc_epoch: HashMap<Uri, u64>,
+    /// Whole-workspace diagnostic reports, cached PER DOCUMENT: an edit to
+    /// one file re-lints that file, not the whole project. Keys carry the
+    /// workspace identity (pointer) so a workspace rebuild invalidates the
+    /// disk-only documents whose own epoch never moves.
+    pub ws_doc_diag: std::sync::Arc<std::sync::Mutex<HashMap<Uri, WsDocDiagEntry>>>,
+    /// Identity of the currently cached workspace; changes when the
+    /// workspace is dropped and rebuilt (saves, watched-file events).
+    pub ws_identity: usize,
     /// Raw initialization options captured in `initialize` for later merge.
     pub pending_init_options: Option<serde_json::Value>,
     /// Merged server configuration (initialization options < client section).
@@ -175,6 +260,7 @@ impl State {
     /// Forgets the disk-backed workspace, and with it the index built
     /// from it: both describe the tree as it was, not as it is.
     pub fn drop_workspace(&mut self) {
+        self.ws_identity = self.ws_identity.wrapping_add(1);
         self.workspace = None;
         self.index_cache = None;
         self.ws_diag_cache = None;
@@ -191,16 +277,18 @@ impl State {
     /// Inserts or replaces a document and reparses it.
     pub fn open_doc(&mut self, uri: Uri, text: String) {
         self.docs
-            .insert(uri.clone(), Arc::new(OpenDoc::parse(uri, text)));
+            .insert(uri.clone(), Arc::new(OpenDoc::parse(uri.clone(), text)));
         self.content_epoch = self.content_epoch.wrapping_add(1);
+        *self.doc_epoch.entry(uri).or_insert(0) += 1;
     }
 
     /// Replaces an already-open document with a reparsed one, bumping the
     /// content epoch the caches key on. Reparse vs. parse is invisible
     /// here: only the cost differs, never the tree.
     pub fn replace_doc(&mut self, uri: Uri, doc: Arc<OpenDoc>) {
-        self.docs.insert(uri, doc);
+        self.docs.insert(uri.clone(), doc);
         self.content_epoch = self.content_epoch.wrapping_add(1);
+        *self.doc_epoch.entry(uri).or_insert(0) += 1;
     }
 
     /// Returns the cached workspace, building it against the workspace root

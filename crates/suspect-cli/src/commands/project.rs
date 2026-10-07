@@ -526,11 +526,18 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         crate::commands::docs_gen_cmd::docs_gen(&args)?;
     }
 
-    // Stage 4b: SDK generation targets.
-    for target in &project.codegen {
-        let exit = crate::commands::sdk::generate_codegen_target(&project.publish_output, target)?;
-        if exit != 0 {
-            failures += 1;
+    // Stage 4b: SDK generation targets. The published spec is compiled
+    // once and shared by every target: N targets no longer pay N loads
+    // and N contract compiles of the same document.
+    if !project.codegen.is_empty() {
+        let shared = std::sync::Arc::new(crate::commands::sdk::SharedSpec::compile(
+            &project.publish_output,
+        )?);
+        for target in &project.codegen {
+            let exit = crate::commands::sdk::generate_codegen_target_shared(&shared, target)?;
+            if exit != 0 {
+                failures += 1;
+            }
         }
     }
 

@@ -101,7 +101,7 @@ pub fn resolve_code_action(
     ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
     cfg: &crate::config_files::SuspectConfig,
 ) -> Option<CodeAction> {
-    let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg, None);
+    let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg, None, false);
     let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), &diags);
     if edits.is_empty() {
         return None;

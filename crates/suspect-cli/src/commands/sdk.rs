@@ -2,7 +2,7 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -75,11 +75,54 @@ impl ValueEnum for SdkCompatibilityProfile {
     }
 }
 
+/// A specification compiled once for a run of SDK targets. A manifest
+/// with N targets names one spec; compiling it N times (a load + a
+/// contract compile each) is pure repetition, so the pipelines compile
+/// once and share this across every target.
+#[derive(Clone)]
+pub struct SharedSpec {
+    /// The loaded reference workspace.
+    pub ws: Arc<suspect_ref::Workspace>,
+    /// The entry's canonical URI inside the workspace.
+    pub uri: suspect_source::Uri,
+    /// The compiled contract; every target renders from an `Arc` clone.
+    pub contract: Arc<Contract>,
+}
+
+impl SharedSpec {
+    /// Loads and compiles `spec` once, for sharing across targets.
+    ///
+    /// # Errors
+    /// Workspace loading and contract compilation failures.
+    pub fn compile(spec: &Path) -> anyhow::Result<SharedSpec> {
+        let input = Input::File {
+            path: spec.to_path_buf(),
+        };
+        let (ws, uri) = input.open().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let contract = Arc::new(
+            Contract::from_workspace(&ws, &uri)
+                .map_err(|e| anyhow::anyhow!("contract compilation failed: {e}"))?,
+        );
+        Ok(SharedSpec { ws, uri, contract })
+    }
+}
+
+impl std::fmt::Debug for SharedSpec {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SharedSpec")
+            .field("uri", &self.uri.as_str())
+            .finish_non_exhaustive()
+    }
+}
+
 /// Options for source-selected canonical SDK generation.
 #[derive(Debug)]
 pub(super) struct SdkArgs {
     /// Entry OpenAPI document. Only its semantic reference closure is loaded.
     pub input: Input,
+    /// A spec compiled and shared by a whole target run; when set, the
+    /// input is never re-opened or re-compiled.
+    pub shared: Option<Arc<SharedSpec>>,
     /// Implemented generation profile; unsupported contracts fail before output.
     pub profile: SdkProfile,
     /// Exact operationId to select (repeatable). Omit to select all outgoing operations.
@@ -179,23 +222,36 @@ struct Prepared {
 }
 
 fn prepare(args: &SdkArgs) -> Result<Prepared, Vec<Diagnostic>> {
-    let input_error = |error: String| vec![Diagnostic::input(args, "sdk-input", error)];
-    let (ws, uri) = args.input.open().map_err(|error| match error {
-        SessionError::Acquisition(error) => vec![Diagnostic {
-            file: error.manifest_path().display().to_string(),
-            pointer: error
-                .resource_index()
-                .map_or_else(String::new, |index| format!("/resources/{index}")),
-            line: error.line().unwrap_or(1).try_into().unwrap_or(u32::MAX),
-            col: 1,
-            range: None,
-            code: error.code().into(),
-            message: error.to_string(),
-        }],
-        error => input_error(error.to_string()),
-    })?;
-    let contract =
-        Arc::new(Contract::from_workspace(&ws, &uri).map_err(|e| input_error(e.to_string()))?);
+    // A shared spec was compiled once for the whole target run: reuse the
+    // workspace and contract instead of re-loading the same file.
+    let (ws, uri, contract) = match &args.shared {
+        Some(shared) => (
+            Arc::clone(&shared.ws),
+            shared.uri.clone(),
+            Arc::clone(&shared.contract),
+        ),
+        None => {
+            let input_error = |error: String| vec![Diagnostic::input(args, "sdk-input", error)];
+            let (ws, uri) = args.input.open().map_err(|error| match error {
+                SessionError::Acquisition(error) => vec![Diagnostic {
+                    file: error.manifest_path().display().to_string(),
+                    pointer: error
+                        .resource_index()
+                        .map_or_else(String::new, |index| format!("/resources/{index}")),
+                    line: error.line().unwrap_or(1).try_into().unwrap_or(u32::MAX),
+                    col: 1,
+                    range: None,
+                    code: error.code().into(),
+                    message: error.to_string(),
+                }],
+                error => input_error(error.to_string()),
+            })?;
+            let contract = Arc::new(
+                Contract::from_workspace(&ws, &uri).map_err(|e| input_error(e.to_string()))?,
+            );
+            (ws, uri, contract)
+        }
+    };
     let entry = SourceId::new(uri, Default::default());
     let available: Vec<_> = contract.operations().collect();
     let mut by_name: BTreeMap<&str, Vec<SourceId>> = BTreeMap::new();
@@ -316,6 +372,20 @@ pub fn generate_codegen_target(
     spec: &std::path::Path,
     target: &super::project::CodegenTarget,
 ) -> anyhow::Result<i32> {
+    let shared = SharedSpec::compile(spec)?;
+    generate_codegen_target_shared(&Arc::new(shared), target)
+}
+
+/// [`generate_codegen_target`] against an already-compiled spec: the
+/// pipelines compile the manifest's spec once and render every target
+/// from the same [`SharedSpec`].
+///
+/// # Errors
+/// Unknown profile ids exit 2; generation failures report and exit 1.
+pub fn generate_codegen_target_shared(
+    shared: &Arc<SharedSpec>,
+    target: &super::project::CodegenTarget,
+) -> anyhow::Result<i32> {
     let Some(profile) = profile_by_name(&target.profile) else {
         eprintln!(
             "codegen {}: unknown profile `{}`",
@@ -332,8 +402,15 @@ pub fn generate_codegen_target(
     );
     generate(&SdkArgs {
         input: Input::File {
-            path: spec.to_path_buf(),
+            // Never opened: the shared spec supplies the workspace and
+            // contract; this field only feeds the report's identity.
+            path: shared
+                .ws
+                .root_path()
+                .unwrap_or_else(|| Path::new("."))
+                .to_path_buf(),
         },
+        shared: Some(Arc::clone(shared)),
         profile,
         operation_id: target.operation_id.clone(),
         package_name: target.package_name.clone(),

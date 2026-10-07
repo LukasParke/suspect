@@ -138,7 +138,7 @@ impl Backend {
             tokio::time::sleep(Duration::from_millis(150)).await;
             // Compute WITHOUT holding the state lock: clone the cheap handles
             // (OpenDoc is small; LowDoc parse tree is Arc-shared internally).
-            let (doc, ws, cfg, ruleset) = {
+            let (doc, ws, cfg, ruleset, strict_format) = {
                 let st = state.read().await;
                 if st.generations.get(&uri) != Some(&generation) {
                     return; // a newer edit superseded this publish
@@ -149,6 +149,7 @@ impl Backend {
                         st.workspace.clone(),
                         st.config.clone(),
                         st.editor_config.settings.lint.ruleset.clone(),
+                        st.editor_config.settings.validate.strict_format,
                     ),
                     None => return,
                 }
@@ -170,6 +171,7 @@ impl Backend {
                         &doc.low,
                         &cfg,
                         ruleset.as_deref(),
+                        strict_format,
                     )
                 }
             })
@@ -780,7 +782,15 @@ impl LanguageServer for Backend {
             };
             (doc.clone(), st.generation())
         };
-        let tokens = semantic::semantic_tokens_full(doc.as_ref());
+        // Off the runtime worker, for the same reason as the delta path:
+        // ~270ms of synchronous CPU must not pin a worker that the
+        // requests behind this one need.
+        let tokens = {
+            let doc = doc.clone();
+            tokio::task::spawn_blocking(move || semantic::semantic_tokens_full(doc.as_ref()))
+                .await
+                .unwrap_or_default()
+        };
         let id = pull::tokens_result_id(&tokens.data);
         self.state
             .write()
@@ -1291,7 +1301,7 @@ impl LanguageServer for Backend {
             return Ok(full_report(Some(id), items));
         }
 
-        let (doc, cfg, floor, ruleset) = {
+        let (doc, cfg, floor, ruleset, strict_format) = {
             let st = self.state.read().await;
             let Some(doc) = st.docs.get(&uri) else {
                 return Ok(full_report(None, Vec::new()));
@@ -1303,6 +1313,7 @@ impl LanguageServer for Backend {
                 st.config.clone(),
                 st.editor_config.min_severity(),
                 st.editor_config.settings.lint.ruleset.clone(),
+                st.editor_config.settings.validate.strict_format,
             )
         };
         // Off the runtime, for the same reason as the push: this is seconds
@@ -1315,15 +1326,21 @@ impl LanguageServer for Backend {
             let doc = doc.clone();
             let ruleset = ruleset.clone();
             move || match &ws {
-                Some(ws) => {
-                    pull::pull_diagnostics(ws, &doc.low, previous, &cfg, ruleset.as_deref())
-                }
+                Some(ws) => pull::pull_diagnostics(
+                    ws,
+                    &doc.low,
+                    previous,
+                    &cfg,
+                    ruleset.as_deref(),
+                    strict_format,
+                ),
                 None => {
                     let items = diagnostics::compute_diagnostics(
                         ws.as_ref(),
                         &doc.low,
                         &cfg,
                         ruleset.as_deref(),
+                        strict_format,
                     );
                     (pull::diagnostics_result_id(&items), items)
                 }
@@ -1371,12 +1388,15 @@ impl LanguageServer for Backend {
         // Same discipline as `diagnostic`: nothing expensive runs while a state
         // guard is alive, because a queued writer behind it blocks every
         // later reader — including the hover that follows.
-        let (workspace, cfg, ruleset) = {
+        let (workspace, cfg, ruleset, strict_format, cache, doc_versions) = {
             let st = self.state.read().await;
             (
                 st.workspace.clone(),
                 st.config.clone(),
                 st.editor_config.settings.lint.ruleset.clone(),
+                st.editor_config.settings.validate.strict_format,
+                Arc::clone(&st.ws_doc_diag),
+                (st.ws_identity, st.doc_epoch.clone()),
             )
         };
         let mut items = Vec::new();
@@ -1388,7 +1408,14 @@ impl LanguageServer for Backend {
         if let Some(ws) = &workspace {
             let cfg = cfg.clone();
             let ruleset = ruleset.clone();
-            for (uri, diags) in pull::workspace_pull(ws, &cfg, ruleset.as_deref()) {
+            // Per-document cache: unchanged documents reuse their reports;
+            // only the edited file pays its lint battery. Keyed on the
+            // workspace identity (saves rebuild it) and each document's own
+            // content version (its edits invalidate only its entry).
+            let view = crate::state::WsDiagCacheView::new(cache, doc_versions.0, doc_versions.1);
+            for (uri, diags) in
+                pull::workspace_pull(ws, &cfg, ruleset.as_deref(), strict_format, &view)
+            {
                 let Ok(url) = Url::parse(uri.as_str()) else {
                     continue;
                 };
@@ -1495,8 +1522,17 @@ impl LanguageServer for Backend {
             Some((cached_epoch, id, data)) if *cached_epoch == epoch => (id.clone(), data.clone()),
             // Changed content (or nothing cached): compute, and keep the
             // previous set around long enough to delta from it below.
+            // Off the runtime worker: this is ~270ms of synchronous CPU on
+            // a 63k-line specification, and a worker pinned here cannot
+            // poll the requests queued behind it (the same scheduler stall
+            // the diagnostics comment documents).
             _ => {
-                let full = semantic::semantic_tokens_full(doc.as_ref());
+                let doc = doc.clone();
+                let full = tokio::task::spawn_blocking(move || {
+                    semantic::semantic_tokens_full(doc.as_ref())
+                })
+                .await
+                .unwrap_or_default();
                 let id = pull::tokens_result_id(&full.data);
                 let data = full.data;
                 self.state

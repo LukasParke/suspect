@@ -45,7 +45,7 @@ x-internal: not-a-boolean
             .unwrap(),
     );
     let cfg = suspect_lsp::config_files::SuspectConfig::default();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None);
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
     let all = codes(&diags);
     assert!(all.iter().any(|c| c == "extension-schema"), "{all:?}");
 }
@@ -66,7 +66,7 @@ x-totally-custom:
     let low = low_at(&dir, "spec.yaml", text);
     let ws = std::sync::Arc::new(WorkspaceBuilder::new().root(&dir).build().unwrap());
     let cfg = suspect_lsp::config_files::SuspectConfig::default();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None);
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
     assert!(
         !codes(&diags).iter().any(|c| c == "extension-schema"),
         "unknown extensions are legal: {:?}",
@@ -101,14 +101,14 @@ x-plex-token:
         }
     }))
     .expect("config parses");
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None);
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
     let all = codes(&diags);
     assert!(all.iter().any(|c| c == "extension-schema"), "{all:?}");
 
     // A conforming value is silent.
     let good = text.replace("  wrong: shape", "  token: abc123");
     let low = low_at(&dir, "spec.yaml", &good);
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None);
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
     assert!(
         !codes(&diags).iter().any(|c| c == "extension-schema"),
         "{:?}",
@@ -139,6 +139,6 @@ x-retry-count: not-a-number
         }
     }))
     .unwrap();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None);
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
     assert!(codes(&diags).iter().any(|c| c == "extension-schema"));
 }

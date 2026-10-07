@@ -25,7 +25,7 @@ use suspect_journal::{
 };
 use tokio::io::{AsyncRead as _, AsyncWrite as _};
 
-use crate::{mock, problem};
+use crate::problem;
 /// Maximum proxied request/response body size (32 MiB).
 pub(crate) const MAX_BODY: usize = 32 * 1024 * 1024;
 
@@ -284,7 +284,7 @@ pub(crate) struct ForwardCtx<'a> {
 /// Validates a request through the shared contract runtime.
 fn runtime_violations(
     op: &IrOperation,
-    refs: &mock::SchemaRefs,
+    schemas: &suspect_runtime::Schemas,
     target: &str,
     headers: &[(String, String)],
     body: &[u8],
@@ -293,10 +293,9 @@ fn runtime_violations(
         Some((path, query)) => (path, Some(query)),
         None => (target, None),
     };
-    let schemas = suspect_runtime::Schemas::from_any_map(refs);
     suspect_runtime::validate_request(
         op,
-        &schemas,
+        schemas,
         suspect_runtime::Exchange {
             path,
             query,
@@ -315,12 +314,11 @@ fn runtime_violations(
 /// Validates a response through the shared contract runtime.
 fn runtime_response_violations(
     op: &IrOperation,
-    refs: &mock::SchemaRefs,
+    schemas: &suspect_runtime::Schemas,
     status: u16,
     body: &[u8],
 ) -> Vec<Violation> {
-    let schemas = suspect_runtime::Schemas::from_any_map(refs);
-    suspect_runtime::validate_response(&op.responses, &schemas, status, body)
+    suspect_runtime::validate_response(&op.responses, schemas, status, body)
         .into_iter()
         .map(|violation| Violation {
             message: violation.message,
@@ -332,14 +330,15 @@ fn runtime_response_violations(
 pub(crate) async fn validate_forward(
     upstream: &str,
     op: &IrOperation,
-    refs: &mock::SchemaRefs,
+    schemas: std::sync::Arc<suspect_runtime::Schemas>,
     ctx: ForwardCtx<'_>,
     body: Bytes,
     enforce: bool,
 ) -> (axum::response::Response, Vec<Violation>) {
     // The shared contract runtime owns the decision; the gateway only
-    // supplies the exchange.
-    let mut violations = runtime_violations(op, refs, ctx.target, ctx.headers, &body);
+    // supplies the exchange. The schema table is the startup-compiled one,
+    // shared by every request instead of cloned per request.
+    let mut violations = runtime_violations(op, schemas.as_ref(), ctx.target, ctx.headers, &body);
 
     if enforce && !violations.is_empty() {
         let detail = serde_json::json!({
@@ -381,7 +380,7 @@ pub(crate) async fn validate_forward(
     // through unchanged either way.
     violations.extend(runtime_response_violations(
         op,
-        refs,
+        schemas.as_ref(),
         reply.status,
         &reply.body,
     ));
