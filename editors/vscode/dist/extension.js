@@ -49,6 +49,7 @@ const testing_1 = require("./testing");
 const projectView_1 = require("./projectView");
 const config_1 = require("./config");
 const serverCommands_1 = require("./serverCommands");
+const liveSdk_1 = require("./liveSdk");
 const discover_1 = require("./discover");
 const project_1 = require("./project");
 let client;
@@ -68,6 +69,7 @@ function activate(context) {
     sdkGeneration = registerSdkGeneration(context);
     startClient();
     context.subscriptions.push(...(0, serverCommands_1.registerServerCommands)(() => client));
+    context.subscriptions.push(...(0, liveSdk_1.registerLiveSdkPreview)(() => client));
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('suspect.basePath')) {
             void restartClient();

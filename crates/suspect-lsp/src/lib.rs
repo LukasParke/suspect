@@ -49,6 +49,7 @@ pub mod pull;
 mod rank;
 mod refactor;
 pub mod rename;
+pub mod render_sdk;
 pub mod run_lenses;
 pub mod semantic;
 pub mod state;
@@ -284,6 +285,53 @@ impl Backend {
             let _ = ws.load_all(&path.to_string_lossy());
         }
         Some(ws)
+    }
+
+    /// A closed workspace mirroring the current editor state: every
+    /// document of the entry's disk closure contributes its live buffer
+    /// when open, its on-disk bytes otherwise. Compiling against this
+    /// sees what the user sees — admission reviews and rendered previews
+    /// track unsaved edits instead of the last saved state.
+    ///
+    /// On-demand by design: the provider snapshot is built per request
+    /// (hashing the closure's bytes), and the closed workspace re-parses
+    /// documents as it opens them. That is the correct cost for a request
+    /// like "review my contract"; the per-keystroke path stays the
+    /// incremental reparse.
+    async fn live_workspace(&self, uri: &Uri) -> Option<Arc<suspect_ref::Workspace>> {
+        let disk = self.workspace_for(uri).await?;
+        let st = self.state.read().await;
+        let mut provided = Vec::new();
+        for open_uri in disk.uris() {
+            let Some(handle) = disk.get(&open_uri) else {
+                continue;
+            };
+            let disk_bytes = handle.doc().inner().bytes().to_vec();
+            let bytes: std::sync::Arc<[u8]> = match st.docs.get(&open_uri) {
+                Some(doc) if doc.text.as_bytes() != disk_bytes.as_slice() => {
+                    doc.text.clone().into_bytes().into()
+                }
+                _ => disk_bytes.into(),
+            };
+            // The handle's URI is the workspace's own identity for this
+            // document (file-based workspaces have no provider metadata);
+            // requested == effective keeps every $ref that resolved
+            // before resolving the same way here.
+            match suspect_ref::ProvidedDocument::new(
+                handle.uri().clone(),
+                handle.uri().clone(),
+                bytes,
+            ) {
+                Ok(document) => provided.push(document),
+                Err(_) => return None,
+            }
+        }
+        let provider = suspect_ref::DocumentProvider::new(provided).ok()?;
+        suspect_ref::WorkspaceBuilder::new()
+            .document_provider(std::sync::Arc::new(provider))
+            .build()
+            .ok()
+            .map(Arc::new)
     }
 
     /// Builds the reference index before anyone asks for it.
@@ -849,23 +897,28 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         // Incremental sync: apply every change in order against the live
         // buffer (full-text changes are the range-less special case), then
-        // reparse once.
+        // reparse incrementally — tree-sitter reuses every unchanged
+        // subtree, so a keystroke costs the edit, not the whole document.
+        // The reparse equals a from-scratch parse of the new text (pinned
+        // by suspect-low's equivalence tests); it is an optimization, not
+        // a different tree.
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return;
         };
         {
             let mut st = self.state.write().await;
-            let Some(doc) = st.docs.get(&uri).map(|d| d.text.clone()) else {
+            let Some(doc) = st.docs.get(&uri).cloned() else {
                 return;
             };
-            let Some(text) = state::apply_content_changes(&doc, &params.content_changes) else {
+            let Some((text, edits)) = state::apply_with_edits(&doc, &params.content_changes) else {
                 return; // malformed ranges: keep the last good buffer
             };
             // Skip the reparse + republish cycle when the text is unchanged.
-            if text == doc {
+            if text == doc.text {
                 return;
             }
-            st.open_doc(uri.clone(), text);
+            let next = OpenDoc::reparse(&doc, text, &edits);
+            st.replace_doc(uri.clone(), Arc::new(next));
         }
         self.warm_index();
         self.schedule_diagnostics(uri);
@@ -2719,9 +2772,11 @@ impl Backend {
                 refusals: 0,
             });
         };
-        let ws = self.workspace_for(&uri).await;
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
+        let doc = {
+            let st = self.state.read().await;
+            st.docs.get(&uri).cloned()
+        };
+        let Some(doc) = doc else {
             return Ok(GenerationContractResult {
                 operations: Vec::new(),
                 findings: Vec::new(),
@@ -2729,7 +2784,10 @@ impl Backend {
                 refusals: 0,
             });
         };
-        let Some(ws) = ws else {
+        // The live overlay: the review sees the current buffer, not the
+        // last saved state, so unsaved edits get their admission verdict
+        // before anyone generates from them.
+        let Some(ws) = self.live_workspace(&uri).await else {
             return Ok(GenerationContractResult {
                 operations: Vec::new(),
                 findings: Vec::new(),
@@ -2738,7 +2796,7 @@ impl Backend {
             });
         };
         Ok(
-            generation_contract::generation_contract(&ws, doc).unwrap_or(
+            generation_contract::generation_contract(&ws, &doc).unwrap_or(
                 GenerationContractResult {
                     operations: Vec::new(),
                     findings: Vec::new(),
@@ -2747,6 +2805,63 @@ impl Backend {
                 },
             ),
         )
+    }
+
+    /// Handler for `suspect/renderSdk`: render one native SDK from the
+    /// live document. Open documents compile from the current buffer (the
+    /// incremental reparse keeps that state current on every keystroke);
+    /// closed documents fall back to the disk workspace. Scoped
+    /// compilation applies when operation selectors are present.
+    async fn render_sdk_request(
+        &self,
+        params: render_sdk::RenderSdkParams,
+    ) -> JsonRpcResult<render_sdk::RenderSdkResult> {
+        use render_sdk::{RenderDiagnostic, RenderSdkResult};
+        let empty = |code: &str, message: String| RenderSdkResult {
+            rendered: false,
+            artifacts: Vec::new(),
+            diagnostics: vec![RenderDiagnostic {
+                code: code.to_owned(),
+                message,
+            }],
+            operations: 0,
+        };
+        let Ok(uri) = Uri::parse(&params.uri) else {
+            return Ok(empty(
+                "sdk-uri-invalid",
+                format!("unparseable uri {:?}", params.uri),
+            ));
+        };
+        let open = self.state.read().await.docs.contains_key(&uri);
+        let ws = if open {
+            self.live_workspace(&uri).await
+        } else {
+            self.workspace_for(&uri).await
+        };
+        let Some(ws) = ws else {
+            return Ok(empty(
+                "sdk-workspace-unavailable",
+                "no workspace for the document".to_owned(),
+            ));
+        };
+        let contract = if params.operation_ids.is_empty() {
+            suspect_ir::contract::Contract::from_workspace(&ws, &uri).ok()
+        } else {
+            let selection = suspect_ir::contract::OperationSelection::new(
+                params.operation_ids.iter().map(String::as_str),
+            );
+            suspect_ir::contract::Contract::from_workspace_scoped(&ws, &uri, &selection).ok()
+        };
+        let Some(contract) = contract else {
+            return Ok(empty(
+                "sdk-compile-failed",
+                "the document did not compile".to_owned(),
+            ));
+        };
+        Ok(render_sdk::render_sdk(
+            std::sync::Arc::new(contract),
+            &params,
+        ))
     }
 
     /// Compiles the Arazzo document at `uri_s`, executes the workflow named
@@ -2876,7 +2991,14 @@ impl Backend {
     async fn render_preview(&self, uri_s: &str, preset: &str) -> Option<Value> {
         let uri = Uri::parse(uri_s).ok()?;
         let spec_path = uri.as_path()?;
-        let ws = run_lenses::workspace_dir_all(&spec_path)?;
+        // The live overlay when the document is open: previews render the
+        // current buffer, so what you preview is what you are looking at.
+        // Closed documents fall back to the disk workspace.
+        let ws = if self.state.read().await.docs.contains_key(&uri) {
+            self.live_workspace(&uri).await?
+        } else {
+            run_lenses::workspace_dir_all(&spec_path)?
+        };
         let ir = suspect_ir::IrSpec::from_workspace(&ws, &uri).ok()?;
 
         let root = self
@@ -2968,6 +3090,10 @@ async fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
         .custom_method(
             <generation_contract::GenerationContractRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::generation_contract_request,
+        )
+        .custom_method(
+            <render_sdk::RenderSdkRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::render_sdk_request,
         )
         .finish()
 }

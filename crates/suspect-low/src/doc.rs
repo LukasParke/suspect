@@ -46,6 +46,20 @@ impl LowDoc {
         }
     }
 
+    /// Reparses after ranged edits, reusing unchanged subtrees
+    /// (incremental). Mirrors [`SourceDoc::reparse`]; the edits' byte
+    /// offsets and points describe the buffer this document was parsed
+    /// from, in application order.
+    ///
+    /// A reparse is equivalent to parsing `new_source` from scratch — the
+    /// incremental path is an optimization, never a different tree.
+    #[must_use]
+    pub fn reparse(&self, new_source: Source, edits: &[suspect_syntax::Edit]) -> LowDoc {
+        Self {
+            doc: self.doc.reparse(new_source, edits),
+        }
+    }
+
     /// Document identifier; same URI the syntax layer parsed with.
     #[must_use]
     pub fn uri(&self) -> &Uri {

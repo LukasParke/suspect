@@ -268,6 +268,16 @@
 				"command": "suspect.renderPreview",
 				"title": "Suspect: Preview Generated Docs",
 				"category": "Suspect"
+			},
+			{
+				"command": "suspect.liveSdkPreview",
+				"title": "Suspect: Live SDK Preview",
+				"category": "Suspect"
+			},
+			{
+				"command": "suspect.stopLiveSdkPreview",
+				"title": "Suspect: Stop Live SDK Preview",
+				"category": "Suspect"
 			}
 		],
 		"viewsContainers": {

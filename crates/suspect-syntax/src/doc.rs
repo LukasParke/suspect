@@ -77,26 +77,79 @@ impl Edit {
         old_end_byte: usize,
         new_text_len: usize,
     ) -> Self {
-        let bytes = doc.bytes();
-        let (start_row, start_col) = doc.line_index().line_col_bytes(bytes, start_byte);
-        let (old_row, old_col) = doc.line_index().line_col_bytes(bytes, old_end_byte);
-        let inserted = &doc.bytes()[start_byte..old_end_byte];
-        let new_lines = inserted.iter().filter(|&&b| b == b'\n').count();
-        let new_end_point = if new_lines == 0 {
+        Self::from_buffer(
+            doc.bytes(),
+            doc.line_index(),
+            start_byte,
+            old_end_byte,
+            new_text_len,
+            &[],
+        )
+    }
+
+    /// Builds an edit with exact points from the old buffer plus the full
+    /// replacement text. Unlike [`Edit::from_bytes`], the new end point is
+    /// computed from the replacement itself, so replacements that add or
+    /// remove lines carry correct positions — which tree-sitter's incremental
+    /// edit inputs require.
+    #[must_use]
+    pub fn from_replacement(
+        doc: &SourceDoc,
+        start_byte: usize,
+        old_end_byte: usize,
+        replacement: &[u8],
+    ) -> Self {
+        Self::from_buffer(
+            doc.bytes(),
+            doc.line_index(),
+            start_byte,
+            old_end_byte,
+            replacement.len(),
+            replacement,
+        )
+    }
+
+    /// The point-computing core: byte offsets and the replacement's bytes
+    /// against one immutable buffer. `new_end_point` is derived from
+    /// `replacement` when it is non-empty, else from `new_text_len` (the
+    /// historical no-newline assumption).
+    #[must_use]
+    pub fn from_buffer(
+        bytes: &[u8],
+        line_index: &LineIndex,
+        start_byte: usize,
+        old_end_byte: usize,
+        new_text_len: usize,
+        replacement: &[u8],
+    ) -> Self {
+        let (start_row, start_col) = line_index.line_col_bytes(bytes, start_byte);
+        let (old_row, old_col) = line_index.line_col_bytes(bytes, old_end_byte);
+        let derived: &[u8] = if replacement.is_empty() {
+            &bytes[start_byte..old_end_byte.min(bytes.len())]
+        } else {
+            replacement
+        };
+        let new_end_point = if new_text_len == 0 {
             Point {
                 row: start_row,
-                column: start_col + new_text_len,
+                column: start_col,
             }
         } else {
-            // last inserted line length after the final '\n'
-            let last_nl = inserted
-                .iter()
-                .rposition(|&b| b == b'\n')
-                .map_or(0, |i| i + 1);
-            let tail = new_text_len.saturating_sub(inserted.len() - last_nl);
-            Point {
-                row: start_row + new_lines,
-                column: tail,
+            let new_lines = derived.iter().filter(|&&b| b == b'\n').count();
+            if new_lines == 0 {
+                Point {
+                    row: start_row,
+                    column: start_col + new_text_len,
+                }
+            } else {
+                let tail = &derived[derived
+                    .iter()
+                    .rposition(|&b| b == b'\n')
+                    .map_or(0, |i| i + 1)..];
+                Point {
+                    row: start_row + new_lines,
+                    column: tail.len(),
+                }
             }
         };
         Self {

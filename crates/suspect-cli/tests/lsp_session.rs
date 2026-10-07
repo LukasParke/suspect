@@ -1908,3 +1908,79 @@ fn a_minimal_client_gets_everything() {
         "symbols must resolve without any client capability"
     );
 }
+
+#[test]
+fn render_sdk_tracks_the_live_buffer_through_incremental_edits() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let api_uri = url_of(&ws.openapi);
+    let (path, text) = (
+        &ws.openapi,
+        std::fs::read_to_string(&ws.openapi).expect("read"),
+    );
+    editor.open(path, &text);
+
+    // Render from the live buffer before any edit: scoped to one GET
+    // operation, the fixture's admissible path.
+    let params = serde_json::json!({
+        "uri": api_uri,
+        "profile": "typescript-http",
+        "packageName": "live-bench",
+        "packageVersion": "0.1.0",
+        "operationIds": ["AccountsGet"],
+    });
+    let first = editor
+        .request("suspect/renderSdk", params.clone())
+        .expect("renderSdk answers");
+    assert!(
+        first["rendered"].as_bool().unwrap_or(false),
+        "the scoped GET operation must admit: {first}"
+    );
+    assert!(first["artifacts"].as_array().is_some_and(|a| !a.is_empty()));
+
+    // A ranged didChange — the incremental reparse path — renames the
+    // operation in the UNSAVED buffer.
+    // locate() is 1-based on both axes; LSP positions are 0-based.
+    let (line, column) = ws.locate(&ws.openapi, "operationId: AccountsGet");
+    let (line, column) = (line - 1, column - 1);
+    editor.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": {"uri": api_uri, "version": 2},
+            "contentChanges": [{
+                "range": {
+                    "start": {"line": line, "character": column + 13},
+                    "end": {"line": line, "character": column + 24},
+                },
+                "text": "RenamedOp",
+            }],
+        }),
+    );
+
+    // The render carries the unsaved edit: incremental reparse → live
+    // overlay → scoped compile → render, one chain. The selector follows
+    // the rename, proving the scoped compile sees the edited buffer.
+    let renamed = serde_json::json!({
+        "uri": api_uri,
+        "profile": "typescript-http",
+        "packageName": "live-bench",
+        "packageVersion": "0.1.0",
+        "operationIds": ["RenamedOp"],
+    });
+    let second = editor
+        .request("suspect/renderSdk", renamed)
+        .expect("renderSdk answers");
+    assert!(second["rendered"].as_bool().unwrap_or(false), "{second}");
+    let serialized = serde_json::to_string(&second).unwrap();
+    let lower = serialized.to_lowercase();
+    assert!(
+        lower.contains("renamedop"),
+        "the render must reflect the unsaved buffer, not the saved file; sample: {}",
+        &serialized[..serialized.len().min(400)]
+    );
+    assert!(
+        !serialized.contains("AccountsGet"),
+        "the stale operation id must be gone from the render"
+    );
+}

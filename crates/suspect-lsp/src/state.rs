@@ -45,7 +45,20 @@ impl OpenDoc {
     /// Parses the buffer text into a [`LowDoc`] (which carries the line
     /// index) and keeps the raw text alongside it.
     pub fn parse(uri: Uri, text: String) -> OpenDoc {
-        let low = LowDoc::parse(uri.clone(), Source::from_vec(text.clone().into_bytes()));
+        let low = LowDoc::parse(uri, Source::from_vec(text.clone().into_bytes()));
+        OpenDoc { text, low }
+    }
+
+    /// Reparses after ranged edits, reusing unchanged subtrees. The
+    /// incremental path is an optimization, never a different tree: a
+    /// reparse equals a from-scratch parse of `text` (pinned by
+    /// `suspect-low`'s equivalence tests), and keeps didChange off the
+    /// whole-file reparse path that dominated editing latency on large
+    /// specifications.
+    pub fn reparse(previous: &OpenDoc, text: String, edits: &[suspect_syntax::Edit]) -> OpenDoc {
+        let low = previous
+            .low
+            .reparse(Source::from_vec(text.clone().into_bytes()), edits);
         OpenDoc { text, low }
     }
 }
@@ -180,6 +193,14 @@ impl State {
         self.content_epoch = self.content_epoch.wrapping_add(1);
     }
 
+    /// Replaces an already-open document with a reparsed one, bumping the
+    /// content epoch the caches key on. Reparse vs. parse is invisible
+    /// here: only the cost differs, never the tree.
+    pub fn replace_doc(&mut self, uri: Uri, doc: Arc<OpenDoc>) {
+        self.docs.insert(uri, doc);
+        self.content_epoch = self.content_epoch.wrapping_add(1);
+    }
+
     /// Returns the cached workspace, building it against the workspace root
     /// on first use.
     pub fn ensure_workspace(&mut self) -> Option<Arc<Workspace>> {
@@ -258,6 +279,51 @@ pub fn apply_content_changes(
         }
     }
     Some(text)
+}
+
+/// Applies one didChange batch to the live document, returning the new
+/// text plus the byte-level [`suspect_syntax::Edit`]s that drive an
+/// incremental reparse. Edits are built per change, in order, against the
+/// buffer as it stands after the preceding change — the same sequential
+/// contract `apply_content_changes` implements and editors follow.
+///
+/// Returns `None` on malformed ranges, exactly like the text-only path;
+/// a range-less change (a full replacement) carries one whole-buffer edit.
+pub fn apply_with_edits(
+    current: &OpenDoc,
+    changes: &[tower_lsp::lsp_types::TextDocumentContentChangeEvent],
+) -> Option<(String, Vec<suspect_syntax::Edit>)> {
+    let mut text = current.text.clone();
+    let mut edits: Vec<suspect_syntax::Edit> = Vec::new();
+    for change in changes {
+        let (start, end): (usize, usize) = match change.range {
+            None => (0, text.len()),
+            Some(range) => {
+                let bytes = text.as_bytes();
+                let li = LineIndex::new(bytes);
+                let start = offset_of_utf16(bytes, &li, range.start.line, range.start.character)?;
+                let end = offset_of_utf16(bytes, &li, range.end.line, range.end.character)?;
+                if end < start || end > text.len() {
+                    return None;
+                }
+                (start, end)
+            }
+        };
+        // Exact points: the new end point is computed from the replacement
+        // itself, so line-count-changing replacements stay correct.
+        let li = LineIndex::new(text.as_bytes());
+        let edit = suspect_syntax::Edit::from_buffer(
+            text.as_bytes(),
+            &li,
+            start,
+            end,
+            change.text.len(),
+            change.text.as_bytes(),
+        );
+        edits.push(edit);
+        text.replace_range(start..end, &change.text);
+    }
+    Some((text, edits))
 }
 
 #[cfg(test)]

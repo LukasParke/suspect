@@ -222,6 +222,23 @@ impl OperationSelection {
         out
     }
 
+    /// Whether an operation identified by (optional operationId, method,
+    /// path template) is kept — the same matching [`SourceId`]-based
+    /// compilation pruning applies, for callers holding operation views.
+    #[must_use]
+    pub fn keeps_operation(&self, id: Option<&str>, method: &str, path: &str) -> bool {
+        if let Some(id) = id
+            && self.by_id.contains(id)
+        {
+            return true;
+        }
+        if id.is_some() {
+            return false;
+        }
+        self.by_method_path
+            .contains(&(method.to_ascii_uppercase(), path.to_owned()))
+    }
+
     /// Whether any selector is present; an empty selection keeps nothing
     /// (callers use it only when a non-empty selector list exists).
     #[must_use]
