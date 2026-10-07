@@ -13,7 +13,10 @@ struct PathTask {
     ancestors: Vec<SourceId>,
 }
 
-pub(super) fn index(contract: &Contract) -> (HttpIndex, Vec<ContractDiagnostic>) {
+pub(super) fn index(
+    contract: &Contract,
+    selection: Option<&super::OperationSelection>,
+) -> (HttpIndex, Vec<ContractDiagnostic>) {
     let mut out = HttpIndex::default();
     let mut diagnostics = super::http_validate::validate(contract);
     let root = SourceId::new(contract.entry().clone(), suspect_low::Pointer::root());
@@ -71,6 +74,11 @@ pub(super) fn index(contract: &Contract) -> (HttpIndex, Vec<ContractDiagnostic>)
             .or_else(|| servers.clone());
         for (method, source, raw) in item.operations() {
             if !raw.is_object() {
+                continue;
+            }
+            if let Some(selection) = selection
+                && !selection.keeps(&source, raw)
+            {
                 continue;
             }
             let operation = Object::new(contract, source.clone());

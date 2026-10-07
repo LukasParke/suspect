@@ -728,3 +728,26 @@ cited above.
 
 The host is not a calibrated dedicated runner. A numerical gate, measured
 absolute budgets and Swift Session performance remain unestablished.
+
+## Observational snapshot: scoped compilation (2026-10-06)
+
+After operation-scoped compilation and the 50ms poll
+(`Contract::from_workspace_scoped`, session `operation_ids`), on
+plex-api-spec (63,028 lines, 404 operations, 6 selected), release build,
+one machine, no controlled collection:
+
+| Path | Before | After |
+|---|---|---|
+| Contract compile | 358 ms (all 404 ops) | 221 ms (scoped) |
+| Watch refresh per save | 0.78–0.82 s | 0.41–0.49 s |
+| No-op change detection | 0.27 s | ~0.05 s |
+
+Stage split of the remaining per-edit work: ~195 ms parse, ~168 ms
+document materialization (the span index over 69,568 values, which also
+carries alias-ambiguity validation), then scoped compile, admission,
+render and write. Lazy span lookup is the identified next lever; it
+touches occurrence-aware source identity and is not attempted yet.
+
+Equivalence is pinned by `crates/suspect-codegen/tests/scoped_compile.rs`
+(byte-identical output across TypeScript, Python and Go) and verified
+live against one-shot codegen on the same spec.

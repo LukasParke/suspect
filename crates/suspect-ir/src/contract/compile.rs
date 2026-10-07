@@ -8,13 +8,26 @@ use suspect_source::Uri;
 
 use super::{
     Contract, ContractDiagnostic, ContractError, ContractReader, ContractSeverity, Document,
-    SchemaDialect, SchemaId,
+    OperationSelection, SchemaDialect, SchemaId,
 };
 
 pub(super) fn compile(
     workspace: &Arc<Workspace>,
     entry: &Uri,
     reader: ContractReader,
+) -> Result<Contract, ContractError> {
+    compile_scoped(workspace, entry, reader, None)
+}
+
+/// [`compile`] with an optional operation scope: when present, the walk and
+/// the HTTP index cover only the selected operations and the closure they
+/// reach, so compilation cost follows the selection instead of the whole
+/// specification.
+pub(super) fn compile_scoped(
+    workspace: &Arc<Workspace>,
+    entry: &Uri,
+    reader: ContractReader,
+    selection: Option<&OperationSelection>,
 ) -> Result<Contract, ContractError> {
     // Provider aliases select one canonical retrieval identity. That identity,
     // rather than a requested redirect alias or cache filename, is the base.
@@ -55,7 +68,7 @@ pub(super) fn compile(
         ),
     };
 
-    super::walk::index(&mut out, workspace, reader, default_dialect)?;
+    super::walk::index(&mut out, workspace, reader, default_dialect, selection)?;
     checkpoint("structural schema/reference graph");
     // The structural registry retains lexical dialects even when a reference
     // selects a nested schema without adding its containing schema to the graph.
@@ -64,7 +77,7 @@ pub(super) fn compile(
         out.schema_diagnostics(&id, &dialect);
     }
     checkpoint("dialect and diagnostics");
-    let (http, diagnostics) = super::http_compile::index(&out);
+    let (http, diagnostics) = super::http_compile::index(&out, selection);
     out.http = http;
     out.diagnostics.extend(diagnostics);
     checkpoint("HTTP metadata");

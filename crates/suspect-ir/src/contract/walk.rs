@@ -10,6 +10,8 @@ use suspect_low::Pointer;
 use suspect_ref::{Workspace, resource_uri};
 use suspect_source::Uri;
 
+use super::OperationSelection;
+
 use super::SchemaContext as Context;
 use super::shape::{self, Kind};
 use super::{
@@ -48,11 +50,13 @@ fn walker<'a>(
     contract: &'a mut Contract,
     workspace: &'a Workspace,
     reader: ContractReader,
+    selection: Option<&'a OperationSelection>,
 ) -> Walker<'a> {
     Walker {
         contract,
         workspace,
         reader,
+        selection,
         registered_documents: HashSet::new(),
         registry: BTreeMap::new(),
         registered_contexts: BTreeMap::new(),
@@ -73,6 +77,7 @@ pub(super) fn index(
     workspace: &Workspace,
     reader: ContractReader,
     dialect: SchemaDialect,
+    selection: Option<&OperationSelection>,
 ) -> Result<(), ContractError> {
     let entry = contract.entry.clone();
     let root = SourceId::new(entry.clone(), Pointer::root());
@@ -86,7 +91,7 @@ pub(super) fn index(
         dialect_source: default_source.clone(),
         default_dialect_source: default_source,
     };
-    let mut walker = walker(contract, workspace, reader);
+    let mut walker = walker(contract, workspace, reader, selection);
     walker.register_document(&entry, &context);
     let context = walker.document_context(&entry, &context);
     walker.pending.push(Task {
@@ -181,6 +186,9 @@ struct Walker<'a> {
     contract: &'a mut Contract,
     workspace: &'a Workspace,
     reader: ContractReader,
+    /// The operation scope, when compilation is scoped: `None` compiles
+    /// everything (the historical, default behavior).
+    selection: Option<&'a OperationSelection>,
     registered_documents: HashSet<Uri>,
     registry: BTreeMap<(SourceId, Kind), Context>,
     registered_contexts: BTreeMap<(SourceId, Kind), Vec<Context>>,
@@ -196,6 +204,37 @@ struct Walker<'a> {
 }
 
 impl Walker<'_> {
+    /// Applies the operation scope to one expansion's children: under a
+    /// path item, unselected operations and the subtrees below them drop
+    /// out; everything else (components, webhooks, callbacks) compiles as
+    /// before. An explicit `$ref` from a kept operation can still reach an
+    /// unselected subtree — reference resolution does not pass through
+    /// here.
+    fn selected_children(
+        &self,
+        parent: &SourceId,
+        parent_kind: Kind,
+        children: Vec<(SourceId, Kind)>,
+    ) -> Vec<(SourceId, Kind)> {
+        let Some(selection) = self.selection else {
+            return children;
+        };
+        if parent_kind != Kind::PathItem {
+            return children;
+        }
+        let document = &self.contract.documents[parent.document()];
+        children
+            .into_iter()
+            .filter(|(source, kind)| {
+                if *kind != Kind::Operation {
+                    return true;
+                }
+                let raw = document.raw.pointer(source.pointer());
+                raw.is_none_or(|raw| selection.keeps(source, raw))
+            })
+            .collect()
+    }
+
     fn document_context(&self, document: &Uri, inherited: &Context) -> Context {
         let raw = &self.contract.documents[document].raw;
         let Some(version) = raw.get("openapi").and_then(Value::as_str) else {
@@ -388,13 +427,17 @@ impl Walker<'_> {
                 );
             }
             pending.extend(
-                shape::children(&task.source, raw, task.kind, &task.context.version)
-                    .into_iter()
-                    .map(|(source, kind)| Task {
-                        source,
-                        kind,
-                        context: task.context.clone(),
-                    }),
+                self.selected_children(
+                    &task.source.clone(),
+                    task.kind,
+                    shape::children(&task.source, raw, task.kind, &task.context.version),
+                )
+                .into_iter()
+                .map(|(source, kind)| Task {
+                    source,
+                    kind,
+                    context: task.context.clone(),
+                }),
             );
             self.registry
                 .entry((task.source, task.kind))
@@ -432,7 +475,11 @@ impl Walker<'_> {
             .contract
             .source(&task.source)
             .expect("registered source exists");
-        let children = shape::children(&task.source, raw, task.kind, &task.context.version);
+        let children = self.selected_children(
+            &task.source.clone(),
+            task.kind,
+            shape::children(&task.source, raw, task.kind, &task.context.version),
+        );
         let has_reference =
             task.kind.reference_allowed(&task.context.version) && raw.get("$ref").is_some();
         let has_dynamic = task.kind == Kind::Schema
@@ -696,7 +743,7 @@ impl Walker<'_> {
                     super::compile::snapshot(uri.clone(), incoming.context.version.clone());
                 catalog.documents.insert(uri.clone(), document);
                 {
-                    let mut registration = walker(&mut catalog, self.workspace, self.reader);
+                    let mut registration = walker(&mut catalog, self.workspace, self.reader, None);
                     registration.register_document(&uri, &incoming.context);
                     let root = SourceId::new(uri.clone(), Pointer::root());
                     if registration

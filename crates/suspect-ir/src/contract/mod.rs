@@ -189,6 +189,79 @@ impl SchemaContext {
     }
 }
 
+/// Which operations an operation-scoped [`Contract`] compilation keeps.
+///
+/// One selector per operation, in the generation session's spellings: an
+/// `operationId`, or `METHOD /path.template` for an operation without an
+/// id. An operation with an id is kept only by its id; the method/path
+/// spelling selects only id-less operations.
+#[derive(Debug, Clone, Default)]
+pub struct OperationSelection {
+    by_id: std::collections::BTreeSet<String>,
+    by_method_path: std::collections::BTreeSet<(String, String)>,
+}
+
+impl OperationSelection {
+    /// Builds a selection from its selectors.
+    pub fn new(selectors: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let mut out = Self::default();
+        for selector in selectors {
+            let selector: String = selector.into();
+            // `METHOD /path` selects an unnamed operation; anything else is
+            // an operationId. This mirrors the session's matching exactly.
+            if let Some((method, path)) = selector.split_once(' ')
+                && path.starts_with('/')
+                && method.chars().all(char::is_alphabetic)
+            {
+                out.by_method_path
+                    .insert((method.to_ascii_uppercase(), path.to_owned()));
+            } else {
+                out.by_id.insert(selector);
+            }
+        }
+        out
+    }
+
+    /// Whether any selector is present; an empty selection keeps nothing
+    /// (callers use it only when a non-empty selector list exists).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty() && self.by_method_path.is_empty()
+    }
+
+    /// Whether the operation at `op_source` with raw value `raw` is kept.
+    pub(super) fn keeps(&self, op_source: &SourceId, raw: &serde_json::Value) -> bool {
+        let id = raw.get("operationId").and_then(serde_json::Value::as_str);
+        if let Some(id) = id
+            && self.by_id.contains(id)
+        {
+            return true;
+        }
+        // Id-less operations (and only they) match the METHOD /path spelling.
+        if id.is_some() {
+            return false;
+        }
+        let Some((method, route)) = method_and_route(op_source) else {
+            return false;
+        };
+        self.by_method_path.contains(&(method, route))
+    }
+}
+
+/// `("GET", "/pets/{id}")` from an operation source pointer; `None` when
+/// the pointer is not an operation under a path item. Pointer tokens are
+/// escaped, so both segments unescape before comparing.
+fn method_and_route(op_source: &SourceId) -> Option<(String, String)> {
+    let escaped: Vec<&str> = op_source.pointer().split('/').skip(1).collect();
+    let unescape = |token: &str| token.replace("~1", "/").replace("~0", "~");
+    let method = unescape(escaped.last()?);
+    let route = unescape(escaped.get(escaped.len().checked_sub(2)?)?);
+    if !method.chars().all(char::is_alphabetic) || !route.starts_with('/') {
+        return None;
+    }
+    Some((method.to_ascii_uppercase(), route))
+}
+
 /// An immutable, owned snapshot independent of workspace/document lifetimes.
 #[derive(Debug)]
 pub struct Contract {
@@ -251,6 +324,35 @@ impl Contract {
         reader: ContractReader,
     ) -> Result<Self, ContractError> {
         compile::compile(workspace, entry, reader)
+    }
+
+    /// Compiles only the selected operations and the schema closure they
+    /// reach. Unselected operations are excluded from the walk, the HTTP
+    /// index, and everything derived from them, so a session rendering a
+    /// handful of operations from a large specification pays for those
+    /// operations only.
+    ///
+    /// The same operation-identity spellings the generation session accepts
+    /// select here: an `operationId`, or `METHOD /path.template` for
+    /// operations without an id. Selectors are matched against the raw
+    /// document; an unselected operation's subtree can still be reached
+    /// through an explicit `$ref` from a selected one.
+    ///
+    /// Scope differences from [`Contract::from_workspace`]: lexical anchors
+    /// and `$dynamicRef` targets declared under unselected operations are
+    /// not pre-registered, and diagnostics rooted in unselected operations
+    /// are absent because those operations are. Consumers that already work
+    /// per-selected-operation (the generation session's admission review)
+    /// see identical verdicts.
+    ///
+    /// # Errors
+    /// Same as [`Contract::from_workspace`].
+    pub fn from_workspace_scoped(
+        workspace: &Arc<Workspace>,
+        entry: &Uri,
+        selection: &OperationSelection,
+    ) -> Result<Self, ContractError> {
+        compile::compile_scoped(workspace, entry, ContractReader::Lossless, Some(selection))
     }
 
     /// Requested canonical retrieval URI.

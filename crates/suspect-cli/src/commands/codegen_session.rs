@@ -37,8 +37,10 @@ pub struct SessionArgs {
     /// Human-readable status or versioned newline-delimited JSON records.
     #[arg(long, value_enum, default_value = "text")]
     pub format: OutputFormat,
-    /// Content-fingerprint polling interval, in milliseconds.
-    #[arg(long,default_value_t=250,value_parser=clap::value_parser!(u64).range(25..=60000))]
+    /// Content-fingerprint polling interval, in milliseconds. 50ms keeps
+    /// perceived refresh latency low; a poll hashes only the closure's
+    /// bytes, so the cost is negligible next to any real change.
+    #[arg(long,default_value_t=50,value_parser=clap::value_parser!(u64).range(25..=60000))]
     pub interval_ms: u64,
     /// Optional finite watch limit for automated process-level consumers.
     #[arg(long, hide = true, requires = "watch")]

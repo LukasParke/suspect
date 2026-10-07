@@ -195,6 +195,11 @@ struct Snapshot {
     targets: BTreeMap<String, Vec<String>>,
     pinned_identity: Option<String>,
     documents: BTreeSet<String>,
+    /// The compile scope this contract was built with: `None` compiles the
+    /// whole specification; `Some` is the fingerprint of the operation
+    /// selection a scoped compile kept. A scoped contract is reusable only
+    /// by an identical selection — a whole contract serves any selection.
+    selection: Option<String>,
 }
 pub struct Session {
     entry: PathBuf,
@@ -297,7 +302,14 @@ impl Session {
         entry: &Path,
         entry_hash: &str,
         pinned_identity: Option<&str>,
+        selection: Option<&str>,
     ) -> bool {
+        // A scoped contract is a function of bytes AND selection: an
+        // identical-file snapshot compiled for another selection (or for
+        // none) cannot serve this one.
+        if snapshot.selection.as_deref() != selection {
+            return false;
+        }
         if pinned_identity.is_some() || snapshot.pinned_identity.is_some() {
             // pins() has already verified every manifest/cache byte before this
             // decision, including files not in the selected schema closure.
@@ -331,6 +343,15 @@ impl Session {
         }
         let config_hash = configuration(&self.config);
         let mut delta = Stats::default();
+        // The compile scope in effect: the whole contract, or the
+        // fingerprint of this configuration's operation selection.
+        let scope = if self.config.operation_ids.is_empty() {
+            None
+        } else {
+            Some(hash(
+                &serde_json::to_vec(&self.config.operation_ids).expect("selection identity"),
+            ))
+        };
         let matching = self.cache.iter().position(|snapshot| {
             snapshot.configuration == config_hash
                 && Self::current(
@@ -338,6 +359,7 @@ impl Session {
                     &self.entry,
                     &entry_hash,
                     pinned_identity.as_deref(),
+                    scope.as_deref(),
                 )
         });
         let (contract, files, documents, revision) = if let Some(index) = matching {
@@ -361,6 +383,7 @@ impl Session {
                     &self.entry,
                     &entry_hash,
                     pinned_identity.as_deref(),
+                    scope.as_deref(),
                 )
             });
             let (contract, closure, missing, source_bytes, cacheable, documents) =
@@ -375,10 +398,20 @@ impl Session {
                     )
                 } else {
                     let (workspace, entry) = self.input.open_verified(pins.as_ref())?;
-                    let contract = Arc::new(
+                    // An operation-scoped compile pays only for the
+                    // selected operations and the closure they reach, so
+                    // a session rendering a handful of operations from a
+                    // large specification stays fast on every refresh.
+                    let contract = Arc::new(if self.config.operation_ids.is_empty() {
                         Contract::from_workspace(&workspace, &entry)
-                            .map_err(|error| SessionError::Input(error.to_string()))?,
-                    );
+                            .map_err(|error| SessionError::Input(error.to_string()))?
+                    } else {
+                        let selection = suspect_ir::contract::OperationSelection::new(
+                            self.config.operation_ids.iter().map(String::as_str),
+                        );
+                        Contract::from_workspace_scoped(&workspace, &entry, &selection)
+                            .map_err(|error| SessionError::Input(error.to_string()))?
+                    });
                     let mut closure = BTreeMap::new();
                     let mut source_bytes = 0;
                     let documents: BTreeSet<String>;
@@ -576,6 +609,7 @@ impl Session {
                     targets,
                     pinned_identity: pinned_identity.clone(),
                     documents: documents.clone(),
+                    selection: scope,
                 });
                 self.evict();
             }
