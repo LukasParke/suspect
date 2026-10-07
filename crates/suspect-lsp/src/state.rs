@@ -8,7 +8,7 @@ use suspect_low::LowDoc;
 use suspect_ref::{Workspace, WorkspaceBuilder};
 use suspect_source::{LineIndex, Source, Uri};
 use tower_lsp::lsp_types::{
-    CodeLens, ColorInformation, Diagnostic, DocumentLink, FoldingRange,
+    CodeLens, ColorInformation, Diagnostic, DocumentLink, DocumentSymbol, FoldingRange,
     WorkspaceDocumentDiagnosticReport,
 };
 use tower_lsp::lsp_types::{Position, Range, SemanticToken};
@@ -29,6 +29,8 @@ pub struct DocCache {
     pub lenses: Option<Arc<Vec<CodeLens>>>,
     /// `textDocument/foldingRange`
     pub folds: Option<Arc<Vec<FoldingRange>>>,
+    /// `textDocument/documentSymbol`
+    pub symbols: Option<Arc<Vec<DocumentSymbol>>>,
 }
 
 /// One editor-open document: the live buffer text plus the `LowDoc` parsed

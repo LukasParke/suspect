@@ -103,6 +103,11 @@ struct Backend {
     client: Client,
     /// Shared mutable server state; also captured by debounce tasks.
     state: Arc<tokio::sync::RwLock<State>>,
+    /// Single-flight for whole-workspace index builds: requests that miss
+    /// the cache together line up behind one build instead of racing to
+    /// build the same answer. Held across the build only — never across
+    /// the state lock.
+    index_build_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Backend {
@@ -111,6 +116,7 @@ impl Backend {
         Self {
             client,
             state: Arc::new(tokio::sync::RwLock::new(State::default())),
+            index_build_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -132,13 +138,18 @@ impl Backend {
             tokio::time::sleep(Duration::from_millis(150)).await;
             // Compute WITHOUT holding the state lock: clone the cheap handles
             // (OpenDoc is small; LowDoc parse tree is Arc-shared internally).
-            let (doc, ws, cfg) = {
+            let (doc, ws, cfg, ruleset) = {
                 let st = state.read().await;
                 if st.generations.get(&uri) != Some(&generation) {
                     return; // a newer edit superseded this publish
                 }
                 match st.docs.get(&uri) {
-                    Some(doc) => (doc.clone(), st.workspace.clone(), st.config.clone()),
+                    Some(doc) => (
+                        doc.clone(),
+                        st.workspace.clone(),
+                        st.config.clone(),
+                        st.editor_config.settings.lint.ruleset.clone(),
+                    ),
                     None => return,
                 }
             };
@@ -152,7 +163,15 @@ impl Backend {
                 let ws = ws.clone();
                 let cfg = cfg.clone();
                 let doc = doc.clone();
-                move || diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg)
+                let ruleset = ruleset.clone();
+                move || {
+                    diagnostics::compute_diagnostics(
+                        ws.as_ref(),
+                        &doc.low,
+                        &cfg,
+                        ruleset.as_deref(),
+                    )
+                }
             })
             .await
             {
@@ -203,6 +222,14 @@ impl Backend {
         ws: &std::sync::Arc<suspect_ref::Workspace>,
     ) -> std::sync::Arc<crate::meaning::Index> {
         let generation = self.state.read().await.generation();
+        if let Some(index) = self.state.read().await.cached_index(generation) {
+            return index;
+        }
+        // Single-flight: requests that miss together (a burst right after
+        // a keystroke invalidates the cache) line up here. The first builds;
+        // every waiter re-checks the cache under the lock and finds the
+        // finished answer instead of building it again.
+        let _guard = self.index_build_lock.lock().await;
         if let Some(index) = self.state.read().await.cached_index(generation) {
             return index;
         }
@@ -342,8 +369,21 @@ impl Backend {
     /// invalidates the result, so the next edit warms it again and the
     /// build never lands in front of a cursor move.
     fn warm_index(&self) {
+        // Debounced: one whole-workspace build per editing pause, not one
+        // per keystroke. The sleep means a typing burst of N changes
+        // schedules N of these tasks but exactly one survives to build;
+        // the rest observe a newer generation on wake and stand down.
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
         let state = Arc::clone(&self.state);
         tokio::spawn(async move {
+            // The generation this task was scheduled for: only the task
+            // owned by the LAST change of an editing pause builds.
+            let scheduled = state.read().await.generation();
+            tokio::time::sleep(SETTLE).await;
+            // The editor kept moving: a newer task owns the warm.
+            if state.read().await.generation() != scheduled {
+                return;
+            }
             let (ws, generation) = {
                 let st = state.read().await;
                 let Some(ws) = st.workspace.as_ref() else {
@@ -1079,12 +1119,25 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        // Cached like its whole-document siblings (folds, links): the
+        // outline is re-requested on focus changes, and a tab switch back
+        // to an unchanged file should not re-walk the tree.
+        if let Some(cached) = self.doc_cached(&uri, |cache| cache.symbols.clone()).await {
+            return Ok(
+                (!cached.is_empty()).then(|| DocumentSymbolResponse::Nested((*cached).clone()))
+            );
+        }
+        let (doc, epoch) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            (doc.clone(), st.generation())
         };
-        let syms = symbols::document_symbols(&doc.low);
-        Ok((!syms.is_empty()).then_some(DocumentSymbolResponse::Nested(syms)))
+        let syms = std::sync::Arc::new(symbols::document_symbols(&doc.low));
+        self.doc_store(&uri, epoch, |cache, v| cache.symbols = v, syms.clone())
+            .await;
+        Ok((!syms.is_empty()).then(|| DocumentSymbolResponse::Nested((*syms).clone())))
     }
 
     async fn folding_range(
@@ -1170,11 +1223,23 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceSymbolParams,
     ) -> JsonRpcResult<Option<Vec<SymbolInformation>>> {
+        // Read-first: the workspace is cached in the common case, and a
+        // write lock here would let one symbol-search keystroke stall
+        // every other request behind a post-save rebuild.
         let ws = {
-            let mut st = self.state.write().await;
-            st.ensure_workspace()
+            let st = self.state.read().await;
+            st.workspace.clone()
         };
-        let Some(ws) = ws else { return Ok(None) };
+        let ws = match ws {
+            Some(ws) => ws,
+            None => {
+                let mut st = self.state.write().await;
+                let Some(ws) = st.ensure_workspace() else {
+                    return Ok(None);
+                };
+                ws
+            }
+        };
         let syms = workspace_symbol::workspace_symbols(&ws, &params.query);
         Ok((!syms.is_empty()).then_some(syms))
     }
@@ -1226,7 +1291,7 @@ impl LanguageServer for Backend {
             return Ok(full_report(Some(id), items));
         }
 
-        let (doc, cfg, floor) = {
+        let (doc, cfg, floor, ruleset) = {
             let st = self.state.read().await;
             let Some(doc) = st.docs.get(&uri) else {
                 return Ok(full_report(None, Vec::new()));
@@ -1237,6 +1302,7 @@ impl LanguageServer for Backend {
                 doc.clone(),
                 st.config.clone(),
                 st.editor_config.min_severity(),
+                st.editor_config.settings.lint.ruleset.clone(),
             )
         };
         // Off the runtime, for the same reason as the push: this is seconds
@@ -1247,10 +1313,18 @@ impl LanguageServer for Backend {
             let ws = ws.clone();
             let cfg = cfg.clone();
             let doc = doc.clone();
+            let ruleset = ruleset.clone();
             move || match &ws {
-                Some(ws) => pull::pull_diagnostics(ws, &doc.low, previous, &cfg),
+                Some(ws) => {
+                    pull::pull_diagnostics(ws, &doc.low, previous, &cfg, ruleset.as_deref())
+                }
                 None => {
-                    let items = diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg);
+                    let items = diagnostics::compute_diagnostics(
+                        ws.as_ref(),
+                        &doc.low,
+                        &cfg,
+                        ruleset.as_deref(),
+                    );
                     (pull::diagnostics_result_id(&items), items)
                 }
             }
@@ -1297,9 +1371,13 @@ impl LanguageServer for Backend {
         // Same discipline as `diagnostic`: nothing expensive runs while a state
         // guard is alive, because a queued writer behind it blocks every
         // later reader — including the hover that follows.
-        let (workspace, cfg) = {
+        let (workspace, cfg, ruleset) = {
             let st = self.state.read().await;
-            (st.workspace.clone(), st.config.clone())
+            (
+                st.workspace.clone(),
+                st.config.clone(),
+                st.editor_config.settings.lint.ruleset.clone(),
+            )
         };
         let mut items = Vec::new();
         let previous: HashMap<String, String> = params
@@ -1309,7 +1387,8 @@ impl LanguageServer for Backend {
             .collect();
         if let Some(ws) = &workspace {
             let cfg = cfg.clone();
-            for (uri, diags) in pull::workspace_pull(ws, &cfg) {
+            let ruleset = ruleset.clone();
+            for (uri, diags) in pull::workspace_pull(ws, &cfg, ruleset.as_deref()) {
                 let Ok(url) = Url::parse(uri.as_str()) else {
                     continue;
                 };

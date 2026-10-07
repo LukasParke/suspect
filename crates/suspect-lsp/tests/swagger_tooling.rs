@@ -95,6 +95,7 @@ fn swagger_inline_parameter_defaults_get_instance_checks() {
         Some(&std::sync::Arc::new(ws)),
         &low,
         &cfg,
+        None,
     );
     // default 0 violates minimum 1 on the inline parameter schema.
     let hit = diags.iter().any(|d| {

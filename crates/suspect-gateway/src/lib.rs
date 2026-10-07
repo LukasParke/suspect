@@ -918,13 +918,14 @@ pub fn load_workspace(spec: &Path) -> Result<Arc<suspect_ref::Workspace>, String
     Ok(Arc::new(ws))
 }
 
-/// Loads the IR snapshot for `spec` through [`load_workspace`].
+/// Loads the IR snapshot for `spec`. The fast path (a ~7–14 ms subset
+/// parse, benchmarked in `docs/PERFORMANCE.md` §2.4) is tried first and
+/// the CST workspace path remains the built-in fallback — for YAML
+/// outside the fast subset, JSON entries, or anything the fast reader
+/// declines. The IR is identical on both paths; only the cost differs.
 ///
 /// # Errors
-/// Workspace/document loading or non-OAS documents.
+/// Document loading failures or non-OAS documents.
 fn load_ir(spec: &Path) -> Result<IrSpec, String> {
-    let ws = load_workspace(spec)?;
-    let uri = suspect_source::Uri::from_path(spec)
-        .map_err(|e| format!("invalid spec path {}: {e}", spec.display()))?;
-    IrSpec::from_workspace(&ws, &uri)
+    suspect_ir::IrSpec::from_file(spec)
 }

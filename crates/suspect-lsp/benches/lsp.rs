@@ -343,7 +343,7 @@ fn bench_diagnostics(c: &mut Criterion) {
 
         let mut g = group(c, name, bytes.len(), sample);
         g.bench_function("compute_diagnostics", |b| {
-            b.iter(|| black_box(compute_diagnostics(Some(&ws), &low, &Default::default()).len()))
+            b.iter(|| black_box(compute_diagnostics(Some(&ws), &low, &Default::default(), None).len()))
         });
         g.finish();
     }

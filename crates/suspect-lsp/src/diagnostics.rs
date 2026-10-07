@@ -127,10 +127,25 @@ pub fn validate_diagnostics(ws: &Arc<Workspace>, low: &LowDoc) -> Vec<Diagnostic
         .collect()
 }
 
-/// Spectral-default lint findings; every family is linted.
+/// Loads and compiles a custom ruleset; `None` when it cannot be read or
+/// compiled (the caller falls back to the default set).
+fn load_ruleset(path: &std::path::Path) -> Option<suspect_lint::Linter> {
+    let bytes = std::fs::read(path).ok()?;
+    let uri = suspect_source::Uri::from_path(path).ok()?;
+    let doc = LowDoc::parse(uri, suspect_source::Source::from_vec(bytes));
+    suspect_lint::Linter::from_ruleset(&doc).ok()
+}
+
+/// Lint findings for every family. A configured `lint.ruleset` is loaded
+/// and compiled; anything absent or unloadable falls back to the Spectral
+/// default — the same precedence the CLI's lint path uses, so a project's
+/// committed ruleset applies in the editor too.
 #[must_use]
-pub fn lint_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
-    let linter = suspect_lint::Linter::spectral_default();
+pub fn lint_diagnostics(low: &LowDoc, ruleset: Option<&std::path::Path>) -> Vec<Diagnostic> {
+    let linter = match ruleset.and_then(load_ruleset) {
+        Some(linter) => linter,
+        None => suspect_lint::Linter::spectral_default(),
+    };
     let bytes = low.inner().bytes();
     let li = low.inner().line_index();
     linter
@@ -274,8 +289,9 @@ pub fn compute_diagnostics(
     ws: Option<&Arc<Workspace>>,
     low: &LowDoc,
     cfg: &crate::config_files::SuspectConfig,
+    ruleset: Option<&std::path::Path>,
 ) -> Vec<Diagnostic> {
-    crate::config_files::apply_config(compute_diagnostics_raw(ws, low, cfg), cfg)
+    crate::config_files::apply_config(compute_diagnostics_raw(ws, low, cfg, ruleset), cfg)
 }
 
 /// Unfiltered battery; [`compute_diagnostics`] applies user config on top.
@@ -284,6 +300,7 @@ pub fn compute_diagnostics_raw(
     ws: Option<&Arc<Workspace>>,
     low: &LowDoc,
     cfg: &crate::config_files::SuspectConfig,
+    ruleset: Option<&std::path::Path>,
 ) -> Vec<Diagnostic> {
     let mut out = syntax_diagnostics(low);
     // suspect's own configuration files are checked against their schema, so
@@ -292,7 +309,7 @@ pub fn compute_diagnostics_raw(
     if let Some(ws) = ws {
         out.extend(validate_diagnostics(ws, low));
     }
-    out.extend(lint_diagnostics(low));
+    out.extend(lint_diagnostics(low, ruleset));
     out.extend(swagger_diagnostics(low));
     out.extend(arazzo_diagnostics(low));
     // The CommonMark fields get markdownlint-compatible rules, at their
@@ -418,7 +435,7 @@ mod tests {
         let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
         ws.load_all("api.yaml").unwrap();
         let ws = Arc::new(ws);
-        let diags = compute_diagnostics(Some(&ws), &low, &Default::default());
+        let diags = compute_diagnostics(Some(&ws), &low, &Default::default(), None);
         // No syntax errors; everything else is well-formed.
         assert!(
             diags
@@ -431,7 +448,7 @@ mod tests {
                 .all(|d| matches!(d.source.as_deref(), Some(SOURCE) | Some(SOURCE_LINT)))
         );
         // Without a workspace only syntax + lint + arazzo run.
-        let bare = compute_diagnostics(None, &low, &Default::default());
+        let bare = compute_diagnostics(None, &low, &Default::default(), None);
         assert!(bare.len() <= diags.len());
     }
 
