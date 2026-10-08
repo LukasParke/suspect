@@ -201,11 +201,11 @@ fn validate_step<'d>(
     for c in step.success_criteria() {
         match c.condition() {
             Some(cond) => {
-                if !condition_is_valid(cond) {
+                if let Some(problem) = condition_problem(cond) {
                     out.push(diag(
                         c.node().byte_range(),
                         "arazzo-invalid-condition",
-                        format!("condition is not a valid runtime expression: {cond:?}"),
+                        problem,
                     ));
                 }
             }
@@ -650,6 +650,65 @@ fn validate_sequential_outputs(wf: &crate::WorkflowView<'_>, out: &mut Vec<Arazz
 /// Criterion Object defines (`==`, `!=`, `<`, `<=`, `>`, `>=`, `=~`).
 /// `$statusCode == 200` — the canonical Arazzo condition — is a comparison,
 /// not a bare expression, and must not be flagged invalid.
+/// Diagnoses an invalid condition: names what the parser expected, where
+/// the expression stops parsing, and — for the mistakes users actually
+/// make — the corrected spelling. Returns `None` when the condition is
+/// valid in any of the forms [`condition_is_valid`] accepts.
+fn condition_problem(cond: &str) -> Option<String> {
+    if condition_is_valid(cond) {
+        return None;
+    }
+    // The parser already knows where and why it stopped: report that,
+    // then add the fix for the common shapes.
+    let what = match crate::expr::parse(cond) {
+        Ok(_) => unreachable!("condition_is_valid accepted what parse rejects"),
+        Err(error) => format!("at byte {}, {error}", error.offset),
+    };
+    let fix = dotted_body_fix(cond)
+        .map(|corrected| format!(" — did you mean `{corrected}`?"))
+        .unwrap_or_default();
+    Some(format!("invalid runtime expression {cond:?}: {what}{fix}"))
+}
+
+/// The fix for the most common mistake: dotted-path navigation into the
+/// response/request body. Arazzo addresses the body with a JSON pointer
+/// fragment, not property dots — `$response.body.MediaContainer.size` is
+/// `$response.body#/MediaContainer/size`.
+fn dotted_body_fix(cond: &str) -> Option<String> {
+    // Split the comparison once, remembering the operator so the RHS
+    // carries over verbatim. No operator: the whole condition is the LHS.
+    const OPERATORS: &[&str] = &["==", "!=", "<=", ">=", "=~", "<", ">"];
+    let (lhs, op, rhs) = match OPERATORS
+        .iter()
+        .find_map(|op| cond.split_once(op).map(|(lhs, rhs)| (lhs, *op, rhs)))
+    {
+        Some((lhs, op, rhs)) => (lhs, Some(op), rhs),
+        None => (cond, None, ""),
+    };
+    let lhs = lhs.trim_end();
+    for prefix in ["$response.body.", "$request.body."] {
+        let Some(path) = lhs.strip_prefix(prefix) else {
+            continue;
+        };
+        if path.is_empty() || path.contains(char::is_whitespace) {
+            // A bare trailing dot or free text: not the dotted-path shape.
+            return None;
+        }
+        let pointer: String = path
+            .split('.')
+            .map(|segment| segment.replace('~', "~0").replace('/', "~1"))
+            .collect::<Vec<_>>()
+            .join("/");
+        let corrected_head = format!("{}#/{pointer}", prefix.strip_suffix('.')?);
+        let corrected = match op {
+            Some(op) => format!("{corrected_head} {op}{rhs}"),
+            None => corrected_head,
+        };
+        return Some(corrected);
+    }
+    None
+}
+
 fn condition_is_valid(cond: &str) -> bool {
     if crate::expr::parse(cond).is_ok() {
         return true;
@@ -675,4 +734,61 @@ fn condition_is_valid(cond: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod condition_diagnosis_tests {
+    use super::condition_problem;
+
+    #[test]
+    fn a_valid_condition_has_no_problem() {
+        assert!(condition_problem("$response.body#/MediaContainer/size > 0").is_none());
+        assert!(condition_problem("$statusCode == 200").is_none());
+        assert!(condition_problem("{$inputs.token}").is_none());
+    }
+
+    #[test]
+    fn dotted_body_navigation_names_the_fix() {
+        let problem =
+            condition_problem("$response.body.MediaContainer.size > 0").expect("diagnosed");
+        assert!(
+            problem.contains("$response.body#/MediaContainer/size"),
+            "the corrected spelling is named: {problem}"
+        );
+        assert!(
+            problem.contains("invalid runtime expression"),
+            "the diagnosis says what failed: {problem}"
+        );
+    }
+
+    #[test]
+    fn dotted_request_body_also_gets_the_fix() {
+        let problem = condition_problem("$request.body.user.name == \"x\"").expect("diagnosed");
+        assert!(
+            problem.contains("$request.body#/user/name"),
+            "request-side navigation fixed too: {problem}"
+        );
+    }
+
+    #[test]
+    fn a_condition_with_untouched_rhs_carries_it_over() {
+        let problem = condition_problem("$response.body.count >= 10").expect("diagnosed");
+        assert!(
+            problem.contains("$response.body#/count >= 10"),
+            "operator and RHS survive: {problem}"
+        );
+    }
+
+    #[test]
+    fn free_text_does_not_get_a_false_fix() {
+        let problem = condition_problem("just some words").expect("diagnosed");
+        assert!(
+            !problem.contains("did you mean"),
+            "no fix suggestion for non-expression text: {problem}"
+        );
+        assert!(
+            problem.contains("just some words"),
+            "the condition is still named: {problem}"
+        );
+    }
 }

@@ -2047,3 +2047,37 @@ fn the_project_manifest_drives_the_editor_lint_battery() {
     }
     let _ = serialized;
 }
+
+#[test]
+fn an_invalid_arazzo_condition_names_the_fix() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+
+    // The exact mistake from the field: dotted navigation into the
+    // response body instead of a JSON pointer.
+    std::fs::write(
+        ws.root.join("broken.arazzo.yaml"),
+        "arazzo: 1.0.0\ninfo:\n  title: Broken\n  version: '1'\nsourceDescriptions:\n  - name: api\n    type: openapi\n    url: api.yaml\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: s\n        operationId: getStatus\n        successCriteria:\n          - condition: '$response.body.MediaContainer.size > 0'\n",
+    )
+    .expect("write");
+    let (broken_path, broken_text) = (
+        ws.root.join("broken.arazzo.yaml"),
+        std::fs::read_to_string(ws.root.join("broken.arazzo.yaml")).expect("read"),
+    );
+    editor.open(&broken_path, &broken_text);
+    let uri = url_of(&ws.root.join("broken.arazzo.yaml"));
+
+    let answer = editor
+        .request("textDocument/diagnostic", doc(&uri))
+        .expect("diagnostics for the broken workflow");
+    let serialized = serde_json::to_string(&answer).unwrap_or_default();
+    assert!(
+        serialized.contains("$response.body#/MediaContainer/size"),
+        "the diagnostic names the corrected spelling: {serialized}"
+    );
+    assert!(
+        serialized.contains("did you mean"),
+        "the diagnostic reads as a suggestion, not just a rejection: {serialized}"
+    );
+}
