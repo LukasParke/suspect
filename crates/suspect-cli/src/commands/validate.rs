@@ -35,6 +35,46 @@ pub fn validate_file(
     }
 }
 
+/// [`validate_file`] against a workspace the caller already loaded: a
+/// project build validates the same published spec that the contract,
+/// docs, and SDK stages consume — one parse serves them all.
+///
+/// # Errors
+/// Nothing: findings carry their own severity; input failures return as
+/// findings like the file path does.
+pub fn validate_workspace(
+    workspace: &Arc<suspect_ref::Workspace>,
+    path: &Path,
+    strict_format: bool,
+) -> Vec<Finding> {
+    let absolute = match path.canonicalize() {
+        Ok(absolute) => absolute,
+        Err(e) => {
+            return vec![input_finding(path, &e.to_string())];
+        }
+    };
+    let entry = match absolute.to_str() {
+        Some(entry) => entry.to_owned(),
+        None => return vec![input_finding(path, "path is not UTF-8")],
+    };
+    match validate_on_workspace(workspace, &entry, path, strict_format) {
+        Ok(findings) => findings,
+        Err(message) => vec![input_finding(path, &message)],
+    }
+}
+
+fn input_finding(path: &Path, message: &str) -> Finding {
+    Finding {
+        file: path.display().to_string(),
+        severity: Severity::Error,
+        code: "validation-input".into(),
+        message: message.to_owned(),
+        line: 1,
+        col: 1,
+        range: None,
+    }
+}
+
 fn validate_loaded(
     path: &Path,
     allowed_documents: Option<&[Uri]>,
@@ -47,13 +87,24 @@ fn validate_loaded(
         builder = builder.allowed_documents(documents.iter().cloned());
     }
     let workspace = Arc::new(builder.build().map_err(|e| e.to_string())?);
+    validate_on_workspace(&workspace, entry, path, strict_format)
+}
+
+/// The battery itself: syntax findings over the closure, then semantic
+/// validation of the entry, against an already-loaded workspace.
+fn validate_on_workspace(
+    workspace: &Arc<suspect_ref::Workspace>,
+    entry: &str,
+    path: &Path,
+    strict_format: bool,
+) -> Result<Vec<Finding>, String> {
     let handle = workspace.open(entry).map_err(|e| e.to_string())?;
     let mut findings = syntax_findings(handle.doc(), &path.display().to_string());
     if !findings.is_empty() {
         return Ok(findings);
     }
 
-    let session = Session::new(Arc::clone(&workspace));
+    let session = Session::new(Arc::clone(workspace));
     let api = session.open(entry).map_err(|e| e.to_string())?;
     // Materialize only the semantic closure before checking its syntax.
     let _ = api.reference_objects();

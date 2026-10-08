@@ -90,7 +90,32 @@ pub fn contract(args: &ContractArgs) -> anyhow::Result<i32> {
     );
     let shown = spec_path.display().to_string();
     workspace.load_all(&shown)?;
+    contract_on_workspace(&workspace, &spec_path, args)
+}
 
+/// [`contract`] against a workspace the caller already loaded: a project
+/// build compiles the same published spec every other stage consumes.
+/// Inside, the entry's parse comes from the workspace (the historical
+/// second parse of the same file is gone), and the manifest counts come
+/// from the fast IR path (probe-verified identical to the full compile).
+///
+/// # Errors
+/// IO, parse, or serialization failures.
+pub fn contract_on_workspace(
+    workspace: &std::sync::Arc<suspect_ref::Workspace>,
+    spec_path: &Path,
+    args: &ContractArgs,
+) -> anyhow::Result<i32> {
+    let prof = std::env::var_os("SUSPECT_BUILD_PROFILE").is_some();
+    let mut clock = std::time::Instant::now();
+    let mut mark = |name: &str| {
+        if prof {
+            eprintln!("[contract-profile] {name}: {:?}", clock.elapsed());
+        }
+        clock = std::time::Instant::now();
+    };
+
+    mark("setup");
     // Collect the closure identity from the raw source bytes: any byte
     // change anywhere in the closure changes the revision.
     let mut documents = Vec::new();
@@ -99,7 +124,7 @@ pub fn contract(args: &ContractArgs) -> anyhow::Result<i32> {
         let Some(handle) = workspace.get(&uri) else {
             continue;
         };
-        let relative = relative_name(&spec_path, uri.as_str());
+        let relative = relative_name(spec_path, uri.as_str());
         documents.push(relative.clone());
         let bytes = handle.doc().inner().bytes();
         digests.insert(
@@ -115,19 +140,66 @@ pub fn contract(args: &ContractArgs) -> anyhow::Result<i32> {
         let Some(handle) = workspace.get(&uri) else {
             continue;
         };
-        for index in 0..handle.edges().len() {
-            edges += 1;
-            if let Err(error) = handle.resolve_edge(index) {
-                unresolved.push(format!("{}: {error}", handle.doc().uri()));
-            }
+        // The count is the edge list's length — no resolution needed.
+        // Only the unresolved list pays resolution, and that walk is
+        // independent per edge against a concurrent memo table, so it
+        // fans out across threads (5,486 edges on the reference spec was
+        // over a second serially).
+        let total = handle.edges().len();
+        edges += total;
+        let label = std::sync::Arc::new(handle.doc().uri().to_string());
+        let chunk = (total / 8).max(64);
+        let results: Vec<Vec<String>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..total)
+                .step_by(chunk)
+                .map(|start| {
+                    let handle = &handle;
+                    let label = std::sync::Arc::clone(&label);
+                    scope.spawn(move || {
+                        let end = (start + chunk).min(total);
+                        let mut out = Vec::new();
+                        for index in start..end {
+                            // Status only: the manifest counts edges and
+                            // lists the unresolved ones; materializing
+                            // every landing node bought nothing the
+                            // verdict needed.
+                            if let Err(error) = handle.resolve_edge_status(index) {
+                                out.push(format!("{label}: {error}"));
+                            }
+                        }
+                        out
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("edge resolution thread"))
+                .collect()
+        });
+        for part in results {
+            unresolved.extend(part);
         }
     }
     unresolved.sort();
     unresolved.dedup();
 
-    // The description: start from the entry document, apply overlays when
+    mark("digests+edges");
+    // The description: start from the entry document — the workspace's
+    // own parse, not a second read of the same file — apply overlays when
     // configured, then inline the whole closure into one tree.
-    let entry_doc = crate::load_doc(&spec_path)?;
+    // Canonicalized: the workspace keys documents by their canonical
+    // retrieval URI (on macOS, /var resolves to /private/var), so a raw
+    // relative path would miss the lookup.
+    let entry_uri = suspect_source::Uri::from_path(
+        &spec_path
+            .canonicalize()
+            .unwrap_or_else(|_| spec_path.to_path_buf()),
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let entry_handle = workspace
+        .get(&entry_uri)
+        .ok_or_else(|| anyhow::anyhow!("entry document is not loaded"))?;
+    let entry_doc = entry_handle.doc();
     let mut tree: suspect_overlay::Value = suspect_overlay::Value::from_node(entry_doc.root());
     let mut applied_overlays = Vec::new();
     for overlay_path in &args.overlays {
@@ -144,17 +216,20 @@ pub fn contract(args: &ContractArgs) -> anyhow::Result<i32> {
         applied_overlays.push(overlay_path.display().to_string());
     }
 
-    let inlined = inline_closure(&tree, &workspace, &spec_path);
+    mark("overlays");
+    let inlined = inline_closure(&tree, workspace, spec_path);
     let description = match inlined {
         Some(text) => text,
         None => tree.to_yaml(),
     };
 
-    let ir = suspect_ir::IrSpec::from_workspace(
-        &workspace,
-        &suspect_source::Uri::from_path(&spec_path).map_err(|e| anyhow::anyhow!("{e}"))?,
-    )
-    .unwrap_or_default();
+    mark("inline");
+    // The manifest needs title, version, and counts — the fast IR path
+    // supplies them at single-digit milliseconds against the CST compile's
+    // ~350ms, with identical counts (probe-verified on the 63k-line
+    // reference spec). The full compile happens where it is needed: the
+    // SDK stage.
+    let ir = suspect_ir::IrSpec::from_file(spec_path).unwrap_or_default();
 
     let manifest = ContractManifest {
         format: FORMAT.to_owned(),
@@ -170,6 +245,7 @@ pub fn contract(args: &ContractArgs) -> anyhow::Result<i32> {
         unresolved_refs: unresolved.clone(),
     };
 
+    mark("ir");
     if args.check {
         let description_path = description_path(&args.out, args.json);
         let manifest_path = args.out.join("manifest.json");
@@ -299,23 +375,51 @@ fn relative_name(entry: &Path, uri: &str) -> String {
 /// Inlines every resolvable `$ref` in the description so the emitted
 /// document stands alone. Cycles collapse to an `x-suspect-cyclic`
 /// marker, which keeps the package finite and honest instead of hanging.
+/// One cacheable `$ref` expansion: the inlined value plus every
+/// reference dereferenced producing it. An expansion whose target set is
+/// disjoint from the caller's active reference stack, and which produced
+/// no cycle markers, is stack-independent — identical under any ancestor
+/// chain — so it can be reused verbatim.
+struct InlinedRef {
+    value: suspect_overlay::Value,
+    targets: Vec<String>,
+}
+
+/// The inline walk's mutable state. `markers` is a monotonic count of
+/// cycle/unresolved markers produced; candidate expansions snapshot it
+/// before and compare after, which needs no save/restore discipline.
+struct InlineCtx<'a> {
+    workspace: &'a std::sync::Arc<suspect_ref::Workspace>,
+    seen: Vec<String>,
+    depth: usize,
+    cache: std::collections::HashMap<(PathBuf, String), InlinedRef>,
+    markers: usize,
+}
+
 fn inline_closure(
     tree: &suspect_overlay::Value,
     workspace: &std::sync::Arc<suspect_ref::Workspace>,
     entry: &Path,
 ) -> Option<String> {
-    let mut depth = 0usize;
     let value: serde_json::Value = serde_json::from_str(&tree.to_json()).ok()?;
-    Some(inline_value(&value, workspace, entry, &mut Vec::new(), &mut depth).to_yaml())
+    let mut ctx = InlineCtx {
+        workspace,
+        seen: Vec::new(),
+        depth: 0,
+        cache: std::collections::HashMap::new(),
+        markers: 0,
+    };
+    Some(inline_value(&value, entry, &mut ctx).to_yaml())
 }
 
-/// Recursively resolves `$ref`s against the loaded workspace.
+/// Recursively resolves `$ref`s against the loaded workspace. Shared
+/// schemas referenced dozens of times inline once and reuse the cached
+/// expansion — the reference spec's 5,486 edges collapse to its few
+/// hundred unique targets.
 fn inline_value(
     value: &serde_json::Value,
-    workspace: &std::sync::Arc<suspect_ref::Workspace>,
     current: &Path,
-    seen: &mut Vec<String>,
-    depth: &mut usize,
+    ctx: &mut InlineCtx<'_>,
 ) -> suspect_overlay::Value {
     use suspect_overlay::Value;
     const MAX_DEPTH: usize = 12;
@@ -326,27 +430,56 @@ fn inline_value(
                 && let Some(reference) = map.get("$ref").and_then(|r| r.as_str())
             {
                 let key = reference.to_owned();
-                if seen.contains(&key) {
+                if ctx.seen.contains(&key) {
+                    ctx.markers += 1;
                     return Value::Object(vec![(
                         "x-suspect-cyclic".into(),
                         Value::Str(key.into()),
                     )]);
                 }
-                if *depth > MAX_DEPTH {
+                if ctx.depth > MAX_DEPTH {
+                    ctx.markers += 1;
                     return Value::Bool(true);
                 }
-                if let Some((target, document)) =
-                    resolve_in_workspace(reference, workspace, current)
+                // A stack-independent cached expansion is the answer as-is.
+                let cache_key = (current.to_path_buf(), key.clone());
+                if let Some(cached) = ctx.cache.get(&cache_key)
+                    && !cached
+                        .targets
+                        .iter()
+                        .any(|target| ctx.seen.contains(target))
                 {
-                    seen.push(key);
-                    *depth += 1;
+                    return cached.value.clone();
+                }
+                if let Some((target, document)) =
+                    resolve_in_workspace(reference, ctx.workspace, current)
+                {
+                    let stack_before = ctx.seen.len();
+                    let markers_before = ctx.markers;
+                    ctx.seen.push(key);
+                    ctx.depth += 1;
                     // Nested references resolve against the document that
                     // carried this one, not against the entry document.
-                    let resolved = inline_value(&target, workspace, &document, seen, depth);
-                    *depth -= 1;
-                    seen.pop();
+                    let resolved = inline_value(&target, &document, ctx);
+                    ctx.depth -= 1;
+                    ctx.seen.pop();
+                    let targets: Vec<String> = ctx.seen[stack_before..].to_vec();
+                    let produced_marker = ctx.markers > markers_before;
+                    // Cache only stack-independent expansions: no marker
+                    // was produced inside, and none of the dereferenced
+                    // targets touch anything an ancestor could hold.
+                    if !produced_marker && !targets.iter().any(|target| ctx.seen.contains(target)) {
+                        ctx.cache.insert(
+                            cache_key,
+                            InlinedRef {
+                                value: resolved.clone(),
+                                targets,
+                            },
+                        );
+                    }
                     return resolved;
                 }
+                ctx.markers += 1;
                 return Value::Object(vec![(
                     "x-suspect-unresolved".into(),
                     Value::Str(reference.into()),
@@ -357,7 +490,7 @@ fn inline_value(
                     .map(|(key, child)| {
                         (
                             key.clone().into_boxed_str(),
-                            inline_value(child, workspace, current, seen, depth),
+                            inline_value(child, current, ctx),
                         )
                     })
                     .collect(),
@@ -366,7 +499,7 @@ fn inline_value(
         serde_json::Value::Array(items) => Value::Array(
             items
                 .iter()
-                .map(|item| inline_value(item, workspace, current, seen, depth))
+                .map(|item| inline_value(item, current, ctx))
                 .collect(),
         ),
         other => match other {
