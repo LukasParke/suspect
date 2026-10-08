@@ -97,6 +97,18 @@ pub struct AuthConfig {
 /// single secret. A missing variable is an error that names the variable,
 /// never the value that referenced it.
 pub fn interpolate_env(value: &serde_json::Value) -> Result<serde_json::Value, String> {
+    interpolate_env_with_map(value, &std::collections::BTreeMap::new())
+}
+
+/// [`interpolate_env`] with a fallback map: the process environment wins
+/// over the map, and the map fills what the environment does not carry —
+/// the `.suspect/.env` file's values reach the interpolation without ever
+/// mutating the process environment (a thread-safety hazard since the
+/// 2024 edition made `set_var` unsafe).
+pub fn interpolate_env_with_map(
+    value: &serde_json::Value,
+    env: &std::collections::BTreeMap<String, String>,
+) -> Result<serde_json::Value, String> {
     match value {
         serde_json::Value::String(text) => {
             let mut out = String::with_capacity(text.len());
@@ -108,14 +120,12 @@ pub fn interpolate_env(value: &serde_json::Value) -> Result<serde_json::Value, S
                     return Err(format!("credentials: unterminated ${{ in {text:?}"));
                 };
                 let name = &after[..close];
-                match std::env::var(name) {
-                    Ok(v) => out.push_str(&v),
-                    Err(_) => {
-                        return Err(format!(
-                            "credentials: ${{{name}}} is not set in the environment"
-                        ));
-                    }
-                }
+                let Some(v) = env.get(name).cloned().or_else(|| std::env::var(name).ok()) else {
+                    return Err(format!(
+                        "credentials: ${{{name}}} is not set in the environment (or .env)"
+                    ));
+                };
+                out.push_str(&v);
                 rest = &after[close + 1..];
             }
             out.push_str(rest);
@@ -124,14 +134,14 @@ pub fn interpolate_env(value: &serde_json::Value) -> Result<serde_json::Value, S
         serde_json::Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (key, value) in map {
-                out.insert(key.clone(), interpolate_env(value)?);
+                out.insert(key.clone(), interpolate_env_with_map(value, env)?);
             }
             Ok(serde_json::Value::Object(out))
         }
         serde_json::Value::Array(items) => Ok(serde_json::Value::Array(
             items
                 .iter()
-                .map(interpolate_env)
+                .map(|v| interpolate_env_with_map(v, env))
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         other => Ok(other.clone()),
@@ -418,6 +428,77 @@ pub fn inject(request: &mut HttpRequest, injected: &[Injected]) {
 /// The default credentials file name, relative to the workspace root.
 pub const CREDENTIALS_FILE: &str = ".suspect/credentials.json";
 
+/// The env file loaded alongside the credentials file: `KEY=value` lines
+/// (one per line), `#` comments, blank lines ignored. Lives at
+/// `.suspect/.env` — the same gitignored directory the credentials file
+/// occupies — so secrets never appear in a committed file, a command line
+/// (shell history), or the process environment of unrelated tools.
+///
+/// Precedence: a variable already present in the process environment is
+/// NOT overridden (an exported variable wins over the file), so a CI
+/// secrets-manager injection beats the local file without configuration.
+pub const ENV_FILE: &str = ".env";
+
+/// Loads `KEY=value` lines from the env file at `path`, setting each
+/// variable in the process environment only when it is not already set.
+/// The file's permissions are checked like the credentials file's:
+/// group/other readable draws a warning.
+///
+/// # Errors
+/// Filesystem failures reading the file; not malformed lines (a line
+/// without `=` is skipped, not fatal — an env file that can be partially
+/// used is worth more than one that refuses to load).
+pub fn load_env_file(
+    path: &std::path::Path,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path)
+            && meta.permissions().mode() & 0o077 != 0
+        {
+            eprintln!(
+                "suspect: warning: {display} is readable by group/other; tighten it with `chmod 600`",
+                display = path.display()
+            );
+        }
+    }
+    let text =
+        std::fs::read_to_string(path).map_err(|e| format!("env file {}: {e}", path.display()))?;
+    let mut out = std::collections::BTreeMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // `export KEY=value` and `KEY=value` both work.
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let Some((name, value)) = line.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() || name.contains(char::is_whitespace) {
+            continue;
+        }
+        // Strip one layer of surrounding quotes, like dotenv does.
+        let value = value.trim();
+        let value: &str = if (value.starts_with('"') && value.ends_with('"') && value.len() >= 2)
+            || (value.starts_with('\'') && value.ends_with('\'') && value.len() >= 2)
+        {
+            &value[1..value.len() - 1]
+        } else {
+            value
+        };
+        // Process environment wins: a CI secrets-manager injection beats
+        // the local file, so the file only fills what the environment
+        // does not carry.
+        if std::env::var_os(name).is_none() {
+            out.insert(name.to_owned(), value.to_owned());
+        }
+    }
+    Ok(out)
+}
+
 /// Loads and validates the credentials file at `path`.
 ///
 /// The file holds an `{"auth": {"schemes": …}}` document — the same shape
@@ -427,6 +508,37 @@ pub const CREDENTIALS_FILE: &str = ".suspect/credentials.json";
 /// still worth reporting, and read-only checkouts sometimes carry modes
 /// that cannot be tightened.
 pub fn load_credentials_file(path: &std::path::Path) -> Result<AuthConfig, String> {
+    // Env files supply the `${VAR}` values the credentials reference.
+    // Both spellings are honored, layered: repo-root `.env` (the universal
+    // convention — direnv, docker-compose, dotenv all read it) beneath
+    // `.suspect/.env` (beside the credentials file). Each is optional;
+    // neither is required. The process environment beats both, so CI
+    // secrets-manager injection wins over any file.
+    //
+    // Discovery walks up from the credentials file, matching the
+    // credentials discovery's directory chain: `.suspect/credentials.json`
+    // sits inside `.suspect/`, and the repo root is its parent.
+    let mut env: std::collections::BTreeMap<String, String> = Default::default();
+    if let Some(suspect_dir) = path.parent() {
+        // .suspect/.env — beside the credentials file.
+        let beside = suspect_dir.join(".env");
+        if beside.is_file() {
+            env = load_env_file(&beside)?;
+        }
+        // The repo root's .env — one level up from `.suspect/`.
+        if let Some(repo_root) = suspect_dir.parent() {
+            let repo_env = repo_root.join(ENV_FILE);
+            if repo_env.is_file() {
+                let repo = load_env_file(&repo_env)?;
+                // First-file-wins per key: .suspect/.env is more specific
+                // (deliberately placed beside the credentials) than the
+                // repo-root convention.
+                for (key, value) in repo {
+                    env.entry(key).or_insert(value);
+                }
+            }
+        }
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -443,7 +555,7 @@ pub fn load_credentials_file(path: &std::path::Path) -> Result<AuthConfig, Strin
         .map_err(|e| format!("credentials file {}: {e}", path.display()))?;
     let raw: serde_json::Value = serde_json::from_str(&text)
         .map_err(|e| format!("credentials file {}: invalid JSON: {e}", path.display()))?;
-    let interpolated = interpolate_env(&raw)?;
+    let interpolated = interpolate_env_with_map(&raw, &env)?;
     let root = interpolated
         .get("auth")
         .ok_or_else(|| format!("credentials file {}: no `auth` section", path.display()))?;
@@ -484,4 +596,65 @@ pub fn auth_from_config(value: &serde_json::Value) -> AuthConfig {
         .and_then(|auth| auth.get("schemes"))
         .and_then(|schemes| serde_json::from_value(schemes.clone()).ok())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod env_file_tests {
+    use super::*;
+
+    #[test]
+    fn env_file_supplies_values_the_environment_does_not() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".env");
+        std::fs::write(
+            &path,
+            "# a comment\nTEST_TOKEN_ONE=secret-one\nexport TEST_TOKEN_TWO=secret-two\nQUOTED=\"quoted-value\"\nnot-an-assignment\n\n",
+        )
+        .expect("write");
+        let map = load_env_file(&path).expect("loads");
+        assert_eq!(
+            map.get("TEST_TOKEN_ONE").map(String::as_str),
+            Some("secret-one")
+        );
+        assert_eq!(
+            map.get("TEST_TOKEN_TWO").map(String::as_str),
+            Some("secret-two")
+        );
+        assert_eq!(map.get("QUOTED").map(String::as_str), Some("quoted-value"));
+        assert!(!map.contains_key("not-an-assignment"));
+    }
+
+    #[test]
+    fn process_environment_beats_the_env_file() {
+        // SAFETY: single-threaded test.
+        unsafe { std::env::set_var("ENV_FILE_OVERRIDE_TEST", "from-process") };
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".env");
+        std::fs::write(&path, "ENV_FILE_OVERRIDE_TEST=from-file\n").expect("write");
+        let map = load_env_file(&path).expect("loads");
+        assert!(
+            !map.contains_key("ENV_FILE_OVERRIDE_TEST"),
+            "the process env wins over the file"
+        );
+        unsafe { std::env::remove_var("ENV_FILE_OVERRIDE_TEST") };
+    }
+
+    #[test]
+    fn interpolation_reads_from_the_env_file_map() {
+        let mut env = std::collections::BTreeMap::new();
+        env.insert("FILE_VAR".to_owned(), "file-value".to_owned());
+        let value = serde_json::json!({"auth": {"token": "${FILE_VAR}"}});
+        let interpolated = interpolate_env_with_map(&value, &env).expect("interpolates");
+        assert_eq!(interpolated["auth"]["token"], "file-value");
+    }
+
+    #[test]
+    fn missing_variable_error_names_both_sources() {
+        let value = serde_json::json!({"token": "${NOWHERE_SET_VAR}"});
+        let error = interpolate_env(&value).expect_err("not set");
+        assert!(
+            error.contains(".env"),
+            "the error tells you where to put it: {error}"
+        );
+    }
 }
