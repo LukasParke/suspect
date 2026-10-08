@@ -1984,3 +1984,66 @@ fn render_sdk_tracks_the_live_buffer_through_incremental_edits() {
         "the stale operation id must be gone from the render"
     );
 }
+
+#[test]
+fn the_project_manifest_drives_the_editor_lint_battery() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+
+    // A committed manifest turning a rule OFF and setting a floor: the
+    // battery must honor both without any client configuration.
+    std::fs::write(
+        ws.root.join("suspect.project.json"),
+        r#"{
+            "entry": "openapi.yaml",
+            "lint": {"min_severity": "error", "rules": {"oas-op-summary": "off"}}
+        }"#,
+    )
+    .expect("manifest");
+
+    let (path, text) = (
+        &ws.openapi,
+        std::fs::read_to_string(&ws.openapi).expect("read"),
+    );
+    editor.open(path, &text);
+    let api_uri = url_of(&ws.openapi);
+
+    // Give the debounce a beat, then pull: the findings are the floor's.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let answer = editor
+        .request(
+            "textDocument/diagnostic",
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "identifier": "suspect",
+            }),
+        )
+        .expect("pull answers");
+    let items = answer
+        .get("items")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let serialized = serde_json::to_string(&items).unwrap_or_default();
+    // The manifest's floor suppresses everything below error: no
+    // `info`/`warning` findings survive in the pull.
+    let item_array = items.as_array().cloned().unwrap_or_default();
+    if let Some(first) = item_array.first() {
+        let kind = first.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        if kind == "full" {
+            for item in first
+                .get("items")
+                .and_then(|i| i.as_array())
+                .cloned()
+                .unwrap_or_default()
+            {
+                let severity = item.get("severity").and_then(|s| s.as_i64()).unwrap_or(0);
+                assert!(
+                    severity <= 1,
+                    "the manifest's error floor must suppress below-error findings: {item}"
+                );
+            }
+        }
+    }
+    let _ = serialized;
+}

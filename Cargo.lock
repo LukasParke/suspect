@@ -2023,6 +2023,7 @@ dependencies = [
 name = "suspect-config"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "suspect-low",
  "suspect-source",
  "tempfile",

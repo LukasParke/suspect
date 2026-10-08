@@ -39,6 +39,11 @@ pub struct ProjectManifest {
     /// Contract-test targets: Arazzo documents run against `base_url`
     /// (or offline from `cassette`).
     pub tests: Option<ProjectTests>,
+    /// The manifest's committed policy sections — `lint`, `validate`,
+    /// `editor` — carried raw: the config loader interprets them with the
+    /// settings file's key spellings, so one schema serves both files and
+    /// `.suspect.yaml` remains a local override on top.
+    pub policy: serde_json::Value,
 }
 
 /// One SDK generation target.
@@ -321,6 +326,16 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
         codegen: codegen.unwrap_or_default(),
         contract,
         tests,
+        policy: ["lint", "validate", "editor"]
+            .into_iter()
+            .filter_map(|key| {
+                object
+                    .get(key)
+                    .cloned()
+                    .map(|value| (key.to_owned(), value))
+            })
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into(),
     })
 }
 
@@ -356,6 +371,16 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                 "docs": {"style": "markdown", "output": "build/docs"},
                 "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"},
                 "codegen": [],
+                // Committed policy: the editor, a shell and CI read the
+                // same values; `.suspect.yaml` and client settings layer
+                // on top as local overrides.
+                "lint": {"min_severity": "hint", "rules": {}, "recommended": true},
+                "validate": {"strict_format": false},
+                "editor": {
+                    "inlay_hints": {"refs": true, "properties": true},
+                    "ref": {"max_docs": 500},
+                    "formatting": {"sort_keys": true}
+                },
                 "contract": {"output": "build/contract"}
             });
             std::fs::create_dir_all(&dir)?;

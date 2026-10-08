@@ -27,7 +27,11 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// Walks up from `start` looking for a configuration file.
+/// Walks up from `start` looking for a configuration file, composing the
+/// project manifest's policy sections underneath when one sits on the
+/// walk. Both searches are independent: the settings file and the
+/// manifest need not sit in the same directory, and each contributes its
+/// own layer — the settings file wins wherever both carry a value.
 ///
 /// # Errors
 /// Propagates a parse failure rather than ignoring it.
@@ -37,16 +41,52 @@ pub fn discover(start: &Path) -> Result<Option<Loaded>, ConfigError> {
     } else {
         start.parent()
     };
+    let mut manifest: Option<Loaded> = None;
     while let Some(current) = dir {
+        // The manifest is recorded BEFORE the settings check: the two
+        // usually sit in the same directory, and the walk would otherwise
+        // return at the settings file without ever seeing it.
+        if manifest.is_none() {
+            let candidate = current.join(crate::MANIFEST_NAME);
+            if candidate.is_file() {
+                manifest = Some(load_manifest_policy(&candidate));
+            }
+        }
         for name in CONFIG_NAMES {
             let candidate = current.join(name);
             if candidate.is_file() {
-                return load(&candidate).map(Some);
+                let settings = load(&candidate)?;
+                let composed = match manifest {
+                    Some(base) => Loaded::layered(base, settings),
+                    None => settings,
+                };
+                return Ok(Some(composed));
             }
         }
         dir = current.parent();
     }
-    Ok(None)
+    Ok(manifest)
+}
+
+/// The manifest's `lint`/`validate` policy sections as a [`Loaded`] base
+/// layer. Absent or malformed sections parse as absent settings — a
+/// broken manifest is not silently swallowed (`suspect project check`
+/// owns that surface), but policy it does not carry is not invented.
+fn load_manifest_policy(path: &Path) -> Loaded {
+    let policy: Option<serde_json::Value> = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let dir = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    match policy {
+        Some(policy) => Loaded::from_manifest_policy(&dir, &policy),
+        None => Loaded {
+            settings: crate::Settings::default(),
+            path: None,
+            root: dir,
+        },
+    }
 }
 
 /// Parses one configuration file.

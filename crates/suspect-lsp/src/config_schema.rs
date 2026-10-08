@@ -213,6 +213,77 @@ const SETTINGS: &[Field] = &[
         &[],
     ),
     field(
+        "lint.rules",
+        Kind::Map,
+        "Rule id → severity name (`error`, `warn`, `info`, `off`) overriding the \
+         severity a rule would otherwise produce.",
+        Some("{}"),
+        &[],
+    ),
+    field(
+        "lint.recommended",
+        Kind::Bool,
+        "Apply the recommended lint rule set.",
+        Some("true"),
+        &[],
+    ),
+    field(
+        "ref",
+        Kind::Section,
+        "Reference-workspace tuning.",
+        None,
+        &[],
+    ),
+    field(
+        "ref.max_docs",
+        Kind::Int,
+        "Maximum documents loaded in one ref workspace.",
+        Some("500"),
+        &[],
+    ),
+    field(
+        "inlay_hints",
+        Kind::Section,
+        "Inlay hint toggles.",
+        None,
+        &[],
+    ),
+    field(
+        "inlay_hints.refs",
+        Kind::Bool,
+        "Show resolved `$ref` target inlay hints.",
+        Some("true"),
+        &[],
+    ),
+    field(
+        "inlay_hints.ref_targets",
+        Kind::Bool,
+        "Legacy spelling of `inlay_hints.refs`.",
+        Some("true"),
+        &[],
+    ),
+    field(
+        "inlay_hints.properties",
+        Kind::Bool,
+        "Show property type-annotation inlay hints.",
+        Some("true"),
+        &[],
+    ),
+    field(
+        "formatting",
+        Kind::Section,
+        "Canonical formatting policy.",
+        None,
+        &[],
+    ),
+    field(
+        "formatting.sort_keys",
+        Kind::Bool,
+        "Reorder object keys into the canonical OpenAPI order when formatting.",
+        Some("true"),
+        &[],
+    ),
+    field(
         "codegen",
         Kind::Section,
         "Defaults applied to SDK generation targets.",
@@ -331,6 +402,102 @@ const PROJECT: &[Field] = &[
         None,
         SEVERITIES,
     ),
+    field(
+        "lint.rules",
+        Kind::Map,
+        "Rule id → severity name (`error`, `warn`, `info`, `off`) overriding the \
+         severity a rule would otherwise produce. The editor's lint battery reads \
+         these from the manifest.",
+        Some("{}"),
+        &[],
+    ),
+    field(
+        "lint.ruleset",
+        Kind::Path,
+        "Custom lint ruleset document, relative to the manifest.",
+        None,
+        &[],
+    ),
+    field(
+        "lint.recommended",
+        Kind::Bool,
+        "Apply the recommended lint rule set.",
+        Some("true"),
+        &[],
+    ),
+    field(
+        "validate",
+        Kind::Section,
+        "Validation policy for this project. The editor's validate battery and \
+         `suspect validate` honor `strict_format` identically.",
+        None,
+        &[],
+    ),
+    field(
+        "validate.strict_format",
+        Kind::Bool,
+        "Treat non-canonical YAML formatting and declared `format` keywords as \
+         findings instead of annotations.",
+        Some("false"),
+        &[],
+    ),
+    field(
+        "editor",
+        Kind::Section,
+        "Editor defaults this project commits: the knobs the client carries under \
+         `suspect.*` settings, layered under `.suspect.yaml` and client preferences.",
+        None,
+        &[],
+    ),
+    field(
+        "editor.inlay_hints",
+        Kind::Section,
+        "Inlay hint toggles.",
+        None,
+        &[],
+    ),
+    field(
+        "editor.inlay_hints.refs",
+        Kind::Bool,
+        "Show resolved `$ref` target inlay hints.",
+        Some("true"),
+        &[],
+    ),
+    field(
+        "editor.inlay_hints.properties",
+        Kind::Bool,
+        "Show property type-annotation inlay hints.",
+        Some("true"),
+        &[],
+    ),
+    field(
+        "editor.ref",
+        Kind::Section,
+        "Reference-workspace tuning.",
+        None,
+        &[],
+    ),
+    field(
+        "editor.ref.max_docs",
+        Kind::Int,
+        "Maximum documents loaded in one ref workspace.",
+        Some("500"),
+        &[],
+    ),
+    field(
+        "editor.formatting",
+        Kind::Section,
+        "Canonical formatting policy.",
+        None,
+        &[],
+    ),
+    field(
+        "editor.formatting.sort_keys",
+        Kind::Bool,
+        "Reorder object keys into the canonical OpenAPI order when formatting.",
+        Some("true"),
+        &[],
+    ),
     field("docs", Kind::Section, "Documentation target.", None, &[]),
     field("docs.style", Kind::Str, "Output style.", None, DOC_STYLES),
     field(
@@ -380,6 +547,13 @@ const PROJECT: &[Field] = &[
         "tests.message_broker",
         Kind::Path,
         "Message broker directory for Arazzo 1.1 AsyncAPI steps.",
+        None,
+        &[],
+    ),
+    field(
+        "tests.credentials",
+        Kind::Path,
+        "Credentials file for the security schemes the suites exercise.",
         None,
         &[],
     ),
@@ -1065,6 +1239,43 @@ codegen:
     }
 
     #[test]
+    fn manifest_policy_keys_hover_and_complete() {
+        // The committed policy sections read like the rest of the manifest:
+        // hover names what the key does, completion offers what is missing.
+        let text = "{\"entry\": \"a.yaml\", \"lint\": {\"min_severity\": \"warning\"}, \
+                    \"validate\": {\"strict_format\": true}, \"editor\": {\"inlay_hints\": {}}}";
+        let low = doc("suspect.project.json", text);
+        let md = hover(FileKind::Project, &low, offset(text, "min_severity")).expect("lint hover");
+        assert!(md.contains("Minimum severity"), "{md}");
+        let md =
+            hover(FileKind::Project, &low, offset(text, "strict_format")).expect("validate hover");
+        assert!(md.contains("format"), "{md}");
+        let md =
+            hover(FileKind::Project, &low, offset(text, "editor")).expect("editor section hover");
+        assert!(md.contains("suspect.*"), "{md}");
+
+        // Completion inside the lint section offers the policy keys.
+        let items = completions(FileKind::Project, &low, offset(text, "min_severity"));
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        for expected in ["ruleset", "rules", "recommended"] {
+            assert!(labels.contains(&expected), "missing {expected}: {labels:?}");
+        }
+    }
+
+    #[test]
+    fn manifest_policy_mistakes_are_diagnosed() {
+        // A bad severity value in the manifest is flagged exactly like one
+        // in `.suspect.yaml` would be.
+        let text = "{\"lint\": {\"min_severity\": \"shout\"}}";
+        let low = doc("suspect.project.json", text);
+        let findings = diagnostics(&low);
+        assert!(
+            findings.iter().any(|f| f.message.contains("shout")),
+            "the bad value is named: {findings:?}"
+        );
+    }
+
+    #[test]
     fn completion_offers_the_keys_still_missing_from_a_section() {
         let low = doc(".suspect.yaml", "lint:\n  min_severity: warning\n");
         let items = completions(
@@ -1073,7 +1284,11 @@ codegen:
             offset("lint:\n  min_severity", "min"),
         );
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(labels, vec!["ruleset"], "{labels:?}");
+        assert_eq!(
+            labels,
+            vec!["ruleset", "rules", "recommended"],
+            "{labels:?}"
+        );
     }
 
     #[test]

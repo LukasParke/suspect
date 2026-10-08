@@ -1906,7 +1906,17 @@ impl LanguageServer for Backend {
         {
             let mut st = self.state.write().await;
             let init_opts = std::mem::take(&mut st.pending_init_options);
-            st.config = config_files::merge(init_opts, client_cfg, Default::default());
+            // The base is the committed policy: the manifest's sections
+            // under the workspace `.suspect.yaml`, so `lint.rules`,
+            // `lint.recommended`, inlay toggles and formatting policy
+            // committed in either file reach the battery without any
+            // client configuration. Client settings still win per leaf.
+            let root = st.workspace_root();
+            st.config = config_files::merge(
+                init_opts,
+                client_cfg,
+                config_files::file_layers(root.as_deref()),
+            );
             st.editor_config = file_config;
         }
         // Dynamic registration: only clients advertising
@@ -1946,7 +1956,20 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        let parsed = config_files::parse_config(&params.settings);
+        // The new effective client layer over the committed file layers:
+        // a manifest or `.suspect.yaml` edited on disk is picked up here
+        // too (the files participate in the comparison, not just the
+        // client section, or a file-only change would look like no change).
+        let client_layers = {
+            let st = self.state.read().await;
+            let root = st.workspace_root();
+            config_files::merge(
+                Some(params.settings.clone()),
+                None,
+                config_files::file_layers(root.as_deref()),
+            )
+        };
+        let parsed = Some(client_layers);
         // The editor-side settings are re-derived too: `lint.min_severity`
         // lives there, not in `SuspectConfig`, and this handler used to
         // parse it into one object while the severity floor read the other
