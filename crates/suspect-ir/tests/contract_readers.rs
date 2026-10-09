@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use suspect_ir::IrSpec;
 use suspect_ir::contract::{Contract, ContractReader};
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
@@ -526,4 +527,73 @@ fn tracked_corpus_values_and_reference_targets_match_under_both_readers() {
                 .collect::<Vec<_>>()
         );
     }
+}
+
+/// Inline response and request-body schemas are registered under generated
+/// names — the gateway mock and contract tooling address them exactly like
+/// component schemas, instead of degrading to a `null` example.
+#[test]
+fn inline_response_and_body_schemas_are_addressable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("spec.yaml");
+    std::fs::write(
+        &path,
+        "openapi: \"3.1.0\"\n\
+         info:\n  title: t\n  version: \"1\"\n\
+         paths:\n\
+         \x20 /identity:\n\
+         \x20   get:\n\
+         \x20     operationId: getIdentity\n\
+         \x20     responses:\n\
+         \x20       '200':\n\
+         \x20         description: ok\n\
+         \x20         content:\n\
+         \x20           application/json:\n\
+         \x20             schema:\n\
+         \x20               type: object\n\
+         \x20               properties:\n\
+         \x20                 MediaContainer:\n\
+         \x20                   type: object\n\
+         \x20                   properties:\n\
+         \x20                     machineIdentifier:\n\
+         \x20                       type: string\n\
+         components:\n\
+         \x20 schemas:\n\
+         \x20   Named:\n\
+         \x20     type: object\n",
+    )
+    .expect("write spec");
+    let spec = IrSpec::from_file(&path).expect("parses");
+    let op = spec
+        .by_operation_id
+        .get("getIdentity")
+        .map(|&i| &spec.operations[i as usize])
+        .expect("op present");
+    let schema_name = op
+        .responses
+        .iter()
+        .find(|r| r.status == Some(200))
+        .and_then(|r| r.schema.clone())
+        .expect("inline schema is named");
+    assert!(
+        schema_name.starts_with("~~inline~~"),
+        "inline schemas carry the synthetic prefix: {schema_name}"
+    );
+    let schema = spec
+        .schema(&schema_name)
+        .expect("registered and resolvable");
+    assert!(
+        schema
+            .json
+            .pointer("/properties/MediaContainer/properties/machineIdentifier")
+            .is_some(),
+        "the materialized schema keeps the full inline tree"
+    );
+    // Component schemas keep their own names and indices alongside the
+    // inline registrations.
+    assert!(spec.schema("Named").is_some(), "component schemas intact");
+    assert!(
+        spec.schema_index.contains_key(&schema_name),
+        "the schema index covers inline registrations"
+    );
 }

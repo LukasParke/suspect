@@ -11,7 +11,9 @@
 //! value > type defaults (`""`, `0`, `false`). Objects include every
 //! declared property, arrays contain exactly one element, strings honor
 //! `minLength` by padding with `'a'`, and `$ref`s resolve through the
-//! spec's component-schema lookup map. Recursion (including self- and
+//! spec's component-schema lookup map. `allOf` compositions
+//! union-merge their members' syntheses, so composed schemas mock as
+//! the merge the wire carries. Recursion (including self- and
 //! mutually-referential schemas) is bounded by [`DEPTH_CAP`] — past the
 //! cap synthesis emits `null`.
 
@@ -91,10 +93,23 @@ pub fn synth_example(schema: &Value, refs: &SchemaRefs, depth: u8) -> Value {
     if let Some(v) = schema.get("default") {
         return v.clone();
     }
-    if let Some(Value::Array(values)) = schema.get("enum")
-        && let Some(first) = values.first()
+    if let Some(v) = schema.get("enum")
+        && let Some(first) = v.as_array().and_then(|values| values.first())
     {
         return first.clone();
+    }
+    // `allOf`: synthesize every member and union-merge the results, so
+    // composed schemas (the spec-heavy pattern) mock as the merge the
+    // wire actually carries. Objects merge recursively; for any other
+    // collision the later member wins.
+    if let Some(Value::Array(members)) = schema.get("allOf")
+        && !members.is_empty()
+    {
+        let mut merged = synth_example(&members[0], refs, depth + 1);
+        for member in &members[1..] {
+            merged = merge_example(merged, synth_example(member, refs, depth + 1));
+        }
+        return merged;
     }
     match schema_type(schema).as_deref() {
         Some("object") => {
@@ -118,6 +133,25 @@ pub fn synth_example(schema: &Value, refs: &SchemaRefs, depth: u8) -> Value {
         Some("integer" | "number") => Value::Number(0.into()),
         Some("boolean") => Value::Bool(false),
         _ => Value::Null,
+    }
+}
+
+/// Recursive union of two synthesized examples: object members merge
+/// key-wise, and any other pair resolves to the overlay (later member
+/// wins) — matching what an `allOf` composition means on the wire.
+fn merge_example(base: Value, overlay: Value) -> Value {
+    match (base, overlay) {
+        (Value::Object(mut base), Value::Object(overlay)) => {
+            for (key, value) in overlay {
+                let merged = match base.remove(&key) {
+                    Some(existing) => merge_example(existing, value),
+                    None => value,
+                };
+                base.insert(key, merged);
+            }
+            Value::Object(base)
+        }
+        (_, overlay) => overlay,
     }
 }
 

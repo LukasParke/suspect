@@ -988,3 +988,61 @@ async fn gateway_serves_its_own_contract_at_openapi_json() {
         "the served contract carries the schema graph"
     );
 }
+
+/// `allOf` compositions synthesize as the union-merge of their members:
+/// the spec-heavy composition pattern mocks as the merge the wire
+/// actually carries, not `null`.
+#[test]
+fn synth_example_merges_allof_members() {
+    use crate::mock::{SchemaRefs, synth_example};
+    use serde_json::json;
+
+    let mut refs = SchemaRefs::new();
+    refs.insert(
+        "MediaContainer".to_owned(),
+        json!({
+            "type": "object",
+            "properties": {
+                "size": { "type": "integer" },
+                "machineIdentifier": { "type": "string" }
+            }
+        }),
+    );
+    refs.insert(
+        "Extra".to_owned(),
+        json!({
+            "type": "object",
+            "properties": { "platform": { "type": "string" } }
+        }),
+    );
+
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "MediaContainer": {
+                "allOf": [
+                    { "$ref": "#/components/schemas/MediaContainer" },
+                    { "$ref": "#/components/schemas/Extra" },
+                    { "type": "object", "properties": { "Directory": { "type": "array", "items": { "type": "string" } } } }
+                ]
+            }
+        }
+    });
+
+    let synthesized = synth_example(&schema, &refs, 0);
+    let container = synthesized
+        .pointer("/MediaContainer")
+        .expect("the composed member synthesizes an object");
+    assert!(
+        container.get("size").is_some() && container.get("machineIdentifier").is_some(),
+        "the first member's properties survive the merge: {container}"
+    );
+    assert!(
+        container.get("platform").is_some(),
+        "the second member's properties merge in: {container}"
+    );
+    assert!(
+        container.get("Directory").is_some(),
+        "the inline member's properties merge in: {container}"
+    );
+}
