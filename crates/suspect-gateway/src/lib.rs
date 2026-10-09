@@ -538,21 +538,24 @@ async fn process(
             });
             // POST on an id-less collection route synthesizes a resource
             // from the declared example, stores it under a generated id,
-            // and returns 201 with the stored body.
+            // and answers with the DECLARED success status (REST-create
+            // conventions vary; the spec's own status wins) plus the
+            // stored body.
             let t_for_post = template.unwrap_or_default().to_owned();
-            let post_creates: Option<(String, Bytes)> = template
+            let post_creates: Option<(String, Bytes, Option<u16>)> = template
                 .filter(|t| method == "POST" && !t.contains('{'))
                 .and_then(|t| ir_method.and_then(|m| state.mocks.get(&(m, t.to_owned()))))
-                .and_then(|compiled| mock::best(compiled).map(|c| c.body.clone()))
-                .map(|example_body| (t_for_post.to_owned(), example_body));
-            if let Some((collection_raw, example_body)) = post_creates {
-                let collection = stateful_mock::collection_base(&t_for_post);
-                let _ = collection_raw;
+                .and_then(|compiled| {
+                    mock::best(compiled).map(|c| (t_for_post.to_owned(), c.body.clone(), c.status))
+                });
+            if let Some((collection_raw, example_body, declared_status)) = post_creates {
+                let collection = stateful_mock::collection_base(&collection_raw);
                 let id = state.resources.next_id(&collection);
                 let body = stateful_mock::with_synthesized_id(&example_body, &id);
                 state.resources.insert(&collection, &id, body.clone());
                 return (
-                    StatusCode::CREATED,
+                    StatusCode::from_u16(declared_status.unwrap_or(201))
+                        .unwrap_or(StatusCode::CREATED),
                     [("content-type", "application/json")],
                     body,
                 )

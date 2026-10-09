@@ -455,6 +455,13 @@ fn timeout_interrupts_stalled_headers_and_cancellation_interrupts_stalled_bodies
         if let Some(worker) = worker {
             worker.join().unwrap();
         }
+        // The request is recorded by the server's worker thread, which
+        // races the (much shorter) client timeout under load; poll for it
+        // instead of asserting synchronously.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while server.requests().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(server.requests().len(), 1);
     }
 }

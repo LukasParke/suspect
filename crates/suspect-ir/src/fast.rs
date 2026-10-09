@@ -86,10 +86,13 @@ pub fn ir_from_fast(value: &FastValue) -> IrSpec {
         }
     }
 
-    // Operations.
+    // Operations. Inline response and request-body schemas are registered
+    // under generated names in the same pass, so they stay addressable
+    // exactly like component schemas — the gateway mock and contract
+    // tooling synthesize from them without a `$ref` in sight.
     if let Some(paths) = get(value, "paths") {
         let entries = paths.entries();
-        let per_path: Vec<Vec<IrOperation>> = if entries.len() > PAR_PATH_THRESHOLD {
+        let per_path: Vec<PathContribution> = if entries.len() > PAR_PATH_THRESHOLD {
             entries
                 .par_iter()
                 .map(|(path, item)| path_operations(path, item))
@@ -100,7 +103,13 @@ pub fn ir_from_fast(value: &FastValue) -> IrSpec {
                 .map(|(path, item)| path_operations(path, item))
                 .collect()
         };
-        for ops in per_path {
+        for (ops, inlines) in per_path {
+            for (schema, refs) in inlines {
+                let idx = spec.schemas.len() as u32;
+                spec.schema_index.insert(schema.name.clone(), idx);
+                spec.schema_edges.insert(schema.name.clone(), refs);
+                spec.schemas.push(schema);
+            }
             for op in ops {
                 let idx = spec.operations.len() as u32;
                 if let Some(id) = &op.id {
@@ -115,11 +124,17 @@ pub fn ir_from_fast(value: &FastValue) -> IrSpec {
     spec
 }
 
-/// All operations of one path item, canonical method order.
-fn path_operations(path: &str, item: &FastValue) -> Vec<IrOperation> {
+/// One path item's contribution to the spec: its operations plus the
+/// inline schemas those operations registered.
+type PathContribution = (Vec<IrOperation>, Vec<(IrSchema, Vec<String>)>);
+
+/// All operations of one path item, canonical method order, plus the
+/// inline schemas those operations registered.
+fn path_operations(path: &str, item: &FastValue) -> PathContribution {
     let mut out = Vec::new();
+    let mut inlines: Vec<(IrSchema, Vec<String>)> = Vec::new();
     if !matches!(item, FastValue::Object(_)) {
-        return out;
+        return (out, inlines);
     }
     let item_params = parameters_of(item);
     for method in Method::ALL {
@@ -149,9 +164,57 @@ fn path_operations(path: &str, item: &FastValue) -> Vec<IrOperation> {
                 .and_then(|rb| get(rb, "content"))
                 .and_then(|c| get(c, "application/json"))
                 .and_then(|j| get(j, "schema"))
-                .and_then(ref_name),
-            responses: responses_of(op),
+                .and_then(|node| named_schema(node, &mut inlines, path, method, "request")),
+            responses: responses_of(op, path, method, &mut inlines),
         });
+    }
+    (out, inlines)
+}
+
+/// The addressable name for one schema node: a `$ref` keeps its target
+/// name; an inline schema is materialized and registered under a
+/// deterministic generated name unique to its operation and slot.
+fn named_schema(
+    node: &FastValue,
+    inlines: &mut Vec<(IrSchema, Vec<String>)>,
+    path: &str,
+    method: Method,
+    slot: &str,
+) -> Option<String> {
+    // A `$ref` — local or external — is never inline material: locals keep
+    // their component name; externals stay opaque (None), matching the
+    // "external refs stay unresolved" policy of the fast reader.
+    if get(node, "$ref").is_some() {
+        return ref_name(node);
+    }
+    let name = format!(
+        "~~inline~~{}~~{}~~{slot}",
+        escape_path(path),
+        method_key(method),
+    );
+    let json_value = json(Some(node));
+    let refs = collect_local_refs(&json_value);
+    inlines.push((
+        IrSchema {
+            name: name.clone(),
+            json: json_value,
+        },
+        refs,
+    ));
+    Some(name)
+}
+
+/// Path text safe for a schema name: hex-escapes everything outside
+/// `[A-Za-z0-9]`, so the mapping is injective (`~~` never appears in the
+/// escaped form).
+fn escape_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("-{byte:02x}-"));
+        }
     }
     out
 }
@@ -237,7 +300,12 @@ fn parameters_of(node: &FastValue) -> Vec<IrParameter> {
 }
 
 /// Responses sorted by numeric status ascending, `default` last.
-fn responses_of(op: &FastValue) -> Vec<IrResponse> {
+fn responses_of(
+    op: &FastValue,
+    path: &str,
+    method: Method,
+    inlines: &mut Vec<(IrSchema, Vec<String>)>,
+) -> Vec<IrResponse> {
     let Some(responses) = get(op, "responses") else {
         return Vec::new();
     };
@@ -256,7 +324,9 @@ fn responses_of(op: &FastValue) -> Vec<IrResponse> {
                     schema: get(value, "content")
                         .and_then(|c| get(c, "application/json"))
                         .and_then(|j| get(j, "schema"))
-                        .and_then(ref_name),
+                        .and_then(|node| {
+                            named_schema(node, inlines, path, method, &format!("response{}", key))
+                        }),
                 },
             )
         })
