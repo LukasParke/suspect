@@ -1343,6 +1343,25 @@ const RESERVED: &[&str] = &[
     "New",
     "String",
     "Limits",
+    // The HTTP runtime shares the model package; its protocol declarations
+    // are reserved so media models never shadow them (the plex spec's
+    // `Part`/`Stream` models once collided with the wire Part/Stream).
+    "Part",
+    "NewPart",
+    "Stream",
+    "NewStream",
+    "Content",
+    "NoContent",
+    "Link",
+    "Server",
+    "ServerVariable",
+    "Authorization",
+    "SecurityRequirement",
+    "SecurityAlternative",
+    "HTTPProvenance",
+    "CredentialRequest",
+    "CredentialHook",
+    "OAuthFlow",
 ];
 
 // Literal constants and union wrappers share the package namespace with model

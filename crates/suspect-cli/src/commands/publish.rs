@@ -354,8 +354,13 @@ pub fn descriptor_version(backend: &str, dir: &Path) -> anyhow::Result<VersionSo
         }
         "cpp" => {
             let text = read("CMakeLists.txt")?;
+            // The `project(<name> VERSION <x.y.z> ...)` line declares the
+            // package version; other VERSION tokens (e.g.
+            // `cmake_minimum_required(VERSION 3.24)`) are unrelated.
             let version = text
-                .split_once("VERSION")
+                .lines()
+                .find(|l| l.trim_start().starts_with("project("))
+                .and_then(|l| l.split_once("VERSION"))
                 .and_then(|(_, rest)| rest.split_whitespace().next())
                 .map(str::to_owned)
                 .ok_or_else(|| anyhow::anyhow!("CMakeLists.txt has no project VERSION"))?;

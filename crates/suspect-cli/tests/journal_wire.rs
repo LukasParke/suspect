@@ -80,7 +80,19 @@ fn raw_get(port: u16, path: &str, extra_header: Option<(&str, &str)>) -> u16 {
     request.push_str("connection: close\r\n\r\n");
     stream.write_all(request.as_bytes()).expect("write");
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).expect("read");
+    let mut buf = [0u8; 4096];
+    // `connection: close` servers may RST instead of half-closing once
+    // done (Linux routinely does once unread input remains): the
+    // response has already arrived, so a reset ends the read instead of
+    // failing it.
+    loop {
+        match stream.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => response.extend_from_slice(&buf[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => break,
+            Err(e) => panic!("read: {e}"),
+        }
+    }
     let head = String::from_utf8_lossy(&response[..response.len().min(512)]).into_owned();
     head.split_whitespace()
         .nth(1)

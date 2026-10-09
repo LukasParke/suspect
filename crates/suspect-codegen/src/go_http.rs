@@ -505,11 +505,22 @@ fn valid_module_path(path: &str) -> bool {
     {
         return false;
     }
-    path.chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '.' | '_' | '/'))
-        && path
-            .split('/')
-            .all(|el| !el.starts_with('.') && !el.ends_with('-') && !el.ends_with('_'))
+    // The host is a domain: lowercase. Later elements are case-significant
+    // and may carry uppercase — `github.com/LukeHagar/plexgo` is a legal
+    // module path (the proxy case-encodes it), and refusing it here meant
+    // the generator could not target real existing modules.
+    path.split('/').enumerate().all(|(index, el)| {
+        let chars_ok = el.chars().all(|c| {
+            c.is_ascii_digit()
+                || matches!(c, '-' | '.' | '_')
+                || if index == 0 {
+                    c.is_ascii_lowercase()
+                } else {
+                    c.is_ascii_alphabetic()
+                }
+        });
+        chars_ok && !el.starts_with('.') && !el.ends_with('-') && !el.ends_with('_')
+    })
 }
 
 /// Go package names must be legal identifiers and not reserved keywords so
@@ -747,4 +758,33 @@ fn is_go_keyword(name: &str) -> bool {
             | "type"
             | "var"
     )
+}
+
+#[cfg(test)]
+mod module_path_tests {
+    use super::valid_module_path;
+
+    #[test]
+    fn host_must_stay_lowercase_but_elements_may_carry_case() {
+        // The host is a domain: lowercase only.
+        assert!(valid_module_path("example.com/sdk"));
+        assert!(!valid_module_path("Example.com/sdk"));
+        // Later elements are case-significant: the proxy case-encodes
+        // them (`github.com/!luke!hagar/plexgo`), so a real existing
+        // module like plexgo's must validate.
+        assert!(valid_module_path("github.com/LukeHagar/plexgo"));
+        assert!(valid_module_path("github.com/LukasParke/plexgo/v2"));
+    }
+
+    #[test]
+    fn structural_rules_hold() {
+        assert!(!valid_module_path("nohost/sdk"));
+        assert!(!valid_module_path("example.com//sdk"));
+        assert!(!valid_module_path("example.com/../sdk"));
+        assert!(!valid_module_path("/leading"));
+        assert!(!valid_module_path("example.com/.leading"));
+        assert!(!valid_module_path("example.com/dash-"));
+        assert!(!valid_module_path("example.com/under_"));
+        assert!(!valid_module_path(""));
+    }
 }
