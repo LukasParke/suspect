@@ -498,7 +498,11 @@ fn template_vars(key: &str) -> Vec<String> {
     vars
 }
 
-fn declared_path_params(params: Option<NodeRef<'_>>) -> Vec<String> {
+/// Path-parameter names declared by one parameter list. Inline entries
+/// contribute directly; a local `$ref` contributes the component it
+/// points at — a `$ref` to `#/components/parameters/transcodeType`
+/// declares that parameter exactly as its inline twin would.
+fn declared_path_params(params: Option<NodeRef<'_>>, doc_root: NodeRef<'_>) -> Vec<String> {
     let Some(params) = params else {
         return Vec::new();
     };
@@ -507,13 +511,36 @@ fn declared_path_params(params: Option<NodeRef<'_>>) -> Vec<String> {
         .into_iter()
         .filter_map(|p| {
             let p = p.resolved();
-            if p.get("in").and_then(|v| v.as_str()) == Some("path") {
-                p.get("name").and_then(|n| n.as_str()).map(str::to_string)
+            if let Some(name) = p.get("name").and_then(|n| n.as_str()) {
+                return (p.get("in").and_then(|v| v.as_str()) == Some("path"))
+                    .then(|| name.to_owned());
+            }
+            // A $ref entry: resolve the local pointer against the document.
+            let reference = p.get("$ref").and_then(|r| r.as_str())?;
+            let target = resolve_local_ref(doc_root, reference)?;
+            let target = target.resolved();
+            if target.get("in").and_then(|v| v.as_str()) == Some("path") {
+                target
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .map(str::to_owned)
             } else {
                 None
             }
         })
         .collect()
+}
+
+/// Walks a local JSON pointer (`#/components/parameters/X`) from the
+/// document root; external refs resolve to nothing.
+fn resolve_local_ref<'d>(root: NodeRef<'d>, reference: &str) -> Option<NodeRef<'d>> {
+    let fragment = reference.strip_prefix('#')?;
+    let mut current = root;
+    for token in fragment.split('/').filter(|t| !t.is_empty()) {
+        let token = token.replace("~1", "/").replace("~0", "~");
+        current = current.get(&token)?;
+    }
+    Some(current)
 }
 
 fn check_path_params(
@@ -533,11 +560,14 @@ fn check_path_params(
     if vars.is_empty() {
         return;
     }
-    let path_level = declared_path_params(node.get("parameters"));
+    // The syntax document root is a stream wrapper; resolve to the actual
+    // root mapping so $ref lookups navigate real entries.
+    let doc_root = NodeRef::new(node.syntax().doc().root()).resolved();
+    let path_level = declared_path_params(node.get("parameters"), doc_root);
     for method in HTTP_METHODS {
         let Some(op) = node.get(method) else { continue };
         let mut declared = path_level.clone();
-        declared.extend(declared_path_params(op.get("parameters")));
+        declared.extend(declared_path_params(op.get("parameters"), doc_root));
         for var in &vars {
             if !declared.iter().any(|d| d == var) {
                 push_at(
