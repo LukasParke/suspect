@@ -4,14 +4,20 @@
 //! spec* but correlates with real-world API security incidents.
 
 use crate::functions::Function;
-use crate::rule::{FamilySet, Rule, Severity};
+use crate::rule::{Category, FamilySet, Rule, Severity};
 
 /// The security pack, in canonical order.
+///
+/// Every rule here is [`Category::Design`]: each flags a pattern that is
+/// *permitted by the spec* but correlates with real-world API security
+/// incidents. The document is truthful; only the API's owner could change
+/// the flagged behavior — so projects documenting an API they do not own
+/// may silence the class (`lint.design` policy).
 pub(crate) fn rules() -> Vec<Rule> {
     let oas3 = FamilySet::OAS3;
     let oas23 = FamilySet::OAS2.union(FamilySet::OAS3);
     use super::oas::METHOD_PATHS;
-    vec![
+    let mut rules = vec![
         Rule::new(
             "security-server-https-only",
             "Server URLs must use HTTPS — plaintext transport exposes credentials and data.",
@@ -92,5 +98,9 @@ pub(crate) fn rules() -> Vec<Rule> {
             &["$.paths.*.delete"],
             Function::DeleteRequiresId,
         ),
-    ]
+    ];
+    for rule in &mut rules {
+        rule.category = Category::Design;
+    }
+    rules
 }

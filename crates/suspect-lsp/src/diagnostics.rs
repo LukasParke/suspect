@@ -150,11 +150,34 @@ fn load_ruleset(path: &std::path::Path) -> Option<suspect_lint::Linter> {
 /// and compiled; anything absent or unloadable falls back to the Spectral
 /// default — the same precedence the CLI's lint path uses, so a project's
 /// committed ruleset applies in the editor too.
+///
+/// Committed policy applies per finding: a per-rule `lint.rules` override
+/// wins over the `lint.design` class severity (both accept `off` to drop
+/// the finding); the severity floor applies after. The same order the
+/// CLI's `suspect lint` enforces.
 #[must_use]
-pub fn lint_diagnostics(low: &LowDoc, ruleset: Option<&std::path::Path>) -> Vec<Diagnostic> {
+pub fn lint_diagnostics(
+    low: &LowDoc,
+    ruleset: Option<&std::path::Path>,
+    lint: Option<&crate::config_files::LintCfg>,
+) -> Vec<Diagnostic> {
     let linter = match ruleset.and_then(load_ruleset) {
         Some(linter) => linter,
         None => suspect_lint::Linter::spectral_default(),
+    };
+    // Per-rule override first (a specific rule beats its class), then the
+    // design-class severity; `off` drops the finding before mapping.
+    let policy = |code: &str, default: suspect_lint::Severity| {
+        let per_rule = lint
+            .and_then(|l| l.rules.get(code))
+            .and_then(|name| suspect_lint::Severity::from_policy(name));
+        let class = (linter.category_of(code) == suspect_lint::Category::Design)
+            .then(|| {
+                lint.and_then(|l| l.design.as_deref())
+                    .and_then(suspect_lint::Severity::from_policy)
+            })
+            .flatten();
+        per_rule.or(class).unwrap_or(default)
     };
     let bytes = low.inner().bytes();
     let li = low.inner().line_index();
@@ -162,7 +185,7 @@ pub fn lint_diagnostics(low: &LowDoc, ruleset: Option<&std::path::Path>) -> Vec<
         .run(low)
         .into_iter()
         .filter_map(|f| {
-            let severity = map_lint_severity(f.severity)?;
+            let severity = map_lint_severity(policy(&f.code, f.severity))?;
             let mut diag = make(bytes, li, f.range, severity, &f.code, f.message);
             diag.source = Some(SOURCE_LINT.to_owned());
             Some(diag)
@@ -324,7 +347,7 @@ pub fn compute_diagnostics_raw(
     if let Some(ws) = ws {
         out.extend(validate_diagnostics(ws, low, strict_format));
     }
-    out.extend(lint_diagnostics(low, ruleset));
+    out.extend(lint_diagnostics(low, ruleset, cfg.lint.as_ref()));
     out.extend(swagger_diagnostics(low));
     out.extend(arazzo_diagnostics(low));
     // The CommonMark fields get markdownlint-compatible rules, at their

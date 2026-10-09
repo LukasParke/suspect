@@ -37,6 +37,10 @@ pub struct LintCfg {
     /// Rule id → severity name (`error`, `warn`, `info`, `off`) overriding
     /// the severity a rule would otherwise produce.
     pub rules: HashMap<String, String>,
+    /// Severity for design-class rules — findings the document cannot
+    /// fix without misdocumenting the API (`error`..`hint`, or `off`).
+    /// A per-rule entry in `rules` wins over the class.
+    pub design: Option<String>,
     /// Whether the recommended (spectral-default) ruleset is enabled.
     /// `None` means "not configured"; [`SuspectConfig::lint_recommended`]
     /// applies the default.
@@ -161,6 +165,7 @@ impl SuspectConfig {
                 } else {
                     o.rules.clone()
                 };
+                base.design = o.design.clone().or(base.design.take());
                 base.recommended = o.recommended.or(base.recommended);
                 Some(base)
             }
@@ -218,6 +223,11 @@ pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
                     .collect()
             })
             .unwrap_or_default(),
+        design: v
+            .get("design")
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
         recommended: v.get("recommended").and_then(serde_json::Value::as_bool),
     });
     // The spec spells the section `ref`; accept `refs` as an alias.
@@ -729,8 +739,13 @@ fn build_edit(
 /// Applies [`SuspectConfig`] to a computed diagnostic battery:
 ///
 /// * `lint.recommended = false` drops every `suspect-lint` finding.
-/// * `lint.rules.<id> = "error"|"warning"|"information"|"hint"` remaps the
-///   severity of diagnostics whose code matches `<id>`.
+/// * `lint.rules.<id> = severity` remaps the severity of diagnostics whose
+///   code matches `<id>`; `off` drops them. Markdown battery codes share
+///   the same namespace, so one per-rule entry covers both.
+///
+/// Lint findings from the spectral battery carry their committed policy
+/// already (a per-rule entry wins over `lint.design`); this pass is
+/// idempotent for them and is the only pass the markdown battery gets.
 #[must_use]
 pub fn apply_config(diags: Vec<Diagnostic>, cfg: &SuspectConfig) -> Vec<Diagnostic> {
     let lint_on = cfg.lint_recommended();
@@ -742,19 +757,26 @@ pub fn apply_config(diags: Vec<Diagnostic>, cfg: &SuspectConfig) -> Vec<Diagnost
     diags
         .into_iter()
         .filter(|d| lint_on || d.source.as_deref() != Some(crate::diagnostics::SOURCE_LINT))
-        .map(|mut d| {
+        .filter_map(|mut d| {
             if let Some(NumberOrString::String(code)) = &d.code
-                && let Some(sev) = rules.get(code)
+                && let Some(name) = rules.get(code)
             {
-                d.severity = match sev.as_str() {
-                    "error" => Some(DiagnosticSeverity::ERROR),
-                    "warning" => Some(DiagnosticSeverity::WARNING),
-                    "information" => Some(DiagnosticSeverity::INFORMATION),
-                    "hint" => Some(DiagnosticSeverity::HINT),
-                    _ => d.severity,
-                };
+                match suspect_lint::Severity::from_policy(name) {
+                    Some(suspect_lint::Severity::Off) => return None,
+                    Some(severity) => {
+                        d.severity = match severity {
+                            suspect_lint::Severity::Error => Some(DiagnosticSeverity::ERROR),
+                            suspect_lint::Severity::Warn => Some(DiagnosticSeverity::WARNING),
+                            suspect_lint::Severity::Info => Some(DiagnosticSeverity::INFORMATION),
+                            suspect_lint::Severity::Hint | suspect_lint::Severity::Off => {
+                                Some(DiagnosticSeverity::HINT)
+                            }
+                        };
+                    }
+                    None => {}
+                }
             }
-            d
+            Some(d)
         })
         .collect()
 }
@@ -890,6 +912,7 @@ components:
             }),
             lint: Some(LintCfg {
                 rules: HashMap::from([("old-rule".into(), "off".into())]),
+                design: None,
                 recommended: Some(true),
             }),
             formatting: Some(FmtCfg {

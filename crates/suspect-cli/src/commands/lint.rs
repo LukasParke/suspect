@@ -40,6 +40,60 @@ pub fn build_linter(ruleset: Option<&Path>) -> anyhow::Result<Linter> {
     }
 }
 
+/// Committed policy applied to raw lint findings before the severity
+/// floor, in this order: the design-class severity, then per-rule
+/// overrides (a per-rule entry wins over the class), then the floor.
+///
+/// Design-class findings flag the API's own design rather than the
+/// document's accuracy — a project documenting an API it does not own
+/// cannot fix them without misdocumenting the API, so the committed
+/// policy may silence or downgrade the whole class at once.
+#[derive(Debug, Default, Clone)]
+pub struct LintOverrides {
+    /// Severity for design-class findings, or `None` to keep them as-is.
+    pub design: Option<suspect_lint::Severity>,
+    /// Per-rule severity overrides; [`suspect_lint::Severity::Off`] drops
+    /// the rule. Wins over `design`.
+    pub rules: std::collections::BTreeMap<String, suspect_lint::Severity>,
+}
+
+impl LintOverrides {
+    /// Parses policy names as they appear in committed configuration:
+    /// `error`, `warn`/`warning`, `info`/`information`, `hint`, `off`.
+    ///
+    /// # Errors
+    /// Names every unrecognized severity instead of silently ignoring it.
+    pub fn from_config(
+        design: Option<&str>,
+        rules: &std::collections::BTreeMap<String, String>,
+    ) -> anyhow::Result<Self> {
+        let mut bad: Vec<String> = Vec::new();
+        let parse = |name: &str, bad: &mut Vec<String>| {
+            let severity = suspect_lint::Severity::from_policy(name);
+            if severity.is_none() {
+                bad.push(name.to_owned());
+            }
+            severity
+        };
+        let design = design
+            .filter(|d| !d.is_empty())
+            .and_then(|d| parse(d, &mut bad));
+        let mut map = std::collections::BTreeMap::new();
+        for (code, name) in rules {
+            if let Some(severity) = parse(name, &mut bad) {
+                map.insert(code.clone(), severity);
+            }
+        }
+        if !bad.is_empty() {
+            return Err(anyhow::anyhow!(
+                "unrecognized lint severity: {}",
+                bad.join(", ")
+            ));
+        }
+        Ok(Self { design, rules: map })
+    }
+}
+
 /// Lints one already-parsed document into located findings.
 #[must_use]
 pub fn lint_doc(linter: &Linter, doc: &LowDoc, shown: &str) -> Vec<Finding> {
@@ -72,6 +126,7 @@ pub fn lint_findings(
     paths: &[std::path::PathBuf],
     ruleset: Option<&Path>,
     min_severity: Severity,
+    overrides: &LintOverrides,
 ) -> anyhow::Result<Vec<Finding>> {
     let linter = build_linter(ruleset)?;
     let mut findings: Vec<Finding> = paths
@@ -90,6 +145,24 @@ pub fn lint_findings(
         })
         .collect::<Vec<_>>()
         .concat();
+    // Committed policy: per-rule overrides first (a specific rule wins over
+    // its class), then the design-class severity; `off` drops the finding.
+    // The floor filters after, so a downgraded finding obeys the floor too.
+    findings.retain_mut(|f| {
+        let target = overrides.rules.get(&f.code).copied().or_else(|| {
+            (linter.category_of(&f.code) == suspect_lint::Category::Design)
+                .then_some(overrides.design)
+                .flatten()
+        });
+        match target {
+            Some(suspect_lint::Severity::Off) => false,
+            Some(severity) => {
+                f.severity = map_severity(severity);
+                true
+            }
+            None => true,
+        }
+    });
     findings.retain(|f| f.severity >= min_severity);
     findings.sort_by(|a, b| {
         (&*a.file, a.line, a.col, &a.code).cmp(&(&*b.file, b.line, b.col, &b.code))
@@ -99,7 +172,8 @@ pub fn lint_findings(
 
 /// `suspect lint <PATH>... [--ruleset FILE] [--min-severity S]`: parallel
 /// linting, deterministic (file, line) order; exit 1 when any Error finding
-/// survives the min-severity filter.
+/// survives the committed policy (design-class severity, per-rule
+/// overrides) and the min-severity filter.
 ///
 /// # Errors
 /// Ruleset loading failures.
@@ -107,9 +181,10 @@ pub fn lint(
     paths: &[std::path::PathBuf],
     ruleset: Option<&Path>,
     min_severity: Severity,
+    overrides: &LintOverrides,
     format: OutputFormat,
 ) -> anyhow::Result<i32> {
-    let findings = lint_findings(paths, ruleset, min_severity)?;
+    let findings = lint_findings(paths, ruleset, min_severity, overrides)?;
 
     match format {
         OutputFormat::Text => output::print_findings(&findings),

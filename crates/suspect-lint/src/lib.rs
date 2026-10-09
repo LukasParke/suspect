@@ -27,4 +27,4 @@ mod rule;
 mod ruleset;
 
 pub use engine::{Finding, Linter, RulesetError};
-pub use rule::Severity;
+pub use rule::{Category, Severity};

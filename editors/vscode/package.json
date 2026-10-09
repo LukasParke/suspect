@@ -123,6 +123,19 @@
 					"default": null,
 					"scope": "resource"
 				},
+				"suspect.lint.design": {
+					"type": "string",
+					"enum": [
+						"off",
+						"hint",
+						"info",
+						"warning",
+						"error"
+					],
+					"markdownDescription": "Severity for design-class rules — findings that flag the API's own design rather than the document's accuracy. Set `off` when documenting an API you do not own (`lint.design` in the manifest and `.suspect.yaml`).",
+					"default": null,
+					"scope": "resource"
+				},
 				"suspect.lint.ruleset": {
 					"type": "string",
 					"markdownDescription": "Path to a custom lint ruleset (`lint.ruleset` in `.suspect.yaml`).",

@@ -373,8 +373,13 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                 "codegen": [],
                 // Committed policy: the editor, a shell and CI read the
                 // same values; `.suspect.yaml` and client settings layer
-                // on top as local overrides.
-                "lint": {"min_severity": "hint", "rules": {}, "recommended": true},
+                // on top as local overrides. Projects documenting an API
+                // they do not own add "design": "off" here.
+                "lint": {
+                    "min_severity": "hint",
+                    "rules": {},
+                    "recommended": true
+                },
                 "validate": {"strict_format": false},
                 "editor": {
                     "inlay_hints": {"refs": true, "properties": true},

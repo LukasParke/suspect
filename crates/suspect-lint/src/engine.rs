@@ -6,7 +6,7 @@ use std::ops::Range;
 use rustc_hash::FxHashMap;
 use suspect_low::{LowDoc, NodeRef, Pointer, SpecFamily};
 
-use crate::rule::Rule;
+use crate::rule::{Category, Rule};
 use crate::{Severity, ruleset};
 
 /// One lint result: a rule violation anchored to a byte range and pointer.
@@ -68,15 +68,27 @@ impl Linter {
     ///         property: contact
     /// ```
     ///
-    /// `extends` accepts `spectral:oas`, `spectral:overlay`, and
-    /// `spectral:arazzo` (string or array); rules with the same code as an
-    /// extended builtin override it.
+    /// `extends` accepts `spectral:oas`, `spectral:overlay`,
+    /// `spectral:arazzo`, and `spectral:security` (string or array); rules
+    /// with the same code as an extended builtin override it, inheriting
+    /// its category.
     ///
     /// # Errors
     /// [`RulesetError`] for unknown extends targets, unknown functions,
     /// invalid options, bad severities/formats, or invalid JSONPath queries.
     pub fn from_ruleset(doc: &LowDoc) -> Result<Self, RulesetError> {
         ruleset::compile(doc)
+    }
+
+    /// The category of the rule that would produce a finding with this
+    /// code — [`Category::Document`] for codes no compiled rule declares
+    /// (a code remapped by policy, for instance, keeps its class here).
+    #[must_use]
+    pub fn category_of(&self, code: &str) -> Category {
+        self.rules
+            .iter()
+            .find(|r| &*r.code == code)
+            .map_or(Category::Document, |r| r.category)
     }
 
     /// Runs every enabled, family-matching rule over `doc`. Findings are

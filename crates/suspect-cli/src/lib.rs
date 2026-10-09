@@ -591,7 +591,20 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
                 output::Severity::Hint,
             )
             .value;
-            commands::lint::lint(&paths, ruleset.as_deref(), min_severity, text.format)
+            // Committed policy: design-class severity and per-rule
+            // overrides reach the CLI the same way they reach the editor.
+            let overrides = commands::lint::LintOverrides::from_config(
+                settings.lint.design.as_deref(),
+                &settings.lint.rules,
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            commands::lint::lint(
+                &paths,
+                ruleset.as_deref(),
+                min_severity,
+                &overrides,
+                text.format,
+            )
         }
         Command::Overlay { cmd } => commands::overlay::run(cmd),
         Command::Fmt {

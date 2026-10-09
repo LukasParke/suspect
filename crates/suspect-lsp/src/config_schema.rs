@@ -122,6 +122,7 @@ const fn field(
 }
 
 const SEVERITIES: &[&str] = &["error", "warning", "info", "hint"];
+const POLICY_SEVERITIES: &[&str] = &["error", "warning", "info", "hint", "off"];
 const DOC_STYLES: &[&str] = &["html", "markdown", "sveltekit"];
 
 /// `.suspect.yaml`.
@@ -215,10 +216,19 @@ const SETTINGS: &[Field] = &[
     field(
         "lint.rules",
         Kind::Map,
-        "Rule id → severity name (`error`, `warn`, `info`, `off`) overriding the \
+        "Rule id → severity name (`error`, `warn`, `info`, `hint`, `off`) overriding the \
          severity a rule would otherwise produce.",
         Some("{}"),
         &[],
+    ),
+    field(
+        "lint.design",
+        Kind::Str,
+        "Severity for design-class rules — findings that flag the API's design rather \
+         than the document's accuracy. A project documenting an API it does not own \
+         sets `off` (or `info` to keep them as notes); `lint.rules` wins per rule.",
+        None,
+        POLICY_SEVERITIES,
     ),
     field(
         "lint.recommended",
@@ -390,8 +400,8 @@ const PROJECT: &[Field] = &[
     field(
         "lint",
         Kind::Section,
-        "Lint policy for this project. CI reads `lint.min_severity` from here \
-         before falling back to `.suspect.yaml`.",
+        "Lint policy for this project. CI reads `lint.min_severity`, `lint.design` \
+         and `lint.rules` from here before falling back to `.suspect.yaml`.",
         None,
         &[],
     ),
@@ -405,11 +415,22 @@ const PROJECT: &[Field] = &[
     field(
         "lint.rules",
         Kind::Map,
-        "Rule id → severity name (`error`, `warn`, `info`, `off`) overriding the \
+        "Rule id → severity name (`error`, `warn`, `info`, `hint`, `off`) overriding the \
          severity a rule would otherwise produce. The editor's lint battery reads \
          these from the manifest.",
         Some("{}"),
         &[],
+    ),
+    field(
+        "lint.design",
+        Kind::Str,
+        "Severity for design-class rules — findings that flag the API's own design: \
+         the document is truthful and only the API's owner could change the \
+         behavior. Documenters who do not own the API set `off`, or `info` to keep \
+         them as notes. `lint.rules` wins per rule; `suspect lint` and CI honor \
+         both.",
+        None,
+        POLICY_SEVERITIES,
     ),
     field(
         "lint.ruleset",
@@ -1286,7 +1307,7 @@ codegen:
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(
             labels,
-            vec!["ruleset", "rules", "recommended"],
+            vec!["ruleset", "rules", "design", "recommended"],
             "{labels:?}"
         );
     }

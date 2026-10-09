@@ -321,7 +321,13 @@ fn lint_stage(manifest: &Path) -> StageResult {
         return stage("lint", 0, 0, 0, "no entry or published spec".to_owned());
     };
     let (ruleset, floor) = lint_policy(manifest);
-    let findings = match crate::commands::lint::lint_findings(&[spec], ruleset.as_deref(), floor) {
+    let overrides = lint_overrides(manifest);
+    let findings = match crate::commands::lint::lint_findings(
+        &[spec],
+        ruleset.as_deref(),
+        floor,
+        &overrides,
+    ) {
         Ok(findings) => findings,
         Err(error) => return stage("lint", 1, 1, 0, error.to_string()),
     };
@@ -380,6 +386,43 @@ fn lint_policy(manifest: &Path) -> (Option<PathBuf>, crate::output::Severity) {
         })
         .unwrap_or(crate::output::Severity::Hint);
     (ruleset, floor)
+}
+
+/// The project's lint policy beyond ruleset and floor: the design-class
+/// severity and per-rule overrides, from the manifest with the shared
+/// settings file as fallback — the same layering as the ruleset.
+///
+/// A committed policy naming an unknown severity should be loud; here the
+/// parse falls back to no overrides so the lint stage still reports the
+/// findings as-is (`suspect lint` names the bad value on direct runs).
+fn lint_overrides(manifest: &Path) -> crate::commands::lint::LintOverrides {
+    let declared: Option<serde_json::Value> = std::fs::read_to_string(manifest)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    let from_manifest = declared.as_ref().and_then(|value| value.get("lint"));
+    let (design, rules) = match from_manifest {
+        Some(lint) => (
+            lint.get("design")
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
+            lint.get("rules").and_then(|v| v.as_object()).map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_ascii_lowercase())))
+                    .collect::<std::collections::BTreeMap<String, String>>()
+            }),
+        ),
+        None => (None, None),
+    };
+    let settings = suspect_config::for_invocation(Some(manifest))
+        .map(|loaded| loaded.settings.lint)
+        .ok();
+    let design = design.or_else(|| settings.as_ref().and_then(|s| s.design.clone()));
+    let rules = rules
+        .or_else(|| settings.map(|s| s.rules))
+        .unwrap_or_default();
+    // A committed policy that names an unknown severity must be loud, not
+    // silently absent — the stage failure names the bad value.
+    crate::commands::lint::LintOverrides::from_config(design.as_deref(), &rules).unwrap_or_default()
 }
 
 /// Builds one project through the full pipeline, reporting as it goes.

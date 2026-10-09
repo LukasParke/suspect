@@ -51,6 +51,12 @@ pub struct LintSettings {
     pub ruleset: Option<PathBuf>,
     /// Minimum severity to report (`error`, `warning`, `info`, `hint`).
     pub min_severity: Option<String>,
+    /// Severity for design-class rules — findings the document cannot fix
+    /// without misdocumenting the API (`error`..`hint`, or `off`).
+    pub design: Option<String>,
+    /// Per-rule severity overrides: rule id → severity (`error`..`hint`,
+    /// or `off` to drop the rule). Wins over `design`.
+    pub rules: std::collections::BTreeMap<String, String>,
 }
 
 /// `validate:` settings.
@@ -125,6 +131,12 @@ impl Loaded {
         if let Some(severity) = &s.lint.min_severity {
             lines.push(format!("  lint.min_severity: {severity}"));
         }
+        if let Some(design) = &s.lint.design {
+            lines.push(format!("  lint.design: {design}"));
+        }
+        for (code, severity) in &s.lint.rules {
+            lines.push(format!("  lint.rules.{code}: {severity}"));
+        }
         if s.validate.strict_format {
             lines.push("  validate.strict_format: true".to_owned());
         }
@@ -187,6 +199,24 @@ impl Loaded {
                         .and_then(|l| l.get("min_severity"))
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_owned),
+                    design: lint
+                        .and_then(|l| l.get("design"))
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned),
+                    rules: lint
+                        .and_then(|l| l.get("rules"))
+                        .and_then(serde_json::Value::as_object)
+                        .map(|m| {
+                            m.iter()
+                                .filter_map(|(k, v)| {
+                                    v.as_str()
+                                        .filter(|s| !s.is_empty())
+                                        .map(|s| (k.clone(), s.to_ascii_lowercase()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
                 },
                 validate: crate::ValidateSettings {
                     strict_format: validate
@@ -210,6 +240,10 @@ impl Loaded {
         let u = upper.settings;
         s.lint.ruleset = u.lint.ruleset.or(s.lint.ruleset);
         s.lint.min_severity = u.lint.min_severity.or(s.lint.min_severity);
+        s.lint.design = u.lint.design.or(s.lint.design);
+        for (code, severity) in u.lint.rules {
+            s.lint.rules.insert(code, severity);
+        }
         s.validate.strict_format |= u.validate.strict_format;
         s.format.json |= u.format.json;
         s.format.yaml |= u.format.yaml;
@@ -265,6 +299,7 @@ mod tests {
                 lint: LintSettings {
                     ruleset: Some(PathBuf::from("rules.yaml")),
                     min_severity: Some("warning".to_owned()),
+                    ..LintSettings::default()
                 },
                 validate: ValidateSettings {
                     strict_format: true,
@@ -327,6 +362,77 @@ mod manifest_layer_tests {
     }
 
     #[test]
+    fn manifest_policy_carries_design_and_per_rule_overrides() {
+        let policy = serde_json::json!({
+            "lint": {
+                "design": "off",
+                "rules": {
+                    "security-rate-limit-documented": "info",
+                    "operation-operationId": "OFF"
+                }
+            }
+        });
+        let loaded = Loaded::from_manifest_policy(Path::new("/proj"), &policy);
+        assert_eq!(loaded.settings.lint.design.as_deref(), Some("off"));
+        // Severity names are normalized to lowercase; the map preserves
+        // every entry.
+        assert_eq!(
+            loaded
+                .settings
+                .lint
+                .rules
+                .get("security-rate-limit-documented"),
+            Some(&"info".to_owned())
+        );
+        assert_eq!(
+            loaded.settings.lint.rules.get("operation-operationId"),
+            Some(&"off".to_owned())
+        );
+        assert_eq!(loaded.settings.lint.rules.len(), 2);
+    }
+
+    #[test]
+    fn settings_file_overrides_the_manifest_design_layer_per_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = Loaded::from_manifest_policy(
+            dir.path(),
+            &serde_json::json!({"lint": {
+                "design": "off",
+                "rules": {"operation-operationId": "off", "info-contact": "hint"}
+            }}),
+        );
+        let upper = Loaded {
+            settings: Settings {
+                lint: crate::LintSettings {
+                    design: Some("info".to_owned()),
+                    rules: [(
+                        std::string::String::from("operation-operationId"),
+                        "error".to_owned(),
+                    )]
+                    .into_iter()
+                    .collect(),
+                    ..crate::LintSettings::default()
+                },
+                ..Settings::default()
+            },
+            path: None,
+            root: dir.path().to_path_buf(),
+        };
+        let layered = Loaded::layered(base, upper);
+        // The settings file wins for the keys it carries; the manifest's
+        // other per-rule entries survive.
+        assert_eq!(layered.settings.lint.design.as_deref(), Some("info"));
+        assert_eq!(
+            layered.settings.lint.rules.get("operation-operationId"),
+            Some(&"error".to_owned())
+        );
+        assert_eq!(
+            layered.settings.lint.rules.get("info-contact"),
+            Some(&"hint".to_owned())
+        );
+    }
+
+    #[test]
     fn settings_file_overrides_the_manifest_layer() {
         let dir = tempfile::tempdir().expect("tempdir");
         let base = Loaded::from_manifest_policy(
@@ -338,6 +444,7 @@ mod manifest_layer_tests {
                 lint: crate::LintSettings {
                     min_severity: Some("info".to_owned()),
                     ruleset: None,
+                    ..crate::LintSettings::default()
                 },
                 ..Settings::default()
             },

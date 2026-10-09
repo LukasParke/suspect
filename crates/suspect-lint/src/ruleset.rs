@@ -7,7 +7,7 @@ use suspect_low::{LowDoc, NodeRef, ValueKind};
 
 use crate::engine::{Linter, RulesetError};
 use crate::functions::{Casing, EnumValue, Function};
-use crate::rule::{FamilySet, Rule, Severity};
+use crate::rule::{Category, FamilySet, Rule, Severity};
 
 /// Compiles a ruleset document into a [`Linter`].
 ///
@@ -29,6 +29,7 @@ pub fn compile(doc: &LowDoc) -> Result<Linter, RulesetError> {
                 "spectral:oas" => crate::packs::oas::rules(),
                 "spectral:overlay" => crate::packs::overlay_arazzo::overlay_rules(),
                 "spectral:arazzo" => crate::packs::overlay_arazzo::arazzo_rules(),
+                "spectral:security" => crate::packs::security::rules(),
                 other => {
                     return Err(RulesetError::InvalidRuleset {
                         field: "extends".into(),
@@ -53,7 +54,15 @@ pub fn compile(doc: &LowDoc) -> Result<Linter, RulesetError> {
         }
         for entry in rules_node.entries() {
             let rule = parse_rule(entry.key, entry.value)?;
-            // A user rule with the same code overrides any extended builtin.
+            // A user rule with the same code overrides any extended builtin,
+            // inheriting its category — redefining a builtin's severity does
+            // not change whose concern the finding is.
+            let category = rules
+                .iter()
+                .find(|r| r.code == rule.code)
+                .map_or(crate::rule::Category::Document, |r| r.category);
+            let mut rule = rule;
+            rule.category = category;
             rules.retain(|r| r.code != rule.code);
             rules.push(rule);
         }
@@ -192,6 +201,7 @@ fn parse_rule(code: &str, node: Option<NodeRef<'_>>) -> Result<Rule, RulesetErro
         then,
         severity,
         formats,
+        category: Category::Document,
     })
 }
 
