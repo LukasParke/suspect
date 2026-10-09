@@ -37,10 +37,11 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tower::Layer as _;
 
 use suspect_ir::{IrSpec, Method};
 
-use suspect_journal::{Journal, Level, Redactor, TrafficRecord, Verdict};
+use suspect_journal::{Journal, Level, Redactor, TrafficRecord, Verdict, Violation};
 
 pub mod bridge;
 pub mod mock;
@@ -103,6 +104,18 @@ impl Mode {
             Mode::Replay { .. } => "replay",
         }
     }
+
+    /// Whether requests are forwarded to an upstream server. Off-spec
+    /// traffic (unknown paths, undeclared methods) is forwarded and
+    /// journaled in these modes rather than answered locally, so drift
+    /// shows up in the journal instead of a dead 404.
+    #[must_use]
+    pub fn proxies_upstream(&self) -> bool {
+        matches!(
+            self,
+            Mode::Proxy { .. } | Mode::Validate { .. } | Mode::Record { .. }
+        )
+    }
 }
 
 /// Deterministic fault injection knobs.
@@ -153,6 +166,10 @@ struct GatewayState {
     seq: AtomicU64,
     journal: Arc<tokio::sync::Mutex<Journal>>,
     mocks: HashMap<(Method, String), Vec<mock::CompiledResponse>>,
+    /// Normalized request path -> the spec's original path template. The
+    /// router normalizes trailing slashes, but the mock table and the
+    /// spec's operation indexes speak the spec's own spelling.
+    original_templates: HashMap<String, String>,
     /// Shared CRUD store for stateful mocking (`Mock` mode only).
     resources: stateful_mock::ResourceStore,
     replay: Option<ReplayIndex>,
@@ -169,10 +186,17 @@ pub async fn serve(
     cfg: GatewayConfig,
     journal: Arc<tokio::sync::Mutex<Journal>>,
 ) -> Result<(), String> {
-    let app = build_router(&cfg, Arc::clone(&journal)).await?;
+    let router = build_router(&cfg, Arc::clone(&journal)).await?;
     let listener = tokio::net::TcpListener::bind((HOST, cfg.port))
         .await
         .map_err(|e| format!("cannot bind {HOST}:{}: {e}", cfg.port))?;
+    // Trailing-slash normalization must run BEFORE routing: a request to
+    // `/library/sections/` has to meet the registered `/library/sections`
+    // route, not fall through to the off-spec handler. Wrapping the whole
+    // router service (not per-route layers, which run after matching).
+    let normalizer = axum::middleware::from_fn(normalize_request_path);
+    let app = normalizer.layer(router);
+    let app = axum::ServiceExt::<axum::extract::Request>::into_make_service(app);
     axum::serve(listener, app)
         .await
         .map_err(|e| format!("gateway server error: {e}"))
@@ -262,6 +286,14 @@ pub async fn build_router(
         }),
     ));
 
+    let original_templates: HashMap<String, String> = {
+        let mut map = HashMap::new();
+        for op in &spec.operations {
+            map.entry(normalize_trailing_slash(&op.path).to_owned())
+                .or_insert_with(|| op.path.clone());
+        }
+        map
+    };
     let router = router_for_state(Arc::new(GatewayState {
         resources: stateful_mock::ResourceStore::new(),
         spec: Arc::new(spec),
@@ -271,6 +303,7 @@ pub async fn build_router(
         seq: AtomicU64::new(0),
         journal,
         mocks,
+        original_templates,
         replay,
         recorder,
         redactor,
@@ -283,12 +316,52 @@ pub async fn build_router(
 
 /// Wires routes for every operation path (all declared methods per path)
 /// plus the fallback, all sharing one dispatch handler.
+/// One trailing slash is dropped (`/library/sections/` →
+/// `/library/sections`), except on the root path itself. Applied to
+/// both route registration and incoming requests, every spelling of a
+/// path meets one route — the way real servers behave (Plex serves both
+/// forms).
+fn normalize_trailing_slash(path: &str) -> &str {
+    if path.len() > 1 {
+        path.strip_suffix('/').unwrap_or(path)
+    } else {
+        path
+    }
+}
+
+/// Rewrites the request path so trailing-slash variants route to the
+/// same operation. Runs before routing, so mock, proxy, validate, and
+/// record all observe the normalized exchange.
+async fn normalize_request_path(
+    mut request: AxumRequest,
+    next: axum::middleware::Next,
+) -> Response {
+    let path = request.uri().path();
+    let normalized = normalize_trailing_slash(path);
+    if normalized != path {
+        let pq = request.uri().path_and_query().map_or_else(
+            || normalized.to_owned(),
+            |pq| {
+                let query = pq.query();
+                match query {
+                    Some(q) => format!("{normalized}?{q}"),
+                    None => normalized.to_owned(),
+                }
+            },
+        );
+        if let Ok(uri) = pq.parse() {
+            *request.uri_mut() = uri;
+        }
+    }
+    next.run(request).await
+}
+
 fn router_for_state(state: Arc<GatewayState>) -> Router {
     let mut paths: Vec<&str> = state
         .spec
         .operations
         .iter()
-        .map(|op| op.path.as_str())
+        .map(|op| normalize_trailing_slash(op.path.as_str()))
         .collect();
     paths.sort_unstable();
     paths.dedup();
@@ -401,22 +474,30 @@ async fn dispatch(
     process(&state, request, Some(matched.as_str())).await
 }
 
-/// Fallback handler: replay lookup in replay mode, else plain 404.
+/// Fallback handler: replay lookup in replay mode, and off-spec
+/// observation (forwarded upstream, journaled as drift) in the
+/// proxy-family modes; the mock answers a plain journaled 404.
 async fn fallback_dispatch(
     State(state): State<Arc<GatewayState>>,
     request: AxumRequest,
 ) -> Response {
-    if matches!(state.mode, Mode::Replay { .. }) {
+    if matches!(state.mode, Mode::Replay { .. }) || state.mode.proxies_upstream() {
         return process(&state, request, None).await;
     }
     process_not_found(&state, request).await
 }
 
-/// Handler for a matched path with no declared method: journaled 405.
+/// Handler for a matched path with no declared method: forwarded and
+/// journaled as off-spec drift in the proxy-family modes, journaled 405
+/// in the mock.
 async fn method_not_allowed(
     State(state): State<Arc<GatewayState>>,
+    matched: MatchedPath,
     request: AxumRequest,
 ) -> Response {
+    if state.mode.proxies_upstream() {
+        return process(&state, request, Some(matched.as_str())).await;
+    }
     process_rejection(
         &state,
         request,
@@ -435,6 +516,20 @@ async fn process(
     request: AxumRequest,
     template: Option<&str>,
 ) -> Response {
+    // The matched route speaks the normalized spelling; the mock table
+    // and the spec's indexes speak the spec's own. Translate once, and
+    // every downstream lookup is exact again.
+    let translated;
+    let template = match template {
+        Some(t) => match state.original_templates.get(t) {
+            Some(original) => {
+                translated = original.clone();
+                Some(translated.as_str())
+            }
+            None => Some(t),
+        },
+        None => None,
+    };
     let started = Instant::now();
     let method = request.method().as_str().to_owned();
     let target = request.uri().path_and_query().map_or_else(
@@ -513,7 +608,7 @@ async fn process(
         }
     }
 
-    let (response, violations) = match &state.mode {
+    let (response, verdict) = match &state.mode {
         Mode::Mock => {
             let ir_method = Method::from_key(method.to_ascii_lowercase().as_str());
             let compiled =
@@ -631,10 +726,12 @@ async fn process(
                     |c| mock::respond(c),
                 )
             };
-            (response, Vec::new())
+            (response, Verdict::Pass)
         }
         Mode::Proxy { upstream } => {
-            proxy::forward(upstream, &method, &target, &req_headers, body.clone()).await
+            let (response, violations) =
+                proxy::forward(upstream, &method, &target, &req_headers, body.clone()).await;
+            (response, verdict_of(violations))
         }
         Mode::Validate { upstream, enforce } => {
             let ir_method = Method::from_key(method.to_ascii_lowercase().as_str());
@@ -652,7 +749,7 @@ async fn process(
                         target: &target,
                         headers: &req_headers,
                     };
-                    proxy::validate_forward(
+                    let (response, violations) = proxy::validate_forward(
                         upstream,
                         op,
                         Arc::clone(&state.schemas),
@@ -660,16 +757,30 @@ async fn process(
                         body.clone(),
                         *enforce,
                     )
-                    .await
+                    .await;
+                    (response, verdict_of(violations))
                 }
-                None => (
-                    problem(
-                        StatusCode::NOT_FOUND,
-                        "Operation not found",
-                        Some(format!("{method} {target}")),
-                    ),
-                    Vec::new(),
-                ),
+                // An exchange that addressed no declared operation is a
+                // drift signal, not a dead request: forward it (the
+                // server's answer is part of the observation) and record
+                // off-spec violations the journal can report on.
+                None => {
+                    let (response, _violations) =
+                        proxy::forward(upstream, &method, &target, &req_headers, body.clone())
+                            .await;
+                    let off_spec = if template.is_some() {
+                        vec![Violation {
+                            message: format!("method {method} is not declared on this path"),
+                            pointer: String::new(),
+                        }]
+                    } else {
+                        vec![Violation {
+                            message: "path matches no declared operation".to_owned(),
+                            pointer: String::new(),
+                        }]
+                    };
+                    (response, Verdict::OffSpec(off_spec))
+                }
             }
         }
         Mode::Record { upstream, .. } => {
@@ -708,11 +819,11 @@ async fn process(
                             }
                         }
                     }
-                    (response, Vec::new())
+                    (response, Verdict::Pass)
                 }
                 Err(err) => (
                     problem(StatusCode::BAD_GATEWAY, "Bad gateway", Some(err)),
-                    Vec::new(),
+                    Verdict::Pass,
                 ),
             }
         }
@@ -721,15 +832,10 @@ async fn process(
                 || problem(StatusCode::NOT_FOUND, "No cassette loaded", None),
                 |index| replay::respond(index, &method, &target),
             );
-            (response, Vec::new())
+            (response, Verdict::Pass)
         }
     };
 
-    let verdict = if violations.is_empty() {
-        Verdict::Pass
-    } else {
-        Verdict::Invalid(violations)
-    };
     let exchange = Exchange {
         method: method.clone(),
         host: host.clone(),
@@ -741,6 +847,15 @@ async fn process(
     };
     journal_exchange(state, &exchange, verdict).await;
     response
+}
+
+/// Violations become the matching journal verdict; an empty set passes.
+fn verdict_of(violations: Vec<Violation>) -> Verdict {
+    if violations.is_empty() {
+        Verdict::Pass
+    } else {
+        Verdict::Invalid(violations)
+    }
 }
 
 /// Owned wire-level facts about one served exchange.

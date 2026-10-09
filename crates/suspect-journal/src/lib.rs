@@ -52,6 +52,11 @@ pub enum Verdict {
     Pass,
     /// Validation produced violations (request or response side).
     Invalid(Vec<Violation>),
+    /// The exchange addressed no declared operation — an unknown path, or
+    /// an undeclared method on a known path. In proxy-family modes the
+    /// exchange is still forwarded and observed, so spec drift shows up in
+    /// the journal instead of silently vanishing into a 404.
+    OffSpec(Vec<Violation>),
     /// Fault injection altered the exchange deliberately.
     Fault,
 }
