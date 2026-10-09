@@ -1258,6 +1258,13 @@ fn diff_media_schemas(
 
 /// Follows matching local `$ref`s on both sides (bounded), then applies the
 /// keyword-level narrowing rules and recurses into shared sub-schemas.
+/// The maximum structural recursion depth compared. Schemas reference
+/// schemas; a cyclic `$ref` (legal — `Metadata.children` is a tree) would
+/// otherwise recurse forever, and the per-call `$ref` hop bound cannot see
+/// across recursion levels. The cap keeps the comparison total while
+/// staying far deeper than any honest document nests.
+const DIFF_SCHEMA_DEPTH_CAP: u32 = 64;
+
 fn diff_schema(
     o: NodeRef<'_>,
     c: NodeRef<'_>,
@@ -1265,6 +1272,20 @@ fn diff_schema(
     ctx: &DiffCtx<'_>,
     out: &mut Vec<BreakingChange>,
 ) {
+    diff_schema_at(o, c, chain, ctx, out, 0);
+}
+
+fn diff_schema_at(
+    o: NodeRef<'_>,
+    c: NodeRef<'_>,
+    chain: String,
+    ctx: &DiffCtx<'_>,
+    out: &mut Vec<BreakingChange>,
+    depth: u32,
+) {
+    if depth > DIFF_SCHEMA_DEPTH_CAP {
+        return;
+    }
     let (o, c) = resolve_pair(o, c);
 
     // Type change (any change narrows some producers).
@@ -1366,19 +1387,19 @@ fn diff_schema(
         for pe in op.entries() {
             let Some(pv) = pe.value else { continue };
             if let Some(cpv) = cur_props.get(pe.key) {
-                diff_schema(pv, *cpv, format!("{chain}.{}", pe.key), ctx, out);
+                diff_schema_at(pv, *cpv, format!("{chain}.{}", pe.key), ctx, out, depth + 1);
             }
         }
     }
     if let (Some(oi), Some(ci)) = (o.get("items"), c.get("items")) {
-        diff_schema(oi, ci, format!("{chain}[]"), ctx, out);
+        diff_schema_at(oi, ci, format!("{chain}[]"), ctx, out, depth + 1);
     }
     if let (Some(oa), Some(ca)) = (o.get("allOf"), c.get("allOf"))
         && oa.kind() == ValueKind::Array
         && ca.kind() == ValueKind::Array
     {
         for (i, (ob, cb)) in oa.items().iter().zip(ca.items().iter()).enumerate() {
-            diff_schema(*ob, *cb, format!("{chain}.allOf[{i}]"), ctx, out);
+            diff_schema_at(*ob, *cb, format!("{chain}.allOf[{i}]"), ctx, out, depth + 1);
         }
     }
 }
@@ -2391,6 +2412,56 @@ paths:
                 (y.uri.as_str(), y.message.as_str())
             );
         }
+    }
+
+    // -- breaking (cycles) ---------------------------------------------------
+
+    #[test]
+    fn cyclic_schema_references_terminate() {
+        // Metadata.children items $ref Metadata — a legal, infinite tree.
+        // The comparison must terminate (depth-capped) instead of
+        // overflowing the stack, and still report real differences.
+        let dir = std::env::temp_dir().join("suspect-lsp-cmd-br-cycle");
+        std::fs::create_dir_all(&dir).unwrap();
+        let current = r#"openapi: 3.1.0
+info: {title: t, version: "1"}
+paths:
+  /tree:
+    get:
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metadata'
+components:
+  schemas:
+    Metadata:
+      type: object
+      required: [id]
+      properties:
+        id: {type: integer, minimum: 1}
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/Metadata'
+"#;
+        std::fs::write(dir.join("api.yaml"), current).unwrap();
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        ws.load_all("api.yaml").unwrap();
+        let ws = Arc::new(ws);
+        // Old revision: minimum relaxed — a narrowing the diff must find.
+        let mut old_text = current.to_owned();
+        old_text = old_text.replace("minimum: 1", "minimum: 0");
+        let uri = uri_ending(&ws, "api.yaml");
+        let mut old = HashMap::new();
+        old.insert(uri.as_str().to_owned(), old_text);
+        let changes = breaking_changes(&ws, &old);
+        assert!(
+            changes.iter().any(|c| c.message.contains("minimum")),
+            "the real narrowing is still reported: {changes:#?}"
+        );
     }
 
     // -- contract_coverage --------------------------------------------------
