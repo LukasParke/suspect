@@ -44,7 +44,19 @@ impl MediaType {
     }
     #[must_use]
     pub fn is_text(&self) -> bool {
-        matches!(&self.range, MediaRange::Concrete { type_name, .. } | MediaRange::Type { type_name } if type_name == "text")
+        match &self.range {
+            MediaRange::Concrete { type_name, .. } | MediaRange::Type { type_name } => {
+                type_name == "text"
+                    || matches!(
+                        &self.range,
+                        MediaRange::Concrete { type_name, subtype }
+                            if type_name == "application"
+                                && (subtype == "vnd.apple.mpegurl"
+                                    || subtype == "x-mpegurl")
+                    )
+            }
+            _ => false,
+        }
     }
     pub(super) fn essence(&self, name: &str) -> bool {
         match &self.range {
