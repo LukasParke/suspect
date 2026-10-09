@@ -8,6 +8,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+tower = { version = "0.5", features = ["util"] }
 suspect-source.workspace = true
 suspect-ref.workspace = true
 suspect-ir.workspace = true
@@ -27,7 +28,6 @@ rayon.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-tower = { version = "0.5", features = ["util"] }
 criterion.workspace = true
 
 [[bench]]

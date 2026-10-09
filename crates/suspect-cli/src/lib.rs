@@ -178,6 +178,38 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
+    /// Cross-reference recorded traffic against the spec: endpoints the
+    /// traffic exercised that the spec does not declare, undeclared query
+    /// parameters, and declared operations the traffic never touched.
+    Drift {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Traffic file: a Suspect Cassette (gateway `--mode record`) or a
+        /// Suspect Journal (gateway `--journal`); records are recognized
+        /// line by line.
+        traffic: PathBuf,
+        /// Query parameter names to ignore in gap analysis (repeatable);
+        /// the CI-passed auth token lives here, for instance.
+        #[arg(long = "ignore-param", value_name = "NAME")]
+        ignore_param: Vec<String>,
+        /// Exit with status 2 when the traffic addresses undeclared
+        /// endpoints or parameters.
+        #[arg(long)]
+        exit_on_gap: bool,
+        /// Output format for the drift report.
+        #[command(flatten)]
+        text: TextFormat,
+    },
+    /// Export recorded traffic as an HTTP Archive (HAR 1.2) — the
+    /// interchange format profiling and debugging tools read. Accepts a
+    /// Suspect Cassette or a Suspect Journal.
+    Har {
+        /// Traffic file: a Suspect Cassette or Suspect Journal.
+        traffic: PathBuf,
+        /// Write the archive here instead of stdout.
+        #[arg(long, short = 'o', value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
     /// Wall-clock micro-benchmark of the pipeline stages on one fixture.
     Bench {
         /// Fixture document.
@@ -636,6 +668,14 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             out_format,
         } => bundle::bundle(&input, output.as_deref(), strategy, out_format),
         Command::Diff { a, b, text } => diff::diff_files(&a, &b, text.format),
+        Command::Drift {
+            spec,
+            traffic,
+            ignore_param,
+            exit_on_gap,
+            text,
+        } => commands::drift::drift(&spec, &traffic, &ignore_param, exit_on_gap, text.format),
+        Command::Har { traffic, output } => commands::har::har(&traffic, output.as_deref()),
         Command::Bench {
             fixture,
             iters,
