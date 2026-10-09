@@ -160,7 +160,7 @@ fn compiles_operations_parameters_and_criteria() {
         create.success[0].kind,
         CriterionKind::Equals {
             pointer: None,
-            expected: serde_json::json!(201)
+            expected: crate::plan::Expected::Literal(serde_json::json!(201))
         }
     );
     assert!(matches!(
@@ -205,7 +205,7 @@ fn compiles_operations_parameters_and_criteria() {
         delete.success[0].kind,
         CriterionKind::Equals {
             pointer: None,
-            expected: serde_json::json!(204)
+            expected: crate::plan::Expected::Literal(serde_json::json!(204))
         }
     );
 }
@@ -1518,4 +1518,220 @@ fn injection_fills_empty_headers_but_never_overrides_values() {
         request.headers.iter().any(|(k, _)| k == "x-api-key"),
         "absent headers are added"
     );
+}
+
+/// Caller-provided input overrides beat the workflow's static
+/// `parameters`, and reach the wire.
+#[tokio::test(flavor = "multi_thread")]
+async fn input_overrides_beat_workflow_parameters() {
+    use crate::exec::run_plan_full;
+
+    let plan = compile_fixture();
+
+    // Baseline: the static parameter `userName: world` reaches the wire,
+    // the canned DELETE /users/world matches, all three steps pass.
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan_full(
+        &plan,
+        "http://api.test",
+        &canned_fixture_http(),
+        &crate::auth::AuthState::default(),
+        &crate::auth::AuthConfig::default(),
+        &serde_json::Map::new(),
+        None,
+        tx,
+    )
+    .await;
+    drop(drain(rx).await);
+    assert_eq!(summary.failed, 0, "static parameter satisfies the route");
+
+    // Override: `userName=override-user` must win over the static
+    // `world`, sending DELETE /users/override-user — which the canned
+    // transport names in its unmatched-request error.
+    let mut overrides = serde_json::Map::new();
+    overrides.insert(
+        "userName".to_owned(),
+        serde_json::Value::String("override-user".to_owned()),
+    );
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan_full(
+        &plan,
+        "http://api.test",
+        &canned_fixture_http(),
+        &crate::auth::AuthState::default(),
+        &crate::auth::AuthConfig::default(),
+        &overrides,
+        None,
+        tx,
+    )
+    .await;
+    let events = drain(rx).await;
+    assert_eq!(summary.failed, 1, "the overridden request misses the route");
+    assert!(
+        events
+            .iter()
+            .any(|e| format!("{e:?}").contains("override-user")),
+        "the override reached the wire: {events:?}"
+    );
+}
+
+/// A success criterion may compare a response field against an earlier
+/// step's output (`$steps.<id>.outputs.<name>`) or an input
+/// (`$inputs.<name>`) — resolved at run time, not treated as a literal.
+#[tokio::test(flavor = "multi_thread")]
+async fn criteria_reference_step_outputs_and_inputs() {
+    use crate::exec::run_plan_full;
+
+    const ARAZZO_REFS: &str = r#"
+arazzo: 1.0.0
+info:
+  title: refs
+  version: "1.0"
+sourceDescriptions:
+  - name: petstore
+    url: spec.yaml
+workflows:
+  - workflowId: ref-check
+    steps:
+      - stepId: create-pet
+        operationId: createPet
+        requestBody:
+          name: Rex
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        outputs:
+          petId: $response.body#/id
+      - stepId: verify-roundtrip
+        operationPath: 'GET /pets/{petId}'
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.create-pet.outputs.petId
+        successCriteria:
+          - condition: '$response.body#/id == $steps.create-pet.outputs.petId'
+          - condition: '$statusCode == $inputs.expectedStatus'
+"#;
+
+    let ws = workspace();
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("refs.arazzo.yaml"), ARAZZO_REFS).expect("write arazzo");
+    let arazzo = LowDoc::parse(
+        format!("file://{}", dir.path().join("refs.arazzo.yaml").display()).into(),
+        Source::from_vec(ARAZZO_REFS.as_bytes().to_vec()),
+    );
+    let plan = compile_plan(&arazzo, &ws).expect("compiles");
+
+    let http = CannedTransport::new()
+        .route(
+            Match {
+                method: Some("POST".to_owned()),
+                path_suffix: "/pets".to_owned(),
+            },
+            HttpResponse {
+                status: 201,
+                headers: Vec::new(),
+                body: Bytes::from(r#"{"id":"7","name":"Rex"}"#.to_owned()),
+            },
+        )
+        .route(
+            Match {
+                method: Some("GET".to_owned()),
+                path_suffix: "/pets/7".to_owned(),
+            },
+            HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: Bytes::from(r#"{"id":"7","name":"Rex"}"#.to_owned()),
+            },
+        );
+
+    let mut inputs = serde_json::Map::new();
+    inputs.insert(
+        "expectedStatus".to_owned(),
+        serde_json::Value::Number(200.into()),
+    );
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan_full(
+        &plan,
+        "http://api.test",
+        &http,
+        &crate::auth::AuthState::default(),
+        &crate::auth::AuthConfig::default(),
+        &inputs,
+        None,
+        tx,
+    )
+    .await;
+    drop(drain(rx).await);
+    assert_eq!(
+        summary.passed, 2,
+        "step-output and input references resolve at run time"
+    );
+    assert_eq!(summary.failed, 0);
+
+    // And the input reference is live: a wrong expectation fails the
+    // same criterion that just passed.
+    let mut wrong = serde_json::Map::new();
+    wrong.insert(
+        "expectedStatus".to_owned(),
+        serde_json::Value::Number(418.into()),
+    );
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan_full(
+        &plan,
+        "http://api.test",
+        &http,
+        &crate::auth::AuthState::default(),
+        &crate::auth::AuthConfig::default(),
+        &wrong,
+        None,
+        tx,
+    )
+    .await;
+    drop(drain(rx).await);
+    assert_eq!(summary.failed, 1, "the input value reached the criterion");
+}
+
+/// Arazzo success criteria support ordered comparisons
+/// (`>`, `>=`, `<`, `<=`) over body fields; the classic
+/// `$response.body#/MediaContainer/size > 0` pattern.
+#[test]
+fn ordered_comparisons_compile_and_classify() {
+    use crate::plan::parse_condition;
+
+    let crit = parse_condition("$response.body#/MediaContainer/size > 0").unwrap();
+    assert!(matches!(
+        crit,
+        crate::plan::CriterionKind::Compare {
+            comparison: crate::plan::Comparison::Greater,
+            bound: serde_json::Value::Number(_),
+            ..
+        }
+    ));
+
+    let crit = parse_condition("$response.body#/count >= 2").unwrap();
+    assert!(matches!(
+        crit,
+        crate::plan::CriterionKind::Compare {
+            comparison: crate::plan::Comparison::GreaterOrEqual,
+            ..
+        }
+    ));
+
+    // `>=` wins over `>` at the same position; `>` alone still parses.
+    let crit = parse_condition("$response.body#/x > 5").unwrap();
+    assert!(matches!(
+        crit,
+        crate::plan::CriterionKind::Compare {
+            comparison: crate::plan::Comparison::Greater,
+            ..
+        }
+    ));
+
+    // Operators inside the pointer fragment never split.
+    let crit = parse_condition("$response.body#/a>b == 1").unwrap();
+    assert!(matches!(
+        &crit,
+        crate::plan::CriterionKind::Equals { pointer, .. } if pointer.as_deref() == Some("/a>b")
+    ));
 }

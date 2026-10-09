@@ -30,12 +30,31 @@ pub fn test(
         arazzo,
         base_url,
         filter,
+        &serde_json::Map::new(),
         offline_cassette,
         ndjson,
         None,
         None,
         None,
     )
+}
+
+/// Parses `--input name=value` flags into a workflow input map: each value
+/// is parsed as JSON when it parses, else taken as a string.
+pub fn parse_inputs(raw: &[String]) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
+    let mut out = serde_json::Map::new();
+    for item in raw {
+        let Some((name, value)) = item.split_once('=') else {
+            return Err(anyhow::anyhow!("--input expects NAME=VALUE, got {item:?}"));
+        };
+        if name.is_empty() {
+            return Err(anyhow::anyhow!("--input expects NAME=VALUE, got {item:?}"));
+        }
+        let parsed = serde_json::from_str(value)
+            .unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
+        out.insert(name.to_owned(), parsed);
+    }
+    Ok(out)
 }
 
 /// [`test`] with an optional message broker directory for Arazzo 1.1
@@ -47,6 +66,7 @@ pub fn test_with_messages(
     arazzo: &Path,
     base_url: &str,
     filter: Option<&str>,
+    inputs: &serde_json::Map<String, serde_json::Value>,
     offline_cassette: Option<&Path>,
     ndjson: bool,
     message_broker: Option<&Path>,
@@ -98,6 +118,7 @@ pub fn test_with_messages(
     rt_run(
         &plan,
         base_url,
+        inputs,
         offline_cassette,
         ndjson,
         message_broker,
@@ -110,6 +131,7 @@ pub fn test_with_messages(
 fn rt_run(
     plan: &suspect_test::Plan,
     base_url: &str,
+    inputs: &serde_json::Map<String, serde_json::Value>,
     offline_cassette: Option<&Path>,
     ndjson: bool,
     message_broker: Option<&Path>,
@@ -160,6 +182,7 @@ fn rt_run(
             http.as_ref(),
             &auth_state,
             auth,
+            inputs,
             broker.as_deref(),
             tx,
         )

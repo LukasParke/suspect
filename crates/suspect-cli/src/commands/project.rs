@@ -111,6 +111,8 @@ pub struct ProjectTests {
     /// Credentials file for the security schemes the suites exercise
     /// (default: discovered `.suspect/credentials.json`).
     pub credentials: Option<PathBuf>,
+    /// Workflow inputs supplied to every declared suite: name → value.
+    pub inputs: serde_json::Map<String, serde_json::Value>,
 }
 
 /// `suspect project` subcommands.
@@ -304,6 +306,11 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                 .and_then(|v| v.as_str())
                 .map(resolve),
             credentials: t.get("credentials").and_then(|v| v.as_str()).map(resolve),
+            inputs: t
+                .get("inputs")
+                .and_then(|v| v.as_object())
+                .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+                .unwrap_or_default(),
         })
     });
 
@@ -654,6 +661,7 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
                 arazzo,
                 &tests.base_url,
                 None,
+                &tests.inputs,
                 tests.cassette.as_deref(),
                 false,
                 tests.message_broker.as_deref(),

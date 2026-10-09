@@ -220,6 +220,7 @@ pub async fn run_plan_with_messages(
         http,
         &crate::auth::AuthState::default(),
         &crate::auth::AuthConfig::default(),
+        &serde_json::Map::new(),
         messages,
         events,
     )
@@ -236,7 +237,17 @@ pub async fn run_plan_with_auth(
     auth_config: &crate::auth::AuthConfig,
     events: mpsc::Sender<TestEvent>,
 ) -> RunSummary {
-    run_plan_full(plan, base_url, http, auth_state, auth_config, None, events).await
+    run_plan_full(
+        plan,
+        base_url,
+        http,
+        auth_state,
+        auth_config,
+        &serde_json::Map::new(),
+        None,
+        events,
+    )
+    .await
 }
 
 /// The full entry point: auth state + config + a message transport, for
@@ -249,6 +260,7 @@ pub async fn run_plan_with_auth_and_messages(
     http: &dyn HttpClient,
     auth_state: &crate::auth::AuthState,
     auth_config: &crate::auth::AuthConfig,
+    inputs: &serde_json::Map<String, serde_json::Value>,
     messages: Option<&dyn crate::messaging::MessageTransport>,
     events: mpsc::Sender<TestEvent>,
 ) -> RunSummary {
@@ -258,6 +270,7 @@ pub async fn run_plan_with_auth_and_messages(
         http,
         auth_state,
         auth_config,
+        inputs,
         messages,
         events,
     )
@@ -273,6 +286,7 @@ pub async fn run_plan_full(
     http: &dyn HttpClient,
     auth_state: &crate::auth::AuthState,
     auth_config: &crate::auth::AuthConfig,
+    inputs: &serde_json::Map<String, serde_json::Value>,
     messages: Option<&dyn crate::messaging::MessageTransport>,
     events: mpsc::Sender<TestEvent>,
 ) -> RunSummary {
@@ -290,6 +304,7 @@ pub async fn run_plan_full(
             http,
             auth_state,
             auth_config,
+            inputs,
             &plan.components,
             messages,
             events.clone(),
@@ -338,6 +353,7 @@ async fn run_workflow(
     http: &dyn HttpClient,
     auth_state: &crate::auth::AuthState,
     auth_config: &crate::auth::AuthConfig,
+    input_overrides: &serde_json::Map<String, serde_json::Value>,
     components: &std::collections::BTreeMap<String, serde_json::Value>,
     messages: Option<&dyn crate::messaging::MessageTransport>,
     events: mpsc::Sender<TestEvent>,
@@ -353,8 +369,14 @@ async fn run_workflow(
     // Step outputs keyed by stepId; each value is that step's outputs object.
     let mut steps_outputs = serde_json::Map::<String, serde_json::Value>::new();
 
-    // Apply schema-declared defaults for inputs not explicitly provided.
-    let mut effective_inputs = wf.inputs.clone();
+    // Inputs, most specific first: caller-provided overrides, then the
+    // workflow's static `parameters`, then schema-declared defaults.
+    let mut effective_inputs = input_overrides.clone();
+    for (key, value) in &wf.inputs {
+        effective_inputs
+            .entry(key.clone())
+            .or_insert_with(|| value.clone());
+    }
     for (key, default_val) in &wf.input_defaults {
         effective_inputs
             .entry(key.clone())
@@ -668,7 +690,11 @@ async fn evaluate_response(
 
     let mut all_ok = true;
     for crit in &step.success {
-        match eval_criterion(&crit.kind, response.status, body_json.as_ref(), &body_text) {
+        // Runtime-expectation criteria resolve their right-hand side
+        // against the run state first (`$steps.<id>.outputs.<name>`,
+        // `$inputs.<name>`), then evaluate as ordinary equality.
+        let resolved = resolve_criterion(&crit.kind, inputs, steps_outputs);
+        match eval_criterion(&resolved, response.status, body_json.as_ref(), &body_text) {
             Ok(()) => {
                 send(
                     events,
@@ -725,6 +751,40 @@ async fn evaluate_response(
         }
     }
     StepOutcome::Passed(captured)
+}
+
+/// Resolves an equality criterion's runtime expectations against the run
+/// state: `$steps.<id>.outputs.<name>` and `$inputs.<name>` become the
+/// referenced values (or `null` when absent). Literals pass through
+/// untouched, as do non-equality criteria.
+fn resolve_criterion(
+    crit: &CriterionKind,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    steps_outputs: &serde_json::Map<String, serde_json::Value>,
+) -> CriterionKind {
+    let CriterionKind::Equals { pointer, expected } = crit else {
+        return crit.clone();
+    };
+    let expected = match expected {
+        crate::plan::Expected::Literal(value) => {
+            return CriterionKind::Equals {
+                pointer: pointer.clone(),
+                expected: crate::plan::Expected::Literal(value.clone()),
+            };
+        }
+        crate::plan::Expected::StepOutput { step, name } => steps_outputs
+            .get(step)
+            .and_then(|outputs| outputs.get(name))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+        crate::plan::Expected::Input(name) => {
+            inputs.get(name).cloned().unwrap_or(serde_json::Value::Null)
+        }
+    };
+    CriterionKind::Equals {
+        pointer: pointer.clone(),
+        expected: crate::plan::Expected::Literal(expected),
+    }
 }
 
 /// Materializes a send payload: string leaves starting with `$` are
@@ -1135,7 +1195,11 @@ async fn run_step(
         .await;
     }
     for crit in &step.success {
-        match eval_criterion(&crit.kind, response.status, body_json.as_ref(), &body_text) {
+        // Runtime-expectation criteria resolve their right-hand side
+        // against the run state first (`$steps.<id>.outputs.<name>`,
+        // `$inputs.<name>`), then evaluate as ordinary equality.
+        let resolved = resolve_criterion(&crit.kind, inputs, steps_outputs);
+        match eval_criterion(&resolved, response.status, body_json.as_ref(), &body_text) {
             Ok(()) => {
                 send(
                     events,
@@ -1222,21 +1286,29 @@ fn eval_criterion(
                 Err((crit.describe(), status.to_string()))
             }
         }
-        CriterionKind::Equals { pointer, expected } => match pointer {
-            None if expected.as_u64() == Some(u64::from(status)) => Ok(()),
-            None => Err((expected.to_string(), status.to_string())),
-            Some(pointer) => match resolve_pointer(body_json, pointer) {
-                Some(actual) if actual == expected => Ok(()),
-                Some(actual) => Err((
-                    format!("{pointer} == {expected}"),
-                    format!("{pointer} == {actual}"),
-                )),
-                None => Err((
-                    format!("{pointer} == {expected}"),
-                    format!("{pointer} <missing>"),
-                )),
-            },
-        },
+        CriterionKind::Equals { pointer, expected } => {
+            // Runtime expectations are resolved against the run state
+            // before evaluation; only literals reach here.
+            let expected = match expected {
+                crate::plan::Expected::Literal(value) => value,
+                _ => &serde_json::Value::Null,
+            };
+            match pointer {
+                None if expected.as_u64() == Some(u64::from(status)) => Ok(()),
+                None => Err((expected.to_string(), status.to_string())),
+                Some(pointer) => match resolve_pointer(body_json, pointer) {
+                    Some(actual) if actual == expected => Ok(()),
+                    Some(actual) => Err((
+                        format!("{pointer} == {expected}"),
+                        format!("{pointer} == {actual}"),
+                    )),
+                    None => Err((
+                        format!("{pointer} == {expected}"),
+                        format!("{pointer} <missing>"),
+                    )),
+                },
+            }
+        }
         CriterionKind::NotNull { pointer } => match resolve_pointer(body_json, pointer) {
             Some(serde_json::Value::Null) | None => Err((
                 format!("{pointer} != null"),
@@ -1252,6 +1324,44 @@ fn eval_criterion(
             )),
             Err(e) => Err((format!("body =~ /{pattern}/"), e.to_string())),
         },
+        CriterionKind::Compare {
+            pointer,
+            comparison,
+            bound,
+        } => {
+            let render = |actual: &str| {
+                (
+                    format!("body{pointer} {} {bound}", comparison.sign()),
+                    format!("body{pointer} = {actual}"),
+                )
+            };
+            let Some(actual) = resolve_pointer(body_json, pointer) else {
+                return Err(render("<missing>"));
+            };
+            // Numbers compare numerically; strings lexicographically;
+            // anything else cannot be ordered.
+            let ordered = match (actual, bound) {
+                (serde_json::Value::Number(a), serde_json::Value::Number(b)) => a
+                    .as_f64()
+                    .zip(b.as_f64())
+                    .map(|(a, b)| comparison.holds(a, b)),
+                (serde_json::Value::String(a), serde_json::Value::String(b)) => {
+                    Some(comparison.holds(a, b))
+                }
+                _ => None,
+            };
+            match ordered {
+                Some(true) => Ok(()),
+                Some(false) => {
+                    let (expected_render, actual_render) = render(&actual.to_string());
+                    Err((expected_render, actual_render))
+                }
+                None => Err((
+                    format!("body{pointer} {} {bound}", comparison.sign()),
+                    format!("body{pointer} = {actual} (not orderable with {bound})"),
+                )),
+            }
+        }
         CriterionKind::JsonPathTrue { expr } => {
             let pointer = crate::plan::fragment_to_pointer(expr);
             match resolve_pointer(body_json, &pointer) {

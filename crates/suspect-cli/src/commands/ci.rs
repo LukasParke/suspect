@@ -661,6 +661,12 @@ fn test_stage(manifest: &Path) -> StageResult {
         .get("base_url")
         .and_then(|v| v.as_str())
         .unwrap_or("http://127.0.0.1:8080");
+    // Declared workflow inputs: name → value, supplied to every suite.
+    let inputs: serde_json::Map<String, serde_json::Value> = tests
+        .get("inputs")
+        .and_then(|v| v.as_object())
+        .map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
     let mut failed = 0usize;
     for entry in arazzo {
         let Some(path) = entry.as_str() else {
@@ -683,6 +689,7 @@ fn test_stage(manifest: &Path) -> StageResult {
             &dir.join(path),
             base_url,
             None,
+            &inputs,
             cassette.as_deref(),
             false,
             broker.as_deref(),
