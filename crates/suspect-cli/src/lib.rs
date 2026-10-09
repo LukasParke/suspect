@@ -240,6 +240,11 @@ pub enum Command {
         /// Run only workflows whose id contains this substring.
         #[arg(long)]
         filter: Option<String>,
+        /// Provide a workflow input: `--input name=value` (repeatable).
+        /// The value is parsed as JSON when it parses, else taken as a
+        /// string; applies to every workflow that declares the input.
+        #[arg(long = "input", value_name = "NAME=VALUE")]
+        inputs: Vec<String>,
         /// Run offline against a recorded Suspect Cassette instead of live HTTP.
         #[arg(long, requires = "offline")]
         cassette: Option<PathBuf>,
@@ -690,6 +695,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             arazzo,
             base_url,
             filter,
+            inputs,
             cassette,
             offline: _,
             report,
@@ -700,6 +706,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             &arazzo,
             &base_url,
             filter.as_deref(),
+            &commands::test::parse_inputs(&inputs)?,
             cassette.as_deref(),
             matches!(report, ReportFormat::Ndjson),
             message_broker.as_deref(),

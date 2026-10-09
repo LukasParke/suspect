@@ -193,8 +193,10 @@ pub enum CriterionKind {
     Equals {
         /// Body pointer (`"/a/b"`), or `None` for the status code.
         pointer: Option<String>,
-        /// Expected value.
-        expected: serde_json::Value,
+        /// Expected value: a literal, or a runtime expression
+        /// (`$steps.<id>.outputs.<name>`, `$inputs.<name>`) resolved
+        /// against the run state at execution time.
+        expected: Expected,
     },
     /// The value at a body pointer exists and is not `null`.
     NotNull {
@@ -206,6 +208,16 @@ pub enum CriterionKind {
         /// Regular-expression source.
         pattern: String,
     },
+    /// Ordered numeric comparison of the value at a body pointer against
+    /// a literal bound: `$response.body#/MediaContainer/size > 0`.
+    Compare {
+        /// RFC 6901 body pointer (`"/a/b"`).
+        pointer: String,
+        /// The comparison to apply.
+        comparison: Comparison,
+        /// The literal right-hand side.
+        bound: serde_json::Value,
+    },
     /// An existence-style check over a dot-notation body fragment kept raw
     /// from the condition (e.g. `"pets[0].name"`); passes when the fragment
     /// resolves to a non-null value in the parsed response body.
@@ -216,6 +228,72 @@ pub enum CriterionKind {
     /// Criterion that always passes (e.g. `$inputs.x != null` when the
     /// executor doesn't track optional input presence).
     AlwaysTrue,
+}
+
+/// The right-hand side of an equality criterion: a literal parsed from
+/// the condition text, or a runtime expression resolved against the run
+/// state at execution time (Arazzo success criteria may reference
+/// earlier step outputs and workflow inputs).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expected {
+    /// A JSON literal from the condition text.
+    Literal(serde_json::Value),
+    /// `$steps.<stepId>.outputs.<name>` — the named output of a
+    /// completed step.
+    StepOutput {
+        /// The referenced step's id.
+        step: String,
+        /// The referenced output's name.
+        name: String,
+    },
+    /// `$inputs.<name>` — the workflow's effective input value.
+    Input(String),
+}
+
+impl std::fmt::Display for Expected {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Literal(value) => write!(f, "{value}"),
+            Self::StepOutput { step, name } => write!(f, "$steps.{step}.outputs.{name}"),
+            Self::Input(name) => write!(f, "$inputs.{name}"),
+        }
+    }
+}
+
+/// The ordered comparisons Arazzo success criteria support.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Comparison {
+    /// `>`
+    Greater,
+    /// `>=`
+    GreaterOrEqual,
+    /// `<`
+    Less,
+    /// `<=`
+    LessOrEqual,
+}
+
+impl Comparison {
+    /// The operator's source spelling.
+    pub fn sign(self) -> &'static str {
+        match self {
+            Self::Greater => ">",
+            Self::GreaterOrEqual => ">=",
+            Self::Less => "<",
+            Self::LessOrEqual => "<=",
+        }
+    }
+
+    /// Applies the comparison to two ordered values (numbers, or strings
+    /// compared lexicographically).
+    pub fn holds<T: PartialOrd>(self, left: T, right: T) -> bool {
+        match self {
+            Self::Greater => left > right,
+            Self::GreaterOrEqual => left >= right,
+            Self::Less => left < right,
+            Self::LessOrEqual => left <= right,
+        }
+    }
 }
 
 impl CriterionKind {
@@ -235,6 +313,11 @@ impl CriterionKind {
             } => format!("body{p} == {expected}"),
             Self::NotNull { pointer } => format!("body{pointer} != null"),
             Self::Regex { pattern } => format!("body =~ /{pattern}/"),
+            Self::Compare {
+                pointer,
+                comparison,
+                bound,
+            } => format!("body{pointer} {} {bound}", comparison.sign()),
             Self::JsonPathTrue { expr } => format!("body#/{expr} exists"),
             Self::AlwaysTrue => "always passes".to_owned(),
         }
@@ -247,6 +330,7 @@ impl CriterionKind {
                 pointer: Some(p), ..
             } => out.push(p.clone()),
             Self::NotNull { pointer } => out.push(pointer.clone()),
+            Self::Compare { pointer, .. } => out.push(pointer.clone()),
             _ => {}
         }
     }
@@ -946,6 +1030,14 @@ enum Op {
     Ne,
     /// `/=` (regular-expression match)
     Re,
+    /// `>=`
+    Ge,
+    /// `<=`
+    Le,
+    /// `>`
+    Gt,
+    /// `<`
+    Lt,
 }
 
 /// LHS target of a criterion condition.
@@ -973,7 +1065,7 @@ enum Target {
 /// A declared `type: jsonpath` does not change the comparison shapes: with
 /// an operator present the criterion compares; only operator-less body
 /// conditions become [`CriterionKind::JsonPathTrue`].
-fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
+pub(crate) fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
     let trimmed = condition.trim();
     let Some((lhs, op, rhs)) = split_op(trimmed) else {
         // Operator-less conditions exist only as body-existence checks.
@@ -1007,15 +1099,18 @@ fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
         ))),
         (Target::Status, Op::Eq) => Ok(CriterionKind::Equals {
             pointer: None,
-            expected: literal_value(rhs),
+            expected: expected_value(rhs),
         }),
         (Target::Status, Op::Re) => Ok(status_range_or_regex(regex_pattern(rhs))),
         (Target::Status, Op::Ne) => Err(CompileError(format!(
             "unsupported success criterion: '{condition}'"
         ))),
+        (Target::Status, Op::Ge | Op::Le | Op::Gt | Op::Lt) => Err(CompileError(format!(
+            "unsupported success criterion: '{condition}' (ordered comparisons address body fields)"
+        ))),
         (Target::Body(pointer), Op::Eq) => Ok(CriterionKind::Equals {
             pointer: Some(pointer),
-            expected: literal_value(rhs),
+            expected: expected_value(rhs),
         }),
         (Target::Body(pointer), Op::Ne) if rhs.trim() == "null" => {
             Ok(CriterionKind::NotNull { pointer })
@@ -1026,6 +1121,26 @@ fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
         (Target::Body(_), Op::Re) => Ok(CriterionKind::Regex {
             pattern: regex_pattern(rhs),
         }),
+        (Target::Body(pointer), Op::Gt) => Ok(CriterionKind::Compare {
+            pointer,
+            comparison: Comparison::Greater,
+            bound: literal_value(rhs),
+        }),
+        (Target::Body(pointer), Op::Ge) => Ok(CriterionKind::Compare {
+            pointer,
+            comparison: Comparison::GreaterOrEqual,
+            bound: literal_value(rhs),
+        }),
+        (Target::Body(pointer), Op::Lt) => Ok(CriterionKind::Compare {
+            pointer,
+            comparison: Comparison::Less,
+            bound: literal_value(rhs),
+        }),
+        (Target::Body(pointer), Op::Le) => Ok(CriterionKind::Compare {
+            pointer,
+            comparison: Comparison::LessOrEqual,
+            bound: literal_value(rhs),
+        }),
     }
 }
 
@@ -1034,8 +1149,16 @@ fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
 /// `$response.body#/...` fragment never yield split points.
 fn split_op(cond: &str) -> Option<(&str, Op, &str)> {
     let frag_start = cond.find("#/");
-    let mut best: Option<(usize, Op)> = None;
-    for (needle, op) in [("==", Op::Eq), ("!=", Op::Ne), ("/=", Op::Re)] {
+    let mut best: Option<(usize, Op, usize)> = None;
+    for (needle, op) in [
+        ("==", Op::Eq),
+        ("!=", Op::Ne),
+        ("/=", Op::Re),
+        (">=", Op::Ge),
+        ("<=", Op::Le),
+        (">", Op::Gt),
+        ("<", Op::Lt),
+    ] {
         let mut from = 0;
         while let Some(rel) = cond[from..].find(needle) {
             let idx = from + rel;
@@ -1043,14 +1166,17 @@ fn split_op(cond: &str) -> Option<(&str, Op, &str)> {
             if in_pointer_text(frag_start, cond, idx) {
                 continue;
             }
-            if best.as_ref().is_none_or(|(i, _)| idx < *i) {
-                best = Some((idx, op));
+            let better = best
+                .as_ref()
+                .is_none_or(|(i, _, w)| idx < *i || (idx == *i && needle.len() > *w));
+            if better {
+                best = Some((idx, op, needle.len()));
                 break;
             }
         }
     }
-    let (idx, op) = best?;
-    Some((cond[..idx].trim(), op, cond[idx + 2..].trim()))
+    let (idx, op, width) = best?;
+    Some((cond[..idx].trim(), op, cond[idx + width..].trim()))
 }
 
 /// True when operator position `idx` sits inside the contiguous (whitespace-
@@ -1159,6 +1285,28 @@ fn literal_value(rhs: &str) -> serde_json::Value {
     serde_json::Value::String(inner.unwrap_or(rhs).to_owned())
 }
 
+/// Parses an equality RHS: a runtime expression reference
+/// (`$steps.<id>.outputs.<name>`, `$inputs.<name>`) or a JSON literal.
+fn expected_value(rhs: &str) -> Expected {
+    let rhs = rhs.trim();
+    if let Some(rest) = rhs.strip_prefix("$steps.")
+        && let Some((step, name)) = rest.split_once(".outputs.")
+        && !step.is_empty()
+        && !name.is_empty()
+    {
+        return Expected::StepOutput {
+            step: step.to_owned(),
+            name: name.trim().to_owned(),
+        };
+    }
+    if let Some(name) = rhs.strip_prefix("$inputs.")
+        && !name.is_empty()
+    {
+        return Expected::Input(name.trim().to_owned());
+    }
+    Expected::Literal(literal_value(rhs))
+}
+
 impl StepPlan {
     /// Declared responses as the shared contract runtime consumes them:
     /// status plus the component name each response's schema resolves to.
@@ -1205,7 +1353,7 @@ mod tests {
             crit,
             CriterionKind::Equals {
                 pointer: Some("/count".to_owned()),
-                expected: serde_json::json!(3),
+                expected: Expected::Literal(serde_json::json!(3)),
             }
         );
     }
@@ -1251,7 +1399,7 @@ mod tests {
             plan.workflows[0].steps[0].success[0].kind,
             CriterionKind::Equals {
                 pointer: Some("/count".to_owned()),
-                expected: serde_json::json!(3),
+                expected: Expected::Literal(serde_json::json!(3)),
             }
         );
     }

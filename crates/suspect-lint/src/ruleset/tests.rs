@@ -392,6 +392,51 @@ fn unused_security_schemes_are_name_referenced() {
     // distinguishable by message context in the full battery.)
 }
 
+/// A `$ref` to a component parameter declares that parameter exactly as
+/// its inline twin would — the check resolves local component pointers.
+#[test]
+fn path_params_resolve_component_refs() {
+    let linter = Linter::spectral_default();
+    let target = "openapi: \"3.0.0\"\n\
+                  info:\n  title: t\n  version: \"1\"\n\
+                  paths:\n\
+                  \x20 /{transcodeType}/:/transcode/decision:\n\
+                  \x20   get:\n\
+                  \x20     parameters:\n\
+                  \x20       - $ref: '#/components/parameters/transcodeType'\n\
+                  \x20     responses:\n\
+                  \x20       '200':\n\
+                  \x20         description: ok\n\
+                  \x20 /{transcodeType}/:/transcode/raw:\n\
+                  \x20   get:\n\
+                  \x20     parameters:\n\
+                  \x20       - name: token\n\
+                  \x20         in: header\n\
+                  \x20         schema:\n\
+                  \x20           type: string\n\
+                  \x20     responses:\n\
+                  \x20       '200':\n\
+                  \x20         description: ok\n\
+                  components:\n\
+                  \x20 parameters:\n\
+                  \x20   transcodeType:\n\
+                  \x20     name: transcodeType\n\
+                  \x20     in: path\n\
+                  \x20     required: true\n\
+                  \x20     schema:\n\
+                  \x20       type: string\n";
+    let hits = run(&linter, target);
+    let findings: Vec<_> = hits.iter().filter(|h| h.code == "path-params").collect();
+    // Only the second path — which declares a header instead of the path
+    // template variable — is a finding; the $ref on the first satisfies
+    // the declaration.
+    assert_eq!(findings.len(), 1, "only the undeclared one flags: {hits:?}");
+    assert!(
+        findings[0].message.contains("raw"),
+        "the finding names the undeclared path: {findings:?}"
+    );
+}
+
 /// The root path `/` is the only legal trailing slash; everything else
 /// with a trailing slash is a finding.
 #[test]
