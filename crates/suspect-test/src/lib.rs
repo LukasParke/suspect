@@ -50,6 +50,6 @@ pub use exec::{
 };
 pub use messaging::{FileBroker, LoopbackBroker, Message, MessageError, MessageTransport};
 pub use plan::{
-    CompileError, CriterionKind, CriterionPlan, MessageDirection, MessageStep, OpKey, Plan,
-    StepParam, StepPlan, WfPlan, compile_plan,
+    Comparison, CompileError, CriterionKind, CriterionPlan, Expected, MessageDirection,
+    MessageStep, OpKey, Plan, StepParam, StepPlan, WfPlan, compile_plan,
 };

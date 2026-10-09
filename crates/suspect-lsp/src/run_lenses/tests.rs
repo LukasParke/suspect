@@ -81,7 +81,7 @@ fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
             success: vec![suspect_test::CriterionPlan {
                 kind: suspect_test::CriterionKind::Equals {
                     pointer: None,
-                    expected: serde_json::json!(201),
+                    expected: suspect_test::Expected::Literal(serde_json::json!(201)),
                 },
                 range,
             }],
