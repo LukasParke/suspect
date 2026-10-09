@@ -490,3 +490,113 @@ fn injection_fills_a_credential_parameter_left_empty_by_a_missing_input() {
         "the credential fills the empty parameter; the header carries no Bearer prefix"
     );
 }
+
+#[test]
+fn env_file_supplies_the_env_values_the_credentials_reference() {
+    let (url, saw) = spawn_server();
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_suite(dir.path());
+    // The credentials reference an env var; the `.suspect/.env` file
+    // supplies it; the process environment does NOT — proving the file
+    // is the source.
+    write_credentials(
+        dir.path(),
+        serde_json::json!({
+            "auth": {"schemes": {"tokenAuth": {"kind": "apiKey", "name": "X-Plex-Token", "value": "${FILE_SUPPLIED_TOKEN}"}}}
+        }),
+    );
+    std::fs::write(
+        dir.path().join(".suspect/.env"),
+        "FILE_SUPPLIED_TOKEN=env-file-secret\n",
+    )
+    .expect("env file");
+    let output = suspect()
+        .current_dir(dir.path())
+        .arg("test")
+        .arg("check.yaml")
+        .args(["--base-url", &url])
+        .env_remove("FILE_SUPPLIED_TOKEN")
+        .output()
+        .expect("run");
+    assert!(
+        output.status.success(),
+        "the env file supplies the credential: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        saw.bearer_headers.lock().unwrap().clone(),
+        ["env-file-secret".to_owned()],
+        "the value came from the env file"
+    );
+}
+
+#[test]
+fn repo_root_env_file_also_supplies_credentials() {
+    let (url, saw) = spawn_server();
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_suite(dir.path());
+    write_credentials(
+        dir.path(),
+        serde_json::json!({
+            "auth": {"schemes": {"tokenAuth": {"kind": "apiKey", "name": "X-Plex-Token", "value": "${REPO_ENV_TOKEN}"}}}
+        }),
+    );
+    // The universal convention: repo-root .env, NOT inside .suspect/.
+    std::fs::write(dir.path().join(".env"), "REPO_ENV_TOKEN=repo-root-secret\n").expect("env file");
+    let output = suspect()
+        .current_dir(dir.path())
+        .arg("test")
+        .arg("check.yaml")
+        .args(["--base-url", &url])
+        .env_remove("REPO_ENV_TOKEN")
+        .output()
+        .expect("run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        saw.bearer_headers.lock().unwrap().clone(),
+        ["repo-root-secret".to_owned()],
+        "the value came from the repo-root .env file"
+    );
+}
+
+#[test]
+fn suspect_env_file_is_more_specific_than_the_repo_root_one() {
+    let (url, saw) = spawn_server();
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_suite(dir.path());
+    write_credentials(
+        dir.path(),
+        serde_json::json!({
+            "auth": {"schemes": {"tokenAuth": {"kind": "apiKey", "name": "X-Plex-Token", "value": "${LAYERED_TOKEN}"}}}
+        }),
+    );
+    // Both files carry the same variable: the more specific one wins.
+    std::fs::write(
+        dir.path().join(".suspect/.env"),
+        "LAYERED_TOKEN=beside-credentials\n",
+    )
+    .expect("specific");
+    std::fs::write(dir.path().join(".env"), "LAYERED_TOKEN=repo-root\n").expect("repo-root");
+    let output = suspect()
+        .current_dir(dir.path())
+        .arg("test")
+        .arg("check.yaml")
+        .args(["--base-url", &url])
+        .env_remove("LAYERED_TOKEN")
+        .output()
+        .expect("run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        saw.bearer_headers.lock().unwrap().clone(),
+        ["beside-credentials".to_owned()],
+        ".suspect/.env (beside the credentials) wins over the repo-root .env"
+    );
+}

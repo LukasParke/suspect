@@ -49,7 +49,17 @@ pub fn docs_gen(args: &DocsGenArgs) -> anyhow::Result<i32> {
         uri,
         suspect_source::Source::from_vec(text.as_bytes().to_vec()),
     );
-    let model = docs_gen::extract(&low);
+    docs_gen_parsed(&low, args)
+}
+
+/// [`docs_gen`] against a document the caller already parsed: a project
+/// build renders docs from the same published-spec parse every other
+/// stage consumes.
+///
+/// # Errors
+/// IO failures from writing the rendered output.
+pub fn docs_gen_parsed(low: &suspect_low::LowDoc, args: &DocsGenArgs) -> anyhow::Result<i32> {
+    let model = docs_gen::extract(low);
     let model = if let Some(title) = &args.title {
         let mut titled = model.clone();
         titled.title = title.clone();

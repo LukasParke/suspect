@@ -144,6 +144,10 @@ pub struct GatewayConfig {
 /// Shared per-server state handed to every handler.
 struct GatewayState {
     spec: Arc<IrSpec>,
+    /// The component schema table, compiled once at startup (Validate
+    /// mode's request path used to deep-clone the whole table — and again
+    /// into the runtime's `Schemas` — per request).
+    schemas: Arc<suspect_runtime::Schemas>,
     mode: Mode,
     faults: FaultConfig,
     seq: AtomicU64,
@@ -244,6 +248,8 @@ pub async fn build_router(
     for key in &cfg.redact_json_keys {
         redactor.deny_json_key(key);
     }
+    let schema_refs = mock::schema_refs(&spec);
+    let schemas = Arc::new(suspect_runtime::Schemas::from_any_map(schema_refs.iter()));
     let redactor = Arc::new(redactor);
     *journal.lock().await.redactor_mut() = (*redactor).clone();
     journal.lock().await.emit(Journal::meta(
@@ -259,6 +265,7 @@ pub async fn build_router(
     let router = router_for_state(Arc::new(GatewayState {
         resources: stateful_mock::ResourceStore::new(),
         spec: Arc::new(spec),
+        schemas,
         mode: cfg.mode.clone(),
         faults,
         seq: AtomicU64::new(0),
@@ -637,13 +644,20 @@ async fn process(
             });
             match op {
                 Some(op) => {
-                    let refs = mock::schema_refs(&state.spec);
                     let ctx = proxy::ForwardCtx {
                         method: &method,
                         target: &target,
                         headers: &req_headers,
                     };
-                    proxy::validate_forward(upstream, op, &refs, ctx, body.clone(), *enforce).await
+                    proxy::validate_forward(
+                        upstream,
+                        op,
+                        Arc::clone(&state.schemas),
+                        ctx,
+                        body.clone(),
+                        *enforce,
+                    )
+                    .await
                 }
                 None => (
                     problem(
@@ -918,13 +932,14 @@ pub fn load_workspace(spec: &Path) -> Result<Arc<suspect_ref::Workspace>, String
     Ok(Arc::new(ws))
 }
 
-/// Loads the IR snapshot for `spec` through [`load_workspace`].
+/// Loads the IR snapshot for `spec`. The fast path (a ~7–14 ms subset
+/// parse, benchmarked in `docs/PERFORMANCE.md` §2.4) is tried first and
+/// the CST workspace path remains the built-in fallback — for YAML
+/// outside the fast subset, JSON entries, or anything the fast reader
+/// declines. The IR is identical on both paths; only the cost differs.
 ///
 /// # Errors
-/// Workspace/document loading or non-OAS documents.
+/// Document loading failures or non-OAS documents.
 fn load_ir(spec: &Path) -> Result<IrSpec, String> {
-    let ws = load_workspace(spec)?;
-    let uri = suspect_source::Uri::from_path(spec)
-        .map_err(|e| format!("invalid spec path {}: {e}", spec.display()))?;
-    IrSpec::from_workspace(&ws, &uri)
+    suspect_ir::IrSpec::from_file(spec)
 }

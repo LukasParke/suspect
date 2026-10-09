@@ -722,6 +722,27 @@ impl<'ws> DocHandle<'ws> {
         self.ws.materialize(&mv)
     }
 
+    /// Whether edge number `edge` resolves — the same verdict as
+    /// [`Self::resolve_edge`] without materializing the landing node.
+    /// Callers that only count edges or collect unresolved ones (a
+    /// manifest build scanning thousands of edges) skip the per-edge
+    /// pointer walk this way.
+    ///
+    /// # Errors
+    /// Missing pointers/documents, denied remotes, invalid refs, depth cap.
+    pub fn resolve_edge_status(&self, edge: usize) -> Result<(), RefError> {
+        let edges = self.ws.edges_of(self.id);
+        let Some(edge) = edges.get(edge) else {
+            return Err(RefError::InvalidRef {
+                raw: String::new(),
+                reason: format!("edge index {edge} out of range"),
+            });
+        };
+        self.ws
+            .resolve_edge_memo(self.id, &edge.path, &edge.raw)
+            .map(|_| ())
+    }
+
     /// Resolves an RFC 6901 pointer against a loaded document, following
     /// `$ref` chains from wherever it lands. Memoized.
     ///

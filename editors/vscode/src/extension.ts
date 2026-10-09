@@ -14,6 +14,7 @@ import { registerTesting } from './testing';
 import { registerProjectView } from './projectView';
 import { openSuspectConfig, setSeverityFloor } from './config';
 import { generationContract, registerServerCommands } from './serverCommands';
+import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
 
@@ -55,6 +56,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
 	startClient();
 	context.subscriptions.push(...registerServerCommands(() => client));
+	context.subscriptions.push(...registerLiveSdkPreview(() => client));
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration('suspect.basePath')) {

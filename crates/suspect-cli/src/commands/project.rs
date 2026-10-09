@@ -39,6 +39,11 @@ pub struct ProjectManifest {
     /// Contract-test targets: Arazzo documents run against `base_url`
     /// (or offline from `cassette`).
     pub tests: Option<ProjectTests>,
+    /// The manifest's committed policy sections — `lint`, `validate`,
+    /// `editor` — carried raw: the config loader interprets them with the
+    /// settings file's key spellings, so one schema serves both files and
+    /// `.suspect.yaml` remains a local override on top.
+    pub policy: serde_json::Value,
 }
 
 /// One SDK generation target.
@@ -321,6 +326,16 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
         codegen: codegen.unwrap_or_default(),
         contract,
         tests,
+        policy: ["lint", "validate", "editor"]
+            .into_iter()
+            .filter_map(|key| {
+                object
+                    .get(key)
+                    .cloned()
+                    .map(|value| (key.to_owned(), value))
+            })
+            .collect::<serde_json::Map<String, serde_json::Value>>()
+            .into(),
     })
 }
 
@@ -356,6 +371,16 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                 "docs": {"style": "markdown", "output": "build/docs"},
                 "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"},
                 "codegen": [],
+                // Committed policy: the editor, a shell and CI read the
+                // same values; `.suspect.yaml` and client settings layer
+                // on top as local overrides.
+                "lint": {"min_severity": "hint", "rules": {}, "recommended": true},
+                "validate": {"strict_format": false},
+                "editor": {
+                    "inlay_hints": {"refs": true, "properties": true},
+                    "ref": {"max_docs": 500},
+                    "formatting": {"sort_keys": true}
+                },
                 "contract": {"output": "build/contract"}
             });
             std::fs::create_dir_all(&dir)?;
@@ -427,7 +452,51 @@ fn check_inputs(project: &ProjectManifest, findings: &mut Vec<Finding>) {
 }
 
 /// Executes the build pipeline.
+/// Per-build workspace cache: each distinct spec file is parsed exactly
+/// once and every stage — validate, contract, docs, SDKs — consumes the
+/// same `Arc<Workspace>`. Before this, one `project build` re-parsed the
+/// same published document five times.
+struct WorkspaceLoader {
+    cache: std::collections::HashMap<PathBuf, std::sync::Arc<suspect_ref::Workspace>>,
+}
+
+impl WorkspaceLoader {
+    fn new() -> Self {
+        Self {
+            cache: std::collections::HashMap::new(),
+        }
+    }
+
+    /// The workspace for `spec`, loaded on first request and shared after.
+    ///
+    /// # Errors
+    /// Workspace loading failures.
+    fn load(&mut self, spec: &Path) -> anyhow::Result<std::sync::Arc<suspect_ref::Workspace>> {
+        let absolute = spec.canonicalize()?;
+        if let Some(cached) = self.cache.get(&absolute) {
+            return Ok(std::sync::Arc::clone(cached));
+        }
+        let ws = std::sync::Arc::new(
+            suspect_ref::WorkspaceBuilder::new()
+                .root(absolute.parent().unwrap_or(Path::new(".")))
+                .build()?,
+        );
+        ws.load_all(&absolute.display().to_string())?;
+        self.cache.insert(absolute, std::sync::Arc::clone(&ws));
+        Ok(ws)
+    }
+}
+
 fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
+    let mut loader = WorkspaceLoader::new();
+    let profile = std::env::var_os("SUSPECT_BUILD_PROFILE").is_some();
+    let mut stage_clock = std::time::Instant::now();
+    let mark = |profile: bool, name: &str, clock: &mut std::time::Instant| {
+        if profile {
+            eprintln!("[build-profile] {name}: {:?}", clock.elapsed());
+        }
+        *clock = std::time::Instant::now();
+    };
     let mut failures = 0usize;
 
     // Stage 1: overlays in order → published spec.
@@ -452,6 +521,7 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
     std::fs::write(&project.publish_output, tree.to_yaml())?;
     eprintln!("published {}", project.publish_output.display());
 
+    mark(profile, "publish", &mut stage_clock);
     // Stage 2: publication profiles.
     for (name, overlays) in &project.profiles {
         let mut profile_tree = tree.clone();
@@ -469,6 +539,7 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         eprintln!("profile {name}: {}", out.display());
     }
 
+    mark(profile, "profiles", &mut stage_clock);
     // Stage 3: validate the published spec (and each profile).
     let mut specs = vec![project.publish_output.clone()];
     for name in project.profiles.keys() {
@@ -479,7 +550,8 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         );
     }
     for spec in &specs {
-        let findings = crate::commands::validate::validate_file(spec, None, false);
+        let ws = loader.load(spec)?;
+        let findings = crate::commands::validate::validate_workspace(&ws, spec, false);
         let errors = findings
             .iter()
             .filter(|f| f.severity >= Severity::Error)
@@ -492,20 +564,27 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         failures += errors;
     }
 
+    mark(profile, "validate", &mut stage_clock);
     // Stage 3b: contract package, when the project declares one.
     if let Some(out) = &project.contract {
-        let exit = crate::commands::contract::contract(&crate::commands::contract::ContractArgs {
-            input: project.publish_output.clone(),
-            out: out.clone(),
-            json: false,
-            overlays: Vec::new(),
-            check: false,
-        })?;
+        let ws = loader.load(&project.publish_output)?;
+        let exit = crate::commands::contract::contract_on_workspace(
+            &ws,
+            &project.publish_output,
+            &crate::commands::contract::ContractArgs {
+                input: project.publish_output.clone(),
+                out: out.clone(),
+                json: false,
+                overlays: Vec::new(),
+                check: false,
+            },
+        )?;
         if exit != 0 {
             failures += 1;
         }
     }
 
+    mark(profile, "contract", &mut stage_clock);
     // Stage 4: docs. An unrecognized style is a typo, not a silent
     // fallback to HTML.
     if let Some((style, out)) = &project.docs {
@@ -523,17 +602,43 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
             output: Some(out.clone()),
             title: None,
         };
-        crate::commands::docs_gen_cmd::docs_gen(&args)?;
+        let ws = loader.load(&project.publish_output)?;
+        let entry = suspect_source::Uri::from_path(
+            &project
+                .publish_output
+                .canonicalize()
+                .unwrap_or_else(|_| project.publish_output.clone()),
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        // The workspace's own parse of the published spec: the same
+        // document every other stage consumes, borrowed — no re-read, no
+        // copy, no re-parse.
+        let handle = ws
+            .get(&entry)
+            .ok_or_else(|| anyhow::anyhow!("published spec is not loaded"))?;
+        crate::commands::docs_gen_cmd::docs_gen_parsed(handle.doc(), &args)?;
     }
 
-    // Stage 4b: SDK generation targets.
-    for target in &project.codegen {
-        let exit = crate::commands::sdk::generate_codegen_target(&project.publish_output, target)?;
+    mark(profile, "docs", &mut stage_clock);
+    // Stage 4b: SDK generation targets. The published spec is compiled
+    // once — scoped to the union of the targets' operation selectors —
+    // and every target's render runs in parallel against that one
+    // contract; the commits stay serial and in manifest order.
+    if !project.codegen.is_empty() {
+        let ws = loader.load(&project.publish_output)?;
+        let shared = std::sync::Arc::new(crate::commands::sdk::SharedSpec::from_workspace_scoped(
+            ws,
+            &project.publish_output,
+            &project.codegen,
+        )?);
+        let exit =
+            crate::commands::sdk::generate_codegen_targets_shared(&shared, &project.codegen)?;
         if exit != 0 {
             failures += 1;
         }
     }
 
+    mark(profile, "sdks", &mut stage_clock);
     // Stage 5: contract tests.
     if !skip_tests
         && let Some(tests) = &project.tests
@@ -556,6 +661,8 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         }
     }
 
+    mark(profile, "tests", &mut stage_clock);
+    mark(profile, "tests", &mut stage_clock);
     if failures > 0 {
         eprintln!("project build: {failures} failure(s)");
         Ok(1)

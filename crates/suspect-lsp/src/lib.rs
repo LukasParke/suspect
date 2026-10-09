@@ -49,6 +49,7 @@ pub mod pull;
 mod rank;
 mod refactor;
 pub mod rename;
+pub mod render_sdk;
 pub mod run_lenses;
 pub mod semantic;
 pub mod state;
@@ -102,6 +103,11 @@ struct Backend {
     client: Client,
     /// Shared mutable server state; also captured by debounce tasks.
     state: Arc<tokio::sync::RwLock<State>>,
+    /// Single-flight for whole-workspace index builds: requests that miss
+    /// the cache together line up behind one build instead of racing to
+    /// build the same answer. Held across the build only — never across
+    /// the state lock.
+    index_build_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl Backend {
@@ -110,6 +116,7 @@ impl Backend {
         Self {
             client,
             state: Arc::new(tokio::sync::RwLock::new(State::default())),
+            index_build_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -131,13 +138,19 @@ impl Backend {
             tokio::time::sleep(Duration::from_millis(150)).await;
             // Compute WITHOUT holding the state lock: clone the cheap handles
             // (OpenDoc is small; LowDoc parse tree is Arc-shared internally).
-            let (doc, ws, cfg) = {
+            let (doc, ws, cfg, ruleset, strict_format) = {
                 let st = state.read().await;
                 if st.generations.get(&uri) != Some(&generation) {
                     return; // a newer edit superseded this publish
                 }
                 match st.docs.get(&uri) {
-                    Some(doc) => (doc.clone(), st.workspace.clone(), st.config.clone()),
+                    Some(doc) => (
+                        doc.clone(),
+                        st.workspace.clone(),
+                        st.config.clone(),
+                        st.editor_config.settings.lint.ruleset.clone(),
+                        st.editor_config.settings.validate.strict_format,
+                    ),
                     None => return,
                 }
             };
@@ -151,7 +164,16 @@ impl Backend {
                 let ws = ws.clone();
                 let cfg = cfg.clone();
                 let doc = doc.clone();
-                move || diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg)
+                let ruleset = ruleset.clone();
+                move || {
+                    diagnostics::compute_diagnostics(
+                        ws.as_ref(),
+                        &doc.low,
+                        &cfg,
+                        ruleset.as_deref(),
+                        strict_format,
+                    )
+                }
             })
             .await
             {
@@ -202,6 +224,14 @@ impl Backend {
         ws: &std::sync::Arc<suspect_ref::Workspace>,
     ) -> std::sync::Arc<crate::meaning::Index> {
         let generation = self.state.read().await.generation();
+        if let Some(index) = self.state.read().await.cached_index(generation) {
+            return index;
+        }
+        // Single-flight: requests that miss together (a burst right after
+        // a keystroke invalidates the cache) line up here. The first builds;
+        // every waiter re-checks the cache under the lock and finds the
+        // finished answer instead of building it again.
+        let _guard = self.index_build_lock.lock().await;
         if let Some(index) = self.state.read().await.cached_index(generation) {
             return index;
         }
@@ -286,6 +316,53 @@ impl Backend {
         Some(ws)
     }
 
+    /// A closed workspace mirroring the current editor state: every
+    /// document of the entry's disk closure contributes its live buffer
+    /// when open, its on-disk bytes otherwise. Compiling against this
+    /// sees what the user sees — admission reviews and rendered previews
+    /// track unsaved edits instead of the last saved state.
+    ///
+    /// On-demand by design: the provider snapshot is built per request
+    /// (hashing the closure's bytes), and the closed workspace re-parses
+    /// documents as it opens them. That is the correct cost for a request
+    /// like "review my contract"; the per-keystroke path stays the
+    /// incremental reparse.
+    async fn live_workspace(&self, uri: &Uri) -> Option<Arc<suspect_ref::Workspace>> {
+        let disk = self.workspace_for(uri).await?;
+        let st = self.state.read().await;
+        let mut provided = Vec::new();
+        for open_uri in disk.uris() {
+            let Some(handle) = disk.get(&open_uri) else {
+                continue;
+            };
+            let disk_bytes = handle.doc().inner().bytes().to_vec();
+            let bytes: std::sync::Arc<[u8]> = match st.docs.get(&open_uri) {
+                Some(doc) if doc.text.as_bytes() != disk_bytes.as_slice() => {
+                    doc.text.clone().into_bytes().into()
+                }
+                _ => disk_bytes.into(),
+            };
+            // The handle's URI is the workspace's own identity for this
+            // document (file-based workspaces have no provider metadata);
+            // requested == effective keeps every $ref that resolved
+            // before resolving the same way here.
+            match suspect_ref::ProvidedDocument::new(
+                handle.uri().clone(),
+                handle.uri().clone(),
+                bytes,
+            ) {
+                Ok(document) => provided.push(document),
+                Err(_) => return None,
+            }
+        }
+        let provider = suspect_ref::DocumentProvider::new(provided).ok()?;
+        suspect_ref::WorkspaceBuilder::new()
+            .document_provider(std::sync::Arc::new(provider))
+            .build()
+            .ok()
+            .map(Arc::new)
+    }
+
     /// Builds the reference index before anyone asks for it.
     ///
     /// An open document is a near-certainty that a hover follows, so the
@@ -294,8 +371,21 @@ impl Backend {
     /// invalidates the result, so the next edit warms it again and the
     /// build never lands in front of a cursor move.
     fn warm_index(&self) {
+        // Debounced: one whole-workspace build per editing pause, not one
+        // per keystroke. The sleep means a typing burst of N changes
+        // schedules N of these tasks but exactly one survives to build;
+        // the rest observe a newer generation on wake and stand down.
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(150);
         let state = Arc::clone(&self.state);
         tokio::spawn(async move {
+            // The generation this task was scheduled for: only the task
+            // owned by the LAST change of an editing pause builds.
+            let scheduled = state.read().await.generation();
+            tokio::time::sleep(SETTLE).await;
+            // The editor kept moving: a newer task owns the warm.
+            if state.read().await.generation() != scheduled {
+                return;
+            }
             let (ws, generation) = {
                 let st = state.read().await;
                 let Some(ws) = st.workspace.as_ref() else {
@@ -692,7 +782,15 @@ impl LanguageServer for Backend {
             };
             (doc.clone(), st.generation())
         };
-        let tokens = semantic::semantic_tokens_full(doc.as_ref());
+        // Off the runtime worker, for the same reason as the delta path:
+        // ~270ms of synchronous CPU must not pin a worker that the
+        // requests behind this one need.
+        let tokens = {
+            let doc = doc.clone();
+            tokio::task::spawn_blocking(move || semantic::semantic_tokens_full(doc.as_ref()))
+                .await
+                .unwrap_or_default()
+        };
         let id = pull::tokens_result_id(&tokens.data);
         self.state
             .write()
@@ -849,23 +947,28 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         // Incremental sync: apply every change in order against the live
         // buffer (full-text changes are the range-less special case), then
-        // reparse once.
+        // reparse incrementally — tree-sitter reuses every unchanged
+        // subtree, so a keystroke costs the edit, not the whole document.
+        // The reparse equals a from-scratch parse of the new text (pinned
+        // by suspect-low's equivalence tests); it is an optimization, not
+        // a different tree.
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return;
         };
         {
             let mut st = self.state.write().await;
-            let Some(doc) = st.docs.get(&uri).map(|d| d.text.clone()) else {
+            let Some(doc) = st.docs.get(&uri).cloned() else {
                 return;
             };
-            let Some(text) = state::apply_content_changes(&doc, &params.content_changes) else {
+            let Some((text, edits)) = state::apply_with_edits(&doc, &params.content_changes) else {
                 return; // malformed ranges: keep the last good buffer
             };
             // Skip the reparse + republish cycle when the text is unchanged.
-            if text == doc {
+            if text == doc.text {
                 return;
             }
-            st.open_doc(uri.clone(), text);
+            let next = OpenDoc::reparse(&doc, text, &edits);
+            st.replace_doc(uri.clone(), Arc::new(next));
         }
         self.warm_index();
         self.schedule_diagnostics(uri);
@@ -1026,12 +1129,25 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
-            return Ok(None);
+        // Cached like its whole-document siblings (folds, links): the
+        // outline is re-requested on focus changes, and a tab switch back
+        // to an unchanged file should not re-walk the tree.
+        if let Some(cached) = self.doc_cached(&uri, |cache| cache.symbols.clone()).await {
+            return Ok(
+                (!cached.is_empty()).then(|| DocumentSymbolResponse::Nested((*cached).clone()))
+            );
+        }
+        let (doc, epoch) = {
+            let st = self.state.read().await;
+            let Some(doc) = st.docs.get(&uri) else {
+                return Ok(None);
+            };
+            (doc.clone(), st.generation())
         };
-        let syms = symbols::document_symbols(&doc.low);
-        Ok((!syms.is_empty()).then_some(DocumentSymbolResponse::Nested(syms)))
+        let syms = std::sync::Arc::new(symbols::document_symbols(&doc.low));
+        self.doc_store(&uri, epoch, |cache, v| cache.symbols = v, syms.clone())
+            .await;
+        Ok((!syms.is_empty()).then(|| DocumentSymbolResponse::Nested((*syms).clone())))
     }
 
     async fn folding_range(
@@ -1117,11 +1233,23 @@ impl LanguageServer for Backend {
         &self,
         params: WorkspaceSymbolParams,
     ) -> JsonRpcResult<Option<Vec<SymbolInformation>>> {
+        // Read-first: the workspace is cached in the common case, and a
+        // write lock here would let one symbol-search keystroke stall
+        // every other request behind a post-save rebuild.
         let ws = {
-            let mut st = self.state.write().await;
-            st.ensure_workspace()
+            let st = self.state.read().await;
+            st.workspace.clone()
         };
-        let Some(ws) = ws else { return Ok(None) };
+        let ws = match ws {
+            Some(ws) => ws,
+            None => {
+                let mut st = self.state.write().await;
+                let Some(ws) = st.ensure_workspace() else {
+                    return Ok(None);
+                };
+                ws
+            }
+        };
         let syms = workspace_symbol::workspace_symbols(&ws, &params.query);
         Ok((!syms.is_empty()).then_some(syms))
     }
@@ -1173,7 +1301,7 @@ impl LanguageServer for Backend {
             return Ok(full_report(Some(id), items));
         }
 
-        let (doc, cfg, floor) = {
+        let (doc, cfg, floor, ruleset, strict_format) = {
             let st = self.state.read().await;
             let Some(doc) = st.docs.get(&uri) else {
                 return Ok(full_report(None, Vec::new()));
@@ -1184,6 +1312,8 @@ impl LanguageServer for Backend {
                 doc.clone(),
                 st.config.clone(),
                 st.editor_config.min_severity(),
+                st.editor_config.settings.lint.ruleset.clone(),
+                st.editor_config.settings.validate.strict_format,
             )
         };
         // Off the runtime, for the same reason as the push: this is seconds
@@ -1194,10 +1324,24 @@ impl LanguageServer for Backend {
             let ws = ws.clone();
             let cfg = cfg.clone();
             let doc = doc.clone();
+            let ruleset = ruleset.clone();
             move || match &ws {
-                Some(ws) => pull::pull_diagnostics(ws, &doc.low, previous, &cfg),
+                Some(ws) => pull::pull_diagnostics(
+                    ws,
+                    &doc.low,
+                    previous,
+                    &cfg,
+                    ruleset.as_deref(),
+                    strict_format,
+                ),
                 None => {
-                    let items = diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &cfg);
+                    let items = diagnostics::compute_diagnostics(
+                        ws.as_ref(),
+                        &doc.low,
+                        &cfg,
+                        ruleset.as_deref(),
+                        strict_format,
+                    );
                     (pull::diagnostics_result_id(&items), items)
                 }
             }
@@ -1244,9 +1388,16 @@ impl LanguageServer for Backend {
         // Same discipline as `diagnostic`: nothing expensive runs while a state
         // guard is alive, because a queued writer behind it blocks every
         // later reader — including the hover that follows.
-        let (workspace, cfg) = {
+        let (workspace, cfg, ruleset, strict_format, cache, doc_versions) = {
             let st = self.state.read().await;
-            (st.workspace.clone(), st.config.clone())
+            (
+                st.workspace.clone(),
+                st.config.clone(),
+                st.editor_config.settings.lint.ruleset.clone(),
+                st.editor_config.settings.validate.strict_format,
+                Arc::clone(&st.ws_doc_diag),
+                (st.ws_identity, st.doc_epoch.clone()),
+            )
         };
         let mut items = Vec::new();
         let previous: HashMap<String, String> = params
@@ -1256,7 +1407,15 @@ impl LanguageServer for Backend {
             .collect();
         if let Some(ws) = &workspace {
             let cfg = cfg.clone();
-            for (uri, diags) in pull::workspace_pull(ws, &cfg) {
+            let ruleset = ruleset.clone();
+            // Per-document cache: unchanged documents reuse their reports;
+            // only the edited file pays its lint battery. Keyed on the
+            // workspace identity (saves rebuild it) and each document's own
+            // content version (its edits invalidate only its entry).
+            let view = crate::state::WsDiagCacheView::new(cache, doc_versions.0, doc_versions.1);
+            for (uri, diags) in
+                pull::workspace_pull(ws, &cfg, ruleset.as_deref(), strict_format, &view)
+            {
                 let Ok(url) = Url::parse(uri.as_str()) else {
                     continue;
                 };
@@ -1363,8 +1522,17 @@ impl LanguageServer for Backend {
             Some((cached_epoch, id, data)) if *cached_epoch == epoch => (id.clone(), data.clone()),
             // Changed content (or nothing cached): compute, and keep the
             // previous set around long enough to delta from it below.
+            // Off the runtime worker: this is ~270ms of synchronous CPU on
+            // a 63k-line specification, and a worker pinned here cannot
+            // poll the requests queued behind it (the same scheduler stall
+            // the diagnostics comment documents).
             _ => {
-                let full = semantic::semantic_tokens_full(doc.as_ref());
+                let doc = doc.clone();
+                let full = tokio::task::spawn_blocking(move || {
+                    semantic::semantic_tokens_full(doc.as_ref())
+                })
+                .await
+                .unwrap_or_default();
                 let id = pull::tokens_result_id(&full.data);
                 let data = full.data;
                 self.state
@@ -1738,7 +1906,17 @@ impl LanguageServer for Backend {
         {
             let mut st = self.state.write().await;
             let init_opts = std::mem::take(&mut st.pending_init_options);
-            st.config = config_files::merge(init_opts, client_cfg, Default::default());
+            // The base is the committed policy: the manifest's sections
+            // under the workspace `.suspect.yaml`, so `lint.rules`,
+            // `lint.recommended`, inlay toggles and formatting policy
+            // committed in either file reach the battery without any
+            // client configuration. Client settings still win per leaf.
+            let root = st.workspace_root();
+            st.config = config_files::merge(
+                init_opts,
+                client_cfg,
+                config_files::file_layers(root.as_deref()),
+            );
             st.editor_config = file_config;
         }
         // Dynamic registration: only clients advertising
@@ -1778,7 +1956,20 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        let parsed = config_files::parse_config(&params.settings);
+        // The new effective client layer over the committed file layers:
+        // a manifest or `.suspect.yaml` edited on disk is picked up here
+        // too (the files participate in the comparison, not just the
+        // client section, or a file-only change would look like no change).
+        let client_layers = {
+            let st = self.state.read().await;
+            let root = st.workspace_root();
+            config_files::merge(
+                Some(params.settings.clone()),
+                None,
+                config_files::file_layers(root.as_deref()),
+            )
+        };
+        let parsed = Some(client_layers);
         // The editor-side settings are re-derived too: `lint.min_severity`
         // lives there, not in `SuspectConfig`, and this handler used to
         // parse it into one object while the severity floor read the other
@@ -2719,9 +2910,11 @@ impl Backend {
                 refusals: 0,
             });
         };
-        let ws = self.workspace_for(&uri).await;
-        let st = self.state.read().await;
-        let Some(doc) = st.docs.get(&uri) else {
+        let doc = {
+            let st = self.state.read().await;
+            st.docs.get(&uri).cloned()
+        };
+        let Some(doc) = doc else {
             return Ok(GenerationContractResult {
                 operations: Vec::new(),
                 findings: Vec::new(),
@@ -2729,7 +2922,10 @@ impl Backend {
                 refusals: 0,
             });
         };
-        let Some(ws) = ws else {
+        // The live overlay: the review sees the current buffer, not the
+        // last saved state, so unsaved edits get their admission verdict
+        // before anyone generates from them.
+        let Some(ws) = self.live_workspace(&uri).await else {
             return Ok(GenerationContractResult {
                 operations: Vec::new(),
                 findings: Vec::new(),
@@ -2738,7 +2934,7 @@ impl Backend {
             });
         };
         Ok(
-            generation_contract::generation_contract(&ws, doc).unwrap_or(
+            generation_contract::generation_contract(&ws, &doc).unwrap_or(
                 GenerationContractResult {
                     operations: Vec::new(),
                     findings: Vec::new(),
@@ -2747,6 +2943,63 @@ impl Backend {
                 },
             ),
         )
+    }
+
+    /// Handler for `suspect/renderSdk`: render one native SDK from the
+    /// live document. Open documents compile from the current buffer (the
+    /// incremental reparse keeps that state current on every keystroke);
+    /// closed documents fall back to the disk workspace. Scoped
+    /// compilation applies when operation selectors are present.
+    async fn render_sdk_request(
+        &self,
+        params: render_sdk::RenderSdkParams,
+    ) -> JsonRpcResult<render_sdk::RenderSdkResult> {
+        use render_sdk::{RenderDiagnostic, RenderSdkResult};
+        let empty = |code: &str, message: String| RenderSdkResult {
+            rendered: false,
+            artifacts: Vec::new(),
+            diagnostics: vec![RenderDiagnostic {
+                code: code.to_owned(),
+                message,
+            }],
+            operations: 0,
+        };
+        let Ok(uri) = Uri::parse(&params.uri) else {
+            return Ok(empty(
+                "sdk-uri-invalid",
+                format!("unparseable uri {:?}", params.uri),
+            ));
+        };
+        let open = self.state.read().await.docs.contains_key(&uri);
+        let ws = if open {
+            self.live_workspace(&uri).await
+        } else {
+            self.workspace_for(&uri).await
+        };
+        let Some(ws) = ws else {
+            return Ok(empty(
+                "sdk-workspace-unavailable",
+                "no workspace for the document".to_owned(),
+            ));
+        };
+        let contract = if params.operation_ids.is_empty() {
+            suspect_ir::contract::Contract::from_workspace(&ws, &uri).ok()
+        } else {
+            let selection = suspect_ir::contract::OperationSelection::new(
+                params.operation_ids.iter().map(String::as_str),
+            );
+            suspect_ir::contract::Contract::from_workspace_scoped(&ws, &uri, &selection).ok()
+        };
+        let Some(contract) = contract else {
+            return Ok(empty(
+                "sdk-compile-failed",
+                "the document did not compile".to_owned(),
+            ));
+        };
+        Ok(render_sdk::render_sdk(
+            std::sync::Arc::new(contract),
+            &params,
+        ))
     }
 
     /// Compiles the Arazzo document at `uri_s`, executes the workflow named
@@ -2876,7 +3129,14 @@ impl Backend {
     async fn render_preview(&self, uri_s: &str, preset: &str) -> Option<Value> {
         let uri = Uri::parse(uri_s).ok()?;
         let spec_path = uri.as_path()?;
-        let ws = run_lenses::workspace_dir_all(&spec_path)?;
+        // The live overlay when the document is open: previews render the
+        // current buffer, so what you preview is what you are looking at.
+        // Closed documents fall back to the disk workspace.
+        let ws = if self.state.read().await.docs.contains_key(&uri) {
+            self.live_workspace(&uri).await?
+        } else {
+            run_lenses::workspace_dir_all(&spec_path)?
+        };
         let ir = suspect_ir::IrSpec::from_workspace(&ws, &uri).ok()?;
 
         let root = self
@@ -2968,6 +3228,10 @@ async fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
         .custom_method(
             <generation_contract::GenerationContractRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::generation_contract_request,
+        )
+        .custom_method(
+            <render_sdk::RenderSdkRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::render_sdk_request,
         )
         .finish()
 }

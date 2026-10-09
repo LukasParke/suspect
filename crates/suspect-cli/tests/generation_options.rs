@@ -271,3 +271,39 @@ fn project_init_declares_profiles_where_the_parser_reads_them() {
         "the dead `publish_profiles` key is gone from the template"
     );
 }
+
+#[test]
+fn suspect_yaml_codegen_defaults_fill_omitted_flags() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    write_api(root);
+    // The codegen section supplies what the flags omit — the same surface
+    // `suspect config` and the editor's completions advertise.
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "codegen:\n  profile: typescript-http\n  package_version: 9.9.9\n  out: generated\n",
+    )
+    .expect("settings");
+    let output = run(
+        root,
+        &[
+            "codegen",
+            "api.yaml",
+            "--package-name",
+            "defaults-test",
+            "--operation-id",
+            "getCurrentKey",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "the settings must supply the profile: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let version = std::fs::read_to_string(root.join("generated/typescript/package.json"))
+        .expect("settings output root + generated package");
+    assert!(
+        version.contains("\"version\": \"9.9.9\""),
+        "the settings version lands in the generated package: {version}"
+    );
+}

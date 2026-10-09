@@ -94,8 +94,11 @@ pub fn pull_diagnostics(
     doc: &LowDoc,
     previous_result_id: Option<String>,
     cfg: &crate::config_files::SuspectConfig,
+    ruleset: Option<&std::path::Path>,
+    strict_format: bool,
 ) -> (String, Vec<Diagnostic>) {
-    let diagnostics = crate::diagnostics::compute_diagnostics(Some(ws), doc, cfg);
+    let diagnostics =
+        crate::diagnostics::compute_diagnostics(Some(ws), doc, cfg, ruleset, strict_format);
     let result_id = diagnostics_result_id(&diagnostics);
     // The previous id is consumed by the caller's unchanged check; this pure
     // function always produces the full report.
@@ -112,13 +115,25 @@ pub fn pull_diagnostics(
 pub fn workspace_pull(
     ws: &Arc<Workspace>,
     cfg: &crate::config_files::SuspectConfig,
+    ruleset: Option<&std::path::Path>,
+    strict_format: bool,
+    cache: &crate::state::WsDiagCacheView,
 ) -> Vec<(Uri, Vec<Diagnostic>)> {
     ws.uris()
         .into_iter()
         .filter_map(|uri| {
             let low = ws.get(&uri)?.doc();
-            let diagnostics = crate::diagnostics::compute_diagnostics(Some(ws), low, cfg);
-            Some((uri.clone(), diagnostics))
+            // Per-document reuse: a document whose content (and workspace)
+            // are unchanged since its report was computed is not re-linted.
+            // One edit to one file therefore costs that file's battery,
+            // not the whole project's.
+            if let Some(cached) = cache.get(&uri) {
+                return Some((uri.clone(), cached));
+            }
+            let diagnostics =
+                crate::diagnostics::compute_diagnostics(Some(ws), low, cfg, ruleset, strict_format);
+            cache.store(uri.clone(), diagnostics.clone());
+            Some((uri, diagnostics))
         })
         .collect()
 }
@@ -668,8 +683,15 @@ components:
         );
         let low = low_at(&dir, "main.yaml", MAIN);
 
-        let (id1, d1) = pull_diagnostics(&ws, &low, None, &Default::default());
-        let (id2, d2) = pull_diagnostics(&ws, &low, Some(id1.clone()), &Default::default());
+        let (id1, d1) = pull_diagnostics(&ws, &low, None, &Default::default(), None, false);
+        let (id2, d2) = pull_diagnostics(
+            &ws,
+            &low,
+            Some(id1.clone()),
+            &Default::default(),
+            None,
+            false,
+        );
         assert_eq!(id1, id2, "same input must yield the same result id");
         assert_eq!(d1, d2, "full-report mode ignores the previous id");
     }
@@ -684,14 +706,15 @@ components:
         let clean = low_at(&dir, "main.yaml", MAIN);
         let broken = low_at(&dir, "broken.yaml", BROKEN);
 
-        let (_, broken_diags) = pull_diagnostics(&ws, &broken, None, &Default::default());
+        let (_, broken_diags) =
+            pull_diagnostics(&ws, &broken, None, &Default::default(), None, false);
         assert!(
             !broken_diags.is_empty(),
             "unresolved $ref must produce diagnostics"
         );
 
-        let (id_broken, _) = pull_diagnostics(&ws, &broken, None, &Default::default());
-        let (id_clean, _) = pull_diagnostics(&ws, &clean, None, &Default::default());
+        let (id_broken, _) = pull_diagnostics(&ws, &broken, None, &Default::default(), None, false);
+        let (id_clean, _) = pull_diagnostics(&ws, &clean, None, &Default::default(), None, false);
         assert_ne!(id_broken, id_clean);
     }
 
@@ -701,7 +724,7 @@ components:
         let garbage = ": : :\nfoo: [unclosed\n";
         let ws = workspace(&dir, garbage);
         let low = low_at(&dir, "comp.yaml", garbage);
-        let (_, diags) = pull_diagnostics(&ws, &low, None, &Default::default());
+        let (_, diags) = pull_diagnostics(&ws, &low, None, &Default::default(), None, false);
         assert!(!diags.is_empty(), "parse recovery errors must surface");
     }
 
@@ -713,7 +736,17 @@ components:
         let comp = "components:\n  schemas:\n    Comp:\n      type: object\n";
         let ws = workspace(&dir, comp);
 
-        let results = workspace_pull(&ws, &Default::default());
+        let results = workspace_pull(
+            &ws,
+            &Default::default(),
+            None,
+            false,
+            &crate::state::WsDiagCacheView::new(
+                std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                0,
+                std::collections::HashMap::new(),
+            ),
+        );
         assert_eq!(results.len(), 2, "main.yaml and comp.yaml are loaded");
         for (uri, _) in &results {
             let name = uri.as_str().rsplit('/').next().unwrap();
@@ -726,7 +759,17 @@ components:
         let dir = std::env::temp_dir().join("suspect-lsp-pull-ws-bad");
         let garbage = ": : :\nkey: [unclosed\n";
         let ws = workspace(&dir, garbage);
-        let results = workspace_pull(&ws, &Default::default());
+        let results = workspace_pull(
+            &ws,
+            &Default::default(),
+            None,
+            false,
+            &crate::state::WsDiagCacheView::new(
+                std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+                0,
+                std::collections::HashMap::new(),
+            ),
+        );
         let comp = results
             .iter()
             .find(|(uri, _)| uri.as_str().ends_with("comp.yaml"))

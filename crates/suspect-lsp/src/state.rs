@@ -8,7 +8,7 @@ use suspect_low::LowDoc;
 use suspect_ref::{Workspace, WorkspaceBuilder};
 use suspect_source::{LineIndex, Source, Uri};
 use tower_lsp::lsp_types::{
-    CodeLens, ColorInformation, Diagnostic, DocumentLink, FoldingRange,
+    CodeLens, ColorInformation, Diagnostic, DocumentLink, DocumentSymbol, FoldingRange,
     WorkspaceDocumentDiagnosticReport,
 };
 use tower_lsp::lsp_types::{Position, Range, SemanticToken};
@@ -29,6 +29,8 @@ pub struct DocCache {
     pub lenses: Option<Arc<Vec<CodeLens>>>,
     /// `textDocument/foldingRange`
     pub folds: Option<Arc<Vec<FoldingRange>>>,
+    /// `textDocument/documentSymbol`
+    pub symbols: Option<Arc<Vec<DocumentSymbol>>>,
 }
 
 /// One editor-open document: the live buffer text plus the `LowDoc` parsed
@@ -41,11 +43,97 @@ pub struct OpenDoc {
     pub low: LowDoc,
 }
 
+/// A snapshot of the per-document workspace-report cache plus the keying
+/// data a pull needs, safe to carry into a blocking task: which workspace
+/// the reports are computed against (its identity) and each open
+/// document's own content version.
+pub struct WsDiagCacheView {
+    cache: std::sync::Arc<std::sync::Mutex<HashMap<Uri, WsDocDiagEntry>>>,
+    identity: usize,
+    doc_versions: HashMap<Uri, u64>,
+}
+
+impl WsDiagCacheView {
+    /// Snapshots the cache and its keys for one pull.
+    #[must_use]
+    pub fn new(
+        cache: std::sync::Arc<std::sync::Mutex<HashMap<Uri, WsDocDiagEntry>>>,
+        identity: usize,
+        doc_versions: HashMap<Uri, u64>,
+    ) -> Self {
+        Self {
+            cache,
+            identity,
+            doc_versions,
+        }
+    }
+
+    fn key(&self, uri: &Uri) -> (usize, u64) {
+        (
+            self.identity,
+            self.doc_versions.get(uri).copied().unwrap_or(0),
+        )
+    }
+
+    /// The cached report for `uri`, when neither the workspace nor the
+    /// document's content moved since it was computed.
+    #[must_use]
+    pub fn get(&self, uri: &Uri) -> Option<Vec<Diagnostic>> {
+        let (identity, version) = self.key(uri);
+        let cache = self.cache.lock().ok()?;
+        let entry = cache.get(uri)?;
+        (entry.identity == identity && entry.version == version).then(|| entry.diagnostics.clone())
+    }
+
+    /// Stores the report computed for `uri` under its current keys.
+    pub fn store(&self, uri: Uri, diagnostics: Vec<Diagnostic>) {
+        let (identity, version) = self.key(&uri);
+        let result_id = crate::pull::diagnostics_result_id(&diagnostics);
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.insert(
+                uri,
+                WsDocDiagEntry {
+                    identity,
+                    version,
+                    result_id,
+                    diagnostics,
+                },
+            );
+        }
+    }
+}
+
+/// One cached per-document workspace report.
+#[derive(Clone)]
+pub struct WsDocDiagEntry {
+    /// The workspace the report was computed against (its pointer).
+    pub identity: usize,
+    /// The document's own content version when computed.
+    pub version: u64,
+    /// The stable result id for the report.
+    pub result_id: String,
+    /// The findings themselves.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 impl OpenDoc {
     /// Parses the buffer text into a [`LowDoc`] (which carries the line
     /// index) and keeps the raw text alongside it.
     pub fn parse(uri: Uri, text: String) -> OpenDoc {
-        let low = LowDoc::parse(uri.clone(), Source::from_vec(text.clone().into_bytes()));
+        let low = LowDoc::parse(uri, Source::from_vec(text.clone().into_bytes()));
+        OpenDoc { text, low }
+    }
+
+    /// Reparses after ranged edits, reusing unchanged subtrees. The
+    /// incremental path is an optimization, never a different tree: a
+    /// reparse equals a from-scratch parse of `text` (pinned by
+    /// `suspect-low`'s equivalence tests), and keeps didChange off the
+    /// whole-file reparse path that dominated editing latency on large
+    /// specifications.
+    pub fn reparse(previous: &OpenDoc, text: String, edits: &[suspect_syntax::Edit]) -> OpenDoc {
+        let low = previous
+            .low
+            .reparse(Source::from_vec(text.clone().into_bytes()), edits);
         OpenDoc { text, low }
     }
 }
@@ -102,6 +190,18 @@ pub struct State {
         String,
         Vec<WorkspaceDocumentDiagnosticReport>,
     )>,
+    /// Per-document content versions: a document's own epoch bumps only
+    /// when THAT document changes, so caches keyed on it survive edits to
+    /// every other file. Absent means "never opened" (disk state).
+    pub doc_epoch: HashMap<Uri, u64>,
+    /// Whole-workspace diagnostic reports, cached PER DOCUMENT: an edit to
+    /// one file re-lints that file, not the whole project. Keys carry the
+    /// workspace identity (pointer) so a workspace rebuild invalidates the
+    /// disk-only documents whose own epoch never moves.
+    pub ws_doc_diag: std::sync::Arc<std::sync::Mutex<HashMap<Uri, WsDocDiagEntry>>>,
+    /// Identity of the currently cached workspace; changes when the
+    /// workspace is dropped and rebuilt (saves, watched-file events).
+    pub ws_identity: usize,
     /// Raw initialization options captured in `initialize` for later merge.
     pub pending_init_options: Option<serde_json::Value>,
     /// Merged server configuration (initialization options < client section).
@@ -160,6 +260,7 @@ impl State {
     /// Forgets the disk-backed workspace, and with it the index built
     /// from it: both describe the tree as it was, not as it is.
     pub fn drop_workspace(&mut self) {
+        self.ws_identity = self.ws_identity.wrapping_add(1);
         self.workspace = None;
         self.index_cache = None;
         self.ws_diag_cache = None;
@@ -176,8 +277,18 @@ impl State {
     /// Inserts or replaces a document and reparses it.
     pub fn open_doc(&mut self, uri: Uri, text: String) {
         self.docs
-            .insert(uri.clone(), Arc::new(OpenDoc::parse(uri, text)));
+            .insert(uri.clone(), Arc::new(OpenDoc::parse(uri.clone(), text)));
         self.content_epoch = self.content_epoch.wrapping_add(1);
+        *self.doc_epoch.entry(uri).or_insert(0) += 1;
+    }
+
+    /// Replaces an already-open document with a reparsed one, bumping the
+    /// content epoch the caches key on. Reparse vs. parse is invisible
+    /// here: only the cost differs, never the tree.
+    pub fn replace_doc(&mut self, uri: Uri, doc: Arc<OpenDoc>) {
+        self.docs.insert(uri.clone(), doc);
+        self.content_epoch = self.content_epoch.wrapping_add(1);
+        *self.doc_epoch.entry(uri).or_insert(0) += 1;
     }
 
     /// Returns the cached workspace, building it against the workspace root
@@ -258,6 +369,51 @@ pub fn apply_content_changes(
         }
     }
     Some(text)
+}
+
+/// Applies one didChange batch to the live document, returning the new
+/// text plus the byte-level [`suspect_syntax::Edit`]s that drive an
+/// incremental reparse. Edits are built per change, in order, against the
+/// buffer as it stands after the preceding change — the same sequential
+/// contract `apply_content_changes` implements and editors follow.
+///
+/// Returns `None` on malformed ranges, exactly like the text-only path;
+/// a range-less change (a full replacement) carries one whole-buffer edit.
+pub fn apply_with_edits(
+    current: &OpenDoc,
+    changes: &[tower_lsp::lsp_types::TextDocumentContentChangeEvent],
+) -> Option<(String, Vec<suspect_syntax::Edit>)> {
+    let mut text = current.text.clone();
+    let mut edits: Vec<suspect_syntax::Edit> = Vec::new();
+    for change in changes {
+        let (start, end): (usize, usize) = match change.range {
+            None => (0, text.len()),
+            Some(range) => {
+                let bytes = text.as_bytes();
+                let li = LineIndex::new(bytes);
+                let start = offset_of_utf16(bytes, &li, range.start.line, range.start.character)?;
+                let end = offset_of_utf16(bytes, &li, range.end.line, range.end.character)?;
+                if end < start || end > text.len() {
+                    return None;
+                }
+                (start, end)
+            }
+        };
+        // Exact points: the new end point is computed from the replacement
+        // itself, so line-count-changing replacements stay correct.
+        let li = LineIndex::new(text.as_bytes());
+        let edit = suspect_syntax::Edit::from_buffer(
+            text.as_bytes(),
+            &li,
+            start,
+            end,
+            change.text.len(),
+            change.text.as_bytes(),
+        );
+        edits.push(edit);
+        text.replace_range(start..end, &change.text);
+    }
+    Some((text, edits))
 }
 
 #[cfg(test)]

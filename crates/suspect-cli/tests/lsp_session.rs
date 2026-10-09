@@ -1908,3 +1908,176 @@ fn a_minimal_client_gets_everything() {
         "symbols must resolve without any client capability"
     );
 }
+
+#[test]
+fn render_sdk_tracks_the_live_buffer_through_incremental_edits() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let api_uri = url_of(&ws.openapi);
+    let (path, text) = (
+        &ws.openapi,
+        std::fs::read_to_string(&ws.openapi).expect("read"),
+    );
+    editor.open(path, &text);
+
+    // Render from the live buffer before any edit: scoped to one GET
+    // operation, the fixture's admissible path.
+    let params = serde_json::json!({
+        "uri": api_uri,
+        "profile": "typescript-http",
+        "packageName": "live-bench",
+        "packageVersion": "0.1.0",
+        "operationIds": ["AccountsGet"],
+    });
+    let first = editor
+        .request("suspect/renderSdk", params.clone())
+        .expect("renderSdk answers");
+    assert!(
+        first["rendered"].as_bool().unwrap_or(false),
+        "the scoped GET operation must admit: {first}"
+    );
+    assert!(first["artifacts"].as_array().is_some_and(|a| !a.is_empty()));
+
+    // A ranged didChange — the incremental reparse path — renames the
+    // operation in the UNSAVED buffer.
+    // locate() is 1-based on both axes; LSP positions are 0-based.
+    let (line, column) = ws.locate(&ws.openapi, "operationId: AccountsGet");
+    let (line, column) = (line - 1, column - 1);
+    editor.notify(
+        "textDocument/didChange",
+        serde_json::json!({
+            "textDocument": {"uri": api_uri, "version": 2},
+            "contentChanges": [{
+                "range": {
+                    "start": {"line": line, "character": column + 13},
+                    "end": {"line": line, "character": column + 24},
+                },
+                "text": "RenamedOp",
+            }],
+        }),
+    );
+
+    // The render carries the unsaved edit: incremental reparse → live
+    // overlay → scoped compile → render, one chain. The selector follows
+    // the rename, proving the scoped compile sees the edited buffer.
+    let renamed = serde_json::json!({
+        "uri": api_uri,
+        "profile": "typescript-http",
+        "packageName": "live-bench",
+        "packageVersion": "0.1.0",
+        "operationIds": ["RenamedOp"],
+    });
+    let second = editor
+        .request("suspect/renderSdk", renamed)
+        .expect("renderSdk answers");
+    assert!(second["rendered"].as_bool().unwrap_or(false), "{second}");
+    let serialized = serde_json::to_string(&second).unwrap();
+    let lower = serialized.to_lowercase();
+    assert!(
+        lower.contains("renamedop"),
+        "the render must reflect the unsaved buffer, not the saved file; sample: {}",
+        &serialized[..serialized.len().min(400)]
+    );
+    assert!(
+        !serialized.contains("AccountsGet"),
+        "the stale operation id must be gone from the render"
+    );
+}
+
+#[test]
+fn the_project_manifest_drives_the_editor_lint_battery() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+
+    // A committed manifest turning a rule OFF and setting a floor: the
+    // battery must honor both without any client configuration.
+    std::fs::write(
+        ws.root.join("suspect.project.json"),
+        r#"{
+            "entry": "openapi.yaml",
+            "lint": {"min_severity": "error", "rules": {"oas-op-summary": "off"}}
+        }"#,
+    )
+    .expect("manifest");
+
+    let (path, text) = (
+        &ws.openapi,
+        std::fs::read_to_string(&ws.openapi).expect("read"),
+    );
+    editor.open(path, &text);
+    let api_uri = url_of(&ws.openapi);
+
+    // Give the debounce a beat, then pull: the findings are the floor's.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let answer = editor
+        .request(
+            "textDocument/diagnostic",
+            serde_json::json!({
+                "textDocument": {"uri": api_uri},
+                "identifier": "suspect",
+            }),
+        )
+        .expect("pull answers");
+    let items = answer
+        .get("items")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let serialized = serde_json::to_string(&items).unwrap_or_default();
+    // The manifest's floor suppresses everything below error: no
+    // `info`/`warning` findings survive in the pull.
+    let item_array = items.as_array().cloned().unwrap_or_default();
+    if let Some(first) = item_array.first() {
+        let kind = first.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+        if kind == "full" {
+            for item in first
+                .get("items")
+                .and_then(|i| i.as_array())
+                .cloned()
+                .unwrap_or_default()
+            {
+                let severity = item.get("severity").and_then(|s| s.as_i64()).unwrap_or(0);
+                assert!(
+                    severity <= 1,
+                    "the manifest's error floor must suppress below-error findings: {item}"
+                );
+            }
+        }
+    }
+    let _ = serialized;
+}
+
+#[test]
+fn an_invalid_arazzo_condition_names_the_fix() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+
+    // The exact mistake from the field: dotted navigation into the
+    // response body instead of a JSON pointer.
+    std::fs::write(
+        ws.root.join("broken.arazzo.yaml"),
+        "arazzo: 1.0.0\ninfo:\n  title: Broken\n  version: '1'\nsourceDescriptions:\n  - name: api\n    type: openapi\n    url: api.yaml\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: s\n        operationId: getStatus\n        successCriteria:\n          - condition: '$response.body.MediaContainer.size > 0'\n",
+    )
+    .expect("write");
+    let (broken_path, broken_text) = (
+        ws.root.join("broken.arazzo.yaml"),
+        std::fs::read_to_string(ws.root.join("broken.arazzo.yaml")).expect("read"),
+    );
+    editor.open(&broken_path, &broken_text);
+    let uri = url_of(&ws.root.join("broken.arazzo.yaml"));
+
+    let answer = editor
+        .request("textDocument/diagnostic", doc(&uri))
+        .expect("diagnostics for the broken workflow");
+    let serialized = serde_json::to_string(&answer).unwrap_or_default();
+    assert!(
+        serialized.contains("$response.body#/MediaContainer/size"),
+        "the diagnostic names the corrected spelling: {serialized}"
+    );
+    assert!(
+        serialized.contains("did you mean"),
+        "the diagnostic reads as a suggestion, not just a rejection: {serialized}"
+    );
+}

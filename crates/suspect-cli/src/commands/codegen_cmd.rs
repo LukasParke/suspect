@@ -22,8 +22,9 @@ pub struct CodegenArgs {
     #[arg(long, requires = "pins")]
     pub insecure_test_origin: Vec<String>,
     /// Native capability profile; unsupported contracts fail before output.
+    /// Defaults to `.suspect.yaml`'s `codegen.profile` when omitted.
     #[arg(long, value_enum)]
-    pub profile: SdkProfile,
+    pub profile: Option<SdkProfile>,
     /// Exact operationId selector (repeatable); omit to attempt all operations.
     #[arg(long, allow_hyphen_values = true)]
     pub operation_id: Vec<String>,
@@ -31,8 +32,9 @@ pub struct CodegenArgs {
     #[arg(long)]
     pub package_name: String,
     /// Exact native-compatible package SemVer, independent of API info.version.
+    /// Defaults to `.suspect.yaml`'s `codegen.package_version` when omitted.
     #[arg(long)]
-    pub package_version: String,
+    pub package_version: Option<String>,
     /// Native import/module identity, independent of the source API semantics.
     #[arg(long)]
     pub import_name: Option<String>,
@@ -46,9 +48,10 @@ pub struct CodegenArgs {
     /// compatibility profiles are added on top.
     #[arg(long, value_name = "FILE")]
     pub defaults: Option<PathBuf>,
-    /// Output root for generated artifacts.
-    #[arg(short, long, default_value = "codegen-out")]
-    pub out: PathBuf,
+    /// Output root for generated artifacts. Defaults to `.suspect.yaml`'s
+    /// `codegen.out`, then `codegen-out`.
+    #[arg(short, long)]
+    pub out: Option<PathBuf>,
     /// Check ownership and drift without writing.
     #[arg(long)]
     pub check: bool,
@@ -61,7 +64,38 @@ pub struct CodegenArgs {
 ///
 /// # Errors
 /// Propagates invalid configuration, source loading and emission failures.
-pub fn codegen(args: CodegenArgs) -> anyhow::Result<i32> {
+pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
+    // The `.suspect.yaml` codegen section supplies flag defaults, the
+    // same precedence `suspect docs` uses for style and output: an
+    // explicit flag always wins, the file fills what the flag omitted,
+    // and with neither the historical defaults apply.
+    let settings_source = match args.spec.as_deref().or(args.pins.as_deref()) {
+        Some(entry) => suspect_config::for_invocation(Some(entry))
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .ok(),
+        None => suspect_config::for_invocation(None).ok(),
+    };
+    if let Some(loaded) = settings_source {
+        let codegen = &loaded.settings.codegen;
+        if args.profile.is_none()
+            && let Some(profile) = &codegen.profile
+        {
+            let Some(resolved) = super::sdk::profile_by_name(profile) else {
+                return Err(anyhow::anyhow!(
+                    "codegen profile `{profile}` is not one of the native profiles"
+                ));
+            };
+            args.profile = Some(resolved);
+        }
+        if args.package_version.is_none() {
+            args.package_version = codegen.package_version.clone();
+        }
+        if args.out.is_none()
+            && let Some(out) = &codegen.out
+        {
+            args.out = Some(loaded.root.join(out));
+        }
+    }
     let input = match (args.spec, args.pins) {
         (Some(path), None) => Input::File { path },
         (None, Some(manifest)) => Input::Pinned {
@@ -90,15 +124,22 @@ pub fn codegen(args: CodegenArgs) -> anyhow::Result<i32> {
     for profile in args.compatibility_profile {
         generation.compatibility_profiles.insert(profile.0);
     }
+    // Everything the settings could not supply has a historical default;
+    // the profile is the one selection with no default, so name it.
+    let profile = args.profile.unwrap_or_else(|| {
+        eprintln!("--profile is required (or set codegen.profile in .suspect.yaml)");
+        std::process::exit(2);
+    });
     super::sdk::generate(&SdkArgs {
         input,
-        profile: args.profile,
+        shared: None,
+        profile,
         operation_id: args.operation_id,
         package_name: args.package_name,
-        package_version: args.package_version,
+        package_version: args.package_version.unwrap_or_else(|| "0.1.0".to_owned()),
         import_name: args.import_name,
         generation,
-        out: args.out,
+        out: args.out.unwrap_or_else(|| PathBuf::from("codegen-out")),
         check: args.check,
         text: TextFormat {
             format: args.format,

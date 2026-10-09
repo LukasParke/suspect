@@ -229,7 +229,10 @@ pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
             .and_then(serde_json::Value::as_u64)
             .and_then(|n| usize::try_from(n).ok()),
     });
-    let inlay_hints = obj.get("inlayHints").map(|v| {
+    // The client section spells it `inlayHints`; the settings file and
+    // the manifest's editor section spell it `inlay_hints`.
+    let inlay_json = obj.get("inlayHints").or_else(|| obj.get("inlay_hints"));
+    let inlay_hints = inlay_json.map(|v| {
         let refs = v
             .get("refs")
             .or_else(|| v.get("refTargets"))
@@ -256,6 +259,95 @@ pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
         formatting,
         extensions,
     })
+}
+
+/// The committed policy layers under client settings: the project
+/// manifest's policy sections beneath the workspace `.suspect.yaml`.
+///
+/// One schema serves both files — the manifest's `editor` section is
+/// unwrapped to the same top-level keys the settings file uses — and
+/// `.suspect.yaml` wins wherever both carry a value. Client settings
+/// still win over both; this is the base they land on.
+#[must_use]
+pub fn file_layers(root: Option<&std::path::Path>) -> SuspectConfig {
+    let manifest = root.map(read_manifest_policy).unwrap_or_default();
+    let settings = root.map(read_settings_value).unwrap_or_default();
+    // Layer: settings file over manifest (both as initialization-style
+    // documents, so `merge` applies the same precedence the client does).
+    merge(settings, None, parse_config(&manifest).unwrap_or_default())
+}
+
+/// The manifest's `lint`/`validate` policy plus its `editor` section
+/// unwrapped to top-level keys, as a `suspect`-shaped JSON document.
+#[must_use]
+fn read_manifest_policy(root: &std::path::Path) -> serde_json::Value {
+    let dir = if root.is_dir() {
+        root.to_path_buf()
+    } else {
+        root.parent().map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        )
+    };
+    let text = std::fs::read_to_string(dir.join("suspect.project.json")).ok();
+    let value: Option<serde_json::Value> = text.and_then(|t| serde_json::from_str(&t).ok());
+    let Some(value) = value else {
+        return serde_json::Value::Null;
+    };
+    let mut out = serde_json::Map::new();
+    for key in ["lint", "validate"] {
+        if let Some(section) = value.get(key) {
+            out.insert(key.to_owned(), section.clone());
+        }
+    }
+    // The editor section is the manifest's home for the knobs the client
+    // settings carry under `suspect.*`: unwrap so both files use the
+    // same top-level spellings.
+    if let Some(editor) = value.get("editor").and_then(|e| e.as_object()) {
+        for (key, section) in editor {
+            if key == "inlay_hints"
+                || key == "inlayHints"
+                || key == "ref"
+                || key == "refs"
+                || key == "formatting"
+            {
+                out.insert(key.clone(), section.clone());
+            }
+        }
+    }
+    serde_json::Value::Object(out)
+}
+
+/// The workspace `.suspect.yaml` as a `suspect`-shaped JSON document.
+/// The file's keys are already the top-level spellings; the parse only
+/// strips YAML into JSON.
+#[must_use]
+fn read_settings_value(root: &std::path::Path) -> Option<serde_json::Value> {
+    let dir = if root.is_dir() {
+        root.to_path_buf()
+    } else {
+        root.parent().map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        )
+    };
+    let mut current = Some(dir);
+    while let Some(dir) = current {
+        for name in suspect_config::CONFIG_NAMES {
+            let candidate = dir.join(name);
+            if let Ok(text) = std::fs::read_to_string(&candidate) {
+                let uri = suspect_source::Uri::from_path(&candidate).ok()?;
+                let doc = suspect_low::LowDoc::parse(
+                    uri,
+                    suspect_source::Source::from_vec(text.into_bytes()),
+                );
+                let json = suspect_overlay::Value::from_node(doc.root()).to_json();
+                return serde_json::from_str(&json).ok();
+            }
+        }
+        current = dir.parent().map(std::path::Path::to_path_buf);
+    }
+    None
 }
 
 /// Merges the three configuration sources into one effective config.

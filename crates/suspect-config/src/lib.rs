@@ -160,6 +160,85 @@ impl Loaded {
 /// # Errors
 /// Propagates a malformed configuration file: a committed config that does
 /// not parse must be loud, not silently absent.
+impl Loaded {
+    /// The manifest's policy sections, parsed with the settings file's key
+    /// spellings: the project manifest (`suspect` + `.suspect.project.json`)
+    /// carries `lint` and `validate` as committed project policy, layered
+    /// under the workspace config file so `.suspect.yaml` remains a local
+    /// override and client settings still win over both.
+    ///
+    /// # Errors
+    /// Never: unrecognized or absent sections parse as absent settings.
+    #[must_use]
+    pub fn from_manifest_policy(dir: &Path, policy: &serde_json::Value) -> Loaded {
+        let root = dir.to_path_buf();
+        let resolve = |relative: &str| root.join(relative);
+        let lint = policy.get("lint");
+        let validate = policy.get("validate");
+        Loaded {
+            settings: Settings {
+                lint: crate::LintSettings {
+                    ruleset: lint
+                        .and_then(|l| l.get("ruleset"))
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|s| !s.is_empty())
+                        .map(resolve),
+                    min_severity: lint
+                        .and_then(|l| l.get("min_severity"))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                },
+                validate: crate::ValidateSettings {
+                    strict_format: validate
+                        .and_then(|v| v.get("strict_format"))
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                },
+                ..Settings::default()
+            },
+            path: None,
+            root,
+        }
+    }
+
+    /// Layers `upper` over `self`: every value `upper` carries wins, and
+    /// `self` fills the rest. The manifest is the base; the discovered
+    /// settings file overrides it.
+    #[must_use]
+    pub fn layered(base: Loaded, upper: Loaded) -> Loaded {
+        let mut s = base.settings;
+        let u = upper.settings;
+        s.lint.ruleset = u.lint.ruleset.or(s.lint.ruleset);
+        s.lint.min_severity = u.lint.min_severity.or(s.lint.min_severity);
+        s.validate.strict_format |= u.validate.strict_format;
+        s.format.json |= u.format.json;
+        s.format.yaml |= u.format.yaml;
+        s.docs.style = u.docs.style.or(s.docs.style);
+        s.docs.out = u.docs.out.or(s.docs.out);
+        s.codegen.out = u.codegen.out.or(s.codegen.out);
+        s.codegen.profile = u.codegen.profile.or(s.codegen.profile);
+        s.codegen.package_version = u.codegen.package_version.or(s.codegen.package_version);
+        Loaded {
+            settings: s,
+            path: upper.path.or(base.path),
+            root: if upper.root.as_os_str().is_empty() {
+                base.root
+            } else {
+                upper.root
+            },
+        }
+    }
+}
+
+/// The manifest file name the loader composes policy from.
+pub const MANIFEST_NAME: &str = "suspect.project.json";
+
+/// The configuration for one invocation: the settings file discovered
+/// from the input's directory, with the project manifest's policy
+/// sections layered underneath when one sits on the walk up.
+///
+/// # Errors
+/// Config file discovery and parsing failures.
 pub fn for_invocation(input: Option<&Path>) -> Result<Loaded, file::ConfigError> {
     if let Some(found) = discover(Path::new("."))? {
         return Ok(found);
@@ -222,5 +301,89 @@ mod tests {
             !text.contains("format.yaml"),
             "unset values stay out:\n{text}"
         );
+    }
+}
+
+#[cfg(test)]
+mod manifest_layer_tests {
+    use super::*;
+
+    #[test]
+    fn manifest_policy_parses_with_the_settings_spellings() {
+        let policy = serde_json::json!({
+            "lint": {"min_severity": "warning", "ruleset": "rules/my-rules.yaml"},
+            "validate": {"strict_format": true}
+        });
+        let loaded = Loaded::from_manifest_policy(Path::new("/proj"), &policy);
+        assert_eq!(
+            loaded.settings.lint.min_severity.as_deref(),
+            Some("warning")
+        );
+        assert_eq!(
+            loaded.settings.lint.ruleset,
+            Some(PathBuf::from("/proj/rules/my-rules.yaml"))
+        );
+        assert!(loaded.settings.validate.strict_format);
+    }
+
+    #[test]
+    fn settings_file_overrides_the_manifest_layer() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = Loaded::from_manifest_policy(
+            dir.path(),
+            &serde_json::json!({"lint": {"min_severity": "warning"}}),
+        );
+        let upper = Loaded {
+            settings: Settings {
+                lint: crate::LintSettings {
+                    min_severity: Some("info".to_owned()),
+                    ruleset: None,
+                },
+                ..Settings::default()
+            },
+            path: None,
+            root: dir.path().to_path_buf(),
+        };
+        let layered = Loaded::layered(base, upper);
+        // The settings file wins where it carries a value; the manifest
+        // fills the rest.
+        assert_eq!(layered.settings.lint.min_severity.as_deref(), Some("info"));
+        assert!(layered.settings.lint.ruleset.is_none());
+    }
+
+    #[test]
+    fn discover_composes_a_manifest_beneath_the_settings_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("suspect.project.json"),
+            r#"{"lint": {"min_severity": "error"}, "validate": {"strict_format": true}}"#,
+        )
+        .expect("manifest");
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: warning\n",
+        )
+        .expect("settings");
+        let found = discover(dir.path().join("openapi.yaml").as_path())
+            .expect("discover")
+            .expect("found");
+        // The settings file's floor wins over the manifest's; the
+        // manifest's strict_format survives underneath.
+        assert_eq!(found.settings.lint.min_severity.as_deref(), Some("warning"));
+        assert!(found.settings.validate.strict_format);
+    }
+
+    #[test]
+    fn a_manifest_alone_supplies_its_policy() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("suspect.project.json"),
+            r#"{"lint": {"min_severity": "error"}}"#,
+        )
+        .expect("manifest");
+        let found = discover(dir.path().join("openapi.yaml").as_path())
+            .expect("discover")
+            .expect("found");
+        assert_eq!(found.settings.lint.min_severity.as_deref(), Some("error"));
     }
 }
