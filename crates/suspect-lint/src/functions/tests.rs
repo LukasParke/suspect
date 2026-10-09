@@ -16,6 +16,7 @@ pub(crate) fn doc(yaml: &str) -> LowDoc {
 }
 
 /// Owned projection of a finding so probes can outlive their document.
+#[derive(Debug)]
 pub(crate) struct Hit {
     pub code: String,
     pub severity: Severity,

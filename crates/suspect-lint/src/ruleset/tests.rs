@@ -260,3 +260,161 @@ fn policy_severity_accepts_both_vocabularies() {
     // Whitespace and casing are tolerated; the value is committed policy.
     assert_eq!(Severity::from_policy(" Warning "), Some(Severity::Warn));
 }
+
+/// The builtin parameter rules match Parameter Objects — path-item,
+/// operation and component lists — and never a schema property that
+/// happens to be *named* `parameters`.
+#[test]
+fn parameter_rules_do_not_descend_into_schemas() {
+    let linter = Linter::spectral_default();
+    let target = "openapi: \"3.1.0\"\n\
+                  info:\n  title: t\n  version: \"1\"\n\
+                  paths:\n\
+                  \x20 /items/{id}:\n\
+                  \x20   parameters:\n\
+                  \x20     - name: id\n\
+                  \x20       in: path\n\
+                  \x20       required: true\n\
+                  \x20       schema:\n\
+                  \x20         type: string\n\
+                  \x20   get:\n\
+                  \x20     parameters:\n\
+                  \x20       - name: filter\n\
+                  \x20         in: query\n\
+                  \x20         description: filter the items\n\
+                  \x20         schema:\n\
+                  \x20           type: string\n\
+                  \x20     responses:\n\
+                  \x20       '200':\n\
+                  \x20         description: ok\n\
+                  \x20         content:\n\
+                  \x20           application/json:\n\
+                  \x20             schema:\n\
+                  \x20               $ref: '#/components/schemas/Bag'\n\
+                  components:\n\
+                  \x20 schemas:\n\
+                  \x20   Bag:\n\
+                  \x20     type: object\n\
+                  \x20     properties:\n\
+                  \x20       parameters:\n\
+                  \x20         description: a property named parameters\n\
+                  \x20         type: string\n\
+                  \x20 parameters:\n\
+                  \x20   X-Token:\n\
+                  \x20     name: X-Token\n\
+                  \x20     in: header\n\
+                  \x20     description: auth token\n\
+                  \x20     schema:\n\
+                  \x20       type: string\n";
+    let hits = run(&linter, target);
+    // The schema property named `parameters` is fully described: neither
+    // parameter rule may fire on it.
+    assert!(
+        hits.iter()
+            .all(|h| h.path != "/components/schemas/Bag/properties/parameters"),
+        "a schema property named `parameters` is not a Parameter Object: {hits:?}"
+    );
+    // A real operation parameter missing both schema and content is still
+    // an error.
+    let bad = "openapi: \"3.1.0\"\n\
+               info:\n  title: t\n  version: \"1\"\n\
+               paths:\n\
+               \x20 /a:\n\
+               \x20   get:\n\
+               \x20     parameters:\n\
+               \x20       - name: q\n\
+               \x20         in: query\n\
+               \x20     responses:\n\
+               \x20       '200':\n\
+               \x20         description: ok\n";
+    let hits = run(&linter, bad);
+    assert!(
+        hits.iter().any(|h| h.code == "parameter-schema-or-content"),
+        "a real schema-less parameter is still an error: {hits:?}"
+    );
+}
+
+/// Security schemes are referenced by NAME from `security` blocks, never
+/// by pointer; the unused-component check honors that.
+#[test]
+fn unused_security_schemes_are_name_referenced() {
+    let linter = Linter::spectral_default();
+    let target = "openapi: \"3.0.0\"\n\
+                  info:\n  title: t\n  version: \"1\"\n\
+                  security:\n\
+                  \x20 - token: []\n\
+                  paths:\n\
+                  \x20 /admin:\n\
+                  \x20   get:\n\
+                  \x20     security:\n\
+                  \x20       - clientIdentifier: []\n\
+                  \x20     responses:\n\
+                  \x20       '200':\n\
+                  \x20         description: ok\n\
+                  \x20         content:\n\
+                  \x20           application/json:\n\
+                  \x20             schema:\n\
+                  \x20               $ref: '#/components/schemas/Used'\n\
+                  components:\n\
+                  \x20 securitySchemes:\n\
+                  \x20   token:\n\
+                  \x20     type: apiKey\n\
+                  \x20     name: X-Api-Token\n\
+                  \x20     in: header\n\
+                  \x20   clientIdentifier:\n\
+                  \x20     type: apiKey\n\
+                  \x20     name: X-Client-Identifier\n\
+                  \x20     in: header\n\
+                  \x20   ghost:\n\
+                  \x20     type: apiKey\n\
+                  \x20     name: X-Ghost\n\
+                  \x20     in: header\n\
+                  \x20 schemas:\n\
+                  \x20   Used:\n\
+                  \x20     type: object\n\
+                  \x20   Orphan:\n\
+                  \x20     type: object\n";
+    let hits = run(&linter, target);
+    // Two genuinely unused components: the `ghost` scheme no security
+    // block names, and the `Orphan` schema no $ref points at. The
+    // name-referenced schemes (`token` at the root, `clientIdentifier` at
+    // the operation) and the $ref-referenced `Used` schema stay silent.
+    let unused: Vec<_> = hits
+        .iter()
+        .filter(|h| h.code == "oas3-unused-component")
+        .collect();
+    assert_eq!(
+        unused.len(),
+        2,
+        "only ghost and Orphan are unused: {hits:?}"
+    );
+    // (Findings push at the component key node; both survivors are
+    // distinguishable by message context in the full battery.)
+}
+
+/// The root path `/` is the only legal trailing slash; everything else
+/// with a trailing slash is a finding.
+#[test]
+fn trailing_slash_exempts_only_the_root_path() {
+    let linter = Linter::spectral_default();
+    let target = "openapi: \"3.0.0\"\n\
+                  info:\n  title: t\n  version: \"1\"\n\
+                  paths:\n\
+                  \x20 /:\n\
+                  \x20   get:\n\
+                  \x20     responses:\n\
+                  \x20       '200':\n\
+                  \x20         description: ok\n\
+                  \x20 /pets/:\n\
+                  \x20   get:\n\
+                  \x20     responses:\n\
+                  \x20       '200':\n\
+                  \x20         description: ok\n";
+    let hits = run(&linter, target);
+    let slashes: Vec<_> = hits
+        .iter()
+        .filter(|h| h.code == "path-keys-no-trailing-slash")
+        .collect();
+    assert_eq!(slashes.len(), 1, "only /pets/ is flagged: {hits:?}");
+    assert_eq!(slashes[0].path, "/paths/~1pets~1");
+}

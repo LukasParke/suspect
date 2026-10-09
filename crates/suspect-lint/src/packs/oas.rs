@@ -339,7 +339,15 @@ pub(crate) fn rules() -> Vec<Rule> {
             "Parameter must define `schema` or `content`.",
             Severity::Error,
             FamilySet::OAS3,
-            &["$..parameters.*"],
+            // Path-item, operation and component parameter objects only.
+            // A broad `$..parameters.*` also descends into schemas, where
+            // a property legitimately *named* `parameters` is not a
+            // Parameter Object at all.
+            &[
+                "$.paths.*.parameters.*",
+                "$.paths.*.*.parameters.*",
+                "$.components.parameters.*",
+            ],
             Function::ParameterSchemaOrContent,
         ),
         Rule::new(
@@ -373,7 +381,13 @@ pub(crate) fn rules() -> Vec<Rule> {
             "Parameter objects should have `description`.",
             Severity::Info,
             oas23,
-            &["$..parameters.*"],
+            // Path-item, operation and component parameter objects only —
+            // not schema properties that happen to be named `parameters`.
+            &[
+                "$.paths.*.parameters.*",
+                "$.paths.*.*.parameters.*",
+                "$.components.parameters.*",
+            ],
             property_defined("description"),
         ),
     ]

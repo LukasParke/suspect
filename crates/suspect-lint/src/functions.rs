@@ -837,13 +837,15 @@ fn check_no_trailing_slash<'d>(
 ) {
     // Cheap pre-filter: the node's own addressing key from the pointer map
     // (O(1)); fall back to the full pointer computation when unvisited.
+    // The root path `/` is exempt: it ends in a slash by definition, and
+    // it addresses no resource (the structural validator agrees).
     let ends_with_slash = match ptrs.own_key(node) {
-        Some(k) => k.ends_with(b"/"),
+        Some(k) => k.ends_with(b"/") && k != b"/",
         None => node
             .path_from_root()
             .tokens()
             .last()
-            .is_some_and(|k| k.ends_with('/')),
+            .is_some_and(|k| k.ends_with('/') && k.as_ref() != "/"),
     };
     if ends_with_slash {
         push(out, rule, node, ptrs);
@@ -933,9 +935,22 @@ fn check_unused_component<'d>(
     let syntax_root = node.syntax().doc().root();
     let doc_root = NodeRef::new(syntax_root).resolved();
     let mut referenced: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Security schemes are referenced by NAME from `security` requirement
+    // blocks, never by pointer — collecting those names as references keeps
+    // the rule from flagging every scheme as unused.
+    let mut security_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut stack = vec![doc_root];
     while let Some(current) = stack.pop() {
         for entry in current.entries() {
+            if entry.key == "security"
+                && let Some(value) = entry.value
+            {
+                for requirement in value.resolved().items() {
+                    for name in requirement.resolved().entries() {
+                        security_names.insert(name.key.to_owned());
+                    }
+                }
+            }
             if entry.key == "$ref"
                 && let Some(value) = entry.value
                 && let Some(text) = value.as_str()
@@ -952,12 +967,17 @@ fn check_unused_component<'d>(
     }
     let section = section_of(node);
     for entry in resolved.entries() {
-        let pointer = if section == "definitions" {
-            format!("#/definitions/{}", entry.key)
+        let referenced = if section == "securitySchemes" {
+            security_names.contains(entry.key)
         } else {
-            format!("#/components/{}/{}", section, entry.key)
+            let pointer = if section == "definitions" {
+                format!("#/definitions/{}", entry.key)
+            } else {
+                format!("#/components/{}/{}", section, entry.key)
+            };
+            referenced.contains(&pointer)
         };
-        if !referenced.contains(&pointer) {
+        if !referenced {
             push(out, rule, &entry.key_node, ptrs);
         }
     }
