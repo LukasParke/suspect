@@ -43,6 +43,18 @@ impl Severity {
         }
     }
 
+    /// Parses a policy severity name: the ruleset vocabulary (`error`,
+    /// `warn`, `info`, `hint`, `off`) plus the editor's names
+    /// (`warning`, `information`) for the same ranks.
+    #[must_use]
+    pub fn from_policy(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "warning" => Some(Self::Warn),
+            "information" => Some(Self::Info),
+            other => Self::from_text(other),
+        }
+    }
+
     /// Spectral numeric severities: `0`=error, `1`=warn, `2`=info, `3`=hint.
     pub(crate) fn from_number(n: i64) -> Option<Self> {
         match n {
@@ -136,6 +148,22 @@ impl FamilySet {
     }
 }
 
+/// The concern a rule addresses, deciding who can act on a finding.
+///
+/// `Document` rules fire on documents that misstate or underspecify an
+/// API — the fix is an edit to the document, in reach of whoever owns it.
+/// `Design` rules flag the API's own design: the document is truthful, and
+/// only the API's owner could change the flagged behavior. A documenter
+/// cannot fix a `Design` finding without making the document wrong, so
+/// projects may silence the whole class (see `lint.design` policy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Category {
+    /// Fix the document: it misstates or underspecifies the API.
+    Document,
+    /// Fix would require changing the API; the document is truthful.
+    Design,
+}
+
 /// A compiled lint rule: parsed JSONPath queries plus a resolved `then`
 /// function with its options.
 #[derive(Debug)]
@@ -149,6 +177,7 @@ pub(crate) struct Rule {
     pub then: crate::functions::Function,
     pub severity: Severity,
     pub formats: FamilySet,
+    pub category: Category,
 }
 
 impl Rule {
@@ -177,6 +206,7 @@ impl Rule {
             then,
             severity,
             formats,
+            category: Category::Document,
         }
     }
 }

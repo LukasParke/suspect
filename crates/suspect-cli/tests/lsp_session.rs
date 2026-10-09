@@ -2048,6 +2048,153 @@ fn the_project_manifest_drives_the_editor_lint_battery() {
     let _ = serialized;
 }
 
+/// One spec with a design-class finding (a plaintext server URL — the
+/// document truthfully describes an API its author does not own) and a
+/// document-class finding (a missing `operationId`).
+fn design_document(root: &std::path::Path) -> std::path::PathBuf {
+    let path = root.join("design.yaml");
+    std::fs::write(
+        &path,
+        "openapi: \"3.0.0\"\ninfo:\n  title: t\n  version: \"1\"\nservers:\n  - url: http://media.example.local:32400\npaths:\n  /ping:\n    get:\n      responses:\n        '200':\n          description: ok\n",
+    )
+    .expect("write spec");
+    path
+}
+
+/// Pulls the full diagnostic set for one document as (code, severity)
+/// pairs, after the battery's debounce settles.
+fn pull_findings(editor: &Editor, uri: &str) -> Vec<(String, i64)> {
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    let answer = editor
+        .request(
+            "textDocument/diagnostic",
+            serde_json::json!({
+                "textDocument": {"uri": uri},
+                "identifier": "suspect",
+            }),
+        )
+        .expect("pull answers");
+    // The report shape: {"kind": "full", "items": [...]}.
+    answer
+        .get("items")
+        .and_then(|i| i.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|item| {
+            (
+                item.get("code")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                item.get("severity").and_then(|s| s.as_i64()).unwrap_or(0),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn manifest_design_off_drops_api_design_findings_not_document_ones() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    // The settings file's floor would layer over the manifest; this test
+    // is about the manifest alone. Remove it BEFORE the editor starts —
+    // the editor loads configuration once at initialization.
+    std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    std::fs::write(
+        ws.root.join("suspect.project.json"),
+        r#"{
+            "entry": "design.yaml",
+            "lint": {"design": "off"}
+        }"#,
+    )
+    .expect("manifest");
+
+    let path = design_document(&ws.root);
+    let text = std::fs::read_to_string(&path).expect("read");
+    editor.open(&path, &text);
+    let findings = pull_findings(&editor, &url_of(&path));
+
+    assert!(
+        !findings
+            .iter()
+            .any(|(code, _)| code == "security-server-https-only"),
+        "a design-class finding must respect lint.design: off — got {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|(code, _)| code == "operation-operationId"),
+        "a document-class finding must survive lint.design: off — got {findings:?}"
+    );
+}
+
+#[test]
+fn manifest_design_info_downgrades_instead_of_dropping() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
+    std::fs::write(
+        ws.root.join("suspect.project.json"),
+        r#"{
+            "entry": "design.yaml",
+            "lint": {"design": "info"}
+        }"#,
+    )
+    .expect("manifest");
+    let editor = Editor::start(&ws.root, editor_capabilities());
+
+    let path = design_document(&ws.root);
+    let text = std::fs::read_to_string(&path).expect("read");
+    editor.open(&path, &text);
+    let findings = pull_findings(&editor, &url_of(&path));
+
+    // LSP severity: Error=1, Warning=2, Information=3.
+    let design = findings
+        .iter()
+        .find(|(code, _)| code == "security-server-https-only");
+    assert_eq!(
+        design.map(|(_, sev)| *sev),
+        Some(3),
+        "lint.design: info must downgrade, not drop — got {findings:?}"
+    );
+}
+
+#[test]
+fn manifest_rule_off_drops_that_rule_only() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
+    std::fs::write(
+        ws.root.join("suspect.project.json"),
+        r#"{
+            "entry": "design.yaml",
+            "lint": {"rules": {"operation-operationId": "off"}}
+        }"#,
+    )
+    .expect("manifest");
+    let editor = Editor::start(&ws.root, editor_capabilities());
+
+    let path = design_document(&ws.root);
+    let text = std::fs::read_to_string(&path).expect("read");
+    editor.open(&path, &text);
+    let findings = pull_findings(&editor, &url_of(&path));
+
+    assert!(
+        !findings
+            .iter()
+            .any(|(code, _)| code == "operation-operationId"),
+        "lint.rules.<id>: off must drop the rule — got {findings:?}"
+    );
+    assert!(
+        findings
+            .iter()
+            .any(|(code, _)| code == "security-server-https-only"),
+        "other rules must survive one rule's off — got {findings:?}"
+    );
+}
+
 #[test]
 fn an_invalid_arazzo_condition_names_the_fix() {
     let dir = tempfile::tempdir().expect("tempdir");

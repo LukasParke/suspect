@@ -187,3 +187,76 @@ fn spectral_default_compiles_and_targets_oas() {
             .all(|h| !h.code.starts_with("overlay") && !h.code.starts_with("arazzo"))
     );
 }
+
+#[test]
+fn builtin_categories_split_design_from_document() {
+    let linter = Linter::spectral_default();
+    // The security pack is uniformly design-class: advisory findings about
+    // the API's design that a truthful document still triggers.
+    for code in [
+        "security-server-https-only",
+        "security-no-credentials-in-url",
+        "security-no-delete-without-id",
+        "security-rate-limit-documented",
+    ] {
+        assert_eq!(
+            linter.category_of(code),
+            crate::rule::Category::Design,
+            "{code} must be design-class"
+        );
+    }
+    // OAS pack rules are document-class: the fix is an edit to the
+    // document.
+    for code in ["no-$ref-siblings", "path-params", "operation-operationId"] {
+        assert_eq!(
+            linter.category_of(code),
+            crate::rule::Category::Document,
+            "{code} must be document-class"
+        );
+    }
+    // Unknown codes (never produced by this linter) default to document.
+    assert_eq!(
+        linter.category_of("not-a-rule"),
+        crate::rule::Category::Document
+    );
+}
+
+#[test]
+fn extends_security_and_override_inherits_category() {
+    // The security pack is addressable, so a ruleset can include it and
+    // tune individual rules — and a redefinition of a builtin inherits
+    // its class rather than resetting it.
+    let rs = doc(
+        "extends: spectral:security\nrules:\n  security-no-delete-without-id:\n    description: custom\n    given: $.paths.*.delete\n    severity: hint\n    then:\n      function: falsy\n      functionOptions:\n        property: operationId\n",
+    );
+    let linter = Linter::from_ruleset(&rs).expect("valid ruleset");
+    assert_eq!(
+        linter.category_of("security-no-delete-without-id"),
+        crate::rule::Category::Design,
+        "an overridden builtin keeps its category"
+    );
+    // A doc rule compiled fresh stays document-class.
+    let rs2 = doc(
+        "rules:\n  custom-check:\n    description: d\n    given: $\n    severity: warn\n    then:\n      function: falsy\n      functionOptions:\n        property: nothing\n",
+    );
+    let fresh = Linter::from_ruleset(&rs2).expect("valid ruleset");
+    assert_eq!(
+        fresh.category_of("custom-check"),
+        crate::rule::Category::Document
+    );
+}
+
+#[test]
+fn policy_severity_accepts_both_vocabularies() {
+    use crate::rule::Severity;
+    assert_eq!(Severity::from_policy("error"), Some(Severity::Error));
+    assert_eq!(Severity::from_policy("warn"), Some(Severity::Warn));
+    assert_eq!(Severity::from_policy("warning"), Some(Severity::Warn));
+    assert_eq!(Severity::from_policy("info"), Some(Severity::Info));
+    assert_eq!(Severity::from_policy("information"), Some(Severity::Info));
+    assert_eq!(Severity::from_policy("hint"), Some(Severity::Hint));
+    assert_eq!(Severity::from_policy("off"), Some(Severity::Off));
+    assert_eq!(Severity::from_policy("loud"), None);
+    // Whitespace and casing are tolerated; the value is committed policy.
+    assert_eq!(Severity::from_policy(" Warning "), Some(Severity::Warn));
+}

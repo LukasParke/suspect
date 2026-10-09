@@ -125,12 +125,33 @@ pub fn load(path: &Path) -> Result<Loaded, ConfigError> {
             .and_then(|v| v.as_str())
             .is_some_and(|v| v == "true")
     };
+    // `lint.rules`: rule id → severity, as a plain mapping.
+    let lint_rules = doc
+        .root()
+        .get("lint")
+        .and_then(|l| l.get("rules"))
+        .map(|rules| {
+            rules
+                .entries()
+                .into_iter()
+                .filter_map(|entry| {
+                    entry
+                        .value
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| (entry.key.to_owned(), s.to_ascii_lowercase()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     Ok(Loaded {
         settings: Settings {
             lint: crate::LintSettings {
                 ruleset: text_at("lint", "ruleset").map(resolve),
                 min_severity: text_at("lint", "min_severity"),
+                design: text_at("lint", "design"),
+                rules: lint_rules,
             },
             validate: crate::ValidateSettings {
                 strict_format: bool_at("validate", "strict_format"),
