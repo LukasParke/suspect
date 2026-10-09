@@ -105,6 +105,13 @@ fn apply_client(config: &mut EditorConfig, value: &serde_json::Value) {
     {
         config.settings.lint.ruleset = Some(std::path::PathBuf::from(ruleset));
     }
+    if let Some(design) = section
+        .get("lint")
+        .and_then(|l| l.get("design"))
+        .and_then(|v| v.as_str())
+    {
+        config.settings.lint.design = Some(design.to_owned());
+    }
     if let Some(strict) = section
         .get("validate")
         .and_then(|v| v.get("strictFormat"))

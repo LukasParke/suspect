@@ -259,6 +259,8 @@ test('the server-side commands have editor entry points and the server settings 
 	const props = contributes.configuration.properties;
 	assert.equal(props['suspect.lint.recommended'].type, 'boolean');
 	assert.equal(props['suspect.lint.rules'].type, 'object');
+	assert.equal(props['suspect.lint.design'].type, 'string');
+	assert.equal(props['suspect.lint.design'].enum.includes('off'), true);
 	assert.equal(props['suspect.lint.ruleset'].type, 'string');
 	assert.equal(props['suspect.validate.strictFormat'].type, 'boolean');
 	assert.equal(props['suspect.ref.maxDocs'].type, 'number');
