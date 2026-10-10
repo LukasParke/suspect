@@ -1165,31 +1165,79 @@ pub(super) fn quickstart(plan: &Plan) -> String {
         "// This selection needs caller-provided byte/credential examples; see the manifest.\nvoid main() {}\n".into()
     }
 }
-pub(super) fn reference(plan: &Plan) -> String {
-    let mut out = String::from("# Dart operation reference\n\n");
-    for op in &plan.operations {
+/// One generated documentation file: path and content.
+pub(super) struct DocFile {
+    pub(super) path: String,
+    pub(super) content: String,
+}
+
+/// The split operation reference: `doc/API.md` as a compact index plus one
+/// page per spec tag under `doc/operations/`, so no single page carries the
+/// whole API surface.
+pub(super) fn reference(plan: &Plan) -> Vec<DocFile> {
+    let by_tag = crate::doc_split::by_tag(
+        &plan.operations,
+        |op: &super::protocol::PlannedOperation| {
+            op.wire
+                .tags()
+                .iter()
+                .map(|t| t.value().as_str().to_owned())
+                .collect()
+        },
+    );
+    let mut used = std::collections::BTreeSet::new();
+    let mut files = Vec::new();
+    let mut index =
+        String::from("# Dart operation reference\n\nEvery operation, grouped by API tag.\n\n");
+    for (tag, ops) in &by_tag {
+        let stem = crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(tag));
         writeln!(
-            out,
-            "## `{}`\n\n`{} {}` → `{}`\n\nSource: `{}#{}`\n",
-            op.method_name,
-            op.wire.method().as_str(),
-            op.wire.path(),
-            op.return_type,
-            op.source.document(),
-            op.source.pointer()
+            index,
+            "- [{tag}](operations/{stem}.md) — {} operation{}",
+            ops.len(),
+            if ops.len() == 1 { "" } else { "s" }
         )
         .unwrap();
-        for s in &op.statuses {
-            writeln!(
-                out,
-                "- `{}`: success {:?}, error {:?}, data `{}`",
-                s.wire.status_key(),
-                s.success_name,
-                s.error_name,
-                s.native_type
-            )
-            .unwrap();
+        let mut page = format!("# {tag} operations\n\n[All operations](../API.md)\n\n");
+        for op in ops {
+            page.push_str(&operation_section(op));
         }
+        files.push(DocFile {
+            path: format!("doc/operations/{stem}.md"),
+            content: page,
+        });
+    }
+    files.push(DocFile {
+        path: "doc/API.md".into(),
+        content: index,
+    });
+    files
+}
+
+/// One operation's reference section.
+fn operation_section(op: &super::protocol::PlannedOperation) -> String {
+    let mut out = String::new();
+    writeln!(
+        out,
+        "## `{}`\n\n`{} {}` → `{}`\n\nSource: `{}#{}`\n",
+        op.method_name,
+        op.wire.method().as_str(),
+        op.wire.path(),
+        op.return_type,
+        op.source.document(),
+        op.source.pointer()
+    )
+    .unwrap();
+    for s in &op.statuses {
+        writeln!(
+            out,
+            "- `{}`: success {:?}, error {:?}, data `{}`",
+            s.wire.status_key(),
+            s.success_name,
+            s.error_name,
+            s.native_type
+        )
+        .unwrap();
     }
     out
 }

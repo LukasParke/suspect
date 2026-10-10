@@ -128,9 +128,9 @@ pub(crate) fn cargo_manifest(package_name: &str, version: &str, http: bool) -> S
         ""
     };
     let include = if http {
-        "[\"src/**\", \"README.md\", \"models.md\", \"http-manifest.json\", \"examples.json\", \"examples.md\", \"examples/**\"]"
+        "[\"src/**\", \"README.md\", \"models.md\", \"docs/**\", \"http-manifest.json\", \"examples.json\", \"examples.md\", \"examples/**\"]"
     } else {
-        "[\"src/**\", \"README.md\"]"
+        "[\"src/**\", \"README.md\", \"docs/**\"]"
     };
     let examples = if http {
         "\n[[example]]\nname = \"validated\"\nrequired-features = [\"http\"]\n"

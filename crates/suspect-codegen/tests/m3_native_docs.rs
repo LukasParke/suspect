@@ -116,7 +116,6 @@ fn inventory(files: &[OutFile], language: &str, contract: &Contract) -> (Value, 
         "artifact path collision"
     );
     let bindings = json_file(files, &format!("{language}/docs/source-bindings.json"));
-    let api = file(files, &format!("{language}/docs/api.rst"));
     let mut names = BTreeSet::new();
     for symbol in bindings["symbols"].as_array().unwrap() {
         let name = symbol["name"].as_str().unwrap();
@@ -128,8 +127,16 @@ fn inventory(files: &[OutFile], language: &str, contract: &Contract) -> (Value, 
             files,
             &format!("{language}/{}", symbol["file"].as_str().unwrap()),
         );
+        // Every symbol's anchor must appear in its own recorded split api page.
+        let documentation = file(
+            files,
+            &format!(
+                "{language}/{}",
+                symbol["documentation"]["file"].as_str().unwrap()
+            ),
+        );
         assert!(
-            api.contains(&format!(
+            documentation.contains(&format!(
                 ".. _{}:",
                 symbol["documentation"]["anchor"].as_str().unwrap()
             )),
@@ -242,6 +249,14 @@ fn all_planned_native_symbols_have_browsable_source_bound_artifacts() {
         assert!(!api.lines().any(
             |line| line.starts_with(".. raw::") || line.starts_with(".. include:: description")
         ));
+        for doc in files
+            .iter()
+            .filter(|doc| doc.path.starts_with(&format!("{language}/docs/api/")))
+        {
+            assert!(!doc.content.lines().any(
+                |line| line.starts_with(".. raw::") || line.starts_with(".. include:: description")
+            ));
+        }
     }
     assert_eq!(py_files, python(&py), "rendering must be deterministic");
     assert_eq!(go_files, go(&go_plan), "rendering must be deterministic");

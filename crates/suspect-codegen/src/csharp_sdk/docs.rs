@@ -278,28 +278,55 @@ pub(super) fn render(plan: &SdkPlan) -> Vec<OutFile> {
             }
         }
     }
+    let (program, quickstart) = examples(plan);
+    // Split symbol reference: bounded alphabetical pages under docs/symbols/,
+    // so no single generated page carries the whole API surface.
+    let symbol_refs: Vec<&Value> = symbols.iter().collect();
+    let symbol_groups = crate::doc_split::bounded_groups(
+        symbol_refs,
+        |s: &Value| s["name"].as_str().unwrap_or_default().to_owned(),
+        200,
+    );
+    let mut symbol_files = Vec::new();
+    let mut nav = String::new();
+    {
+        let mut used = std::collections::BTreeSet::new();
+        for (label, group) in &symbol_groups {
+            let stem =
+                crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(label));
+            nav.push_str(&format!(
+                "<div><a href=\"symbols/{stem}.html\">{}… ({})</a></div>",
+                xml(label),
+                group.len()
+            ));
+            let mut page = format!(
+                "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{} symbols {}…</title><style>body{{max-width:85rem;margin:2rem auto;padding:1rem;font:16px/1.6 system-ui}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#eee;padding:1rem}}section{{border-top:1px solid #ccc}}nav{{columns:3}}</style></head><body><h1>{} — native symbols {}…</h1><p><a href=\"../index.html\">All symbols</a></p>",
+                xml(&plan.config.name),
+                xml(label),
+                xml(&plan.config.name),
+                xml(label)
+            );
+            for s in group {
+                page.push_str(&symbol_section(s));
+            }
+            page.push_str("</body></html>\n");
+            symbol_files.push(file(
+                &format!("docs/symbols/{stem}.html"),
+                page,
+            ));
+        }
+    }
     let mut html = format!(
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>{} native reference</title><style>body{{max-width:85rem;margin:2rem auto;padding:1rem;font:16px/1.6 system-ui}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:#eee;padding:1rem}}section{{border-top:1px solid #ccc}}nav{{columns:3}}</style></head><body><h1>{} — C# native SDK</h1><p>Task, CancellationToken, explicit credentials and native constructors. Sequential responses implement IAsyncEnumerable and IAsyncDisposable. See README for operational recipes.</p>",
         xml(&plan.config.name),
         xml(&plan.config.name)
     );
-    let (program, quickstart) = examples(plan);
     html.push_str(&format!(
         "<h2>First request</h2><pre>{}</pre><h2>Reference</h2><nav>",
         xml(&quickstart)
     ));
-    for s in &symbols {
-        html.push_str(&format!(
-            "<div><a href=\"#{}\">{}</a></div>",
-            s["id"].as_str().unwrap(),
-            xml(s["name"].as_str().unwrap())
-        ));
-    }
-    html.push_str("</nav>");
-    for s in &symbols {
-        html.push_str(&format!("<section id=\"{}\"><h2>{}</h2><pre>{}</pre><p>{}</p><details><summary>Native/source binding</summary><code>{}</code><br><code>{}#{}</code></details></section>",s["id"].as_str().unwrap(),xml(s["name"].as_str().unwrap()),xml(s["signature"].as_str().unwrap()),xml(s["description"].as_str().unwrap()),xml(s["xmlId"].as_str().unwrap()),xml(s["source"]["document"].as_str().unwrap()),xml(s["source"]["pointer"].as_str().unwrap())));
-    }
-    html.push_str("</body></html>\n");
+    html.push_str(&nav);
+    html.push_str("</nav></body></html>\n");
     let operations=plan.operations.iter().map(|op|json!({"source":address(&op.source),"operationId":op.operation_id,"methodName":op.method_name,"inputType":op.input_type,"resultType":op.result_type,"errorType":op.error_type,"protocol":op.wire,
         "parameters":op.parameters.iter().map(|p|json!({"source":address(&p.source),"schema":address(&p.schema),"propertyName":p.property_name,"nativeType":p.native_type,"required":p.required,"wireName":p.wire_name,"serialization":p.wire.serialization()})).collect::<Vec<_>>(),
         "body":op.body.as_ref().map(|b|json!({"source":address(&b.source),"nativeType":b.native_type,"required":b.required,"union":b.union,"media":b.media.iter().map(media_record).collect::<Vec<_>>()})),
@@ -345,7 +372,11 @@ pub(super) fn render(plan: &SdkPlan) -> Vec<OutFile> {
         file("http-manifest.json",serde_json::to_string_pretty(&json!({"format":"suspect-csharp-http-v2","package":{"name":plan.config.name,"version":plan.config.version,"namespace":ns,"targetFramework":"net8.0"},"capabilities":plan.protocol.capabilities(),"operations":operations,"credentials":plan.credential_bindings.iter().map(|c|json!({"key":c.key,"property":c.property_name,"type":c.native_type,"requirement":c.requirement})).collect::<Vec<_>>()})).unwrap()),
         file("examples/examples.json",http_examples::manifest(&plan.examples)),file("examples/README.md",http_examples::markdown(&plan.examples,"dotnet run --project examples/Examples.csproj --no-restore")),
         file("examples/Examples.csproj",format!("<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework><OutputType>Exe</OutputType><LangVersion>12.0</LangVersion><Nullable>enable</Nullable><ImplicitUsings>enable</ImplicitUsings><TreatWarningsAsErrors>true</TreatWarningsAsErrors></PropertyGroup><ItemGroup><PackageReference Include=\"{}\" Version=\"[{}]\" /></ItemGroup></Project>",xml(&plan.config.name),xml(&plan.config.version))),file("examples/Program.cs",program),file("examples/Quickstart.cs",quickstart),
-        file("examples/native-fixtures.json",json!({"format":"suspect-csharp-native-fixtures-v1","binary":{"origin":"explicit-native-fixture","bytes":[0,255,42],"policy":"truncate to declared byte limit; never JSON null"},"credentials":{"origin":"application-owned sample fixture","token":"example-token"}}).to_string())];
+        file("examples/native-fixtures.json",json!({"format":"suspect-csharp-native-fixtures-v1","binary":{"origin":"explicit-native-fixture","bytes":[0,255,42],"policy":"truncate to declared byte limit; never JSON null"},"credentials":{"origin":"application-owned sample fixture","token":"example-token"}}).to_string())
+    ]
+    .into_iter()
+    .chain(symbol_files)
+    .collect::<Vec<_>>();
     if let Some(environment) = plan.credential_env() {
         files.push(file(
             "credential-env.json",
@@ -361,6 +392,20 @@ fn media_record(m: &PlannedMedia) -> Value {
 fn part_record(p: &PlannedPart) -> Value {
     json!({"name":p.property_name,"type":p.native_type,"valueType":p.value_type,"partType":p.wrapper_type,"headerType":p.header_type,"wire":p.wire})
 }
+/// One symbol's HTML reference section.
+fn symbol_section(s: &Value) -> String {
+    format!(
+        "<section id=\"{}\"><h2>{}</h2><pre>{}</pre><p>{}</p><details><summary>Native/source binding</summary><code>{}</code><br><code>{}#{}</code></details></section>",
+        s["id"].as_str().unwrap(),
+        xml(s["name"].as_str().unwrap()),
+        xml(s["signature"].as_str().unwrap()),
+        xml(s["description"].as_str().unwrap()),
+        xml(s["xmlId"].as_str().unwrap()),
+        xml(s["source"]["document"].as_str().unwrap()),
+        xml(s["source"]["pointer"].as_str().unwrap())
+    )
+}
+
 fn readme(plan: &SdkPlan, quickstart: &str) -> String {
     format!(
         "# {} {}\n\nA source-selected .NET 8/C# 12 SDK. Metadata is in `http-manifest.json`; browsable native documentation is `docs/index.html`. Native compiler XML docs ship with the DLL.\n\n```sh\ndotnet pack -c Release -o packages\ndotnet restore examples/Examples.csproj --source packages\ndotnet run --project examples/Examples.csproj --no-restore\n```\n\n## First request\n\nThis exact native-constructor recipe is packaged and executed against an installed package. Example values retain declared/synthesized origins; byte samples are explicitly labeled native fixtures.\n\n```csharp\n{quickstart}```\n\n## Credentials and servers\n\nCredentials are source-allocated properties. Bearer strings, `BasicCredential`, header/query/cookie API keys and `AuthorizationProvider` hooks attach only to a selected source security alternative. `RequestOptions.SecurityAlternative` chooses an OR alternative explicitly; otherwise the first complete alternative is used. AND requirements must all be supplied. Scopes/roles and OAuth/OIDC URLs are metadata passed to hooks. Hooks return `AuthorizationValue` with an explicit scheme: the SDK never discovers, acquires or refreshes tokens or infers bearer types. Basic is an explicit ASCII wire profile.\n\n`ClientOptions` and `RequestOptions` support `ServerUrl`, source `ServerIndex`, `ServerVariables` and `DocumentUrl`. Relative servers in local files require an explicit HTTP(S) document base. Unknown variables, invalid enums and malformed URLs fail before sending. `Client.Operations` exposes source server metadata.\n\n## Native data and response dispatch\n\n`Optional<T>` defaults to absent; `Optional<T?>.Present(null)` is present JSON null. `JsonNumber`/`JsonInteger` preserve tokens and mathematical values. Use generated `Codecs`; encoding validates all current mutable values. Sealed union arms validate both their payload and their parent.\n\nSingle-success operations return a direct result. Status ranges/defaults preserve the actual status and success classification. Exact status beats range then default; media is chosen only inside that response. Concrete media beats type wildcards then `*/*`, with matching declared parameters breaking ties. No sniffing or fallback to a less-specific status occurs.\n\nBody alternatives are sealed native classes. JSON, UTF-8 text, `byte[]`, named form/multipart records, and `HttpNoContent` are distinct. HEAD/1xx/204/304 suppress body decoding; missing response content retains bounded bytes. Required typed headers are checked; Links remain inert `ResponseLinkInfo` metadata. Wildcard request media require a concrete Content-Type and cannot bypass a more-specific schema.\n\n## Parts and streaming\n\nNamed multipart records use native part values and explicit filename/media/typed header properties. Filenames are bounded ASCII metadata, never filesystem reads. Form/part structural requiredness, extras and cardinalities are checked separately from item codecs. Binary bytes never enter a JSON validator as null. Positional/streamed multipart and undefined inverse styled response groupings are declined.\n\nA sequential response's `Data` contains `HttpStream<T>` (or a typed media arm containing it). Use `await foreach` and dispose the result or stream if it is never enumerated. Early iteration disposal closes the response. JSON lines validate each actual JSON item. OAS 3.2 SSE validates the HTML-framed event envelope; `data` stays a string, ids persist, multiline data is joined and numeric retry is metadata. No JSON-in-data, `[DONE]`, retry, reconnection or pagination behavior is inferred.\n\n## Failure and lifetime policy\n\nTask methods accept `CancellationToken` and `RequestOptions`. Cancellation remains `OperationCanceledException`; whole-call timeout is `SdkErrorKind.Timeout`, including response streaming. `SdkException` distinguishes request/auth/transport/response/resource failures. Declared API error classes expose source-typed `Data`. Captures are bounded copies excluded from default exception formatting.\n\nThe default HttpClient disables cookies, redirects, proxy discovery, decompression and drain-after-close. Injected clients remain caller-owned and must have empty DefaultRequestHeaders; their handler policies are explicitly application-controlled. No SDK retries are performed.\n\nDefault ceilings: 8 MiB body/total stream, 1 MiB part/item, 64 KiB headers, 4096-byte capture, 30-second whole-call lifetime, 128 JSON/conversion depth, 4096-byte number operands and finite shared validation/conversion work. Options may lower transport limits. Cleanup preserves primary failures; late completion after cancellation is observed and disposed.\n",

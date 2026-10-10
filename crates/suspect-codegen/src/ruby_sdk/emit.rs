@@ -1,7 +1,7 @@
 //! One emitter over retained model and protocol descriptors.
 use super::{
-    ExtraFields, ModelShape, NativeType, PackageConfig, RecordBinding, SampleValue, ScalarKind,
-    SdkPlan,
+    ExtraFields, ModelShape, NativeType, PackageConfig, PlannedOperation, RecordBinding,
+    SampleValue, ScalarKind, SdkPlan,
 };
 use crate::{OutFile, examples::ExampleRole, http_examples, http_protocol as wire};
 use serde_json::{Value, json};
@@ -435,15 +435,16 @@ pub(super) fn package(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
     }
     add("source-map.json".into(), source_map(plan, package));
     add("README.md".into(), guide(plan, package));
+    add("OPERATIONS.md".into(), operations(plan));
     add(
         "RUNTIME.md".into(),
         include_str!("GUIDE.md").replace("__NAMESPACE__", ns),
     );
-    add(".yardopts".into(),"--markup markdown\n--markup-provider redcarpet\n--no-private\n--fail-on-warning\nlib/**/*.rb\n-\nREADME.md\nRUNTIME.md\nEXAMPLES.md\n".into());
+    add(".yardopts".into(),"--markup markdown\n--markup-provider redcarpet\n--no-private\n--fail-on-warning\nlib/**/*.rb\n-\nREADME.md\nOPERATIONS.md\nRUNTIME.md\nEXAMPLES.md\n".into());
     add(
         format!("{}.gemspec", package.name),
         format!(
-            "# frozen_string_literal: true\nGem::Specification.new do |s|\n  s.name = {}\n  s.version = {}\n  s.summary = 'Native Ruby SDK with source-bound HTTP and exact codecs'\n  s.authors = ['SDK package maintainer']\n  s.required_ruby_version = '>= 3.3.12'\n  s.files = Dir['lib/**/*.rb', 'lib/**/*.json', 'sig/**/*.rbs', 'examples/**/*.rb'] + ['README.md','RUNTIME.md','EXAMPLES.md','source-map.json','examples.json','.yardopts']\n  s.require_paths = ['lib']\n  s.add_dependency 'net-http', '>= 0.4.1', '< 1.0'\n  s.add_dependency 'uri', '>= 0.13.3', '< 2.0'\n  s.add_dependency 'openssl', '>= 3.2', '< 5.0'\n  s.add_dependency 'timeout', '>= 0.4.1', '< 1.0'\n  s.add_dependency 'base64', '>= 0.2', '< 1.0'\n  s.add_dependency 'securerandom', '>= 0.3', '< 1.0'\nend\n",
+            "# frozen_string_literal: true\nGem::Specification.new do |s|\n  s.name = {}\n  s.version = {}\n  s.summary = 'Native Ruby SDK with source-bound HTTP and exact codecs'\n  s.authors = ['SDK package maintainer']\n  s.required_ruby_version = '>= 3.3.12'\n  s.files = Dir['lib/**/*.rb', 'lib/**/*.json', 'sig/**/*.rbs', 'examples/**/*.rb'] + ['README.md','OPERATIONS.md','RUNTIME.md','EXAMPLES.md','source-map.json','examples.json','.yardopts']\n  s.require_paths = ['lib']\n  s.add_dependency 'net-http', '>= 0.4.1', '< 1.0'\n  s.add_dependency 'uri', '>= 0.13.3', '< 2.0'\n  s.add_dependency 'openssl', '>= 3.2', '< 5.0'\n  s.add_dependency 'timeout', '>= 0.4.1', '< 1.0'\n  s.add_dependency 'base64', '>= 0.2', '< 1.0'\n  s.add_dependency 'securerandom', '>= 0.3', '< 1.0'\nend\n",
             q(&package.name),
             q(&package.version)
         ),
@@ -1404,7 +1405,7 @@ fn guide(plan: &SdkPlan, p: &PackageConfig) -> String {
         .unwrap_or("        # Choose a source operation from the reference below.")
         .trim();
     let mut out = format!(
-        "# {}\n\nNative Ruby keyword models and HTTP calls. Requires Ruby 3.3.12+.\n\n## Install\n\n```sh\ngem build {}.gemspec\ngem install --local {}-{}.gem\n```\n\n## First request\n\nSupply credentials explicitly under the names declared by your API. A complete source-derived model call is shown below; values and origins are retained in `examples.json`.\n\n```ruby\nrequire {}\n{ns}::Client.open(auth: credentials) do |client|\n  response = {snippet}\n  puts response.status\nend\n```\n\nAnonymous operations accept `Client.new`. Multiple security alternatives require `security: index`; conjunctive credentials are all applied. Supply `BasicCredential` for Basic and an explicit `AuthorizationCredential` via `credential_provider:` for OAuth/OIDC. The provider receives source, scheme, permissions and flow/discovery metadata. It owns acquisition and refresh.\n\nChoose multiple/relative servers with `server:`, `server_variables:` and `document_url:`. An explicit `server_url:` overrides the source choice. Choose request media with `content_type:` and response preference with `accept:`. The selected response uses exact > range > default status precedence and concrete > wildcard media precedence, preserving actual status.\n\nUse `UNSET` for omission and `nil` only for source-permitted JSON null. Byte bodies use `Bytes`; `BytePart.new(bytes:, filename:, content_type:, headers:)` supplies actual bytes and MIME metadata. Forms and multipart have generated keyword body models. `response.typed_headers` holds decoded header models; `response.links` is immutable metadata and invokes nothing.\n\nA sequential response's `data` is an `ItemStream` Enumerator. Use `each` for automatic cleanup, or `next` with explicit `close`. Cancellation and the total deadline remain active while paused. SSE data stays text, retry is metadata, and `[DONE]` is ordinary data.\n\n## Verify and explore\n\n```sh\ngem install yard:0.9.37 redcarpet:3.6.1 rbs:3.9.5 steep:1.10.0\nruby examples/contract_examples.rb\nyard doc\nrbs -I sig validate\n```\n\nInstalled Steep consumers use `library '{}'`. `RUNTIME.md` documents values, failures, bounds, transport and streaming. `EXAMPLES.md` retains example origins/findings; `source-map.json` and the native YARD reference retain detailed bindings.\n\n## Operations\n\n",
+        "# {}\n\nNative Ruby keyword models and HTTP calls. Requires Ruby 3.3.12+.\n\n## Install\n\n```sh\ngem build {}.gemspec\ngem install --local {}-{}.gem\n```\n\n## First request\n\nSupply credentials explicitly under the names declared by your API. A complete source-derived model call is shown below; values and origins are retained in `examples.json`.\n\n```ruby\nrequire {}\n{ns}::Client.open(auth: credentials) do |client|\n  response = {snippet}\n  puts response.status\nend\n```\n\nAnonymous operations accept `Client.new`. Multiple security alternatives require `security: index`; conjunctive credentials are all applied. Supply `BasicCredential` for Basic and an explicit `AuthorizationCredential` via `credential_provider:` for OAuth/OIDC. The provider receives source, scheme, permissions and flow/discovery metadata. It owns acquisition and refresh.\n\nChoose multiple/relative servers with `server:`, `server_variables:` and `document_url:`. An explicit `server_url:` overrides the source choice. Choose request media with `content_type:` and response preference with `accept:`. The selected response uses exact > range > default status precedence and concrete > wildcard media precedence, preserving actual status.\n\nUse `UNSET` for omission and `nil` only for source-permitted JSON null. Byte bodies use `Bytes`; `BytePart.new(bytes:, filename:, content_type:, headers:)` supplies actual bytes and MIME metadata. Forms and multipart have generated keyword body models. `response.typed_headers` holds decoded header models; `response.links` is immutable metadata and invokes nothing.\n\nA sequential response's `data` is an `ItemStream` Enumerator. Use `each` for automatic cleanup, or `next` with explicit `close`. Cancellation and the total deadline remain active while paused. SSE data stays text, retry is metadata, and `[DONE]` is ordinary data.\n\n## Verify and explore\n\n```sh\ngem install yard:0.9.37 redcarpet:3.6.1 rbs:3.9.5 steep:1.10.0\nruby examples/contract_examples.rb\nyard doc\nrbs -I sig validate\n```\n\nInstalled Steep consumers use `library '{}'`. `RUNTIME.md` documents values, failures, bounds, transport and streaming. `EXAMPLES.md` retains example origins/findings; `OPERATIONS.md` lists every operation grouped by API tag; `source-map.json` and the native YARD reference retain detailed bindings.\n\n## Operations\n\n",
         p.name,
         p.name,
         p.name,
@@ -1412,17 +1413,9 @@ fn guide(plan: &SdkPlan, p: &PackageConfig) -> String {
         q(&p.require_name),
         p.name
     );
-    for o in plan.operations() {
-        writeln!(
-            out,
-            "- `{}` — `{}` `{}`. {}",
-            o.method_name,
-            esc(&o.method),
-            esc(&o.path),
-            esc(&o.description)
-        )
-        .unwrap();
-    }
+    out.push_str(
+        "Every operation — native method, wire route and source description — is\nlisted in `OPERATIONS.md`, grouped one section per API tag so this page stays\nreadable whatever the API size.\n",
+    );
     if let Some(env) = plan.credential_env() {
         writeln!(out, "\n## Runtime environment credentials\n\nThis package has an explicit `credential_env` v1 policy. `{}::Client.new` and `{}::Client.open` snapshot the mapped variables at construction only when `auth:` is omitted. Import and generation do not read their values.\n", p.namespace, p.namespace).unwrap();
         for binding in env.bindings() {
@@ -1449,6 +1442,43 @@ fn guide(plan: &SdkPlan, p: &PackageConfig) -> String {
         {
             writeln!(out, "\n```ruby\nrequire {}\n{}::Client.open do |client|\n  response = client.{}\n  puts response.status\nend\n```\n\nThe call uses the source-declared server when no override is supplied. Binding names and physical provenance are recorded in `lib/{}/credential-env.json`; credential values are never packaged.", q(&p.require_name), p.namespace, operation.method_name, p.require_name).unwrap();
         }
+    }
+    out
+}
+
+/// The split operations reference: one section per spec tag, so no single
+/// page carries the whole API surface.
+fn operations(plan: &SdkPlan) -> String {
+    let by_tag = crate::doc_split::by_tag(plan.operations(), |op: &PlannedOperation| {
+        op.wire
+            .tags()
+            .iter()
+            .map(|t| t.value().as_str().to_owned())
+            .collect()
+    });
+    let mut out = String::from(
+        "# Operations\n\nEvery operation in this package, grouped one section per API tag.\n\n",
+    );
+    for (tag, ops) in &by_tag {
+        writeln!(
+            out,
+            "## {tag}\n\n{} operation{}\n",
+            ops.len(),
+            if ops.len() == 1 { "" } else { "s" }
+        )
+        .unwrap();
+        for o in ops {
+            writeln!(
+                out,
+                "- `{}` — `{}` `{}`. {}",
+                o.method_name,
+                esc(&o.method),
+                esc(&o.path),
+                esc(&o.description)
+            )
+            .unwrap();
+        }
+        out.push('\n');
     }
     out
 }

@@ -940,63 +940,70 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
         .enumerate()
         .map(|(i, symbol)| (symbol.name.clone(), format!("go-symbol-{i}")))
         .collect();
-    let mut api = heading("Public Go symbols", '=');
-    api.push_str("Native declarations below are obtained from go doc in this exact module. Descriptions and native comments render literally. Every model, field, codec entry, operation, input and concrete response retains its canonical source binding.\n\n");
-    for symbol in &symbols {
-        api.push_str(&format!(".. _{}:\n\n", labels[&symbol.name]));
-        api.push_str(&heading(&format!("``{}``", symbol.name), '-'));
-        if let Some(source) = &symbol.source {
-            api.push_str(&literal(&source_text(source), "text"));
-        }
-        if !symbol.description.is_empty() {
-            api.push_str(&literal(&symbol.description, "text"));
-        }
-        if matches!(symbol.kind, "model" | "model-field" | "union-alternative")
-            && let Some(raw) = symbol
-                .source
-                .as_ref()
-                .and_then(|source| plan.contract().source(source))
-        {
-            api.push_str("Original schema (annotations are not inferred behavior):\n\n");
-            api.push_str(&literal(
-                &serde_json::to_string_pretty(raw).unwrap(),
-                "json",
-            ));
-        }
-        api.push_str(&format!(
-            ".. native-go:: {}\n{}\n",
-            symbol.name,
-            if symbol.lookup == symbol.name {
-                String::new()
-            } else {
-                format!("   :lookup: {}\n", symbol.lookup)
+    // Symbols live in bounded alphabetical pages; cross-file :ref: labels and
+    // the native-go directives work unchanged from any included document.
+    let api_groups = crate::doc_split::bounded_groups(
+        symbols.iter().collect::<Vec<_>>(),
+        |symbol: &Symbol| symbol.name.clone(),
+        200,
+    );
+    let mut api_file_of: BTreeMap<&str, String> = BTreeMap::new();
+    let mut api_files = Vec::new();
+    {
+        let mut used = std::collections::BTreeSet::new();
+        for (group_label, group) in &api_groups {
+            let stem =
+                crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(group_label));
+            for symbol in group {
+                api_file_of.insert(symbol.name.as_str(), stem.clone());
             }
-        ));
-        if !symbol.related.is_empty() {
-            api.push_str("Related: ");
-            api.push_str(
-                &symbol
-                    .related
-                    .iter()
-                    .map(|name| format!(":ref:`{}`", labels[name]))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-            api.push_str(".\n\n");
+            let mut page = heading(&format!("Symbols ``{group_label}…``"), '=');
+            for symbol in group {
+                page.push_str(&api_symbol(plan, symbol, &labels));
+            }
+            api_files.push(OutFile {
+                path: format!("go/docs/api/{stem}.rst"),
+                content: page,
+            });
+        }
+    }
+    let mut api = heading("Public Go symbols", '=');
+    api.push_str("Native declarations below are obtained from go doc in this exact module, split into bounded alphabetical pages so no single page carries the whole surface. Descriptions and native comments render literally. Every model, field, codec entry, operation, input and concrete response retains its canonical source binding.\n\n.. toctree::\n   :glob:\n\n   api/*\n");
+    // Operations live one page per spec tag.
+    let op_groups = crate::doc_split::by_tag(plan.operations(), |op: &PlannedOperation| {
+        op.wire()
+            .tags()
+            .iter()
+            .map(|t| t.value().as_str().to_owned())
+            .collect()
+    });
+    let mut operation_files = Vec::new();
+    {
+        let mut used = std::collections::BTreeSet::new();
+        for (tag, ops) in &op_groups {
+            let stem = crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(tag));
+            let mut page = heading(&format!("{tag} operations"), '=');
+            page.push_str("All operation groups: :doc:`/operations`.\n\n");
+            for operation in ops {
+                page.push_str(&heading(&format!("``{}``", operation.method_name), '-'));
+                page.push_str(&format!(
+                    "Native call: :ref:`{}`.\n\n",
+                    labels[&format!("Client.{}", operation.method_name)]
+                ));
+                page.push_str(&literal(
+                    &serde_json::to_string_pretty(&operation_binding(plan, operation)).unwrap(),
+                    "json",
+                ));
+            }
+            operation_files.push(OutFile {
+                path: format!("go/docs/operations/{stem}.rst"),
+                content: page,
+            });
         }
     }
     let mut operations = heading("HTTP source bindings", '=');
-    for operation in plan.operations() {
-        operations.push_str(&heading(&format!("``{}``", operation.method_name), '-'));
-        operations.push_str(&format!(
-            "Native call: :ref:`{}`.\n\n",
-            labels[&format!("Client.{}", operation.method_name)]
-        ));
-        operations.push_str(&literal(
-            &serde_json::to_string_pretty(&operation_binding(plan, operation)).unwrap(),
-            "json",
-        ));
-    }
+    operations
+        .push_str("Every selected operation with its native binding, grouped one page per API tag.\n\n.. toctree::\n   :glob:\n\n   operations/*\n");
     let examples = validated_examples(plan, package);
     let mut bindings = json!({
         "format":"suspect-go-docs-v1", "module":package.module_path, "package":package.package_name, "version":package.version,
@@ -1005,7 +1012,7 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
         "symbols":symbols.iter().map(|symbol|json!({
             "name":symbol.name,"lookup":symbol.lookup,"kind":symbol.kind,"file":symbol.file,
             "source":symbol.source.as_ref().map(location),"description":symbol.description,"related":symbol.related,
-            "documentation":{"file":"docs/api.rst","anchor":labels[&symbol.name]},
+            "documentation":{"file":format!("docs/api/{}.rst", api_file_of[symbol.name.as_str()]),"anchor":labels[&symbol.name]},
         })).collect::<Vec<_>>(),
         "operations":plan.operations().iter().map(|op|operation_binding(plan,op)).collect::<Vec<_>>(),
         "examples":examples.1,
@@ -1087,10 +1094,65 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
             content: examples.0,
         },
     ]
+    .into_iter()
+    .chain(api_files)
+    .chain(operation_files)
+    .collect()
 }
 
 fn operation_binding(plan: &HttpPlan, op: &PlannedOperation) -> Value {
     super::emit::binding(plan, op)
+}
+
+/// One symbol's api-reference section.
+fn api_symbol(
+    plan: &HttpPlan,
+    symbol: &Symbol,
+    labels: &BTreeMap<String, String>,
+) -> String {
+    let mut api = String::new();
+    api.push_str(&format!(".. _{}:\n\n", labels[&symbol.name]));
+    api.push_str(&heading(&format!("``{}``", symbol.name), '-'));
+    if let Some(source) = &symbol.source {
+        api.push_str(&literal(&source_text(source), "text"));
+    }
+    if !symbol.description.is_empty() {
+        api.push_str(&literal(&symbol.description, "text"));
+    }
+    if matches!(symbol.kind, "model" | "model-field" | "union-alternative")
+        && let Some(raw) = symbol
+            .source
+            .as_ref()
+            .and_then(|source| plan.contract().source(source))
+    {
+        api.push_str("Original schema (annotations are not inferred behavior):\n\n");
+        api.push_str(&literal(
+            &serde_json::to_string_pretty(raw).unwrap(),
+            "json",
+        ));
+    }
+    api.push_str(&format!(
+        ".. native-go:: {}\n{}\n",
+        symbol.name,
+        if symbol.lookup == symbol.name {
+            String::new()
+        } else {
+            format!("   :lookup: {}\n", symbol.lookup)
+        }
+    ));
+    if !symbol.related.is_empty() {
+        api.push_str("Related: ");
+        api.push_str(
+            &symbol
+                .related
+                .iter()
+                .map(|name| format!(":ref:`{}`", labels[name]))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        api.push_str(".\n\n");
+    }
+    api
 }
 
 fn package_comment(plan: &HttpPlan, package: &PackageConfig) -> String {
