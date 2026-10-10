@@ -538,9 +538,168 @@ pub(super) fn validated_examples(plan: &HttpPlan, crate_name: &str) -> String {
     code
 }
 
+/// One generated documentation file: path (relative to the package root)
+/// and content.
+pub(super) struct DocFile {
+    pub(super) path: String,
+    pub(super) content: String,
+}
+
+/// The split documentation for the Rust SDK: a lean README plus a `docs/`
+/// tree. Operations are grouped one file per spec tag so no single page
+/// carries more than a coherent slice of the API.
+pub(super) fn documentation(
+    plan: &HttpPlan,
+    package: &PackageConfig,
+    crate_name: &str,
+) -> Vec<DocFile> {
+    let mut files = Vec::new();
+    files.push(DocFile {
+        path: "rust/README.md".into(),
+        content: readme(plan, package, crate_name),
+    });
+    files.extend(operations_by_tag(plan, crate_name));
+    files.push(DocFile {
+        path: "rust/docs/execution-contract.md".into(),
+        content: execution_contract(plan),
+    });
+    files.push(DocFile {
+        path: "rust/docs/policies.md".into(),
+        content: policies(plan),
+    });
+    if let Some(policy) = plan.credential_env() {
+        files.push(DocFile {
+            path: "rust/docs/credentials.md".into(),
+            content: credentials(policy),
+        });
+    }
+    files
+}
+
+/// Groups the plan's operations by their spec tags into one doc file per
+/// tag. Untagged operations land in `docs/operations/other.md`.
+fn operations_by_tag(plan: &HttpPlan, _crate_name: &str) -> Vec<DocFile> {
+    use std::collections::BTreeMap;
+    let mut by_tag: BTreeMap<String, Vec<&PlannedOperation>> = BTreeMap::new();
+    for op in &plan.operations {
+        let tags = op.wire.tags();
+        let keys: Vec<String> = if tags.is_empty() {
+            vec!["Other".into()]
+        } else {
+            tags.iter()
+                .map(|t| prose(t.value().as_str()))
+                .collect()
+        };
+        for key in keys {
+            by_tag.entry(key).or_default().push(op);
+        }
+    }
+    let mut files = Vec::new();
+    let mut index = String::from("# Operations\n\n");
+    index.push_str("Every operation in this package, grouped by spec tag.\n\n");
+    for (tag, ops) in &by_tag {
+        let file_name = tag
+            .to_ascii_lowercase()
+            .replace([' ', '/'], "-");
+        index.push_str(&format!(
+            "- [{tag}](operations/{file_name}.md) — {} operation{}\n",
+            ops.len(),
+            if ops.len() == 1 { "" } else { "s" }
+        ));
+        let mut body = format!("# {tag} operations\n\n");
+        for op in ops {
+            body.push_str(&operation_section(op));
+        }
+        files.push(DocFile {
+            path: format!("rust/docs/operations/{file_name}.md"),
+            content: body,
+        });
+    }
+    files.push(DocFile {
+        path: "rust/docs/operations.md".into(),
+        content: index,
+    });
+    files
+}
+
+/// One operation's documentation section.
+fn operation_section(op: &PlannedOperation) -> String {
+    let mut section = format!(
+        "## `{}`\n\n`{} {}`. Module `operations::{}`; method `{}`.\n\n{}\n\nSource: `{}#{}`. Input `{}`; success `{}`; errors `{}` / `{}`.\n\n",
+        prose(&op.operation_id),
+        prose(op.wire.method().as_str()),
+        prose(op.wire.path()),
+        op.module_name,
+        op.function_name,
+        prose(op.wire.description().map(|v| v.value().as_str()).unwrap_or("")),
+        prose(op.source.document().as_str()),
+        prose(op.source.pointer()),
+        op.input_type,
+        op.success_type,
+        op.error_type,
+        op.api_error_type,
+    );
+    for r in &op.responses {
+        for v in &r.variants {
+            section.push_str(&format!(
+                "- `{}` `{}` → `{}` (`{}`).\n",
+                r.wire.status_key(),
+                prose(v.media_index
+                    .map(|i| r.wire.media()[i].media_type().declared())
+                    .unwrap_or("no declared media")),
+                v.name,
+                payload_type(&v.payload)
+            ));
+        }
+    }
+    section.push_str("\n[Back to operations](../operations.md)\n\n---\n\n");
+    section
+}
+
+/// The execution contract: transport, credentials, parameters, status
+/// selection, forms, streaming, adapter and limits.
+fn execution_contract(_plan: &HttpPlan) -> String {
+    let mut doc = String::from("# Execution contract\n\n");
+    doc.push_str("## Transport\n\n`Client::with_transport` accepts a pull-based custom transport. `ClientOptions` selects a declared server index and variable overrides, or an explicit absolute server replacement. Relative servers resolve against the serving document URL; local descriptions require `document_url` or an explicit server. Source path prefixes are preserved. Absolute HTTP replacements are loopback-only; declared HTTP candidates retain their source origins.\n\nThe recommended adapter disables redirects, retries, proxy discovery, referer generation and automatic decompression. Configure pooling, TLS or timeouts with `ReqwestTransport::from_builder`. Wrap calls/stream pulls in the caller executor's timeout or cancellation selection.\n\n");
+    doc.push_str("## Credentials\n\nCredentials implement anonymous, disabled, OR alternatives and AND requirements. Generated scheme constructors are source-addressed, avoiding collisions between documents. Named runtime setters are explicit caller policy. The first fully supplied alternative is used unless `select_alternative(index)` selects one. Bearer, basic and API-key header/query/cookie attachment are implemented. OAuth/OIDC take a complete caller-supplied Authorization value or a `CredentialProvider` receiving located flow/scope/role metadata. The SDK performs no token acquisition, discovery or refresh. Conflicting attachments fail before transport.\n\n");
+    doc.push_str("## Parameters\n\nParameters use their declared simple/label/matrix/form/spaceDelimited/pipeDelimited/deepObject/cookie styles, JSON/text content and percent-encoding rules. Header values are unquoted; ambiguous composite delimiters are rejected. `allowReserved` callers pre-escape query hazards (`&`, `=`, `+`, `#`) and active delimiters. Optional empty style composites omit; required empty composites fail. Null never becomes a string or an absent required field.\n\n");
+    doc.push_str("## Status and media selection\n\nStatus selection is exact > class range > default, before media selection. Actual 2xx status determines success, including default responses. JSON/+json, UTF-8 text, native bytes, wildcards and media parameters have separate typed bindings. Missing or invalid Content-Type cannot select declared content. HEAD/1xx/204/304 drop bodies without decoding. Undeclared response content is bounded bytes. `ApiResponse` retains actual status, complete Content-Type, raw duplicate headers, typed declared headers and source-backed links. Required headers are enforced. Repeated scalar headers, including Set-Cookie, fail typed decoding; raw values remain in errors. Array/object list headers support explicit simple serialization. Links are immutable metadata and never trigger calls.\n\n");
+    doc.push_str("## Forms and multipart\n\nForms and multipart use native aggregate structs and `Part<T, H>` values. File data is `Vec<u8>`, filename is metadata, and each text/JSON part has its own codec. Required fields, extras policy, property counts, array cardinalities and positional order are checked structurally. No mixed aggregate is converted to JSON with null placeholders. Multipart assembly checks part and body bounds before the final allocation, validates headers/disposition, and chooses a collision-free boundary. OAS 3.2 named per-item and positional encodings retain their source bindings.\n\n");
+    doc.push_str("## Streaming\n\nOAS 3.2 `itemSchema` supplies SSE or JSON-lines item codecs. Responses return `ItemStream<Model>`:\n\n```rust\nwhile let Some(item) = response.data.next().await {\n    let item = item?;\n}\n```\n\nSSE exposes the parsed envelope (`data`, `event`, `id`, integer `retry`), combines multiline data and ignores comments/unknown fields/invalid retry fields. JSON inside data and `[DONE]` have no inferred special meaning. Finite request streams use `Vec<Model>` and the same item codecs. Stream parsing keeps one bounded transport chunk and one bounded item, honors pull backpressure, and enforces total byte/poll budgets. Dropping or closing a stream cancels its body; no task is detached.\n\n");
+    doc.push_str("## Limits\n\nByte ceilings (request, response, part, item, chunk and headers) are finite; caller options may only lower generated limits. JSON parsing, schema evaluation and native conversion retain their independent finite budgets and exact number tokens. Error enums distinguish validated API errors from request/transport/resource/decoding failures. Debug and display omit credentials and captures. Inspect bounded `raw_capture` explicitly.\n\n[Back to README](../README.md)\n");
+    doc
+}
+
+/// Source policy, verification, validation and provenance.
+fn policies(plan: &HttpPlan) -> String {
+    let mut doc = String::from("# Source policy and verification\n\n");
+    doc.push_str("## Physical document bases and logical metadata\n\nRelative server URLs use `Server::document_base`, the effective physical retrieval document selected by the shared plan. An absent entry-level server uses the entry document even when an operation is referenced from another document. An explicit empty server override uses its declaring document. `ClientOptions::document_url` overrides that physical base. Logical `$self`/`$id` values never become the API server base. Local-file descriptions require an explicit HTTP document URL or absolute server override.\n\nThe pinned native URL transport preserves encoded slashes and ordinary relative dot navigation. Encoded dot path segments (`%2e`, `%2e%2e` and mixed encoded/literal forms) are refused before URL parsing/joining because that transport would normalize them. Refusals retain physical source identity.\n\n`Operation::provenance` and other provenance descriptors expose `use_site_resource`, `terminal_resource`, and aligned `reference_resources`. Their `ResourceContext` values retain canonical/base URI names, aliases, resource boundaries and schema roots separately from physical `Source` fields. Server URLs expose `ApiUrlBase::ServerDocument`; OAuth/OIDC metadata exposes `EffectiveServer` without rewriting URLs or acquiring tokens/documents.\n\n");
+    if plan.codecs.validation_version() == suspect_schema::OwnedProgram::V3_VERSION {
+        doc.push_str("## Checked resource/dynamic validation\n\nThis package executes `suspect.validation.experimental.v3` / `oas31-jsonschema202012-resources-dynamic`. Each node enters its indexed resource, including nested entry without evaluating its parent. Dynamic references select the outermost actually entered matching binding; unentered candidates do not participate. Pointer/empty/static-anchor fallbacks remain static. Exact ordered resource context participates in cycle detection; returns and branch trials restore scope. Target annotations start fresh and evaluation failures remain distinct from invalid values.\n\n`validation::resources()` and `validation::node_scopes()` expose immutable indexed metadata. Dynamic values and context-dependent unions use exact JSON carriers, preserving null and numeric tokens until whole-root codec validation. Mutable encoding revalidates the actual root context. Source-backed examples use the same explicit v3 compiler; fallback annotations are not guessed.\n\n");
+    }
+    doc.push_str("## Source policy\n\nThe HTTP source manifest records the exact capability list, byte policies, located annotations, typed protocol descriptors and native symbols. Unknown extensions remain uninterpreted. Legacy OAS 3.1+ `string/binary` byte markers require explicit `LegacyBinaryStringV1` generation configuration. Vendor stream conventions, automatic retries/paging, nested/streamed multipart and transfer encodings have no inferred behavior. Neutral Rust codecs still refuse active readOnly/writeOnly projections and unsupported native schema representations. Rust strings cannot represent lone UTF-16 surrogate code points.\n\n[Models and codecs](../models.md), [source manifest](../http-manifest.json), and [validated example provenance](../examples.md) describe the same plan. Examples for actual codec roots are executed by the packaged sample; opaque byte schemas and mixed aggregate schemas are not JSON codec inputs.\n\n");
+    doc.push_str("## Verification\n\n```sh\ncargo check --no-default-features\ncargo test --all-features\ncargo test --doc --all-features\ncargo doc --no-deps --all-features\ncargo run --example validated --features http\ncargo package --allow-dirty --no-verify\n```\n\nGeneration invokes no package manager and never publishes. Native installed-consumer, wire, negative-type, cancellation, ownership and Rust 1.88/current-toolchain gates determine acceptance for this selected package.\n\n[Back to README](../README.md)\n");
+    doc
+}
+
+/// Runtime environment credentials.
+fn credentials(policy: &crate::credential_env::CredentialEnvPlan) -> String {
+    let mut doc = String::from("# Runtime environment credentials\n\nWith `reqwest-rustls`, `Client::from_env() -> Result<Client<ReqwestTransport>, reqwest::Error>` snapshots the configured variables once at client creation. For a custom transport use `Client::with_transport_from_env(transport)`. `Credentials::from_env()` exposes the same snapshot for explicit alternative selection.\n\n");
+    for binding in policy.bindings() {
+        doc.push_str(&format!(
+            "- Source scheme `{}` reads the variable named `{}`.\n",
+            prose(binding.name()),
+            prose(binding.variable())
+        ));
+    }
+    doc.push_str("\nMissing, empty and non-Unicode/unavailable values stay absent. Protected calls use existing source-linked, secret-free errors before HTTP; anonymous calls can still run. Each later client reads a new snapshot. Existing `with_reqwest(credentials)` and `with_transport(transport, credentials)` use only their whole explicit argument, including empty credentials or missing members; they never fill from the environment. Rust's credential argument is non-nullable. The SDK uses the source server unless the caller explicitly overrides it. This policy reads no `.env` files and performs no token acquisition.\n\n[Back to README](../README.md)\n");
+    doc
+}
+
+/// The lean README: title, install, quickstart, features and links.
 pub(super) fn readme(plan: &HttpPlan, package: &PackageConfig, crate_name: &str) -> String {
     let mut docs = format!(
-        "# {}\n\nSource-selected OpenAPI Rust SDK. This private package contains exactly the operations below. Rust 1.88 / edition 2024.\n\n## Install\n\n```toml\n[dependencies]\n{} = {{ path = \"./rust\", features = [\"reqwest-rustls\"] }}\ntokio = {{ version = \"1\", features = [\"macros\", \"rt-multi-thread\", \"time\"] }}\n```\n\nDefault features are empty: exact JSON, native models, validation and codecs have no required dependencies. `http` enables the generic async transport and pinned URL parser. `reqwest-rustls` adds the pinned reqwest/rustls adapter. `serde-json` optionally enables source-bound serde_json codec adapters.\n\n## First request\n\nRun the async call inside a caller-owned Tokio runtime. Supply credentials at runtime:\n\n",
+        "# {}\n\nSource-selected OpenAPI Rust SDK. Rust 1.88 / edition 2024.\n\n## Install\n\n```toml\n[dependencies]\n{} = {{ path = \"./rust\", features = [\"reqwest-rustls\"] }}\ntokio = {{ version = \"1\", features = [\"macros\", \"rt-multi-thread\", \"time\"] }}\n```\n\n## Features\n\n- Default: exact JSON, native models, validation and codecs — no required dependencies\n- `http`: generic async transport and pinned URL parser\n- `reqwest-rustls`: pinned reqwest/rustls adapter\n- `serde-json`: source-bound serde_json codec adapters\n\n## First request\n\nRun the async call inside a caller-owned Tokio runtime. Supply credentials at runtime:\n\n",
         package.name, package.name
     );
     if let Some(op) = plan.operations.first() {
@@ -549,41 +708,10 @@ pub(super) fn readme(plan: &HttpPlan, package: &PackageConfig, crate_name: &str)
             example(plan, op, crate_name)
         ));
     }
-    docs.push_str("Required native inputs are constructor arguments. Optional input builders preserve omission; schema defaults are never inserted. No-input `_default` helpers omit every optional input. A sole-success enum dereferences to its `ApiResponse` and provides `into_response()` and `into_data()`, so consumers can read `.data` directly while existing status matches remain usable.\n\n## Execution contract\n\n`Client::with_transport` accepts a pull-based custom transport. `ClientOptions` selects a declared server index and variable overrides, or an explicit absolute server replacement. Relative servers resolve against the serving document URL; local descriptions require `document_url` or an explicit server. Source path prefixes are preserved. Absolute HTTP replacements are loopback-only; declared HTTP candidates retain their source origins.\n\nCredentials implement anonymous, disabled, OR alternatives and AND requirements. Generated scheme constructors are source-addressed, avoiding collisions between documents. Named runtime setters are explicit caller policy. The first fully supplied alternative is used unless `select_alternative(index)` selects one. Bearer, basic and API-key header/query/cookie attachment are implemented. OAuth/OIDC take a complete caller-supplied Authorization value or a `CredentialProvider` receiving located flow/scope/role metadata. The SDK performs no token acquisition, discovery or refresh. Conflicting attachments fail before transport.\n\nParameters use their declared simple/label/matrix/form/spaceDelimited/pipeDelimited/deepObject/cookie styles, JSON/text content and percent-encoding rules. Header values are unquoted; ambiguous composite delimiters are rejected. `allowReserved` callers pre-escape query hazards (`&`, `=`, `+`, `#`) and active delimiters. Optional empty style composites omit; required empty composites fail. Null never becomes a string or an absent required field.\n\nStatus selection is exact > class range > default, before media selection. Actual 2xx status determines success, including default responses. JSON/+json, UTF-8 text, native bytes, wildcards and media parameters have separate typed bindings. Missing or invalid Content-Type cannot select declared content. HEAD/1xx/204/304 drop bodies without decoding. Undeclared response content is bounded bytes. `ApiResponse` retains actual status, complete Content-Type, raw duplicate headers, typed declared headers and source-backed links. Required headers are enforced. Repeated scalar headers, including Set-Cookie, fail typed decoding; raw values remain in errors. Array/object list headers support explicit simple serialization. Links are immutable metadata and never trigger calls.\n\nForms and multipart use native aggregate structs and `Part<T, H>` values. File data is `Vec<u8>`, filename is metadata, and each text/JSON part has its own codec. Required fields, extras policy, property counts, array cardinalities and positional order are checked structurally. No mixed aggregate is converted to JSON with null placeholders. Multipart assembly checks part and body bounds before the final allocation, validates headers/disposition, and chooses a collision-free boundary. OAS 3.2 named per-item and positional encodings retain their source bindings.\n\nOAS 3.2 `itemSchema` supplies SSE or JSON-lines item codecs. Responses return `ItemStream<Model>`: use `while let Some(item) = response.data.next().await { let item = item?; }`. SSE exposes the parsed envelope (`data`, `event`, `id`, integer `retry`), combines multiline data and ignores comments/unknown fields/invalid retry fields. JSON inside data and `[DONE]` have no inferred special meaning. Finite request streams use `Vec<Model>` and the same item codecs. Stream parsing keeps one bounded transport chunk and one bounded item, honors pull backpressure, and enforces total byte/poll budgets. Dropping or closing a stream cancels its body; no task is detached.\n\nThe recommended adapter disables redirects, retries, proxy discovery, referer generation and automatic decompression. Configure pooling, TLS or timeouts with `ReqwestTransport::from_builder`. Wrap calls/stream pulls in the caller executor's timeout or cancellation selection.\n\nByte ceilings (request, response, part, item, chunk and headers) are finite; caller options may only lower generated limits. JSON parsing, schema evaluation and native conversion retain their independent finite budgets and exact number tokens. Error enums distinguish validated API errors from request/transport/resource/decoding failures. Debug and display omit credentials and captures. Inspect bounded `raw_capture` explicitly.\n\n## Operations\n\n");
-    for op in &plan.operations {
-        docs.push_str(&format!("### `{}`\n\n`{} {}`. Module `operations::{}`; method `{}`.\n\n{}\n\nSource: `{}#{}`. Input `{}`; success `{}`; errors `{}` / `{}`.\n\n",prose(&op.operation_id),prose(op.wire.method().as_str()),prose(op.wire.path()),op.module_name,op.function_name,prose(op.wire.description().map(|v|v.value().as_str()).unwrap_or("")),prose(op.source.document().as_str()),prose(op.source.pointer()),op.input_type,op.success_type,op.error_type,op.api_error_type));
-        for r in &op.responses {
-            for v in &r.variants {
-                docs.push_str(&format!(
-                    "- `{}` `{}` → `{}` (`{}`).\n",
-                    r.wire.status_key(),
-                    prose(
-                        v.media_index
-                            .map(|i| r.wire.media()[i].media_type().declared())
-                            .unwrap_or("no declared media")
-                    ),
-                    v.name,
-                    payload_type(&v.payload)
-                ));
-            }
-        }
-        docs.push('\n');
+    docs.push_str("Required native inputs are constructor arguments. Optional input builders preserve omission; schema defaults are never inserted. No-input `_default` helpers omit every optional input. A sole-success enum dereferences to its `ApiResponse` and provides `into_response()` and `into_data()`, so consumers can read `.data` directly while existing status matches remain usable.\n\n## Documentation\n\n- [Operations](docs/operations.md) — every operation, grouped by API tag\n- [Execution contract](docs/execution-contract.md) — transport, credentials, parameters, status, forms, streaming, limits\n- [Source policies](docs/policies.md) — document bases, validation, verification\n");
+    if plan.credential_env().is_some() {
+        docs.push_str("- [Runtime credentials](docs/credentials.md) — environment-variable bindings\n");
     }
-    docs.push_str("## Physical document bases and logical metadata\n\nRelative server URLs use `Server::document_base`, the effective physical retrieval document selected by the shared plan. An absent entry-level server uses the entry document even when an operation is referenced from another document. An explicit empty server override uses its declaring document. `ClientOptions::document_url` overrides that physical base. Logical `$self`/`$id` values never become the API server base. Local-file descriptions require an explicit HTTP document URL or absolute server override.\n\nThe pinned native URL transport preserves encoded slashes and ordinary relative dot navigation. Encoded dot path segments (`%2e`, `%2e%2e` and mixed encoded/literal forms) are refused before URL parsing/joining because that transport would normalize them. Refusals retain physical source identity.\n\n`Operation::provenance` and other provenance descriptors expose `use_site_resource`, `terminal_resource`, and aligned `reference_resources`. Their `ResourceContext` values retain canonical/base URI names, aliases, resource boundaries and schema roots separately from physical `Source` fields. Server URLs expose `ApiUrlBase::ServerDocument`; OAuth/OIDC metadata exposes `EffectiveServer` without rewriting URLs or acquiring tokens/documents.\n\n");
-    if plan.codecs.validation_version() == suspect_schema::OwnedProgram::V3_VERSION {
-        docs.push_str("## Checked resource/dynamic validation\n\nThis package executes `suspect.validation.experimental.v3` / `oas31-jsonschema202012-resources-dynamic`. Each node enters its indexed resource, including nested entry without evaluating its parent. Dynamic references select the outermost actually entered matching binding; unentered candidates do not participate. Pointer/empty/static-anchor fallbacks remain static. Exact ordered resource context participates in cycle detection; returns and branch trials restore scope. Target annotations start fresh and evaluation failures remain distinct from invalid values.\n\n`validation::resources()` and `validation::node_scopes()` expose immutable indexed metadata. Dynamic values and context-dependent unions use exact JSON carriers, preserving null and numeric tokens until whole-root codec validation. Mutable encoding revalidates the actual root context. Source-backed examples use the same explicit v3 compiler; fallback annotations are not guessed.\n\n");
-    }
-    docs.push_str("## Source policy and verification\n\nThe HTTP source manifest records the exact capability list, byte policies, located annotations, typed protocol descriptors and native symbols. Unknown extensions remain uninterpreted. Legacy OAS 3.1+ `string/binary` byte markers require explicit `LegacyBinaryStringV1` generation configuration. Vendor stream conventions, automatic retries/paging, nested/streamed multipart and transfer encodings have no inferred behavior. Neutral Rust codecs still refuse active readOnly/writeOnly projections and unsupported native schema representations. Rust strings cannot represent lone UTF-16 surrogate code points.\n\n[Models and codecs](models.md), [source manifest](http-manifest.json), and [validated example provenance](examples.md) describe the same plan. Examples for actual codec roots are executed by the packaged sample; opaque byte schemas and mixed aggregate schemas are not JSON codec inputs.\n\n```sh\ncargo check --no-default-features\ncargo test --all-features\ncargo test --doc --all-features\ncargo doc --no-deps --all-features\ncargo run --example validated --features http\ncargo package --allow-dirty --no-verify\n```\n\nGeneration invokes no package manager and never publishes. Native installed-consumer, wire, negative-type, cancellation, ownership and Rust 1.88/current-toolchain gates determine acceptance for this selected package.\n");
-    if let Some(policy) = plan.credential_env() {
-        docs.push_str("\n## Runtime environment credentials\n\nWith `reqwest-rustls`, `Client::from_env() -> Result<Client<ReqwestTransport>, reqwest::Error>` snapshots the configured variables once at client creation. For a custom transport use `Client::with_transport_from_env(transport)`. `Credentials::from_env()` exposes the same snapshot for explicit alternative selection.\n\n");
-        for binding in policy.bindings() {
-            docs.push_str(&format!(
-                "- Source scheme `{}` reads the variable named `{}`.\n",
-                prose(binding.name()),
-                prose(binding.variable())
-            ));
-        }
-        docs.push_str("\nMissing, empty and non-Unicode/unavailable values stay absent. Protected calls use existing source-linked, secret-free errors before HTTP; anonymous calls can still run. Each later client reads a new snapshot. Existing `with_reqwest(credentials)` and `with_transport(transport, credentials)` use only their whole explicit argument, including empty credentials or missing members; they never fill from the environment. Rust's credential argument is non-nullable. The SDK uses the source server unless the caller explicitly overrides it. This policy reads no `.env` files and performs no token acquisition.\n");
-    }
+    docs.push_str("- [Models and codecs](models.md) — every model type with its native codec\n- [Validated examples](examples.md) — source-bound, codec-executed examples\n- Native API docs: `cargo doc --no-deps --all-features`\n");
     docs
 }

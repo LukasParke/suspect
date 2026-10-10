@@ -531,114 +531,62 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
         .enumerate()
         .map(|(i, symbol)| (symbol.key(), format!("python-symbol-{i}")))
         .collect();
+    // Symbols live in bounded alphabetical pages; cross-file :ref: labels and
+    // the native-python directives work unchanged from any included document.
+    let api_groups = crate::doc_split::bounded_groups(
+        symbols.iter().collect::<Vec<_>>(),
+        |symbol: &Symbol| symbol.key(),
+        200,
+    );
+    let mut api_file_of: BTreeMap<String, String> = BTreeMap::new();
+    let mut api_files = Vec::new();
+    {
+        let mut used = std::collections::BTreeSet::new();
+        for (group_label, group) in &api_groups {
+            let stem =
+                crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(group_label));
+            for symbol in group {
+                api_file_of.insert(symbol.key(), stem.clone());
+            }
+            let mut page = heading(&format!("Symbols ``{group_label}…``"), '=');
+            for symbol in group {
+                page.push_str(&api_symbol(plan, symbol, &labels));
+            }
+            api_files.push(OutFile {
+                path: format!("python/docs/api/{stem}.rst"),
+                content: page,
+            });
+        }
+    }
     let mut api = heading("Public Python symbols", '=');
-    api.push_str("Signatures, annotations and docstrings below are read from the importable package. Source prose is displayed literally. Model aliases retain their own source binding even when Python represents two aliases with the same runtime object.\n\n");
-    for symbol in &symbols {
-        api.push_str(&format!(".. _{}:\n\n", labels[&symbol.key()]));
-        api.push_str(&heading(&format!("``{}``", symbol.key()), '-'));
-        if let Some(source) = &symbol.source {
-            api.push_str(&literal(&source_text(source), "text"));
-        }
-        if !symbol.description.is_empty() {
-            api.push_str(&literal(&symbol.description, "text"));
-        }
-        if matches!(symbol.kind, "model" | "alias" | "field")
-            && let Some(raw) = symbol
-                .source
-                .as_ref()
-                .and_then(|source| plan.contract().source(source))
-        {
-            api.push_str("Original schema (annotations are not inferred behavior):\n\n");
-            api.push_str(&literal(
-                &serde_json::to_string_pretty(raw).unwrap(),
-                "json",
-            ));
-        }
-        api.push_str(&format!(
-            ".. native-python:: {} {}\n{}\n",
-            symbol.module,
-            symbol.name,
-            if symbol.members { "   :members:\n" } else { "" }
-        ));
-        if !symbol.related.is_empty() {
-            api.push_str("Related: ");
-            api.push_str(
-                &symbol
-                    .related
-                    .iter()
-                    .map(|key| format!(":ref:`{}`", labels[key]))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-            api.push_str(".\n\n");
-        }
-    }
+    api.push_str("Signatures, annotations and docstrings below are read from the importable package, split into bounded alphabetical pages. Source prose is displayed literally. Model aliases retain their own source binding even when Python represents two aliases with the same runtime object.\n\n.. toctree::\n   :glob:\n\n   api/*\n");
     let import = &package.import_name;
-    let mut operations = heading("Operation reference", '=');
-    operations.push_str("Each method uses keyword-only inputs and returns its declared success type. Concrete result and exception classes are public in the operations module. Detailed source and wire-slot metadata is available in the downloadable source bindings.\n\n");
-    for operation in plan.operations() {
-        operations.push_str(&heading(&format!("``{}``", operation.snake_name), '-'));
-        operations.push_str(&format!(
-            "Native calls: :ref:`{}` and :ref:`{}`.\n\n",
-            labels[&format!("{}.Client.{}", package.import_name, operation.snake_name)],
-            labels[&format!(
-                "{}.AsyncClient.{}",
-                package.import_name, operation.snake_name
-            )]
-        ));
-        operations.push_str(&literal(
-            &format!(
-                "{} {}\n{}",
-                operation.wire().method().as_str(),
-                operation.wire().path(),
-                source_text(&operation.source)
-            ),
-            "text",
-        ));
-        if !operation.description().is_empty() {
-            operations.push_str(&literal(operation.description(), "text"));
+    // Operations live one page per spec tag.
+    let op_groups = crate::doc_split::by_tag(plan.operations(), |op: &PlannedOperation| {
+        op.wire()
+            .tags()
+            .iter()
+            .map(|t| t.value().as_str().to_owned())
+            .collect()
+    });
+    let mut operation_files = Vec::new();
+    {
+        let mut used = std::collections::BTreeSet::new();
+        for (tag, ops) in &op_groups {
+            let stem = crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(tag));
+            let mut page = heading(&format!("{tag} operations"), '=');
+            page.push_str("All operation groups: :doc:`/operations`.\n\nEach method uses keyword-only inputs and returns its declared success type. Concrete result and exception classes are public in the operations module. Detailed source and wire-slot metadata is available in the downloadable source bindings.\n\n");
+            for operation in ops {
+                operation_section(plan, operation, package, &labels, &mut page);
+            }
+            operation_files.push(OutFile {
+                path: format!("python/docs/operations/{stem}.rst"),
+                content: page,
+            });
         }
-        operations.push_str("Inputs\n~~~~~~\n\n");
-        for parameter in operation.parameters() {
-            operations.push_str(&format!(
-                "* ``{}``: :ref:`{}`; {}.\n",
-                parameter.name,
-                labels[&format!("{import}.models.{}", plan.symbols()[parameter.schema()])],
-                if parameter.wire().required() {
-                    "required"
-                } else {
-                    "optional, defaults to UNSET"
-                }
-            ));
-        }
-        if let Some(body) = operation.body() {
-            operations.push_str(&format!(
-                "* ``body``: ``{}``; {}.\n",
-                body.ty.render(plan.symbols(), true, false),
-                if body.required {
-                    "required JSON body"
-                } else {
-                    "optional JSON body, defaults to UNSET"
-                }
-            ));
-        } else if operation.parameters().is_empty() {
-            operations.push_str("No input arguments.\n");
-        }
-        operations.push_str("\nResponses\n~~~~~~~~~\n\n");
-        for response in operation.responses() {
-            operations.push_str(&format!(
-                "* HTTP {}: :ref:`{}` — {}.\n",
-                response.wire().status_key(),
-                labels[&format!("{import}.operations.{}", response.class_name)],
-                if response.succeeds() {
-                    "returned on an actual successful status; default can also raise an API error"
-                } else {
-                    "raised with validated API-error data"
-                }
-            ));
-        }
-        operations.push('\n');
     }
+    let mut operations = heading("Operation reference", '=');
+    operations.push_str("Each method uses keyword-only inputs and returns its declared success type. Concrete result and exception classes are public in the operations module. Detailed source and wire-slot metadata is available in the downloadable source bindings. Every operation is grouped one page per API tag below.\n\n.. toctree::\n   :glob:\n\n   operations/*\n");
     let mut renderer = native_examples::Renderer::new(plan);
     let examples = plan_examples(plan, &mut renderer);
     let guides = guides(plan, package, &examples, &mut renderer);
@@ -654,7 +602,7 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
             "name":symbol.key(), "module":symbol.module, "qualname":symbol.name, "kind":symbol.kind,
             "file":symbol.file, "source":symbol.source.as_ref().map(location),
             "description":symbol.description, "related":symbol.related,
-            "documentation":{"file":"docs/api.rst","anchor":labels[&symbol.key()]},
+            "documentation":{"file":format!("docs/api/{}.rst", api_file_of[&symbol.key()]),"anchor":labels[&symbol.key()]},
         })).collect::<Vec<_>>(),
         "operations":plan.operations().iter().map(|op| operation_binding(plan, package, op)).collect::<Vec<_>>(),
         "examples":examples.records,
@@ -715,7 +663,11 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
             path: "python/examples/validated.py".into(),
             content: validated,
         },
-    ];
+    ]
+    .into_iter()
+    .chain(api_files)
+    .chain(operation_files)
+    .collect::<Vec<_>>();
     let mut readme = format!(
         "# {}\n\nA Python 3.11+ SDK with native dataclasses, synchronous and asynchronous clients, and exact source-bound validation. The selected operations are documented in the [operation reference](docs/operations.rst).\n\n",
         package.name
@@ -770,6 +722,127 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
         content: readme,
     });
     files
+}
+
+/// One symbol's api-reference section.
+fn api_symbol(
+    plan: &HttpPlan,
+    symbol: &Symbol,
+    labels: &BTreeMap<String, String>,
+) -> String {
+    let mut api = String::new();
+    api.push_str(&format!(".. _{}:\n\n", labels[&symbol.key()]));
+    api.push_str(&heading(&format!("``{}``", symbol.key()), '-'));
+    if let Some(source) = &symbol.source {
+        api.push_str(&literal(&source_text(source), "text"));
+    }
+    if !symbol.description.is_empty() {
+        api.push_str(&literal(&symbol.description, "text"));
+    }
+    if matches!(symbol.kind, "model" | "alias" | "field")
+        && let Some(raw) = symbol
+            .source
+            .as_ref()
+            .and_then(|source| plan.contract().source(source))
+    {
+        api.push_str("Original schema (annotations are not inferred behavior):\n\n");
+        api.push_str(&literal(
+            &serde_json::to_string_pretty(raw).unwrap(),
+            "json",
+        ));
+    }
+    api.push_str(&format!(
+        ".. native-python:: {} {}\n{}\n",
+        symbol.module,
+        symbol.name,
+        if symbol.members { "   :members:\n" } else { "" }
+    ));
+    if !symbol.related.is_empty() {
+        api.push_str("Related: ");
+        api.push_str(
+            &symbol
+                .related
+                .iter()
+                .map(|key| format!(":ref:`{}`", labels[key]))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        api.push_str(".\n\n");
+    }
+    api
+}
+
+/// One operation's reference section.
+#[allow(clippy::too_many_arguments)]
+fn operation_section(
+    plan: &HttpPlan,
+    operation: &PlannedOperation,
+    package: &PackageConfig,
+    labels: &BTreeMap<String, String>,
+    page: &mut String,
+) {
+    let import = &package.import_name;
+    page.push_str(&heading(&format!("``{}``", operation.snake_name), '-'));
+    page.push_str(&format!(
+        "Native calls: :ref:`{}` and :ref:`{}`.\n\n",
+        labels[&format!("{}.Client.{}", package.import_name, operation.snake_name)],
+        labels[&format!(
+            "{}.AsyncClient.{}",
+            package.import_name, operation.snake_name
+        )]
+    ));
+    page.push_str(&literal(
+        &format!(
+            "{} {}\n{}",
+            operation.wire().method().as_str(),
+            operation.wire().path(),
+            source_text(&operation.source)
+        ),
+        "text",
+    ));
+    if !operation.description().is_empty() {
+        page.push_str(&literal(operation.description(), "text"));
+    }
+    page.push_str("Inputs\n~~~~~~\n\n");
+    for parameter in operation.parameters() {
+        page.push_str(&format!(
+            "* ``{}``: :ref:`{}`; {}.\n",
+            parameter.name,
+            labels[&format!("{import}.models.{}", plan.symbols()[parameter.schema()])],
+            if parameter.wire().required() {
+                "required"
+            } else {
+                "optional, defaults to UNSET"
+            }
+        ));
+    }
+    if let Some(body) = operation.body() {
+        page.push_str(&format!(
+            "* ``body``: ``{}``; {}.\n",
+            body.ty.render(plan.symbols(), true, false),
+            if body.required {
+                "required JSON body"
+            } else {
+                "optional JSON body, defaults to UNSET"
+            }
+        ));
+    } else if operation.parameters().is_empty() {
+        page.push_str("No input arguments.\n");
+    }
+    page.push_str("\nResponses\n~~~~~~~~~\n\n");
+    for response in operation.responses() {
+        page.push_str(&format!(
+            "* HTTP {}: :ref:`{}` — {}.\n",
+            response.wire().status_key(),
+            labels[&format!("{import}.operations.{}", response.class_name)],
+            if response.succeeds() {
+                "returned on an actual successful status; default can also raise an API error"
+            } else {
+                "raised with validated API-error data"
+            }
+        ));
+    }
+    page.push('\n');
 }
 
 fn operation_binding(plan: &HttpPlan, package: &PackageConfig, op: &PlannedOperation) -> Value {

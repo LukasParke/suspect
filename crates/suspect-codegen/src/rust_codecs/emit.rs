@@ -51,6 +51,7 @@ pub(super) fn package(
     let mut model_code = String::from(
         "//! Neutral native models. Use crate::codecs to validate decode and encode.\n",
     );
+    let mut model_sections: Vec<(String, String)> = Vec::new();
     let mut docs = String::from(
         "# Rust model codecs\n\nStandalone Rust 2024 package (Rust 1.88+), no dependencies. Neutral models and exact JSON codecs; no HTTP transport or request/response projection.\n\nEvery public symbol has a `codecs::<Symbol>Codec` with `decode(&str)`, `decode_bytes(&[u8])`, `decode_value(JsonValue)`, `encode(&Model)` and `encode_value(&Model)`. Decode validates before conversion; encode checks the selected enum branch and complete schema after conversion. Inclusive unions choose the first validating source branch; exclusive unions require exactly one. Evaluation failure is never treated as a branch mismatch.\n\n`Nullable` and `Presence` distinguish null from absence. Unknown properties retain their declared additional-property type independently of named properties. Exact numbers and arbitrary integers retain tokens; native bounded integer fields retain mathematical values (not spelling). Literal enum variants encode the canonical source literal. No defaults or coercions are inferred.\n\n`CodecError` distinguishes JSON errors, invalid source values, evaluation failures and conversion failures. Schema budgets are shared across the root check, all branch trials, and literal equality. JSON bytes/work/nesting and conversion work/depth have separate finite policies; they are not complete allocator/CPU accounting.\n\nRun `cargo test`, `cargo test --doc`, and `cargo doc --no-deps`.\n\n",
     );
@@ -85,8 +86,46 @@ pub(super) fn package(
         };
         code.push_str(&format!("fn decode_{index}(v: JsonValue, cx: &mut Context, d: usize) -> Result<crate::models::{name},CodecError> {{ cx.source({document:?},{pointer:?},|cx| {{ let _ = &v; cx.step(d)?; {nonnull} {decode} }}) }}\nfn encode_{index}(v: &crate::models::{name}, cx: &mut Context, d: usize) -> Result<JsonValue,CodecError> {{ cx.source({document:?},{pointer:?},|cx| {{ let _ = v; cx.step(d)?; {encode} }}) }}\n"));
         code.push_str(&format!("#[cfg(feature = \"serde-json\")]\nimpl {name}Codec {{\n    /// Serialize through the validated codec: encode (schema-checked, budgeted) and\n    /// emit the exact produced JSON verbatim via `serde_json::value::RawValue`. Number\n    /// tokens are never reinterpreted. JSON only; not a general Serde-format adapter.\n    pub fn serialize<S: serde::Serializer>(model: &crate::models::{name}, serializer: S) -> Result<S::Ok, S::Error> {{\n        let text = Self::encode(model).map_err(serde::ser::Error::custom)?;\n        let raw = serde_json::value::RawValue::from_string(text).map_err(serde::ser::Error::custom)?;\n        serde::Serialize::serialize(&*raw, serializer)\n    }}\n    /// Deserialize through the validated codec from a serde_json-based\n    /// `Deserializer`. The raw JSON text (including number tokens) is captured first,\n    /// then decoded by the real codec; values never round-trip through binary floats.\n    /// Other Serde formats are rejected by design.\n    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<crate::models::{name}, D::Error> {{\n        let raw: std::boxed::Box<serde_json::value::RawValue> = serde::Deserialize::deserialize(deserializer)?;\n        Self::decode(raw.get()).map_err(serde::de::Error::custom)\n    }}\n}}\n"));
-        docs.push_str(&format!("## `{name}` / `{name}Codec`\n\n{description}\n\nSource: `{}#{}`. Role: `{:?}`. [Model](src/models.rs), [codec](src/codecs.rs).\n\n```rust,ignore\n{}\n```\n\nOriginal schema:\n\n```json\n{}\n```\n\n",prose(&document),prose(pointer),symbol.role(),symbol.code,symbol.source_json));
+        model_sections.push((
+            name.to_owned(),
+            format!("## `{name}` / `{name}Codec`\n\n{description}\n\nSource: `{}#{}`. Role: `{:?}`. [Model](src/models.rs), [codec](src/codecs.rs).\n\n```rust,ignore\n{}\n```\n\nOriginal schema:\n\n```json\n{}\n```\n\n",prose(&document),prose(pointer),symbol.role(),symbol.code,symbol.source_json),
+        ));
     }
+    // Model reference lives in bounded alphabetical files under docs/models/.
+    let section_refs: Vec<&(String, String)> = model_sections.iter().collect();
+    let model_groups = crate::doc_split::bounded_groups(section_refs, |s| s.0.clone(), 200);
+    let mut model_doc_files = Vec::new();
+    let mut used = std::collections::BTreeSet::new();
+    let mut model_index = String::from(
+        "# Model types\n\nEvery model and codec, grouped into bounded alphabetical files.\n\n",
+    );
+    for (label, group) in &model_groups {
+        let stem = crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(label));
+        model_index.push_str(&format!(
+            "- [`{}`…](models/{stem}.md) — {} type{}\n",
+            label,
+            group.len(),
+            if group.len() == 1 { "" } else { "s" }
+        ));
+        let mut page = format!(
+            "# Model types `{label}…`\n\n[All models](../models.md) index every group.\n\n"
+        );
+        for (_, section) in group {
+            page.push_str(section);
+        }
+        model_doc_files.push(OutFile {
+            path: format!("rust/docs/models/{stem}.md"),
+            content: page,
+        });
+    }
+    model_doc_files.insert(
+        0,
+        OutFile {
+            path: "rust/docs/models.md".into(),
+            content: model_index,
+        },
+    );
+    docs.push_str("## Model types\n\nEvery model, its native declaration and its validated codec is documented in bounded alphabetical files, indexed by [docs/models.md](docs/models.md).\n");
     vec![
         OutFile { path:"rust/src/codecs.rs".into(),content:code },
         OutFile { path:"rust/src/models.rs".into(),content:model_code },
@@ -94,6 +133,9 @@ pub(super) fn package(
         OutFile { path:"rust/src/lib.rs".into(),content:"//! Exact neutral OpenAPI models and validated native codecs. No HTTP transport.\n#![forbid(unsafe_code)]\npub mod models;\npub mod codecs;\npub mod validation;\nmod support;\nmod json;\npub use support::{ExtraFieldError, JsonInteger, JsonNonNullValue, JsonNumber, JsonValue, Never, Nullable, NumberError, Presence};\npub use json::{JsonError, JsonErrorKind, JsonLimits, parse_json, parse_json_bytes, stringify_json};\n".into() },
         OutFile { path:"rust/Cargo.toml".into(),content:super::cargo_manifest("generated-models","0.0.0",false) },
     ]
+    .into_iter()
+    .chain(model_doc_files)
+    .collect()
 }
 struct Emitter<'a> {
     indices: &'a Indices,

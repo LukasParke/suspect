@@ -736,35 +736,87 @@ fn docs(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
     }
     getting.push_str("## Calling operations\n\nInputs with no required fields can be omitted: `try await client.operation()`.\nA sole successful result exposes `.data`, `.status`, `.headers`, `.links`, and\nraw-body capture directly; its declared status case remains available. Multiple\nstatuses/media are explicit enums. Success uses the actual 200–299 HTTP status,\nincluding a status matched by `default`. Exact status beats range, then default;\nmedia mismatch never falls through to a different response declaration.\n\n## Servers and credentials\n\nEach operation's generated HTTP metadata lists effective servers and security\nrequirements with original sources. ClientOptions and RequestOptions select a\nserver index and literal variable overrides. Relative servers use documentURL\nor the actual HTTP retrieval document URL. Local files have no invented origin.\nDeclared HTTP servers are honored; serverURL overrides use HTTPS or loopback\nHTTP unless the caller explicitly sets allowHTTP. Security alternatives are OR,\nmember schemes are AND. Selection defaults to the first fully configured\nalternative, including anonymous, or uses an explicit securityAlternative index.\nBasic/bearer/API-key attachment is source-defined. OAuth/OIDC hooks receive\nsource, flow, discovery and scope metadata and return a complete Authorization\nfield. No token type, acquisition, refresh or retry is inferred.\n\n## Transport and errors\n\nTimeouts are finite (1 day maximum). Per-call response ceilings may only lower\nthe client/generated ceiling. URLSession uses ephemeral storage without cookie,\ncache or credential persistence, rejects redirects and bounds received bytes.\nCustom method tokens preserve exact case. For tokens URLRequest would normalize,\nthe Apple Network transport uses bounded HTTP/1.1 with system TLS trust, no\nredirects/retries and a whole-transfer deadline. This exact-method path supports\nidentity content encoding and finite or incremental response consumption.\nTask cancellation aborts I/O and remains CancellationError. Custom transports\nimplement the same policy; returned status, headers and body are checked again.\nAPIError enums carry typed declared failures; SDKError covers request validation,\nrepresentation, response decoding and transport faults. Captures are bounded\nand error descriptions omit credentials and payloads.\n\n## Whole-query parameters\n\nAn OAS 3.2 querystring parameter supplies the complete URL query, without a name\nprefix. JSON/text receive one URI-component encoding pass. Forms use native\nobject inputs and source-bound aggregate/field codecs; their form-urlencoded\noutput receives no second encoding pass. Ordinary query parameters and query\nAPI keys cannot be implicitly merged with complete query content.\n\n## Forms, ordered parts and streams\n\nForms/multipart use native field structs, repeated arrays and in-memory Data\nparts. Required fields, extras, cardinality, part codecs and separate byte\nceilings are enforced. Positional multipart uses typed part1/part2 prefix slots\nand typed remaining items. Optional missing slots must be a trailing suffix;\nfalse prefixes forbid all later positions. Names/filenames are not inferred for\nunnamed parts; positional form-data uses declared Content-Disposition headers.\nMIME style names belong in Content-Disposition and values in the part body.\nMixed byte bodies never enter a JSON codec as null. Source-typed response headers\nenforce requiredness; repeated ambiguous fields are rejected. URLSession's\ncoalesced Set-Cookie declarations are declined. Links trigger no implicit calls.\n\nHTTPEventStream is a single-consumer AsyncSequence. `for try await` pulls parsed\nSSE envelopes or JSON-lines values through the exact itemSchema codec. Breaking\niteration, cancellation, close(), exhaustion and decoding failure close I/O.\nSSE data remains a string, including `[DONE]`; neither nested JSON nor sentinels\nare inferred. Transport queues, individual items and total received bytes have\nindependent finite ceilings. Streaming requests, nested/streamed multipart,\nexpansive MIME style grouping, composite-style form response grouping and vendor\nstream conventions retain source-linked refusals. Profiles require explicit opt-in.\n");
     getting.push_str("## Physical and logical URL metadata\n\n`HTTPServer.documentBase` is the physical retrieval document which owns the\nserver declaration. Relative server URLs use that base unless an explicit\n`documentURL` override is supplied; `$self` and schema `$id` never move the API.\n`HTTPProvenance` retains separate use-site, terminal and reference-hop\n`HTTPResourceContext` values for logical addresses, alongside physical sources.\nEncoded dot/slash segments remain data. Local-file sources need an explicit HTTP\ndocument base. Link server metadata uses the link's own physical document.\n\nOAuth/OIDC providers receive `HTTPCredentialContext.serverURL` after server\nselection and `urlBase == .effectiveServer`. Flow/discovery URL strings and their\noriginal sources remain intact; resolving them never starts token acquisition.\n\n");
-    let mut reference = String::from(
-        "# Operation reference\n\nEvery entry below is generated from the same operation and symbol plan.\n\n",
+    // One operation-reference article per spec tag; the index article links
+    // them so no single page carries the whole API surface.
+    let op_groups = crate::doc_split::by_tag(
+        plan.operations.iter().collect::<Vec<_>>(),
+        |op: &PlannedOperation| {
+            op.wire
+                .tags()
+                .iter()
+                .map(|t| t.value().as_str().to_owned())
+                .collect()
+        },
     );
-    for op in &plan.operations {
-        let _ = writeln!(
-            reference,
-            "## {}\n\n`{} {}`\n\nSource: <code>{}</code>.\n\n{}\n\nInput: ``{}``; success: ``{}``; declared errors: ``{}``.\n\n",
-            escaped(&op.operation_id),
-            op.method,
-            escaped(&op.path),
-            escaped(&loc(&op.source)),
-            prose(&op.description),
-            op.input_type,
-            op.success_type,
-            op.error_type
+    let mut operation_articles = Vec::new();
+    let mut used = std::collections::BTreeSet::new();
+    let mut reference = String::from(
+        "# Operation reference\n\nEvery operation, generated from the same operation and symbol plan and grouped into one article per API tag.\n\n",
+    );
+    for (tag, ops) in &op_groups {
+        let stem = format!(
+            "Operations-{}",
+            crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(tag))
         );
+        let _ = writeln!(reference, "- <doc:{stem}> — {} operation{}", ops.len(), if ops.len() == 1 { "" } else { "s" });
+        let mut page = format!("# {tag} operations\n\nEvery entry below is generated from the same operation and symbol plan. <doc:OperationReference> lists every group.\n\n");
+        for op in ops {
+            let _ = writeln!(
+                page,
+                "## {}\n\n`{} {}`\n\nSource: <code>{}</code>.\n\n{}\n\nInput: ``{}``; success: ``{}``; declared errors: ``{}``.\n\n",
+                escaped(&op.operation_id),
+                op.method,
+                escaped(&op.path),
+                escaped(&loc(&op.source)),
+                prose(&op.description),
+                op.input_type,
+                op.success_type,
+                op.error_type
+            );
+        }
+        operation_articles.push((stem, page));
     }
+    reference.push('\n');
     let mut model_doc = String::from(
         "# Models and exact codecs\n\nRequired non-null fields have native value types. Required nullable fields use\nNullable; optional non-null fields use OptionalField; optional nullable fields\nuse Presence. Arbitrary JSON and null-only values carry null in their own JSON\nvalue domain. No source default is inserted. Indirect enum storage gives\nrecursive models value semantics, with no mutable reference graph or unsafe casts.\n\nEvery model codec validates decoding and mutable encoding against the checked\nOwnedProgram. Unions validate all branches; oneOf is exactly-one, while anyOf\nselects the first valid typed alternative without discarding wire properties.\nAn explicitly chosen native variant must satisfy its own branch on encoding.\nFormat remains an annotation unless an admitted assertion policy says otherwise.\n\nUse SDKJSONDecoder/SDKJSONEncoder for Codable adapters, or the source-bound\nModelCodec directly. Foundation JSONDecoder/JSONEncoder are deliberately rejected:\nthey cannot recover arbitrary original numeric tokens. Do not round trip this\nSDK through JSONSerialization, NSNumber, Double, or ordinary synthesized Codable.\nWhitespace, object ordering and string escape spelling may change; numeric\ntokens and Unicode scalar sequences do not. JsonObject compares UTF-8 key bytes\nso canonically equivalent Unicode strings remain distinct JSON names.\n\nParsing, writing, conversion, validation, equality and numeric work have finite\nper-call limits. Incomplete evaluation throws ValidationError.evaluationFailure\nand cannot be inverted or hidden by logical alternatives. Duplicate decoded\nkeys, invalid UTF-8 and unpaired surrogates are rejected. Numbers are strict\ntokens, with symbolic unbounded-magnitude exponents under finite byte limits.\n\n## Reachable declarations\n\n",
     );
-    for id in plan.models.declarations.keys() {
+    // Reachable declarations live in bounded alphabetical articles.
+    let declaration_ids: Vec<&SchemaId> = plan.models.declarations.keys().collect();
+    let declaration_groups = crate::doc_split::bounded_groups(
+        declaration_ids,
+        |id: &SchemaId| plan.models.names[id].clone(),
+        200,
+    );
+    let mut model_articles = Vec::new();
+    let mut used_models = std::collections::BTreeSet::new();
+    model_doc.push_str("## Reachable declarations\n\nEvery reachable declaration, grouped into bounded alphabetical articles.\n\n");
+    for (group_label, ids) in &declaration_groups {
+        let stem = format!(
+            "Models-{}",
+            crate::doc_split::allocate_slug(&mut used_models, &crate::doc_split::slug(group_label))
+        );
         let _ = writeln!(
             model_doc,
-            "### ``{}``\n\nSource: <code>{}</code>.\n\n```json\n{}\n```\n",
-            plan.models.names[id],
-            escaped(&loc(id)),
-            serde_json::to_string_pretty(plan.contract.source(id).unwrap()).unwrap()
+            "- <doc:{stem}> — {} declaration{}",
+            ids.len(),
+            if ids.len() == 1 { "" } else { "s" }
         );
+        let mut page = format!(
+            "# Model declarations `{}`…\n\nSource-declared schemas. <doc:ModelsAndCodecs> describes the model and codec policy.\n\n",
+            escaped(group_label)
+        );
+        for id in ids {
+            let _ = writeln!(
+                page,
+                "### ``{}``\n\nSource: <code>{}</code>.\n\n```json\n{}\n```\n",
+                plan.models.names[id],
+                escaped(&loc(id)),
+                serde_json::to_string_pretty(plan.contract.source(id).unwrap()).unwrap()
+            );
+        }
+        model_articles.push((stem, page));
     }
+    model_doc.push('\n');
     if plan.program.version == suspect_schema::OwnedProgram::V3_VERSION {
         model_doc.push_str("## Resource-bound validation\n\nThis package executes the checked `suspect.validation.experimental.v3` /\n`oas31-jsonschema202012-resources-dynamic` program. Node scopes and dynamic\nanchor bindings are immutable indexed metadata. Validation enters the node's\nresource, selects the outermost actually entered matching binding, and restores\nscope on every return. It resolves no URI and loads no document at runtime.\n\nDynamic-dependent shapes use named checked carriers with a mutable `JsonValue`\n`value`. That value is the complete JSON instance, including null when accepted;\nthere is no synthetic wrapper key on the wire. Missing members, explicit nulls,\nnumeric tokens and exact property names remain distinct. Conversion does not\nnarrow an initial fallback's type or re-trial union branches without their\nparent context. Source-bound codecs validate decoding and current mutable\nencoding, and operations always use their actual codec roots.\n\nA native layout can be reused by more than one source codec. Starting directly\nat a nested declaration can legitimately produce a different dynamic binding\nfrom starting at an owning reference in another resource. The named model's\n`codec.source` and the operation's `Codecs` entry identify those distinct entry\npoints; do not substitute a terminal-only codec for an operation codec.\n\nResource entries and binding scans share the finite evaluation budget. Context\nidentity is exact and ordered; cycles or exhausted limits remain noninvertible\n`ValidationError.evaluationFailure` outcomes. Examples come from the bounded\nshared v3 planner, without guessing dynamic fallback annotations.\n");
     }
@@ -821,10 +873,21 @@ fn docs(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
         OutFile {
             path: "README.md".into(),
             content: format!(
-                "# {}\n\nGenerated Swift 6 package, version {}.\n\n```sh\nswift build\nswift test\nswift package dump-symbol-graph\n```\n\nNative documentation is in `Sources/{module}/{module}.docc`. Build it with\n`docc convert` using the symbol graphs produced by SwiftPM.\nSee GettingStarted for the compiled source-backed call sites.\n`validation-program.json`, `sdk-manifest.json` and `example-coverage.json`\nrecord source identities, runtime policy, symbols and example origins.\n",
+                "# {}\n\nGenerated Swift 6 package, version {}.\n\n```sh\nswift build\nswift test\nswift package dump-symbol-graph\n```\n\nNative documentation is in `Sources/{module}/{module}.docc`. Build it with\n`docc convert` using the symbol graphs produced by SwiftPM.\nSee GettingStarted for the compiled source-backed call sites; OperationReference\nlists every operation one article per API tag, and ModelsAndCodecs links bounded\nalphabetical model-declaration articles.\n`validation-program.json`, `sdk-manifest.json` and `example-coverage.json`\nrecord source identities, runtime policy, symbols and example origins.\n",
                 escaped(&package.name),
                 escaped(&package.version)
             ),
         },
     ]
+    .into_iter()
+    .chain(
+        operation_articles
+            .into_iter()
+            .chain(model_articles)
+            .map(|(stem, content)| OutFile {
+                path: format!("Sources/{module}/{module}.docc/{stem}.md"),
+                content,
+            }),
+    )
+    .collect()
 }
