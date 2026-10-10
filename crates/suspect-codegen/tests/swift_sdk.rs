@@ -370,7 +370,9 @@ fn docs_only_updates_leave_executable_and_package_artifacts_identical() {
     assert_eq!(
         changed,
         [
-            "Sources/GeneratedSDK/GeneratedSDK.docc/OperationReference.md",
+            // The operation description lives in its per-tag reference article;
+            // the index article and every executable artifact stay identical.
+            "Sources/GeneratedSDK/GeneratedSDK.docc/Operations-other.md",
             "Sources/GeneratedSDK/Operations.swift"
         ]
     );

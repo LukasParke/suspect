@@ -179,7 +179,8 @@ dart compile exe example/quickstart.dart -o quickstart
 dart doc --validate-links
 ```
 
-`doc/API.md`, native dartdoc and `sdk-manifest.json` retain actual allocated
+`doc/API.md` indexes every operation one page per API tag under
+`doc/operations/`. Native dartdoc and `sdk-manifest.json` retain actual allocated
 symbols. The manifest contains the typed protocol plan and version-2 example
 roles/origins/findings. `doc/validation-program.json` is the checked instruction
 program used by the codecs. Examples requiring opaque bytes or external

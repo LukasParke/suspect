@@ -114,8 +114,9 @@ pub(super) fn package(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic
         expand(plan, include_str!("config.cmake.in")),
     );
     add("Doxyfile".into(), expand(plan, include_str!("Doxyfile")));
-    add("README.md".into(), readme(plan, native_example.as_ref()));
-    add("docs/reference.md".into(), reference(plan));
+    for doc in documentation(plan, native_example.as_ref()) {
+        add(doc.path, doc.content);
+    }
     add("docs/coverage.json".into(), coverage(plan));
     if let Some(policy) = plan.credential_env() {
         add(
@@ -866,142 +867,309 @@ fn coverage(plan: &SdkPlan) -> String {
     });
     serde_json::to_string_pretty(&value).unwrap() + "\n"
 }
-fn reference(plan: &SdkPlan) -> String {
-    let mut out = format!(
-        "# {} C++20 API reference\n\nNamespace `{}`. [Installation and policy](../README.md).\n\n",
-        plan.config.name, plan.config.namespace
-    );
-    for op in &plan.operations {
-        writeln!(out, "## {}\n\n`Result<{}, {}> Client::{}(const {}&, CallOptions) const`\n\n{}\n\nWire: `{}` `{}`. Source: {}#{}\n", op.method_name, op.success_type, op.error_type, op.method_name, op.input_type, prose(op.wire.description().map(|d|d.value().as_str()).unwrap_or("")), op.wire.method().as_str(), prose(op.wire.path()), op.source.document(), prose(op.source.pointer())).unwrap();
-        for p in &op.parameters {
-            writeln!(
-                out,
-                "- `{}`: `{}`; wire `{}`, {:?}, {}.",
-                p.field_name,
-                p.cpp_type,
-                prose(&p.wire_name),
-                p.wire.location(),
-                if p.required { "required" } else { "optional" }
-            )
-            .unwrap();
+/// A generated documentation file: path relative to the package root and content.
+struct DocFile {
+    path: String,
+    content: String,
+}
+
+/// The split documentation tree: a lean README, one operations page per spec
+/// tag, bounded alphabetical model pages, and a compact reference index, so
+/// no single page carries the whole API surface.
+fn documentation(
+    plan: &SdkPlan,
+    example: Option<&native_example::NativeExample>,
+) -> Vec<DocFile> {
+    let mut files = vec![DocFile {
+        path: "README.md".into(),
+        content: readme(plan, example),
+    }];
+    files.extend(operation_pages(plan));
+    files.extend(model_pages(plan));
+    files.push(DocFile {
+        path: "docs/reference.md".into(),
+        content: reference_index(plan),
+    });
+    files.push(DocFile {
+        path: "docs/guide.md".into(),
+        content: format!(
+            "# {} C++20 SDK guide\n{}",
+            plan.config.name,
+            include_str!("guide.md")
+        ),
+    });
+    if plan.credential_env().is_some() {
+        files.push(DocFile {
+            path: "docs/credentials.md".into(),
+            content: format!(
+                "# Runtime environment credentials\n{}",
+                credential_env::documentation(plan)
+            ),
+        });
+    }
+    files
+}
+
+/// One operations index page plus one page per spec tag.
+fn operation_pages(plan: &SdkPlan) -> Vec<DocFile> {
+    let by_tag = crate::doc_split::by_tag(&plan.operations, |op: &super::protocol::PlannedOperation| {
+        op.wire
+            .tags()
+            .iter()
+            .map(|t| t.value().as_str().to_owned())
+            .collect()
+    });
+    let mut used = std::collections::BTreeSet::new();
+    let mut files = Vec::new();
+    let mut index = String::from("# Operations\n\nEvery operation in this package, grouped by API tag.\n\n");
+    for (tag, ops) in &by_tag {
+        let stem = crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(tag));
+        writeln!(
+            index,
+            "- [{tag}](operations/{stem}.md) — {} operation{}",
+            ops.len(),
+            if ops.len() == 1 { "" } else { "s" }
+        )
+        .unwrap();
+        let mut page = format!(
+            "# {tag} operations\n\n[All operations](../operations.md) · [API reference](../reference.md)\n\n"
+        );
+        for op in ops {
+            page.push_str(&operation_section(op));
         }
-        if let Some(body) = &op.body {
+        files.push(DocFile {
+            path: format!("docs/operations/{stem}.md"),
+            content: page,
+        });
+    }
+    files.push(DocFile {
+        path: "docs/operations.md".into(),
+        content: index,
+    });
+    files
+}
+
+/// One operation's reference section.
+fn operation_section(op: &super::protocol::PlannedOperation) -> String {
+    let mut out = String::new();
+    writeln!(out, "## {}\n\n`Result<{}, {}> Client::{}(const {}&, CallOptions) const`\n\n{}\n\nWire: `{}` `{}`. Source: {}#{}\n", op.method_name, op.success_type, op.error_type, op.method_name, op.input_type, prose(op.wire.description().map(|d|d.value().as_str()).unwrap_or("")), op.wire.method().as_str(), prose(op.wire.path()), op.source.document(), prose(op.source.pointer())).unwrap();
+    for p in &op.parameters {
+        writeln!(
+            out,
+            "- `{}`: `{}`; wire `{}`, {:?}, {}.",
+            p.field_name,
+            p.cpp_type,
+            prose(&p.wire_name),
+            p.wire.location(),
+            if p.required { "required" } else { "optional" }
+        )
+        .unwrap();
+    }
+    if let Some(body) = &op.body {
+        writeln!(
+            out,
+            "- `body`: `{}`; {}. Representations: {}.",
+            body.cpp_type,
+            if body.required {
+                "required"
+            } else {
+                "optional"
+            },
+            body.media
+                .iter()
+                .map(|m| format!("`{}`", prose(m.wire.media_type().declared())))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .unwrap();
+    }
+    for response in &op.responses {
+        for case in &response.cases {
+            writeln!(out,"- `{}`: status rule `{}`, body `{}`; {}. Actual status determines success/error membership.",case.variant_type,response.status_key,case.value.cpp_type,case.media.as_ref().map(|m|prose(m.media_type().declared())).unwrap_or_else(||if case.forbidden{"HTTP-forbidden body"}else{"undeclared bounded bytes"}.into())).unwrap();
+        }
+        for header in &response.headers {
             writeln!(
                 out,
-                "- `body`: `{}`; {}. Representations: {}.",
-                body.cpp_type,
-                if body.required {
+                "  - Header `{}` → `{}`: `{}`, {}.",
+                prose(header.wire.name()),
+                header.field_name,
+                header.value.cpp_type,
+                if header.wire.required() {
                     "required"
                 } else {
                     "optional"
-                },
-                body.media
-                    .iter()
-                    .map(|m| format!("`{}`", prose(m.wire.media_type().declared())))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-            .unwrap();
-        }
-        for response in &op.responses {
-            for case in &response.cases {
-                writeln!(out,"- `{}`: status rule `{}`, body `{}`; {}. Actual status determines success/error membership.",case.variant_type,response.status_key,case.value.cpp_type,case.media.as_ref().map(|m|prose(m.media_type().declared())).unwrap_or_else(||if case.forbidden{"HTTP-forbidden body"}else{"undeclared bounded bytes"}.into())).unwrap();
-            }
-            for header in &response.headers {
-                writeln!(
-                    out,
-                    "  - Header `{}` → `{}`: `{}`, {}.",
-                    prose(header.wire.name()),
-                    header.field_name,
-                    header.value.cpp_type,
-                    if header.wire.required() {
-                        "required"
-                    } else {
-                        "optional"
-                    }
-                )
-                .unwrap();
-            }
-            for link in response.wire.links() {
-                writeln!(
-                    out,
-                    "  - Link metadata `{}` (no automatic navigation).",
-                    prose(link.name())
-                )
-                .unwrap();
-            }
-        }
-        out.push('\n');
-    }
-    for s in plan.models.symbols() {
-        writeln!(out, "<a id=\"schema-{}\"></a>\n\n## {}\n\nNative type: `{}`. Codec: `{}` (`decode`, `encode`, `to_json`).\n\nSource: {}#{}\n", s.index, s.name, s.cpp_type, s.codec_name, prose(&s.source.document().to_string()), prose(s.source.pointer())).unwrap();
-        if let Some(raw) = plan.contract.source(&s.source) {
-            if let Some(description) = raw.get("description").and_then(|v| v.as_str()) {
-                writeln!(out, "{}\n", prose(description)).unwrap();
-            }
-            let constraints = raw
-                .as_object()
-                .map(|o| {
-                    o.iter()
-                        .filter(|(k, _)| {
-                            [
-                                "minimum",
-                                "maximum",
-                                "exclusiveMinimum",
-                                "exclusiveMaximum",
-                                "multipleOf",
-                                "minLength",
-                                "maxLength",
-                                "minItems",
-                                "maxItems",
-                                "uniqueItems",
-                                "minProperties",
-                                "maxProperties",
-                                "const",
-                                "enum",
-                                "format",
-                                "deprecated",
-                                "readOnly",
-                                "writeOnly",
-                                "discriminator",
-                            ]
-                            .contains(&k.as_str())
-                        })
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect::<serde_json::Map<_, _>>()
-                })
-                .unwrap_or_default();
-            if !constraints.is_empty() {
-                writeln!(out, "Source constraints/annotations (enforced according to the declared validation profile):\n\n```json\n{}\n```\n", serde_json::to_string_pretty(&constraints).unwrap()).unwrap();
-            }
-        }
-        if let Shape::Object { fields, extras } = &s.shape {
-            for f in fields {
-                let ty = plan.models.get(&f.schema);
-                writeln!(
-                    out,
-                    "- `{}` → wire `{}`: {} `{}`; [schema](#schema-{}).",
-                    f.name,
-                    prose(&f.wire),
-                    if f.required { "required" } else { "optional" },
-                    ty.cpp_type,
-                    ty.index
-                )
-                .unwrap();
-            }
-            writeln!(
-                out,
-                "\nExtras: {}.\n",
-                match extras {
-                    Extras::Any => "exact JsonValue map",
-                    Extras::Patterned => "exact JsonValue map checked by whole-object pattern/additional/unevaluated rules",
-                    Extras::Closed => "closed object, no extra member",
-                    Extras::Typed(_) => "schema-typed map",
                 }
             )
             .unwrap();
         }
+        for link in response.wire.links() {
+            writeln!(
+                out,
+                "  - Link metadata `{}` (no automatic navigation).",
+                prose(link.name())
+            )
+            .unwrap();
+        }
     }
+    out.push('\n');
+    out
+}
+
+/// Upper bound on model types per generated models file.
+const MODEL_GROUP_LIMIT: usize = 200;
+
+/// Alphabetical model groups bounded by [`MODEL_GROUP_LIMIT`]. Large initial
+/// groups subdivide by longer common prefixes, so every file stays readable
+/// whatever the schema count.
+fn model_groups(plan: &SdkPlan) -> Vec<(String, Vec<&ModelSymbol>)> {
+    let symbols: Vec<&ModelSymbol> = plan.models.symbols().collect();
+    crate::doc_split::bounded_groups(symbols, |s| s.name.clone(), MODEL_GROUP_LIMIT)
+}
+
+/// One models index page plus bounded alphabetical model pages, each opening
+/// with its own table of contents.
+fn model_pages(plan: &SdkPlan) -> Vec<DocFile> {
+    let groups = model_groups(plan);
+    let mut used = std::collections::BTreeSet::new();
+    let mut file_of = std::collections::BTreeMap::new();
+    let mut stems = Vec::new();
+    for (label, symbols) in &groups {
+        let stem =
+            crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(label));
+        for s in symbols {
+            file_of.insert(s.index, stem.clone());
+        }
+        stems.push(stem);
+    }
+    let mut files = Vec::new();
+    let mut index = String::from(
+        "# Models\n\nEvery native type and codec, split into bounded alphabetical files.\n\n",
+    );
+    for ((label, symbols), stem) in groups.iter().zip(&stems) {
+        writeln!(
+            index,
+            "- [`{}`…](models/{stem}.md) — {} type{}",
+            label,
+            symbols.len(),
+            if symbols.len() == 1 { "" } else { "s" }
+        )
+        .unwrap();
+        let mut page = format!(
+            "# Model types `{label}…`\n\n[All models](../models.md) · [API reference](../reference.md)\n\n## Types\n\n"
+        );
+        for s in symbols {
+            writeln!(page, "- [`{}`](#schema-{})", s.name, s.index).unwrap();
+        }
+        page.push_str("\n---\n\n");
+        for s in symbols {
+            page.push_str(&model_section(plan, s, &file_of));
+        }
+        files.push(DocFile {
+            path: format!("docs/models/{stem}.md"),
+            content: page,
+        });
+    }
+    files.push(DocFile {
+        path: "docs/models.md".into(),
+        content: index,
+    });
+    files
+}
+
+/// One model type's reference section. Cross-references link into the
+/// referenced type's own models file.
+fn model_section(
+    plan: &SdkPlan,
+    s: &ModelSymbol,
+    file_of: &std::collections::BTreeMap<usize, String>,
+) -> String {
+    let mut out = String::new();
+    writeln!(out, "<a id=\"schema-{}\"></a>\n\n## {}\n\nNative type: `{}`. Codec: `{}` (`decode`, `encode`, `to_json`).\n\nSource: {}#{}\n", s.index, s.name, s.cpp_type, s.codec_name, prose(&s.source.document().to_string()), prose(s.source.pointer())).unwrap();
+    if let Some(raw) = plan.contract.source(&s.source) {
+        if let Some(description) = raw.get("description").and_then(|v| v.as_str()) {
+            writeln!(out, "{}\n", prose(description)).unwrap();
+        }
+        let constraints = raw
+            .as_object()
+            .map(|o| {
+                o.iter()
+                    .filter(|(k, _)| {
+                        [
+                            "minimum",
+                            "maximum",
+                            "exclusiveMinimum",
+                            "exclusiveMaximum",
+                            "multipleOf",
+                            "minLength",
+                            "maxLength",
+                            "minItems",
+                            "maxItems",
+                            "uniqueItems",
+                            "minProperties",
+                            "maxProperties",
+                            "const",
+                            "enum",
+                            "format",
+                            "deprecated",
+                            "readOnly",
+                            "writeOnly",
+                            "discriminator",
+                        ]
+                        .contains(&k.as_str())
+                    })
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect::<serde_json::Map<_, _>>()
+            })
+            .unwrap_or_default();
+        if !constraints.is_empty() {
+            writeln!(out, "Source constraints/annotations (enforced according to the declared validation profile):\n\n```json\n{}\n```\n", serde_json::to_string_pretty(&constraints).unwrap()).unwrap();
+        }
+    }
+    if let Shape::Object { fields, extras } = &s.shape {
+        for f in fields {
+            let ty = plan.models.get(&f.schema);
+            let target = file_of
+                .get(&ty.index)
+                .map(|stem| format!("{stem}.md#schema-{}", ty.index))
+                .unwrap_or_else(|| format!("#schema-{}", ty.index));
+            writeln!(
+                out,
+                "- `{}` → wire `{}`: {} `{}`; [schema]({target}).",
+                f.name,
+                prose(&f.wire),
+                if f.required { "required" } else { "optional" },
+                ty.cpp_type,
+            )
+            .unwrap();
+        }
+        writeln!(
+            out,
+            "\nExtras: {}.\n",
+            match extras {
+                Extras::Any => "exact JsonValue map",
+                Extras::Patterned => "exact JsonValue map checked by whole-object pattern/additional/unevaluated rules",
+                Extras::Closed => "closed object, no extra member",
+                Extras::Typed(_) => "schema-typed map",
+            }
+        )
+        .unwrap();
+    }
+    out
+}
+
+/// Compact reference index over the operations and models trees.
+fn reference_index(plan: &SdkPlan) -> String {
+    let mut out = format!(
+        "# {} C++20 API reference\n\nNamespace `{}`. [Installation and policy](../README.md).\n\n",
+        plan.config.name, plan.config.namespace
+    );
+    out.push_str(
+        "The reference is split into readable pages: operations grouped by API tag, and model types grouped into bounded alphabetical files.\n\n## Contents\n\n- [Operations](operations.md)\n- [Models](models.md)\n",
+    );
+    if plan.credential_env().is_some() {
+        out.push_str("- [Environment credentials](credentials.md)\n");
+    }
+    out.push_str("- [SDK guide](guide.md)\n");
     out
 }
 fn readme(plan: &SdkPlan, example: Option<&native_example::NativeExample>) -> String {
@@ -1012,7 +1180,7 @@ fn readme(plan: &SdkPlan, example: Option<&native_example::NativeExample>) -> St
         "[example findings](docs/coverage.json)"
     };
     let mut out = format!(
-        "# {name} — C++20 SDK\n\n```sh\ncmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"$PWD/install\" -DSUSPECT_SDK_BUILD_DOCS=ON\ncmake --build build\nctest --test-dir build --output-on-failure\ncmake --build build --target sdk_docs\ncmake --install build\n```\n\nConsumer CMake:\n\n```cmake\nfind_package({name} {} CONFIG REQUIRED)\ntarget_link_libraries(app PRIVATE {name}::{name})\n```\n\nInclude `<{name}/sdk.hpp>`. The installed target exports its C++20 and libcurl\nrequirements. Use `SUSPECT_SDK_WITH_CURL=OFF` for a core-only package with an\ninjected transport. Native documentation requires Doxygen 1.9.8 or newer; use\n`SUSPECT_SDK_BUILD_DOCS=OFF` when only building the library.\n\n[API reference](docs/reference.md), [symbol/example coverage](docs/coverage.json),\n{examples_link}. Native HTML is in `build/docs/html`.\n",
+        "# {name} — C++20 SDK\n\n```sh\ncmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"$PWD/install\" -DSUSPECT_SDK_BUILD_DOCS=ON\ncmake --build build\nctest --test-dir build --output-on-failure\ncmake --build build --target sdk_docs\ncmake --install build\n```\n\nConsumer CMake:\n\n```cmake\nfind_package({name} {} CONFIG REQUIRED)\ntarget_link_libraries(app PRIVATE {name}::{name})\n```\n\nInclude `<{name}/sdk.hpp>`. The installed target exports its C++20 and libcurl\nrequirements. Use `SUSPECT_SDK_WITH_CURL=OFF` for a core-only package with an\ninjected transport. Native documentation requires Doxygen 1.9.8 or newer; use\n`SUSPECT_SDK_BUILD_DOCS=OFF` when only building the library.\n",
         plan.config.version
     );
     if let Some(example) = example {
@@ -1022,8 +1190,10 @@ fn readme(plan: &SdkPlan, example: Option<&native_example::NativeExample>) -> St
             write!(out,"\nSupply the bearer credential for source scheme `{}` explicitly:\n\n```cpp\nCredentials credentials;\ncredentials.{field} = token; // application-supplied string\nauto connected = Client::with_curl(std::move(credentials));\nif (!connected) return 2;\nreturn first_request(connected.value());\n```\n\nThe executable uses a fixture when run without arguments. Passing a bearer token\nexplicitly executes one request against the source-declared server. Credential\nacquisition belongs to the application.\n",single_line(scheme)).unwrap();
         }
     }
-    out.push_str(&credential_env::documentation(plan));
-    out.push_str(include_str!("guide.md"));
-    write!(out,"\nGenerated ceilings: URL/body {} bytes each, response {} bytes, raw capture {}\nbytes, and cumulative response headers {} bytes. This package selects {}\noperations; the reference lists every operation and reachable schema.\n",plan.config.max_request_bytes,plan.config.max_response_bytes,plan.config.max_capture_bytes,plan.config.max_header_bytes,plan.operations.len()).unwrap();
+    out.push_str("\n## Documentation\n\n- [API reference](docs/reference.md) — index over every operation and model type\n- [Operations](docs/operations.md) — grouped into one page per API tag\n- [Models](docs/models.md) — every native type and its codec\n- [SDK guide](docs/guide.md) — building against and consuming the package\n");
+    if plan.credential_env().is_some() {
+        out.push_str("- [Environment credentials](docs/credentials.md) — optional v1 policy\n");
+    }
+    write!(out,"- [Symbol/example coverage](docs/coverage.json)\n- {examples_link}\n\nNative HTML documentation is in `build/docs/html` after building `sdk_docs`.\n\nGenerated ceilings: URL/body {} bytes each, response {} bytes, raw capture {}\nbytes, and cumulative response headers {} bytes. This package selects {}\noperations; the reference lists every operation and reachable schema.\n",plan.config.max_request_bytes,plan.config.max_response_bytes,plan.config.max_capture_bytes,plan.config.max_header_bytes,plan.operations.len()).unwrap();
     out
 }

@@ -275,7 +275,9 @@ pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
         format!("# {version}\n\nGenerated source-selected native SDK; see sdk-manifest.json.\n"),
     );
     push("dartdoc_options.yaml","dartdoc:\n  showUndocumentedCategories: true\n  linkToSource:\n    excludes: ['**/*.dart']\n".into());
-    push("doc/API.md", http_emit::reference(plan));
+    for doc in http_emit::reference(plan) {
+        push(&doc.path, doc.content);
+    }
     if plan.credential_env().is_some() {
         push("doc/CREDENTIAL-ENV.md", super::environment::guide(plan));
     }

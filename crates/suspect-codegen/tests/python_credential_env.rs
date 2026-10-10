@@ -18,8 +18,9 @@ use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
 
 const IMPORT: &str = "credential_python_sdk";
-// Captured after the ua/v1 attribution runtime changes to _runtime.py.
-const NO_POLICY_SHA256: &str = "bb1d607cd0e12e994dad89377f04981d59c2443cb4df6a48e7cf26209e19d72c";
+// Captured after the split documentation emission (docs/api/*.rst and
+// docs/operations/*.rst pages replace the single-page api/operations bodies).
+const NO_POLICY_SHA256: &str = "ce899150ba3083146f3662848e40eeec3979e7b68201c21c63dae70d1a7f7dc0";
 
 fn root(label: &str) -> PathBuf {
     tempfile::Builder::new()

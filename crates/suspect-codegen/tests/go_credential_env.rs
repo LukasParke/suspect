@@ -109,20 +109,21 @@ fn inventory_hash(value: &Value) -> String {
 }
 #[test]
 fn no_policy_retains_pre_change_sdk_and_terraform_bytes() {
-    // Captured after the ua/v1 attribution emission (one added go/attribution.go
-    // file). This binds every path, length and SHA-256, without depending on a
-    // target/ witness at runtime.
+    // Captured after the split documentation emission (go/docs/api/*.rst and
+    // go/docs/operations/*.rst pages replace the single-page api/operations
+    // bodies). This binds every path, length and SHA-256, without depending
+    // on a target/ witness at runtime.
     let synthetic = inventory(&synthetic_files());
-    assert_eq!(synthetic.as_object().unwrap().len(), 35);
+    assert_eq!(synthetic.as_object().unwrap().len(), 51);
     assert_eq!(
         inventory_hash(&synthetic),
-        "74ffce12340c324c4d451738c30dde409e289ef04427a599b7f7eb8833e3c8ca"
+        "7d6f3d0ac78a6f1599aff04c7530ef2312f24ea451012b721a12f190d373ab0f"
     );
     let terraform = inventory(&terraform_files());
-    assert_eq!(terraform.as_object().unwrap().len(), 49);
+    assert_eq!(terraform.as_object().unwrap().len(), 65);
     assert_eq!(
         inventory_hash(&terraform),
-        "3ede744f1d03a93d27c04b230c69c291a70889dec4206a79be4ddfc9b7a7e81f"
+        "1680e4d1b66ebd1f970bb93296f2f6e2be29dc06a7d8fe2364f937a1b0a0dfbf"
     );
     let sdk = json!(
         terraform
@@ -133,10 +134,10 @@ fn no_policy_retains_pre_change_sdk_and_terraform_bytes() {
             .map(|(path, value)| (path.clone(), value.clone()))
             .collect::<BTreeMap<_, _>>()
     );
-    assert_eq!(sdk.as_object().unwrap().len(), 35);
+    assert_eq!(sdk.as_object().unwrap().len(), 51);
     assert_eq!(
         inventory_hash(&sdk),
-        "3de9a714710ac82e7a08cb8d29f9b4a47ec7d818af266e720842afb816e6e282"
+        "f2e35f322cdbbfb86b2cc73e35e6eb8aed5e3fb5ad7b458100e1f7b29c0b724b"
     );
 }
 
@@ -537,7 +538,7 @@ fn generator_environment_values_do_not_enter_configured_or_unconfigured_artifact
     );
     assert_eq!(
         inventory_hash(&inventory(&synthetic_files())),
-        "74ffce12340c324c4d451738c30dde409e289ef04427a599b7f7eb8833e3c8ca"
+        "7d6f3d0ac78a6f1599aff04c7530ef2312f24ea451012b721a12f190d373ab0f"
     );
 }
 
