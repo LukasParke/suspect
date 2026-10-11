@@ -305,6 +305,9 @@ pub enum Command {
         #[arg(long = "inputs", value_name = "FILE")]
         inputs_file: Option<PathBuf>,
     },
+    /// Run Arazzo workflows as weighted virtual-user scenarios under a phased
+    /// load profile, with latency/throughput metrics and SLO gates.
+    Load(Box<commands::load::LoadArgs>),
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
         /// Entry OpenAPI document.
@@ -686,6 +689,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             iters,
             text,
         } => commands::bench::bench(&fixture, iters, text.format),
+        Command::Load(args) => commands::load::load(*args),
         Command::Fuzz {
             spec,
             base_url,

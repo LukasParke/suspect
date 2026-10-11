@@ -407,10 +407,15 @@ pub async fn run_load(
                 let (stop_tx, stop_rx) = watch::channel(false);
                 let budget = iterations.map(|n| Arc::new(AtomicU64::new(n)));
                 let count = (*vus).min(phase.max_vusers.unwrap_or(usize::MAX)).max(1);
+                // Loopers report when they exit so an iteration-bounded
+                // phase can end before its clock does.
+                let (alive_tx, mut alive_rx) = watch::channel(count);
+                let alive_tx = Arc::new(alive_tx);
                 for _ in 0..count {
                     let shared = Arc::clone(&shared);
                     let mut stop = stop_rx.clone();
                     let budget = budget.clone();
+                    let alive = Arc::clone(&alive_tx);
                     let mut vu_rng = rand::rngs::StdRng::seed_from_u64(rng.r#gen());
                     let first_vu = next_vu;
                     next_vu += 1;
@@ -438,10 +443,25 @@ pub async fn run_load(
                                 break;
                             }
                         }
+                        alive.send_modify(|n| *n = n.saturating_sub(1));
                         Ok(true)
                     });
                 }
-                let completed = sleep_or_cancel(phase_start + phase.duration, &mut cancel).await;
+                let deadline = phase_start + phase.duration;
+                let completed = loop {
+                    if *alive_rx.borrow_and_update() == 0 {
+                        break true;
+                    }
+                    let mut cancel_rx = cancel.clone();
+                    tokio::select! {
+                        done = sleep_or_cancel(deadline, &mut cancel_rx) => break done,
+                        changed = alive_rx.changed() => {
+                            if changed.is_err() {
+                                break true;
+                            }
+                        }
+                    }
+                };
                 let _ = stop_tx.send(true);
                 if !completed {
                     interrupted = true;

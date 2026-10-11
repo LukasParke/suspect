@@ -213,9 +213,15 @@ async fn closed_loop_vus_loop_until_the_phase_ends() {
         )],
         vec![scenario("create-and-fetch", 1.0)],
     );
-    let http: Arc<dyn HttpClient> = Arc::new(canned_fixture_http());
+    let http: Arc<dyn HttpClient> = Arc::new(DelayTransport::new(
+        canned_fixture_http(),
+        Duration::from_millis(100),
+    ));
     let (summary, _) = run(fixture(), &p, config(http)).await;
     assert_eq!(summary.aggregate.vusers.created, 6);
+    // The phase ends when the budget is spent, not after its 60s clock.
+    assert!(summary.duration_s < 5.0, "{}", summary.duration_s);
+    assert_eq!(summary.phases[0].kind, "vus 4 × 6 iterations");
 }
 
 #[tokio::test(start_paused = true)]

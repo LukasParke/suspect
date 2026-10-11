@@ -1,0 +1,63 @@
+# Load profile for the Petstore journeys in flows.arazzo.yaml.
+#
+#   suspect gateway examples/load/petstore.openapi.yaml -p 8080 --mode mock
+#   suspect load examples/load/petstore.load.yaml
+#
+# `suspect load examples/load/petstore.load.yaml --dry-run` prints the
+# resolved schedule without sending anything.
+suspectLoad: "1.0"
+arazzo: ./flows.arazzo.yaml
+target: http://127.0.0.1:8080
+
+environments:
+  smoke:
+    phases:
+      - { name: smoke, duration: 5s, arrivalRate: 20 }
+
+phases:
+  - { name: warmup,  duration: 10s, arrivalRate: 5 }
+  - { name: ramp,    duration: 20s, arrivalRate: 5, rampTo: 60 }
+  - { name: sustain, duration: 30s, arrivalRate: 60, maxVusers: 400 }
+  - { pause: 5s }
+  - { name: spike,   duration: 5s,  arrivalCount: 500 }
+  - { name: soak,    duration: 15s, vus: 25 }
+
+# `create-and-cleanup` declares `dependsOn: [sign-in]`, so sign-in runs
+# once before arrivals and its token reaches users as
+# $workflows.sign-in.outputs.token. Listing it here as well is optional.
+before: sign-in
+
+scenarios:
+  - name: browse
+    workflow: browse
+    weight: 7
+    inputs:
+      pageSize: [10, 20, 50]
+    think: { between_steps: 100ms..400ms }
+  - name: writer
+    workflow: create-and-cleanup
+    weight: 3
+    data:
+      path: ./pets.csv
+      fields: [petName]
+      order: sequence
+      skipHeader: true
+
+http:
+  timeout: 5s
+  http2: true
+  cookies: false
+
+ensure:
+  maxErrorRate: 1
+  thresholds:
+    - http.response_time.p95: 200
+    - http.response_time.p99: 500
+    - scenario.writer.step.create.response_time.p99: 500
+  conditions:
+    - expression: http.request_rate > 10 and vusers.failed == 0
+    - expression: http.codes.5xx == 0
+      strict: false
+
+report:
+  interval: 5s
