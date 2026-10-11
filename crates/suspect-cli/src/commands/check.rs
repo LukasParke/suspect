@@ -45,6 +45,7 @@ pub fn family_label(family: SpecFamily) -> &'static str {
         SpecFamily::Oas32 => "Oas32",
         SpecFamily::Arazzo10 => "Arazzo10",
         SpecFamily::Overlay10 => "Overlay10",
+        SpecFamily::Load10 => "Load10",
         SpecFamily::Unknown => "Unknown",
     }
 }

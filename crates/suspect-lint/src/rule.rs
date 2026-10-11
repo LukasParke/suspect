@@ -128,7 +128,8 @@ impl FamilySet {
             SpecFamily::Oas32 => Self::OAS32.0,
             SpecFamily::Overlay10 => Self::OVERLAY.0,
             SpecFamily::Arazzo10 => Self::ARAZZO.0,
-            SpecFamily::Unknown => Self::UNKNOWN.0,
+            // Load profiles are not lint targets; treat like unknown.
+            SpecFamily::Load10 | SpecFamily::Unknown => Self::UNKNOWN.0,
         };
         self.0 & bit != 0
     }

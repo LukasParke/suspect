@@ -153,6 +153,16 @@ fn family_sniffing_all_kinds() {
         parse("overlay: '1.0.0'\n").sniff_family(),
         SpecFamily::Overlay10
     );
+    // A load profile names its workflow document under `arazzo:`; the
+    // `suspectLoad` discriminator must win over that key.
+    assert_eq!(
+        parse("suspectLoad: '1.0'\narazzo: ./flows.arazzo.yaml\n").sniff_family(),
+        SpecFamily::Load10
+    );
+    assert_eq!(
+        parse("suspectLoad: '2.0'\n").sniff_family(),
+        SpecFamily::Unknown
+    );
     assert_eq!(parse("random: doc\n").sniff_family(), SpecFamily::Unknown);
 }
 

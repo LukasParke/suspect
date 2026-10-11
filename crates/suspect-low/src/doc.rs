@@ -19,6 +19,8 @@ pub enum SpecFamily {
     Arazzo10,
     /// `overlay: "1.0.x"`
     Overlay10,
+    /// `suspectLoad: "1.x"` — a `suspect load` profile.
+    Load10,
     /// Anything else (including unparseable roots).
     Unknown,
 }
@@ -103,6 +105,16 @@ impl LowDoc {
         if root.kind() != ValueKind::Object {
             return SpecFamily::Unknown;
         }
+        // Checked first: a load profile also carries an `arazzo:` key (the
+        // path of the workflow document), which must not be mistaken for
+        // the Arazzo version discriminator.
+        if let Some(v) = root.get("suspectLoad") {
+            return if v.as_str().is_some_and(|s| s.starts_with("1.") || s == "1") {
+                SpecFamily::Load10
+            } else {
+                SpecFamily::Unknown
+            };
+        }
         if let Some(v) = root.get("openapi") {
             return match v.as_str().unwrap_or("") {
                 s if s.starts_with("3.0") => SpecFamily::Oas30,
@@ -132,6 +144,7 @@ impl LowDoc {
                 SpecFamily::Unknown
             };
         }
+
         SpecFamily::Unknown
     }
 }

@@ -315,8 +315,46 @@ pub fn swagger_diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
         .collect()
 }
 
+/// Load profile (`suspectLoad: "1.0"`) structural checks: phases,
+/// scenarios, durations, ensure expressions, data files. Workflow ids are
+/// checked against the Arazzo document when it is loaded in the workspace.
+#[must_use]
+pub fn load_profile_diagnostics(ws: Option<&Arc<Workspace>>, low: &LowDoc) -> Vec<Diagnostic> {
+    if low.sniff_family() != SpecFamily::Load10 {
+        return Vec::new();
+    }
+    let path = tower_lsp::lsp_types::Url::parse(low.uri().as_str())
+        .ok()
+        .and_then(|u| u.to_file_path().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("profile.load.yaml"));
+    let (profile, mut diags) = suspect_test::load::read_profile_lenient(low, &path);
+    if let (Some(ws), Some(arazzo)) = (ws, &profile.arazzo)
+        && let Ok(uri) = suspect_source::Uri::from_path(arazzo)
+        && let Some(handle) = ws.get(&uri)
+        && let Ok(plan) = suspect_test::compile_plan(handle.doc(), ws)
+    {
+        diags.extend(suspect_test::load::profile::check_against_plan(
+            &profile, &plan,
+        ));
+    }
+    let bytes = low.inner().bytes();
+    let li = low.inner().line_index();
+    diags
+        .into_iter()
+        .map(|d| {
+            let severity = if d.error {
+                DiagnosticSeverity::ERROR
+            } else {
+                DiagnosticSeverity::WARNING
+            };
+            make(bytes, li, d.range, severity, d.code, d.message)
+        })
+        .collect()
+}
+
 /// Full battery for one document: syntax, semantic validation (OAS 3.x
-/// only), lint (all families), Swagger checks (2.0), and Arazzo checks.
+/// only), lint (all families), Swagger checks (2.0), Arazzo checks, and
+/// load-profile checks.
 #[must_use]
 pub fn compute_diagnostics(
     ws: Option<&Arc<Workspace>>,
@@ -360,6 +398,7 @@ pub fn compute_diagnostics_raw(
         &cfg.extensions.clone().unwrap_or_default(),
         root.as_deref(),
     ));
+    out.extend(load_profile_diagnostics(ws, low));
     out
 }
 
@@ -525,6 +564,52 @@ workflows:
         std::fs::create_dir_all(&dir).unwrap();
         let low = low_at(&dir, "oas.yaml", "openapi: 3.1.0\ninfo: {}\n");
         assert!(arazzo_diagnostics(&low).is_empty());
+        assert!(load_profile_diagnostics(None, &low).is_empty());
+    }
+
+    #[test]
+    fn load_profile_errors_and_unknown_workflows_are_located() {
+        let dir = std::env::temp_dir().join("suspect-lsp-diag-load");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("spec.yaml"),
+            "openapi: 3.1.0\ninfo: {title: t, version: '1'}\npaths:\n  /p:\n    get:\n      operationId: getP\n      responses:\n        '200': {description: ok}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("flows.arazzo.yaml"),
+            "arazzo: 1.0.0\ninfo: {title: f, version: '1'}\nsourceDescriptions:\n  - name: api\n    url: spec.yaml\nworkflows:\n  - workflowId: real\n    steps:\n      - stepId: s\n        operationId: getP\n",
+        )
+        .unwrap();
+        let text = "suspectLoad: \"1.0\"\narazzo: ./flows.arazzo.yaml\nphases:\n  - { duration: 10s, arrivalRate: 5 }\n  - { pause: soon }\nscenarios:\n  - workflow: ghost\n  - workflow: real\n";
+        let low = low_at(&dir, "p.load.yaml", text);
+        let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
+        ws.load_all("spec.yaml").unwrap();
+        ws.load_all("flows.arazzo.yaml").unwrap();
+        let ws = Arc::new(ws);
+
+        let diags = load_profile_diagnostics(Some(&ws), &low);
+        let codes: Vec<String> = diags
+            .iter()
+            .filter_map(|d| match &d.code {
+                Some(NumberOrString::String(c)) => Some(c.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(codes.iter().any(|c| c == "load-duration"), "{codes:?}");
+        assert!(
+            codes.iter().any(|c| c == "load-unknown-workflow"),
+            "{codes:?}"
+        );
+        // The bad `pause` literal is anchored on its own line (line 4).
+        let pause = diags
+            .iter()
+            .find(|d| d.message.contains("`pause`"))
+            .expect("pause diagnostic");
+        assert_eq!(pause.range.start.line, 4, "{pause:?}");
+        assert_eq!(pause.severity, Some(DiagnosticSeverity::ERROR));
+        // Full battery routes by family too.
+        assert!(!compute_diagnostics(Some(&ws), &low, &Default::default(), None, false).is_empty());
     }
 }
 

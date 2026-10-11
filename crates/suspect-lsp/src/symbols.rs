@@ -41,7 +41,7 @@ pub fn document_symbols(low: &LowDoc) -> Vec<DocumentSymbol> {
         SpecFamily::Arazzo10 => arazzo_symbols(low),
         SpecFamily::Overlay10 => overlay_symbols(low),
         SpecFamily::Oas2 => swagger2_symbols(low),
-        SpecFamily::Unknown => Vec::new(),
+        SpecFamily::Load10 | SpecFamily::Unknown => Vec::new(),
     }
 }
 
