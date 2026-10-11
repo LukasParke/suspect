@@ -656,3 +656,49 @@ mod tests {
         assert_eq!(snap.get("http.error_rate"), Some(0.0));
     }
 }
+
+#[cfg(test)]
+mod perf {
+    use super::*;
+
+    struct Names;
+    impl StepNames for Names {
+        fn names(&self, s: ScenarioIdx, step: u16) -> (String, String, String) {
+            (format!("s{s}"), format!("step{step}"), String::new())
+        }
+        fn scenario_name(&self, s: ScenarioIdx) -> String {
+            format!("s{s}")
+        }
+    }
+
+    /// `cargo test --release -p suspect-test aggregator_ingest -- --ignored --nocapture`
+    #[test]
+    #[ignore = "perf measurement; run explicitly in release mode"]
+    fn aggregator_ingest() {
+        let mut w = Window::new();
+        let n = 2_000_000u64;
+        let started = std::time::Instant::now();
+        for i in 0..n {
+            w.record(&Event::Step {
+                scenario: (i % 3) as u16,
+                step: (i % 4) as u16,
+                sample: StepSample {
+                    status: Some(200 + (i % 2) as u16),
+                    latency: Duration::from_micros(100 + (i % 5000)),
+                    ttfb: Some(Duration::from_micros(50)),
+                    bytes_out: 10,
+                    bytes_in: 100,
+                    verdict: StepVerdict::Passed,
+                },
+            });
+        }
+        let el = started.elapsed();
+        let _ = w.snapshot(el, &Names);
+        eprintln!(
+            "aggregator ingest: {n} samples in {:.3}s = {:.0} ns/sample ({:.2}M samples/s)",
+            el.as_secs_f64(),
+            el.as_secs_f64() * 1e9 / n as f64,
+            n as f64 / el.as_secs_f64() / 1e6
+        );
+    }
+}

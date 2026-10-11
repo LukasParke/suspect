@@ -823,3 +823,38 @@ async fn credentials_are_injected_and_schema_validation_is_opt_in() {
     assert_eq!(summary.aggregate.http.codes[&200], 5);
     assert_eq!(summary.aggregate.contract.failures, 5);
 }
+
+/// Generator-side cost per request with no network: 8 closed-loop users
+/// pushing 200k two-step iterations through `CannedTransport`. Run with
+/// `cargo test --release -p suspect-test load_generator_overhead -- --ignored --nocapture`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "perf measurement; run explicitly in release mode"]
+async fn load_generator_overhead() {
+    let http: Arc<dyn HttpClient> = Arc::new(canned_fixture_http());
+    let iterations = 100_000u64;
+    let p = profile(
+        vec![phase(
+            PhaseKind::ConstantVus {
+                vus: 8,
+                iterations: Some(iterations),
+            },
+            600.0,
+        )],
+        vec![scenario("create-and-fetch", 1.0)],
+    );
+    let mut cfg = config(http);
+    cfg.report_interval = Duration::from_secs(3600);
+    let started = std::time::Instant::now();
+    let (summary, _) = run(fixture(), &p, cfg).await;
+    let wall = started.elapsed();
+    let requests = summary.aggregate.http.requests;
+    assert_eq!(requests, iterations * 2);
+    assert_eq!(summary.aggregate.dropped, 0);
+    eprintln!(
+        "load generator overhead: {requests} requests in {:.2}s = {:.1} µs/request wall ({:.0} req/s), {:.1} µs CPU-ish per request across 8 workers",
+        wall.as_secs_f64(),
+        wall.as_secs_f64() * 1e6 / requests as f64,
+        requests as f64 / wall.as_secs_f64(),
+        wall.as_secs_f64() * 1e6 * 8.0 / requests as f64,
+    );
+}

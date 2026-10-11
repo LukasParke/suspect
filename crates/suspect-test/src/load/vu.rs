@@ -297,6 +297,9 @@ async fn run_vu_inner(
                 break;
             }
         }
+        // Cooperative yield: in-process transports never block, and the
+        // aggregator task must still get scheduled between iterations.
+        tokio::task::yield_now().await;
     }
     Ok(all_ok)
 }
