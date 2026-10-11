@@ -6,10 +6,24 @@ the existing Arazzo contract-test executor, so the **same Arazzo workflow**
 that runs as a contract test also runs as a weighted user scenario under a
 phased arrival profile, with latency/throughput/error metrics and SLO gates.
 
-Status: `planned` (decisions in §16 resolved 2026-10-10). Nothing here is a
-greenfield bet: the plan compiler,
+Status: `shipped` — phases A–E landed 2026-10-10 (see §14 for what each
+phase delivered and §18 for deferred items); user guide in
+[LOAD-TESTING.md](LOAD-TESTING.md). Nothing here was a greenfield bet: the
+plan compiler,
 executor, rex evaluator, journal, and gateway already exist; this is a
 second *execution mode* over them.
+
+Rebased 2026-10-13 onto a `main` whose executor had meanwhile gained
+credential injection (`.suspect/credentials.json`, OAuth grants),
+Arazzo 1.1 message steps, step timeouts, step-level `dependsOn`
+scheduling and response-schema validation. The observer seam carries all
+of them (built-in failures surface through `ExecObserver::on_check_failed`);
+`RunOpts` gained `auth` (one token cache shared by every VU) and
+`validate_responses`; `run_workflow` takes `&Plan` so the component
+schemas travel with it. `suspect load` reads credentials exactly like
+`suspect test` (`--credentials`) and schema-checks responses only with
+`--validate-responses`. Sections below describe the design as planned
+against the earlier base.
 
 ---
 
@@ -563,6 +577,8 @@ Budgets are recorded in `README.platform.md` with the same honest
 
 ## 14. Phases and gates
 
+Status per phase (2026-10-10): **A ✓ B ✓ C ✓ D ✓ (retry action deferred) E ✓ F partial** (`Load10` family, `check` label and LSP profile diagnostics shipped; lint rules and the VS Code lens are deferred).
+
 | Phase | Deliverable | Gate |
 |---|---|---|
 | A — executor seams | `ExecObserver`, `run_workflow_owned`, input binding (`--input`), µs timing, `ErrorClass`, `DelayTransport`; `run_plan` rewritten on top | existing `suspect-test` + CLI tests green; NDJSON golden byte-identical; `platform_bench` executor budget unchanged |
@@ -615,11 +631,33 @@ Defaulting to the recommendation unless overridden:
 
 1. One Arazzo document serves both `suspect test` (unchanged output) and
    `suspect load` (phased, weighted, SLO-gated) with no edits.
+   **Met** — `examples/load/flows.arazzo.yaml`; event-stream golden guards
+   `suspect test` output.
 2. A 3-phase profile against `suspect gateway --mode mock` runs green;
    the same profile against the gateway with `--error-pct 20` fails
    `maxErrorRate` with a JUnit testcase naming the breached check.
+   **Met** — `crates/suspect-cli/tests/load.rs`.
 3. Reports expose contract-failure rate separately from transport/HTTP
-   error rate.
+   error rate. **Met** — `contract.*` vs `errors.*` vs `http.error_rate`.
 4. Generator overhead and sustained-rate budgets are met and recorded in
-   `README.platform.md`.
+   `README.platform.md`. **Met** — ~4 µs CPU/request, 43k req/s, 64M
+   samples/s aggregator.
 5. All existing gates hold: clippy −D, workspace tests, docs, determinism.
+   **Met** for every touched crate; one pre-existing `HEAD` failure
+   (`suspect-cli` fuzz unit test, macOS `/var` canonicalization) is
+   unrelated and unchanged.
+
+## 18. Deferred / follow-ups
+
+- Arazzo `retry` / `end` actions and `onSuccess` goto in the executor.
+- Lint rules from §12 (weak criteria under load; orphaned
+  `x-suspect-think`) and the VS Code "Run as load test" lens.
+- Per-phase `ensure` (interval metrics are reported, not gated).
+- HTML report via a `suspect-gen` template over the JSON report.
+- Recorder batching per user: today a saturated host drops samples
+  (reported as `metrics.dropped`); batching would raise the ceiling.
+- Multi-node runs: histograms and windows are mergeable; a coordinator
+  and transport are not written.
+- `${ENV_VAR}` interpolation in profile `inputs` (security-scheme
+  credentials are covered by the shared credentials file, which already
+  interpolates `${VAR}`; `--input` flags and `--inputs` cover the rest).
