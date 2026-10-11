@@ -41,6 +41,7 @@ pub mod duration;
 pub mod evolved_fuzz;
 pub mod exec;
 pub mod fuzz;
+pub mod load;
 pub mod messaging;
 pub use suspect_faker as faker;
 pub mod plan;

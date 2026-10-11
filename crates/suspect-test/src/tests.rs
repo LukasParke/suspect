@@ -18,7 +18,7 @@ use suspect_source::Source;
 use std::collections::BTreeMap;
 use suspect_ir::{Method, ParamIn};
 
-const OAS: &str = r#"
+pub(crate) const OAS: &str = r#"
 openapi: 3.1.0
 info:
   title: Petstore
@@ -115,7 +115,7 @@ fn arazzo_doc() -> LowDoc {
 }
 
 /// Builds a workspace containing only `spec.yaml` and returns it shared.
-fn workspace() -> Arc<suspect_ref::Workspace> {
+pub(crate) fn workspace() -> Arc<suspect_ref::Workspace> {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("spec.yaml"), OAS).expect("write spec");
     let ws = WorkspaceBuilder::new()
@@ -128,7 +128,7 @@ fn workspace() -> Arc<suspect_ref::Workspace> {
     Arc::new(ws)
 }
 
-fn compile_fixture() -> crate::plan::Plan {
+pub(crate) fn compile_fixture() -> crate::plan::Plan {
     let ws = workspace();
     compile_plan(&arazzo_doc(), &ws).expect("compiles")
 }
@@ -243,7 +243,7 @@ workflows:
     );
 }
 
-fn canned_fixture_http() -> CannedTransport {
+pub(crate) fn canned_fixture_http() -> CannedTransport {
     let body = |s: &str| Bytes::from(s.to_owned());
     CannedTransport::new()
         .route(
@@ -1902,7 +1902,7 @@ async fn owned_workflow_runs_spawn_with_per_vu_inputs() {
     );
 }
 
-const DEPENDS_ARAZZO: &str = r#"
+pub(crate) const DEPENDS_ARAZZO: &str = r#"
 arazzo: 1.0.0
 info: { title: deps, version: "1" }
 sourceDescriptions:

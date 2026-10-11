@@ -26,6 +26,8 @@ bytes = "1"
 async-trait.workspace = true
 regex.workspace = true
 rand = "0.8"
+hdrhistogram.workspace = true
+csv.workspace = true
 tokio = { workspace = true, features = ["net"] }
 
 [dev-dependencies]
