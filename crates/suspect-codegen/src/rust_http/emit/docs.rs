@@ -586,9 +586,7 @@ fn operations_by_tag(plan: &HttpPlan, _crate_name: &str) -> Vec<DocFile> {
         let keys: Vec<String> = if tags.is_empty() {
             vec!["Other".into()]
         } else {
-            tags.iter()
-                .map(|t| prose(t.value().as_str()))
-                .collect()
+            tags.iter().map(|t| prose(t.value().as_str())).collect()
         };
         for key in keys {
             by_tag.entry(key).or_default().push(op);
@@ -598,9 +596,7 @@ fn operations_by_tag(plan: &HttpPlan, _crate_name: &str) -> Vec<DocFile> {
     let mut index = String::from("# Operations\n\n");
     index.push_str("Every operation in this package, grouped by spec tag.\n\n");
     for (tag, ops) in &by_tag {
-        let file_name = tag
-            .to_ascii_lowercase()
-            .replace([' ', '/'], "-");
+        let file_name = tag.to_ascii_lowercase().replace([' ', '/'], "-");
         index.push_str(&format!(
             "- [{tag}](operations/{file_name}.md) — {} operation{}\n",
             ops.len(),
@@ -631,7 +627,12 @@ fn operation_section(op: &PlannedOperation) -> String {
         prose(op.wire.path()),
         op.module_name,
         op.function_name,
-        prose(op.wire.description().map(|v| v.value().as_str()).unwrap_or("")),
+        prose(
+            op.wire
+                .description()
+                .map(|v| v.value().as_str())
+                .unwrap_or("")
+        ),
         prose(op.source.document().as_str()),
         prose(op.source.pointer()),
         op.input_type,
@@ -644,9 +645,11 @@ fn operation_section(op: &PlannedOperation) -> String {
             section.push_str(&format!(
                 "- `{}` `{}` → `{}` (`{}`).\n",
                 r.wire.status_key(),
-                prose(v.media_index
-                    .map(|i| r.wire.media()[i].media_type().declared())
-                    .unwrap_or("no declared media")),
+                prose(
+                    v.media_index
+                        .map(|i| r.wire.media()[i].media_type().declared())
+                        .unwrap_or("no declared media")
+                ),
                 v.name,
                 payload_type(&v.payload)
             ));
@@ -684,7 +687,9 @@ fn policies(plan: &HttpPlan) -> String {
 
 /// Runtime environment credentials.
 fn credentials(policy: &crate::credential_env::CredentialEnvPlan) -> String {
-    let mut doc = String::from("# Runtime environment credentials\n\nWith `reqwest-rustls`, `Client::from_env() -> Result<Client<ReqwestTransport>, reqwest::Error>` snapshots the configured variables once at client creation. For a custom transport use `Client::with_transport_from_env(transport)`. `Credentials::from_env()` exposes the same snapshot for explicit alternative selection.\n\n");
+    let mut doc = String::from(
+        "# Runtime environment credentials\n\nWith `reqwest-rustls`, `Client::from_env() -> Result<Client<ReqwestTransport>, reqwest::Error>` snapshots the configured variables once at client creation. For a custom transport use `Client::with_transport_from_env(transport)`. `Credentials::from_env()` exposes the same snapshot for explicit alternative selection.\n\n",
+    );
     for binding in policy.bindings() {
         doc.push_str(&format!(
             "- Source scheme `{}` reads the variable named `{}`.\n",
@@ -710,7 +715,9 @@ pub(super) fn readme(plan: &HttpPlan, package: &PackageConfig, crate_name: &str)
     }
     docs.push_str("Required native inputs are constructor arguments. Optional input builders preserve omission; schema defaults are never inserted. No-input `_default` helpers omit every optional input. A sole-success enum dereferences to its `ApiResponse` and provides `into_response()` and `into_data()`, so consumers can read `.data` directly while existing status matches remain usable.\n\n## Documentation\n\n- [Operations](docs/operations.md) — every operation, grouped by API tag\n- [Execution contract](docs/execution-contract.md) — transport, credentials, parameters, status, forms, streaming, limits\n- [Source policies](docs/policies.md) — document bases, validation, verification\n");
     if plan.credential_env().is_some() {
-        docs.push_str("- [Runtime credentials](docs/credentials.md) — environment-variable bindings\n");
+        docs.push_str(
+            "- [Runtime credentials](docs/credentials.md) — environment-variable bindings\n",
+        );
     }
     docs.push_str("- [Models and codecs](models.md) — every model type with its native codec\n- [Validated examples](examples.md) — source-bound, codec-executed examples\n- Native API docs: `cargo doc --no-deps --all-features`\n");
     docs

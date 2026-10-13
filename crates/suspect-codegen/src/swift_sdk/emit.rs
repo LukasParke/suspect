@@ -758,8 +758,15 @@ fn docs(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
             "Operations-{}",
             crate::doc_split::allocate_slug(&mut used, &crate::doc_split::slug(tag))
         );
-        let _ = writeln!(reference, "- <doc:{stem}> — {} operation{}", ops.len(), if ops.len() == 1 { "" } else { "s" });
-        let mut page = format!("# {tag} operations\n\nEvery entry below is generated from the same operation and symbol plan. <doc:OperationReference> lists every group.\n\n");
+        let _ = writeln!(
+            reference,
+            "- <doc:{stem}> — {} operation{}",
+            ops.len(),
+            if ops.len() == 1 { "" } else { "s" }
+        );
+        let mut page = format!(
+            "# {tag} operations\n\nEvery entry below is generated from the same operation and symbol plan. <doc:OperationReference> lists every group.\n\n"
+        );
         for op in ops {
             let _ = writeln!(
                 page,

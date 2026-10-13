@@ -466,7 +466,10 @@ fn xml_annotations_do_not_rename_json_wire_properties() {
         .collect();
     // Exactly one split api page carries the annotated symbol documentation.
     assert_eq!(annotating.len(), 1, "{annotating:?}");
-    assert!(annotating[0].starts_with("python/docs/api/"), "{annotating:?}");
+    assert!(
+        annotating[0].starts_with("python/docs/api/"),
+        "{annotating:?}"
+    );
 }
 
 /// (b) A malformed `xml` annotation is not a protocol-level assertion, so the

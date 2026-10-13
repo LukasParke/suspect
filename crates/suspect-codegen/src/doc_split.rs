@@ -24,11 +24,7 @@ pub fn slug(value: &str) -> String {
     while out.ends_with('-') {
         out.pop();
     }
-    if out.is_empty() {
-        "other".into()
-    } else {
-        out
-    }
+    if out.is_empty() { "other".into() } else { out }
 }
 
 /// Allocate a unique file stem, suffixing `-2`, `-3`, … on collision.

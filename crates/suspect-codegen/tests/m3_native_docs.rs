@@ -253,9 +253,10 @@ fn all_planned_native_symbols_have_browsable_source_bound_artifacts() {
             .iter()
             .filter(|doc| doc.path.starts_with(&format!("{language}/docs/api/")))
         {
-            assert!(!doc.content.lines().any(
-                |line| line.starts_with(".. raw::") || line.starts_with(".. include:: description")
-            ));
+            assert!(
+                !doc.content.lines().any(|line| line.starts_with(".. raw::")
+                    || line.starts_with(".. include:: description"))
+            );
         }
     }
     assert_eq!(py_files, python(&py), "rendering must be deterministic");

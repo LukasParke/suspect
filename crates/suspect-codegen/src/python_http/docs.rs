@@ -725,11 +725,7 @@ pub(super) fn artifacts(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile
 }
 
 /// One symbol's api-reference section.
-fn api_symbol(
-    plan: &HttpPlan,
-    symbol: &Symbol,
-    labels: &BTreeMap<String, String>,
-) -> String {
+fn api_symbol(plan: &HttpPlan, symbol: &Symbol, labels: &BTreeMap<String, String>) -> String {
     let mut api = String::new();
     api.push_str(&format!(".. _{}:\n\n", labels[&symbol.key()]));
     api.push_str(&heading(&format!("``{}``", symbol.key()), '-'));
