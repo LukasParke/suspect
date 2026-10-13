@@ -14,6 +14,8 @@
 //!                    | "$inputs." name | "$inputs#" json-pointer-fragment
 //!                    | "$steps." step-id ".outputs." name
 //!                    | "$steps." step-id ".outputs#" json-pointer-fragment
+//!                    | "$workflows." workflow-id ".outputs." name
+//!                    | "$workflows." workflow-id ".steps." step-id ".outputs." name
 //!                    | "$sourceDescriptions." name "#" json-pointer-fragment
 //! location           = "header." name | "query." name | "path." name
 //!                    | "body" [ "#" json-pointer-fragment ]
@@ -98,6 +100,18 @@ pub enum Rex {
         /// RFC 6901 pointer into the named description document.
         pointer: Pointer,
     },
+    /// `$workflows.<id>.outputs.<key>` or
+    /// `$workflows.<id>.steps.<step>.outputs.<key>` — an output of another,
+    /// already-finished workflow.
+    Workflows {
+        /// The referenced workflow id.
+        workflow: String,
+        /// Step id when addressing a step output rather than a
+        /// workflow-level output.
+        step: Option<String>,
+        /// Output key.
+        outputs_key: String,
+    },
     /// Any input not starting with `$`, passed through verbatim.
     Text(String),
 }
@@ -140,6 +154,7 @@ pub struct RexCtx<'a> {
     response_body: &'a str,
     inputs: &'a serde_json::Map<String, serde_json::Value>,
     steps_outputs: &'a serde_json::Map<String, serde_json::Value>,
+    workflows_outputs: &'a serde_json::Map<String, serde_json::Value>,
     source_descriptions: &'a HashMap<String, String>,
 }
 
@@ -158,6 +173,7 @@ impl Default for RexCtx<'_> {
             response_body: "",
             inputs: &EMPTY_MAP,
             steps_outputs: &EMPTY_MAP,
+            workflows_outputs: &EMPTY_MAP,
             source_descriptions: &EMPTY_DESCRIPTIONS,
         }
     }
@@ -223,6 +239,18 @@ impl<'a> RexCtx<'a> {
         steps_outputs: &'a serde_json::Map<String, serde_json::Value>,
     ) -> Self {
         self.steps_outputs = steps_outputs;
+        self
+    }
+
+    /// Sets the outputs of already-finished workflows, keyed by workflow id.
+    /// Each value is `{"outputs": {...}, "steps": {stepId: {...}}}`. Read by
+    /// `$workflows...`.
+    #[must_use]
+    pub fn workflows_outputs(
+        mut self,
+        workflows_outputs: &'a serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
+        self.workflows_outputs = workflows_outputs;
         self
     }
 
@@ -373,6 +401,45 @@ pub fn parse_rex(input: &str) -> Result<Rex, RexError> {
                 outputs_key,
             })
         }
+        "workflows" => {
+            let Some(after_head) = tail.strip_prefix('.') else {
+                return err(format!("missing `.outputs.<key>` after `$workflows{tail}`"));
+            };
+            let Some((workflow, after_wf)) = after_head.split_once('.') else {
+                return err(format!(
+                    "missing `.outputs.<key>` after `$workflows.{after_head}`"
+                ));
+            };
+            if workflow.is_empty() || workflow.contains('#') {
+                return err(format!("invalid workflow id `{workflow}`"));
+            }
+            let (step, outputs_key) = if let Some(key) = after_wf.strip_prefix("outputs.") {
+                (None, key)
+            } else if let Some(rest) = after_wf.strip_prefix("steps.") {
+                let Some((step, after_step)) = rest.split_once(".outputs.") else {
+                    return err(format!(
+                        "expected `.outputs.<key>` after `$workflows.{workflow}.steps.<step>`"
+                    ));
+                };
+                if step.is_empty() {
+                    return err("missing step id after `$workflows.<id>.steps.`".to_owned());
+                }
+                (Some(step.to_owned()), after_step)
+            } else {
+                return err(format!(
+                    "expected `.outputs.<key>` or `.steps.<step>.outputs.<key>` after \
+                     `$workflows.{workflow}.`, found `.{after_wf}`"
+                ));
+            };
+            if outputs_key.is_empty() {
+                return err("missing output key after `.outputs.`".to_owned());
+            }
+            Ok(Rex::Workflows {
+                workflow: workflow.to_owned(),
+                step,
+                outputs_key: outputs_key.to_owned(),
+            })
+        }
         "sourceDescriptions" => {
             let Some(name_and_frag) = tail.strip_prefix('.') else {
                 return err("missing source description name".to_owned());
@@ -391,8 +458,8 @@ pub fn parse_rex(input: &str) -> Result<Rex, RexError> {
         }
         other => err(format!(
             "unknown runtime expression `${other}`; expected `method`, \
-             `statusCode`, `url`, `request`, `response`, `inputs`, `steps` \
-             or `sourceDescriptions`"
+             `statusCode`, `url`, `request`, `response`, `inputs`, `steps`, \
+             `workflows` or `sourceDescriptions`"
         )),
     }
 }
@@ -537,6 +604,17 @@ pub fn eval_rex(rex: &Rex, ctx: &RexCtx<'_>) -> Option<serde_json::Value> {
         Rex::SourceDescriptions { name, pointer } => {
             let doc = parse_json(ctx.source_descriptions.get(name)?)?;
             resolve_pointer(&doc, pointer).cloned()
+        }
+        Rex::Workflows {
+            workflow,
+            step,
+            outputs_key,
+        } => {
+            let wf = ctx.workflows_outputs.get(workflow)?;
+            match step {
+                None => wf.get("outputs")?.get(outputs_key).cloned(),
+                Some(step) => wf.get("steps")?.get(step)?.get(outputs_key).cloned(),
+            }
         }
         Rex::Text(text) => Some(serde_json::Value::String(text.clone())),
     }

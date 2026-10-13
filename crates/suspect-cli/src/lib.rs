@@ -300,6 +300,10 @@ pub enum Command {
         /// Write the journal to this file (append) instead of stdout.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
+        /// JSON object file of workflow inputs, applied before `--input`
+        /// pairs (which override it).
+        #[arg(long = "inputs", value_name = "FILE")]
+        inputs_file: Option<PathBuf>,
     },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
@@ -743,11 +747,12 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             message_broker,
             credentials,
             journal,
+            inputs_file,
         } => commands::test::test_with_messages(
             &arazzo,
             &base_url,
             filter.as_deref(),
-            &commands::test::parse_inputs(&inputs)?,
+            &commands::inputs::parse_inputs(inputs_file.as_deref(), &inputs)?,
             cassette.as_deref(),
             matches!(report, ReportFormat::Ndjson),
             message_broker.as_deref(),

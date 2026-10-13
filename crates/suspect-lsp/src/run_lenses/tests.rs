@@ -78,6 +78,7 @@ fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
             },
             parameters: Vec::new(),
             request_body: None,
+            request_content_type: None,
             success: vec![suspect_test::CriterionPlan {
                 kind: suspect_test::CriterionKind::Equals {
                     pointer: None,
@@ -93,7 +94,10 @@ fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
             security: Vec::new(),
             response_schemas: Vec::new(),
             body_pointers: Vec::new(),
+            think: None,
         }],
+        depends_on: Vec::new(),
+        outputs: Vec::new(),
     }
 }
 

@@ -26,6 +26,7 @@ pub mod generate;
 pub mod har;
 pub mod http;
 pub mod impact;
+pub mod inputs;
 pub mod lint;
 pub mod overlay;
 pub mod overlay_dry_run;

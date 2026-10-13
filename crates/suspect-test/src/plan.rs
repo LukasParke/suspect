@@ -54,7 +54,7 @@ pub struct Plan {
 }
 
 /// One compiled workflow.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WfPlan {
     /// The Arazzo `workflowId`.
     pub workflow_id: String,
@@ -65,6 +65,41 @@ pub struct WfPlan {
     pub input_defaults: serde_json::Map<String, serde_json::Value>,
     /// Compiled steps, in document order; executed sequentially.
     pub steps: Vec<StepPlan>,
+    /// Workflow ids from `dependsOn`; those workflows run to completion
+    /// first and their outputs are readable through `$workflows.<id>...`.
+    pub depends_on: Vec<String>,
+    /// Workflow-level `outputs` `(name, expression)`, evaluated against the
+    /// accumulated step outputs once every step has run.
+    pub outputs: Vec<(String, Rex)>,
+}
+
+/// Pause inserted after a step completes, declared with the
+/// `x-suspect-think` step extension (`2s`, `500ms..2s`, or a bare number of
+/// seconds). Only honoured by executors whose
+/// [`ThinkPolicy`](crate::exec::ThinkPolicy) asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThinkSpec {
+    /// Shortest pause (inclusive).
+    pub min: std::time::Duration,
+    /// Longest pause (inclusive); equal to `min` for a fixed pause.
+    pub max: std::time::Duration,
+}
+
+impl ThinkSpec {
+    /// A fixed pause.
+    #[must_use]
+    pub fn fixed(d: std::time::Duration) -> Self {
+        Self { min: d, max: d }
+    }
+
+    /// Parses a think literal (`2s`, `500ms..2s`, `1.5`).
+    ///
+    /// # Errors
+    /// Returns the duration parser's message for malformed literals.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let (min, max) = crate::duration::parse_duration_range(text)?;
+        Ok(Self { min, max })
+    }
 }
 
 /// One compiled step parameter (`name`, `in`, `value`).
@@ -88,8 +123,13 @@ pub struct StepPlan {
     pub operation: OpKey,
     /// Step parameters in document order.
     pub parameters: Vec<StepParam>,
-    /// Request body expression, when the step declares `requestBody`.
+    /// Request body expression, when the step declares `requestBody`
+    /// (its `payload` when the spec wrapper is used, else the whole node).
+    /// JSON bodies may carry runtime expressions in string leaves; the
+    /// executor resolves them per request.
     pub request_body: Option<Rex>,
+    /// `requestBody.contentType` when declared; sent as `content-type`.
+    pub request_content_type: Option<String>,
     /// Success criteria; all must pass for the step to pass. Empty at
     /// compile time means "defaults to 2xx" and is materialized as
     /// [`CriterionKind::StatusInRange(2, 2)`](CriterionKind::StatusInRange).
@@ -120,6 +160,8 @@ pub struct StepPlan {
     /// 1.1 §5.8.5.2.4 requires: a step that reads
     /// `$steps.<id>.outputs.<name>` depends on `<id>`.
     pub depends_on: Vec<String>,
+    /// Pause after this step from the `x-suspect-think` extension.
+    pub think: Option<ThinkSpec>,
 }
 
 /// Arazzo 1.1 AsyncAPI message step: `action: send` or `action: receive`
@@ -397,17 +439,103 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
             }
         }
 
+        // Local workflow ids only: a `$sourceDescriptions.<name>.<id>`
+        // entry names a workflow in another Arazzo document, which this
+        // plan does not execute (the validator checks that reference).
+        let depends_on: Vec<String> = wf
+            .depends_on()
+            .into_iter()
+            .filter(|dep| !dep.starts_with('$'))
+            .map(str::to_owned)
+            .collect();
+
+        let mut outputs = Vec::new();
+        for (name, node) in wf.outputs() {
+            outputs.push((name.to_owned(), rex_of_node(node)?));
+        }
+
         workflows.push(WfPlan {
             workflow_id: wf.workflow_id.to_owned(),
             inputs,
             input_defaults,
             steps,
+            depends_on,
+            outputs,
         });
     }
+    check_dependencies(&workflows)?;
     Ok(Plan {
         workflows,
         components,
     })
+}
+
+/// Rejects `dependsOn` references to unknown workflows and dependency
+/// cycles, so executors can schedule prerequisites without re-validating.
+fn check_dependencies(workflows: &[WfPlan]) -> Result<(), CompileError> {
+    for wf in workflows {
+        for dep in &wf.depends_on {
+            if dep == &wf.workflow_id {
+                return Err(CompileError(format!(
+                    "workflow '{}' depends on itself",
+                    wf.workflow_id
+                )));
+            }
+            if !workflows.iter().any(|w| &w.workflow_id == dep) {
+                return Err(CompileError(format!(
+                    "workflow '{}': dependsOn '{dep}' matches no workflow",
+                    wf.workflow_id
+                )));
+            }
+        }
+    }
+    dependency_waves(workflows).map(|_| ())
+}
+
+/// Groups workflows into execution waves: every workflow in wave `n` depends
+/// only on workflows in earlier waves. Workflows without dependencies form
+/// wave 0.
+///
+/// # Errors
+/// Returns a [`CompileError`] naming a workflow on a dependency cycle.
+pub fn dependency_waves(workflows: &[WfPlan]) -> Result<Vec<Vec<usize>>, CompileError> {
+    let mut placed: Vec<Option<usize>> = vec![None; workflows.len()];
+    let mut waves: Vec<Vec<usize>> = Vec::new();
+    let mut remaining = workflows.len();
+    while remaining > 0 {
+        let mut wave = Vec::new();
+        for (idx, wf) in workflows.iter().enumerate() {
+            if placed[idx].is_some() {
+                continue;
+            }
+            let ready = wf.depends_on.iter().all(|dep| {
+                workflows
+                    .iter()
+                    .position(|w| &w.workflow_id == dep)
+                    .is_none_or(|d| placed[d].is_some())
+            });
+            if ready {
+                wave.push(idx);
+            }
+        }
+        if wave.is_empty() {
+            let stuck = workflows
+                .iter()
+                .enumerate()
+                .find(|(i, _)| placed[*i].is_none())
+                .map(|(_, w)| w.workflow_id.as_str())
+                .unwrap_or("?");
+            return Err(CompileError(format!(
+                "workflow '{stuck}' is part of a dependsOn cycle"
+            )));
+        }
+        for &idx in &wave {
+            placed[idx] = Some(waves.len());
+        }
+        remaining -= wave.len();
+        waves.push(wave);
+    }
+    Ok(waves)
 }
 
 /// Maps `sourceDescriptions` names to IR snapshots of their documents.
@@ -772,9 +900,29 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
     for p in step.parameters() {
         parameters.push(compile_param(&step_id, p)?);
     }
-    let request_body = match step.request_body() {
-        Some(node) => Some(rex_of_node(node)?),
-        None => None,
+    // Arazzo wraps the body as `{contentType, payload, replacements}`; a
+    // bare value is accepted leniently as the payload itself.
+    let (request_body, request_content_type) = match step.request_body() {
+        Some(node) => {
+            let content_type = node
+                .get("contentType")
+                .and_then(|n| n.as_str())
+                .map(str::to_owned);
+            let payload = node.get("payload");
+            let is_wrapper = node.kind() == ValueKind::Object
+                && (payload.is_some() || content_type.is_some())
+                && node
+                    .entries()
+                    .iter()
+                    .all(|e| matches!(e.key, "contentType" | "payload" | "replacements"));
+            let body = match (is_wrapper, payload) {
+                (true, Some(p)) => Some(rex_of_node(p)?),
+                (true, None) => None,
+                (false, _) => Some(rex_of_node(node)?),
+            };
+            (body, content_type)
+        }
+        None => (None, None),
     };
 
     let mut success = Vec::new();
@@ -825,11 +973,26 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
             }
         });
 
+    let think = match step.node().get("x-suspect-think") {
+        None => None,
+        Some(node) => {
+            let text = match node.as_str() {
+                Some(s) => s.to_owned(),
+                None => String::from_utf8_lossy(node.raw_text()).trim().to_owned(),
+            };
+            Some(
+                ThinkSpec::parse(&text)
+                    .map_err(|e| CompileError(format!("step '{step_id}': x-suspect-think: {e}")))?,
+            )
+        }
+    };
+
     Ok(StepPlan {
         step_id,
         operation,
         parameters,
         request_body,
+        request_content_type,
         message,
         depends_on: step_dependencies(step),
         timeout_ms: step.timeout_ms(),
@@ -839,6 +1002,7 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         failure_goto,
         security,
         response_schemas,
+        think,
     })
 }
 

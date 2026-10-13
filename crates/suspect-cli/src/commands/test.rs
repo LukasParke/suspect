@@ -41,20 +41,11 @@ pub fn test(
 
 /// Parses `--input name=value` flags into a workflow input map: each value
 /// is parsed as JSON when it parses, else taken as a string.
+///
+/// # Errors
+/// Returns an error for a flag without `=` or with an empty name.
 pub fn parse_inputs(raw: &[String]) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-    let mut out = serde_json::Map::new();
-    for item in raw {
-        let Some((name, value)) = item.split_once('=') else {
-            return Err(anyhow::anyhow!("--input expects NAME=VALUE, got {item:?}"));
-        };
-        if name.is_empty() {
-            return Err(anyhow::anyhow!("--input expects NAME=VALUE, got {item:?}"));
-        }
-        let parsed = serde_json::from_str(value)
-            .unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
-        out.insert(name.to_owned(), parsed);
-    }
-    Ok(out)
+    super::inputs::parse_inputs(None, raw)
 }
 
 /// [`test()`] with an optional message broker directory for Arazzo 1.1

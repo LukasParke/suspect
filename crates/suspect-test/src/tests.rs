@@ -371,6 +371,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     },
                     parameters: Vec::new(),
                     request_body: None,
+                    request_content_type: None,
                     success: vec![CriterionPlan {
                         kind: CriterionKind::StatusInRange(2, 2),
                         range: 0..0,
@@ -383,6 +384,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
+                    think: None,
                 },
                 crate::plan::StepPlan {
                     step_id: "never-runs".to_owned(),
@@ -392,6 +394,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     },
                     parameters: Vec::new(),
                     request_body: None,
+                    request_content_type: None,
                     success: Vec::new(),
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
@@ -401,8 +404,11 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
+                    think: None,
                 },
             ],
+            depends_on: Vec::new(),
+            outputs: Vec::new(),
         }],
     };
     let http = CannedTransport::new().route(
@@ -1734,4 +1740,499 @@ fn ordered_comparisons_compile_and_classify() {
         &crit,
         crate::plan::CriterionKind::Equals { pointer, .. } if pointer.as_deref() == Some("/a>b")
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Executor seams (observer, owned runs, inputs, dependsOn, think, errors)
+// ---------------------------------------------------------------------------
+
+use crate::exec::{
+    ErrorClass, ExecObserver, NullObserver, RunOpts, StepCx, StepSample, StepVerdict, ThinkPolicy,
+    TransportError, VuId, WfOutcome, run_plan_observed, run_workflow_owned,
+};
+use crate::plan::ThinkSpec;
+use crate::transports::DelayTransport;
+use std::sync::Mutex;
+use std::time::Duration;
+
+/// Golden for the classic event stream: the exact sequence of event kinds a
+/// single-workflow run produces. Guards the `EventObserver` refactor —
+/// editors parse this stream.
+#[tokio::test(flavor = "multi_thread")]
+async fn event_stream_order_is_stable() {
+    let mut plan = compile_fixture();
+    plan.workflows
+        .retain(|wf| wf.workflow_id == "create-and-fetch");
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let _ = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let kinds: Vec<&str> = drain(rx)
+        .await
+        .iter()
+        .map(|ev| match ev {
+            TestEvent::WfStarted { .. } => "wf_started",
+            TestEvent::StepStarted { .. } => "step_started",
+            TestEvent::RequestSent { .. } => "request_sent",
+            TestEvent::ResponseGot { .. } => "response_got",
+            TestEvent::ResponseValidated { .. } => "response_validated",
+            TestEvent::CriterionOk { .. } => "criterion_ok",
+            TestEvent::CriterionFail { .. } => "criterion_fail",
+            TestEvent::OutputSet { .. } => "output_set",
+            TestEvent::WfDone { .. } => "wf_done",
+            TestEvent::RunDone { .. } => "run_done",
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "wf_started",
+            "step_started",
+            "request_sent",
+            "response_got",
+            "criterion_ok",
+            "output_set",
+            "step_started",
+            "request_sent",
+            "response_got",
+            "criterion_ok",
+            "criterion_ok",
+            "wf_done",
+            "run_done",
+        ]
+    );
+}
+
+/// Observer that records step samples and workflow outcomes only.
+#[derive(Default)]
+struct Recorder {
+    samples: Mutex<Vec<(String, VuId, StepSample)>>,
+    done: Mutex<Vec<(String, VuId, WfOutcome)>>,
+}
+
+#[async_trait::async_trait]
+impl ExecObserver for Recorder {
+    async fn on_step_done(&self, cx: &StepCx<'_>, sample: &StepSample) {
+        self.samples
+            .lock()
+            .unwrap()
+            .push((cx.step.to_owned(), cx.vu, sample.clone()));
+    }
+    async fn on_workflow_done(&self, wf: &crate::plan::WfPlan, vu: VuId, outcome: &WfOutcome) {
+        self.done
+            .lock()
+            .unwrap()
+            .push((wf.workflow_id.clone(), vu, outcome.clone()));
+    }
+}
+
+/// Owned runs are `'static`: many virtual users spawn over one shared plan,
+/// each with its own inputs, and the observer sees per-VU samples.
+#[tokio::test(flavor = "multi_thread")]
+async fn owned_workflow_runs_spawn_with_per_vu_inputs() {
+    let plan = Arc::new(compile_fixture());
+    let wf_index = plan
+        .workflows
+        .iter()
+        .position(|wf| wf.workflow_id == "cleanup-user")
+        .unwrap();
+    let http: Arc<dyn HttpClient> = Arc::new(
+        CannedTransport::new()
+            .route(
+                Match {
+                    method: Some("DELETE".to_owned()),
+                    path_suffix: "/users/alice".to_owned(),
+                },
+                HttpResponse {
+                    status: 204,
+                    ..Default::default()
+                },
+            )
+            .route(
+                Match {
+                    method: Some("DELETE".to_owned()),
+                    path_suffix: "/users/bob".to_owned(),
+                },
+                HttpResponse {
+                    status: 204,
+                    ..Default::default()
+                },
+            ),
+    );
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn ExecObserver> = recorder.clone();
+
+    let mut set = tokio::task::JoinSet::new();
+    for (vu, name) in [(1u64, "alice"), (2u64, "bob"), (3u64, "carol")] {
+        let mut opts = RunOpts::new("http://api.test/");
+        opts.vu = VuId(vu);
+        // Overrides the Arazzo `parameters` value (`world`).
+        opts.inputs
+            .insert("userName".to_owned(), serde_json::json!(name));
+        set.spawn(run_workflow_owned(
+            Arc::clone(&plan),
+            wf_index,
+            opts,
+            Arc::clone(&http),
+            Arc::clone(&observer),
+        ));
+    }
+    let mut outcomes = Vec::new();
+    while let Some(res) = set.join_next().await {
+        outcomes.push(res.unwrap());
+    }
+    assert_eq!(outcomes.iter().filter(|o| o.ok).count(), 2);
+    assert_eq!(
+        outcomes.iter().filter(|o| !o.ok).count(),
+        1,
+        "carol has no route"
+    );
+
+    let samples = recorder.samples.lock().unwrap();
+    assert_eq!(samples.len(), 3);
+    let carol = samples.iter().find(|(_, vu, _)| *vu == VuId(3)).unwrap();
+    assert_eq!(carol.2.status, None);
+    assert!(matches!(
+        carol.2.verdict,
+        StepVerdict::Transport(ErrorClass::Other)
+    ));
+    assert!(
+        samples
+            .iter()
+            .filter(|(_, vu, _)| *vu != VuId(3))
+            .all(|(_, _, s)| s.ok() && s.status == Some(204))
+    );
+}
+
+const DEPENDS_ARAZZO: &str = r#"
+arazzo: 1.0.0
+info: { title: deps, version: "1" }
+sourceDescriptions:
+  - name: petstore
+    url: spec.yaml
+workflows:
+  - workflowId: use-pet
+    dependsOn: [seed]
+    steps:
+      - stepId: fetch
+        operationId: showPetById
+        parameters:
+          - name: petId
+            in: path
+            value: $workflows.seed.outputs.createdId
+          - name: via
+            in: query
+            value: $workflows.seed.steps.make.outputs.petId
+  - workflowId: seed
+    steps:
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        outputs:
+          petId: $response.body#/id
+    outputs:
+      createdId: $steps.make.outputs.petId
+"#;
+
+/// A cross-document `dependsOn` (`$sourceDescriptions.<name>.<id>`) is a
+/// valid Arazzo reference this plan cannot schedule; it must not fail
+/// compilation, while an unknown local id still does.
+#[test]
+fn cross_document_depends_on_compiles_and_unknown_local_fails() {
+    let ws = workspace();
+    let compile = |depends: &str| {
+        let text = format!(
+            "arazzo: 1.0.0\ninfo: {{ title: x, version: '1' }}\nsourceDescriptions:\n  - {{ name: petstore, url: spec.yaml }}\n  - {{ name: other, url: other.arazzo.yaml, type: arazzo }}\nworkflows:\n  - workflowId: w\n    dependsOn: [{depends}]\n    steps:\n      - {{ stepId: s, operationId: listPets }}\n"
+        );
+        let doc = LowDoc::parse(
+            "mem://cross.arazzo.yaml".into(),
+            Source::from_vec(text.into_bytes()),
+        );
+        compile_plan(&doc, &ws)
+    };
+    let plan = compile("'$sourceDescriptions.other.setup'").expect("compiles");
+    assert!(plan.workflows[0].depends_on.is_empty());
+    let err = compile("ghost").expect_err("unknown local workflow");
+    assert!(err.0.contains("ghost"), "{err}");
+}
+
+/// `dependsOn` schedules `seed` before `use-pet` even though it is declared
+/// second, and both `$workflows.<id>.outputs.*` and
+/// `$workflows.<id>.steps.<step>.outputs.*` resolve in the dependent.
+#[tokio::test(flavor = "multi_thread")]
+async fn depends_on_runs_prerequisites_and_exposes_outputs() {
+    let ws = workspace();
+    let doc = LowDoc::parse(
+        "mem://deps.arazzo.yaml".into(),
+        Source::from_vec(DEPENDS_ARAZZO.as_bytes().to_vec()),
+    );
+    let plan = compile_plan(&doc, &ws).expect("compiles");
+    assert_eq!(
+        crate::plan::dependency_waves(&plan.workflows).unwrap(),
+        vec![vec![1], vec![0]]
+    );
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (2, 0), "{events:#?}");
+
+    let started: Vec<&str> = events
+        .iter()
+        .filter_map(|ev| match ev {
+            TestEvent::WfStarted { id } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(started, vec!["seed", "use-pet"]);
+    assert!(events.iter().any(|ev| matches!(
+        ev,
+        TestEvent::RequestSent { url, .. } if url.ends_with("/pets/7?via=7")
+    )));
+}
+
+#[test]
+fn depends_on_rejects_unknown_targets_and_cycles() {
+    let ws = workspace();
+    let unknown = DEPENDS_ARAZZO.replace("dependsOn: [seed]", "dependsOn: [ghost]");
+    let doc = LowDoc::parse(
+        "mem://x.arazzo.yaml".into(),
+        Source::from_vec(unknown.into_bytes()),
+    );
+    let err = compile_plan(&doc, &ws).expect_err("unknown dep");
+    assert!(err.to_string().contains("ghost"), "{err}");
+
+    let cyclic = DEPENDS_ARAZZO.replace(
+        "  - workflowId: seed\n",
+        "  - workflowId: seed\n    dependsOn: [use-pet]\n",
+    );
+    let doc = LowDoc::parse(
+        "mem://y.arazzo.yaml".into(),
+        Source::from_vec(cyclic.into_bytes()),
+    );
+    let err = compile_plan(&doc, &ws).expect_err("cycle");
+    assert!(err.to_string().contains("cycle"), "{err}");
+}
+
+const THINK_ARAZZO: &str = r#"
+arazzo: 1.0.0
+info: { title: think, version: "1" }
+sourceDescriptions:
+  - name: petstore
+    url: spec.yaml
+workflows:
+  - workflowId: slow
+    steps:
+      - stepId: first
+        operationId: listPets
+        x-suspect-think: 2s
+      - stepId: second
+        operationId: listPets
+        x-suspect-think: 10s
+"#;
+
+/// Think time is compiled from `x-suspect-think`, ignored by default, and
+/// honoured (after non-final steps only) under `ThinkPolicy::Honour`.
+#[tokio::test(start_paused = true)]
+async fn think_time_is_ignored_by_default_and_honoured_on_request() {
+    let ws = workspace();
+    let doc = LowDoc::parse(
+        "mem://think.arazzo.yaml".into(),
+        Source::from_vec(THINK_ARAZZO.as_bytes().to_vec()),
+    );
+    let plan = compile_plan(&doc, &ws).expect("compiles");
+    assert_eq!(
+        plan.workflows[0].steps[0].think,
+        Some(ThinkSpec::fixed(Duration::from_secs(2)))
+    );
+    let http = CannedTransport::new().route(
+        Match {
+            method: None,
+            path_suffix: "/pets".to_owned(),
+        },
+        HttpResponse {
+            status: 200,
+            ..Default::default()
+        },
+    );
+
+    let t0 = tokio::time::Instant::now();
+    let summary = run_plan_observed(
+        &plan,
+        &RunOpts::new("http://api.test"),
+        &http,
+        &NullObserver,
+    )
+    .await;
+    assert_eq!(summary.passed, 2);
+    assert_eq!(t0.elapsed(), Duration::ZERO, "ignore policy never sleeps");
+
+    let t1 = tokio::time::Instant::now();
+    let mut honour = RunOpts::new("http://api.test");
+    honour.think = ThinkPolicy::Honour { default: None };
+    let summary = run_plan_observed(&plan, &honour, &http, &NullObserver).await;
+    assert_eq!(summary.passed, 2);
+    // Only the first step's 2s pause applies: the final step never thinks.
+    assert_eq!(t1.elapsed(), Duration::from_secs(2));
+}
+
+#[tokio::test(start_paused = true)]
+async fn delay_transport_sleeps_on_virtual_clock() {
+    let inner = CannedTransport::new().route(
+        Match {
+            method: None,
+            path_suffix: "/pets".to_owned(),
+        },
+        HttpResponse {
+            status: 200,
+            ..Default::default()
+        },
+    );
+    let delayed = DelayTransport::new(inner, Duration::from_millis(300));
+    let t0 = tokio::time::Instant::now();
+    let resp = delayed
+        .execute(HttpRequest {
+            method: "GET".into(),
+            url: "http://x/pets".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    assert_eq!(t0.elapsed(), Duration::from_millis(300));
+    assert_eq!(delayed.calls(), 1);
+}
+
+#[test]
+fn transport_errors_classify_by_prefix_then_heuristics() {
+    assert_eq!(
+        TransportError::classified(ErrorClass::Timeout, "deadline").class(),
+        ErrorClass::Timeout
+    );
+    assert_eq!(
+        TransportError("operation timed out".into()).class(),
+        ErrorClass::Timeout
+    );
+    assert_eq!(
+        TransportError("connection refused (os error 61)".into()).class(),
+        ErrorClass::Connect
+    );
+    assert_eq!(
+        TransportError("invalid peer certificate".into()).class(),
+        ErrorClass::Tls
+    );
+    assert_eq!(
+        TransportError("connection reset by peer".into()).class(),
+        ErrorClass::Reset
+    );
+    assert_eq!(
+        TransportError("no canned response for GET /x".into()).class(),
+        ErrorClass::Other
+    );
+}
+
+#[test]
+fn rex_parses_workflow_output_expressions() {
+    use suspect_rex::parse_rex;
+    assert_eq!(
+        parse_rex("$workflows.seed.outputs.token").unwrap(),
+        Rex::Workflows {
+            workflow: "seed".into(),
+            step: None,
+            outputs_key: "token".into()
+        }
+    );
+    assert_eq!(
+        parse_rex("$workflows.seed.steps.login.outputs.token").unwrap(),
+        Rex::Workflows {
+            workflow: "seed".into(),
+            step: Some("login".into()),
+            outputs_key: "token".into()
+        }
+    );
+    assert!(parse_rex("$workflows.seed").is_err());
+    assert!(parse_rex("$workflows.seed.outputs.").is_err());
+    assert!(parse_rex("$workflows.seed.inputs.x").is_err());
+}
+
+const BODY_ARAZZO: &str = r#"
+arazzo: 1.0.0
+info: { title: body, version: "1" }
+sourceDescriptions:
+  - name: petstore
+    url: spec.yaml
+workflows:
+  - workflowId: typed-body
+    inputs:
+      type: object
+      properties:
+        qty: { type: integer, default: 3 }
+    parameters:
+      - name: owner
+        value: ada
+    steps:
+      - stepId: create
+        operationId: createPet
+        requestBody:
+          contentType: application/vnd.pet+json
+          payload:
+            name: "pet of {$inputs.owner}"
+            qty: $inputs.qty
+            tags: ["${$inputs.owner}", literal]
+            note: "price is $5"
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+"#;
+
+/// Spec-form `requestBody.payload` is unwrapped, `contentType` is sent,
+/// whole-leaf expressions keep their JSON type and embedded expressions
+/// (both `{$x}` and `${$x}` spellings) render as text. A lone `$` that is
+/// not an expression is left alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn request_body_payload_resolves_runtime_expressions() {
+    let ws = workspace();
+    let doc = LowDoc::parse(
+        "mem://body.arazzo.yaml".into(),
+        Source::from_vec(BODY_ARAZZO.as_bytes().to_vec()),
+    );
+    let plan = compile_plan(&doc, &ws).expect("compiles");
+    assert_eq!(
+        plan.workflows[0].steps[0].request_content_type.as_deref(),
+        Some("application/vnd.pet+json")
+    );
+
+    struct Capture(Mutex<Vec<HttpRequest>>);
+    #[async_trait::async_trait]
+    impl HttpClient for Capture {
+        async fn execute(&self, req: HttpRequest) -> Result<HttpResponse, TransportError> {
+            self.0.lock().unwrap().push(req);
+            Ok(HttpResponse {
+                status: 201,
+                ..Default::default()
+            })
+        }
+    }
+    let http = Capture(Mutex::new(Vec::new()));
+    let mut opts = RunOpts::new("http://api.test");
+    opts.inputs.insert("qty".into(), serde_json::json!(9));
+    let summary = run_plan_observed(&plan, &opts, &http, &NullObserver).await;
+    assert_eq!(summary.passed, 1);
+
+    let reqs = http.0.lock().unwrap();
+    let req = &reqs[0];
+    assert!(
+        req.headers
+            .iter()
+            .any(|(k, v)| k == "content-type" && v == "application/vnd.pet+json")
+    );
+    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "name": "pet of ada",
+            "qty": 9,
+            "tags": ["ada", "literal"],
+            "note": "price is $5"
+        })
+    );
 }
