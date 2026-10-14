@@ -5,7 +5,7 @@
 //! `before`/`after` anchors; unknown extensions sort after everything,
 //! alphabetically. The built-in registry covers the widely used extension
 //! families; workspaces extend or override it through configuration
-//! (see [`config_files`] and the `suspect.extensions` settings section).
+//! (see [`crate::config_files`] and the `suspect.extensions` settings section).
 
 /// Position of one extension relative to a standard key of its context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

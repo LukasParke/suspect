@@ -144,7 +144,7 @@ pub fn validate_arazzo(doc: &ArazzoDoc<'_>) -> Vec<ArazzoDiagnostic> {
                 ));
             }
             validate_step(step, &workflow_ids, &mut out);
-            validate_step_dependencies(wf, step, &mut out);
+            validate_step_dependencies(wf, step, doc, &mut out);
             validate_step_targets(step, &mut out);
             validate_step_async_fields(step, doc, &mut out);
         }
@@ -388,7 +388,8 @@ fn diag(
 }
 
 /// Arazzo 1.1 workflow-level `dependsOn`: names must resolve, and the
-/// workflow dependency graph must be acyclic.
+/// workflow dependency graph must be acyclic. Cross-workflow step
+/// `dependsOn` entries order workflows too, so they count as edges.
 fn validate_workflow_dependencies(
     wf: &crate::WorkflowView<'_>,
     doc: &ArazzoDoc<'_>,
@@ -426,7 +427,7 @@ fn validate_workflow_dependencies(
             if other.workflow_id != current {
                 continue;
             }
-            for dep in other.depends_on() {
+            for dep in workflow_prerequisites(other) {
                 if dep == wf.workflow_id {
                     out.push(diag(
                         wf.node().byte_range(),
@@ -446,22 +447,57 @@ fn validate_workflow_dependencies(
     }
 }
 
-/// Arazzo 1.1 step-level `dependsOn`: same-workflow step ids must exist and
-/// appear earlier (sequential satisfiability); expression forms must parse.
+/// Arazzo 1.1 step-level `dependsOn`: same-workflow step ids (bare or as
+/// `$workflows.<this>.steps.<id>`) must exist and appear earlier
+/// (sequential satisfiability); `$workflows.<other>.steps.<id>` must name a
+/// declared workflow and one of its steps; other expression forms must be
+/// one of the spec's step references.
 fn validate_step_dependencies(
     wf: &crate::WorkflowView<'_>,
     step: &crate::StepView<'_>,
+    doc: &ArazzoDoc<'_>,
     out: &mut Vec<ArazzoDiagnostic>,
 ) {
+    use crate::StepDependency;
     let earlier: FxHashSet<&str> = wf
         .steps()
         .iter()
         .take_while(|s| s.step_id != step.step_id)
         .map(|s| s.step_id)
         .collect();
-    for dep in step.depends_on() {
-        if let Some(path) = dep.strip_prefix('$') {
-            if crate::expr::parse(path).is_err() {
+    for (dep, parsed) in step.depends_on().into_iter().zip(step.dependencies()) {
+        let local = match parsed {
+            StepDependency::Local(id) => Some(id),
+            StepDependency::Workflow { workflow, step: id } if workflow == wf.workflow_id => {
+                Some(id)
+            }
+            StepDependency::Workflow { workflow, step: id } => {
+                let other = doc.workflows().iter().find(|w| w.workflow_id == workflow);
+                match other {
+                    None => out.push(diag(
+                        step.node().byte_range(),
+                        "arazzo-depends-on-unknown-workflow",
+                        format!(
+                            "step `{}` dependsOn {dep:?} names undeclared workflowId `{workflow}`",
+                            step.step_id
+                        ),
+                    )),
+                    Some(other) if !other.steps().iter().any(|s| s.step_id == id) => {
+                        out.push(diag(
+                            step.node().byte_range(),
+                            "arazzo-depends-on-unknown-step",
+                            format!(
+                                "step `{}` dependsOn {dep:?}, but workflow `{workflow}` has no step `{id}`",
+                                step.step_id
+                            ),
+                        ));
+                    }
+                    Some(_) => {}
+                }
+                None
+            }
+            StepDependency::Source { .. } => None,
+            StepDependency::Invalid(_) => {
                 out.push(diag(
                     step.node().byte_range(),
                     "arazzo-invalid-depends-on",
@@ -470,18 +506,40 @@ fn validate_step_dependencies(
                         step.step_id
                     ),
                 ));
+                None
             }
-        } else if !earlier.contains(dep) {
+        };
+        if let Some(id) = local
+            && !earlier.contains(id)
+        {
             out.push(diag(
                 step.node().byte_range(),
                 "arazzo-depends-on-unknown-step",
                 format!(
-                    "step `{}` depends on `{dep}`, which is not an earlier step in workflow `{}`",
+                    "step `{}` depends on `{id}`, which is not an earlier step in workflow `{}`",
                     step.step_id, wf.workflow_id
                 ),
             ));
         }
     }
+}
+
+/// Workflows that must finish before `wf` runs: its own `dependsOn` plus
+/// every other workflow a step names through
+/// `$workflows.<workflowId>.steps.<stepId>`.
+fn workflow_prerequisites<'d>(wf: &crate::WorkflowView<'d>) -> Vec<&'d str> {
+    let mut prerequisites = wf.depends_on();
+    for step in wf.steps() {
+        for dependency in step.dependencies() {
+            if let crate::StepDependency::Workflow { workflow, .. } = dependency
+                && workflow != wf.workflow_id
+                && !prerequisites.contains(&workflow)
+            {
+                prerequisites.push(workflow);
+            }
+        }
+    }
+    prerequisites
 }
 
 /// Arazzo 1.1 target mutual exclusion and `timeout` well-formedness.

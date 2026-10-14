@@ -12,7 +12,7 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
-use suspect_arazzo::{ArazzoDoc, ParameterView, StepView};
+use suspect_arazzo::{ArazzoDoc, ParameterView, StepDependency, StepView, WorkflowView};
 use suspect_ir::{IrSpec, Method, OpSelector, ParamIn};
 use suspect_low::{LowDoc, NodeRef, ValueKind};
 use suspect_ref::Workspace;
@@ -54,7 +54,7 @@ pub struct Plan {
 }
 
 /// One compiled workflow.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WfPlan {
     /// The Arazzo `workflowId`.
     pub workflow_id: String,
@@ -65,6 +65,52 @@ pub struct WfPlan {
     pub input_defaults: serde_json::Map<String, serde_json::Value>,
     /// Compiled steps, in document order; executed sequentially.
     pub steps: Vec<StepPlan>,
+    /// Workflow ids that run to completion first, their outputs readable
+    /// through `$workflows.<id>...`: the workflow's own `dependsOn`, then
+    /// every workflow a step names in a `$workflows.<id>.steps.<step>`
+    /// `dependsOn` entry (the step cannot run before that workflow does).
+    pub depends_on: Vec<String>,
+    /// Workflow-level `outputs` `(name, expression)`, evaluated against the
+    /// accumulated step outputs once every step has run.
+    pub outputs: Vec<(String, Rex)>,
+}
+
+/// Pause inserted after a step completes, declared with the
+/// `x-suspect-think` step extension (`2s`, `500ms..2s`, or a bare number of
+/// seconds). Only honoured by executors whose
+/// [`ThinkPolicy`](crate::exec::ThinkPolicy) asks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ThinkSpec {
+    /// Shortest pause (inclusive).
+    pub min: std::time::Duration,
+    /// Longest pause (inclusive); equal to `min` for a fixed pause.
+    pub max: std::time::Duration,
+}
+
+impl ThinkSpec {
+    /// A fixed pause.
+    #[must_use]
+    pub fn fixed(d: std::time::Duration) -> Self {
+        Self { min: d, max: d }
+    }
+
+    /// Parses a think literal (`2s`, `500ms..2s`, `1.5`).
+    ///
+    /// # Errors
+    /// Returns the duration parser's message for malformed literals.
+    pub fn parse(text: &str) -> Result<Self, String> {
+        let (min, max) = crate::duration::parse_duration_range(text)?;
+        Ok(Self { min, max })
+    }
+}
+
+/// A step of a named workflow in the same Arazzo document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowStepRef {
+    /// The `workflowId`.
+    pub workflow: String,
+    /// The `stepId` within that workflow.
+    pub step: String,
 }
 
 /// One compiled step parameter (`name`, `in`, `value`).
@@ -88,8 +134,13 @@ pub struct StepPlan {
     pub operation: OpKey,
     /// Step parameters in document order.
     pub parameters: Vec<StepParam>,
-    /// Request body expression, when the step declares `requestBody`.
+    /// Request body expression, when the step declares `requestBody`
+    /// (its `payload` when the spec wrapper is used, else the whole node).
+    /// JSON bodies may carry runtime expressions in string leaves; the
+    /// executor resolves them per request.
     pub request_body: Option<Rex>,
+    /// `requestBody.contentType` when declared; sent as `content-type`.
+    pub request_content_type: Option<String>,
     /// Success criteria; all must pass for the step to pass. Empty at
     /// compile time means "defaults to 2xx" and is materialized as
     /// [`CriterionKind::StatusInRange(2, 2)`](CriterionKind::StatusInRange).
@@ -115,11 +166,20 @@ pub struct StepPlan {
     pub response_schemas: Vec<(Option<u16>, serde_json::Value)>,
     /// Arazzo 1.1 AsyncAPI message step; `None` for ordinary HTTP steps.
     pub message: Option<MessageStep>,
-    /// Step ids that must complete before this one runs. Combines the
-    /// explicit `dependsOn` list with the implicit dependencies Arazzo
-    /// 1.1 §5.8.5.2.4 requires: a step that reads
-    /// `$steps.<id>.outputs.<name>` depends on `<id>`.
+    /// Step ids of the same workflow that must complete before this one
+    /// runs. Combines the explicit `dependsOn` list (bare ids and
+    /// `$workflows.<this>.steps.<id>`, normalized to `<id>`) with the
+    /// implicit dependencies Arazzo 1.1 §5.8.5.2.4 requires: a step that
+    /// reads `$steps.<id>.outputs.<name>` depends on `<id>`. Every id names
+    /// a step of the workflow (checked at compile time).
     pub depends_on: Vec<String>,
+    /// Steps of *other* workflows in this document that must have
+    /// completed (passed) before this one runs, from
+    /// `$workflows.<workflowId>.steps.<stepId>` `dependsOn` entries. Their
+    /// workflows are added to [`WfPlan::depends_on`] so they run first.
+    pub workflow_depends_on: Vec<WorkflowStepRef>,
+    /// Pause after this step from the `x-suspect-think` extension.
+    pub think: Option<ThinkSpec>,
 }
 
 /// Arazzo 1.1 AsyncAPI message step: `action: send` or `action: receive`
@@ -343,7 +403,9 @@ impl CriterionKind {
 /// # Errors
 /// Returns a [`CompileError`] when a workflow/step lacks its id, a source
 /// description matches no loaded document, or an operation reference cannot
-/// be resolved or a criterion/parameter expression cannot be parsed.
+/// be resolved, a criterion/parameter expression cannot be parsed, or a
+/// `dependsOn` entry (workflow or step level) cannot be resolved or forms
+/// a workflow dependency cycle.
 pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, CompileError> {
     let doc = ArazzoDoc::new(arazzo);
     let sources = SourceIndex::load(&doc, arazzo.uri(), ws)?;
@@ -356,8 +418,18 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
         }
         let inputs = workflow_inputs(wf);
         let mut steps = Vec::with_capacity(wf.steps().len());
+        let mut implied_workflows: Vec<String> = Vec::new();
         for step in wf.steps() {
-            steps.push(compile_step(step, &sources)?);
+            let mut compiled = compile_step(step, &sources)?;
+            let (local, foreign) = step_dependencies(&doc, wf, step)?;
+            compiled.depends_on = local;
+            for dependency in &foreign {
+                if !implied_workflows.contains(&dependency.workflow) {
+                    implied_workflows.push(dependency.workflow.clone());
+                }
+            }
+            compiled.workflow_depends_on = foreign;
+            steps.push(compiled);
         }
         for (_, _, uri) in &sources.specs {
             if let Some(handle) = sources.ws.get(uri)
@@ -397,17 +469,108 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
             }
         }
 
+        // Local workflow ids only: a `$sourceDescriptions.<name>.<id>`
+        // entry names a workflow in another Arazzo document, which this
+        // plan does not execute (the validator checks that reference).
+        let mut depends_on: Vec<String> = wf
+            .depends_on()
+            .into_iter()
+            .filter(|dep| !dep.starts_with('$'))
+            .map(str::to_owned)
+            .collect();
+        for workflow in implied_workflows {
+            if !depends_on.contains(&workflow) {
+                depends_on.push(workflow);
+            }
+        }
+
+        let mut outputs = Vec::new();
+        for (name, node) in wf.outputs() {
+            outputs.push((name.to_owned(), rex_of_node(node)?));
+        }
+
         workflows.push(WfPlan {
             workflow_id: wf.workflow_id.to_owned(),
             inputs,
             input_defaults,
             steps,
+            depends_on,
+            outputs,
         });
     }
+    check_dependencies(&workflows)?;
     Ok(Plan {
         workflows,
         components,
     })
+}
+
+/// Rejects `dependsOn` references to unknown workflows and dependency
+/// cycles, so executors can schedule prerequisites without re-validating.
+fn check_dependencies(workflows: &[WfPlan]) -> Result<(), CompileError> {
+    for wf in workflows {
+        for dep in &wf.depends_on {
+            if dep == &wf.workflow_id {
+                return Err(CompileError(format!(
+                    "workflow '{}' depends on itself",
+                    wf.workflow_id
+                )));
+            }
+            if !workflows.iter().any(|w| &w.workflow_id == dep) {
+                return Err(CompileError(format!(
+                    "workflow '{}': dependsOn '{dep}' matches no workflow",
+                    wf.workflow_id
+                )));
+            }
+        }
+    }
+    dependency_waves(workflows).map(|_| ())
+}
+
+/// Groups workflows into execution waves: every workflow in wave `n` depends
+/// only on workflows in earlier waves. Workflows without dependencies form
+/// wave 0.
+///
+/// # Errors
+/// Returns a [`CompileError`] naming a workflow on a dependency cycle.
+pub fn dependency_waves(workflows: &[WfPlan]) -> Result<Vec<Vec<usize>>, CompileError> {
+    let mut placed: Vec<Option<usize>> = vec![None; workflows.len()];
+    let mut waves: Vec<Vec<usize>> = Vec::new();
+    let mut remaining = workflows.len();
+    while remaining > 0 {
+        let mut wave = Vec::new();
+        for (idx, wf) in workflows.iter().enumerate() {
+            if placed[idx].is_some() {
+                continue;
+            }
+            let ready = wf.depends_on.iter().all(|dep| {
+                workflows
+                    .iter()
+                    .position(|w| &w.workflow_id == dep)
+                    .is_none_or(|d| placed[d].is_some())
+            });
+            if ready {
+                wave.push(idx);
+            }
+        }
+        if wave.is_empty() {
+            let stuck = workflows
+                .iter()
+                .enumerate()
+                .find(|(i, _)| placed[*i].is_none())
+                .map(|(_, w)| w.workflow_id.as_str())
+                .unwrap_or("?");
+            return Err(CompileError(format!(
+                "workflow '{stuck}' is part of a dependsOn cycle"
+            )));
+        }
+        for &idx in &wave {
+            placed[idx] = Some(waves.len());
+        }
+        remaining -= wave.len();
+        waves.push(wave);
+    }
+    Ok(waves)
 }
 
 /// Maps `sourceDescriptions` names to IR snapshots of their documents.
@@ -657,9 +820,85 @@ fn workflow_inputs(
 }
 
 /// The steps that must run before `step`: its declared `dependsOn` plus
-/// every step whose outputs it reads.
-pub fn step_dependencies(step: &StepView<'_>) -> Vec<String> {
-    let mut dependencies: Vec<String> = step.depends_on().into_iter().map(str::to_owned).collect();
+/// every step whose outputs it reads (Arazzo 1.1 §5.8.5.2.4), split into
+/// steps of `wf` (by id) and steps of other workflows of `doc`.
+///
+/// Per the Step Object, an entry is a bare `stepId` of the current
+/// workflow, `$workflows.<workflowId>.steps.<stepId>` for a workflow of
+/// this document (normalized to a bare id when it names `wf` itself), or
+/// `$sourceDescriptions.<name>.<workflowId>.steps.<stepId>` for another
+/// Arazzo document. That last form is dropped, like a cross-document
+/// workflow `dependsOn`: this plan never executes other documents.
+///
+/// # Errors
+/// A [`CompileError`] naming the workflow and step when an entry is
+/// malformed, names the step itself, or names a workflow or step that
+/// does not exist, since such a step could never become ready.
+fn step_dependencies(
+    doc: &ArazzoDoc<'_>,
+    wf: &WorkflowView<'_>,
+    step: &StepView<'_>,
+) -> Result<(Vec<String>, Vec<WorkflowStepRef>), CompileError> {
+    let located = |message: String| {
+        CompileError(format!(
+            "workflow '{}', step '{}': {message}",
+            wf.workflow_id, step.step_id
+        ))
+    };
+    let has_step = |workflow: &WorkflowView<'_>, id: &str| {
+        workflow
+            .steps()
+            .iter()
+            .any(|candidate| candidate.step_id == id)
+    };
+    let mut local: Vec<String> = Vec::new();
+    let mut foreign: Vec<WorkflowStepRef> = Vec::new();
+    for (entry, dependency) in step.depends_on().into_iter().zip(step.dependencies()) {
+        let id = match dependency {
+            StepDependency::Local(id) => id,
+            StepDependency::Workflow { workflow, step: id } if workflow == wf.workflow_id => id,
+            StepDependency::Workflow { workflow, step: id } => {
+                let Some(other) = doc.workflows().iter().find(|w| w.workflow_id == workflow) else {
+                    return Err(located(format!("dependsOn '{entry}' matches no workflow")));
+                };
+                if !has_step(other, id) {
+                    return Err(located(format!(
+                        "dependsOn '{entry}' matches no step of workflow '{workflow}'"
+                    )));
+                }
+                let reference = WorkflowStepRef {
+                    workflow: workflow.to_owned(),
+                    step: id.to_owned(),
+                };
+                if !foreign.contains(&reference) {
+                    foreign.push(reference);
+                }
+                continue;
+            }
+            StepDependency::Source { .. } => continue,
+            StepDependency::Invalid(_) => {
+                return Err(located(format!(
+                    "dependsOn '{entry}' is not a stepId, $workflows.<workflowId>.steps.<stepId>, \
+                     or $sourceDescriptions.<name>.<workflowId>.steps.<stepId>"
+                )));
+            }
+        };
+        if id == step.step_id {
+            return Err(located(format!(
+                "dependsOn '{entry}' names the step itself"
+            )));
+        }
+        if !has_step(wf, id) {
+            return Err(located(format!(
+                "dependsOn '{entry}' matches no step of workflow '{}'",
+                wf.workflow_id
+            )));
+        }
+        if !local.iter().any(|known| known == id) {
+            local.push(id.to_owned());
+        }
+    }
+
     let mut expressions: Vec<String> = Vec::new();
     for parameter in step.parameters() {
         if let Some(value) = parameter.value().and_then(|node| node.as_str()) {
@@ -687,12 +926,23 @@ pub fn step_dependencies(step: &StepView<'_>) -> Vec<String> {
             if step_id.is_empty() {
                 break;
             }
-            if !dependencies.contains(&step_id) {
-                dependencies.push(step_id);
+            // A step reading its own captured outputs is not an ordering
+            // constraint.
+            if step_id == step.step_id {
+                continue;
+            }
+            if !has_step(wf, &step_id) {
+                return Err(located(format!(
+                    "reads '$steps.{step_id}', which matches no step of workflow '{}'",
+                    wf.workflow_id
+                )));
+            }
+            if !local.contains(&step_id) {
+                local.push(step_id);
             }
         }
     }
-    dependencies
+    Ok((local, foreign))
 }
 
 /// Compiles an Arazzo 1.1 AsyncAPI step into a [`MessageStep`], or
@@ -772,9 +1022,29 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
     for p in step.parameters() {
         parameters.push(compile_param(&step_id, p)?);
     }
-    let request_body = match step.request_body() {
-        Some(node) => Some(rex_of_node(node)?),
-        None => None,
+    // Arazzo wraps the body as `{contentType, payload, replacements}`; a
+    // bare value is accepted leniently as the payload itself.
+    let (request_body, request_content_type) = match step.request_body() {
+        Some(node) => {
+            let content_type = node
+                .get("contentType")
+                .and_then(|n| n.as_str())
+                .map(str::to_owned);
+            let payload = node.get("payload");
+            let is_wrapper = node.kind() == ValueKind::Object
+                && (payload.is_some() || content_type.is_some())
+                && node
+                    .entries()
+                    .iter()
+                    .all(|e| matches!(e.key, "contentType" | "payload" | "replacements"));
+            let body = match (is_wrapper, payload) {
+                (true, Some(p)) => Some(rex_of_node(p)?),
+                (true, None) => None,
+                (false, _) => Some(rex_of_node(node)?),
+            };
+            (body, content_type)
+        }
+        None => (None, None),
     };
 
     let mut success = Vec::new();
@@ -825,13 +1095,30 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
             }
         });
 
+    let think = match step.node().get("x-suspect-think") {
+        None => None,
+        Some(node) => {
+            let text = match node.as_str() {
+                Some(s) => s.to_owned(),
+                None => String::from_utf8_lossy(node.raw_text()).trim().to_owned(),
+            };
+            Some(
+                ThinkSpec::parse(&text)
+                    .map_err(|e| CompileError(format!("step '{step_id}': x-suspect-think: {e}")))?,
+            )
+        }
+    };
+
     Ok(StepPlan {
         step_id,
         operation,
         parameters,
         request_body,
+        request_content_type,
         message,
-        depends_on: step_dependencies(step),
+        // Resolved against the enclosing workflow by `compile_plan`.
+        depends_on: Vec::new(),
+        workflow_depends_on: Vec::new(),
         timeout_ms: step.timeout_ms(),
         success,
         outputs,
@@ -839,6 +1126,7 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         failure_goto,
         security,
         response_schemas,
+        think,
     })
 }
 

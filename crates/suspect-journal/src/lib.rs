@@ -143,6 +143,23 @@ pub struct RunSummaryRecord {
     pub duration_ms: f64,
 }
 
+/// Periodic load-test metrics snapshot (`suspect load`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadSnapshotRecord {
+    /// Unix epoch milliseconds.
+    pub ts_ms: u64,
+    /// Zero-based interval index.
+    pub index: usize,
+    /// Active phase label.
+    pub phase: String,
+    /// Seconds since the run started.
+    pub at_s: f64,
+    /// Metrics for this interval only (`MetricsSnapshot` JSON).
+    pub interval: serde_json::Value,
+    /// Metrics since the run started (`MetricsSnapshot` JSON).
+    pub cumulative: serde_json::Value,
+}
+
 /// Everything a journal can emit.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -155,6 +172,8 @@ pub enum Record {
     Traffic(TrafficRecord),
     /// End-of-run rollup.
     RunSummary(RunSummaryRecord),
+    /// Load-test interval snapshot.
+    LoadSnapshot(LoadSnapshotRecord),
 }
 
 /// Destination for journal lines.
@@ -398,7 +417,7 @@ impl Journal {
             }
             Record::Log(l) => self.redactor.json_value(&mut l.fields),
             Record::Meta(m) => self.redactor.json_value(&mut m.fields),
-            Record::RunSummary(_) => {}
+            Record::RunSummary(_) | Record::LoadSnapshot(_) => {}
         }
         self.seq += 1;
         let line = serde_json::to_string(&record).expect("record serializes");

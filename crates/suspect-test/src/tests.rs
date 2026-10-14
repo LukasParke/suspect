@@ -18,7 +18,7 @@ use suspect_source::Source;
 use std::collections::BTreeMap;
 use suspect_ir::{Method, ParamIn};
 
-const OAS: &str = r#"
+pub(crate) const OAS: &str = r#"
 openapi: 3.1.0
 info:
   title: Petstore
@@ -115,7 +115,7 @@ fn arazzo_doc() -> LowDoc {
 }
 
 /// Builds a workspace containing only `spec.yaml` and returns it shared.
-fn workspace() -> Arc<suspect_ref::Workspace> {
+pub(crate) fn workspace() -> Arc<suspect_ref::Workspace> {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("spec.yaml"), OAS).expect("write spec");
     let ws = WorkspaceBuilder::new()
@@ -128,7 +128,7 @@ fn workspace() -> Arc<suspect_ref::Workspace> {
     Arc::new(ws)
 }
 
-fn compile_fixture() -> crate::plan::Plan {
+pub(crate) fn compile_fixture() -> crate::plan::Plan {
     let ws = workspace();
     compile_plan(&arazzo_doc(), &ws).expect("compiles")
 }
@@ -243,7 +243,7 @@ workflows:
     );
 }
 
-fn canned_fixture_http() -> CannedTransport {
+pub(crate) fn canned_fixture_http() -> CannedTransport {
     let body = |s: &str| Bytes::from(s.to_owned());
     CannedTransport::new()
         .route(
@@ -371,6 +371,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     },
                     parameters: Vec::new(),
                     request_body: None,
+                    request_content_type: None,
                     success: vec![CriterionPlan {
                         kind: CriterionKind::StatusInRange(2, 2),
                         range: 0..0,
@@ -381,8 +382,10 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     timeout_ms: None,
                     message: None,
                     depends_on: Vec::new(),
+                    workflow_depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
+                    think: None,
                 },
                 crate::plan::StepPlan {
                     step_id: "never-runs".to_owned(),
@@ -392,6 +395,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     },
                     parameters: Vec::new(),
                     request_body: None,
+                    request_content_type: None,
                     success: Vec::new(),
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
@@ -399,10 +403,14 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     timeout_ms: None,
                     message: None,
                     depends_on: Vec::new(),
+                    workflow_depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
+                    think: None,
                 },
             ],
+            depends_on: Vec::new(),
+            outputs: Vec::new(),
         }],
     };
     let http = CannedTransport::new().route(
@@ -1204,7 +1212,8 @@ workflows:
         summary.passed == 0,
         "a cyclic graph runs nothing: {summary:?}"
     );
-    assert!(!summary.passed > 0);
+    // The blocked graph must fail the run, not pass as "0 failed".
+    assert_eq!((summary.failed, summary.skipped), (1, 1), "{summary:?}");
     let mut diagnosed = false;
     while let Ok(event) = rx.try_recv() {
         if let crate::exec::TestEvent::CriterionFail { crit, actual, .. } = event
@@ -1734,4 +1743,874 @@ fn ordered_comparisons_compile_and_classify() {
         &crit,
         crate::plan::CriterionKind::Equals { pointer, .. } if pointer.as_deref() == Some("/a>b")
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Executor seams (observer, owned runs, inputs, dependsOn, think, errors)
+// ---------------------------------------------------------------------------
+
+use crate::exec::{
+    ErrorClass, ExecObserver, NullObserver, RunOpts, StepCx, StepSample, StepVerdict, ThinkPolicy,
+    TransportError, VuId, WfOutcome, run_plan_observed, run_workflow_owned,
+};
+use crate::plan::ThinkSpec;
+use crate::transports::DelayTransport;
+use std::sync::Mutex;
+use std::time::Duration;
+
+/// Golden for the classic event stream: the exact sequence of event kinds a
+/// single-workflow run produces. Guards the `EventObserver` refactor —
+/// editors parse this stream.
+#[tokio::test(flavor = "multi_thread")]
+async fn event_stream_order_is_stable() {
+    let mut plan = compile_fixture();
+    plan.workflows
+        .retain(|wf| wf.workflow_id == "create-and-fetch");
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let _ = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let kinds: Vec<&str> = drain(rx)
+        .await
+        .iter()
+        .map(|ev| match ev {
+            TestEvent::WfStarted { .. } => "wf_started",
+            TestEvent::StepStarted { .. } => "step_started",
+            TestEvent::RequestSent { .. } => "request_sent",
+            TestEvent::ResponseGot { .. } => "response_got",
+            TestEvent::ResponseValidated { .. } => "response_validated",
+            TestEvent::CriterionOk { .. } => "criterion_ok",
+            TestEvent::CriterionFail { .. } => "criterion_fail",
+            TestEvent::OutputSet { .. } => "output_set",
+            TestEvent::WfDone { .. } => "wf_done",
+            TestEvent::RunDone { .. } => "run_done",
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            "wf_started",
+            "step_started",
+            "request_sent",
+            "response_got",
+            "criterion_ok",
+            "output_set",
+            "step_started",
+            "request_sent",
+            "response_got",
+            "criterion_ok",
+            "criterion_ok",
+            "wf_done",
+            "run_done",
+        ]
+    );
+}
+
+/// Observer that records step samples and workflow outcomes only.
+#[derive(Default)]
+struct Recorder {
+    samples: Mutex<Vec<(String, VuId, StepSample)>>,
+    done: Mutex<Vec<(String, VuId, WfOutcome)>>,
+}
+
+#[async_trait::async_trait]
+impl ExecObserver for Recorder {
+    async fn on_step_done(&self, cx: &StepCx<'_>, sample: &StepSample) {
+        self.samples
+            .lock()
+            .unwrap()
+            .push((cx.step.to_owned(), cx.vu, sample.clone()));
+    }
+    async fn on_workflow_done(&self, wf: &crate::plan::WfPlan, vu: VuId, outcome: &WfOutcome) {
+        self.done
+            .lock()
+            .unwrap()
+            .push((wf.workflow_id.clone(), vu, outcome.clone()));
+    }
+}
+
+/// Owned runs are `'static`: many virtual users spawn over one shared plan,
+/// each with its own inputs, and the observer sees per-VU samples.
+#[tokio::test(flavor = "multi_thread")]
+async fn owned_workflow_runs_spawn_with_per_vu_inputs() {
+    let plan = Arc::new(compile_fixture());
+    let wf_index = plan
+        .workflows
+        .iter()
+        .position(|wf| wf.workflow_id == "cleanup-user")
+        .unwrap();
+    let http: Arc<dyn HttpClient> = Arc::new(
+        CannedTransport::new()
+            .route(
+                Match {
+                    method: Some("DELETE".to_owned()),
+                    path_suffix: "/users/alice".to_owned(),
+                },
+                HttpResponse {
+                    status: 204,
+                    ..Default::default()
+                },
+            )
+            .route(
+                Match {
+                    method: Some("DELETE".to_owned()),
+                    path_suffix: "/users/bob".to_owned(),
+                },
+                HttpResponse {
+                    status: 204,
+                    ..Default::default()
+                },
+            ),
+    );
+    let recorder = Arc::new(Recorder::default());
+    let observer: Arc<dyn ExecObserver> = recorder.clone();
+
+    let mut set = tokio::task::JoinSet::new();
+    for (vu, name) in [(1u64, "alice"), (2u64, "bob"), (3u64, "carol")] {
+        let mut opts = RunOpts::new("http://api.test/");
+        opts.vu = VuId(vu);
+        // Overrides the Arazzo `parameters` value (`world`).
+        opts.inputs
+            .insert("userName".to_owned(), serde_json::json!(name));
+        set.spawn(run_workflow_owned(
+            Arc::clone(&plan),
+            wf_index,
+            opts,
+            Arc::clone(&http),
+            Arc::clone(&observer),
+        ));
+    }
+    let mut outcomes = Vec::new();
+    while let Some(res) = set.join_next().await {
+        outcomes.push(res.unwrap());
+    }
+    assert_eq!(outcomes.iter().filter(|o| o.ok).count(), 2);
+    assert_eq!(
+        outcomes.iter().filter(|o| !o.ok).count(),
+        1,
+        "carol has no route"
+    );
+
+    let samples = recorder.samples.lock().unwrap();
+    assert_eq!(samples.len(), 3);
+    let carol = samples.iter().find(|(_, vu, _)| *vu == VuId(3)).unwrap();
+    assert_eq!(carol.2.status, None);
+    assert!(matches!(
+        carol.2.verdict,
+        StepVerdict::Transport(ErrorClass::Other)
+    ));
+    assert!(
+        samples
+            .iter()
+            .filter(|(_, vu, _)| *vu != VuId(3))
+            .all(|(_, _, s)| s.ok() && s.status == Some(204))
+    );
+}
+
+pub(crate) const DEPENDS_ARAZZO: &str = r#"
+arazzo: 1.0.0
+info: { title: deps, version: "1" }
+sourceDescriptions:
+  - name: petstore
+    url: spec.yaml
+workflows:
+  - workflowId: use-pet
+    dependsOn: [seed]
+    steps:
+      - stepId: fetch
+        operationId: showPetById
+        parameters:
+          - name: petId
+            in: path
+            value: $workflows.seed.outputs.createdId
+          - name: via
+            in: query
+            value: $workflows.seed.steps.make.outputs.petId
+  - workflowId: seed
+    steps:
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        outputs:
+          petId: $response.body#/id
+    outputs:
+      createdId: $steps.make.outputs.petId
+"#;
+
+/// A cross-document `dependsOn` (`$sourceDescriptions.<name>.<id>`) is a
+/// valid Arazzo reference this plan cannot schedule; it must not fail
+/// compilation, while an unknown local id still does.
+#[test]
+fn cross_document_depends_on_compiles_and_unknown_local_fails() {
+    let ws = workspace();
+    let compile = |depends: &str| {
+        let text = format!(
+            "arazzo: 1.0.0\ninfo: {{ title: x, version: '1' }}\nsourceDescriptions:\n  - {{ name: petstore, url: spec.yaml }}\n  - {{ name: other, url: other.arazzo.yaml, type: arazzo }}\nworkflows:\n  - workflowId: w\n    dependsOn: [{depends}]\n    steps:\n      - {{ stepId: s, operationId: listPets }}\n"
+        );
+        let doc = LowDoc::parse(
+            "mem://cross.arazzo.yaml".into(),
+            Source::from_vec(text.into_bytes()),
+        );
+        compile_plan(&doc, &ws)
+    };
+    let plan = compile("'$sourceDescriptions.other.setup'").expect("compiles");
+    assert!(plan.workflows[0].depends_on.is_empty());
+    let err = compile("ghost").expect_err("unknown local workflow");
+    assert!(err.0.contains("ghost"), "{err}");
+}
+
+/// `dependsOn` schedules `seed` before `use-pet` even though it is declared
+/// second, and both `$workflows.<id>.outputs.*` and
+/// `$workflows.<id>.steps.<step>.outputs.*` resolve in the dependent.
+#[tokio::test(flavor = "multi_thread")]
+async fn depends_on_runs_prerequisites_and_exposes_outputs() {
+    let ws = workspace();
+    let doc = LowDoc::parse(
+        "mem://deps.arazzo.yaml".into(),
+        Source::from_vec(DEPENDS_ARAZZO.as_bytes().to_vec()),
+    );
+    let plan = compile_plan(&doc, &ws).expect("compiles");
+    assert_eq!(
+        crate::plan::dependency_waves(&plan.workflows).unwrap(),
+        vec![vec![1], vec![0]]
+    );
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (2, 0), "{events:#?}");
+
+    let started: Vec<&str> = events
+        .iter()
+        .filter_map(|ev| match ev {
+            TestEvent::WfStarted { id } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(started, vec!["seed", "use-pet"]);
+    assert!(events.iter().any(|ev| matches!(
+        ev,
+        TestEvent::RequestSent { url, .. } if url.ends_with("/pets/7?via=7")
+    )));
+}
+
+#[test]
+fn depends_on_rejects_unknown_targets_and_cycles() {
+    let ws = workspace();
+    let unknown = DEPENDS_ARAZZO.replace("dependsOn: [seed]", "dependsOn: [ghost]");
+    let doc = LowDoc::parse(
+        "mem://x.arazzo.yaml".into(),
+        Source::from_vec(unknown.into_bytes()),
+    );
+    let err = compile_plan(&doc, &ws).expect_err("unknown dep");
+    assert!(err.to_string().contains("ghost"), "{err}");
+
+    let cyclic = DEPENDS_ARAZZO.replace(
+        "  - workflowId: seed\n",
+        "  - workflowId: seed\n    dependsOn: [use-pet]\n",
+    );
+    let doc = LowDoc::parse(
+        "mem://y.arazzo.yaml".into(),
+        Source::from_vec(cyclic.into_bytes()),
+    );
+    let err = compile_plan(&doc, &ws).expect_err("cycle");
+    assert!(err.to_string().contains("cycle"), "{err}");
+}
+
+const THINK_ARAZZO: &str = r#"
+arazzo: 1.0.0
+info: { title: think, version: "1" }
+sourceDescriptions:
+  - name: petstore
+    url: spec.yaml
+workflows:
+  - workflowId: slow
+    steps:
+      - stepId: first
+        operationId: listPets
+        x-suspect-think: 2s
+      - stepId: second
+        operationId: listPets
+        x-suspect-think: 10s
+"#;
+
+/// Think time is compiled from `x-suspect-think`, ignored by default, and
+/// honoured (after non-final steps only) under `ThinkPolicy::Honour`.
+#[tokio::test(start_paused = true)]
+async fn think_time_is_ignored_by_default_and_honoured_on_request() {
+    let ws = workspace();
+    let doc = LowDoc::parse(
+        "mem://think.arazzo.yaml".into(),
+        Source::from_vec(THINK_ARAZZO.as_bytes().to_vec()),
+    );
+    let plan = compile_plan(&doc, &ws).expect("compiles");
+    assert_eq!(
+        plan.workflows[0].steps[0].think,
+        Some(ThinkSpec::fixed(Duration::from_secs(2)))
+    );
+    let http = CannedTransport::new().route(
+        Match {
+            method: None,
+            path_suffix: "/pets".to_owned(),
+        },
+        HttpResponse {
+            status: 200,
+            ..Default::default()
+        },
+    );
+
+    let t0 = tokio::time::Instant::now();
+    let summary = run_plan_observed(
+        &plan,
+        &RunOpts::new("http://api.test"),
+        &http,
+        &NullObserver,
+    )
+    .await;
+    assert_eq!(summary.passed, 2);
+    assert_eq!(t0.elapsed(), Duration::ZERO, "ignore policy never sleeps");
+
+    let t1 = tokio::time::Instant::now();
+    let mut honour = RunOpts::new("http://api.test");
+    honour.think = ThinkPolicy::Honour { default: None };
+    let summary = run_plan_observed(&plan, &honour, &http, &NullObserver).await;
+    assert_eq!(summary.passed, 2);
+    // Only the first step's 2s pause applies: the final step never thinks.
+    assert_eq!(t1.elapsed(), Duration::from_secs(2));
+}
+
+#[tokio::test(start_paused = true)]
+async fn delay_transport_sleeps_on_virtual_clock() {
+    let inner = CannedTransport::new().route(
+        Match {
+            method: None,
+            path_suffix: "/pets".to_owned(),
+        },
+        HttpResponse {
+            status: 200,
+            ..Default::default()
+        },
+    );
+    let delayed = DelayTransport::new(inner, Duration::from_millis(300));
+    let t0 = tokio::time::Instant::now();
+    let resp = delayed
+        .execute(HttpRequest {
+            method: "GET".into(),
+            url: "http://x/pets".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(resp.status, 200);
+    assert_eq!(t0.elapsed(), Duration::from_millis(300));
+    assert_eq!(delayed.calls(), 1);
+}
+
+#[test]
+fn transport_errors_classify_by_prefix_then_heuristics() {
+    assert_eq!(
+        TransportError::classified(ErrorClass::Timeout, "deadline").class(),
+        ErrorClass::Timeout
+    );
+    assert_eq!(
+        TransportError("operation timed out".into()).class(),
+        ErrorClass::Timeout
+    );
+    assert_eq!(
+        TransportError("connection refused (os error 61)".into()).class(),
+        ErrorClass::Connect
+    );
+    assert_eq!(
+        TransportError("invalid peer certificate".into()).class(),
+        ErrorClass::Tls
+    );
+    assert_eq!(
+        TransportError("connection reset by peer".into()).class(),
+        ErrorClass::Reset
+    );
+    assert_eq!(
+        TransportError("no canned response for GET /x".into()).class(),
+        ErrorClass::Other
+    );
+}
+
+#[test]
+fn rex_parses_workflow_output_expressions() {
+    use suspect_rex::parse_rex;
+    assert_eq!(
+        parse_rex("$workflows.seed.outputs.token").unwrap(),
+        Rex::Workflows {
+            workflow: "seed".into(),
+            step: None,
+            outputs_key: "token".into()
+        }
+    );
+    assert_eq!(
+        parse_rex("$workflows.seed.steps.login.outputs.token").unwrap(),
+        Rex::Workflows {
+            workflow: "seed".into(),
+            step: Some("login".into()),
+            outputs_key: "token".into()
+        }
+    );
+    assert!(parse_rex("$workflows.seed").is_err());
+    assert!(parse_rex("$workflows.seed.outputs.").is_err());
+    assert!(parse_rex("$workflows.seed.inputs.x").is_err());
+}
+
+const BODY_ARAZZO: &str = r#"
+arazzo: 1.0.0
+info: { title: body, version: "1" }
+sourceDescriptions:
+  - name: petstore
+    url: spec.yaml
+workflows:
+  - workflowId: typed-body
+    inputs:
+      type: object
+      properties:
+        qty: { type: integer, default: 3 }
+    parameters:
+      - name: owner
+        value: ada
+    steps:
+      - stepId: create
+        operationId: createPet
+        requestBody:
+          contentType: application/vnd.pet+json
+          payload:
+            name: "pet of {$inputs.owner}"
+            qty: $inputs.qty
+            tags: ["${$inputs.owner}", literal]
+            note: "price is $5"
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+"#;
+
+/// Spec-form `requestBody.payload` is unwrapped, `contentType` is sent,
+/// whole-leaf expressions keep their JSON type and embedded expressions
+/// (both `{$x}` and `${$x}` spellings) render as text. A lone `$` that is
+/// not an expression is left alone.
+#[tokio::test(flavor = "multi_thread")]
+async fn request_body_payload_resolves_runtime_expressions() {
+    let ws = workspace();
+    let doc = LowDoc::parse(
+        "mem://body.arazzo.yaml".into(),
+        Source::from_vec(BODY_ARAZZO.as_bytes().to_vec()),
+    );
+    let plan = compile_plan(&doc, &ws).expect("compiles");
+    assert_eq!(
+        plan.workflows[0].steps[0].request_content_type.as_deref(),
+        Some("application/vnd.pet+json")
+    );
+
+    struct Capture(Mutex<Vec<HttpRequest>>);
+    #[async_trait::async_trait]
+    impl HttpClient for Capture {
+        async fn execute(&self, req: HttpRequest) -> Result<HttpResponse, TransportError> {
+            self.0.lock().unwrap().push(req);
+            Ok(HttpResponse {
+                status: 201,
+                ..Default::default()
+            })
+        }
+    }
+    let http = Capture(Mutex::new(Vec::new()));
+    let mut opts = RunOpts::new("http://api.test");
+    opts.inputs.insert("qty".into(), serde_json::json!(9));
+    let summary = run_plan_observed(&plan, &opts, &http, &NullObserver).await;
+    assert_eq!(summary.passed, 1);
+
+    let reqs = http.0.lock().unwrap();
+    let req = &reqs[0];
+    assert!(
+        req.headers
+            .iter()
+            .any(|(k, v)| k == "content-type" && v == "application/vnd.pet+json")
+    );
+    let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "name": "pet of ada",
+            "qty": 9,
+            "tags": ["ada", "literal"],
+            "note": "price is $5"
+        })
+    );
+}
+
+// ------------------------------- step dependsOn: qualified and cross-workflow
+
+/// Compiles an inline Arazzo 1.1 document against the petstore fixture.
+fn compile_text(text: &str) -> Result<crate::plan::Plan, CompileError> {
+    let doc = LowDoc::parse(
+        "mem://steps.arazzo.yaml".into(),
+        Source::from_vec(text.as_bytes().to_vec()),
+    );
+    compile_plan(&doc, &workspace())
+}
+
+/// Step `b` of workflow `w` depends on `a` through the spec's qualified
+/// form; `c` is independent and declared last.
+const QUALIFIED_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Qualified, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: a
+        operationId: createPet
+        requestBody: { name: Rex }
+      - stepId: b
+        operationId: listPets
+        dependsOn: ['$workflows.w.steps.a']
+      - stepId: c
+        operationId: listPets
+"#;
+
+fn started_steps(events: &[TestEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            TestEvent::StepStarted { step, .. } => Some(step.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `$workflows.<this>.steps.<id>` is the current workflow's step `<id>`:
+/// `b` runs right after `a`, in document order, and the run passes.
+/// Before the fix the entry stayed unresolved, so `b` never ran: `c` ran
+/// first, then `b` was reported blocked and counted *skipped*, leaving
+/// `0 failed` and a green exit code.
+#[tokio::test(flavor = "multi_thread")]
+async fn qualified_same_workflow_depends_on_runs_the_step() {
+    let plan = compile_text(QUALIFIED_ARAZZO).expect("compiles");
+    let b = &plan.workflows[0].steps[1];
+    assert_eq!(b.depends_on, vec!["a".to_owned()]);
+    assert!(b.workflow_depends_on.is_empty());
+    assert!(plan.workflows[0].depends_on.is_empty());
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &OrderRecorder::default(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!(
+        (summary.passed, summary.failed, summary.skipped),
+        (3, 0, 0),
+        "{events:#?}"
+    );
+    assert_eq!(started_steps(&events), vec!["a", "b", "c"]);
+}
+
+/// `fetch` (declared in the first workflow) waits on a step of `seed`.
+const CROSS_STEP_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Cross, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: use-pet
+    steps:
+      - stepId: fetch
+        operationId: showPetById
+        dependsOn: ['$workflows.seed.steps.make']
+        parameters:
+          - name: petId
+            in: path
+            value: $workflows.seed.steps.make.outputs.petId
+  - workflowId: seed
+    steps:
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        outputs:
+          petId: $response.body#/id
+"#;
+
+/// Arazzo 1.1 Step Object: a step of a different workflow is referenced as
+/// `$workflows.<workflowId>.steps.<stepId>` and MUST complete first. The
+/// plan orders `seed` before `use-pet` (implied workflow dependency) and
+/// the dependent step reads the prerequisite step's outputs.
+#[tokio::test(flavor = "multi_thread")]
+async fn cross_workflow_step_depends_on_orders_the_workflows() {
+    let plan = compile_text(CROSS_STEP_ARAZZO).expect("compiles");
+    assert_eq!(plan.workflows[0].depends_on, vec!["seed".to_owned()]);
+    assert_eq!(
+        plan.workflows[0].steps[0].workflow_depends_on,
+        vec![crate::plan::WorkflowStepRef {
+            workflow: "seed".to_owned(),
+            step: "make".to_owned(),
+        }]
+    );
+    assert!(plan.workflows[0].steps[0].depends_on.is_empty());
+    assert_eq!(
+        crate::plan::dependency_waves(&plan.workflows).unwrap(),
+        vec![vec![1], vec![0]]
+    );
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (2, 0), "{events:#?}");
+    assert_eq!(started_steps(&events), vec!["make", "fetch"]);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        TestEvent::RequestSent { url, .. } if url.ends_with("/pets/7")
+    )));
+}
+
+/// When the prerequisite step fails, or its workflow is not part of the
+/// run (`suspect test --workflow use-pet`), the dependent step can never
+/// become ready: it fails with a diagnosis naming the missing step instead
+/// of being skipped silently or hanging.
+#[tokio::test(flavor = "multi_thread")]
+async fn unmet_cross_workflow_step_dependency_fails_the_run() {
+    let assert_blocked = |summary: &RunSummary, events: &[TestEvent]| {
+        assert!(summary.failed >= 1, "{summary:?}");
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                TestEvent::CriterionFail { step, crit, actual, .. }
+                    if step == "fetch"
+                        && crit == "depends-on"
+                        && actual.contains("$workflows.seed.steps.make")
+            )),
+            "{events:#?}"
+        );
+        assert!(!started_steps(events).contains(&"fetch"));
+    };
+
+    // `make` answers 200 where its criterion wants 201.
+    let plan = compile_text(CROSS_STEP_ARAZZO).expect("compiles");
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &OrderRecorder::default(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (0, 2), "{events:#?}");
+    assert_blocked(&summary, &events);
+
+    // The prerequisite workflow was filtered out of the run.
+    let mut plan = compile_text(CROSS_STEP_ARAZZO).expect("compiles");
+    plan.workflows.retain(|wf| wf.workflow_id == "use-pet");
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (0, 1), "{events:#?}");
+    assert_blocked(&summary, &events);
+}
+
+/// A step that could never become ready is a compile error naming the
+/// workflow, the step, and the offending entry, like an unknown
+/// workflow-level `dependsOn`.
+#[test]
+fn unresolvable_step_dependencies_fail_compilation() {
+    let with_dep = |dep: &str| {
+        QUALIFIED_ARAZZO.replace(
+            "dependsOn: ['$workflows.w.steps.a']",
+            &format!("dependsOn: ['{dep}']"),
+        )
+    };
+    for (dep, needle) in [
+        ("ghost", "dependsOn 'ghost' matches no step of workflow 'w'"),
+        (
+            "$workflows.w.steps.ghost",
+            "dependsOn '$workflows.w.steps.ghost' matches no step of workflow 'w'",
+        ),
+        (
+            "$workflows.nowhere.steps.a",
+            "dependsOn '$workflows.nowhere.steps.a' matches no workflow",
+        ),
+        ("$workflows.w.steps.b", "names the step itself"),
+        ("b", "names the step itself"),
+        ("$workflows.w.a", "is not a stepId"),
+        ("$workflows.w.steps.a.outputs.x", "is not a stepId"),
+    ] {
+        let err = compile_text(&with_dep(dep)).expect_err(dep);
+        assert!(
+            err.0.starts_with("workflow 'w', step 'b': "),
+            "{dep}: {err}"
+        );
+        assert!(err.0.contains(needle), "{dep}: {err}");
+    }
+
+    let unknown_foreign_step = CROSS_STEP_ARAZZO.replace(
+        "dependsOn: ['$workflows.seed.steps.make']",
+        "dependsOn: ['$workflows.seed.steps.ghost']",
+    );
+    let err = compile_text(&unknown_foreign_step).expect_err("unknown step");
+    assert!(
+        err.0
+            .contains("'$workflows.seed.steps.ghost' matches no step of workflow 'seed'"),
+        "{err}"
+    );
+
+    // An implicit dependency must resolve too.
+    let implicit = QUALIFIED_ARAZZO.replace(
+        "      - stepId: c\n        operationId: listPets\n",
+        "      - stepId: c\n        operationId: listPets\n        parameters:\n          - {name: q, in: query, value: $steps.ghost.outputs.x}\n",
+    );
+    let err = compile_text(&implicit).expect_err("implicit unknown");
+    assert!(err.0.contains("step 'c': reads '$steps.ghost'"), "{err}");
+
+    // A cross-workflow step dependency orders workflows, so it closes a
+    // cycle with a workflow-level dependsOn pointing back.
+    let cyclic = CROSS_STEP_ARAZZO.replace(
+        "  - workflowId: seed\n",
+        "  - workflowId: seed\n    dependsOn: [use-pet]\n",
+    );
+    let err = compile_text(&cyclic).expect_err("cycle");
+    assert!(err.0.contains("cycle"), "{err}");
+}
+
+/// A step in another Arazzo document is a valid reference this plan never
+/// executes; like a cross-document workflow `dependsOn`, it compiles and
+/// does not block the step.
+#[test]
+fn cross_document_step_depends_on_compiles() {
+    let text = QUALIFIED_ARAZZO
+        .replace(
+            "  - {name: petstore, url: spec.yaml, type: openapi}\n",
+            "  - {name: petstore, url: spec.yaml, type: openapi}\n  - {name: other, url: other.arazzo.yaml, type: arazzo}\n",
+        )
+        .replace(
+            "dependsOn: ['$workflows.w.steps.a']",
+            "dependsOn: ['$sourceDescriptions.other.setup.steps.login', a]",
+        );
+    let plan = compile_text(&text).expect("compiles");
+    let b = &plan.workflows[0].steps[1];
+    assert_eq!(b.depends_on, vec!["a".to_owned()]);
+    assert!(b.workflow_depends_on.is_empty());
+}
+
+/// `createPet` fails (500) on its first call and passes (201) after.
+#[derive(Default)]
+struct FailFirstCreate {
+    creates: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl HttpClient for FailFirstCreate {
+    async fn execute(
+        &self,
+        req: crate::exec::HttpRequest,
+    ) -> Result<crate::exec::HttpResponse, crate::exec::TransportError> {
+        let status = if req.method == "POST" {
+            let prior = self
+                .creates
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if prior == 0 { 500 } else { 201 }
+        } else {
+            200
+        };
+        Ok(crate::exec::HttpResponse {
+            status,
+            headers: Vec::new(),
+            body: Bytes::from_static(b"{}"),
+        })
+    }
+}
+
+/// `make` fails once and recovers by jumping back to `prepare`.
+const GOTO_RECOVERY_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Goto, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: prepare
+        operationId: listPets
+      - stepId: check
+        operationId: listPets
+        dependsOn: [prepare]
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        onFailure:
+          - {name: recover, type: goto, stepId: prepare}
+"#;
+
+/// Arazzo `goto` jumps to the target step and execution continues from
+/// there in order: `prepare` and its dependent `check` re-run against the
+/// fresh state, then the failed `make` is retried. Before the fix the
+/// re-run invalidated nothing (`check` kept its stale completion) and the
+/// failed step was dropped, so the recovery path never retried it.
+#[tokio::test(flavor = "multi_thread")]
+async fn on_failure_goto_reruns_from_the_target_step() {
+    let plan = compile_text(GOTO_RECOVERY_ARAZZO).expect("compiles");
+    assert_eq!(
+        plan.workflows[0].steps[2].failure_goto.as_deref(),
+        Some("prepare")
+    );
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_plan(&plan, "http://api.test", &FailFirstCreate::default(), tx),
+    )
+    .await
+    .expect("the run terminates");
+    let events = drain(rx).await;
+    assert_eq!(
+        started_steps(&events),
+        vec!["prepare", "check", "make", "prepare", "check", "make"],
+        "{events:#?}"
+    );
+    // The first `make` failure stays on the record; the re-runs replace,
+    // rather than add to, the earlier passes.
+    assert_eq!((summary.passed, summary.failed), (3, 1), "{events:#?}");
+}
+
+/// `make` always fails and its `onFailure` jumps back to itself.
+const GOTO_LOOP_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Loop, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        onFailure:
+          - {name: again, type: goto, stepId: make}
+"#;
+
+/// A `goto` cycle that never recovers ends after a bounded number of jumps
+/// with a diagnosis. Before the fix it re-sent the request forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn on_failure_goto_loops_are_bounded() {
+    let plan = compile_text(GOTO_LOOP_ARAZZO).expect("compiles");
+    let (tx, rx) = tokio::sync::mpsc::channel(4096);
+    let drained = tokio::spawn(drain(rx));
+    let summary = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_plan(&plan, "http://api.test", &OrderRecorder::default(), tx),
+    )
+    .await
+    .expect("a goto loop terminates");
+    let events = drained.await.expect("drain");
+    assert_eq!(
+        started_steps(&events).len(),
+        crate::exec::MAX_GOTO_JUMPS + 1,
+        "one initial attempt plus one per allowed jump"
+    );
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            TestEvent::CriterionFail { crit, .. } if crit == "on-failure-goto"
+        )),
+        "{events:#?}"
+    );
+    assert!(summary.failed >= 1);
 }

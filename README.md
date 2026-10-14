@@ -92,6 +92,7 @@ After applying, every `$ref` is rewritten:
 | `suspect-artifact` | Shared ownership-aware output, drift checks and changed-file writes |
 | `suspect-overlay` | Overlay 1.0 models + apply engine |
 | `suspect-arazzo` | Arazzo 1.0 models, runtime expressions, cross-ref validation |
+| `suspect-test` | Arazzo plan compiler, observable executor, load generator (profiles, scheduler, metrics, SLO gates), reporters |
 | `suspect-validate` | Source-located semantic checks with stable diagnostic codes |
 | `suspect-lint` | Spectral-compatible rulesets and builtin rules |
 | `suspect-lsp` | tower-lsp server: diagnostics, goto-def/references, hover, symbols, completion |
@@ -109,6 +110,8 @@ $ suspect diff old.yaml new.yaml
 $ suspect stats api.yaml
 $ suspect fmt api.yaml --json
 $ suspect bench fixture.yaml           # per-stage timings
+$ suspect test flows.arazzo.yaml --base-url http://localhost:8080 --input petName=Rex
+$ suspect load profile.load.yaml       # Artillery-style load test from Arazzo scenarios
 $ suspect lsp                          # stdio language server
 ```
 
@@ -136,6 +139,18 @@ For multi-target generation, watch and editor previews, use
 and generated interfaces with [`codegen-compare`](docs/SDK-COMPATIBILITY-REPORTS.md).
 Markdown and custom templates use `suspect gen api.yaml --preset docs-md` or
 `suspect gen api.yaml --manifest FILE`; native SDK docs are emitted by each profile.
+
+## Contract and load testing
+
+`suspect test` compiles an Arazzo document into an executable suite and
+runs it against a live server or a recorded cassette; `suspect load` runs
+the **same workflows** as weighted virtual-user scenarios under a phased
+arrival profile (`arrivalRate`/`rampTo`, `arrivalCount`, `pause`,
+closed-loop `vus`), with HDR-histogram latency percentiles, status and
+error breakdowns, contract-failure rate, SLO gates (`ensure`) and
+JSON/JUnit reports. Load profiles are `suspectLoad: "1.0"` YAML files
+with editor diagnostics. See [docs/LOAD-TESTING.md](docs/LOAD-TESTING.md)
+and the runnable example in [`examples/load/`](examples/load/).
 
 ## Notable engineering
 

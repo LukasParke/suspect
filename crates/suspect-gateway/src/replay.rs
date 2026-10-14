@@ -71,7 +71,7 @@ fn path_only(path_and_query: &str) -> &str {
 
 /// Startup index over one cassette's entries.
 ///
-/// Built once by the gateway (or via [`replay_index`]); lookups are
+/// Built once by the gateway (or via [`ReplayIndex::new`]); lookups are
 /// allocation-free.
 #[derive(Debug, Clone)]
 pub struct ReplayIndex {

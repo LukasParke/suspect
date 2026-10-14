@@ -52,17 +52,23 @@ pub fn gateway(
             scenario_path.display()
         );
         let rt = tokio::runtime::Runtime::new()?;
-        eprintln!(
-            "scenario gateway listening on 127.0.0.1:{port} ({} steps)",
-            script.steps.len()
-        );
-        return rt
-            .block_on(suspect_gateway::scenario::serve_scenario(
-                port,
-                script.steps,
-            ))
-            .map(|()| 0)
-            .map_err(|e| anyhow::anyhow!("{e}"));
+        let steps = script.steps;
+        return rt.block_on(async move {
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+                .await
+                .map_err(|e| anyhow::anyhow!("cannot bind 127.0.0.1:{port}: {e}"))?;
+            // Announce only once bound, with the real address (`--port 0`
+            // resolves here): the line is the readiness signal.
+            eprintln!(
+                "scenario gateway listening on {} ({} steps)",
+                listener.local_addr()?,
+                steps.len()
+            );
+            suspect_gateway::scenario::serve_scenario_on(listener, steps)
+                .await
+                .map(|()| 0)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        });
     }
     let gw_mode = match mode {
         "mock" => Mode::Mock,
@@ -105,15 +111,21 @@ pub fn gateway(
     };
 
     let rt = tokio::runtime::Runtime::new()?;
-    eprintln!("gateway listening on 127.0.0.1:{port} ({mode})");
     let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(super::sink(
         journal_file,
     )?)));
     // Serve until Ctrl-C: the runtime blocks on serve(); process exit tears
     // everything down.
     rt.block_on(async move {
+        let bound = suspect_gateway::bind(cfg, journal)
+            .await
+            .map_err(|e| anyhow::anyhow!(e))?;
+        // Announce only once the router is built and the port is bound,
+        // with the real address (`--port 0` resolves here): the line is
+        // the readiness signal.
+        eprintln!("gateway listening on {} ({mode})", bound.local_addr()?);
         tokio::select! {
-            result = suspect_gateway::serve(cfg, journal) => match result {
+            result = bound.serve() => match result {
                 Ok(()) => Ok(0),
                 Err(e) => Err(anyhow::anyhow!(e)),
             },

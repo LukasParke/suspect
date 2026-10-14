@@ -361,7 +361,8 @@ impl HttpPlan {
         self.credential_env_factory.as_deref()
     }
     /// The compiled pagination selection carried by this plan, when a policy is
-    /// configured. Helpers are emitted only when [`PaginationPlan::operations`]
+    /// configured. Helpers are emitted only when
+    /// [`PaginationPlan::operations`](pagination::PaginationPlan::operations)
     /// is non-empty, so no-policy output stays byte-identical.
     #[must_use]
     pub fn pagination(&self) -> Option<&pagination::PaginationPlan> {

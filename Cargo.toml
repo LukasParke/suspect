@@ -71,6 +71,8 @@ cc = "1"
 memchr = "2"
 tree-sitter-language = "0.1"
 notify = "8"
+hdrhistogram = { version = "7", default-features = false }
+csv = "1"
 
 [profile.dev]
 # Concurrent cargo sessions from sibling worktrees race on incremental

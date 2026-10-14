@@ -1,0 +1,102 @@
+arazzo: 1.0.0
+info:
+  title: Petstore user journeys
+  version: "1.0"
+  description: >
+    The same workflows run as a contract suite (`suspect test`) and as
+    weighted virtual-user scenarios (`suspect load` with petstore.load.yaml).
+sourceDescriptions:
+  - name: petstore
+    url: petstore.openapi.yaml
+
+workflows:
+  # Runs once before the load scenarios (profile `before:`); its outputs
+  # are readable by every virtual user via $workflows.sign-in.outputs.token.
+  - workflowId: sign-in
+    inputs:
+      type: object
+      properties:
+        username: { type: string, default: demo }
+        password: { type: string, default: secret }
+    steps:
+      - stepId: login
+        operationId: login
+        requestBody:
+          username: $inputs.username
+          password: $inputs.password
+        successCriteria:
+          - condition: "{$statusCode} == 200"
+          - condition: "$response.body#/token != null"
+        outputs:
+          token: $response.body#/token
+    outputs:
+      token: $steps.login.outputs.token
+
+  # A read-mostly visitor: list, then open one pet.
+  - workflowId: browse
+    inputs:
+      type: object
+      properties:
+        pageSize: { type: integer, default: 20 }
+    steps:
+      - stepId: list
+        operationId: listPets
+        parameters:
+          - name: limit
+            in: query
+            value: $inputs.pageSize
+        successCriteria:
+          - condition: "{$statusCode} == 200"
+          - condition: "$response.body#/items/0/id != null"
+        outputs:
+          firstId: $response.body#/items/0/id
+        x-suspect-think: 300ms..1s
+      - stepId: open
+        operationId: showPetById
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.list.outputs.firstId
+        successCriteria:
+          - condition: "{$statusCode} == 200"
+
+  # A writer: create, read back, delete. Depends on sign-in for the token.
+  - workflowId: create-and-cleanup
+    dependsOn: [sign-in]
+    inputs:
+      type: object
+      properties:
+        petName: { type: string, default: Rex }
+    steps:
+      - stepId: create
+        operationId: createPet
+        parameters:
+          - name: Authorization
+            in: header
+            value: "Bearer ${$workflows.sign-in.outputs.token}"
+        requestBody:
+          name: $inputs.petName
+          tag: load
+        successCriteria:
+          - condition: "{$statusCode} == 201"
+          - condition: "$response.body#/id != null"
+        outputs:
+          petId: $response.body#/id
+        x-suspect-think: 200ms
+      - stepId: read-back
+        operationId: showPetById
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.create.outputs.petId
+        successCriteria:
+          - condition: "{$statusCode} == 200"
+          - condition: "$response.body#/name != null"
+      - stepId: cleanup
+        operationId: deletePet
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.create.outputs.petId
+        successCriteria:
+          - condition: "{$statusCode} == 204"

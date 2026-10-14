@@ -204,10 +204,9 @@ pub(super) fn package(plan: &HttpPlan, package: &PackageConfig, crate_name: &str
             operation::emit(plan, op, crate_name),
         );
     }
-    files.insert(
-        "rust/README.md".into(),
-        docs::readme(plan, package, crate_name),
-    );
+    for doc in docs::documentation(plan, package, crate_name) {
+        files.insert(doc.path, doc.content);
+    }
     files.insert(
         "rust/examples.json".into(),
         crate::http_examples::manifest(&plan.examples),

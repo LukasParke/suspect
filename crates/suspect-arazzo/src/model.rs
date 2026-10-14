@@ -50,6 +50,72 @@ pub struct StepView<'d> {
     node: NodeRef<'d>,
 }
 
+/// One step-level `dependsOn` entry (Arazzo 1.1 Step Object): the step
+/// that must complete before the declaring step runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StepDependency<'d> {
+    /// A bare `stepId` of the current workflow.
+    Local(&'d str),
+    /// `$workflows.<workflowId>.steps.<stepId>`: a step of a workflow in
+    /// this document. The spec uses this form for *other* workflows, but
+    /// naming the current workflow is unambiguous and means [`Self::Local`].
+    Workflow {
+        /// The `workflowId` segment.
+        workflow: &'d str,
+        /// The `stepId` segment.
+        step: &'d str,
+    },
+    /// `$sourceDescriptions.<name>.<workflowId>.steps.<stepId>`: a step of
+    /// a workflow in another Arazzo document.
+    Source {
+        /// The `sourceDescriptions` entry name.
+        source: &'d str,
+        /// The `workflowId` segment.
+        workflow: &'d str,
+        /// The `stepId` segment.
+        step: &'d str,
+    },
+    /// A `$` entry matching neither expression form.
+    Invalid(&'d str),
+}
+
+impl<'d> StepDependency<'d> {
+    /// Classifies one `dependsOn` entry. Ids use the Arazzo
+    /// `[A-Za-z0-9_\-]+` alphabet, so `.steps.` cannot occur inside one.
+    #[must_use]
+    pub fn parse(entry: &'d str) -> Self {
+        let Some(expression) = entry.strip_prefix('$') else {
+            return Self::Local(entry);
+        };
+        let is_id = |s: &str| {
+            !s.is_empty()
+                && s.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        };
+        let workflow_step = |rest: &'d str| {
+            rest.split_once(".steps.")
+                .filter(|(workflow, step)| is_id(workflow) && is_id(step))
+        };
+        if let Some(rest) = expression.strip_prefix("workflows.")
+            && let Some((workflow, step)) = workflow_step(rest)
+        {
+            return Self::Workflow { workflow, step };
+        }
+        if let Some(rest) = expression.strip_prefix("sourceDescriptions.")
+            && let Some((source, rest)) = rest.split_once('.')
+            && is_id(source)
+            && let Some((workflow, step)) = workflow_step(rest)
+        {
+            return Self::Source {
+                source,
+                workflow,
+                step,
+            };
+        }
+        Self::Invalid(entry)
+    }
+}
+
 /// A reusable or inline parameter (`name`, `in`, `value`/`target`).
 pub struct ParameterView<'d> {
     node: NodeRef<'d>,
@@ -329,6 +395,15 @@ impl<'d> StepView<'d> {
             .get("dependsOn")
             .map(|n| n.items().iter().filter_map(|i| i.as_str()).collect())
             .unwrap_or_default()
+    }
+
+    /// [`Self::depends_on`] entries classified by [`StepDependency::parse`].
+    #[must_use]
+    pub fn dependencies(&self) -> Vec<StepDependency<'d>> {
+        self.depends_on()
+            .into_iter()
+            .map(StepDependency::parse)
+            .collect()
     }
 
     /// `timeout` in milliseconds (Arazzo 1.1), when a positive integer.

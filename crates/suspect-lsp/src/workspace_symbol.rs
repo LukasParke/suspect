@@ -163,7 +163,7 @@ fn collect_doc(low: &LowDoc, sink: &mut Sink<'_>) {
         }
         SpecFamily::Arazzo10 => arazzo_workspace_symbols(low, sink),
         // Overlay actions are skipped; OAS 2.x / unknown families emit none.
-        SpecFamily::Overlay10 | SpecFamily::Oas2 | SpecFamily::Unknown => {}
+        SpecFamily::Overlay10 | SpecFamily::Load10 | SpecFamily::Oas2 | SpecFamily::Unknown => {}
     }
 }
 

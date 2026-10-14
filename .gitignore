@@ -7,3 +7,4 @@ __pycache__/
 *.py[cod]
 .suspect-cache/
 crates/suspect-cli/target/
+editors/zed/target/

@@ -72,7 +72,8 @@ pub struct CodegenTarget {
 }
 
 /// Lifts the `compatibility_profiles`/`credential_env`/`sdk_defaults`
-/// keys of one manifest codegen target into its [`GenerationOptions`].
+/// keys of one manifest codegen target into its
+/// [`GenerationOptions`](suspect_codegen::backend::GenerationOptions).
 ///
 /// # Errors
 /// Fails when a present key does not parse as generation options.

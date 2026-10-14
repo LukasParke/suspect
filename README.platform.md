@@ -20,7 +20,7 @@ pending post-cleanup acceptance.
 | `suspect-ir` | Source-addressed SDK Contract and indexed platform spec snapshots |
 | `suspect-journal` | Structured JSONL logs, traffic records, Suspect Cassette v1 format |
 | `suspect-rex` | Arazzo runtime-expression parser/evaluator |
-| `suspect-test` | Plan compiler + concurrent workflow executor + reporters |
+| `suspect-test` | Plan compiler, observable workflow executor, load generator (`suspect load`), reporters |
 | `suspect-gateway` | Local server: mock / proxy / validate / record / replay |
 | `suspect-codegen` | Five native SDK backends, codecs/docs, incremental sessions and compatibility reports |
 | `suspect-gen` | Template engine (minijinja), docs-md preset and custom manifests |
@@ -41,6 +41,9 @@ suspect lint api.yaml
 
 # Contract testing (offline from a recorded cassette)
 suspect test flows.arazzo.yaml --offline --cassette prod.scj
+
+# Load testing: the same Arazzo workflows as weighted virtual-user scenarios
+suspect load examples/load/petstore.load.yaml --json out/load.json --junit out/load.xml
 
 # Live mock of the whole API
 suspect gateway api.yaml -p 8080 --mode mock
@@ -97,6 +100,9 @@ Current session measurements and pending Mac calibration are documented in
 | Validate p95/file | ≤ 50 ms | **44 ms** |
 | Gateway startup | < 1 s | **~880 ms** |
 | Executor per step | ≤ 100 µs | **3.6 µs** |
+| Load generator per request (in-process, incl. metrics) | ≤ 15 µs | **~4 µs CPU, 0.5 µs wall @ 8 workers** |
+| Load generator sustained vs local mock gateway | ≥ 20k req/s | **43k req/s, 0 dropped samples, p99 1.15 ms** |
+| Load metrics aggregator ingest | ≥ 200k samples/s | **64M samples/s** |
 | Gateway MOCK throughput | ≥ 30k req/s | **95–127k** |
 | REPLAY throughput | ≥ 50k req/s | **88–146k** |
 | Prepared docs rendering | ≥ 400 MiB/s synthetic test floor | **1.6–1.9 GB/s** historical rendering measurement |

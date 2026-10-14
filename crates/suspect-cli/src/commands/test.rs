@@ -41,42 +41,27 @@ pub fn test(
 
 /// Parses `--input name=value` flags into a workflow input map: each value
 /// is parsed as JSON when it parses, else taken as a string.
+///
+/// # Errors
+/// Returns an error for a flag without `=` or with an empty name.
 pub fn parse_inputs(raw: &[String]) -> anyhow::Result<serde_json::Map<String, serde_json::Value>> {
-    let mut out = serde_json::Map::new();
-    for item in raw {
-        let Some((name, value)) = item.split_once('=') else {
-            return Err(anyhow::anyhow!("--input expects NAME=VALUE, got {item:?}"));
-        };
-        if name.is_empty() {
-            return Err(anyhow::anyhow!("--input expects NAME=VALUE, got {item:?}"));
-        }
-        let parsed = serde_json::from_str(value)
-            .unwrap_or_else(|_| serde_json::Value::String(value.to_owned()));
-        out.insert(name.to_owned(), parsed);
-    }
-    Ok(out)
+    super::inputs::parse_inputs(None, raw)
 }
 
-/// [`test`] with an optional message broker directory for Arazzo 1.1
-/// AsyncAPI send/receive steps. The directory holds `inbox.jsonl`
-/// (pre-recorded messages the workflow may receive) and collects
-/// `outbox.jsonl` (what the workflow published).
-#[allow(clippy::too_many_arguments)]
-pub fn test_with_messages(
+/// Resolves the credentials a run injects, the way every testing flow
+/// does: an explicit file wins; otherwise `SUSPECT_CREDENTIALS`; otherwise
+/// `.suspect/credentials.json` discovered by walking up from the Arazzo
+/// document. No file is a valid state — workflows whose operations declare
+/// no security run fine without one — reported distinctly from a file that
+/// exists but fails to load.
+///
+/// # Errors
+/// Propagates a credentials file that cannot be read, parsed or
+/// interpolated.
+pub fn load_credentials(
     arazzo: &Path,
-    base_url: &str,
-    filter: Option<&str>,
-    inputs: &serde_json::Map<String, serde_json::Value>,
-    offline_cassette: Option<&Path>,
-    ndjson: bool,
-    message_broker: Option<&Path>,
     credentials: Option<&Path>,
-    journal: Option<&Path>,
-) -> anyhow::Result<i32> {
-    // Credentials: an explicit file wins; otherwise discover, and only
-    // then the SUSPECT_CREDENTIALS override. No file is a valid state —
-    // workflows whose operations declare no security run fine without
-    // one — reported distinctly from a file that exists but fails.
+) -> anyhow::Result<suspect_test::auth::AuthConfig> {
     let auth = match credentials {
         Some(path) => Some(
             suspect_test::auth::load_credentials_file(path).map_err(|e| anyhow::anyhow!("{e}"))?,
@@ -99,7 +84,26 @@ pub fn test_with_messages(
             }
         },
     };
-    let auth = auth.unwrap_or_default();
+    Ok(auth.unwrap_or_default())
+}
+
+/// [`test()`] with an optional message broker directory for Arazzo 1.1
+/// AsyncAPI send/receive steps. The directory holds `inbox.jsonl`
+/// (pre-recorded messages the workflow may receive) and collects
+/// `outbox.jsonl` (what the workflow published).
+#[allow(clippy::too_many_arguments)]
+pub fn test_with_messages(
+    arazzo: &Path,
+    base_url: &str,
+    filter: Option<&str>,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    offline_cassette: Option<&Path>,
+    ndjson: bool,
+    message_broker: Option<&Path>,
+    credentials: Option<&Path>,
+    journal: Option<&Path>,
+) -> anyhow::Result<i32> {
+    let auth = load_credentials(arazzo, credentials)?;
     let ws = super::workspace_for_entry(arazzo)?;
     let uri = Uri::from_path(arazzo)?;
     let handle = ws

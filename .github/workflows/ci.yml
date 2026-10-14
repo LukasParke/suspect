@@ -21,6 +21,15 @@ jobs:
       - uses: actions/checkout@v4
       - run: rustup component add clippy
       - run: cargo clippy --workspace --all-targets
+  # Mirrors the docs.yml build so broken or private intra-doc links fail the
+  # PR instead of the post-merge Pages deploy.
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo doc --workspace --no-deps
   test:
     runs-on: ubuntu-latest
     steps:
