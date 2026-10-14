@@ -52,7 +52,7 @@ pub fn docs_gen(args: &DocsGenArgs) -> anyhow::Result<i32> {
     docs_gen_parsed(&low, args)
 }
 
-/// [`docs_gen`] against a document the caller already parsed: a project
+/// [`docs_gen()`] against a document the caller already parsed: a project
 /// build renders docs from the same published-spec parse every other
 /// stage consumes.
 ///

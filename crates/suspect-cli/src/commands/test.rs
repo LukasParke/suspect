@@ -57,7 +57,7 @@ pub fn parse_inputs(raw: &[String]) -> anyhow::Result<serde_json::Map<String, se
     Ok(out)
 }
 
-/// [`test`] with an optional message broker directory for Arazzo 1.1
+/// [`test()`] with an optional message broker directory for Arazzo 1.1
 /// AsyncAPI send/receive steps. The directory holds `inbox.jsonl`
 /// (pre-recorded messages the workflow may receive) and collects
 /// `outbox.jsonl` (what the workflow published).

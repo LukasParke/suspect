@@ -3,7 +3,7 @@
 //!
 //! This is the read-only front door to the same source-level admission the
 //! backends run before emitting artifacts: shared HTTP admission
-//! ([`crate::http_contract::plan`]), incoming webhook/callback admission,
+//! (`http_contract::plan`), incoming webhook/callback admission,
 //! contract-level limitations, and cross-convention naming-collision
 //! analysis. Consumers (CLI pre-flight, the LSP, CI jobs) get one
 //! structured report instead of inferring verdicts from per-backend
