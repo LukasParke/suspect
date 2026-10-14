@@ -710,13 +710,19 @@ impl<'a> Env<'a> {
     }
 }
 
+/// Upper bound on `onFailure` goto jumps within one workflow run. A goto
+/// re-enters the workflow at its target, so a target that keeps failing
+/// back into the same goto would otherwise re-send requests forever.
+pub const MAX_GOTO_JUMPS: usize = 16;
+
 /// Runs a compiled [`Plan`] once against `http`, emitting the classic
 /// [`TestEvent`] stream on `events`.
 ///
 /// Workflows run concurrently inside each dependency wave; steps run one at
 /// a time inside each workflow. The first failing step without an
 /// `onFailure` goto ends its workflow; remaining steps are counted as
-/// skipped.
+/// skipped. A goto re-runs the workflow from its target step onward, at
+/// most [`MAX_GOTO_JUMPS`] times per workflow run.
 #[must_use]
 pub async fn run_plan(
     plan: &Plan,
@@ -1027,6 +1033,7 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
     // step's outputs, i.e. the step passed.
     let mut completed: BTreeSet<String> = BTreeSet::new();
     let mut remaining: Vec<usize> = (0..wf.steps.len()).collect();
+    let mut goto_jumps = 0usize;
     let foreign_done = |dependency: &crate::plan::WorkflowStepRef| {
         opts.workflows_outputs
             .get(&dependency.workflow)
@@ -1111,27 +1118,38 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
             outcome.failed += 1;
             outcome.ok = false;
             // Follow an `onFailure` goto when the target step exists:
-            // the scheduler re-enters at that step next.
+            // execution jumps to the target and continues from there in
+            // document order, so the target and every later step (the
+            // failed one included) run again against the fresh state.
             if let Some(target) = &step.failure_goto
                 && let Some(next) = wf.steps.iter().position(|s| &s.step_id == target)
             {
-                if completed.remove(&wf.steps[next].step_id) {
-                    // Re-running a completed step invalidates what
-                    // depended on it.
-                    for dependent in &wf.steps {
-                        if dependent
-                            .depends_on
-                            .iter()
-                            .any(|dependency| dependency == &wf.steps[next].step_id)
-                            && !completed.contains(&dependent.step_id)
-                        {
-                            completed.remove(&dependent.step_id);
-                        }
+                goto_jumps += 1;
+                if goto_jumps > MAX_GOTO_JUMPS {
+                    observer
+                        .on_check_failed(
+                            &cx,
+                            "on-failure-goto",
+                            &format!("at most {MAX_GOTO_JUMPS} onFailure goto jumps"),
+                            &format!("goto '{target}' did not recover the workflow"),
+                        )
+                        .await;
+                    outcome.skipped += remaining.len();
+                    remaining.clear();
+                    continue;
+                }
+                for rerun in next..wf.steps.len() {
+                    let step_id = &wf.steps[rerun].step_id;
+                    steps_outputs.remove(step_id);
+                    if completed.remove(step_id) {
+                        // Its re-run is counted afresh.
+                        outcome.passed -= 1;
+                    }
+                    if !remaining.contains(&rerun) {
+                        remaining.push(rerun);
                     }
                 }
-                // Put the target back at the front of the queue.
-                remaining.retain(|candidate| *candidate != next);
-                remaining.insert(0, next);
+                remaining.sort_unstable();
                 continue;
             }
             // No recovery path: the rest of the workflow cannot run.

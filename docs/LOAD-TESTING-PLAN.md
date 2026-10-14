@@ -39,6 +39,15 @@ with a `depends-on` diagnosis instead of being counted as skipped. Before
 this, the qualified form was never resolved: the step silently never
 ran and the run still reported `0 failed`.
 
+`onFailure: goto` (fixed 2026-10-14, also pre-existing on main): a goto
+now re-runs the workflow from its target step onward in document order,
+so the failed step is retried after the recovery steps and completed
+steps after the target re-run against the fresh state. Jumps are capped
+at `MAX_GOTO_JUMPS` (16) per workflow run, after which the step fails with
+an `on-failure-goto` diagnosis. Before this, the "invalidate dependents"
+loop could never remove anything, the failed step was dropped instead of
+retried, and a goto that kept failing back into itself looped forever.
+
 ---
 
 ## 0. What exists today (review)
@@ -412,7 +421,8 @@ Per arrival:
 
 A VU failing a criterion is a *failed VU* and counts toward
 `maxErrorRate` at the request level (that step) — the remaining steps are
-skipped exactly as in contract mode (`onFailure: goto` still honoured).
+skipped exactly as in contract mode (`onFailure: goto` still honoured,
+with the same `MAX_GOTO_JUMPS` bound per iteration).
 
 ---
 

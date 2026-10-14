@@ -2485,3 +2485,132 @@ fn cross_document_step_depends_on_compiles() {
     assert_eq!(b.depends_on, vec!["a".to_owned()]);
     assert!(b.workflow_depends_on.is_empty());
 }
+
+/// `createPet` fails (500) on its first call and passes (201) after.
+#[derive(Default)]
+struct FailFirstCreate {
+    creates: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl HttpClient for FailFirstCreate {
+    async fn execute(
+        &self,
+        req: crate::exec::HttpRequest,
+    ) -> Result<crate::exec::HttpResponse, crate::exec::TransportError> {
+        let status = if req.method == "POST" {
+            let prior = self
+                .creates
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if prior == 0 { 500 } else { 201 }
+        } else {
+            200
+        };
+        Ok(crate::exec::HttpResponse {
+            status,
+            headers: Vec::new(),
+            body: Bytes::from_static(b"{}"),
+        })
+    }
+}
+
+/// `make` fails once and recovers by jumping back to `prepare`.
+const GOTO_RECOVERY_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Goto, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: prepare
+        operationId: listPets
+      - stepId: check
+        operationId: listPets
+        dependsOn: [prepare]
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        onFailure:
+          - {name: recover, type: goto, stepId: prepare}
+"#;
+
+/// Arazzo `goto` jumps to the target step and execution continues from
+/// there in order: `prepare` and its dependent `check` re-run against the
+/// fresh state, then the failed `make` is retried. Before the fix the
+/// re-run invalidated nothing (`check` kept its stale completion) and the
+/// failed step was dropped, so the recovery path never retried it.
+#[tokio::test(flavor = "multi_thread")]
+async fn on_failure_goto_reruns_from_the_target_step() {
+    let plan = compile_text(GOTO_RECOVERY_ARAZZO).expect("compiles");
+    assert_eq!(
+        plan.workflows[0].steps[2].failure_goto.as_deref(),
+        Some("prepare")
+    );
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_plan(&plan, "http://api.test", &FailFirstCreate::default(), tx),
+    )
+    .await
+    .expect("the run terminates");
+    let events = drain(rx).await;
+    assert_eq!(
+        started_steps(&events),
+        vec!["prepare", "check", "make", "prepare", "check", "make"],
+        "{events:#?}"
+    );
+    // The first `make` failure stays on the record; the re-runs replace,
+    // rather than add to, the earlier passes.
+    assert_eq!((summary.passed, summary.failed), (3, 1), "{events:#?}");
+}
+
+/// `make` always fails and its `onFailure` jumps back to itself.
+const GOTO_LOOP_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Loop, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        onFailure:
+          - {name: again, type: goto, stepId: make}
+"#;
+
+/// A `goto` cycle that never recovers ends after a bounded number of jumps
+/// with a diagnosis. Before the fix it re-sent the request forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn on_failure_goto_loops_are_bounded() {
+    let plan = compile_text(GOTO_LOOP_ARAZZO).expect("compiles");
+    let (tx, rx) = tokio::sync::mpsc::channel(4096);
+    let drained = tokio::spawn(drain(rx));
+    let summary = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run_plan(&plan, "http://api.test", &OrderRecorder::default(), tx),
+    )
+    .await
+    .expect("a goto loop terminates");
+    let events = drained.await.expect("drain");
+    assert_eq!(
+        started_steps(&events).len(),
+        crate::exec::MAX_GOTO_JUMPS + 1,
+        "one initial attempt plus one per allowed jump"
+    );
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            TestEvent::CriterionFail { crit, .. } if crit == "on-failure-goto"
+        )),
+        "{events:#?}"
+    );
+    assert!(summary.failed >= 1);
+}
