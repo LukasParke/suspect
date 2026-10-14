@@ -62,6 +62,6 @@ pub use exec::{
 pub use messaging::{FileBroker, LoopbackBroker, Message, MessageError, MessageTransport};
 pub use plan::{
     Comparison, CompileError, CriterionKind, CriterionPlan, Expected, MessageDirection,
-    MessageStep, OpKey, Plan, StepParam, StepPlan, ThinkSpec, WfPlan, compile_plan,
-    dependency_waves,
+    MessageStep, OpKey, Plan, StepParam, StepPlan, ThinkSpec, WfPlan, WorkflowStepRef,
+    compile_plan, dependency_waves,
 };

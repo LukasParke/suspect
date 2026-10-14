@@ -104,7 +104,10 @@ seconds.
 ### Workflow prerequisites
 
 `before:` and every `dependsOn` of a scenario workflow run **once**, in
-dependency order, before arrivals begin; their outputs are readable by
+dependency order, before arrivals begin. A step-level `dependsOn` entry
+`$workflows.<id>.steps.<step>` naming another workflow counts too: that
+workflow becomes a prerequisite, and the step runs only once `<step>`
+passed there. Their outputs are readable by
 every user as `$workflows.<id>.outputs.<name>` (or
 `$workflows.<id>.steps.<step>.outputs.<name>`). A failing prerequisite
 aborts the run with exit 2 — nothing is load-tested against a broken

@@ -25,6 +25,20 @@ schemas travel with it. `suspect load` reads credentials exactly like
 `--validate-responses`. Sections below describe the design as planned
 against the earlier base.
 
+Step-level `dependsOn` resolution is shared by `suspect test` and
+`suspect load` (both run through `run_workflow`). The plan compiler
+normalizes `$workflows.<this>.steps.<id>` to the local step `<id>`,
+turns `$workflows.<other>.steps.<id>` into an implied workflow
+dependency (so `<other>` runs first, and as a once-per-run prerequisite
+under load) plus a runtime check that `<id>` passed there, drops
+`$sourceDescriptions.…` step references like their workflow-level
+counterparts, and rejects unknown workflows/steps, malformed entries,
+and self-dependencies at compile time. A step that still cannot become
+ready (a cycle, or a failed or absent prerequisite step) fails the run
+with a `depends-on` diagnosis instead of being counted as skipped. Before
+this, the qualified form was never resolved: the step silently never
+ran and the run still reported `0 failed`.
+
 ---
 
 ## 0. What exists today (review)

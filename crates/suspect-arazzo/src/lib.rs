@@ -17,7 +17,7 @@ pub use asyncapi::{
 pub use expr::{ComponentKind, Expr, ExprError, ExprPart, HttpPart, parse, parse_embedded};
 pub use model::{
     ActionView, ArazzoDoc, CriterionView, ParameterView, SourceDescriptionView, SourceType,
-    StepView, WorkflowView,
+    StepDependency, StepView, WorkflowView,
 };
 pub use validate::{ArazzoDiagnostic, validate_arazzo};
 

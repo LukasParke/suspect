@@ -1022,23 +1022,55 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
     // remaining step whose dependencies are all satisfied, in document
     // order, so a sequential run still satisfies the graph and a step
     // whose dependency has not run yet waits rather than reading a
-    // missing output.
+    // missing output. A dependency on another workflow's step is met when
+    // that workflow (a prerequisite, so already finished) captured the
+    // step's outputs, i.e. the step passed.
     let mut completed: BTreeSet<String> = BTreeSet::new();
     let mut remaining: Vec<usize> = (0..wf.steps.len()).collect();
+    let foreign_done = |dependency: &crate::plan::WorkflowStepRef| {
+        opts.workflows_outputs
+            .get(&dependency.workflow)
+            .and_then(|outputs| outputs.get("steps"))
+            .and_then(|steps| steps.get(&dependency.step))
+            .is_some()
+    };
 
     while !remaining.is_empty() {
         let ready = remaining.iter().copied().find(|index| {
-            wf.steps[*index]
-                .depends_on
+            let step = &wf.steps[*index];
+            step.depends_on
                 .iter()
                 .all(|dependency| completed.contains(dependency))
+                && step.workflow_depends_on.iter().all(foreign_done)
         });
         let Some(index) = ready else {
             // No remaining step can run: the dependency graph cannot be
-            // satisfied (a cycle, or a dependency on an unrunnable step).
-            let blocked: Vec<&str> = remaining
+            // satisfied (a cycle, or a dependency on a step that failed or
+            // never ran). The first blocked step fails with the diagnosis
+            // so the run cannot pass; the rest are skipped.
+            let blocked: Vec<String> = remaining
                 .iter()
-                .map(|index| wf.steps[*index].step_id.as_str())
+                .map(|index| {
+                    let step = &wf.steps[*index];
+                    let unmet: Vec<String> = step
+                        .depends_on
+                        .iter()
+                        .filter(|dependency| !completed.contains(*dependency))
+                        .cloned()
+                        .chain(
+                            step.workflow_depends_on
+                                .iter()
+                                .filter(|dependency| !foreign_done(dependency))
+                                .map(|dependency| {
+                                    format!(
+                                        "$workflows.{}.steps.{}",
+                                        dependency.workflow, dependency.step
+                                    )
+                                }),
+                        )
+                        .collect();
+                    format!("{} (waits on {})", step.step_id, unmet.join(", "))
+                })
                 .collect();
             observer
                 .on_check_failed(
@@ -1047,11 +1079,12 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
                     "a satisfiable step order",
                     &format!(
                         "blocked by unsatisfied dependencies: {}",
-                        blocked.join(", ")
+                        blocked.join("; ")
                     ),
                 )
                 .await;
-            outcome.skipped += remaining.len();
+            outcome.failed += 1;
+            outcome.skipped += remaining.len() - 1;
             outcome.ok = false;
             remaining.clear();
             break;

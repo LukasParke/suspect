@@ -317,6 +317,34 @@ async fn prerequisites_run_once_and_feed_users() {
     );
 }
 
+/// `suspect load` shares the plan's dependency resolution: a scenario step
+/// whose `dependsOn` names `$workflows.seed.steps.make` makes `seed` a
+/// once-per-run prerequisite, and every user's step then runs (before the
+/// fix it never became ready, so every user's iteration failed).
+#[tokio::test(start_paused = true)]
+async fn cross_workflow_step_dependency_runs_its_workflow_first() {
+    let text = DEPENDS_ARAZZO.replace(
+        "    dependsOn: [seed]\n    steps:\n      - stepId: fetch\n",
+        "    steps:\n      - stepId: fetch\n        dependsOn: ['$workflows.seed.steps.make']\n",
+    );
+    assert_ne!(text, DEPENDS_ARAZZO);
+    let doc = LowDoc::parse(
+        "mem://deps.arazzo.yaml".into(),
+        Source::from_vec(text.into_bytes()),
+    );
+    let plan = Arc::new(compile_plan(&doc, &workspace()).expect("compiles"));
+    let p = profile(
+        vec![phase(PhaseKind::ArrivalCount { count: 3 }, 1.0)],
+        vec![scenario("use-pet", 1.0)],
+    );
+    let (summary, _) = run(plan, &p, config(Arc::new(canned_fixture_http()))).await;
+    assert_eq!(summary.hooks.len(), 1);
+    assert_eq!(summary.hooks[0].workflow, "seed");
+    assert!(summary.hooks[0].ok);
+    assert_eq!(summary.aggregate.vusers.completed, 3);
+    assert_eq!(summary.aggregate.vusers.failed, 0);
+}
+
 #[tokio::test(start_paused = true)]
 async fn failing_before_hook_aborts_the_run() {
     let http: Arc<dyn HttpClient> = Arc::new(CannedTransport::new());

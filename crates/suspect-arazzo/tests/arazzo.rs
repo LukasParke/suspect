@@ -540,3 +540,107 @@ fn message_payload_expressions_parse() {
     ));
     assert!(suspect_arazzo::parse("$message.nonsense").is_err());
 }
+
+/// Codes for a two-workflow document: `w` (steps `a`, `b`) where step `b`
+/// declares `dependsOn: [<dep>]`, and `seed` (step `make`) whose own
+/// workflow-level `dependsOn` is `<seed_deps>`.
+fn step_dependency_codes(dep: &str, seed_deps: &str) -> Vec<&'static str> {
+    let doc = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n        operationId: listPets\n      - stepId: b\n        operationId: getPet\n        dependsOn: ['{dep}']\n  - workflowId: seed\n    dependsOn: [{seed_deps}]\n    steps:\n      - stepId: make\n        operationId: listPets\n"
+    ));
+    let parsed = suspect_arazzo::ArazzoDoc::new(&doc);
+    validate_arazzo(&parsed).iter().map(|d| d.code).collect()
+}
+
+/// Arazzo 1.1 Step Object `dependsOn`: `$workflows.<workflowId>.steps.<stepId>`
+/// is the spec's reference form; it is not a `.outputs.` runtime
+/// expression and must not be rejected as one.
+#[test]
+fn qualified_step_depends_on_validates() {
+    assert_eq!(
+        step_dependency_codes("$workflows.w.steps.a", ""),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        step_dependency_codes("$workflows.seed.steps.make", ""),
+        Vec::<&str>::new()
+    );
+    assert_eq!(
+        step_dependency_codes("$sourceDescriptions.api.other.steps.s", ""),
+        Vec::<&str>::new()
+    );
+}
+
+#[test]
+fn qualified_step_depends_on_must_resolve() {
+    // The current workflow, qualified, follows the bare-id rule.
+    assert!(
+        step_dependency_codes("$workflows.w.steps.b", "")
+            .contains(&"arazzo-depends-on-unknown-step")
+    );
+    assert!(
+        step_dependency_codes("$workflows.w.steps.ghost", "")
+            .contains(&"arazzo-depends-on-unknown-step")
+    );
+    assert!(
+        step_dependency_codes("$workflows.seed.steps.ghost", "")
+            .contains(&"arazzo-depends-on-unknown-step")
+    );
+    assert!(
+        step_dependency_codes("$workflows.nowhere.steps.make", "")
+            .contains(&"arazzo-depends-on-unknown-workflow")
+    );
+    assert!(
+        step_dependency_codes("$workflows.seed.make", "").contains(&"arazzo-invalid-depends-on")
+    );
+    assert!(
+        step_dependency_codes("$workflows.seed.steps.make.outputs.x", "")
+            .contains(&"arazzo-invalid-depends-on")
+    );
+}
+
+/// A cross-workflow step dependency orders the two workflows, so it closes
+/// a cycle with a workflow-level `dependsOn` pointing back.
+#[test]
+fn cross_workflow_step_depends_on_participates_in_cycles() {
+    assert!(
+        step_dependency_codes("$workflows.seed.steps.make", "w")
+            .contains(&"arazzo-depends-on-cycle")
+    );
+    assert!(!step_dependency_codes("a", "w").contains(&"arazzo-depends-on-cycle"));
+}
+
+#[test]
+fn step_dependency_entries_classify() {
+    use suspect_arazzo::StepDependency;
+    assert_eq!(StepDependency::parse("auth"), StepDependency::Local("auth"));
+    assert_eq!(
+        StepDependency::parse("$workflows.place-order.steps.pay_1"),
+        StepDependency::Workflow {
+            workflow: "place-order",
+            step: "pay_1"
+        }
+    );
+    assert_eq!(
+        StepDependency::parse("$sourceDescriptions.shared.login.steps.token"),
+        StepDependency::Source {
+            source: "shared",
+            workflow: "login",
+            step: "token"
+        }
+    );
+    for bad in [
+        "$workflows.w",
+        "$workflows.w.steps.",
+        "$workflows..steps.a",
+        "$workflows.w.steps.a.outputs.x",
+        "$sourceDescriptions.shared.login",
+        "$steps.a",
+    ] {
+        assert_eq!(
+            StepDependency::parse(bad),
+            StepDependency::Invalid(bad),
+            "{bad}"
+        );
+    }
+}

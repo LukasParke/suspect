@@ -382,6 +382,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     timeout_ms: None,
                     message: None,
                     depends_on: Vec::new(),
+                    workflow_depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
                     think: None,
@@ -402,6 +403,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     timeout_ms: None,
                     message: None,
                     depends_on: Vec::new(),
+                    workflow_depends_on: Vec::new(),
                     security: Vec::new(),
                     response_schemas: Vec::new(),
                     think: None,
@@ -1210,7 +1212,8 @@ workflows:
         summary.passed == 0,
         "a cyclic graph runs nothing: {summary:?}"
     );
-    assert!(!summary.passed > 0);
+    // The blocked graph must fail the run, not pass as "0 failed".
+    assert_eq!((summary.failed, summary.skipped), (1, 1), "{summary:?}");
     let mut diagnosed = false;
     while let Ok(event) = rx.try_recv() {
         if let crate::exec::TestEvent::CriterionFail { crit, actual, .. } = event
@@ -2235,4 +2238,250 @@ async fn request_body_payload_resolves_runtime_expressions() {
             "note": "price is $5"
         })
     );
+}
+
+// ------------------------------- step dependsOn: qualified and cross-workflow
+
+/// Compiles an inline Arazzo 1.1 document against the petstore fixture.
+fn compile_text(text: &str) -> Result<crate::plan::Plan, CompileError> {
+    let doc = LowDoc::parse(
+        "mem://steps.arazzo.yaml".into(),
+        Source::from_vec(text.as_bytes().to_vec()),
+    );
+    compile_plan(&doc, &workspace())
+}
+
+/// Step `b` of workflow `w` depends on `a` through the spec's qualified
+/// form; `c` is independent and declared last.
+const QUALIFIED_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Qualified, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: a
+        operationId: createPet
+        requestBody: { name: Rex }
+      - stepId: b
+        operationId: listPets
+        dependsOn: ['$workflows.w.steps.a']
+      - stepId: c
+        operationId: listPets
+"#;
+
+fn started_steps(events: &[TestEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            TestEvent::StepStarted { step, .. } => Some(step.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `$workflows.<this>.steps.<id>` is the current workflow's step `<id>`:
+/// `b` runs right after `a`, in document order, and the run passes.
+/// Before the fix the entry stayed unresolved, so `b` never ran: `c` ran
+/// first, then `b` was reported blocked and counted *skipped*, leaving
+/// `0 failed` and a green exit code.
+#[tokio::test(flavor = "multi_thread")]
+async fn qualified_same_workflow_depends_on_runs_the_step() {
+    let plan = compile_text(QUALIFIED_ARAZZO).expect("compiles");
+    let b = &plan.workflows[0].steps[1];
+    assert_eq!(b.depends_on, vec!["a".to_owned()]);
+    assert!(b.workflow_depends_on.is_empty());
+    assert!(plan.workflows[0].depends_on.is_empty());
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &OrderRecorder::default(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!(
+        (summary.passed, summary.failed, summary.skipped),
+        (3, 0, 0),
+        "{events:#?}"
+    );
+    assert_eq!(started_steps(&events), vec!["a", "b", "c"]);
+}
+
+/// `fetch` (declared in the first workflow) waits on a step of `seed`.
+const CROSS_STEP_ARAZZO: &str = r#"
+arazzo: 1.1.0
+info: {title: Cross, version: '1'}
+sourceDescriptions:
+  - {name: petstore, url: spec.yaml, type: openapi}
+workflows:
+  - workflowId: use-pet
+    steps:
+      - stepId: fetch
+        operationId: showPetById
+        dependsOn: ['$workflows.seed.steps.make']
+        parameters:
+          - name: petId
+            in: path
+            value: $workflows.seed.steps.make.outputs.petId
+  - workflowId: seed
+    steps:
+      - stepId: make
+        operationId: createPet
+        requestBody: { name: Rex }
+        successCriteria:
+          - condition: '{$statusCode} == 201'
+        outputs:
+          petId: $response.body#/id
+"#;
+
+/// Arazzo 1.1 Step Object: a step of a different workflow is referenced as
+/// `$workflows.<workflowId>.steps.<stepId>` and MUST complete first. The
+/// plan orders `seed` before `use-pet` (implied workflow dependency) and
+/// the dependent step reads the prerequisite step's outputs.
+#[tokio::test(flavor = "multi_thread")]
+async fn cross_workflow_step_depends_on_orders_the_workflows() {
+    let plan = compile_text(CROSS_STEP_ARAZZO).expect("compiles");
+    assert_eq!(plan.workflows[0].depends_on, vec!["seed".to_owned()]);
+    assert_eq!(
+        plan.workflows[0].steps[0].workflow_depends_on,
+        vec![crate::plan::WorkflowStepRef {
+            workflow: "seed".to_owned(),
+            step: "make".to_owned(),
+        }]
+    );
+    assert!(plan.workflows[0].steps[0].depends_on.is_empty());
+    assert_eq!(
+        crate::plan::dependency_waves(&plan.workflows).unwrap(),
+        vec![vec![1], vec![0]]
+    );
+
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (2, 0), "{events:#?}");
+    assert_eq!(started_steps(&events), vec!["make", "fetch"]);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        TestEvent::RequestSent { url, .. } if url.ends_with("/pets/7")
+    )));
+}
+
+/// When the prerequisite step fails, or its workflow is not part of the
+/// run (`suspect test --workflow use-pet`), the dependent step can never
+/// become ready: it fails with a diagnosis naming the missing step instead
+/// of being skipped silently or hanging.
+#[tokio::test(flavor = "multi_thread")]
+async fn unmet_cross_workflow_step_dependency_fails_the_run() {
+    let assert_blocked = |summary: &RunSummary, events: &[TestEvent]| {
+        assert!(summary.failed >= 1, "{summary:?}");
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                TestEvent::CriterionFail { step, crit, actual, .. }
+                    if step == "fetch"
+                        && crit == "depends-on"
+                        && actual.contains("$workflows.seed.steps.make")
+            )),
+            "{events:#?}"
+        );
+        assert!(!started_steps(events).contains(&"fetch"));
+    };
+
+    // `make` answers 200 where its criterion wants 201.
+    let plan = compile_text(CROSS_STEP_ARAZZO).expect("compiles");
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &OrderRecorder::default(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (0, 2), "{events:#?}");
+    assert_blocked(&summary, &events);
+
+    // The prerequisite workflow was filtered out of the run.
+    let mut plan = compile_text(CROSS_STEP_ARAZZO).expect("compiles");
+    plan.workflows.retain(|wf| wf.workflow_id == "use-pet");
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &canned_fixture_http(), tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (0, 1), "{events:#?}");
+    assert_blocked(&summary, &events);
+}
+
+/// A step that could never become ready is a compile error naming the
+/// workflow, the step, and the offending entry, like an unknown
+/// workflow-level `dependsOn`.
+#[test]
+fn unresolvable_step_dependencies_fail_compilation() {
+    let with_dep = |dep: &str| {
+        QUALIFIED_ARAZZO.replace(
+            "dependsOn: ['$workflows.w.steps.a']",
+            &format!("dependsOn: ['{dep}']"),
+        )
+    };
+    for (dep, needle) in [
+        ("ghost", "dependsOn 'ghost' matches no step of workflow 'w'"),
+        (
+            "$workflows.w.steps.ghost",
+            "dependsOn '$workflows.w.steps.ghost' matches no step of workflow 'w'",
+        ),
+        (
+            "$workflows.nowhere.steps.a",
+            "dependsOn '$workflows.nowhere.steps.a' matches no workflow",
+        ),
+        ("$workflows.w.steps.b", "names the step itself"),
+        ("b", "names the step itself"),
+        ("$workflows.w.a", "is not a stepId"),
+        ("$workflows.w.steps.a.outputs.x", "is not a stepId"),
+    ] {
+        let err = compile_text(&with_dep(dep)).expect_err(dep);
+        assert!(
+            err.0.starts_with("workflow 'w', step 'b': "),
+            "{dep}: {err}"
+        );
+        assert!(err.0.contains(needle), "{dep}: {err}");
+    }
+
+    let unknown_foreign_step = CROSS_STEP_ARAZZO.replace(
+        "dependsOn: ['$workflows.seed.steps.make']",
+        "dependsOn: ['$workflows.seed.steps.ghost']",
+    );
+    let err = compile_text(&unknown_foreign_step).expect_err("unknown step");
+    assert!(
+        err.0
+            .contains("'$workflows.seed.steps.ghost' matches no step of workflow 'seed'"),
+        "{err}"
+    );
+
+    // An implicit dependency must resolve too.
+    let implicit = QUALIFIED_ARAZZO.replace(
+        "      - stepId: c\n        operationId: listPets\n",
+        "      - stepId: c\n        operationId: listPets\n        parameters:\n          - {name: q, in: query, value: $steps.ghost.outputs.x}\n",
+    );
+    let err = compile_text(&implicit).expect_err("implicit unknown");
+    assert!(err.0.contains("step 'c': reads '$steps.ghost'"), "{err}");
+
+    // A cross-workflow step dependency orders workflows, so it closes a
+    // cycle with a workflow-level dependsOn pointing back.
+    let cyclic = CROSS_STEP_ARAZZO.replace(
+        "  - workflowId: seed\n",
+        "  - workflowId: seed\n    dependsOn: [use-pet]\n",
+    );
+    let err = compile_text(&cyclic).expect_err("cycle");
+    assert!(err.0.contains("cycle"), "{err}");
+}
+
+/// A step in another Arazzo document is a valid reference this plan never
+/// executes; like a cross-document workflow `dependsOn`, it compiles and
+/// does not block the step.
+#[test]
+fn cross_document_step_depends_on_compiles() {
+    let text = QUALIFIED_ARAZZO
+        .replace(
+            "  - {name: petstore, url: spec.yaml, type: openapi}\n",
+            "  - {name: petstore, url: spec.yaml, type: openapi}\n  - {name: other, url: other.arazzo.yaml, type: arazzo}\n",
+        )
+        .replace(
+            "dependsOn: ['$workflows.w.steps.a']",
+            "dependsOn: ['$sourceDescriptions.other.setup.steps.login', a]",
+        );
+    let plan = compile_text(&text).expect("compiles");
+    let b = &plan.workflows[0].steps[1];
+    assert_eq!(b.depends_on, vec!["a".to_owned()]);
+    assert!(b.workflow_depends_on.is_empty());
 }
