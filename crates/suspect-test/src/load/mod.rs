@@ -24,6 +24,20 @@ pub mod report;
 pub mod schedule;
 pub mod vu;
 
+/// Claims one iteration from a shared closed-loop budget, or returns
+/// `false` once it is exhausted. A compare-exchange loop rather than
+/// `fetch_update`, which newer toolchains deprecate in favour of
+/// `try_update` — unavailable at the workspace MSRV.
+fn take_iteration(budget: &AtomicU64) -> bool {
+    let mut current = budget.load(Ordering::Relaxed);
+    while let Some(next) = current.checked_sub(1) {
+        match budget.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(actual) => current = actual,
+        }
+    }
+    false
+}
 #[cfg(test)]
 mod tests;
 
@@ -425,14 +439,10 @@ pub async fn run_load(
                             if *stop.borrow() {
                                 break;
                             }
-                            if let Some(b) = &budget {
-                                let prev =
-                                    b.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                                        n.checked_sub(1)
-                                    });
-                                if prev.is_err() {
-                                    break;
-                                }
+                            if let Some(b) = &budget
+                                && !take_iteration(b)
+                            {
+                                break;
                             }
                             let scenario = shared.pick_scenario(&mut vu_rng);
                             let _ = run_vu_task(Arc::clone(&shared), VuId(vu), scenario).await;
