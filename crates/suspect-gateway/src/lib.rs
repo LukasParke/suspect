@@ -141,8 +141,8 @@ pub struct GatewayConfig {
     pub mode: Mode,
     /// Path of the OpenAPI entry document; its whole directory is loaded.
     pub spec: PathBuf,
-    /// TCP port on `127.0.0.1` (`0` is allowed only when callers drive
-    /// [`build_router`] themselves and bind their own listener).
+    /// TCP port on `127.0.0.1`; `0` picks a free port, reported by
+    /// [`BoundGateway::local_addr`].
     pub port: u16,
     /// Fault injection settings.
     pub faults: FaultConfig,
@@ -179,6 +179,10 @@ struct GatewayState {
 
 /// Serves the gateway on `127.0.0.1:<cfg.port>`, blocking until failure.
 ///
+/// Equivalent to [`bind`] followed by [`BoundGateway::serve`]; use those
+/// directly to learn the bound address (e.g. for `port: 0`) before
+/// traffic starts.
+///
 /// # Errors
 /// Router construction (spec/cassette loading), bind failures, or runtime
 /// server failures, rendered as strings.
@@ -186,20 +190,66 @@ pub async fn serve(
     cfg: GatewayConfig,
     journal: Arc<tokio::sync::Mutex<Journal>>,
 ) -> Result<(), String> {
-    let router = build_router(&cfg, Arc::clone(&journal)).await?;
+    bind(cfg, journal).await?.serve().await
+}
+
+/// A gateway whose router is built and whose listener is bound, but which
+/// is not yet accepting connections.
+///
+/// Connections that arrive before [`BoundGateway::serve`] runs wait in the
+/// listen backlog and are served once it starts, so the bound address is a
+/// truthful readiness signal.
+pub struct BoundGateway {
+    listener: tokio::net::TcpListener,
+    router: Router,
+}
+
+/// Builds the router, then binds `127.0.0.1:<cfg.port>` (`0` picks a free
+/// port; see [`BoundGateway::local_addr`]).
+///
+/// The router is built first so spec or cassette failures never leave a
+/// bound port behind.
+///
+/// # Errors
+/// Router construction (spec/cassette loading) or bind failures, rendered
+/// as strings.
+pub async fn bind(
+    cfg: GatewayConfig,
+    journal: Arc<tokio::sync::Mutex<Journal>>,
+) -> Result<BoundGateway, String> {
+    let router = build_router(&cfg, journal).await?;
     let listener = tokio::net::TcpListener::bind((HOST, cfg.port))
         .await
         .map_err(|e| format!("cannot bind {HOST}:{}: {e}", cfg.port))?;
-    // Trailing-slash normalization must run BEFORE routing: a request to
-    // `/library/sections/` has to meet the registered `/library/sections`
-    // route, not fall through to the off-spec handler. Wrapping the whole
-    // router service (not per-route layers, which run after matching).
-    let normalizer = axum::middleware::from_fn(normalize_request_path);
-    let app = normalizer.layer(router);
-    let app = axum::ServiceExt::<axum::extract::Request>::into_make_service(app);
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| format!("gateway server error: {e}"))
+    Ok(BoundGateway { listener, router })
+}
+
+impl BoundGateway {
+    /// The address actually bound (resolves `port: 0`).
+    ///
+    /// # Errors
+    /// The OS failed to report the socket address.
+    pub fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+        self.listener.local_addr()
+    }
+
+    /// Accepts and serves connections, blocking until failure.
+    ///
+    /// # Errors
+    /// Runtime server failures, rendered as strings.
+    pub async fn serve(self) -> Result<(), String> {
+        // Trailing-slash normalization must run BEFORE routing: a request
+        // to `/library/sections/` has to meet the registered
+        // `/library/sections` route, not fall through to the off-spec
+        // handler. Wrapping the whole router service (not per-route
+        // layers, which run after matching).
+        let normalizer = axum::middleware::from_fn(normalize_request_path);
+        let app = normalizer.layer(self.router);
+        let app = axum::ServiceExt::<axum::extract::Request>::into_make_service(app);
+        axum::serve(self.listener, app)
+            .await
+            .map_err(|e| format!("gateway server error: {e}"))
+    }
 }
 
 /// Builds the gateway router without binding a socket.

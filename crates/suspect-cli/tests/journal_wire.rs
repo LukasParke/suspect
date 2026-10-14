@@ -2,7 +2,7 @@
 //! the scenario gateway mode, `--journal <file>` sinks, and the redaction
 //! denylist flags.
 
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -107,33 +107,58 @@ struct GatewayChild {
 }
 
 impl GatewayChild {
+    /// Starts `suspect gateway --port 0` and returns once it is serving.
+    ///
+    /// The gateway binds the port itself and announces the bound address
+    /// on stderr only once it can serve. Reserving a port here instead
+    /// (bind `:0`, drop, pass the number) is racy: a child spawned
+    /// concurrently by another test inherits the reservation socket
+    /// (until exec on Linux, for its whole life on macOS), so the
+    /// gateway's own bind can fail and early connections land in a
+    /// backlog nobody serves, then get reset.
     fn spec(root: &Path, args: &[&str]) -> Self {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().expect("addr").port();
-        drop(listener);
         let spec = root.join("api.yaml");
         let mut command = suspect();
         command
             .arg("gateway")
             .arg(&spec)
-            .args(["--port", &port.to_string()])
+            .args(["--port", "0"])
             .args(args)
             .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        Self {
-            child: command.spawn().expect("gateway spawn"),
-            port,
-        }
-    }
-
-    fn wait_ready(&self) {
-        for _ in 0..50 {
-            if TcpStream::connect(("127.0.0.1", self.port)).is_ok() {
-                return;
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().expect("gateway spawn");
+        let stderr = child.stderr.take().expect("piped stderr");
+        let (ready, port) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut seen = String::new();
+            let mut lines = BufReader::new(stderr).lines();
+            for line in lines.by_ref().map_while(Result::ok) {
+                let bound = line
+                    .split_once("listening on 127.0.0.1:")
+                    .and_then(|(_, rest)| rest.split_whitespace().next())
+                    .and_then(|port| port.parse::<u16>().ok());
+                if let Some(port) = bound {
+                    let _ = ready.send(Ok(port));
+                    // Keep draining so the child never blocks on a full pipe.
+                    for _ in lines {}
+                    return;
+                }
+                seen.push_str(&line);
+                seen.push('\n');
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            let _ = ready.send(Err(seen));
+        });
+        match port.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(Ok(port)) => Self { child, port },
+            Ok(Err(stderr)) => {
+                let _ = child.kill();
+                panic!("gateway exited before listening: {stderr}");
+            }
+            Err(e) => {
+                let _ = child.kill();
+                panic!("gateway never announced its address: {e}");
+            }
         }
-        panic!("gateway never came up");
     }
 }
 
@@ -211,7 +236,6 @@ fn scenario_mode_serves_the_script_and_rejects_deviation() {
             scenario.to_str().expect("path"),
         ],
     );
-    gateway.wait_ready();
     assert_eq!(raw_get(gateway.port, "/first", None), 200);
     assert_eq!(
         raw_get(gateway.port, "/nope", None),
@@ -279,7 +303,6 @@ fn redact_flags_extend_the_journal_denylist() {
             "X-Internal-Secret",
         ],
     );
-    gateway.wait_ready();
     let code = raw_get(
         gateway.port,
         "/ping",

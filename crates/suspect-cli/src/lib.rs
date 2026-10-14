@@ -404,7 +404,8 @@ pub enum Command {
     Gateway {
         /// Entry OpenAPI document (mock/validate/record) or ignored (replay).
         spec: PathBuf,
-        /// TCP port to bind on 127.0.0.1.
+        /// TCP port to bind on 127.0.0.1 (`0` picks a free port). The bound
+        /// address is printed on stderr once the gateway can serve.
         #[arg(long, short = 'p', default_value_t = 8080)]
         port: u16,
         /// Operating mode: mock | proxy | validate | record | replay |
