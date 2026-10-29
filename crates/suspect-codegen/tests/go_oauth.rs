@@ -1745,6 +1745,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	sdk "example.com/oauth-sdk"
 )
@@ -1766,6 +1767,12 @@ type fakeReplay struct {
 	staleToken  string
 	failFrom    int
 	server      *httptest.Server
+	// staleHold > 0 parks every stale-token request until that many have
+	// arrived, so concurrent callers really do present the stale token
+	// together instead of one of them refreshing before the other sends.
+	staleHold    int
+	staleArrived int
+	staleReady   chan struct{}
 }
 
 type recordedReplay struct {
@@ -1808,6 +1815,7 @@ func newFakeReplay() *fakeReplay {
 			_, _ = w.Write([]byte(`{"access_token":"feed-"` + `,"token_type":"Bearer","expires_in":3600}`))
 		case widgetsPath:
 			if mode == "always-401" || (stale != "" && r.Header.Get("Authorization") == "Bearer "+stale) {
+				fake.holdStale()
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte(`{"error":"stale"}`))
@@ -1862,6 +1870,41 @@ func (f *fakeReplay) armStale() {
 	defer f.mu.Unlock()
 	f.staleNext = true
 	f.mode = "ok"
+}
+
+// armStaleConcurrent is armStale for `callers` simultaneous requests: the
+// stale 401s are answered only once all of them are in flight, so each
+// caller presents the stale token and the refresh coordination (one
+// leader, the rest waiting on its round) is what gets exercised.
+func (f *fakeReplay) armStaleConcurrent(callers int) {
+	f.armStale()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.staleHold = callers
+	f.staleArrived = 0
+	f.staleReady = make(chan struct{})
+}
+
+// holdStale parks a stale-token request until the armed number have
+// arrived. The timeout keeps a broken caller from hanging the suite; the
+// count assertions then report what actually happened.
+func (f *fakeReplay) holdStale() {
+	f.mu.Lock()
+	hold, ready := f.staleHold, f.staleReady
+	if hold > 0 {
+		f.staleArrived++
+		if f.staleArrived == hold {
+			close(ready)
+		}
+	}
+	f.mu.Unlock()
+	if hold == 0 {
+		return
+	}
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+	}
 }
 
 func (f *fakeReplay) always401() {
@@ -1952,10 +1995,14 @@ func TestReplaySurfacesTheSecond401(t *testing.T) {
 }
 
 // (c) concurrent 401s across two goroutines: ONE refresh, two replays.
+// The fake answers neither stale 401 until both stale requests are in
+// flight; without that, the second caller's credential hook can run after
+// the first caller's refresh and start out with the fresh token, which is a
+// correct outcome that exercises nothing (seen as "got 3 API requests").
 func TestConcurrent401sShareOneRefresh(t *testing.T) {
 	fake := newFakeReplay()
 	defer fake.server.Close()
-	fake.armStale()
+	fake.armStaleConcurrent(2)
 	replay, err := sdk.NewReplayCredentials("service")
 	if err != nil {
 		t.Fatal(err)
@@ -1988,7 +2035,7 @@ func TestConcurrent401sShareOneRefresh(t *testing.T) {
 		}
 	}
 	if got := fake.count(widgetsPath); got != 4 {
-		t.Fatalf("expected two replays, got %d API requests", got)
+		t.Fatalf("expected two replays, got %d API requests: %+v", got, fake.requests)
 	}
 	if got := fake.count("/token"); got != 2 {
 		t.Fatalf("expected one shared refresh, got %d token requests", got)
