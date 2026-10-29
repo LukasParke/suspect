@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use suspect_lsp::state::{OpenDoc, lsp_range};
+use suspect_lsp::state::{OpenDoc, lsp_range, offset_of_utf16};
 use suspect_lsp::{
     actions, completion, diagnostics, navigation, rename, semantic, workspace_symbol,
 };
@@ -293,6 +293,40 @@ fn main() {
             e["range"]["start"]["character"].as_u64(),
         )
     });
+    // Applying the edits must leave a spec that still parses the way the
+    // author wrote it: the `$ref` values stay quoted strings, and the
+    // declaration takes the new name.
+    let mut applied = SPEC.to_owned();
+    for e in edits.iter().rev() {
+        let (s, t) = (&e["range"]["start"], &e["range"]["end"]);
+        let start = offset_of_utf16(
+            bytes,
+            li,
+            s["line"].as_u64().unwrap() as u32,
+            s["character"].as_u64().unwrap() as u32,
+        )
+        .unwrap();
+        let end = offset_of_utf16(
+            bytes,
+            li,
+            t["line"].as_u64().unwrap() as u32,
+            t["character"].as_u64().unwrap() as u32,
+        )
+        .unwrap();
+        applied.replace_range(start..end, e["new_text"].as_str().unwrap());
+    }
+    assert!(applied.contains("\n    Animal:\n"), "{applied}");
+    assert_eq!(
+        applied
+            .matches("$ref: '#/components/schemas/Animal'")
+            .count(),
+        2,
+        "both local refs are rewritten and keep their quotes:\n{applied}"
+    );
+    assert!(
+        !applied.contains("$ref: #/"),
+        "an unquoted $ref is a YAML comment:\n{applied}"
+    );
     out.insert(
         "rename".into(),
         json!({

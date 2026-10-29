@@ -22,6 +22,7 @@ import argparse
 import html
 import json
 import os
+import pathlib
 import re
 import shutil
 import subprocess
@@ -92,10 +93,10 @@ body { width: %(width)dpx; }
 
 .widget { position: absolute; background: #202020; border: 1px solid #454545; box-shadow: 0 2px 8px rgba(0,0,0,0.5); z-index: 5; }
 .hover { padding: 8px 12px; max-width: 560px; font-size: 13px; line-height: 1.45; color: #cccccc; }
-.hover h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #ffffff; }
+.hover h3, .hover h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #ffffff; }
 .hover p { margin: 4px 0; }
 .hover code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px; color: #d7ba7d; }
-.hover h3 code { color: #4ec9b0; background: none; font-size: 14px; padding: 0; }
+.hover h3 code, .hover h4 code { color: #4ec9b0; background: none; font-size: 14px; padding: 0; }
 .hover em { color: #a9a9a9; }
 .hover hr { border: 0; border-top: 1px solid #454545; margin: 8px 0; }
 .hover table { border-collapse: collapse; margin: 6px 0 2px; font-size: 12.5px; }
@@ -212,6 +213,38 @@ STR_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 NUM_RE = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])")
 
 
+def utf16_to_index(line: str, col: int) -> int:
+    """LSP columns count UTF-16 code units; the renderer indexes Python
+    strings by code point. Maps one to the other on `line`."""
+    units = 0
+    for i, ch in enumerate(line):
+        if units >= col:
+            return i
+        units += 2 if ord(ch) > 0xFFFF else 1
+    return len(line)
+
+
+def to_code_points(data: dict, lines: list[str]) -> None:
+    """Rewrites every LSP position in `data` (objects with `line` and
+    `character`, plus semantic-token `length`s) from UTF-16 code units to
+    code-point columns, in place."""
+    def visit(node):
+        if isinstance(node, dict):
+            if "line" in node and "character" in node and isinstance(node["line"], int):
+                text = lines[node["line"]] if node["line"] < len(lines) else ""
+                start = utf16_to_index(text, node["character"])
+                if "length" in node:
+                    node["length"] = utf16_to_index(text, node["character"] + node["length"]) - start
+                node["character"] = start
+            for v in node.values():
+                visit(v)
+        elif isinstance(node, list):
+            for v in node:
+                visit(v)
+
+    visit(data)
+
+
 class Doc:
     """The spec text plus everything that decorates it."""
 
@@ -220,6 +253,7 @@ class Doc:
         self.lines = self.text.split("\n")
         if self.lines and self.lines[-1] == "":
             self.lines.pop()
+        to_code_points(data, self.lines)
         self.tokens = data["semantic_tokens"]
         self.base = [self._base_styles(line) for line in self.lines]
         for t in self.tokens:
@@ -413,7 +447,10 @@ def sev_decorations(diags: list[dict], doc: Doc) -> dict[int, list[tuple[int, in
 def page_diagnostics(data: dict, doc: Doc) -> str:
     diags = data["diagnostics"]
     first, last = 0, 25
-    current = 17
+    # The cursor sits on the undeclared path parameter, the one semantic
+    # error in the file; its Problems row is the selected one.
+    selected = next((d for d in diags if d["code"] == "oas-path-param-not-declared"), diags[0])
+    current = selected["range"]["start"]["line"]
     body = tabs_html(data["file"])
     body += editor_html(doc, first, last, current=current, decorations=sev_decorations(diags, doc))
     rows = []
@@ -422,7 +459,7 @@ def page_diagnostics(data: dict, doc: Doc) -> str:
         if d["source"] == "suspect-lint" and d["severity"] == "info":
             continue  # keep the panel to one screen: the lint infos are repetitive
         s = d["range"]["start"]
-        active = " active" if s["line"] == current and d["code"] == "oas-path-param-not-declared" else ""
+        active = " active" if d is selected else ""
         rows.append(
             f'<div class="row{active}"><span class="ico-{d["severity"]}">{SEV_ICON[d["severity"]]}</span>'
             f'<span class="msg">{esc(d["message"])}</span>'
@@ -440,7 +477,7 @@ def page_diagnostics(data: dict, doc: Doc) -> str:
         + (f'<div class="more">… {len(diags) - shown} more</div>' if shown < len(diags) else "")
         + "</div></div>"
     )
-    body += status_html(diags, current, 4)
+    body += status_html(diags, current, selected["range"]["start"]["character"])
     return page(body)
 
 
@@ -690,7 +727,7 @@ def capture(chrome: str, html_path: str, png_path: str, scale: int = 2) -> None:
             chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
             "--disable-extensions", "--font-render-hinting=none",
             f"--force-device-scale-factor={scale}", f"--window-size={WIDTH},{tall}",
-            f"--screenshot={png_path}", "file://" + os.path.abspath(html_path),
+            f"--screenshot={png_path}", pathlib.Path(html_path).absolute().as_uri(),
         ],
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
     )
@@ -712,7 +749,7 @@ def capture(chrome: str, html_path: str, png_path: str, scale: int = 2) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default=DEFAULT_OUT, help="directory for lsp-*.png")
-    ap.add_argument("--only", nargs="*", choices=sorted(PAGES), help="render a subset")
+    ap.add_argument("--only", nargs="+", choices=sorted(PAGES), help="render a subset")
     ap.add_argument("--keep-html", action="store_true", help="leave the HTML next to the PNGs")
     args = ap.parse_args()
 
@@ -722,17 +759,19 @@ def main() -> None:
     chrome = find_chrome()
     os.makedirs(args.out, exist_ok=True)
     work = args.out if args.keep_html else tempfile.mkdtemp(prefix="suspect-showcase-")
-    for name, build in PAGES.items():
-        if args.only and name not in args.only:
-            continue
-        html_path = os.path.join(work, f"lsp-{name}.html")
-        png_path = os.path.join(args.out, f"lsp-{name}.png")
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(build(data, doc))
-        capture(chrome, html_path, png_path)
-        print(f"wrote {os.path.relpath(png_path)}")
-    if not args.keep_html:
-        shutil.rmtree(work, ignore_errors=True)
+    try:
+        for name, build in PAGES.items():
+            if args.only and name not in args.only:
+                continue
+            html_path = os.path.join(work, f"lsp-{name}.html")
+            png_path = os.path.join(args.out, f"lsp-{name}.png")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(build(data, doc))
+            capture(chrome, html_path, png_path)
+            print(f"wrote {os.path.relpath(png_path)}")
+    finally:
+        if not args.keep_html:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

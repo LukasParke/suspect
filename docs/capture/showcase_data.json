@@ -453,11 +453,11 @@
         "new_text": "#/components/schemas/Animal",
         "range": {
           "end": {
-            "character": 48,
+            "character": 47,
             "line": 24
           },
           "start": {
-            "character": 22,
+            "character": 23,
             "line": 24
           }
         }
@@ -481,11 +481,11 @@
         "new_text": "#/components/schemas/Animal",
         "range": {
           "end": {
-            "character": 40,
+            "character": 39,
             "line": 41
           },
           "start": {
-            "character": 14,
+            "character": 15,
             "line": 41
           }
         }
