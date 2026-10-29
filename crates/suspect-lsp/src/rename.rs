@@ -177,6 +177,7 @@ pub fn rename(
         let is_home = uri == home_uri;
         home_seen |= is_home;
         let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+        let doc_bytes = handle.doc().inner().bytes();
         for edge in handle.edges().iter() {
             let pointer = match &edge.parsed {
                 ParsedRef::Local(p) if is_home => Some(p),
@@ -205,18 +206,25 @@ pub fn rename(
             let Some(hash) = edge.raw.rfind('#') else {
                 continue;
             };
+            // `edge.at` spans the whole scalar, quotes included, while the
+            // replacement is bare text: edit only what sits between the
+            // quotes so `'#/…/Pet'` stays a quoted string. An unquoted
+            // rewrite would make YAML read `#/…` as a comment.
             edits.push((
-                edge.at.clone(),
+                inside_quotes(doc_bytes, edge.at.clone()),
                 format!("{}#{}", &edge.raw[..hash], renamed),
             ));
         }
         if is_home {
-            edits.push((site.range.clone(), new_name.to_owned()));
+            edits.push((
+                inside_quotes(home.low.inner().bytes(), site.range.clone()),
+                new_name.to_owned(),
+            ));
         }
         // Plain-name uses outside `$ref` edges: discriminator mapping
         // values name schemas; security requirement keys name schemes.
         for at in expression_uses(handle.doc(), &site.section, &site.name) {
-            edits.push((at, new_name.to_owned()));
+            edits.push((inside_quotes(doc_bytes, at), new_name.to_owned()));
         }
         if !edits.is_empty() {
             per_doc.insert(uri, edits);
@@ -224,7 +232,13 @@ pub fn rename(
     }
     if !home_seen {
         // Unsaved/never-loaded home buffer: still rewrite its declaration.
-        per_doc.insert(home_uri, vec![(site.range, new_name.to_owned())]);
+        per_doc.insert(
+            home_uri,
+            vec![(
+                inside_quotes(home.low.inner().bytes(), site.range),
+                new_name.to_owned(),
+            )],
+        );
     }
 
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
@@ -256,6 +270,19 @@ pub fn rename(
         document_changes: None,
         change_annotations: None,
     })
+}
+
+/// Shrinks a scalar's byte range to the text between its surrounding
+/// quotes, when it has a matching pair, so a replacement keeps the author's
+/// quoting style. Plain scalars come back unchanged.
+fn inside_quotes(bytes: &[u8], range: std::ops::Range<usize>) -> std::ops::Range<usize> {
+    if range.len() >= 2 && range.end <= bytes.len() {
+        let (first, last) = (bytes[range.start], bytes[range.end - 1]);
+        if first == last && (first == b'\'' || first == b'"') {
+            return range.start + 1..range.end - 1;
+        }
+    }
+    range
 }
 
 /// Byte ranges of plain-name uses of a renamed component outside `$ref`
@@ -481,6 +508,34 @@ components:
         assert_eq!(
             base_edits[0].new_text, "schemas.yaml#/components/schemas/Cat",
             "external ref rewritten, file prefix preserved"
+        );
+    }
+
+    #[test]
+    fn rename_keeps_the_refs_quoted() {
+        let dir = std::env::temp_dir().join("suspect-lsp-rename-quoted");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (ws, home) = setup(&dir);
+        let off = offset_of(SCHEMAS, "    Pet:");
+        let edit = rename(&ws, &home, "Cat", off).expect("rename ok");
+        let changes = edit.changes.expect("changes present");
+
+        let schemas_url = Url::parse(home.low.uri().as_str()).unwrap();
+        let applied = apply_edits(&home, SCHEMAS, &changes[&schemas_url]);
+        assert!(applied.contains("    Cat:\n"), "{applied}");
+        assert!(
+            applied.contains("$ref: '#/components/schemas/Cat'\n"),
+            "the local ref keeps its quotes: {applied}"
+        );
+
+        let base_path = dir.join("base.yaml");
+        let base_url = Url::from_file_path(&base_path).unwrap();
+        let base_doc = OpenDoc::parse(Uri::from_path(&base_path).unwrap(), BASE.to_owned());
+        let applied = apply_edits(&base_doc, BASE, &changes[&base_url]);
+        assert!(
+            applied.contains("$ref: 'schemas.yaml#/components/schemas/Cat'\n"),
+            "the external ref keeps its quotes: {applied}"
         );
     }
 

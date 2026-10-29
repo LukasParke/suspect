@@ -47,7 +47,9 @@ jobs:
   # then drive the built executable against the python3 loopback fixture.
   native-go-cli:
     name: Native Go CLI acceptance
-    runs-on: ubuntu-latest
+    # Pinned to the image the exact python below has a build for;
+    # `ubuntu-latest` moved to 26.04, where 3.12.12 is not published.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -99,7 +101,8 @@ jobs:
   # runtime are both really built and run here.
   native-mcp-server:
     name: Native MCP server acceptance (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    # Same image pin as native-go-cli, for the same python build.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false

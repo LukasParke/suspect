@@ -1,192 +1,722 @@
-[
-  {
-    "feature": "hover",
-    "markdown": "### `Pets`\n\n*schema — `array`*",
-    "offset": 289,
-    "title": "Hover: resolved $ref target"
-  },
-  {
-    "feature": "diagnostics",
-    "lint": [
+{
+  "code_actions": {
+    "actions": [
       {
-        "code": "info-contact",
-        "message": "Info object should contain a contact object.",
-        "severity": "Warn",
-        "start": 23
+        "kind": "quickfix",
+        "title": "Add operationId `getPets`"
       },
       {
-        "code": "info-description",
-        "message": "OpenAPI object should have `description`.",
-        "severity": "Info",
-        "start": 23
+        "kind": "quickfix",
+        "title": "Add tags to operation"
       },
       {
-        "code": "info-license",
-        "message": "Info object should contain a license object.",
-        "severity": "Warn",
-        "start": 23
-      },
-      {
-        "code": "oas3-api-contact",
-        "message": "OpenAPI 3.x API description must have a contact object.",
-        "severity": "Info",
-        "start": 23
-      },
-      {
-        "code": "operation-4xx-response",
-        "message": "Operation should have at least one 4XX response.",
-        "severity": "Warn",
-        "start": 94
-      },
-      {
-        "code": "operation-operationId",
-        "message": "Operation must have an `operationId`.",
-        "severity": "Error",
-        "start": 94
-      },
-      {
-        "code": "operation-tags",
-        "message": "Operation should have non-empty `tags` array.",
-        "severity": "Warn",
-        "start": 94
-      },
-      {
-        "code": "security-rate-limit-documented",
-        "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
-        "severity": "Info",
-        "start": 94
-      },
-      {
-        "code": "operation-4xx-response",
-        "message": "Operation should have at least one 4XX response.",
-        "severity": "Warn",
-        "start": 336
-      },
-      {
-        "code": "operation-operationId",
-        "message": "Operation must have an `operationId`.",
-        "severity": "Error",
-        "start": 336
-      },
-      {
-        "code": "operation-tags",
-        "message": "Operation should have non-empty `tags` array.",
-        "severity": "Warn",
-        "start": 336
-      },
-      {
-        "code": "path-params",
-        "message": "Operation `get` of \"/pets/{petId}\" does not declare path parameter {petId}",
-        "severity": "Error",
-        "start": 336
-      },
-      {
-        "code": "security-rate-limit-documented",
-        "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
-        "severity": "Info",
-        "start": 336
+        "kind": "source.fixAll.suspect",
+        "title": "Fix all suspect issues"
       }
     ],
-    "title": "Diagnostics: semantic + lint",
-    "validate": [
-      {
-        "code": "oas-operation-missing-operationId",
-        "message": "get operation is missing an operationId",
-        "severity": "Warning",
-        "start": 94
+    "range": {
+      "end": {
+        "character": 13,
+        "line": 7
       },
-      {
-        "code": "oas-operation-no-error-response",
-        "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response",
-        "severity": "Info",
-        "start": 94
-      },
-      {
-        "code": "sdk-operation-missing-id",
-        "message": "GET operation has no `operationId`; SDK generation falls back to `GET /pets` selection",
-        "severity": "Info",
-        "start": 94
-      },
-      {
-        "code": "oas-path-param-not-declared",
-        "message": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it",
-        "severity": "Error",
-        "start": 325
-      },
-      {
-        "code": "oas-operation-missing-operationId",
-        "message": "get operation is missing an operationId",
-        "severity": "Warning",
-        "start": 336
-      },
-      {
-        "code": "oas-operation-no-error-response",
-        "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response",
-        "severity": "Info",
-        "start": 336
-      },
-      {
-        "code": "sdk-operation-missing-id",
-        "message": "GET operation has no `operationId`; SDK generation falls back to `GET /pets/{petId}` selection",
-        "severity": "Info",
-        "start": 336
+      "start": {
+        "character": 6,
+        "line": 7
       }
-    ]
+    }
   },
-  {
-    "feature": "goto_def",
-    "target_line": {
-      "start": 787,
-      "uri": "file:///var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/suspect-showcase/petstore.yaml"
+  "completion": {
+    "items": [
+      "#/components/schemas/Pet",
+      "#/components/schemas/Pets"
+    ],
+    "position": {
+      "character": 23,
+      "line": 14
     },
-    "title": "Go to definition: $ref target"
+    "typed": "#/"
   },
-  {
-    "count": 22,
-    "feature": "semantic_tokens",
-    "title": "Semantic tokens"
-  },
-  {
-    "actions": [],
-    "feature": "code_actions",
-    "title": "Code actions: quick fixes"
-  },
-  {
-    "feature": "inlay_hints",
-    "hints": [
-      {
-        "label": "InlayHint { position: Position { line: 14, character: 49 }, label: String(\"→ Pets (petstore.yaml)\"), kind: Some(Type), text_edits: None, tooltip: None, padding_left: None, padding_right: Some(true), data: Some(Object {\"end\": Number(853), \"start\": Number(787), \"suspect\": String(\"refHint\"), \"uri\": String(\"file:///var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/suspect-showcase/petstore.yaml\")}) }",
+  "diagnostics": [
+    {
+      "code": "info-contact",
+      "message": "Info object should contain a contact object.",
+      "range": {
+        "end": {
+          "character": 18,
+          "line": 3
+        },
+        "start": {
+          "character": 2,
+          "line": 2
+        }
+      },
+      "severity": "warning",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "info-description",
+      "message": "OpenAPI object should have `description`.",
+      "range": {
+        "end": {
+          "character": 18,
+          "line": 3
+        },
+        "start": {
+          "character": 2,
+          "line": 2
+        }
+      },
+      "severity": "info",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "info-license",
+      "message": "Info object should contain a license object.",
+      "range": {
+        "end": {
+          "character": 18,
+          "line": 3
+        },
+        "start": {
+          "character": 2,
+          "line": 2
+        }
+      },
+      "severity": "warning",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "oas3-api-contact",
+      "message": "OpenAPI 3.x API description must have a contact object.",
+      "range": {
+        "end": {
+          "character": 18,
+          "line": 3
+        },
+        "start": {
+          "character": 2,
+          "line": 2
+        }
+      },
+      "severity": "info",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "oas-operation-missing-operationId",
+      "message": "get operation is missing an operationId",
+      "range": {
+        "end": {
+          "character": 49,
+          "line": 14
+        },
+        "start": {
+          "character": 6,
+          "line": 7
+        }
+      },
+      "severity": "warning",
+      "source": "suspect"
+    },
+    {
+      "code": "oas-operation-no-error-response",
+      "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response",
+      "range": {
+        "end": {
+          "character": 49,
+          "line": 14
+        },
+        "start": {
+          "character": 6,
+          "line": 7
+        }
+      },
+      "severity": "info",
+      "source": "suspect"
+    },
+    {
+      "code": "sdk-operation-missing-id",
+      "message": "GET operation has no `operationId`; SDK generation falls back to `GET /pets` selection",
+      "range": {
+        "end": {
+          "character": 49,
+          "line": 14
+        },
+        "start": {
+          "character": 6,
+          "line": 7
+        }
+      },
+      "severity": "info",
+      "source": "suspect"
+    },
+    {
+      "code": "operation-4xx-response",
+      "message": "Operation should have at least one 4XX response.",
+      "range": {
+        "end": {
+          "character": 49,
+          "line": 14
+        },
+        "start": {
+          "character": 6,
+          "line": 7
+        }
+      },
+      "severity": "warning",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "operation-operationId",
+      "message": "Operation must have an `operationId`.",
+      "range": {
+        "end": {
+          "character": 49,
+          "line": 14
+        },
+        "start": {
+          "character": 6,
+          "line": 7
+        }
+      },
+      "severity": "error",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "operation-tags",
+      "message": "Operation should have non-empty `tags` array.",
+      "range": {
+        "end": {
+          "character": 49,
+          "line": 14
+        },
+        "start": {
+          "character": 6,
+          "line": 7
+        }
+      },
+      "severity": "warning",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "security-rate-limit-documented",
+      "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
+      "range": {
+        "end": {
+          "character": 49,
+          "line": 14
+        },
+        "start": {
+          "character": 6,
+          "line": 7
+        }
+      },
+      "severity": "info",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "oas-path-param-not-declared",
+      "message": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 4,
+          "line": 16
+        }
+      },
+      "severity": "error",
+      "source": "suspect"
+    },
+    {
+      "code": "oas-operation-missing-operationId",
+      "message": "get operation is missing an operationId",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "warning",
+      "source": "suspect"
+    },
+    {
+      "code": "oas-operation-no-error-response",
+      "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "info",
+      "source": "suspect"
+    },
+    {
+      "code": "sdk-operation-missing-id",
+      "message": "GET operation has no `operationId`; SDK generation falls back to `GET /pets/{petId}` selection",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "info",
+      "source": "suspect"
+    },
+    {
+      "code": "operation-4xx-response",
+      "message": "Operation should have at least one 4XX response.",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "warning",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "operation-operationId",
+      "message": "Operation must have an `operationId`.",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "error",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "operation-tags",
+      "message": "Operation should have non-empty `tags` array.",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "warning",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "path-params",
+      "message": "Operation `get` of \"/pets/{petId}\" does not declare path parameter {petId}",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "error",
+      "source": "suspect-lint"
+    },
+    {
+      "code": "security-rate-limit-documented",
+      "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
+      "range": {
+        "end": {
+          "character": 48,
+          "line": 24
+        },
+        "start": {
+          "character": 6,
+          "line": 17
+        }
+      },
+      "severity": "info",
+      "source": "suspect-lint"
+    }
+  ],
+  "file": "petstore.yaml",
+  "goto_def": {
+    "source": {
+      "end": {
+        "character": 49,
         "line": 14
       },
-      {
-        "label": "InlayHint { position: Position { line: 24, character: 48 }, label: String(\"→ Pet (petstore.yaml)\"), kind: Some(Type), text_edits: None, tooltip: None, padding_left: None, padding_right: Some(true), data: Some(Object {\"end\": Number(770), \"start\": Number(580), \"suspect\": String(\"refHint\"), \"uri\": String(\"file:///var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/suspect-showcase/petstore.yaml\")}) }",
+      "start": {
+        "character": 22,
+        "line": 14
+      }
+    },
+    "target": {
+      "end": {
+        "character": 0,
+        "line": 42
+      },
+      "start": {
+        "character": 6,
+        "line": 39
+      }
+    }
+  },
+  "hover": {
+    "markdown": "### `Pet`\n\n*schema — `object`*\n\n| Property | Type | Required | Description |\n|---|---|---|---|\n| `id` | `integer` | ✓ |  |\n| `name` | `string` | ✓ |  |\n| `tag` | `string` |  |  |",
+    "range": {
+      "end": {
+        "character": 48,
         "line": 24
       },
-      {
-        "label": "InlayHint { position: Position { line: 31, character: 10 }, label: String(\"· required\"), kind: Some(Type), text_edits: None, tooltip: None, padding_left: Some(true), padding_right: None, data: None }",
+      "start": {
+        "character": 22,
+        "line": 24
+      }
+    }
+  },
+  "inlay_hints": [
+    {
+      "kind": "type",
+      "label": "→ Pets (petstore.yaml)",
+      "padding_left": false,
+      "padding_right": true,
+      "position": {
+        "character": 49,
+        "line": 14
+      }
+    },
+    {
+      "kind": "type",
+      "label": "→ Pet (petstore.yaml)",
+      "padding_left": false,
+      "padding_right": true,
+      "position": {
+        "character": 48,
+        "line": 24
+      }
+    },
+    {
+      "kind": "type",
+      "label": "· required",
+      "padding_left": true,
+      "padding_right": false,
+      "position": {
+        "character": 10,
         "line": 31
-      },
-      {
-        "label": "InlayHint { position: Position { line: 34, character: 12 }, label: String(\"· required\"), kind: Some(Type), text_edits: None, tooltip: None, padding_left: Some(true), padding_right: None, data: None }",
+      }
+    },
+    {
+      "kind": "type",
+      "label": "· required",
+      "padding_left": true,
+      "padding_right": false,
+      "position": {
+        "character": 12,
         "line": 34
-      },
-      {
-        "label": "InlayHint { position: Position { line: 41, character: 40 }, label: String(\"→ Pet (petstore.yaml)\"), kind: Some(Type), text_edits: None, tooltip: None, padding_left: None, padding_right: Some(true), data: Some(Object {\"end\": Number(770), \"start\": Number(580), \"suspect\": String(\"refHint\"), \"uri\": String(\"file:///var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/suspect-showcase/petstore.yaml\")}) }",
+      }
+    },
+    {
+      "kind": "type",
+      "label": "→ Pet (petstore.yaml)",
+      "padding_left": false,
+      "padding_right": true,
+      "position": {
+        "character": 40,
         "line": 41
       }
+    }
+  ],
+  "rename": {
+    "edits": [
+      {
+        "file": "petstore.yaml",
+        "new_text": "#/components/schemas/Animal",
+        "range": {
+          "end": {
+            "character": 47,
+            "line": 24
+          },
+          "start": {
+            "character": 23,
+            "line": 24
+          }
+        }
+      },
+      {
+        "file": "petstore.yaml",
+        "new_text": "Animal",
+        "range": {
+          "end": {
+            "character": 7,
+            "line": 27
+          },
+          "start": {
+            "character": 4,
+            "line": 27
+          }
+        }
+      },
+      {
+        "file": "petstore.yaml",
+        "new_text": "#/components/schemas/Animal",
+        "range": {
+          "end": {
+            "character": 39,
+            "line": 41
+          },
+          "start": {
+            "character": 15,
+            "line": 41
+          }
+        }
+      }
     ],
-    "title": "Inlay hints: $ref targets + property types"
+    "new_name": "Animal",
+    "placeholder": "Pet",
+    "range": {
+      "end": {
+        "character": 7,
+        "line": 27
+      },
+      "start": {
+        "character": 4,
+        "line": 27
+      }
+    }
   },
-  {
-    "feature": "workspace_symbols",
-    "names": [
-      "/pets",
-      "GET /pets",
-      "/pets/{petId}",
-      "GET /pets/{petId}",
-      "Pet",
-      "Pets"
-    ],
-    "title": "Workspace symbols"
-  }
-]
+  "semantic_tokens": [
+    {
+      "character": 0,
+      "length": 7,
+      "line": 0,
+      "modifiers": [],
+      "type": "keyword"
+    },
+    {
+      "character": 0,
+      "length": 4,
+      "line": 1,
+      "modifiers": [],
+      "type": "namespace"
+    },
+    {
+      "character": 12,
+      "length": 5,
+      "line": 3,
+      "modifiers": [],
+      "type": "string"
+    },
+    {
+      "character": 0,
+      "length": 5,
+      "line": 4,
+      "modifiers": [],
+      "type": "namespace"
+    },
+    {
+      "character": 4,
+      "length": 3,
+      "line": 6,
+      "modifiers": [],
+      "type": "method"
+    },
+    {
+      "character": 15,
+      "length": 9,
+      "line": 7,
+      "modifiers": [
+        "documentation"
+      ],
+      "type": "string"
+    },
+    {
+      "character": 23,
+      "length": 14,
+      "line": 10,
+      "modifiers": [
+        "documentation"
+      ],
+      "type": "string"
+    },
+    {
+      "character": 16,
+      "length": 4,
+      "line": 14,
+      "modifiers": [],
+      "type": "keyword"
+    },
+    {
+      "character": 23,
+      "length": 25,
+      "line": 14,
+      "modifiers": [
+        "definition"
+      ],
+      "type": "type"
+    },
+    {
+      "character": 4,
+      "length": 3,
+      "line": 16,
+      "modifiers": [],
+      "type": "method"
+    },
+    {
+      "character": 15,
+      "length": 13,
+      "line": 17,
+      "modifiers": [
+        "documentation"
+      ],
+      "type": "string"
+    },
+    {
+      "character": 23,
+      "length": 7,
+      "line": 20,
+      "modifiers": [
+        "documentation"
+      ],
+      "type": "string"
+    },
+    {
+      "character": 16,
+      "length": 4,
+      "line": 24,
+      "modifiers": [],
+      "type": "keyword"
+    },
+    {
+      "character": 23,
+      "length": 24,
+      "line": 24,
+      "modifiers": [
+        "definition"
+      ],
+      "type": "type"
+    },
+    {
+      "character": 0,
+      "length": 10,
+      "line": 25,
+      "modifiers": [],
+      "type": "namespace"
+    },
+    {
+      "character": 4,
+      "length": 3,
+      "line": 27,
+      "modifiers": [
+        "definition",
+        "declaration"
+      ],
+      "type": "type"
+    },
+    {
+      "character": 8,
+      "length": 2,
+      "line": 31,
+      "modifiers": [],
+      "type": "property"
+    },
+    {
+      "character": 8,
+      "length": 4,
+      "line": 34,
+      "modifiers": [],
+      "type": "property"
+    },
+    {
+      "character": 8,
+      "length": 3,
+      "line": 36,
+      "modifiers": [],
+      "type": "property"
+    },
+    {
+      "character": 4,
+      "length": 4,
+      "line": 38,
+      "modifiers": [
+        "definition",
+        "declaration"
+      ],
+      "type": "type"
+    },
+    {
+      "character": 8,
+      "length": 4,
+      "line": 41,
+      "modifiers": [],
+      "type": "keyword"
+    },
+    {
+      "character": 15,
+      "length": 24,
+      "line": 41,
+      "modifiers": [
+        "definition"
+      ],
+      "type": "type"
+    }
+  ],
+  "text": "openapi: 3.1.0\ninfo:\n  title: Petstore Demo\n  version: \"1.0.0\"\npaths:\n  /pets:\n    get:\n      summary: List pets\n      responses:\n        \"200\":\n          description: A page of pets\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Pets'\n  /pets/{petId}:\n    get:\n      summary: Fetch one pet\n      responses:\n        \"200\":\n          description: The pet\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Pet'\ncomponents:\n  schemas:\n    Pet:\n      type: object\n      required: [id, name]\n      properties:\n        id:\n          type: integer\n          format: int64\n        name:\n          type: string\n        tag:\n          type: string\n    Pets:\n      type: array\n      items:\n        $ref: '#/components/schemas/Pet'\n",
+  "workspace_symbols": [
+    {
+      "container": null,
+      "kind": "Interface",
+      "line": 6,
+      "name": "/pets"
+    },
+    {
+      "container": "/pets",
+      "kind": "Method",
+      "line": 7,
+      "name": "GET /pets"
+    },
+    {
+      "container": null,
+      "kind": "Interface",
+      "line": 16,
+      "name": "/pets/{petId}"
+    },
+    {
+      "container": "/pets/{petId}",
+      "kind": "Method",
+      "line": 17,
+      "name": "GET /pets/{petId}"
+    },
+    {
+      "container": "components/schemas",
+      "kind": "Struct",
+      "line": 28,
+      "name": "Pet"
+    },
+    {
+      "container": "components/schemas",
+      "kind": "Struct",
+      "line": 39,
+      "name": "Pets"
+    }
+  ]
+}
