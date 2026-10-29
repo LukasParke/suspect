@@ -42,37 +42,50 @@ and **Telescope** (sailpoint-oss) is in
 
 ### In action (VS Code + the bundled extension)
 
-Screenshots are reproducible via `docs/capture/capture.sh` (requires VS Code, Xvfb, xdotool, tesseract).
+Every screenshot below is drawn from real server output for
+[`docs/demo/petstore.yaml`](docs/demo/petstore.yaml). Regenerate them with
+`cargo run --example showcase -p suspect-lsp && python3 docs/capture/render.py`
+(needs Chrome and Pillow).
 
-Diagnostics from the validator and linter, with `$ref` inlay hints:
+Diagnostics from the validator and the Spectral-compatible linter, in the
+editor and the Problems panel:
 
 ![Diagnostics](docs/images/lsp-diagnostics.png)
 
-Hover over a `$ref` resolves it across files and previews the target:
+Hover over a `$ref` resolves it (across files, too) and previews the target:
 
 ![Hover](docs/images/lsp-hover.png)
 
-Quick fixes derived from diagnostics (insert missing `operationId`,
-`responses`, `description`, contact/license skeletons, …):
+Quick fixes derived from diagnostics, plus `source.fixAll.suspect`:
 
 ![Code actions](docs/images/lsp-code_actions.png)
 
-Problems panel:
+Completions inside a `$ref` offer the components declared across the
+workspace:
 
+![Completion](docs/images/lsp-completion.png)
 
-Semantic highlighting and property type hints:
+Go to definition peeks at the `$ref` target:
 
-![Semantic tokens + inlay hints](docs/images/lsp-semantic_tokens.png)
+![Go to definition](docs/images/lsp-goto_def.png)
+
+Semantic highlighting; the legend lists the token types in this file:
+
+![Semantic tokens](docs/images/lsp-semantic_tokens.png)
+
+Inlay hints name each `$ref` target and mark required properties:
+
+![Inlay hints](docs/images/lsp-inlay_hints.png)
+
+Workspace symbols cover paths, operations and components:
+
+![Workspace symbols](docs/images/lsp-workspace_symbols.png)
 
 Workspace-wide rename rewrites the declaration and every `$ref` that points
 at it (guarded by `prepareRename`; cross-file edits land in one atomic
 `WorkspaceEdit`) — shown here renaming `Pet`:
 
-![Workspace symbols](docs/images/lsp-workspace_symbols.png)
-
-After applying, every `$ref` is rewritten:
-
-![Go to definition](docs/images/lsp-goto_def.png)
+![Rename](docs/images/lsp-rename.png)
 
 
 ## Crates
