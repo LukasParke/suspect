@@ -59,7 +59,7 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     }
     let doc = suspect_overlay::Value::from_node(low.root()).to_json();
     let doc: serde_json::Value = serde_json::from_str(&doc)?;
-    let upgraded = suspect_upgrade::upgrade(&doc).map_err(anyhow::Error::msg)?;
+    let upgraded = crate::upgrade::upgrade(&doc).map_err(anyhow::Error::msg)?;
 
     let json_text = serde_json::to_string_pretty(&upgraded)? + "\n";
     let output_text = match pick_format(args) {

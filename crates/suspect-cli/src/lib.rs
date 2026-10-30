@@ -9,10 +9,12 @@ pub mod bundle;
 pub mod commands;
 pub mod diff;
 pub mod output;
+pub mod reverse;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
 pub mod sarif;
 /// FD-level output silencing for machine-readable runs.
 pub mod silence;
+pub mod upgrade;
 pub mod watch;
 
 use std::path::PathBuf;

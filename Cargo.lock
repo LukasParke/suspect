@@ -2107,6 +2107,7 @@ dependencies = [
  "libc",
  "notify",
  "rayon",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
@@ -2125,13 +2126,11 @@ dependencies = [
  "suspect-oas",
  "suspect-overlay",
  "suspect-ref",
- "suspect-reverse",
  "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",
  "suspect-test",
- "suspect-upgrade",
  "suspect-validate",
  "tempfile",
  "tokio",
@@ -2373,15 +2372,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "suspect-reverse"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "suspect-ir",
-]
-
-[[package]]
 name = "suspect-rex"
 version = "0.1.0"
 dependencies = [
@@ -2493,16 +2483,6 @@ dependencies = [
  "suspect-source",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "suspect-upgrade"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "suspect-low",
- "suspect-overlay",
- "suspect-source",
 ]
 
 [[package]]

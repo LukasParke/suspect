@@ -29,7 +29,6 @@ suspect-lint = { path = "crates/suspect-lint", version = "0.1.0" }
 suspect-lsp = { path = "crates/suspect-lsp", version = "0.1.0" }
 suspect-ir = { path = "crates/suspect-ir", version = "0.1.0" }
 suspect-journal = { path = "crates/suspect-journal", version = "0.1.0" }
-suspect-reverse = { path = "crates/suspect-reverse", version = "0.1.0" }
 suspect-rules = { path = "crates/suspect-rules", version = "0.1.0" }
 suspect-rex = { path = "crates/suspect-rex", version = "0.1.0" }
 suspect-test = { path = "crates/suspect-test", version = "0.1.0" }
@@ -38,7 +37,6 @@ suspect-artifact = { path = "crates/suspect-artifact", version = "0.1.0" }
 suspect-codegen = { path = "crates/suspect-codegen", version = "0.1.0" }
 suspect-gateway = { path = "crates/suspect-gateway", version = "0.1.0" }
 suspect-faker = { path = "crates/suspect-faker", version = "0.1.0" }
-suspect-upgrade = { path = "crates/suspect-upgrade", version = "0.1.0" }
 
 # external
 tree-sitter = "0.26"

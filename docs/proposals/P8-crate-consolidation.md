@@ -234,7 +234,7 @@ Each step is one PR, independent of the others, and leaves `cargo test
    `examples/feature_bench.rs`; delete `Cargo.toml:32,42`. Tests: the moved
    unit tests plus the existing CLI integration tests that run them
    (`crates/suspect-cli/tests/ecosystem_commands.rs:48-94` for `upgrade`,
-   `crates/suspect-cli/tests/orphan_wire.rs:222,250` for `reverse`). 2 h.
+   `crates/suspect-cli/tests/orphan_wire.rs:222,250` for `reverse`). 2 h. **Done.**
 4. **Merge `suspect-faker` into `suspect_ir::faker`.** Update
    `suspect-gen/src/filters.rs:481`, `suspect-test/src/lib.rs:46`, both
    manifests, `Cargo.toml:41`. Tests: the moved faker tests under

@@ -12,11 +12,9 @@ path = "src/main.rs"
 
 [dependencies]
 suspect-test.workspace = true
-suspect-upgrade.workspace = true
 suspect-gen.workspace = true
 suspect-ir.workspace = true
 suspect-journal.workspace = true
-suspect-reverse.workspace = true
 suspect-codegen.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2", "cookies"], optional = true }
 axum = { version = "0.8", optional = true }
@@ -47,6 +45,7 @@ sha2.workspace = true
 rayon.workspace = true
 anyhow.workspace = true
 notify.workspace = true
+regex.workspace = true
 suspect-gateway.workspace = true
 
 [features]

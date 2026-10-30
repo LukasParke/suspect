@@ -141,14 +141,14 @@ fn bench_r4_stateful(name: &str, ir: &IrSpec) {
 fn bench_r8_reverse(name: &str, ir: &IrSpec) {
     // Extract routes from our own workspace source tree
     let s = Instant::now();
-    let routes = suspect_reverse::extract_from_tree(std::path::Path::new(concat!(
+    let routes = suspect_cli::reverse::extract_from_tree(std::path::Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/.."
     )));
     let extract_t = s.elapsed();
 
     let s = Instant::now();
-    let xref = suspect_reverse::cross_reference(ir, &routes);
+    let xref = suspect_cli::reverse::cross_reference(ir, &routes);
     let xref_t = s.elapsed();
 
     let files: usize = routes

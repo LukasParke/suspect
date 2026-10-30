@@ -20,7 +20,7 @@ pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
         .ok_or_else(|| anyhow::anyhow!("spec document not loaded: {uri}"))?;
     let ir = IrSpec::from_workspace(&ws, &uri)
         .map_err(|e| anyhow::anyhow!("IR compilation failed: {e}"))?;
-    let routes = suspect_reverse::extract_from_tree(source);
+    let routes = crate::reverse::extract_from_tree(source);
     if routes.is_empty() {
         eprintln!(
             "no routes extracted from {} (supported: Rust axum/actix, TypeScript Express, Go net/http, Gin)",
@@ -28,7 +28,7 @@ pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
         );
         return Ok(2);
     }
-    let report = suspect_reverse::cross_reference(&ir, &routes);
+    let report = crate::reverse::cross_reference(&ir, &routes);
     if json {
         println!(
             "{}",
