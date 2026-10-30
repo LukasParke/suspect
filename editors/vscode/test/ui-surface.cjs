@@ -316,12 +316,16 @@ test('every server command the extension registers itself is declared in the han
 	const declared = new Set(clientProtocol().clientCommands);
 	for (const id of [...registered, RUN_WORKFLOW_COMMAND]) assert.ok(declared.has(id), `${id} is registered locally but not declared`);
 	const capabilities = { experimental: { other: 1 } };
-	suspectCapabilities().fillClientCapabilities(capabilities);
+	suspectCapabilities('0.1.0').fillClientCapabilities(capabilities);
 	assert.deepEqual(capabilities.experimental.other, 1, 'other experimental capabilities survive');
 	assert.deepEqual(capabilities.experimental.suspect.clientCommands, [...EDITOR_OWNED_COMMANDS]);
+	// The server compares this against its own version and warns once.
+	assert.equal(capabilities.experimental.suspect.extensionVersion, '0.1.0');
+	assert.equal(clientProtocol().extensionVersion, undefined);
 
 	const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
-	assert.ok(extension.includes('registerFeature(suspectCapabilities())'), 'the client sends the declaration');
+	assert.ok(extension.includes('registerFeature(suspectCapabilities(extensionVersion))'), 'the client sends the declaration');
+	assert.ok(!extension.includes('warnOnVersionMismatch'), 'the version check is the server\'s');
 	assert.ok(!extension.includes('commands.register ='), 'the language client is not patched');
 	assert.ok(extension.includes("configurationSection: 'suspect'"), 'settings changes reach the server');
 });

@@ -2365,3 +2365,63 @@ fn declared_client_commands_are_not_registered_but_still_run() {
         "a declared command must still execute: {graph}"
     );
 }
+
+/// The `showMessage` warnings about the extension version.
+fn version_warnings(editor: &Editor) -> Vec<String> {
+    editor
+        .notifications()
+        .into_iter()
+        .filter(|(method, _)| method == "window/showMessage")
+        .filter_map(|(_, params)| params["message"].as_str().map(str::to_owned))
+        .filter(|message| message.contains("is serving an extension built for"))
+        .collect()
+}
+
+/// The server checks the extension version it is told about and warns once
+/// on a minor mismatch: from the capabilities (VS Code) or from the
+/// initialization options (Zed).
+#[test]
+fn an_extension_for_another_minor_release_gets_one_warning() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let mut capabilities = editor_capabilities();
+    capabilities["experimental"] =
+        serde_json::json!({ "suspect": { "extensionVersion": "0.0.9" } });
+    let editor = Editor::start(&ws.root, capabilities);
+    assert!(editor.wait_for_notification("window/showMessage", Duration::from_secs(10)));
+    // Past the config reload that follows `initialized`.
+    std::thread::sleep(Duration::from_millis(500));
+    let warnings = version_warnings(&editor);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("built for 0.0.x"),
+        "the warning names the extension's release: {warnings:?}"
+    );
+
+    let zed = Editor::start_with(
+        &ws.root,
+        editor_capabilities(),
+        Some(serde_json::json!({ "extensionVersion": "0.0.9" })),
+    );
+    assert!(zed.wait_for_notification("window/showMessage", Duration::from_secs(10)));
+    assert_eq!(version_warnings(&zed).len(), 1);
+}
+
+/// A patch difference is not a mismatch.
+#[test]
+fn an_extension_one_patch_apart_gets_no_warning() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let server = env!("CARGO_PKG_VERSION");
+    let (major_minor, _) = server.rsplit_once('.').expect("x.y.z");
+    let mut capabilities = editor_capabilities();
+    capabilities["experimental"] =
+        serde_json::json!({ "suspect": { "extensionVersion": format!("{major_minor}.99") } });
+    let editor = Editor::start(&ws.root, capabilities);
+    // A round trip after `initialized`, so its warning would have arrived.
+    editor
+        .request("workspace/symbol", serde_json::json!({"query": "x"}))
+        .expect("workspace/symbol");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(version_warnings(&editor), Vec::<String>::new());
+}

@@ -712,11 +712,15 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    extension's ids, which now fails the client start with "command already
    exists"; the extension names that case ("older than this extension")
    instead of a generic start failure.
-2. **Server-side version handshake.** `initialized` compares
+2. **Done.** **Server-side version handshake.** `initialized` compares
    `extensionVersion`. Zed sends it through
    `language_server_initialization_options`. Delete
    `warnOnVersionMismatch`. Test: a session with `0.0.9` gets one
    `showMessage`, and a patch difference gets none. 0.5 day.
+   As built: the server reads `experimental.suspect.extensionVersion`
+   (VS Code) first, then `initializationOptions.extensionVersion` (Zed,
+   merged into the user's `lsp.suspect-lsp.initialization_options`). A
+   version that does not parse is not a mismatch.
 3. **`DocKind`, gating, `suspect/documentKind`.** `state.rs`, `lib.rs`
    handlers, VS Code context key and `when` clauses, activation globs, Zed
    README opt-out. Tests: an `lsp_session` case that opens

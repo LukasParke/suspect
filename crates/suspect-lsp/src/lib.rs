@@ -2013,6 +2013,20 @@ impl LanguageServer for Backend {
 
     // ---------- workspace sync / configuration / folders ----------
     async fn initialized(&self, _params: InitializedParams) {
+        // Every client gets the version check, including ones that cannot
+        // read `serverInfo`; `initialized` comes once, so it warns once.
+        let extension = {
+            let st = self.state.read().await;
+            protocol::extension_version(st.client_caps.as_ref(), st.pending_init_options.as_ref())
+        };
+        if let Some(warning) = extension
+            .as_deref()
+            .and_then(|e| protocol::version_mismatch(env!("CARGO_PKG_VERSION"), e))
+        {
+            self.client
+                .show_message(MessageType::WARNING, warning)
+                .await;
+        }
         // Fetch merged config when the client supports workspace/configuration.
         let client = self.pull_client_settings().await;
         // The client may already have pulled diagnostics under the

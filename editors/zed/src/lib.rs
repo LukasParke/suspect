@@ -12,6 +12,11 @@
 //! Workspace configuration is forwarded from `lsp.suspect-lsp.settings`
 //! under the `suspect` section the server reads
 //! (`{ "suspect": { "lint": .., "ref": .., "inlayHints": .. } }`).
+//!
+//! The initialization options carry `extensionVersion`, which the server
+//! compares with its own version (it warns once on a major or minor
+//! mismatch), plus whatever the user set in
+//! `lsp.suspect-lsp.initialization_options`.
 
 use zed_extension_api::{
     self as zed, settings::LspSettings, Command, LanguageServerId, Result, Worktree,
@@ -46,6 +51,19 @@ impl zed::Extension for SuspectExtension {
             return Ok(Some(settings));
         }
         Ok(Some(zed::serde_json::json!({ "suspect": settings })))
+    }
+
+    /// The user's `lsp.suspect-lsp.initialization_options` with this
+    /// extension's version added, for the server's version check.
+    fn language_server_initialization_options(
+        &mut self,
+        language_server_id: &LanguageServerId,
+        worktree: &Worktree,
+    ) -> Result<Option<zed::serde_json::Value>> {
+        let user = LspSettings::for_worktree(language_server_id.as_ref(), worktree)
+            .ok()
+            .and_then(|settings| settings.initialization_options);
+        Ok(Some(with_extension_version(user)))
     }
 
     /// Spawns `suspect lsp`, honoring a configured binary first.
@@ -90,4 +108,40 @@ impl zed::Extension for SuspectExtension {
     }
 }
 
+/// `options` (an object, or nothing) with `extensionVersion` set to this
+/// extension's version unless the user already set one.
+fn with_extension_version(options: Option<zed::serde_json::Value>) -> zed::serde_json::Value {
+    let mut options = match options {
+        Some(zed::serde_json::Value::Object(map)) => map,
+        _ => zed::serde_json::Map::new(),
+    };
+    options
+        .entry("extensionVersion")
+        .or_insert_with(|| env!("CARGO_PKG_VERSION").into());
+    zed::serde_json::Value::Object(options)
+}
+
 zed::register_extension!(SuspectExtension);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zed::serde_json::json;
+
+    #[test]
+    fn initialization_options_carry_the_extension_version() {
+        let version = env!("CARGO_PKG_VERSION");
+        assert_eq!(
+            with_extension_version(None),
+            json!({ "extensionVersion": version })
+        );
+        assert_eq!(
+            with_extension_version(Some(json!({ "run": { "baseUrl": "http://x" } }))),
+            json!({ "run": { "baseUrl": "http://x" }, "extensionVersion": version })
+        );
+        assert_eq!(
+            with_extension_version(Some(json!({ "extensionVersion": "9.9.9" }))),
+            json!({ "extensionVersion": "9.9.9" })
+        );
+    }
+}

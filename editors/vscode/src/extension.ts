@@ -29,9 +29,8 @@ let client: LanguageClient | undefined;
 let gateway: GatewayState | undefined;
 let gatewayStatus: vscode.StatusBarItem | undefined;
 let sdkGeneration: SdkGenerationController | undefined;
-/** The extension's own package version, compared against the server's. */
+/** The extension's own package version, sent to the server, which checks it. */
 let extensionVersion: string | undefined;
-let versionMismatchWarned = false;
 /** Watches the committed config layers; shared across client restarts. */
 let configWatcher: vscode.FileSystemWatcher | undefined;
 
@@ -115,45 +114,25 @@ function startClient(): void {
 	client = current;
 	// Declares the server command ids the extension registers itself, so the
 	// server leaves them out of executeCommandProvider and the client does
-	// not register them twice.
-	current.registerFeature(suspectCapabilities());
-	void Promise.resolve(current.start()).then(
-		() => warnOnVersionMismatch(current),
-		(err: unknown) => {
-			if (client === current) client = undefined;
-			const message = errorMessage(err);
-			const missing = /ENOENT|Launching server using command/.test(message);
-			// A server older than the experimental.suspect handshake ignores
-			// the declared commands and advertises ids this extension owns.
-			const tooOld = /command '[^']+' already exists/.test(message);
-			const text = missing
-				? `Suspect CLI not found at \`${binary}\`. Install it or set suspect.basePath to the CLI (or its directory).`
-				: tooOld
-					? `The Suspect CLI at \`${binary}\` is older than this extension. Update it or set suspect.basePath to a newer build.`
-					: `Suspect language server failed to start: ${message}`;
-			void vscode.window.showWarningMessage(text, 'Open Settings').then((choice) => {
-				if (choice === 'Open Settings') {
-					void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
-				}
-			});
-		},
-	);
-}
-
-/** Warns (once per session, non-blocking) when the server is a different build than the extension. */
-function warnOnVersionMismatch(current: LanguageClient): void {
-	const serverVersion = current.initializeResult?.serverInfo?.version;
-	if (versionMismatchWarned || !serverVersion || !extensionVersion || serverVersion === extensionVersion) {
-		return;
-	}
-	versionMismatchWarned = true;
-	void vscode.window.showWarningMessage(
-		`Suspect CLI ${serverVersion} differs from the extension version ${extensionVersion}; some editor features may not match the server.`,
-		'Open Settings',
-	).then((choice) => {
-		if (choice === 'Open Settings') {
-			void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
-		}
+	// not register them twice, and the extension version the server checks.
+	current.registerFeature(suspectCapabilities(extensionVersion));
+	void Promise.resolve(current.start()).catch((err: unknown) => {
+		if (client === current) client = undefined;
+		const message = errorMessage(err);
+		const missing = /ENOENT|Launching server using command/.test(message);
+		// A server older than the experimental.suspect handshake ignores
+		// the declared commands and advertises ids this extension owns.
+		const tooOld = /command '[^']+' already exists/.test(message);
+		const text = missing
+			? `Suspect CLI not found at \`${binary}\`. Install it or set suspect.basePath to the CLI (or its directory).`
+			: tooOld
+				? `The Suspect CLI at \`${binary}\` is older than this extension. Update it or set suspect.basePath to a newer build.`
+				: `Suspect language server failed to start: ${message}`;
+		void vscode.window.showWarningMessage(text, 'Open Settings').then((choice) => {
+			if (choice === 'Open Settings') {
+				void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
+			}
+		});
 	});
 }
 

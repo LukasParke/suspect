@@ -96,6 +96,12 @@ settings:
 from the editor layer over the committed `.suspect.yaml` /
 `suspect.project.json` files.
 
+The extension sends `extensionVersion` in the server's initialization options,
+merged into anything you set under `lsp.suspect-lsp.initialization_options`.
+The server compares it with its own version and shows one warning when the
+major or minor release differs (for example a `binary.path` pointing at an
+older build).
+
 ## What works
 
 - Full LSP feature set over stdio (`suspect lsp`): diagnostics (validation +

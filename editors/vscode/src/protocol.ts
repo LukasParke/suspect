@@ -6,7 +6,9 @@
  * the server leaves those out of `executeCommandProvider`, so the language
  * client does not register them a second time. The server answers with
  * `capabilities.experimental.suspect`: its custom requests and commands,
- * each with a version, so a feature can be checked instead of tried.
+ * each with a version, so a feature can be checked instead of tried. The
+ * client also reports its own version, and the server warns once when it
+ * belongs to another release.
  */
 import type { ClientCapabilities, FeatureState, LanguageClient, StaticFeature } from 'vscode-languageclient/node';
 import { EDITOR_OWNED_COMMANDS } from './serverCommands';
@@ -14,6 +16,7 @@ import { EDITOR_OWNED_COMMANDS } from './serverCommands';
 /** What the client puts under `capabilities.experimental.suspect`. */
 export interface ClientProtocol {
 	clientCommands: string[];
+	extensionVersion?: string;
 }
 
 /** The server's `capabilities.experimental.suspect`. */
@@ -23,16 +26,16 @@ export interface ServerProtocol {
 	commands: Record<string, number>;
 }
 
-export function clientProtocol(): ClientProtocol {
-	return { clientCommands: [...EDITOR_OWNED_COMMANDS] };
+export function clientProtocol(extensionVersion?: string): ClientProtocol {
+	return { clientCommands: [...EDITOR_OWNED_COMMANDS], ...(extensionVersion && { extensionVersion }) };
 }
 
 /** Fills `experimental.suspect` in the client capabilities; register it before `start()`. */
-export function suspectCapabilities(): StaticFeature {
+export function suspectCapabilities(extensionVersion?: string): StaticFeature {
 	return {
 		fillClientCapabilities(capabilities: ClientCapabilities): void {
 			const experimental = (capabilities.experimental ?? {}) as Record<string, unknown>;
-			capabilities.experimental = { ...experimental, suspect: clientProtocol() };
+			capabilities.experimental = { ...experimental, suspect: clientProtocol(extensionVersion) };
 		},
 		initialize(): void {},
 		getState: (): FeatureState => ({ kind: 'static' }),

@@ -169,6 +169,46 @@ pub fn registered_commands(client_owned: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The extension version a client reported: VS Code sends
+/// `capabilities.experimental.suspect.extensionVersion`, clients without
+/// custom capabilities (Zed) send `initializationOptions.extensionVersion`.
+#[must_use]
+pub fn extension_version(
+    caps: Option<&ClientCapabilities>,
+    initialization_options: Option<&Value>,
+) -> Option<String> {
+    caps.and_then(client_section)
+        .and_then(|s| s.get("extensionVersion"))
+        .or_else(|| initialization_options?.get("extensionVersion"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+/// `major.minor` of a version string; `None` when it does not parse.
+fn major_minor(version: &str) -> Option<(u64, u64)> {
+    let core = version.trim().trim_start_matches('v');
+    let core = core.split(['-', '+']).next()?;
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
+}
+
+/// The warning for a server serving an extension built for another
+/// release: major or minor differ (for `0.x` that is the minor alone).
+/// A patch difference, or a version that does not parse, is not a
+/// mismatch.
+#[must_use]
+pub fn version_mismatch(server: &str, extension: &str) -> Option<String> {
+    let (s, e) = (major_minor(server)?, major_minor(extension)?);
+    (s != e).then(|| {
+        format!(
+            "suspect {server} is serving an extension built for {}.{}.x. Editor features may not match.",
+            e.0, e.1
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +340,40 @@ mod tests {
         let mut listed: Vec<String> = COMMANDS.iter().map(|c| c.name.to_owned()).collect();
         listed.sort();
         assert_eq!(arms_sorted, listed);
+    }
+
+    #[test]
+    fn extension_version_prefers_capabilities_over_initialization_options() {
+        let with_caps = caps(json!({ "suspect": { "extensionVersion": "0.2.0" } }));
+        let options = json!({ "extensionVersion": "0.3.0" });
+        assert_eq!(
+            extension_version(Some(&with_caps), Some(&options)).as_deref(),
+            Some("0.2.0")
+        );
+        assert_eq!(
+            extension_version(Some(&ClientCapabilities::default()), Some(&options)).as_deref(),
+            Some("0.3.0")
+        );
+        assert_eq!(extension_version(None, None), None);
+        assert_eq!(extension_version(None, Some(&json!({ "lint": {} }))), None);
+    }
+
+    #[test]
+    fn versions_mismatch_on_major_or_minor_only() {
+        assert_eq!(version_mismatch("0.1.0", "0.1.7"), None, "patch");
+        assert_eq!(
+            version_mismatch("0.1.0", "v0.1.0-dev"),
+            None,
+            "prefix, pre-release"
+        );
+        assert_eq!(
+            version_mismatch("0.3.1", "0.2.0").as_deref(),
+            Some(
+                "suspect 0.3.1 is serving an extension built for 0.2.x. Editor features may not match."
+            )
+        );
+        assert!(version_mismatch("1.2.0", "2.2.0").is_some(), "major");
+        assert!(version_mismatch("1.2.0", "1.3.0").is_some(), "minor");
+        assert_eq!(version_mismatch("0.1.0", "unknown"), None, "unparseable");
     }
 }
