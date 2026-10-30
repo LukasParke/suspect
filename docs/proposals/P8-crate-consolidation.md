@@ -221,7 +221,7 @@ Each step is one PR, independent of the others, and leaves `cargo test
 
 1. **Drop the unused `suspect-rex` edge from `suspect-lsp`.** Delete
    `crates/suspect-lsp/Cargo.toml:32`. Test: `cargo build -p suspect-lsp`.
-   0.25 h.
+   0.25 h. **Done.**
 2. **Merge `suspect-watch` into `suspect_cli::watch`.** Move
    `src/lib.rs` and `src/tests.rs`; add `notify.workspace = true` to
    `suspect-cli`; update `commands/watch.rs` and `examples/platform_bench.rs`;
