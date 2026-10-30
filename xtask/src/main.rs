@@ -14,8 +14,10 @@ use anyhow::{Context, Result, bail};
 const USAGE: &str = "\
 tasks:
   ci [JOB...] [flags]             Run the CI jobs locally (`cargo xtask ci --help`).
-  sdk-full [options]              Verify the maintained twelve-language full SDK plan.
-  sdk-m3-m6 [options]             Verify the current native SDK and iteration milestones.
+  verify-sdk [options]            Verify the maintained twelve-language SDK plan
+                                  (was sdk-full).
+  verify-sdk-demo [options]       Verify the frozen five-backend M3/M6 demo scope
+                                  (was sdk-m3-m6).
   fetch-corpus [--force]          Download real-world OpenAPI specs into corpus/ (gitignored).
   gen-fixtures [options]          Generate deterministic synthetic OpenAPI 3.1 fixtures.
     --paths N                     Number of path items (default 100).
@@ -32,12 +34,16 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let task = args.first().map(String::as_str).unwrap_or_default();
     let rest = &args[1.min(args.len())..];
+    let (task, renamed) = canonical_task(task);
+    if let Some(warning) = renamed {
+        eprintln!("{warning}");
+    }
     match task {
         "ci" => ci::run(rest),
         "fetch-corpus" => fetch_corpus(rest),
         "gen-fixtures" => gen_fixtures(rest),
-        "sdk-full" => sdk_full::run(rest),
-        "sdk-m3-m6" => sdk_m3_m6::run(rest),
+        "verify-sdk" => sdk_full::run(rest),
+        "verify-sdk-demo" => sdk_m3_m6::run(rest),
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
             Ok(())
@@ -46,6 +52,20 @@ fn main() -> Result<()> {
             eprintln!("unknown task: {task:?}\n\n{USAGE}");
             std::process::exit(2);
         }
+    }
+}
+
+/// Old task names kept for one release; historical records under `docs/`
+/// still cite them.
+const RENAMED_TASKS: &[(&str, &str)] =
+    &[("sdk-full", "verify-sdk"), ("sdk-m3-m6", "verify-sdk-demo")];
+
+/// The current name for `task`, plus the warning to print when an old name
+/// was used.
+fn canonical_task(task: &str) -> (&str, Option<String>) {
+    match RENAMED_TASKS.iter().find(|(old, _)| *old == task) {
+        Some((old, new)) => (new, Some(format!("xtask: '{old}' is now '{new}'"))),
+        None => (task, None),
     }
 }
 
@@ -1053,6 +1073,26 @@ mod tests {
                 5
             );
         }
+    }
+
+    #[test]
+    fn old_task_names_dispatch_to_the_new_ones_with_a_warning() {
+        assert_eq!(
+            canonical_task("sdk-full"),
+            (
+                "verify-sdk",
+                Some("xtask: 'sdk-full' is now 'verify-sdk'".into())
+            )
+        );
+        assert_eq!(
+            canonical_task("sdk-m3-m6"),
+            (
+                "verify-sdk-demo",
+                Some("xtask: 'sdk-m3-m6' is now 'verify-sdk-demo'".into())
+            )
+        );
+        assert_eq!(canonical_task("verify-sdk"), ("verify-sdk", None));
+        assert_eq!(canonical_task("ci"), ("ci", None));
     }
 
     #[test]

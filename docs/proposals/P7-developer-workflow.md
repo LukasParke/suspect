@@ -540,7 +540,9 @@ the tools: those runs now fail instead of passing.
    `ci.yml`, moves `cargo-deny` to install-action, drops `RUSTFLAGS`, and
    adds `links` if P6 step 1 has landed. Adds the drift test. Updates the
    `CONTRIBUTING.md` "Checks" block. 0.5 day.
-4. **Rename milestone tasks.** `verify-sdk`, `verify-sdk-demo`, aliases with
+4. **Rename milestone tasks.** **Done.** `USAGE` strings now say
+   `cargo xtask verify-sdk` / `cargo xtask verify-sdk-demo` (the alias
+   carries `--locked`). `verify-sdk`, `verify-sdk-demo`, aliases with
    warnings, updated `USAGE`, and the user-facing references listed above.
    Tests: an xtask unit test that both old names dispatch and warn. 0.25 day.
 5. **`test_inputs` and the env-name migration.** Adds the helper, rewrites

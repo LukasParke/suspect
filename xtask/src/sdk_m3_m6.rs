@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const USAGE: &str = "usage: cargo run -p xtask -- sdk-m3-m6 --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo run -p xtask -- sdk-m3-m6 --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See docs/SDK-M3-M6-EXIT.md.\n";
+const USAGE: &str = "usage: cargo xtask verify-sdk-demo --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo xtask verify-sdk-demo --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See docs/SDK-M3-M6-EXIT.md.\n";
 const BOTH: &[&str] = &["M3", "M6"];
 const M3: &[&str] = &["M3"];
 const M6: &[&str] = &["M6"];

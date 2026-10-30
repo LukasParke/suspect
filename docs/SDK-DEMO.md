@@ -63,7 +63,7 @@ also include source-backed call sites for those interfaces.
 ## Acceptance
 
 ```sh
-cargo run --locked -p xtask -- sdk-m3-m6 --list-stages --demo
+cargo xtask verify-sdk-demo --list-stages --demo
 ```
 
 The `hackathon-demo` profile retains **208 generation/native/iteration gates**.

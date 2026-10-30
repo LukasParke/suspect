@@ -1,4 +1,4 @@
-//! sdk-full's native build/import/codec/request observation entrypoint.
+//! `cargo xtask verify-sdk`'s native build/import/codec/request observation entrypoint.
 //!
 //! The Python collector launches actual native tools against the runner's
 //! immutable emitted packages and installed consumers. Libtest elapsed time is
@@ -59,7 +59,7 @@ fn collector_unit_and_adversarial_evidence_checks() {
 }
 
 #[test]
-#[ignore = "requires sdk-full's immutable twelve-target packages, installed native consumers, explicit identities, fresh output and all declared tools"]
+#[ignore = "requires verify-sdk's immutable twelve-target packages, installed native consumers, explicit identities, fresh output and all declared tools"]
 fn native_build_import_codec_request_costs() {
     for key in [
         "SUSPECT_SDK_FULL_PACKAGES",
