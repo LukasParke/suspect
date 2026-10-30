@@ -2173,13 +2173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "suspect-faker"
-version = "0.1.0"
-dependencies = [
- "serde_json",
-]
-
-[[package]]
 name = "suspect-gateway"
 version = "0.1.0"
 dependencies = [
@@ -2214,7 +2207,6 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-artifact",
- "suspect-faker",
  "suspect-ir",
  "tempfile",
  "unicode-ident",
@@ -2471,7 +2463,6 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-arazzo",
- "suspect-faker",
  "suspect-ir",
  "suspect-journal",
  "suspect-low",

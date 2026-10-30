@@ -106,7 +106,7 @@ at it (guarded by `prepareRename`; cross-file edits land in one atomic
 | `suspect-jsonpath` | RFC 9535 JSONPath over low nodes |
 | `suspect-schema` | Source-bound JSON Schema validation and checked owned programs for SDK codecs |
 | `suspect-oas` | Typed OpenAPI 3.x views; `$ref`-transparent, cycle-safe |
-| `suspect-ir` | Source-addressed SDK `Contract` and indexed platform snapshots |
+| `suspect-ir` | Source-addressed SDK `Contract`, indexed platform snapshots, deterministic example values (`faker`) |
 | `suspect-codegen` | Native SDK models, codecs, HTTP packages, docs, sessions and compatibility |
 | `suspect-gen` | Markdown documentation preset and custom manifest/template rendering |
 | `suspect-artifact` | Shared ownership-aware output, drift checks and changed-file writes |
@@ -117,7 +117,6 @@ at it (guarded by `prepareRename`; cross-file edits land in one atomic
 | `suspect-lint` | Spectral-compatible rulesets and builtin rules |
 | `suspect-config` | One settings schema (`.suspect.yaml`) and precedence rule for the CLI and LSP |
 | `suspect-runtime` | Shared contract runtime: one interpretation of a contract for every surface |
-| `suspect-faker` | Deterministic example-value synthesis from JSON Schema |
 | `suspect-rex` | Arazzo runtime expressions: parsing and evaluation |
 | `suspect-journal` | Structured JSONL journals, traffic records, Suspect Cassette format |
 | `suspect-gateway` | HTTP contract gateway: mock, proxy, validate, record, replay |

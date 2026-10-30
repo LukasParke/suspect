@@ -239,7 +239,7 @@ Each step is one PR, independent of the others, and leaves `cargo test
    `suspect-gen/src/filters.rs:481`, `suspect-test/src/lib.rs:46`, both
    manifests, `Cargo.toml:41`. Tests: the moved faker tests under
    `cargo test -p suspect-ir`; existing `suspect-gen` docs snapshot tests
-   and `suspect-test` fuzz tests unchanged. 1-2 h.
+   and `suspect-test` fuzz tests unchanged. 1-2 h. **Done.**
 5. **Merge `suspect-rex` into `suspect_arazzo::rex`.** Move the file; add
    `serde` to `suspect-arazzo`; update the four `suspect-test` files and its
    manifest (`crates/suspect-test/Cargo.toml:17`, which is path-only today);

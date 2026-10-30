@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 suspect-artifact.workspace = true
 suspect-ir = { path = "../suspect-ir" }
-suspect-faker.workspace = true
 minijinja = "2"
 serde_json.workspace = true
 serde.workspace = true

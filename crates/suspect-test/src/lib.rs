@@ -43,7 +43,7 @@ pub mod exec;
 pub mod fuzz;
 pub mod load;
 pub mod messaging;
-pub use suspect_faker as faker;
+pub use suspect_ir::faker;
 pub mod plan;
 pub mod reporters;
 pub mod stateful;
