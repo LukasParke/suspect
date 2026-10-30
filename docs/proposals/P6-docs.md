@@ -440,7 +440,11 @@ would have to be deleted when P1 lands.
 
 ## Implementation plan
 
-1. **Link checker on today's layout.** Adds `lychee.toml`. Its
+1. **Link checker on today's layout.** **Done.** The 4 links were already
+   fixed. The `links` job runs `cargo xtask ci links --ci` (P7) with lychee
+   from `taiki-e/install-action@v2` (`lychee@0.24.2`, P7 open question 3)
+   instead of `lychee-action`; inputs are `git ls-files '*.md'`, run with
+   `-q`. Adds `lychee.toml`. Its
    `exclude_path` temporarily lists the 34 internal file names as one regex
    (tested above). Adds the `links` job in `ci.yml`, fixes the 4 broken links,
    and adds a `lychee` line to `CONTRIBUTING.md`. Files: `lychee.toml`,

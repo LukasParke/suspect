@@ -55,6 +55,27 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Tracked files (`git ls-files`, repository-relative, `/`-separated) that
+/// match `keep`.
+fn tracked_files(root: &Path, keep: impl Fn(&str) -> bool) -> Result<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(root)
+        .output()
+        .context("run git ls-files")?;
+    if !out.status.success() {
+        bail!(
+            "git ls-files failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|path| !path.is_empty() && keep(path))
+        .map(str::to_owned)
+        .collect())
+}
+
 // ---------------------------------------------------------------------------
 // fetch-corpus
 // ---------------------------------------------------------------------------

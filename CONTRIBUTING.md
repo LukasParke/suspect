@@ -22,6 +22,9 @@ cargo test --workspace
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo deny check                      # cargo install cargo-deny
 
+# Relative links in tracked Markdown (lychee 0.24.2, offline; see lychee.toml)
+cargo xtask ci links
+
 # VS Code extension
 cd editors/vscode && npm ci && npm run compile && npm run test:headless
 # ...and in a real VS Code window (desktop session; macOS app path by default,

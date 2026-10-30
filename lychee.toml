@@ -1,0 +1,19 @@
+# lychee.toml — relative links only; external URLs are excluded by `offline`.
+# Run: `cargo xtask ci links` (lychee 0.24.2 over `git ls-files '*.md'`).
+offline = true
+include_fragments = "anchor-only"
+no_progress = true
+exclude_path = [
+  "(^|/)target/",
+  "(^|/)node_modules/",
+  # SDK guide templates: their links resolve inside the generated package.
+  "crates/suspect-codegen/src/[a-z]+_sdk/",
+  # Frozen historical records (plans, exits, evidence, dated reviews,
+  # research). They move to docs/internal/ (P6 step 3), which replaces
+  # this list.
+  "docs/(ARBITER-FOLD-PLAN|CODE-FOLD-PLAN|DEPTH-ANALYSIS|FEATURE-ROADMAP|LOAD-TESTING-PLAN|LSP-DEPTH-ENRICHMENT|REVOLUTIONARY-FEATURES|SDK-GENERATION-PLAN|SDK-GOLDEN-DEFAULTS-PLAN|SDK-FULL-PLAN-WORK|SDK-COMPAT-DROPIN-PLAN|SDK-TODAY-M3-M6|SDK-FULL-EXIT|SDK-FULL-PLAN-STATUS|SDK-M0-KNOWN-FAILURES|SDK-M0-M2-DX-APPROVAL|SDK-M0-M2-EXIT|SDK-M0-WORKFLOW|SDK-M2-CALLSITES|SDK-M3-M6-EXIT|SDK-PROGRESS|SDK-SESSION-HANDOFF|SDK-NATIVE-COSTS|PERFORMANCE|SDK-DEMO|SDK-CURRENT-SDK-COMPARISON-20260911|SDK-DX-REVIEW-20260911|SDK-DX-ASSESSMENT|SDK-COMPAT-DIFF-PYTHON|SDK-COMPAT-DIFF-TYPESCRIPT|LSP_COMPARISON|SDK-OPENAPI-RESEARCH|SDK-SPEAKEASY-RESEARCH|SPEAKEASY-OPENAPI-GENERATION-REVIEW)\\.md$",
+]
+exclude = [
+  "^file:///ws/",   # example URI in LSP_FEATURES.md
+  "/target/",       # links to local build evidence
+]

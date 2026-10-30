@@ -36,6 +36,7 @@ pub(crate) enum Tool {
     Rustfmt,
     Clippy,
     CargoDeny,
+    Lychee,
     Node,
     Npm,
     Bun,
@@ -48,6 +49,7 @@ impl Tool {
             Tool::Rustfmt => "rustfmt",
             Tool::Clippy => "clippy",
             Tool::CargoDeny => "cargo-deny",
+            Tool::Lychee => "lychee",
             Tool::Node => "node >= 22",
             Tool::Npm => "npm",
             Tool::Bun => "bun",
@@ -61,6 +63,9 @@ impl Tool {
             Tool::Clippy => "rustup component add clippy",
             Tool::CargoDeny => {
                 "cargo install --locked cargo-deny (CI: taiki-e/install-action@v2, tool: cargo-deny)"
+            }
+            Tool::Lychee => {
+                "install lychee 0.24.2 from https://lychee.cli.rs (CI: taiki-e/install-action@v2, tool: lychee)"
             }
             Tool::Node | Tool::Npm => {
                 "install Node.js 22 or later from https://nodejs.org (CI: actions/setup-node@v4)"
@@ -76,6 +81,7 @@ impl Tool {
             Tool::Rustfmt => probe_ok(Command::new(&ctx.cargo).args(["fmt", "--version"])),
             Tool::Clippy => probe_ok(Command::new(&ctx.cargo).args(["clippy", "--version"])),
             Tool::CargoDeny => probe_ok(Command::new(&ctx.cargo).args(["deny", "--version"])),
+            Tool::Lychee => probe_ok(Command::new("lychee").arg("--version")),
             Tool::Npm => probe_ok(Command::new(npm()).arg("--version")),
             Tool::Bun => probe_ok(Command::new("bun").arg("--version")),
             Tool::Node => {
@@ -207,6 +213,20 @@ pub(crate) const JOBS: &[Job] = &[
             ctx.cargo(&["test", "-p", "suspect-cli", "--test", "corpus_suite"])
                 .env("SUSPECT_REQUIRE_CORPUS", "1")
                 .run()
+        },
+    },
+    Job {
+        name: "links",
+        workflow: CI_YML,
+        commands: "lychee --config lychee.toml -q $(git ls-files '*.md') (offline, relative links)",
+        tools: &[Tool::Lychee],
+        run: |ctx| {
+            let files = crate::tracked_files(&ctx.root, |path| path.ends_with(".md"))?;
+            let mut args = vec!["--config", "lychee.toml", "-q"];
+            args.extend(files.iter().map(String::as_str));
+            let mut step = Step::new("lychee", &args).dir(&ctx.root);
+            step.shown = "lychee --config lychee.toml -q <git ls-files '*.md'>".into();
+            step.run()
         },
     },
     Job {
