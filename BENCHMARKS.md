@@ -220,3 +220,29 @@ milestone, not an architecture problem.
 - Lint query-result cache (Arc-shared NodeList per distinct expression):
   rules sharing `given` queries evaluate once per document instead of once
   per rule.
+
+## Platform budgets (historical)
+
+See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the full profiling report,
+phase-by-phase cost attribution, and the ranked plan of attack.
+These measurements are fixture-specific; they do not establish OpenRouter
+end-to-end SDK generation or emitted-SDK performance.
+Current session measurements and pending Mac calibration are documented in
+[SDK session performance](docs/SDK-SESSION-PERFORMANCE.md).
+
+| Path | Budget | Achieved |
+|---|---|---|
+| Parse + IR cold | < 10 ms | **7.5 ms** |
+| Lint p95/file | ≤ 50 ms | **42 ms** |
+| Validate p95/file | ≤ 50 ms | **44 ms** |
+| Gateway startup | < 1 s | **~880 ms** |
+| Executor per step | ≤ 100 µs | **3.6 µs** |
+| Load generator per request (in-process, incl. metrics) | ≤ 15 µs | **~4 µs CPU, 0.5 µs wall @ 8 workers** |
+| Load generator sustained vs local mock gateway | ≥ 20k req/s | **43k req/s, 0 dropped samples, p99 1.15 ms** |
+| Load metrics aggregator ingest | ≥ 200k samples/s | **64M samples/s** |
+| Gateway MOCK throughput | ≥ 30k req/s | **95–127k** |
+| REPLAY throughput | ≥ 50k req/s | **88–146k** |
+| Prepared docs rendering | ≥ 400 MiB/s synthetic test floor | **1.6–1.9 GB/s** historical rendering measurement |
+| Watch save→rerun | < 150ms | ~10 ms event latency |
+
+Run them: `cargo bench`.

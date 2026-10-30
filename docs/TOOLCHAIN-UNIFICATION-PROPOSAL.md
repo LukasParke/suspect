@@ -212,7 +212,8 @@ error, `130` interrupted. A test asserts every command's documented codes.
 
 **Generated CLI reference** (`cargo xtask cli-docs` via `clap_mangen` +
 Markdown) checked in CI, replacing hand-maintained README command lists
-(~30 commands are undocumented today).
+(this exists now as `docs/CLI.md`, rendered from clap by
+`crates/suspect-cli/tests/cli_reference.rs`; regrouping the tree regenerates it).
 
 Estimate: ~2 days for the tree + aliases, ~1 day for the flag module and
 per-command format enums, ~0.5 day for the reference generator.
@@ -263,8 +264,8 @@ per-command format enums, ~0.5 day for the reference generator.
 ### Today
 
 No release workflow, no binaries, no packaged extensions; no crate sets
-`publish = false`; no `LICENSE-MIT`/`LICENSE-APACHE`, `CHANGELOG` or
-`CONTRIBUTING` despite `license = "MIT OR Apache-2.0"`.
+`publish = false`; no `CHANGELOG`. (`LICENSE-MIT`, `LICENSE-APACHE` and
+`CONTRIBUTING.md` were added alongside this proposal.)
 
 ### Proposal
 
@@ -274,10 +275,11 @@ No release workflow, no binaries, no packaged extensions; no crate sets
 2. The same workflow packages the `.vsix` and the Zed extension (P4.6).
 3. `publish = false` on internal crates; decide which crates are public API
    (likely `suspect-low`, `suspect-ref`, `suspect-oas`, `suspect-lint`).
-4. Add licence files, `CHANGELOG.md` (generated from conventional commits)
-   and `CONTRIBUTING.md` pointing at `cargo xtask ci`.
+4. Add `CHANGELOG.md` (generated from conventional commits) and point
+   `CONTRIBUTING.md` at `cargo xtask ci` once it exists (P7).
 
-**Needs a decision:** licence copyright holder line, and which registries
+**Needs a decision:** confirm the copyright line in `LICENSE-MIT`
+("Luke Parke and suspect contributors"), and which registries
 (crates.io, Homebrew, npm wrapper) are in scope.
 
 ---
@@ -305,8 +307,10 @@ docs/sdk/<language>/       per-language notes (today's SDK-<LANG>-*.md)
 docs/internal/             plans, exits, status, research, dated reviews
 ```
 
-`README.platform.md` merges into `README.md`; its performance table moves to
-`BENCHMARKS.md`. A link checker (lychee) runs in CI.
+Done so far: `README.platform.md` is merged into `README.md` (performance
+table in `BENCHMARKS.md`), `docs/README.md` indexes every file, and
+`docs/CLI.md` is generated from clap and checked by a test. Remaining: the
+directory moves above, and a link checker (lychee) in CI.
 
 ---
 
@@ -317,16 +321,22 @@ docs/internal/             plans, exits, status, research, dated reviews
   same xtask so local and CI can't drift.
 - Rename milestone tasks (`sdk-full`, `sdk-m3-m6`) to what they verify
   (`verify-sdk`, `verify-sdk-native`).
-- **Native-toolchain discovery in tests.** ~60 opt-in codegen gates fall
-  back to `/Users/luke/...` paths (mise installs, a local `openrouter-web`
-  checkout); `xtask/src/sdk_m3_m6.rs` and `tools/sdk-terraform-acceptance.py`
-  do the same. Route all of them through `suspect_codegen::toolchain` (now
-  `$HOME`-relative) and a single `SUSPECT_OPENROUTER_SPEC` input, so a skip
-  message names what is missing instead of a hard-coded path.
-- Gates that check only presence should check the manifest's minimum
-  version too: `sdk_compat_profiles` runs generated Python on whatever
-  `python3` is on `PATH`, so `cargo test --workspace` fails on a stock macOS
-  Python 3.9 (no `typing.TypeAlias`) instead of skipping.
+- **One name for the OpenRouter input.** Native-toolchain fallbacks now all
+  go through `suspect_codegen::toolchain` (done; it gained `python`,
+  `terraform` and nested mise layouts). The spec checkout is still named two
+  ways — `OPENROUTER_WEB_ROOT` (a checkout, 19 test files) and
+  `SUSPECT_OPENROUTER_OPENAPI` (a file, the Java gates and xtask). Pick one.
+- **Skip vs fail for missing inputs.** Opt-in gates fail when an input such
+  as the OpenRouter checkout is unset ("missing inputs fail the gate; they
+  never skip it"), while toolchain gates skip. Decide one rule and record it
+  in `CONTRIBUTING.md`.
+- **Historical records keep machine paths.** Exit/evidence documents
+  (`SDK-*-EXIT.md`, `SDK-SESSION-HANDOFF.md`, dated reviews) and
+  `tools/sdk-session-perf/runners/*-inventory-*.json` record the machine they
+  ran on and several link to root files that no longer exist
+  (`DEMO-README.md`, `LIVE-DEMO-README.md`). Moving them to `docs/internal/`
+  (P6) and excluding that directory from the link checker keeps them honest
+  without breaking CI.
 
 ## P8. Crate consolidation (optional)
 

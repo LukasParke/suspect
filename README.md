@@ -18,6 +18,13 @@ The [hackathon demo](docs/SDK-DEMO.md) generates SDKs from the real
 OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
 [verified demo scope](docs/SDK-PROGRESS.md).
 
+## Install
+
+```console
+cargo install --path crates/suspect-cli   # puts `suspect` on PATH
+suspect --version
+```
+
 ## LSP — full-featured editor experience
 
 `suspect lsp` is a complete language server for OpenAPI/Arazzo/Overlay files.
@@ -108,6 +115,16 @@ at it (guarded by `prepareRename`; cross-file edits land in one atomic
 | `suspect-test` | Arazzo plan compiler, observable executor, load generator (profiles, scheduler, metrics, SLO gates), reporters |
 | `suspect-validate` | Source-located semantic checks with stable diagnostic codes |
 | `suspect-lint` | Spectral-compatible rulesets and builtin rules |
+| `suspect-config` | One settings schema (`.suspect.yaml`) and precedence rule for the CLI and LSP |
+| `suspect-runtime` | Shared contract runtime: one interpretation of a contract for every surface |
+| `suspect-faker` | Deterministic example-value synthesis from JSON Schema |
+| `suspect-rex` | Arazzo runtime expressions: parsing and evaluation |
+| `suspect-journal` | Structured JSONL journals, traffic records, Suspect Cassette format |
+| `suspect-gateway` | HTTP contract gateway: mock, proxy, validate, record, replay |
+| `suspect-watch` | Debounced filesystem watching for `--watch` modes |
+| `suspect-rules` | TS/JS custom rule runtime (Bun sidecar) |
+| `suspect-reverse` | Route extraction from server code, cross-referenced with the spec |
+| `suspect-upgrade` | Swagger 2.0 → OpenAPI 3.1 upgrader |
 | `suspect-lsp` | tower-lsp server: diagnostics, goto-def/references, hover, symbols, completion |
 | `suspect-cli` | `suspect` binary: authoring, SDK generation, tests, gateway and editor commands |
 
@@ -126,7 +143,19 @@ $ suspect bench fixture.yaml           # per-stage timings
 $ suspect test flows.arazzo.yaml --base-url http://localhost:8080 --input petName=Rex
 $ suspect load profile.load.yaml       # Artillery-style load test from Arazzo scenarios
 $ suspect lsp                          # stdio language server
+$ suspect gateway api.yaml -p 8080 --mode mock
+$ suspect gateway api.yaml -p 9000 --mode record --upstream http://staging:80 --cassette rec.scj
+$ suspect gateway api.yaml -p 9001 --mode replay --cassette rec.scj
+$ suspect test flows.arazzo.yaml --offline --cassette rec.scj
+$ suspect fuzz api.yaml --base-url http://localhost:8080 --runs 50
+$ suspect watch . -- suspect test flows.arazzo.yaml --offline --cassette rec.scj
+$ suspect config                       # settings in effect, and where they came from
 ```
+
+Every command is listed with its flags in the generated
+[command reference](docs/CLI.md); the [documentation index](docs/README.md)
+groups the guides. Exit codes are shared: `0` clean, `1` findings or failed
+checks, `2` usage or environment error.
 
 ## SDK generation
 
@@ -165,6 +194,27 @@ JSON/JUnit reports. Load profiles are `suspectLoad: "1.0"` YAML files
 with editor diagnostics. See [docs/LOAD-TESTING.md](docs/LOAD-TESTING.md)
 and the runnable example in [`examples/load/`](examples/load/).
 
+## Gateway, recording and replay
+
+`suspect gateway` serves a spec as a mock, or proxies an upstream while
+validating, recording or replaying traffic. Recorded traffic feeds offline
+contract tests (`suspect test --offline --cassette`), drift reports
+(`suspect drift`), HAR export (`suspect har`) and impact analysis
+(`suspect impact`).
+
+### Cassette format
+
+Suspect Cassette `.scj`: JSONL — header line (`format`, `version`,
+`recorded_at_ms`, `source`) then one entry per exchange with sha256-hashed
+bodies (UTF-8 or base64). Append-only, git-diffable, consumed by replay,
+offline tests, and drift checks.
+
+## Roadmap
+
+The next platform features are tracked in
+[docs/FEATURE-ROADMAP.md](docs/FEATURE-ROADMAP.md); the toolchain alignment
+plan is [docs/TOOLCHAIN-UNIFICATION-PROPOSAL.md](docs/TOOLCHAIN-UNIFICATION-PROPOSAL.md).
+
 ## Notable engineering
 
 - **Vendored grammars**: `crates/suspect-syntax/grammars/` with a local patch
@@ -176,13 +226,6 @@ and the runnable example in [`examples/load/`](examples/load/).
   never hangs.
 - **CI**: `.github/workflows/ci.yml` gates fmt, clippy (`-D warnings`), tests,
   and a bench smoke run.
-
-## Install
-
-```console
-cargo install --path crates/suspect-cli   # puts `suspect` on PATH
-suspect --version
-```
 
 ## Editors
 
@@ -200,3 +243,9 @@ suspect --version
 
 All clients share the same settings file: `.suspect.yaml` at the project root
 (`suspect config` shows what is in effect).
+
+## License
+
+Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT](LICENSE-MIT), at your option. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for development setup.

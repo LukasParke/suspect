@@ -33,6 +33,6 @@ The separate codec/HTTP planners now pass native M2 and five-operation OpenRoute
 consumer gates. Full integrated native/docs/release status remains in `SDK-PROGRESS.md`.
 
 ```sh
-OPENROUTER_WEB_ROOT=/Users/luke/github/openrouter-web \
+OPENROUTER_WEB_ROOT=/path/to/openrouter-web \
   cargo test --locked -p suspect-codegen --test go_models -- --include-ignored
 ```

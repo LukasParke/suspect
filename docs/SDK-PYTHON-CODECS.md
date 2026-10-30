@@ -79,7 +79,7 @@ OpenRouter credits. HTTP tests additionally build/install the wheel and run stri
 mypy over the generated package and native consumers.
 
 ```sh
-OPENROUTER_WEB_ROOT=/Users/luke/github/openrouter-web \
+OPENROUTER_WEB_ROOT=/path/to/openrouter-web \
   cargo test --locked -p suspect-codegen --test python_codecs -- --include-ignored
 ```
 

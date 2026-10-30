@@ -65,7 +65,7 @@ Arazzo + OpenAPI workspace --compile_plan--> Plan --run_plan--> RunSummary
 | Layer | File | What it gives us for load |
 |---|---|---|
 | Plan compiler | `crates/suspect-test/src/plan.rs` | `Plan`/`WfPlan`/`StepPlan` are `Clone`; ops resolved to canonical `method + path` via `IrSpec`; params/body/outputs kept as `Rex` for late evaluation; criteria pre-compiled to `CriterionKind`. `Arc<Plan>` can be shared across thousands of tasks with zero recompilation. |
-| Executor | `crates/suspect-test/src/exec.rs` | `run_step` already does everything one VU request needs: param placement, `${…}` template substitution, body rendering, criteria evaluation, output capture. Measured at 3.6 µs/step overhead (`README.platform.md`). |
+| Executor | `crates/suspect-test/src/exec.rs` | `run_step` already does everything one VU request needs: param placement, `${…}` template substitution, body rendering, criteria evaluation, output capture. Measured at 3.6 µs/step overhead (`BENCHMARKS.md`). |
 | Transport | `crates/suspect-cli/src/commands/http.rs` | `LiveTransport` (reqwest) is the only live client; `HttpClient` is object-safe and `Send + Sync`. |
 | Reporters | `crates/suspect-test/src/reporters.rs` | console / JUnit / NDJSON over the event log. Pure functions; easy to add siblings. |
 | Journal | `crates/suspect-journal` | `RunSummaryRecord`, `TrafficRecord`, sinks (stdout/file/vec). `Record` is an additive tagged enum. |
@@ -594,7 +594,7 @@ Benches (`crates/suspect-cli/examples/feature_bench.rs` + `cargo bench`):
 | Aggregator ingest | ≥ 200k samples/s single task |
 | Memory at 5k concurrent VUs | < 200 MB RSS |
 
-Budgets are recorded in `README.platform.md` with the same honest
+Budgets are recorded in `BENCHMARKS.md` with the same honest
 "budget / achieved" table as the existing rows.
 
 ---
@@ -609,7 +609,7 @@ Status per phase (2026-10-10): **A ✓ B ✓ C ✓ D ✓ (retry action deferred)
 | B — profile + scheduler + VU | `load::profile` (`suspect-low` typed view + validation, `SpecFamily::Load10`), `schedule` (all four open-loop kinds + closed-loop `vus:`), `vu`, `data`; `suspect load --dry-run`; flag-only quick run | schedule/weights/inputs tests incl. a closed-loop test (`vus: 4, duration: 2s` under paused time → exactly 4 concurrent, loops stop at the boundary); `--dry-run` prints resolved phases and scenario table |
 | C — metrics + reports + ensure | `metrics`, `report` (console/JSON/JUnit/journal), `ensure`; exit codes | goldens; `load_against_gateway_mock` and `load_detects_fault_injection` green |
 | D — Arazzo completeness | `dependsOn`, workflow outputs, `$workflows.…` rex, `x-suspect-think`, `before`/`after`, `retry` action | cross-workflow tests; contract mode also gains these |
-| E — transport + perf | reqwest builder (h2, cookies, per-VU), ttfb, benches in `feature_bench.rs`, `README.platform.md` rows | bench budgets met or honestly recorded |
+| E — transport + perf | reqwest builder (h2, cookies, per-VU), ttfb, benches in `feature_bench.rs`, `BENCHMARKS.md` rows | bench budgets met or honestly recorded |
 | F — editor/lint (optional) | LSP publishes the Phase B profile diagnostics + goto-definition into the Arazzo doc, lint rules, VS Code lens | diagnostics land on the right byte range; lens streams snapshots |
 
 Every phase: `cargo fmt`, `clippy -D warnings`, workspace tests, docs build
@@ -664,7 +664,7 @@ Defaulting to the recommendation unless overridden:
 3. Reports expose contract-failure rate separately from transport/HTTP
    error rate. **Met** — `contract.*` vs `errors.*` vs `http.error_rate`.
 4. Generator overhead and sustained-rate budgets are met and recorded in
-   `README.platform.md`. **Met** — ~4 µs CPU/request, 43k req/s, 64M
+   `BENCHMARKS.md`. **Met** — ~4 µs CPU/request, 43k req/s, 64M
    samples/s aggregator.
 5. All existing gates hold: clippy −D, workspace tests, docs, determinism.
    **Met** for every touched crate; one pre-existing `HEAD` failure

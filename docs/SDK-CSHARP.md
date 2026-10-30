@@ -539,6 +539,6 @@ Retained native roots are `target/sdk-csharp-schema-v3/vectors-1tnnV0/`,
 `controls-EGQN6v/` and `sdk-hpi98K/`. The separate evidence index is
 `target/sdk-csharp-schema-v3-evidence-20260910/report.json`. Every native command
 honors `SUSPECT_DOTNET_BIN`, with the sole fallback
-`/Users/luke/.local/share/mise/dotnet-root/dotnet`. Sources, programs, packages,
+a local .NET install (for example `~/.local/share/mise/dotnet-root/dotnet`). Sources, programs, packages,
 command records, logs and private caches remain preserved. Earlier evidence keeps
 its original completed scope.

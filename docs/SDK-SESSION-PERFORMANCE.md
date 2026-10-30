@@ -543,7 +543,7 @@ After Main freezes the final greenfield tree and explicitly declares ready:
 # Optional nonprivileged awake assertion; no pmset/governor configuration change.
 /usr/bin/caffeinate -is python3 tools/sdk-session-perf/calibrate.py \
   --role baseline --out target/session-baseline-mac-v2 \
-  --suite public --openrouter-root /Users/luke/github/openrouter-web \
+  --suite public --openrouter-root /path/to/openrouter-web \
   --runner tools/sdk-session-perf/runners/luke-mac-v2.json \
   --repeats 5 --iterations 200 --warmups 5 --offline --require-qualified
 
@@ -551,7 +551,7 @@ After Main freezes the final greenfield tree and explicitly declares ready:
   --role candidate --out target/session-candidate-mac-v2 \
   --baseline target/session-baseline-mac-v2/baseline.json \
   --policy target/session-baseline-mac-v2/policy.json \
-  --suite public --openrouter-root /Users/luke/github/openrouter-web \
+  --suite public --openrouter-root /path/to/openrouter-web \
   --runner tools/sdk-session-perf/runners/luke-mac-v2.json \
   --repeats 3 --iterations 200 --warmups 5 --offline --gate
 ```
@@ -628,7 +628,7 @@ checked again when the stages run):
 python3 tools/sdk-session-perf/accept.py plan \
   --evidence /absolute/performance-inputs.json \
   --evidence-sha256 "$REVIEWED_PERFORMANCE_INPUTS_SHA256" \
-  --corpus /Users/luke/github/openrouter-web \
+  --corpus /path/to/openrouter-web \
   --out target/sdk-m3-m6-performance-plan.json
 ```
 
@@ -647,7 +647,7 @@ The individual command shape, already emitted by `plan`, is:
   --evidence /absolute/performance-inputs.json \
   --evidence-sha256 "$REVIEWED_PERFORMANCE_INPUTS_SHA256" \
   --original "{original}" --snapshot "{workspace}" \
-  --corpus /Users/luke/github/openrouter-web \
+  --corpus /path/to/openrouter-web \
   --acceptance-root "{out}" --out "{out}/performance/small.json"
 ```
 

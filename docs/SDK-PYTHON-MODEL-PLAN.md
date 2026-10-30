@@ -44,7 +44,7 @@ Model-only plans still retain obligations. Full integrated M3/release status is
 recorded in `SDK-PROGRESS.md`.
 
 ```sh
-OPENROUTER_WEB_ROOT=/Users/luke/github/openrouter-web \
+OPENROUTER_WEB_ROOT=/path/to/openrouter-web \
   cargo test --locked -p suspect-codegen --test python_models -- --include-ignored
 # Set SUSPECT_PYTHON_BIN to exercise a specific installed interpreter.
 ```

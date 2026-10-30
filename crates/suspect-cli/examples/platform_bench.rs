@@ -1,5 +1,5 @@
 //! End-to-end platform benchmark: measures every performance budget line
-//! from README.platform.md against the real Stripe corpus (6.4 MB OpenAPI)
+//! from BENCHMARKS.md ("Platform budgets") against the real Stripe corpus (6.4 MB OpenAPI)
 //! with **real socket I/O** for gateway/replay throughput.
 //!
 //! Run: `cargo run --release -p suspect-cli --example platform_bench`
