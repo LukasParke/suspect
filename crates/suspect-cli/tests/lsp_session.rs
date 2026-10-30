@@ -30,7 +30,7 @@ mod support {
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use support::editor::{Editor, editor_capabilities, url_of};
+use support::editor::{Editor, editor_capabilities, push_client_capabilities, url_of};
 use support::workspace::Workspace;
 
 /// Built once and shared: the read-only feature sweep must not pay for
@@ -956,11 +956,14 @@ fn a_storm_of_traffic_leaves_the_server_usable() {
         batch.len()
     );
 
-    // The server pushed diagnostics for the open, which means it got all the
-    // way through the request rather than parking before it.
+    // A pull after the storm answers with the document's findings, which
+    // means the server got all the way through rather than parking.
+    let pulled = editor
+        .request("textDocument/diagnostic", doc(&api_uri))
+        .expect("pull after the storm");
     assert!(
-        editor.wait_for_notification("textDocument/publishDiagnostics", Duration::from_secs(30)),
-        "no diagnostics were pushed for an opened document"
+        pulled.get("items").and_then(|i| i.as_array()).is_some(),
+        "the pull after the storm carried no report: {pulled}"
     );
 
     let text_after = editor
@@ -1407,7 +1410,7 @@ fn references_from_a_declaration_find_its_uses() {
 fn a_configuration_change_refilters_diagnostics() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ws = Workspace::build(dir.path());
-    let editor = Editor::start(&ws.root, editor_capabilities());
+    let editor = Editor::start(&ws.root, push_client_capabilities());
     let uri = url_of(&ws.openapi);
     let text = std::fs::read_to_string(&ws.openapi).expect("read");
     editor.open(&ws.openapi, &text);
@@ -1634,7 +1637,7 @@ fn token_deltas_carry_edits_after_a_change() {
 fn push_and_pull_apply_the_same_severity_floor() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ws = Workspace::build(dir.path());
-    let editor = Editor::start(&ws.root, editor_capabilities());
+    let editor = Editor::start(&ws.root, push_client_capabilities());
     let uri = url_of(&ws.openapi);
     let text = std::fs::read_to_string(&ws.openapi).expect("read");
     editor.open(&ws.openapi, &text);
@@ -1725,10 +1728,6 @@ fn markdown_fields_are_tokenized_and_linted() {
     let editor = Editor::start(dir_path.parent().unwrap(), editor_capabilities());
     let uri = url_of(&dir_path);
     editor.open(&dir_path, source);
-    assert!(
-        editor.wait_for_notification("textDocument/publishDiagnostics", Duration::from_secs(30)),
-        "no diagnostics were pushed for an opened document"
-    );
 
     // Tokens: the markdown constructs arrive under their own types.
     let tokens = editor
@@ -2226,5 +2225,36 @@ fn an_invalid_arazzo_condition_names_the_fix() {
     assert!(
         serialized.contains("did you mean"),
         "the diagnostic reads as a suggestion, not just a rejection: {serialized}"
+    );
+}
+
+/// A client that pulls diagnostics gets them only by pulling.
+///
+/// VS Code keeps pushed and pulled diagnostics in separate collections and
+/// lists both, so a server that also pushed to it showed every finding
+/// twice in the Problems panel.
+#[test]
+fn a_pulling_client_is_not_also_pushed_diagnostics() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let uri = url_of(&ws.openapi);
+    let text = std::fs::read_to_string(&ws.openapi).expect("read");
+    editor.open(&ws.openapi, &text);
+
+    let pulled = editor
+        .request("textDocument/diagnostic", doc(&uri))
+        .expect("pull");
+    assert!(
+        pulled
+            .get("items")
+            .and_then(|i| i.as_array())
+            .is_some_and(|items| !items.is_empty()),
+        "the fixture must produce findings: {pulled}"
+    );
+    // Past the 150ms push debounce, with room to spare.
+    assert!(
+        !editor.wait_for_notification("textDocument/publishDiagnostics", Duration::from_secs(2)),
+        "the server pushed diagnostics to a client that pulls them"
     );
 }

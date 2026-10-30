@@ -170,6 +170,9 @@ impl Backend {
         let mut st = self.state.write().await;
         st.client_settings = client;
         let changed = st.config != merged || st.editor_config != editor;
+        if changed {
+            st.policy_epoch = st.policy_epoch.wrapping_add(1);
+        }
         st.config = merged;
         st.editor_config = editor;
         changed
@@ -223,7 +226,7 @@ impl Backend {
             tokio::time::sleep(Duration::from_millis(150)).await;
             // Compute WITHOUT holding the state lock: clone the cheap handles
             // (OpenDoc is small; LowDoc parse tree is Arc-shared internally).
-            let (doc, ws, cfg, ruleset, strict_format) = {
+            let (doc, ws, cfg, ruleset, strict_format, epoch) = {
                 let st = state.read().await;
                 if st.generations.get(&uri) != Some(&generation) {
                     return; // a newer edit superseded this publish
@@ -235,6 +238,7 @@ impl Backend {
                         st.config.clone(),
                         st.editor_config.settings.lint.ruleset.clone(),
                         st.editor_config.settings.validate.strict_format,
+                        st.cache_epoch(),
                     ),
                     None => return,
                 }
@@ -285,15 +289,21 @@ impl Backend {
             }
             // Keep the result so the pull that follows this push is a cache
             // hit rather than a second full lint pass.
-            {
+            let pulls = {
                 let mut st = state.write().await;
                 if st.generations.get(&uri) == Some(&generation) {
-                    let epoch = st.generation();
                     st.diag_cache
                         .insert(uri.clone(), (epoch, id, diags.clone()));
                 }
+                st.client_pulls_diagnostics()
+            };
+            // A client that pulls keeps pushed and pulled diagnostics in
+            // separate collections and shows both, so pushing as well
+            // listed every finding twice. It pulls on its own after each
+            // change, and the cache above answers that pull.
+            if !pulls {
+                client.publish_diagnostics(url, diags, None).await;
             }
-            client.publish_diagnostics(url, diags, None).await;
         });
     }
 
@@ -1398,7 +1408,7 @@ impl LanguageServer for Backend {
         let cached = {
             let st = self.state.read().await;
             match st.diag_cache.get(&uri) {
-                Some((epoch, id, items)) if *epoch == st.generation() => {
+                Some((epoch, id, items)) if *epoch == st.cache_epoch() => {
                     Some((id.clone(), items.clone()))
                 }
                 _ => None,
@@ -1411,7 +1421,7 @@ impl LanguageServer for Backend {
             return Ok(full_report(Some(id), items));
         }
 
-        let (doc, cfg, floor, ruleset, strict_format) = {
+        let (doc, cfg, floor, ruleset, strict_format, epoch) = {
             let st = self.state.read().await;
             let Some(doc) = st.docs.get(&uri) else {
                 return Ok(full_report(None, Vec::new()));
@@ -1424,6 +1434,7 @@ impl LanguageServer for Backend {
                 st.editor_config.min_severity(),
                 st.editor_config.settings.lint.ruleset.clone(),
                 st.editor_config.settings.validate.strict_format,
+                st.cache_epoch(),
             )
         };
         // Off the runtime, for the same reason as the push: this is seconds
@@ -1457,13 +1468,16 @@ impl LanguageServer for Backend {
             }
         })
         .await;
-        let Ok((id, items)) = id_and_items else {
+        let Ok((_, items)) = id_and_items else {
             return Ok(full_report(None, Vec::new()));
         };
+        // The id names what the client is shown: computed after the floor,
+        // or a floor change alone would answer "unchanged" with the report
+        // the old floor produced.
         let items = diagnostics::filter_at_least(items, floor);
+        let id = pull::diagnostics_result_id(&items);
         {
             let mut st = self.state.write().await;
-            let epoch = st.generation();
             st.diag_cache
                 .insert(uri, (epoch, id.clone(), items.clone()));
         }
@@ -1485,7 +1499,7 @@ impl LanguageServer for Backend {
             st.ws_diag_cache
                 .as_ref()
                 .and_then(|(epoch, config, id, items)| {
-                    let fresh = *epoch == st.generation() && *config == st.config;
+                    let fresh = *epoch == st.cache_epoch() && *config == st.config;
                     fresh.then(|| (id.clone(), items.clone()))
                 })
         };
@@ -1498,15 +1512,17 @@ impl LanguageServer for Backend {
         // Same discipline as `diagnostic`: nothing expensive runs while a state
         // guard is alive, because a queued writer behind it blocks every
         // later reader — including the hover that follows.
-        let (workspace, cfg, ruleset, strict_format, cache, doc_versions) = {
+        let (workspace, cfg, floor, ruleset, strict_format, cache, doc_versions, epoch) = {
             let st = self.state.read().await;
             (
                 st.workspace.clone(),
                 st.config.clone(),
+                st.editor_config.min_severity(),
                 st.editor_config.settings.lint.ruleset.clone(),
                 st.editor_config.settings.validate.strict_format,
                 Arc::clone(&st.ws_doc_diag),
                 (st.ws_identity, st.doc_epoch.clone()),
+                st.cache_epoch(),
             )
         };
         let mut items = Vec::new();
@@ -1529,6 +1545,10 @@ impl LanguageServer for Backend {
                 let Ok(url) = Url::parse(uri.as_str()) else {
                     continue;
                 };
+                // The same floor the push and document-pull paths apply;
+                // without it the workspace report re-adds every finding the
+                // configured `lint.min_severity` suppressed.
+                let diags = diagnostics::filter_at_least(diags, floor);
                 let id = pull::diagnostics_result_id(&diags);
                 if previous.get(uri.as_str()) == Some(&id) {
                     items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
@@ -1563,9 +1583,7 @@ impl LanguageServer for Backend {
         };
         {
             let mut st = self.state.write().await;
-            let epoch = st.generation();
-            let config = st.config.clone();
-            st.ws_diag_cache = Some((epoch, config, id.clone(), items.clone()));
+            st.ws_diag_cache = Some((epoch, cfg, id.clone(), items.clone()));
         }
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
@@ -1995,7 +2013,12 @@ impl LanguageServer for Backend {
     async fn initialized(&self, _params: InitializedParams) {
         // Fetch merged config when the client supports workspace/configuration.
         let client = self.pull_client_settings().await;
-        self.reload_config(client).await;
+        // The client may already have pulled diagnostics under the
+        // file-only policy while this answer was in flight; when its
+        // settings change the policy, those reports are stale.
+        if self.reload_config(client).await {
+            self.republish_after_config_change().await;
+        }
         // Dynamic registration: only clients advertising
         // `didChangeWatchedFiles.dynamicRegistration` need the watcher
         // registered explicitly; others deliver the notification natively.
@@ -4146,6 +4169,87 @@ components:
     /// `didChangeConfiguration` (whose payload VS Code sends as `null`, so
     /// the server must re-pull), and a configuration file changing on disk
     /// (`didChangeWatchedFiles`, which used to drop only the workspace).
+    /// `workspace/diagnostic` honours the severity floor like the push and
+    /// document-pull paths. VS Code merges the workspace report into the
+    /// Problems panel, so an unfiltered report re-added every warning a
+    /// `lint.min_severity: error` policy suppressed.
+    #[tokio::test]
+    async fn the_workspace_report_applies_the_severity_floor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: error\n",
+        )
+        .expect("write");
+        let spec = dir.path().join("openapi.yaml");
+        let text = spec_with_refs(2);
+        std::fs::write(&spec, &text).expect("write");
+        let uri = Url::from_file_path(&spec).expect("file url");
+
+        let (mut service, socket) = service().await;
+        let draining = tokio::spawn(async move {
+            use futures::{SinkExt, StreamExt};
+            let mut socket = socket;
+            while let Some(request) = socket.next().await {
+                if let Some(id) = request.id().cloned() {
+                    socket
+                        .send(tower_lsp::jsonrpc::Response::from_ok(
+                            id,
+                            serde_json::Value::Null,
+                        ))
+                        .await
+                        .ok();
+                }
+            }
+        });
+        in_flight(
+            &mut service,
+            1,
+            "initialize",
+            serde_json::json!({
+                "processId": null,
+                "rootUri": format!("file://{}", dir.path().display()),
+                "capabilities": {},
+            }),
+        )
+        .await
+        .expect("initialize answered");
+        let _ = in_flight(&mut service, 0, "initialized", serde_json::json!({})).await;
+        let _ = in_flight(
+            &mut service,
+            0,
+            "textDocument/didOpen",
+            serde_json::json!({"textDocument": {
+                "uri": uri.as_str(), "languageId": "yaml", "version": 1, "text": text,
+            }}),
+        )
+        .await;
+
+        let answer = in_flight(
+            &mut service,
+            2,
+            "workspace/diagnostic",
+            serde_json::json!({
+                "previousResultIds": [],
+            }),
+        )
+        .await
+        .expect("workspace/diagnostic answered");
+        let report = answer.result().expect("a report").clone();
+        let severities: Vec<u64> = report["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .flat_map(|item| item["items"].as_array().cloned().unwrap_or_default())
+            .filter_map(|diagnostic| diagnostic["severity"].as_u64())
+            .collect();
+        assert!(
+            severities.iter().all(|&severity| severity == 1),
+            "below-floor findings in the workspace report: {severities:?}"
+        );
+        draining.abort();
+    }
+
     #[tokio::test]
     async fn configuration_reloads_from_pulls_and_from_disk() {
         let dir = tempfile::tempdir().expect("tempdir");

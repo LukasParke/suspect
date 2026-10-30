@@ -667,3 +667,18 @@ pub fn editor_capabilities() -> serde_json::Value {
         .cloned()
         .expect("the captured capability set must carry `capabilities`")
 }
+
+/// The captured capability set without pull diagnostics: a client that
+/// learns about diagnostics only from `textDocument/publishDiagnostics`.
+/// The server pushes to such a client and does not push to one that pulls
+/// (VS Code shows pushed and pulled diagnostics side by side).
+pub fn push_client_capabilities() -> serde_json::Value {
+    let mut capabilities = editor_capabilities();
+    if let Some(text) = capabilities
+        .get_mut("textDocument")
+        .and_then(|t| t.as_object_mut())
+    {
+        text.remove("diagnostic");
+    }
+    capabilities
+}

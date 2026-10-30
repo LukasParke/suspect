@@ -138,6 +138,10 @@ impl OpenDoc {
     }
 }
 
+/// The content epoch and the policy epoch a diagnostics cache entry was
+/// computed under; see [`State::cache_epoch`].
+pub type CacheEpoch = (u64, u64);
+
 /// Everything the backend knows, guarded by one async `RwLock`.
 #[derive(Default)]
 pub struct State {
@@ -175,7 +179,7 @@ pub struct State {
     /// specification that pass costs seconds, and the second one is what a
     /// hover queued behind. Keyed on the content epoch, so any edit
     /// invalidates it.
-    pub diag_cache: HashMap<Uri, (u64, String, Vec<Diagnostic>)>,
+    pub diag_cache: HashMap<Uri, (CacheEpoch, String, Vec<Diagnostic>)>,
     /// Whole-workspace diagnostics cache: the content epoch and the config
     /// they were computed for, the result id, and the reports.
     ///
@@ -185,7 +189,7 @@ pub struct State {
     /// asks for hover, symbols and links. Measured on that burst: seven
     /// cheap requests finish in 290ms; adding this one takes it to 4.4s.
     pub ws_diag_cache: Option<(
-        u64,
+        CacheEpoch,
         crate::config_files::SuspectConfig,
         String,
         Vec<WorkspaceDocumentDiagnosticReport>,
@@ -215,6 +219,11 @@ pub struct State {
     /// degrade (e.g. deferring work to `codeAction/resolve` needs
     /// `codeAction.resolveSupport`).
     pub client_caps: Option<tower_lsp::lsp_types::ClientCapabilities>,
+    /// Bumped whenever the effective policy (config, severity floor)
+    /// changes. Diagnostics caches key on it alongside the content epoch,
+    /// so a report computed under the old policy — even one that finishes
+    /// after the change cleared the caches — is never served again.
+    pub policy_epoch: u64,
     /// Settings from the shared schema: the workspace's `.suspect.yaml`
     /// with the client's initialization options layered on top. This is
     /// the same configuration the CLI reads, so the editor and CI agree.
@@ -229,6 +238,16 @@ pub struct State {
 }
 
 impl State {
+    /// Whether the client asked for pull diagnostics
+    /// (`textDocument.diagnostic` in its capabilities). Such a client gets
+    /// diagnostics only by pulling; pushing as well duplicates them.
+    pub fn client_pulls_diagnostics(&self) -> bool {
+        self.client_caps
+            .as_ref()
+            .and_then(|caps| caps.text_document.as_ref())
+            .is_some_and(|text| text.diagnostic.is_some())
+    }
+
     /// The workspace root, when the client declared one.
     #[must_use]
     pub fn workspace_root(&self) -> Option<std::path::PathBuf> {
@@ -260,6 +279,13 @@ impl State {
     /// A counter that changes whenever any open document does.
     pub fn generation(&self) -> u64 {
         self.content_epoch
+    }
+
+    /// The key diagnostics caches are valid for: the content epoch and the
+    /// policy epoch. Capture it when a computation starts, not when its
+    /// result is stored.
+    pub fn cache_epoch(&self) -> CacheEpoch {
+        (self.content_epoch, self.policy_epoch)
     }
 
     /// Forgets the disk-backed workspace, and with it the index built
