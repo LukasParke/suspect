@@ -1,9 +1,6 @@
 [workspace]
 resolver = "3"
-members = [
-    "crates/suspect-config",
-    "crates/suspect-runtime",
-    "crates/suspect-config","crates/*", "xtask"]
+members = ["crates/*", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -18,7 +15,7 @@ libc = "0.2"
 # internal crates
 suspect-source = { path = "crates/suspect-source", version = "0.1.0" }
 suspect-syntax = { path = "crates/suspect-syntax", version = "0.1.0" }
-suspect-config = { path = "crates/suspect-config" }
+suspect-config = { path = "crates/suspect-config", version = "0.1.0" }
 suspect-runtime = { path = "crates/suspect-runtime", version = "0.1.0" }
 suspect-low = { path = "crates/suspect-low", version = "0.1.0" }
 suspect-ref = { path = "crates/suspect-ref", version = "0.1.0" }
@@ -41,6 +38,8 @@ suspect-artifact = { path = "crates/suspect-artifact", version = "0.1.0" }
 suspect-codegen = { path = "crates/suspect-codegen", version = "0.1.0" }
 suspect-gateway = { path = "crates/suspect-gateway", version = "0.1.0" }
 suspect-watch = { path = "crates/suspect-watch", version = "0.1.0" }
+suspect-faker = { path = "crates/suspect-faker", version = "0.1.0" }
+suspect-upgrade = { path = "crates/suspect-upgrade", version = "0.1.0" }
 
 # external
 tree-sitter = "0.26"

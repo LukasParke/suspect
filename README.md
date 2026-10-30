@@ -21,8 +21,8 @@ OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
 ## LSP — full-featured editor experience
 
 `suspect lsp` is a complete language server for OpenAPI/Arazzo/Overlay files.
-The repo ships a ready-to-use VS Code extension in
-[`.vscode-suspect/`](.vscode-suspect/) (see its README for setup), and any LSP
+The repo ships a VS Code extension in [`editors/vscode/`](editors/vscode/)
+and a Zed extension in [`editors/zed/`](editors/zed/), and any LSP
 client works — Neovim, Helix, Zed, Emacs (lsp-mode/eglot).
 
 **Capabilities**: publishDiagnostics (syntax + 22 semantic checks + 21 lint
@@ -177,18 +177,26 @@ and the runnable example in [`examples/load/`](examples/load/).
 - **CI**: `.github/workflows/ci.yml` gates fmt, clippy (`-D warnings`), tests,
   and a bench smoke run.
 
-## VS Code extension
+## Install
 
 ```console
-# build the server once
-cargo build --release -p suspect-cli
-
-# point the extension at it (or rely on `suspect` being on PATH)
-mkdir -p ~/.vscode/extensions/suspect-lsp
-cp -r .vscode-suspect/* ~/.vscode/extensions/suspect-lsp/
-cd ~/.vscode/extensions/suspect-lsp && npm install vscode-languageclient@9
+cargo install --path crates/suspect-cli   # puts `suspect` on PATH
+suspect --version
 ```
 
-Then set `"suspect.server.path"` to the absolute path of the `suspect`
-binary and reload the window. The `.vscode-suspect/README.md` documents the
-full configuration surface.
+## Editors
+
+- **VS Code** ([`editors/vscode`](editors/vscode/)): language features via the
+  bundled LSP, a Testing-API explorer for Arazzo workflows, an Arazzo notebook,
+  gateway control and SDK generation. Build it with
+  `cd editors/vscode && npm ci && npm run compile`, then run it from VS Code's
+  extension development host or package it with `npx @vscode/vsce package`.
+  The extension finds `suspect` on `PATH`; set `"suspect.basePath"` to use a
+  specific binary.
+- **Zed** ([`editors/zed`](editors/zed/)): registers `suspect lsp` for YAML and
+  JSON; see its README for install and settings.
+- **Others** (Neovim, Helix, Emacs): run `suspect lsp` over stdio; smoke
+  configurations live in [`editors/multiclient/`](editors/multiclient/).
+
+All clients share the same settings file: `.suspect.yaml` at the project root
+(`suspect config` shows what is in effect).

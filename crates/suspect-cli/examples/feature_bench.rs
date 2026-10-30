@@ -141,9 +141,10 @@ fn bench_r4_stateful(name: &str, ir: &IrSpec) {
 fn bench_r8_reverse(name: &str, ir: &IrSpec) {
     // Extract routes from our own workspace source tree
     let s = Instant::now();
-    let routes = suspect_reverse::extract_from_tree(std::path::Path::new(
-        "/home/luke/github/suspect/crates",
-    ));
+    let routes = suspect_reverse::extract_from_tree(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/.."
+    )));
     let extract_t = s.elapsed();
 
     let s = Instant::now();
@@ -174,7 +175,10 @@ fn bench_r2_causal(_name: &str, _ir: &IrSpec, iters: usize) {
     let spec_path = std::path::PathBuf::from("/tmp/plex-api-spec/plex-api-spec.yaml")
         .canonicalize()
         .unwrap_or_else(|_| {
-            std::path::PathBuf::from("/home/luke/github/suspect/corpus/stripe-sdk.yaml")
+            std::path::PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../corpus/stripe-sdk.yaml"
+            ))
         });
     let mut times = Vec::new();
     for i in 0..iters {
@@ -291,8 +295,14 @@ fn main() -> Result<(), String> {
     println!();
 
     // --- Load corpus ---
-    let (_, stripe) = load_ir("/home/luke/github/suspect/corpus", "stripe-sdk.yaml")?;
-    let (_, github) = load_ir("/home/luke/github/suspect/corpus", "api.github.com.yaml")?;
+    let (_, stripe) = load_ir(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus"),
+        "stripe-sdk.yaml",
+    )?;
+    let (_, github) = load_ir(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../corpus"),
+        "api.github.com.yaml",
+    )?;
     let (plex_ws, plex) = load_ir("/tmp/plex-api-spec", "plex-api-spec.yaml")?;
     println!(
         "corpus: stripe-sdk {} ops/{} schemas, github {} ops/{} schemas, plex {} ops/{} schemas",

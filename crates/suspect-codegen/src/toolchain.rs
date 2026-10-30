@@ -31,8 +31,8 @@ pub struct Tool {
     /// `SUSPECT_RUBY_HOME`). Empty when the tool has none.
     pub home_env: &'static str,
     /// Known version-manager install path used when the tool is not on
-    /// `PATH` (mise layouts on the primary dev machine). Empty when the
-    /// tool always lives on `PATH`.
+    /// `PATH` (mise layouts). A leading `~/` expands to `$HOME`. Empty when
+    /// the tool always lives on `PATH`.
     pub version_manager_path: &'static str,
 }
 
@@ -58,7 +58,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install JDK 21 or later from https://adoptium.net, or point JAVA_HOME at one",
         env_override: "SUSPECT_JAVA_BIN",
         home_env: "JAVA_HOME",
-        version_manager_path: "/Users/luke/.local/share/mise/installs/java/temurin-21",
+        version_manager_path: "~/.local/share/mise/installs/java/temurin-21",
     },
     Tool {
         id: "maven",
@@ -69,7 +69,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install Maven 3.8 or later from https://maven.apache.org/install.html",
         env_override: "SUSPECT_MAVEN_BIN",
         home_env: "",
-        version_manager_path: "/Users/luke/.local/share/mise/installs/maven/3",
+        version_manager_path: "~/.local/share/mise/installs/maven/3",
     },
     Tool {
         id: "dotnet",
@@ -80,7 +80,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install the .NET 8 SDK or later from https://dotnet.microsoft.com/download",
         env_override: "SUSPECT_DOTNET_BIN",
         home_env: "",
-        version_manager_path: "/Users/luke/.local/share/mise/dotnet-root/dotnet",
+        version_manager_path: "~/.local/share/mise/dotnet-root/dotnet",
     },
     Tool {
         id: "swift",
@@ -238,7 +238,7 @@ pub fn resolve_path(id: &str) -> Option<std::path::PathBuf> {
         }
     }
     if !tool.version_manager_path.is_empty() {
-        let managed = std::path::PathBuf::from(tool.version_manager_path);
+        let managed = expand_home(tool.version_manager_path);
         if managed.is_file() {
             return Some(managed);
         }
@@ -252,6 +252,14 @@ pub fn resolve_path(id: &str) -> Option<std::path::PathBuf> {
         }
     }
     find_on_path(tool.version_command[0])
+}
+
+/// Expands a leading `~/` against `$HOME`.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => std::path::PathBuf::from(home).join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
 }
 
 /// Walks `PATH` for an executable with the given name (the `which` dance
