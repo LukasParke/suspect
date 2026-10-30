@@ -58,7 +58,7 @@ Commands:
   evidence           Print the SDK verification matrix: backend x feature -> evidence
   ci                 Run validate, contract, breaking, codegen, and tests across every project in a workspace as one gate
   contract           Emit or verify a machine-readable contract package
-  config             Show the project configuration in effect for this invocation
+  config             Show the configuration in effect, or with `--explain` every setting and where its value came from
   project            Build and check a suspect project from one manifest
   lsp                Run the language server over stdio
   help               Print this message or the help of the given subcommand(s)
@@ -1067,15 +1067,18 @@ Options:
 ## `suspect config`
 
 ```text
-Show the project configuration in effect for this invocation
+Show the configuration in effect, or with `--explain` every setting and where its value came from
 
-Usage: suspect config [INPUT]
+Usage: suspect config [OPTIONS] [INPUT]
 
 Arguments:
-  [INPUT]  Report the configuration a command on this input would use: a settings file above the working directory wins, and the input's own directory is searched only when there is none
+  [INPUT]  Report the configuration a command on this input would use: the nearest settings file above it, else the one above the working directory
 
 Options:
-  -h, --help  Print help
+      --explain          Print every setting with its value and origin (`flag`, `env SUSPECT_X`, `.suspect.yaml:12`, `default`), plus debug variables
+      --set-only         With `--explain`: hide settings that hold their default
+      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+  -h, --help             Print help (see more with '--help')
 ```
 
 ## `suspect project`

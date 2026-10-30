@@ -15,6 +15,7 @@ pub mod ci;
 pub mod codegen_cmd;
 pub mod codegen_compare;
 pub mod codegen_session;
+pub mod config_cmd;
 pub mod contract;
 pub mod docs_gen_cmd;
 pub mod drift;

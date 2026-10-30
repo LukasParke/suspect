@@ -823,6 +823,11 @@ Each step leaves `main` green and shippable.
    the fixed help text for `config [INPUT]`. Files: `cli/src/lib.rs`
    (`Command::Config`). Tests: `crates/suspect-cli/tests/config_explain.rs`
    with a tempdir fixture asserting origins incl. `file:line`. 0.5 day.
+   **Done.** `suspect config` itself discovers from INPUT (falling back to
+   the working directory when nothing configures it) from this step on;
+   with `--explain`, rejected values are listed as `error:` lines and the
+   exit code is 2. Rows also name their env variable. The JSON adds
+   `config`, `errors`, `layer` per value and a `debug` list.
 3. **CLI and CI on `resolve`**. `validate`, `lint`, `fmt`, `docs`,
    `codegen`, `ci`, `project build` call `resolve_with`; input-first
    discovery; multi-config warning; delete `lint_policy`/`lint_overrides`;

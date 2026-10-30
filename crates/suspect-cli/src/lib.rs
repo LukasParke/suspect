@@ -11,6 +11,7 @@ pub mod diff;
 pub mod output;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
 pub mod sarif;
+pub mod settings;
 /// FD-level output silencing for machine-readable runs.
 pub mod silence;
 
@@ -499,13 +500,9 @@ pub enum Command {
     Ci(commands::ci::CiArgs),
     /// Emit or verify a machine-readable contract package.
     Contract(commands::contract::ContractArgs),
-    /// Show the project configuration in effect for this invocation.
-    Config {
-        /// Report the configuration a command on this input would use: a
-        /// settings file above the working directory wins, and the input's
-        /// own directory is searched only when there is none.
-        input: Option<PathBuf>,
-    },
+    /// Show the configuration in effect, or with `--explain` every setting
+    /// and where its value came from.
+    Config(commands::config_cmd::ConfigArgs),
     /// Build and check a suspect project from one manifest.
     #[command(name = "project")]
     Project {
@@ -884,12 +881,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
-        Command::Config { input } => {
-            let loaded = suspect_config::for_invocation(input.as_deref())
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            println!("{}", loaded.describe());
-            Ok(0)
-        }
+        Command::Config(args) => commands::config_cmd::config(&args),
         Command::Evidence(args) => commands::evidence::evidence(&args),
         Command::Ci(args) => {
             // The gate reports its own aggregate, so a failing stage is a
