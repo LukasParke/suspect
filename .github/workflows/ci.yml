@@ -75,3 +75,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo run -p xtask -- check-versions
+  # Non-Linux coverage for the binary and the load path (P5 step 3). The
+  # Windows job is informational until its first green run, then
+  # `continue-on-error` goes (docs/proposals/P5-release.md, Windows tier 2).
+  test-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo test -p suspect-cli -p suspect-low -p suspect-ref
+  test-windows:
+    runs-on: windows-2022
+    continue-on-error: true
+    steps:
+      # Fixtures and golden files are compared byte for byte; keep LF.
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - run: cargo test -p suspect-cli -p suspect-low -p suspect-ref

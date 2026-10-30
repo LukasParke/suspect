@@ -562,6 +562,25 @@ workflow does, required secrets), and its "Checks" list is replaced by
    do not follow the CRT fds, use `SetStdHandle` instead) with a test that a
    gate's `--format json` output is one document. Fix what else fails. 1-2 days, depending on
    findings.
+   **Done, Windows unverified.** Rust's std does not use CRT descriptors on
+   Windows (it calls `GetStdHandle` per write, and `Command` inherits the
+   standard handles), so `Silenced` swaps the handles with `SetStdHandle`
+   onto an open `NUL` file, declared directly against kernel32 so
+   `suspect-cli` gains no dependency. Both platforms now flush std's
+   buffers before and after the swap, so a partial line written while
+   silenced no longer leaks into the document. The test
+   (`silence::tests`) re-runs the test binary as a child, silences it, and
+   asserts that output from the child and from a grandchild it spawns is
+   dropped while output before and after reaches the real streams; the
+   existing `ci_reports_a_machine_readable_aggregate` already parses a
+   gate's whole `--format json` stdout as one document. The Windows code
+   type-checks and passes clippy for `x86_64-pc-windows-msvc` (module
+   alone) and `x86_64-pc-windows-gnu` (`suspect-cli`, `suspect-low`,
+   `suspect-ref`, all targets, `zig cc` for the C build scripts; the msvc
+   target needs the Windows SDK headers for those). It has not run on
+   Windows, so the `test-windows` job is `continue-on-error` until its first
+   green run, and checks out with `core.autocrlf false`. Known risk:
+   `suspect release-publish` runs target commands through `sh -c`.
 4. **cargo-dist and changelog.** `dist init` with the config above;
    generated `release.yml`; `dist generate --check` in `ci.yml`;
    `cliff.toml`; `CHANGELOG.md` with the `v0.1.0` entry;
