@@ -78,20 +78,68 @@ pub fn for_workspace(
 
 impl EditorConfig {
     /// The configured minimum severity, defaulting to `hint` (show
-    /// everything). Accepts the LSP/`.suspect.yaml` spellings and the
-    /// `"information"` spelling VS Code's settings enum uses, plus the
-    /// `warn`/`info` short forms.
+    /// everything). Names are parsed by the shared
+    /// [`suspect_config::parse_severity`]; an unknown name (or `off`, which
+    /// is not a floor) also shows everything, and [`policy_problems`] says
+    /// so instead of applying it silently.
     #[must_use]
     pub fn min_severity(&self) -> tower_lsp::lsp_types::DiagnosticSeverity {
-        match self.settings.lint.min_severity.as_deref() {
-            Some("error") => tower_lsp::lsp_types::DiagnosticSeverity::ERROR,
-            Some("warning") | Some("warn") => tower_lsp::lsp_types::DiagnosticSeverity::WARNING,
-            Some("info") | Some("information") => {
-                tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION
-            }
-            _ => tower_lsp::lsp_types::DiagnosticSeverity::HINT,
+        use suspect_config::SeverityName;
+        use tower_lsp::lsp_types::DiagnosticSeverity;
+        match self
+            .settings
+            .lint
+            .min_severity
+            .as_deref()
+            .and_then(suspect_config::parse_severity)
+        {
+            Some(SeverityName::Error) => DiagnosticSeverity::ERROR,
+            Some(SeverityName::Warning) => DiagnosticSeverity::WARNING,
+            Some(SeverityName::Info) => DiagnosticSeverity::INFORMATION,
+            Some(SeverityName::Hint | SeverityName::Off) | None => DiagnosticSeverity::HINT,
         }
     }
+}
+
+/// Settings the server could not apply, one message each: a configuration
+/// file that did not load, and severity names the shared parser rejects
+/// (`suspect lint` exits 2 on the same values). Empty when everything
+/// applied.
+#[must_use]
+pub fn policy_problems(
+    editor: &EditorConfig,
+    files: &crate::config_files::SuspectConfig,
+) -> Vec<String> {
+    let mut problems: Vec<String> = editor.error.iter().cloned().collect();
+    if let Some(name) = editor.settings.lint.min_severity.as_deref() {
+        let floor = suspect_config::parse_severity(name);
+        if floor.is_none() || floor == Some(suspect_config::SeverityName::Off) {
+            problems.push(format!(
+                "lint.min_severity: unrecognized severity {name:?} \
+                 (expected error, warning, info or hint); showing every finding"
+            ));
+        }
+    }
+    if let Some(lint) = &files.lint {
+        let mut named: Vec<(String, &str)> = lint
+            .rules
+            .iter()
+            .map(|(code, name)| (format!("lint.rules.{code}"), name.as_str()))
+            .collect();
+        named.sort();
+        if let Some(design) = lint.design.as_deref() {
+            named.push(("lint.design".to_owned(), design));
+        }
+        for (key, name) in named {
+            if suspect_config::parse_severity(name).is_none() {
+                problems.push(format!(
+                    "{key}: unrecognized severity {name:?} \
+                     (expected error, warning, info, hint or off); not applied"
+                ));
+            }
+        }
+    }
+    problems
 }
 
 /// Layers the client's `suspect.*` initialization options over the file
@@ -137,6 +185,51 @@ fn set_string(value: &serde_json::Value) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unrecognized_severity_names_are_reported_not_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: fatal\n  rules:\n    info-contact: loud\n    info-license: warn\n",
+        )
+        .unwrap();
+        let editor = for_workspace(Some(dir.path()), None);
+        let files = crate::config_files::merge(
+            None,
+            None,
+            crate::config_files::file_layers(Some(dir.path())),
+        );
+        assert_eq!(
+            editor.min_severity(),
+            tower_lsp::lsp_types::DiagnosticSeverity::HINT
+        );
+        let problems = policy_problems(&editor, &files);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems[0].starts_with("lint.min_severity: unrecognized severity \"fatal\""));
+        assert!(problems[1].starts_with("lint.rules.info-contact: unrecognized severity \"loud\""));
+    }
+
+    #[test]
+    fn valid_policy_has_no_problems() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: information\n  rules:\n    info-contact: off\n",
+        )
+        .unwrap();
+        let editor = for_workspace(Some(dir.path()), None);
+        let files = crate::config_files::merge(
+            None,
+            None,
+            crate::config_files::file_layers(Some(dir.path())),
+        );
+        assert_eq!(
+            editor.min_severity(),
+            tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION
+        );
+        assert!(policy_problems(&editor, &files).is_empty());
+    }
 
     #[test]
     fn file_settings_are_read_from_the_workspace_root() {

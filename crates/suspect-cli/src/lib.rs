@@ -501,8 +501,9 @@ pub enum Command {
     Contract(commands::contract::ContractArgs),
     /// Show the project configuration in effect for this invocation.
     Config {
-        /// Report the configuration that would apply to this input, instead
-        /// of the one above the working directory.
+        /// Report the configuration a command on this input would use: a
+        /// settings file above the working directory wins, and the input's
+        /// own directory is searched only when there is none.
         input: Option<PathBuf>,
     },
     /// Build and check a suspect project from one manifest.

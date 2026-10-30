@@ -167,14 +167,27 @@ impl Backend {
             client.as_ref().and_then(config_files::parse_config),
             config_files::file_layers(root.as_deref()),
         );
-        let mut st = self.state.write().await;
-        st.client_settings = client;
-        let changed = st.config != merged || st.editor_config != editor;
+        let problems = editor_config::policy_problems(&editor, &merged);
+        let changed = {
+            let mut st = self.state.write().await;
+            st.client_settings = client;
+            let changed = st.config != merged || st.editor_config != editor;
+            if changed {
+                st.policy_epoch = st.policy_epoch.wrapping_add(1);
+            }
+            st.config = merged;
+            st.editor_config = editor;
+            changed
+        };
+        // Said once per change, not on every pass: a setting the server
+        // cannot apply is visible instead of silently ignored.
         if changed {
-            st.policy_epoch = st.policy_epoch.wrapping_add(1);
+            for problem in problems {
+                self.client
+                    .show_message(MessageType::WARNING, format!("suspect: {problem}"))
+                    .await;
+            }
         }
-        st.config = merged;
-        st.editor_config = editor;
         changed
     }
 

@@ -1072,7 +1072,7 @@ Show the project configuration in effect for this invocation
 Usage: suspect config [INPUT]
 
 Arguments:
-  [INPUT]  Report the configuration that would apply to this input, instead of the one above the working directory
+  [INPUT]  Report the configuration a command on this input would use: a settings file above the working directory wins, and the input's own directory is searched only when there is none
 
 Options:
   -h, --help  Print help

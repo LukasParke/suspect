@@ -564,7 +564,8 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
     }
     for spec in &specs {
         let ws = loader.load(spec)?;
-        let findings = crate::commands::validate::validate_workspace(&ws, spec, false);
+        let strict_format = crate::commands::validate::configured_strict_format(spec);
+        let findings = crate::commands::validate::validate_workspace(&ws, spec, strict_format);
         let errors = findings
             .iter()
             .filter(|f| f.severity >= Severity::Error)

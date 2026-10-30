@@ -321,7 +321,10 @@ fn lint_stage(manifest: &Path) -> StageResult {
         return stage("lint", 0, 0, 0, "no entry or published spec".to_owned());
     };
     let (ruleset, floor) = lint_policy(manifest);
-    let overrides = lint_overrides(manifest);
+    let overrides = match lint_overrides(manifest) {
+        Ok(overrides) => overrides,
+        Err(error) => return stage("lint", 1, 1, 0, error.to_string()),
+    };
     let findings = match crate::commands::lint::lint_findings(
         &[spec],
         ruleset.as_deref(),
@@ -396,10 +399,9 @@ fn lint_policy(manifest: &Path) -> (Option<PathBuf>, crate::output::Severity) {
 /// severity and per-rule overrides, from the manifest with the shared
 /// settings file as fallback — the same layering as the ruleset.
 ///
-/// A committed policy naming an unknown severity should be loud; here the
-/// parse falls back to no overrides so the lint stage still reports the
-/// findings as-is (`suspect lint` names the bad value on direct runs).
-fn lint_overrides(manifest: &Path) -> crate::commands::lint::LintOverrides {
+/// A committed policy naming an unknown severity is an error: the lint
+/// stage fails and names the bad value, as `suspect lint` does.
+fn lint_overrides(manifest: &Path) -> anyhow::Result<crate::commands::lint::LintOverrides> {
     let declared: Option<serde_json::Value> = std::fs::read_to_string(manifest)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok());
@@ -424,9 +426,7 @@ fn lint_overrides(manifest: &Path) -> crate::commands::lint::LintOverrides {
     let rules = rules
         .or_else(|| settings.map(|s| s.rules))
         .unwrap_or_default();
-    // A committed policy that names an unknown severity must be loud, not
-    // silently absent — the stage failure names the bad value.
-    crate::commands::lint::LintOverrides::from_config(design.as_deref(), &rules).unwrap_or_default()
+    crate::commands::lint::LintOverrides::from_config(design.as_deref(), &rules)
 }
 
 /// Builds one project through the full pipeline, reporting as it goes.
@@ -455,7 +455,8 @@ fn validate_stage(manifest: &Path) -> StageResult {
             format!("{} was never published", spec.display()),
         );
     }
-    let findings = crate::commands::validate::validate_file(&spec, None, false);
+    let strict_format = crate::commands::validate::configured_strict_format(&spec);
+    let findings = crate::commands::validate::validate_file(&spec, None, strict_format);
     let errors = findings
         .iter()
         .filter(|f| f.severity >= crate::output::Severity::Error)

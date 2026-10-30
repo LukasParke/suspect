@@ -15,12 +15,16 @@ use crate::output::{self, Finding, Severity};
 use crate::{OutputFormat, TextFormat};
 
 /// A rule's declared severity, with the shared config spellings
-/// (`warn`, `information`, ...); absent, `off`, or unknown names report as
-/// a warning.
-fn severity_from_str(s: Option<&str>) -> Severity {
-    s.and_then(suspect_config::parse_severity)
-        .and_then(Severity::from_config)
-        .unwrap_or(Severity::Warning)
+/// (`warn`, `information`, ...). `off` drops the finding (`None`); absent
+/// or unknown names report as a warning.
+fn severity_from_str(s: Option<&str>) -> Option<Severity> {
+    match s.and_then(suspect_config::parse_severity) {
+        Some(suspect_config::SeverityName::Off) => None,
+        name => Some(
+            name.and_then(Severity::from_config)
+                .unwrap_or(Severity::Warning),
+        ),
+    }
 }
 
 fn load_doc(path: &std::path::Path) -> anyhow::Result<LowDoc> {
@@ -36,20 +40,21 @@ fn to_findings(doc: &LowDoc, shown: &str, findings: Vec<suspect_rules::TsFinding
     let index = doc.inner().line_index();
     findings
         .into_iter()
-        .map(|f| {
+        .filter_map(|f| {
+            let severity = severity_from_str(f.severity.as_deref())?;
             let (line, col) = f
                 .span
                 .map(|(start, _)| index.line_col(bytes, start))
                 .unwrap_or((0, 0));
-            Finding {
+            Some(Finding {
                 file: shown.to_owned(),
-                severity: severity_from_str(f.severity.as_deref()),
+                severity,
                 code: f.rule_id,
                 message: f.message,
                 line: line + 1,
                 col: col + 1,
                 range: f.span.map(|(start, end)| start..end),
-            }
+            })
         })
         .collect()
 }
@@ -276,5 +281,19 @@ impl RulesCmd {
                 timeout_ms,
             } => bench(path, iterations, Some(timeout_ms)).map(|()| 0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn off_drops_a_finding_and_unknown_names_warn() {
+        assert_eq!(severity_from_str(Some("off")), None);
+        assert_eq!(severity_from_str(Some("error")), Some(Severity::Error));
+        assert_eq!(severity_from_str(Some("information")), Some(Severity::Info));
+        assert_eq!(severity_from_str(Some("loud")), Some(Severity::Warning));
+        assert_eq!(severity_from_str(None), Some(Severity::Warning));
     }
 }

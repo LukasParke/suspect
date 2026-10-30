@@ -1118,3 +1118,27 @@ fn ci_build_produces_artifacts_and_gates_them_in_one_command() {
         std::fs::read_dir(root.join("generated")).unwrap().count()
     );
 }
+
+#[test]
+fn ci_lint_stage_fails_on_an_unrecognized_override_severity() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    service(root, "svc");
+    std::fs::write(
+        root.join("svc/.suspect.yaml"),
+        "lint:\n  rules:\n    info-contact: loud\n",
+    )
+    .unwrap();
+    init_git_repo(root);
+    let out = std::process::Command::new(binary())
+        .args(["ci", ".", "--stage", "lint"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success(), "a bad override must fail: {stdout}");
+    assert!(
+        stdout.contains("unrecognized lint severity: loud"),
+        "the stage names the bad value: {stdout}"
+    );
+}
