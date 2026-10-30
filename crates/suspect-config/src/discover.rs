@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 /// What [`discover`] found.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Found {
     /// The settings file in effect.
     pub config: Option<PathBuf>,

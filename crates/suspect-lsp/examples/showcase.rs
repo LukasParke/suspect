@@ -92,7 +92,11 @@ fn main() {
     // Diagnostics: the validator plus the Spectral-compatible linter, as the
     // server publishes them (severity, code, source, editor range).
     let mut all_diags = diagnostics::validate_diagnostics(&ws, low, false);
-    all_diags.extend(diagnostics::lint_diagnostics(low, None, None));
+    all_diags.extend(diagnostics::lint_diagnostics(
+        low,
+        None,
+        &Default::default(),
+    ));
     all_diags.sort_by_key(|d| (d.range.start.line, d.range.start.character));
     out.insert(
         "diagnostics".into(),

@@ -182,3 +182,38 @@ fn lint_recommended_false_runs_no_builtin_rules() {
     let (errors, warnings, _) = ci_lint(root);
     assert_eq!((errors, warnings), (0, 0));
 }
+
+#[allow(dead_code)]
+mod support {
+    pub mod editor;
+}
+
+/// The server, started at the parent of both directories (a monorepo
+/// root), resolves the document's own project like `suspect lint` does.
+#[test]
+fn the_editor_reports_the_severities_lint_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fixture(root);
+    let findings = lint(&root.join("proj"), "openapi.yaml");
+    let spec = root.join("proj/openapi.yaml");
+    let editor = support::editor::Editor::start_bare(root);
+    let uri = editor.open(&spec, &std::fs::read_to_string(&spec).unwrap());
+    let report = editor
+        .request(
+            "textDocument/diagnostic",
+            serde_json::json!({"textDocument": {"uri": uri}}),
+        )
+        .expect("pull answered");
+    let names = ["", "error", "warning", "info", "hint"];
+    for code in ["info-contact", "info-license"] {
+        let item = report["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["code"] == code)
+            .unwrap_or_else(|| panic!("{code} not reported: {report}"));
+        let severity = names[item["severity"].as_u64().unwrap() as usize];
+        assert_eq!(Some(severity), severity_of(&findings, code), "{code}");
+    }
+}

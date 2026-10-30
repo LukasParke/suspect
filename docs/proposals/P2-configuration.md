@@ -854,6 +854,20 @@ Each step leaves `main` green and shippable.
    `suspect-config`; add an LSP case to `config_agreement.rs` using
    `tests/support/editor.rs` (same fixture, same severities as `lint`);
    `npm run test:host:smoke` unchanged and green. 1.5 days.
+   **Done.** `ResolvedCache` lives in `config_files.rs` (state holds an
+   `Arc` of it), keyed on the discovery result (plus the start directory
+   when nothing configures it); `reload_config` builds a fresh cache and
+   compares the workspace's and every open document's `Resolved` with the
+   old one. `compute_diagnostics`, `pull_diagnostics`, `workspace_pull`
+   (per-document settings through a closure) and `resolve_code_action` take
+   `&suspect_config::Settings`; ruleset, strict format and floor come from
+   it. `lint.recommended: false` now drops lint findings only without a
+   `lint.ruleset`, as the CLI does. Rejected values are shown once per
+   change with `window/showMessage` (`file:line: key: ...`) and, when the
+   file is open, by the schema check, which now reads the shared table and
+   also flags deprecated spellings. Not done: the `lsp_bench.rs` case and
+   the host-smoke case (needs a VS Code host); the stdio agreement case is
+   in `config_agreement.rs`.
 5. **Option A**. Manifest `config` key in discovery and `project check`;
    deprecation warning (CLI, CI note, LSP diagnostic); `project init`
    writes `.suspect.yaml`; `extends`; `suspect config migrate`. Files:

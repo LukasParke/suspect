@@ -497,3 +497,92 @@ fn explain_lists_every_row_and_json_has_the_shape() {
     assert_eq!(value["trace"].as_array().unwrap().len(), 2);
     assert_eq!(json["files"].as_array().unwrap().len(), 2);
 }
+
+// Ported from the language server's former `editor_config` tests.
+
+#[test]
+fn blank_or_null_editor_strings_do_not_override_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    write(
+        dir.path(),
+        ".suspect.yaml",
+        "lint:\n  min_severity: warning\n  ruleset: rules.yaml\n  design: warn\n",
+    );
+    // VS Code's defaults for untouched string settings, and a cleared one.
+    for blank in [
+        serde_json::json!(""),
+        serde_json::json!("   "),
+        serde_json::Value::Null,
+    ] {
+        let client = serde_json::json!({
+            "suspect": {"lint": {"minSeverity": blank, "ruleset": blank, "design": blank},
+                        "inlayHints": {"refs": false}}
+        });
+        let editor = [&client];
+        let r = resolve_with(
+            dir.path(),
+            Inputs {
+                editor: &editor,
+                env: Env::empty(),
+                ..Inputs::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            r.settings.lint.min_severity.as_deref(),
+            Some("warning"),
+            "{blank}"
+        );
+        assert_eq!(
+            r.settings.lint.ruleset,
+            Some(dir.path().join("rules.yaml")),
+            "{blank}"
+        );
+        assert_eq!(
+            r.settings.lint.design.as_deref(),
+            Some("warning"),
+            "{blank}"
+        );
+        assert!(!r.settings.editor.inlay_hints.refs);
+    }
+}
+
+#[test]
+fn a_relative_editor_ruleset_resolves_against_the_config_root() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "api/.suspect.yaml", "lint: {}\n");
+    let client = serde_json::json!({"lint": {"ruleset": "policy/rules.yaml"}});
+    let editor = [&client];
+    let inputs = || Inputs {
+        editor: &editor,
+        env: Env::empty(),
+        ..Inputs::default()
+    };
+    let r = resolve_with(&dir.path().join("api/v1/openapi.yaml"), inputs()).unwrap();
+    assert_eq!(
+        r.settings.lint.ruleset,
+        Some(dir.path().join("api/policy/rules.yaml")),
+        "the editor's relative path resolves where the file's would, not the cwd"
+    );
+    // No configuration file: the start directory is the base.
+    let bare = tempfile::tempdir().unwrap();
+    let r = resolve_with(bare.path(), inputs()).unwrap();
+    assert_eq!(
+        r.settings.lint.ruleset,
+        Some(bare.path().join("policy/rules.yaml"))
+    );
+    // An absolute path is taken as given.
+    let absolute = dir.path().join("elsewhere.yaml");
+    let client = serde_json::json!({"lint": {"ruleset": absolute}});
+    let editor = [&client];
+    let r = resolve_with(
+        dir.path(),
+        Inputs {
+            editor: &editor,
+            env: Env::empty(),
+            ..Inputs::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(r.settings.lint.ruleset, Some(absolute));
+}

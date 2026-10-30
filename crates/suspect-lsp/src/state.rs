@@ -180,8 +180,8 @@ pub struct State {
     /// hover queued behind. Keyed on the content epoch, so any edit
     /// invalidates it.
     pub diag_cache: HashMap<Uri, (CacheEpoch, String, Vec<Diagnostic>)>,
-    /// Whole-workspace diagnostics cache: the content epoch and the config
-    /// they were computed for, the result id, and the reports.
+    /// Whole-workspace diagnostics cache: the content epoch and the policy
+    /// epoch they were computed for, the result id, and the reports.
     ///
     /// `workspace/diagnostic` re-lints every document in the project on
     /// every request, which on a 63k-line specification is about four
@@ -190,7 +190,7 @@ pub struct State {
     /// cheap requests finish in 290ms; adding this one takes it to 4.4s.
     pub ws_diag_cache: Option<(
         CacheEpoch,
-        crate::config_files::SuspectConfig,
+        u64,
         String,
         Vec<WorkspaceDocumentDiagnosticReport>,
     )>,
@@ -213,8 +213,12 @@ pub struct State {
     /// the client cannot be asked). Kept so a configuration file changing
     /// on disk can be re-merged under it without another round trip.
     pub client_settings: Option<serde_json::Value>,
-    /// Merged server configuration (initialization options < client section).
-    pub config: crate::config_files::SuspectConfig,
+    /// The effective configuration per document: `.suspect.yaml` (and the
+    /// deprecated manifest policy) discovered from each document's
+    /// directory, the environment, then initialization options and the
+    /// client section on top — the layers `suspect lint` reads, plus the
+    /// editor's. Replaced whenever client settings or a config file change.
+    pub resolved: std::sync::Arc<crate::config_files::ResolvedCache>,
     /// Client capabilities from `initialize`, consulted when a feature can
     /// degrade (e.g. deferring work to `codeAction/resolve` needs
     /// `codeAction.resolveSupport`).
@@ -224,10 +228,6 @@ pub struct State {
     /// so a report computed under the old policy — even one that finishes
     /// after the change cleared the caches — is never served again.
     pub policy_epoch: u64,
-    /// Settings from the shared schema: the workspace's `.suspect.yaml`
-    /// with the client's initialization options layered on top. This is
-    /// the same configuration the CLI reads, so the editor and CI agree.
-    pub editor_config: crate::editor_config::EditorConfig,
     /// The workspace reference index, cached per document generation.
     ///
     /// Rebuilding it walks every document and every `$ref`; doing that per
