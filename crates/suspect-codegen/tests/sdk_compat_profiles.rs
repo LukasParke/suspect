@@ -336,14 +336,16 @@ fn emitted_field_types_for(
 
 #[test]
 fn the_nullable_profile_decodes_null_in_the_emitted_python_codecs() {
-    if !tool_available(
-        &std::env::var_os("SUSPECT_PYTHON_BIN")
-            .unwrap_or_else(|| "python3".into())
-            .to_string_lossy(),
-    ) {
-        eprintln!("python3 is not on PATH; skipping the native codec check");
-        return;
-    }
+    // The emitted codecs need the generated SDK's Python floor (3.11+);
+    // `SUSPECT_PYTHON_BIN` overrides the interpreter, and an absent or
+    // older one skips with the manifest's install guidance.
+    let interpreter = match suspect_codegen::toolchain::gate("python") {
+        Ok(python) => python,
+        Err(skip) => {
+            eprintln!("skipping the native codec check: {skip}");
+            return;
+        }
+    };
     let contract = contract_with_document(nullable_document());
     for (policy, accepts_null) in [
         (
@@ -388,13 +390,11 @@ print("OK")
 "#,
         )
         .unwrap();
-        let output = Command::new(
-            std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()),
-        )
-        .arg("consumer.py")
-        .current_dir(&python)
-        .output()
-        .unwrap();
+        let output = Command::new(&interpreter)
+            .arg("consumer.py")
+            .current_dir(&python)
+            .output()
+            .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if accepts_null {
             assert!(

@@ -310,24 +310,14 @@ fn oauth_class_emits_only_under_a_usable_scheme() {
 
 /// A JDK 21+ toolchain, mirroring the other Java acceptance tests.
 fn java_home() -> PathBuf {
-    // The manifest resolves the JDK (`SUSPECT_JAVA_BIN` override,
-    // `JAVA_HOME`, the pinned mise install) and gates the version
-    // (>= 21); the home derives from the resolved `java` executable.
-    // `SUSPECT_JAVA_HOME` keeps its documented override role, and the
-    // historical fallback stands so a missing manifest tool still
-    // surfaces the actionable `guidance("jdk")` skip message.
-    if let Ok(java) = suspect_codegen::toolchain::gate("jdk")
-        && let Some(home) = java.parent().and_then(Path::parent)
-    {
-        return std::env::var_os("SUSPECT_JAVA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.to_path_buf());
-    }
+    // `SUSPECT_JAVA_HOME` and `JAVA_HOME` keep their override roles; the
+    // manifest otherwise resolves and version-gates the JDK (>= 21) and the
+    // JVM reports its own home.
     std::env::var_os("SUSPECT_JAVA_HOME")
         .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
         })
 }
 

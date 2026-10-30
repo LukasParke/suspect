@@ -1206,7 +1206,7 @@ fn native_runtime_vectors_refs_and_resource_classification() {
 fn native_five_actual_openrouter_operations() {
     let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let before = Sha256::digest(std::fs::read(&path).expect("actual OpenRouter input is required"));
     let contract = load(&path);

@@ -42,7 +42,7 @@ fn load(path: &Path) -> Arc<Contract> {
 fn openrouter() -> Arc<Contract> {
     let base = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     load(&base.join("projects/docs/openapi/openapi.yaml"))
 }
 fn config() -> SdkConfig {

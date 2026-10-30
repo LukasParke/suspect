@@ -400,7 +400,7 @@ fn java_home() -> PathBuf {
         .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
         })
 }
 fn native_package(plan: &SdkPlan, consumer: &str) -> PathBuf {
@@ -423,9 +423,8 @@ fn native_package(plan: &SdkPlan, consumer: &str) -> PathBuf {
         "required JDK: {}",
         home.display()
     );
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let repository = crate_root().join("../../target/sdk-java-maven-cache/java/repository");
     checked(Command::new(bin.join("java")).arg("-version"), &root);
     checked(
@@ -762,7 +761,7 @@ fn negative_types(root: &Path, cases: &[&str]) {
 fn openrouter() -> (SdkPlan, PathBuf) {
     let path = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into())
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout")
         .join("projects/docs/openapi/openapi.yaml");
     assert!(
         path.is_file(),

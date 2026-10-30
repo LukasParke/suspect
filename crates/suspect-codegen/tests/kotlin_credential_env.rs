@@ -365,7 +365,7 @@ fn openrouter() -> Plan {
     use sha2::{Digest, Sha256};
     let base = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = base.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(

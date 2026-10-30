@@ -31,7 +31,10 @@ pub struct Tool {
     /// `SUSPECT_RUBY_HOME`). Empty when the tool has none.
     pub home_env: &'static str,
     /// Known version-manager install path used when the tool is not on
-    /// `PATH` (mise layouts). A leading `~/` expands to `$HOME`. Empty when
+    /// `PATH` (mise layouts). A leading `~/` expands to `$HOME`. A file is
+    /// the executable itself; a directory is searched for `<command>`,
+    /// `bin/<command>`, then `*/bin/<command>` (one nested level, for
+    /// archives such as `maven/3/apache-maven-3.9.16/bin/mvn`). Empty when
     /// the tool always lives on `PATH`.
     pub version_manager_path: &'static str,
 }
@@ -116,6 +119,18 @@ pub const TOOLS: &[Tool] = &[
         version_manager_path: "",
     },
     Tool {
+        id: "python",
+        description: "Python 3.11+ gates executing emitted Python SDKs and codecs",
+        version_command: &["python3", "--version"],
+        version_regex: r"Python (\d+\.\d+(?:\.\d+)?)",
+        // The emitted `pyproject.toml` declares `requires-python=">=3.11"`.
+        min_version: "3.11",
+        install_documentation: "Install Python 3.11 or later from https://www.python.org/downloads (or `uv python install 3.11`), then point SUSPECT_PYTHON_BIN at its interpreter",
+        env_override: "SUSPECT_PYTHON_BIN",
+        home_env: "",
+        version_manager_path: "",
+    },
+    Tool {
         id: "ruby",
         description: "Ruby acceptance gates (OAuth lifecycle, pagination, streams)",
         version_command: &["ruby", "--version"],
@@ -124,7 +139,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install Ruby 3.2 or later from https://www.ruby-lang.org/en/documentation/installation",
         env_override: "SUSPECT_RUBY_BIN",
         home_env: "SUSPECT_RUBY_HOME",
-        version_manager_path: "",
+        version_manager_path: "~/.local/share/mise/installs/ruby/3",
     },
     Tool {
         id: "php",
@@ -139,6 +154,18 @@ pub const TOOLS: &[Tool] = &[
             env!("CARGO_MANIFEST_DIR"),
             "/../../target/sdk-php-tools/php-8.3.32/php"
         ),
+    },
+    Tool {
+        id: "terraform",
+        description: "Terraform provider acceptance gates (plan/apply/import, addresses, modules)",
+        version_command: &["terraform", "version"],
+        version_regex: r"Terraform v(\d+\.\d+\.\d+)",
+        // Emitted examples declare `ephemeral` credential variables (1.10+).
+        min_version: "1.10",
+        install_documentation: "Install Terraform 1.10 or later from https://developer.hashicorp.com/terraform/install (or `mise use terraform@latest`), or point SUSPECT_TERRAFORM_BIN at one",
+        env_override: "SUSPECT_TERRAFORM_BIN",
+        home_env: "",
+        version_manager_path: "~/.local/share/mise/installs/terraform/latest/terraform",
     },
 ];
 
@@ -242,16 +269,59 @@ pub fn resolve_path(id: &str) -> Option<std::path::PathBuf> {
         if managed.is_file() {
             return Some(managed);
         }
-        // Directory layouts (e.g. `…/installs/maven/3`) need the binary
-        // name appended.
-        if managed.is_dir() {
-            let candidate = managed.join(tool.version_command[0]);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+        // Directory layouts (`…/installs/java/temurin-21`,
+        // `…/installs/maven/3`) need the binary located inside them.
+        if managed.is_dir()
+            && let Some(candidate) = find_in_install_dir(&managed, tool.version_command[0])
+        {
+            return Some(candidate);
         }
     }
     find_on_path(tool.version_command[0])
+}
+
+/// Locates `name` in a version-manager install directory: directly, under
+/// `bin/`, or under exactly one nested directory's `bin/` (the first in
+/// sorted order, so resolution is deterministic).
+fn find_in_install_dir(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    for candidate in [dir.join(name), dir.join("bin").join(name)] {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    let mut nested = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    nested.sort();
+    nested
+        .into_iter()
+        .map(|path| path.join("bin").join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The `JAVA_HOME` of the gated JDK (`gate("jdk")`), as reported by the JVM
+/// itself (`java.home`), so PATH shims, `/usr/bin/java` stubs and
+/// alternatives links all resolve to the real installation.
+///
+/// # Errors
+/// The `jdk` gate's skip message when no JDK 21+ is resolvable, or a
+/// description of why `java.home` could not be read.
+pub fn java_home() -> Result<std::path::PathBuf, String> {
+    let java = gate("jdk")?;
+    let output = std::process::Command::new(&java)
+        .args(["-XshowSettings:properties", "-version"])
+        .output()
+        .map_err(|error| format!("{}: {error}", java.display()))?;
+    let text = String::from_utf8_lossy(&output.stderr).into_owned()
+        + &String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix("java.home = "))
+        .map(|home| std::path::PathBuf::from(home.trim()))
+        .filter(|home| home.join("bin").is_dir())
+        .ok_or_else(|| format!("{} did not report java.home", java.display()))
 }
 
 /// Expands a leading `~/` against `$HOME`.
@@ -391,6 +461,8 @@ mod tests {
             ("node", "v20.19.0"),
             ("ruby", "ruby 3.4.5 (2025-07-16)"),
             ("php", "PHP 8.3.32 (cli)"),
+            ("python", "Python 3.11.13"),
+            ("terraform", "Terraform v1.15.8\non darwin_arm64"),
         ];
         for tool in TOOLS {
             assert!(
@@ -453,6 +525,36 @@ mod tests {
         }
         // Unknown ids resolve to nothing.
         assert!(resolve_path("definitely-not-a-tool").is_none());
+    }
+
+    #[test]
+    fn install_directories_resolve_direct_bin_and_one_nested_bin() {
+        let root = tempfile::tempdir().unwrap();
+        let touch = |relative: &str| {
+            let path = root.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"").unwrap();
+            path
+        };
+        let nested = touch("maven/3/apache-maven-3.9.16/bin/mvn");
+        assert_eq!(
+            find_in_install_dir(&root.path().join("maven/3"), "mvn"),
+            Some(nested)
+        );
+        let bin = touch("java/temurin-21/bin/java");
+        assert_eq!(
+            find_in_install_dir(&root.path().join("java/temurin-21"), "java"),
+            Some(bin)
+        );
+        let direct = touch("dotnet-root/dotnet");
+        assert_eq!(
+            find_in_install_dir(&root.path().join("dotnet-root"), "dotnet"),
+            Some(direct)
+        );
+        assert_eq!(
+            find_in_install_dir(&root.path().join("maven"), "none"),
+            None
+        );
     }
 
     #[test]

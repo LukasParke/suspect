@@ -10,13 +10,26 @@ fn collector_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tools/sdk-native-costs")
 }
 
-fn python() -> std::ffi::OsString {
-    std::env::var_os("SUSPECT_PYTHON_CURRENT_BIN").unwrap_or_else(|| "python3".into())
+/// The runner-selected `SUSPECT_PYTHON_CURRENT_BIN`, else the manifest's
+/// Python 3.11+ (`SUSPECT_PYTHON_BIN`, then `PATH`); the collector imports
+/// `tomllib`, so older interpreters are refused with install guidance.
+fn python() -> Result<PathBuf, String> {
+    match std::env::var_os("SUSPECT_PYTHON_CURRENT_BIN") {
+        Some(python) if !python.is_empty() => Ok(python.into()),
+        _ => suspect_codegen::toolchain::gate("python"),
+    }
 }
 
 #[test]
 fn collector_unit_and_adversarial_evidence_checks() {
-    let output = Command::new(python())
+    let python = match python() {
+        Ok(python) => python,
+        Err(skip) => {
+            eprintln!("skipping the native collector host checks: {skip}");
+            return;
+        }
+    };
+    let output = Command::new(python)
         .args([
             "-B",
             "-m",
@@ -61,7 +74,7 @@ fn native_build_import_codec_request_costs() {
             "{key} is required when native_build_import_codec_request_costs is explicitly run"
         );
     }
-    let status = Command::new(python())
+    let status = Command::new(python().unwrap_or_else(|skip| panic!("{skip}")))
         .arg("-B")
         .arg(collector_root().join("run.py"))
         .arg("collect")

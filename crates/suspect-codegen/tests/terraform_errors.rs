@@ -97,7 +97,7 @@ fn native_sdk_error_lifetimes_and_state_distinctions() {
     .unwrap();
     let root = tempfile::Builder::new()
         .prefix("sdk-terraform-errors-")
-        .tempdir_in("/private/var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/opencode")
+        .tempdir_in(native_tmp())
         .unwrap()
         .keep();
     std::fs::write(
@@ -141,4 +141,13 @@ fn native_sdk_error_lifetimes_and_state_distinctions() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// The approved native temporary directory shared with
+/// `tools/sdk-terraform-acceptance.py` (`APPROVED`): `suspect-terraform-native`
+/// under the caller's `TMPDIR`.
+fn native_tmp() -> std::path::PathBuf {
+    let path = std::env::temp_dir().join("suspect-terraform-native");
+    std::fs::create_dir_all(&path).unwrap();
+    path
 }

@@ -139,7 +139,7 @@ fn native_openrouter_environment_client() {
     let root = directory("openrouter-");
     let corpus = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Users/luke/github/openrouter-web"));
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = corpus.join("projects/docs/openapi/openapi.yaml");
     let original = fs::read(&path).unwrap();
     let workspace = Arc::new(

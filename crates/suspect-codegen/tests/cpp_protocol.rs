@@ -267,7 +267,7 @@ fn undefined_stream_and_positional_profiles_are_source_located_refusals() {
 fn actual_openrouter_expanded_selection_has_real_byte_and_form_roots() {
     let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let file = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(file.is_file(), "actual OpenRouter corpus required");
     let contract = load(&file);
@@ -316,7 +316,7 @@ fn native_additional_openrouter_operations() {
     use sha2::{Digest, Sha256};
     let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let before = Sha256::digest(std::fs::read(&path).unwrap());
     let contract = load(&path);

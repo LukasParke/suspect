@@ -1056,27 +1056,35 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
     }
     let selected =
         |name: &str, default: &str| std::env::var(name).unwrap_or_else(|_| default.into());
+    // Interpreter defaults when the `SUSPECT_*` override is unset: the
+    // versioned executable on the caller's PATH (Python), or the mise
+    // major-version install under `$HOME` falling back to `node` on PATH.
+    // The `tool-*` stages then verify the exact versions.
+    let on_path = |name: &str| resolve(name, &run.env).display().to_string();
+    let mise_node = |major: &str| {
+        std::env::var_os("HOME")
+            .map(|home| {
+                PathBuf::from(home)
+                    .join(format!(".local/share/mise/installs/node/{major}/bin/node"))
+            })
+            .filter(|node| node.is_file())
+            .map_or_else(|| on_path("node"), |node| node.display().to_string())
+    };
+    let (python_floor, python_current) = (on_path("python3.11"), on_path("python3.14"));
+    let (node22, node24) = (mise_node("22"), mise_node("24"));
     for (token, name, default) in [
         (
             "{python-floor}",
             "SUSPECT_PYTHON_FLOOR_BIN",
-            "/Users/luke/.local/share/uv/python/cpython-3.11-macos-aarch64-none/bin/python3.11",
+            python_floor.as_str(),
         ),
         (
             "{python-current}",
             "SUSPECT_PYTHON_CURRENT_BIN",
-            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            python_current.as_str(),
         ),
-        (
-            "{node22}",
-            "SUSPECT_DOCS_NODE",
-            "/Users/luke/.local/share/mise/installs/node/22.23.1/bin/node",
-        ),
-        (
-            "{node24}",
-            "SUSPECT_NODE24_BIN",
-            "/Users/luke/.local/share/mise/installs/node/24.21.0/bin/node",
-        ),
+        ("{node22}", "SUSPECT_DOCS_NODE", node22.as_str()),
+        ("{node24}", "SUSPECT_NODE24_BIN", node24.as_str()),
         (
             "{python-tools}",
             "SUSPECT_PYTHON_TOOLS",

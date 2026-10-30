@@ -428,7 +428,7 @@ fn native_openrouter_current_key_environment_defaults() {
     let root = root("openrouter-");
     let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let input = checkout.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&input).expect("actual OpenRouter source checkout required");
     let workspace = Arc::new(

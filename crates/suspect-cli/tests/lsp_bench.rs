@@ -80,7 +80,7 @@ fn site(ws: &Workspace) -> Site {
 /// scale where the deadlocks actually appeared:
 ///
 /// ```text
-/// SUSPECT_BENCH_ROOT=/Users/luke/github/plex-api-spec \
+/// SUSPECT_BENCH_ROOT=/path/to/plex-api-spec \
 ///   cargo test -p suspect-cli --test lsp_bench -- --nocapture
 /// ```
 fn bench_root() -> Option<std::path::PathBuf> {

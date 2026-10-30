@@ -686,7 +686,7 @@ fn native_openrouter_credential_env() {
     let root = support::root("credential-env-openrouter-");
     let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let source_hash = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
     let c = support::load(&path);

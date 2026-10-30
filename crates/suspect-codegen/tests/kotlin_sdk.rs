@@ -319,22 +319,31 @@ fn malformed_paths_are_source_linked_before_native_emission() {
     }
 }
 
+/// The JDK 21/25 matrix: the mise major-version installs under `$HOME`
+/// that exist, else the single JDK 21+ the toolchain manifest gates
+/// (`SUSPECT_JAVA_BIN`, `JAVA_HOME`, then `PATH`).
 fn java_homes() -> Vec<PathBuf> {
     if let Some(home) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME") {
         return vec![home.into()];
     }
-    ["temurin-21.0.12+101.0.LTS", "temurin-25.0.4+101.0.LTS"]
+    let mise = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".local/share/mise/installs/java"));
+    let matrix = ["temurin-21", "temurin-25"]
         .iter()
-        .map(|name| Path::new("/Users/luke/.local/share/mise/installs/java").join(name))
-        .collect()
+        .filter_map(|name| mise.as_ref().map(|mise| mise.join(name)))
+        .filter(|home| home.join("bin/java").is_file())
+        .collect::<Vec<_>>();
+    if !matrix.is_empty() {
+        return matrix;
+    }
+    vec![suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))]
 }
 
 fn maven(home: &Path) -> Command {
     let binary = std::env::var_os("SUSPECT_KOTLIN_MAVEN")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-        });
+        .or_else(|| suspect_codegen::toolchain::resolve_path("maven"))
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let mut command = Command::new(binary);
     command
         .args(["-B", "--no-transfer-progress"])
@@ -683,7 +692,7 @@ fn native_actual_five_openrouter_operations() {
     use sha2::Digest;
     let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&path).expect("actual OpenRouter description is required");
     assert_eq!(

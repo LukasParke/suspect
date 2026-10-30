@@ -457,9 +457,8 @@ fn install(plan: &SdkPlan, root: &Path) -> PathBuf {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -599,9 +598,11 @@ fn native_credential_env_openrouter() {
     let root = root();
     let source = std::env::var_os("SUSPECT_OPENROUTER_OPENAPI")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/github/openrouter-web/projects/docs/openapi/openapi.yaml".into()
-        });
+        .or_else(|| {
+            std::env::var_os("OPENROUTER_WEB_ROOT")
+                .map(|root| PathBuf::from(root).join("projects/docs/openapi/openapi.yaml"))
+        })
+        .expect("set SUSPECT_OPENROUTER_OPENAPI to openrouter-web's openapi.yaml, or OPENROUTER_WEB_ROOT to the checkout");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(source.parent().unwrap())

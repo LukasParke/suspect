@@ -520,7 +520,7 @@ fn java() -> PathBuf {
     std::env::var_os("JAVA_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
         })
 }
 fn normative_vectors(root: &Path) {
@@ -590,9 +590,8 @@ fn native_protocol_package() {
             .as_ref()
             .is_none_or(|g| g.split(',').any(|v| v == name))
     };
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -804,9 +803,11 @@ fn native_protocol_openrouter() {
     let root = root();
     let source = std::env::var_os("SUSPECT_OPENROUTER_OPENAPI")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/github/openrouter-web/projects/docs/openapi/openapi.yaml".into()
-        });
+        .or_else(|| {
+            std::env::var_os("OPENROUTER_WEB_ROOT")
+                .map(|root| PathBuf::from(root).join("projects/docs/openapi/openapi.yaml"))
+        })
+        .expect("set SUSPECT_OPENROUTER_OPENAPI to openrouter-web's openapi.yaml, or OPENROUTER_WEB_ROOT to the checkout");
     let contract = load(&source);
     let operations = contract
         .operations()
@@ -866,9 +867,8 @@ fn native_protocol_openrouter() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -961,9 +961,8 @@ fn native_protocol_document_servers() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])

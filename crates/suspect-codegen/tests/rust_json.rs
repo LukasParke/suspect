@@ -126,7 +126,7 @@ pub fn support_error_kind(error: &generated_models::JsonError) -> generated_mode
 fn tracked_models_and_four_documents_pass_native_package_gates() {
     let checkout = PathBuf::from(
         std::env::var_os("OPENROUTER_WEB_ROOT")
-            .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into()),
+            .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout"),
     );
     let primary = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(primary.is_file(), "missing tracked OpenRouter checkout");

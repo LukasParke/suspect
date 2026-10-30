@@ -1310,7 +1310,7 @@ puts 'replay behavior verified'
 /// emitted runtime syntax, so discovery refuses them.
 fn ruby() -> Option<std::path::PathBuf> {
     // The manifest resolves `SUSPECT_RUBY_BIN`, `$SUSPECT_RUBY_HOME/bin`,
-    // then `PATH`, and gates the version (>= 3.2).
+    // the mise Ruby 3 install, then `PATH`, and gates the version (>= 3.2).
     suspect_codegen::toolchain::gate("ruby").ok()
 }
 

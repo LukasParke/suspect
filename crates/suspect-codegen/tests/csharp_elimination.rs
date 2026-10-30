@@ -294,10 +294,11 @@ fn generate(document: Value) -> Vec<OutFile> {
     .unwrap()
 }
 
+/// `SUSPECT_DOTNET_BIN`, the mise install, then `PATH` (the toolchain
+/// manifest's resolution order).
 fn dotnet() -> PathBuf {
-    std::env::var_os("SUSPECT_DOTNET_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/.local/share/mise/dotnet-root/dotnet".into())
+    suspect_codegen::toolchain::resolve_path("dotnet")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("dotnet")))
 }
 
 fn dotnet_command(directory: &Path, home: &Path) -> Command {

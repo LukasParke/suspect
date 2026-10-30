@@ -478,7 +478,7 @@ fn installed_rust_credential_env_snapshots_and_explicit_credentials_obey_source_
 fn installed_rust_openrouter_env_current_key_uses_source_default_https() {
     let root = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = root.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()

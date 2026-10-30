@@ -787,7 +787,7 @@ fn native_protocol_spm_types_wire_stream_lifetimes_and_docs() {
 fn native_new_openrouter_operations_and_explicit_legacy_binary_profile() {
     let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(path.is_file(), "the actual source corpus is required");
     let contract = load(&path);
