@@ -210,6 +210,13 @@ pub(crate) const JOBS: &[Job] = &[
         },
     },
     Job {
+        name: "platform-smoke",
+        workflow: PLATFORM_YML,
+        commands: "cargo build --release -p suspect-cli; gateway mock + Arazzo suite live, then offline against a cassette",
+        tools: &[],
+        run: platform_smoke,
+    },
+    Job {
         name: "vscode-extension",
         workflow: PLATFORM_YML,
         commands: "cargo build -p suspect-cli; in editors/vscode: npm ci, npm run compile, npm run test:headless, SUSPECT_TEST_BINARY=target/debug/suspect npm run test:generation",
@@ -340,6 +347,235 @@ impl Step {
         }
         Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// platform-smoke
+// ---------------------------------------------------------------------------
+
+/// The CI port; locally a free port is used so a running gateway does not
+/// collide.
+const CI_SMOKE_PORT: u16 = 8091;
+
+const SMOKE_PETSTORE: &str = r#"openapi: "3.0.0"
+info:
+  title: Smoke Petstore
+  version: "1.0.0"
+servers:
+  - url: http://127.0.0.1:{PORT}
+paths:
+  /pets/{petId}:
+    get:
+      operationId: showPetById
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: one pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        tag:
+          type: string
+"#;
+
+const SMOKE_SUITE: &str = r#"arazzo: 1.0.0
+info:
+  title: smoke flows
+  version: "1.0"
+sourceDescriptions:
+  - name: petstore
+    url: petstore.yaml
+workflows:
+  - workflowId: fetch-pet
+    steps:
+      - stepId: show-pet
+        operationId: showPetById
+        parameters:
+          - name: petId
+            in: path
+            value: 1
+        successCriteria:
+          - condition: '{$statusCode} == 200'
+"#;
+
+/// Kills the gateway when the job ends, however it ends.
+struct Gateway(std::process::Child);
+
+impl Drop for Gateway {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn platform_smoke(ctx: &Ctx) -> Result<()> {
+    ctx.cargo(&["build", "--release", "-p", "suspect-cli"])
+        .run()?;
+    let suspect = ctx
+        .target_dir()
+        .join("release")
+        .join(format!("suspect{}", std::env::consts::EXE_SUFFIX));
+    let dir = ctx.target_dir().join("xtask-ci/platform-smoke");
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir).with_context(|| format!("clear {}", dir.display()))?;
+    }
+    std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+
+    let port = if ctx.ci { CI_SMOKE_PORT } else { free_port()? };
+    let base = format!("http://127.0.0.1:{port}");
+    std::fs::write(
+        dir.join("petstore.yaml"),
+        SMOKE_PETSTORE.replace("{PORT}", &port.to_string()),
+    )?;
+    let suite = dir.join("suite.arazzo.yaml");
+    std::fs::write(&suite, SMOKE_SUITE)?;
+
+    let log_path = dir.join("gateway.log");
+    let log = std::fs::File::create(&log_path)?;
+    println!("$ suspect gateway petstore.yaml --port {port} --mode mock &");
+    let gateway = Gateway(
+        Command::new(&suspect)
+            .arg("gateway")
+            .arg(dir.join("petstore.yaml"))
+            .args(["--port", &port.to_string(), "--mode", "mock"])
+            .stdout(log.try_clone()?)
+            .stderr(log)
+            .spawn()
+            .with_context(|| format!("spawn {}", suspect.display()))?,
+    );
+    let result = smoke_against(&suspect, &dir, &suite, &base);
+    drop(gateway);
+    if result.is_err() {
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        let tail = log.lines().rev().take(20).collect::<Vec<_>>();
+        eprintln!("gateway log (last lines):");
+        for line in tail.into_iter().rev() {
+            eprintln!("  {line}");
+        }
+    }
+    result
+}
+
+fn smoke_against(suspect: &Path, dir: &Path, suite: &Path, base: &str) -> Result<()> {
+    wait_ready(&format!("{base}/pets/1"))?;
+
+    println!("$ suspect test suite.arazzo.yaml --base-url {base} --report ndjson");
+    let live = Command::new(suspect)
+        .arg("test")
+        .arg(suite)
+        .args(["--base-url", base, "--report", "ndjson"])
+        .output()
+        .context("run suspect test (live)")?;
+    check_run_done("live", &live)?;
+
+    let cassette = dir.join("smoke.cassette");
+    std::fs::write(&cassette, smoke_cassette(base))?;
+    println!(
+        "$ suspect test suite.arazzo.yaml --base-url {base} --offline --cassette smoke.cassette --report ndjson"
+    );
+    let offline = Command::new(suspect)
+        .arg("test")
+        .arg(suite)
+        .args(["--base-url", base, "--offline", "--cassette"])
+        .arg(&cassette)
+        .args(["--report", "ndjson"])
+        .output()
+        .context("run suspect test (offline)")?;
+    check_run_done("offline", &offline)
+}
+
+fn free_port() -> Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").context("bind a free port")?;
+    Ok(listener.local_addr()?.port())
+}
+
+/// Polls `url` until it answers 200, for up to 30 seconds.
+fn wait_ready(url: &str) -> Result<()> {
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(2)))
+        .build()
+        .new_agent();
+    for _ in 0..30 {
+        if let Ok(response) = agent.get(url).call()
+            && response.status().as_u16() == 200
+        {
+            println!("gateway ready: GET {url} -> 200");
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    bail!("gateway did not answer GET {url} with 200 within 30s")
+}
+
+/// The NDJSON stream must carry `run_done` with one pass and no failure
+/// (the human report and the run summary follow it on stdout).
+fn check_run_done(label: &str, output: &std::process::Output) -> Result<()> {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    print!("{stdout}");
+    eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    let done = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .rfind(|record| record["event"] == "run_done")
+        .with_context(|| format!("{label}: no run_done event in the ndjson report"))?;
+    if done["passed"] != 1 || done["failed"] != 0 || !output.status.success() {
+        bail!(
+            "{label}: expected run_done with passed 1, failed 0 and success; got {done} ({})",
+            output.status
+        );
+    }
+    Ok(())
+}
+
+/// A one-entry Suspect Cassette answering `GET /pets/1`.
+fn smoke_cassette(base: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let body_obj = |raw: &[u8]| {
+        let sha: String = Sha256::digest(raw)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        serde_json::json!({
+            "encoding": "utf8",
+            "content": String::from_utf8_lossy(raw),
+            "sha256": sha,
+        })
+    };
+    let body = serde_json::json!({"id": 1, "name": "Rex", "tag": "happy"}).to_string();
+    let header = serde_json::json!({
+        "format": "suspect-cassette",
+        "version": 1,
+        "recorded_at_ms": 0,
+        "source": "platform-smoke",
+    });
+    let entry = serde_json::json!({
+        "id": 1,
+        "method": "GET",
+        "url": format!("{base}/pets/1"),
+        "status": 200,
+        "request_headers": [],
+        "request_body": body_obj(b""),
+        "response_headers": [["content-type", "application/json"]],
+        "response_body": body_obj(body.as_bytes()),
+        "duration_ms": 1.0,
+    });
+    format!("{header}\n{entry}\n")
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -601,5 +837,20 @@ mod tests {
             assert!(JOBS[..i].iter().all(|j| j.name != job.name), "{}", job.name);
             assert!(listed.contains(job.name));
         }
+    }
+    #[test]
+    fn smoke_cassette_is_two_json_lines_with_matching_digest() {
+        use sha2::{Digest, Sha256};
+        let text = smoke_cassette("http://127.0.0.1:1");
+        let lines = text.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2);
+        let entry: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(entry["url"], "http://127.0.0.1:1/pets/1");
+        let content = entry["response_body"]["content"].as_str().unwrap();
+        let sha: String = Sha256::digest(content.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(entry["response_body"]["sha256"], sha.as_str());
     }
 }

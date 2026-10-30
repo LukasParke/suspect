@@ -522,7 +522,9 @@ the tools: those runs now fail instead of passing.
    `vscode-extension`, `zed-extension` and `rules-runtime`. Workflows are not
    changed yet. Tests: unit tests for argument parsing and the summary exit
    code. 1 day.
-2. **`platform-smoke` in Rust.** Fixtures, gateway child process with a free
+2. **`platform-smoke` in Rust.** **Done.** The check looks for the
+   `run_done` record anywhere in stdout (the human report and the
+   `run_summary` line follow it), as the old `grep -q` did. Fixtures, gateway child process with a free
    port, readiness poll, live run, cassette writer and offline run. Tests:
    the job itself, run locally and once in a PR. 0.5 day.
 3. **Workflows call the xtask, and the drift test.** Rewrites the `run:`
