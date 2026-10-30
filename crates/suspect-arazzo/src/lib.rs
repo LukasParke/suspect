@@ -9,6 +9,7 @@
 pub mod asyncapi;
 mod expr;
 mod model;
+pub mod rex;
 mod validate;
 
 pub use asyncapi::{

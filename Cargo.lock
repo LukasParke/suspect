@@ -2364,15 +2364,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "suspect-rex"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "suspect-low",
-]
-
-[[package]]
 name = "suspect-rules"
 version = "0.1.0"
 dependencies = [
@@ -2468,7 +2459,6 @@ dependencies = [
  "suspect-low",
  "suspect-overlay",
  "suspect-ref",
- "suspect-rex",
  "suspect-runtime",
  "suspect-schema",
  "suspect-source",

@@ -14,7 +14,6 @@ suspect-low.workspace = true
 suspect-ref.workspace = true
 suspect-source.workspace = true
 suspect-arazzo.workspace = true
-suspect-rex.path = "../suspect-rex"
 suspect-ir.path = "../suspect-ir"
 suspect-runtime.path = "../suspect-runtime"
 suspect-schema.workspace = true

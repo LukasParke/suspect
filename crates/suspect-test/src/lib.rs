@@ -17,7 +17,7 @@
 //! [`compile_plan`] resolves every step's `operationId`/`operationPath`
 //! against normalized IR snapshots ([`suspect_ir::IrSpec`]) so steps address
 //! canonical `method + path` keys, parses success criteria into a pragmatic
-//! criterion model, and keeps runtime expressions ([`suspect_rex::Rex`])
+//! criterion model, and keeps runtime expressions ([`suspect_arazzo::rex::Rex`])
 //! for late evaluation. [`run_plan`] executes workflows concurrently and
 //! steps sequentially within each workflow, substituting parameters,
 //! chaining step outputs, and evaluating criteria against live responses.

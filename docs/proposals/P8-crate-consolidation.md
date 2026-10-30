@@ -244,7 +244,11 @@ Each step is one PR, independent of the others, and leaves `cargo test
    `serde` to `suspect-arazzo`; update the four `suspect-test` files and its
    manifest (`crates/suspect-test/Cargo.toml:17`, which is path-only today);
    delete `Cargo.toml:34`. Tests: the moved rex tests under `cargo test -p
-   suspect-arazzo`; the `suspect-test` executor tests unchanged. 2-3 h.
+   suspect-arazzo`; the `suspect-test` executor tests unchanged. 2-3 h. **Done.**
+   The crate had a separate `tests.rs`, so it landed as
+   `crates/suspect-arazzo/src/rex/{mod.rs,tests.rs}` (like `watch`), not
+   `rex.rs`. `serde` was not added: `suspect-rex` declared it but never
+   used it (only `serde_json`, which `suspect-arazzo` already has).
 
 Total: about 1 day. Do it before P5's first tag so the release bump and the
 `publish = false` list are written once.

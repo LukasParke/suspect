@@ -35,8 +35,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
+use suspect_arazzo::rex::{RexCtx, eval_rex};
 use suspect_ir::ParamIn;
-use suspect_rex::{RexCtx, eval_rex};
 use tokio::sync::mpsc;
 
 use crate::auth::{AuthConfig, AuthState};
@@ -1517,7 +1517,7 @@ fn resolve_payload_template(template: &serde_json::Value, ctx: &RexCtx<'_>) -> s
     match template {
         serde_json::Value::String(text) => {
             if text.starts_with('$')
-                && let Ok(rex) = suspect_rex::parse_rex(text)
+                && let Ok(rex) = suspect_arazzo::rex::parse_rex(text)
                 && let Some(value) = eval_rex(&rex, ctx)
             {
                 return value;
@@ -1536,7 +1536,7 @@ fn resolve_payload_template(template: &serde_json::Value, ctx: &RexCtx<'_>) -> s
                                 // part carries the parsed form, but the rex
                                 // evaluator works on the rex grammar.
                                 let text = format!("${}", render_expr(rex));
-                                let evaluated = suspect_rex::parse_rex(&text)
+                                let evaluated = suspect_arazzo::rex::parse_rex(&text)
                                     .ok()
                                     .and_then(|parsed| eval_rex(&parsed, ctx));
                                 evaluated.map_or_else(
@@ -1880,12 +1880,14 @@ pub fn render_embedded(text: &str, ctx: &RexCtx<'_>) -> String {
             break;
         };
         let expr_text = &after[..end];
-        match suspect_rex::parse_rex(expr_text) {
-            Ok(rex) if !matches!(rex, suspect_rex::Rex::Text(_)) => match eval_rex(&rex, ctx) {
-                Some(serde_json::Value::String(v)) => result.push_str(&v),
-                Some(other) => result.push_str(&other.to_string()),
-                None => {}
-            },
+        match suspect_arazzo::rex::parse_rex(expr_text) {
+            Ok(rex) if !matches!(rex, suspect_arazzo::rex::Rex::Text(_)) => {
+                match eval_rex(&rex, ctx) {
+                    Some(serde_json::Value::String(v)) => result.push_str(&v),
+                    Some(other) => result.push_str(&other.to_string()),
+                    None => {}
+                }
+            }
             _ => result.push_str(&rest[start..start + open_len + end + 1]),
         }
         rest = &after[end + 1..];
@@ -1928,8 +1930,8 @@ fn resolve_body_value(value: &mut serde_json::Value, ctx: &RexCtx<'_>) {
         serde_json::Value::String(s) => {
             // Whole-leaf expression keeps the evaluated JSON type.
             if s.starts_with('$')
-                && let Ok(rex) = suspect_rex::parse_rex(s)
-                && !matches!(rex, suspect_rex::Rex::Text(_))
+                && let Ok(rex) = suspect_arazzo::rex::parse_rex(s)
+                && !matches!(rex, suspect_arazzo::rex::Rex::Text(_))
             {
                 *value = eval_rex(&rex, ctx).unwrap_or(serde_json::Value::Null);
             } else if s.contains("{$") || s.contains("${") {

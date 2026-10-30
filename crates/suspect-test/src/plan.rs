@@ -12,11 +12,11 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+use suspect_arazzo::rex::{Rex, parse_rex};
 use suspect_arazzo::{ArazzoDoc, ParameterView, StepDependency, StepView, WorkflowView};
 use suspect_ir::{IrSpec, Method, OpSelector, ParamIn};
 use suspect_low::{LowDoc, NodeRef, ValueKind};
 use suspect_ref::Workspace;
-use suspect_rex::{Rex, parse_rex};
 use suspect_source::Uri;
 
 /// Failure while compiling an Arazzo document into a [`Plan`].
@@ -984,7 +984,7 @@ fn message_step(step: &StepView<'_>, sources: &SourceIndex) -> Option<MessageSte
             let payload = body.get("payload").unwrap_or(body);
             payload
                 .as_str()
-                .and_then(|text| suspect_rex::parse_rex(text).ok())
+                .and_then(|text| suspect_arazzo::rex::parse_rex(text).ok())
         }),
         payload_template: step.request_body().map(|body| {
             let payload = body.get("payload").unwrap_or(body);
@@ -997,7 +997,7 @@ fn message_step(step: &StepView<'_>, sources: &SourceIndex) -> Option<MessageSte
         }),
         correlation_id: step
             .correlation_id()
-            .and_then(|expr| suspect_rex::parse_rex(expr).ok()),
+            .and_then(|expr| suspect_arazzo::rex::parse_rex(expr).ok()),
         payload_schema: resolved.and_then(|m| m.payload),
     })
 }

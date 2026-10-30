@@ -1,5 +1,4 @@
-#![deny(missing_docs)]
-//! suspect-rex: Arazzo runtime expressions ("rex").
+//! Arazzo runtime expressions ("rex") with an evaluator over step context.
 //!
 //! A runtime expression is a string beginning with `$` that references data
 //! from the running workflow: the HTTP exchange of the current step, the
@@ -137,7 +136,7 @@ impl std::error::Error for RexError {}
 /// fields through the builder-style setters:
 ///
 /// ```
-/// use suspect_rex::RexCtx;
+/// use suspect_arazzo::rex::RexCtx;
 ///
 /// let ctx = RexCtx::default()
 ///     .method("POST")
