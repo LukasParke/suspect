@@ -82,8 +82,9 @@ the rest of the toolchain to the same standard.
    parse report moves to `suspect check --parse-only` / `suspect stats`.
    `validate` and `lint` remain as filtered views (`--only validate|lint`).
 
-**Open question:** do the `sdk-*` readiness codes stay a separate category
-(shown only when codegen is configured), or fold into the canonical codes?
+**Decided (2026-10-29):** the `sdk-*` readiness codes stay a separate
+category, shown only when codegen is configured, so a problem such as a
+missing `operationId` is reported once by default.
 
 Estimate: 2–3 days for crate + renderers + LSP/CLI switch-over; +1 day for
 suppression; +1 day for the rule alias table and dedup tests.
@@ -122,8 +123,9 @@ suppression; +1 day for the rule alias table and dedup tests.
    It owns discovery, manifest-policy layering and precedence; CI, the CLI and
    the LSP delete their own merges (`ci.rs` `lint_policy`/`lint_overrides`,
    LSP `read_manifest_policy`/`read_settings_value`).
-2. **Decide the manifest/config boundary.** The crate doc says a manifest is
-   "deliberately not configuration", yet manifests carry lint policy. Options:
+2. **Manifest/config boundary — decided (2026-10-29): option A.** The crate
+   doc says a manifest is "deliberately not configuration", yet manifests
+   carry lint policy. Options considered:
    - **(A, recommended)** policy lives only in `.suspect.yaml`; the manifest
      references it (`"config": ".suspect.yaml"`). One-release deprecation
      warning when a manifest carries `lint`.
@@ -278,8 +280,8 @@ No release workflow, no binaries, no packaged extensions; no crate sets
 4. Add `CHANGELOG.md` (generated from conventional commits) and point
    `CONTRIBUTING.md` at `cargo xtask ci` once it exists (P7).
 
-**Needs a decision:** confirm the copyright line in `LICENSE-MIT`
-("Luke Parke and suspect contributors"), and which registries
+**Decided:** the `LICENSE-MIT` copyright line stays "Luke Parke and suspect
+contributors". **Needs a decision:** which registries
 (crates.io, Homebrew, npm wrapper) are in scope.
 
 ---
