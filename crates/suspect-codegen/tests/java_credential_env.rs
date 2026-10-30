@@ -596,13 +596,7 @@ fn native_credential_env_controls() {
 #[ignore = "actual getCurrentKey/getCredits source schemas and branded fromEnv helper on JDK21/25"]
 fn native_credential_env_openrouter() {
     let root = root();
-    let source = std::env::var_os("SUSPECT_OPENROUTER_OPENAPI")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("OPENROUTER_WEB_ROOT")
-                .map(|root| PathBuf::from(root).join("projects/docs/openapi/openapi.yaml"))
-        })
-        .expect("set SUSPECT_OPENROUTER_OPENAPI to openrouter-web's openapi.yaml, or OPENROUTER_WEB_ROOT to the checkout");
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(source.parent().unwrap())

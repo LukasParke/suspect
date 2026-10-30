@@ -146,7 +146,7 @@ The same test file's `tracked_five_operation_docs_and_example_artifacts_build_na
 gate loads the actual five tracked OpenRouter operations, checks shared example
 provenance across Python/Go, builds both documentation inventories, typechecks
 the Python sample and executes both native codec samples. Select that source
-with `OPENROUTER_WEB_ROOT` or `SUSPECT_OPENROUTER_YAML` and invoke the gate with
+with `OPENROUTER_WEB_ROOT` (the openrouter-web checkout) and invoke the gate with
 `--ignored`. Its HTTP wire acceptance remains in `tests/wave_a_openrouter.rs`.
 
 This documents the admitted M3 slice. Directional annotations and other

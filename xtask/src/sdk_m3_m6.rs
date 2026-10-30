@@ -1154,14 +1154,6 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
         ("SUSPECT_GO_TOOLCHAIN", "local"),
         ("GOWORK", "off"),
         ("OPENROUTER_WEB_ROOT", "{out}/inputs"),
-        (
-            "SUSPECT_OPENROUTER_YAML",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
-        (
-            "SUSPECT_OPENROUTER_SPEC",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
         ("SUSPECT_PYTHON_BIN", "{python-current}"),
         ("SUSPECT_PYTHON_TOOLS", "{python-tools}"),
         ("SUSPECT_PYTHON_FLOOR_BIN", "{python-floor}"),

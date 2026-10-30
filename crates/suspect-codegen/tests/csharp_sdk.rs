@@ -418,9 +418,7 @@ const TOOLCHAINS: &[(&str, &str)] = &[("8.0.424", "net8.0"), ("10.0.400", "net10
 #[test]
 #[ignore = "newly admitted real OpenRouter anonymous/undeclared-body operation; .NET 8/10 installed consumers"]
 fn native_openrouter_expanded_anonymous_operation() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let path = root.join("projects/docs/openapi/openapi.yaml");
     let before = fs::read(&path).unwrap();
     let contract = load(&path);
@@ -746,9 +744,7 @@ impl Native {
 #[test]
 #[ignore = "requires the read-only OpenRouter corpus and installed .NET SDKs"]
 fn native_actual_openrouter_five_operations() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let files = [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",

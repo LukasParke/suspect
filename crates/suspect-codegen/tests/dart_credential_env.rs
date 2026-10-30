@@ -684,9 +684,7 @@ fn native_credential_env_constructor_compatibility() {
 #[ignore = "actual OpenRouter getCurrentKey/getCredits source with installed runtime env and source-default HTTPS capture"]
 fn native_openrouter_credential_env() {
     let root = support::root("credential-env-openrouter-");
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let source_hash = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
     let c = support::load(&path);

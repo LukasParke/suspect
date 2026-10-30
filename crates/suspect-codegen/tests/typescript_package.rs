@@ -529,7 +529,7 @@ maps(path.join(installed, 'dist'));
 #[test]
 #[ignore = "requires pinned Node 22.23.1/npm 10.9.8 and cached TypeScript 5.9.3"]
 fn installed_openrouter_http_package_runs_a_recorded_request_and_its_documented_helper() {
-    let source = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let source = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&source).join("projects/docs/openapi/openapi.yaml"));
     let selected = contract
         .operations()
@@ -609,7 +609,7 @@ if (false) {
 #[test]
 #[ignore = "requires tracked OpenRouter YAML, pinned Node/npm and cached TypeScript"]
 fn installed_openrouter_container_list_and_get_preserve_query_wire_contract() {
-    let source = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let source = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&source).join("projects/docs/openapi/openapi.yaml"));
     let selected = contract
         .operations()
@@ -834,7 +834,7 @@ if (integer !== 9007199254740993n) throw new Error('incorrect installed declarat
 #[test]
 #[ignore = "requires tracked OpenRouter YAML, pinned Node/npm and cached TypeScript"]
 fn installed_package_preserves_tracked_openrouter_caller_and_image_closures() {
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&checkout).join("projects/docs/openapi/openapi.yaml"));
     let roots = contract
         .schema_roots()

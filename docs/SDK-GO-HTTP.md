@@ -149,8 +149,8 @@ consumer/cancellation tests remain in `tests/go_http.rs`.
 `tracked_five_operation_docs_and_example_artifacts_build_natively` in the same
 test file additionally builds Python/Go documentation and compiles/executes
 their codec samples for the five actual tracked OpenRouter operations. It
-checks identical shared-example provenance. Select the corpus through
-`OPENROUTER_WEB_ROOT` or `SUSPECT_OPENROUTER_YAML` and use `--ignored`; the
+checks identical shared-example provenance. Select the corpus with
+`OPENROUTER_WEB_ROOT` (the openrouter-web checkout) and use `--ignored`; the
 independent five-operation HTTP consumers remain in `tests/wave_a_openrouter.rs`.
 
 This is documentation and executable-example support for the admitted M3

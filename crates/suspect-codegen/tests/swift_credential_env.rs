@@ -426,9 +426,7 @@ fn native_credential_env_precedence_snapshot_and_docs() {
 #[ignore = "actual OpenRouter getCurrentKey/getCredits schemas, controlled HTTPS transport capture, environment API and DocC"]
 fn native_openrouter_current_key_environment_defaults() {
     let root = root("openrouter-");
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let input = checkout.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&input).expect("actual OpenRouter source checkout required");
     let workspace = Arc::new(

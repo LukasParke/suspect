@@ -503,9 +503,7 @@ fn object_array_and_composition_applicability_never_invent_a_type_or_required_va
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT; missing tracked input fails this acceptance test"]
 fn tracked_openrouter_index_and_messages_validate_through_owned_contract_identity() {
-    let root_dir = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(std::path::PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to the source checkout");
+    let root_dir = crate::test_inputs::openrouter_root();
     let path = root_dir.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(WorkspaceBuilder::new().root(&root_dir).build().unwrap());
     let contract =

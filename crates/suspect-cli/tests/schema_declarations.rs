@@ -1,14 +1,11 @@
 //! Declaration validation on the actual OpenRouter contracts through the CLI.
 
-use std::path::PathBuf;
 use std::process::Command;
 
 use serde_json::{Value, json};
 
 fn upstream(relative: &str) -> String {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to the openrouter-web source checkout");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     std::fs::read_to_string(root.join(relative)).expect("read tracked OpenRouter specification")
 }
 

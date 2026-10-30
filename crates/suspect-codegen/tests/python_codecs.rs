@@ -175,10 +175,8 @@ else: raise AssertionError('native cycle accepted')
 #[test]
 #[ignore = "requires native Python and tracked OpenRouter public source"]
 fn tracked_credits_codec_preserves_real_exact_fields() {
-    let source = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
-    )
-    .join("projects/docs/openapi/openapi.yaml");
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let c = load(&source);
     let op = c
         .operations()

@@ -1178,7 +1178,6 @@ fn suites() -> Vec<Stage> {
                 "swift" => { env.insert("SUSPECT_SWIFT_CREDENTIAL_ENV_ROOT".into(), format!("{{work}}/native/swift/{tier}/credential-env")); }
                 "java" => {
                     env.insert("SUSPECT_MAVEN_BIN".into(), "{maven}".into());
-                    env.insert("SUSPECT_OPENROUTER_OPENAPI".into(), "{out}/inputs/projects/docs/openapi/openapi.yaml".into());
                 }
                 "kotlin" => {
                     env.insert("SUSPECT_KOTLIN_MAVEN".into(), "{maven}".into());
@@ -2495,10 +2494,7 @@ fn configure_environment(run: &mut Run) -> Result<()> {
         ("npm_config_userconfig", "{work}/home/.npmrc"),
         ("PYTHONNOUSERSITE", "1"),
         ("MYPY_CACHE_DIR", "{work}/caches/mypy"),
-        (
-            "OPENROUTER_PUBLIC_SCHEMA",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
+        ("OPENROUTER_WEB_ROOT", "{out}/inputs"),
         ("MAVEN_ARGS", "--offline --no-transfer-progress"),
         ("MAVEN_USER_HOME", "{work}/home/.m2"),
         ("JAVA_HOME", "{jdk-current}"),
@@ -6354,10 +6350,8 @@ mod tests {
                 .find(|item| item.id == format!("{tier}-java_credential_env"))
                 .unwrap();
             assert_eq!(java.environment["JAVA_HOME"], format!("{{jdk-{tier}}}"));
-            assert_eq!(
-                java.environment["SUSPECT_OPENROUTER_OPENAPI"],
-                "{out}/inputs/projects/docs/openapi/openapi.yaml"
-            );
+            assert_eq!(java.environment["OPENROUTER_WEB_ROOT"], "{out}/inputs");
+            assert!(!java.environment.contains_key("SUSPECT_OPENROUTER_OPENAPI"));
             assert!(
                 !java
                     .environment

@@ -399,7 +399,7 @@ const incompleteRequest: RecordRequest = { name: 'n' };
 #[test]
 #[ignore = "requires tracked OpenRouter checkout, native TypeScript and Node.js"]
 fn tracked_openrouter_closures_keep_one_view_program_without_annotations() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));
     let roots: Vec<_> = contract
         .schema_roots()

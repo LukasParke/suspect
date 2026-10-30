@@ -1,5 +1,9 @@
 //! Collection bounds using tracked OpenRouter contracts and independent cases.
 
+#[allow(dead_code)]
+#[path = "../../suspect-codegen/src/test_inputs.rs"]
+mod test_inputs;
+
 use suspect_low::{LowDoc, Pointer};
 use suspect_schema::{Compiler, Config};
 use suspect_source::{Source, Uri};
@@ -16,9 +20,7 @@ fn json(text: &str) -> LowDoc {
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT; missing primary input fails this acceptance test"]
 fn openrouter_requires_nonempty_messages_and_pricing_predicates() {
-    let root = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
-    );
+    let root = test_inputs::openrouter_root();
     for (relative, format, schema_path, keyword, empty) in [
         (
             "projects/docs/openapi/openapi.yaml",

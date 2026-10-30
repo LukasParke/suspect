@@ -256,12 +256,7 @@ fn native_http_gate_rejects_manifest_export_prose_and_type_binding_mutations() {
 #[test]
 #[ignore = "requires pinned Node 22.23.1, TypeDoc, TypeScript and tracked OpenRouter YAML"]
 fn native_http_docs_cover_tracked_openrouter_operations_and_query_inputs() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let c = contract(&path);
     let ids = [
         "getCredits",

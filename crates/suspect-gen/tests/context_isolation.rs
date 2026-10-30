@@ -1,5 +1,9 @@
 //! Context isolation at the public template-rendering boundary.
 
+#[allow(dead_code)]
+#[path = "../../suspect-codegen/src/test_inputs.rs"]
+mod test_inputs;
+
 use serde_json::json;
 use suspect_gen::{GenError, MinijinjaEngine, TemplateEngine};
 
@@ -232,10 +236,9 @@ fn json_output_supports_indentation_and_html_safe_escaping() {
 }
 
 #[test]
-#[ignore = "requires SUSPECT_OPENROUTER_SPEC pointing to the local OpenRouter OpenAPI JSON"]
+#[ignore = "requires OPENROUTER_WEB_ROOT (the OpenRouter public OpenAPI spec)"]
 fn openrouter_docs_contexts_remain_isolated() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_SPEC")
-        .expect("set SUSPECT_OPENROUTER_SPEC to openrouter-web/openrouter-openapi.json");
+    let path = test_inputs::openrouter_spec();
     let spec = suspect_ir::IrSpec::from_file(std::path::Path::new(&path)).unwrap();
     assert_eq!(spec.title, "OpenRouter API");
     let preset = suspect_gen::presets::get("docs-md").unwrap();

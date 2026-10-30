@@ -92,7 +92,7 @@ harness is `/private/tmp/suspect-number-independent-20260908/check.rs`.
 ```sh
 cargo test -p suspect-schema --locked
 cargo clippy -p suspect-schema --all-targets --locked -- -D warnings
-OPENROUTER_PUBLIC_SCHEMA=/absolute/path/to/pinned/input.yaml \
+OPENROUTER_WEB_ROOT=/absolute/path/to/openrouter-web \
   cargo test -p suspect-schema --test numeric --locked -- --ignored --nocapture
 cargo bench -p suspect-schema --bench numeric --locked
 ```

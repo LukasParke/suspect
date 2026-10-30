@@ -166,9 +166,7 @@ fn native_env(command: &mut Command) -> &mut Command {
 }
 
 fn contract() -> Arc<Contract> {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(std::path::PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let path = root.join("projects/docs/openapi/openapi.yaml");
     assert!(
         path.is_file(),

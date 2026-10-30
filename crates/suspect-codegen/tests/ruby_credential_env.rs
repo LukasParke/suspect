@@ -695,9 +695,7 @@ fn installed_credential_env_omission_precedence_choices_and_snapshot() {
 }
 
 fn openrouter_source() -> PathBuf {
-    std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root().join("../openrouter-web"))
+    suspect_codegen::test_inputs::openrouter_root()
         .join("projects/docs/openapi/openapi.yaml")
         .canonicalize()
         .unwrap()

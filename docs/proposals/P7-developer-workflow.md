@@ -545,7 +545,14 @@ the tools: those runs now fail instead of passing.
    carries `--locked`). `verify-sdk`, `verify-sdk-demo`, aliases with
    warnings, updated `USAGE`, and the user-facing references listed above.
    Tests: an xtask unit test that both old names dispatch and warn. 0.25 day.
-5. **`test_inputs` and the env-name migration.** Adds the helper, rewrites
+5. **`test_inputs` and the env-name migration.** **Done.** 72 files: every
+   lookup goes through `openrouter_root()` / `openrouter_spec()`; the
+   lookups are wrapped around a testable `resolve_root(get)`, so the unit
+   tests pass an environment closure instead of mutating the process
+   environment. `suspect-gen/tests/context_isolation.rs` named
+   `openrouter-openapi.json` but the xtask always pointed it at
+   `openapi.yaml`, so it now reads `openrouter_spec()`. `suspect-gen` (not in
+   the proposal's list) also uses the `#[path]` include. Adds the helper, rewrites
    the lookup sites, drops the sibling fallbacks, and makes the xtask set one
    variable. Tests: unit tests for root vs deprecated-file resolution with a
    temp dir; `cargo test --workspace` (sites are under `#[ignore]`, so this
