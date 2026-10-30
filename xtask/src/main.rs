@@ -1,6 +1,8 @@
 //! Workspace automation: corpus fetch, fixture generation, benches.
 
 mod ci;
+#[cfg(test)]
+mod docs_paths;
 mod sdk_full;
 mod sdk_m3_m6;
 

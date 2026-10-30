@@ -4856,7 +4856,7 @@ fn stage_inventory(functional_only: bool) -> Result<Value> {
     )
 }
 
-fn syntax_check(original: &Path) -> Result<Value> {
+pub(crate) fn syntax_check(original: &Path) -> Result<Value> {
     let inventory = stage_inventory(false)?;
     let runner_files = sealed::inventory(
         original,

@@ -452,7 +452,10 @@ would have to be deleted when P1 lands.
    `docs/SDK-NATIVE-DX.md`, `docs/SDK-CREDENTIAL-ENV.md`,
    `tools/sdk-demo-web/README.md`, `CONTRIBUTING.md`. Tests: the CI job.
    0.5 day.
-2. **Guard tests.** Adds `xtask/src/docs_paths.rs` with
+2. **Guard tests.** **Done.** The pattern is a hand-written scanner (no
+   `regex-lite`, so `Cargo.lock` is unchanged); `docs_paths.rs` is a
+   `#[cfg(test)]` module and skips its own samples. `repo_root` and
+   `tracked_files` live in `xtask/src/main.rs`, shared with `ci.rs`. Adds `xtask/src/docs_paths.rs` with
    `every_docs_path_named_in_code_exists` and
    `repository_passes_sdk_full_syntax_check`. Both pass on today's layout.
    Files: `xtask/src/main.rs`, `xtask/src/docs_paths.rs`, `xtask/Cargo.toml`.
