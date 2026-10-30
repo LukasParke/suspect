@@ -47,6 +47,13 @@ pub fn for_workspace(
         },
         None => None,
     };
+    // Relative client paths resolve where the file's own relative paths
+    // do: the directory of the configuration that was found, else the
+    // workspace root — never the server process's working directory.
+    let base = loaded
+        .as_ref()
+        .map(|l| l.root.clone())
+        .or_else(|| root.map(Path::to_path_buf));
     if loaded.is_none() {
         loaded = Some(Loaded::default());
     }
@@ -64,7 +71,7 @@ pub fn for_workspace(
     };
 
     if let Some(value) = client_overrides {
-        apply_client(&mut config, value);
+        apply_client(&mut config, value, base.as_deref());
     }
     config
 }
@@ -72,12 +79,13 @@ pub fn for_workspace(
 impl EditorConfig {
     /// The configured minimum severity, defaulting to `hint` (show
     /// everything). Accepts the LSP/`.suspect.yaml` spellings and the
-    /// `"information"` spelling VS Code's settings enum uses.
+    /// `"information"` spelling VS Code's settings enum uses, plus the
+    /// `warn`/`info` short forms.
     #[must_use]
     pub fn min_severity(&self) -> tower_lsp::lsp_types::DiagnosticSeverity {
         match self.settings.lint.min_severity.as_deref() {
             Some("error") => tower_lsp::lsp_types::DiagnosticSeverity::ERROR,
-            Some("warning") => tower_lsp::lsp_types::DiagnosticSeverity::WARNING,
+            Some("warning") | Some("warn") => tower_lsp::lsp_types::DiagnosticSeverity::WARNING,
             Some("info") | Some("information") => {
                 tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION
             }
@@ -88,28 +96,27 @@ impl EditorConfig {
 
 /// Layers the client's `suspect.*` initialization options over the file
 /// settings. Only keys the client actually set are applied, so an unset
-/// editor option never clears a committed file value.
-fn apply_client(config: &mut EditorConfig, value: &serde_json::Value) {
+/// editor option never clears a committed file value. "Set" means a
+/// non-blank string: VS Code reports an untouched string setting as its
+/// default `""` (and a cleared one as `null`), and treating that as an
+/// explicit choice silently replaced the committed `.suspect.yaml` value.
+///
+/// A relative `lint.ruleset` resolves against `base` (the configuration
+/// root), matching how the file's own `lint.ruleset` resolves.
+fn apply_client(config: &mut EditorConfig, value: &serde_json::Value, base: Option<&Path>) {
     let section = value.get("suspect").unwrap_or(value);
-    if let Some(min_severity) = section
-        .get("lint")
-        .and_then(|l| l.get("minSeverity"))
-        .and_then(|v| v.as_str())
-    {
+    let lint = |key: &str| section.get("lint").and_then(|l| l.get(key));
+    if let Some(min_severity) = lint("minSeverity").and_then(set_string) {
         config.settings.lint.min_severity = Some(min_severity.to_owned());
     }
-    if let Some(ruleset) = section
-        .get("lint")
-        .and_then(|l| l.get("ruleset"))
-        .and_then(|v| v.as_str())
-    {
-        config.settings.lint.ruleset = Some(std::path::PathBuf::from(ruleset));
+    if let Some(ruleset) = lint("ruleset").and_then(set_string) {
+        let path = std::path::PathBuf::from(ruleset);
+        config.settings.lint.ruleset = Some(match base {
+            Some(base) if path.is_relative() => base.join(path),
+            _ => path,
+        });
     }
-    if let Some(design) = section
-        .get("lint")
-        .and_then(|l| l.get("design"))
-        .and_then(|v| v.as_str())
-    {
+    if let Some(design) = lint("design").and_then(set_string) {
         config.settings.lint.design = Some(design.to_owned());
     }
     if let Some(strict) = section
@@ -119,6 +126,12 @@ fn apply_client(config: &mut EditorConfig, value: &serde_json::Value) {
     {
         config.settings.validate.strict_format = strict;
     }
+}
+
+/// A client string setting that was actually set: present, a string, and
+/// not blank. Returned trimmed.
+fn set_string(value: &serde_json::Value) -> Option<&str> {
+    value.as_str().map(str::trim).filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]
@@ -195,6 +208,82 @@ mod tests {
         assert_eq!(
             config.min_severity(),
             tower_lsp::lsp_types::DiagnosticSeverity::INFORMATION
+        );
+    }
+
+    #[test]
+    fn blank_or_null_client_strings_do_not_override_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: warning\n  ruleset: rules.yaml\n  design: warn\n",
+        )
+        .unwrap();
+        // VS Code's defaults for untouched string settings, and a cleared one.
+        for blank in [
+            serde_json::json!(""),
+            serde_json::json!("   "),
+            serde_json::Value::Null,
+        ] {
+            let client = serde_json::json!({
+                "suspect": {"lint": {"minSeverity": blank, "ruleset": blank, "design": blank}}
+            });
+            let config = for_workspace(Some(dir.path()), Some(&client));
+            assert_eq!(
+                config.settings.lint.min_severity.as_deref(),
+                Some("warning"),
+                "{blank}: a blank editor setting must not replace the file's floor"
+            );
+            assert_eq!(
+                config.min_severity(),
+                tower_lsp::lsp_types::DiagnosticSeverity::WARNING
+            );
+            assert_eq!(
+                config.settings.lint.ruleset.as_deref(),
+                Some(dir.path().join("rules.yaml").as_path()),
+                "{blank}: a blank editor ruleset must not replace the file's"
+            );
+            assert_eq!(config.settings.lint.design.as_deref(), Some("warn"));
+        }
+    }
+
+    #[test]
+    fn a_relative_client_ruleset_resolves_against_the_config_root() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".suspect.yaml"), "lint: {}\n").unwrap();
+        let client = serde_json::json!({"suspect": {"lint": {"ruleset": "policy/rules.yaml"}}});
+        let config = for_workspace(Some(dir.path()), Some(&client));
+        assert_eq!(
+            config.settings.lint.ruleset.as_deref(),
+            Some(dir.path().join("policy/rules.yaml").as_path()),
+            "a relative editor ruleset resolves against the workspace, not the cwd"
+        );
+
+        // No configuration file: the workspace root is the base.
+        let bare = tempfile::tempdir().unwrap();
+        let config = for_workspace(Some(bare.path()), Some(&client));
+        assert_eq!(
+            config.settings.lint.ruleset.as_deref(),
+            Some(bare.path().join("policy/rules.yaml").as_path())
+        );
+
+        // An absolute path is taken as given.
+        let absolute = dir.path().join("elsewhere.yaml");
+        let client = serde_json::json!({"suspect": {"lint": {"ruleset": absolute}}});
+        let config = for_workspace(Some(dir.path()), Some(&client));
+        assert_eq!(
+            config.settings.lint.ruleset.as_deref(),
+            Some(absolute.as_path())
+        );
+    }
+
+    #[test]
+    fn warn_is_an_alias_for_warning() {
+        let mut config = EditorConfig::default();
+        config.settings.lint.min_severity = Some("warn".to_owned());
+        assert_eq!(
+            config.min_severity(),
+            tower_lsp::lsp_types::DiagnosticSeverity::WARNING
         );
     }
 

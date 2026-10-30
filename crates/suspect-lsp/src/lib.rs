@@ -96,7 +96,8 @@ use tower_lsp::{LanguageServer, LspService, Server};
 /// [`State::docs`] cache and bumps [`State::generation`] → a debounce task
 /// publishes diagnostics 150 ms later unless superseded →
 /// `did_change_watched_files` drops the cached ref workspace so the next
-/// navigation query rebuilds it from disk. There is no explicit teardown
+/// navigation query rebuilds it from disk (and, when a configuration file
+/// changed, reloads the configuration and republishes). There is no explicit teardown
 /// beyond what `LspService` drops on shutdown.
 struct Backend {
     /// Client handle used to publish diagnostics back to the editor.
@@ -117,6 +118,90 @@ impl Backend {
             client,
             state: Arc::new(tokio::sync::RwLock::new(State::default())),
             index_build_lock: Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+
+    /// The client's `suspect` settings section via `workspace/configuration`,
+    /// or `None` when the client cannot answer or answers `null`.
+    async fn pull_client_settings(&self) -> Option<serde_json::Value> {
+        self.client
+            .configuration(vec![ConfigurationItem {
+                scope_uri: None,
+                section: Some("suspect".to_owned()),
+            }])
+            .await
+            .ok()?
+            .into_iter()
+            .next()
+            .filter(|v| !v.is_null())
+    }
+
+    /// Rebuilds both configuration objects from the files on disk with
+    /// `client` (the client's settings section) layered on top, and reports
+    /// whether either changed. The one rebuild path for `initialized`,
+    /// `didChangeConfiguration` and a configuration file changing on disk,
+    /// so the three cannot drift apart.
+    ///
+    /// The base is the committed policy: the manifest's sections under the
+    /// workspace `.suspect.yaml`, so `lint.rules`, `lint.recommended`,
+    /// inlay toggles and formatting policy committed in either file reach
+    /// the battery without any client configuration. Initialization
+    /// options sit above the files and client settings above those — an
+    /// explicit editor setting still wins, the same precedence the CLI
+    /// enforces. `lint.min_severity` and friends live in the editor-side
+    /// settings, re-derived here too, or the floor would not move.
+    async fn reload_config(&self, client: Option<serde_json::Value>) -> bool {
+        let (root, init_opts) = {
+            let st = self.state.read().await;
+            // The declared root survives a dropped workspace (saves and
+            // watched-file events drop it); the workspace's own root is
+            // only there while it is cached.
+            (
+                st.workspace_root().or_else(|| st.root.clone()),
+                st.pending_init_options.clone(),
+            )
+        };
+        let editor = editor_config::for_workspace(root.as_deref(), client.as_ref());
+        let merged = config_files::merge(
+            init_opts,
+            client.as_ref().and_then(config_files::parse_config),
+            config_files::file_layers(root.as_deref()),
+        );
+        let mut st = self.state.write().await;
+        st.client_settings = client;
+        let changed = st.config != merged || st.editor_config != editor;
+        st.config = merged;
+        st.editor_config = editor;
+        changed
+    }
+
+    /// After a configuration change: anything computed under the old
+    /// policy is no longer the answer — including the per-document pull
+    /// cache, whose entries are pre-filtered by the floor — so drop the
+    /// caches, republish every open document, and ask the client to
+    /// re-pull diagnostics and inlay hints. Semantic tokens and lenses are
+    /// config-free.
+    async fn republish_after_config_change(&self) {
+        let uris: Vec<Uri> = {
+            let mut st = self.state.write().await;
+            st.ws_diag_cache = None;
+            st.diag_cache.clear();
+            // The per-document workspace reports are keyed on workspace
+            // identity and document version, neither of which a policy
+            // change moves, so they must go explicitly.
+            if let Ok(mut cache) = st.ws_doc_diag.lock() {
+                cache.clear();
+            }
+            st.docs.keys().cloned().collect()
+        };
+        let _ = self.client.workspace_diagnostic_refresh().await;
+        for uri in uris {
+            self.schedule_diagnostics(uri);
+        }
+        if self.client.inlay_hint_refresh().await.is_err() {
+            self.client
+                .log_message(MessageType::WARNING, "inlayHint refresh rejected")
+                .await;
         }
     }
 
@@ -534,6 +619,15 @@ struct GateReport {
     summary: String,
     /// Structured data for the client.
     value: serde_json::Value,
+}
+
+/// The file names whose change on disk changes the effective
+/// configuration: every settings file name and the project manifest.
+fn config_file_names() -> impl Iterator<Item = &'static str> {
+    suspect_config::CONFIG_NAMES
+        .iter()
+        .copied()
+        .chain(std::iter::once(suspect_config::MANIFEST_NAME))
 }
 
 /// The workspace root directory, when the workspace has one on disk.
@@ -988,10 +1082,26 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         // Drop the cached workspace so the next query reloads from disk.
-        let mut st = self.state.write().await;
-        st.drop_workspace();
+        self.state.write().await.drop_workspace();
+        // A configuration file edited, created or deleted on disk changes
+        // the effective policy: rebuild it under the last client settings
+        // and republish, exactly as a client settings change does.
+        let config_touched = params.changes.iter().any(|change| {
+            change
+                .uri
+                .to_file_path()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .is_some_and(|name| config_file_names().any(|c| c == name))
+        });
+        if config_touched {
+            let client = self.state.read().await.client_settings.clone();
+            if self.reload_config(client).await {
+                self.republish_after_config_change().await;
+            }
+        }
     }
 
     async fn goto_definition(
@@ -1884,41 +1994,8 @@ impl LanguageServer for Backend {
     // ---------- workspace sync / configuration / folders ----------
     async fn initialized(&self, _params: InitializedParams) {
         // Fetch merged config when the client supports workspace/configuration.
-        let cfg_json = match self
-            .client
-            .configuration(vec![ConfigurationItem {
-                scope_uri: None,
-                section: Some("suspect".to_owned()),
-            }])
-            .await
-        {
-            Ok(values) => values.into_iter().next(),
-            Err(_) => None,
-        };
-        // The shared schema: the workspace's `.suspect.yaml` is the base,
-        // and the client's settings layer on top (an explicit editor
-        // setting still wins — the same precedence the CLI enforces).
-        let file_config = {
-            let st = self.state.read().await;
-            editor_config::for_workspace(st.workspace_root().as_deref(), cfg_json.as_ref())
-        };
-        let client_cfg = cfg_json.as_ref().and_then(config_files::parse_config);
-        {
-            let mut st = self.state.write().await;
-            let init_opts = std::mem::take(&mut st.pending_init_options);
-            // The base is the committed policy: the manifest's sections
-            // under the workspace `.suspect.yaml`, so `lint.rules`,
-            // `lint.recommended`, inlay toggles and formatting policy
-            // committed in either file reach the battery without any
-            // client configuration. Client settings still win per leaf.
-            let root = st.workspace_root();
-            st.config = config_files::merge(
-                init_opts,
-                client_cfg,
-                config_files::file_layers(root.as_deref()),
-            );
-            st.editor_config = file_config;
-        }
+        let client = self.pull_client_settings().await;
+        self.reload_config(client).await;
         // Dynamic registration: only clients advertising
         // `didChangeWatchedFiles.dynamicRegistration` need the watcher
         // registered explicitly; others deliver the notification natively.
@@ -1934,10 +2011,16 @@ impl LanguageServer for Backend {
             .unwrap_or(false);
         if wants_dynamic_watcher {
             let options = DidChangeWatchedFilesRegistrationOptions {
-                watchers: vec![FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.{yaml,yml,json}".to_owned()),
-                    kind: None,
-                }],
+                // The broad glob covers specifications; the configuration
+                // files are named explicitly so a client whose glob
+                // matcher skips dotfiles still reports `.suspect.yaml`.
+                watchers: std::iter::once("**/*.{yaml,yml,json}".to_owned())
+                    .chain(config_file_names().map(|name| format!("**/{name}")))
+                    .map(|glob| FileSystemWatcher {
+                        glob_pattern: GlobPattern::String(glob),
+                        kind: None,
+                    })
+                    .collect(),
             };
             let registration = Registration {
                 id: "suspect-watched-yaml".to_owned(),
@@ -1956,70 +2039,15 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        // The new effective client layer over the committed file layers:
-        // a manifest or `.suspect.yaml` edited on disk is picked up here
-        // too (the files participate in the comparison, not just the
-        // client section, or a file-only change would look like no change).
-        let client_layers = {
-            let st = self.state.read().await;
-            let root = st.workspace_root();
-            config_files::merge(
-                Some(params.settings.clone()),
-                None,
-                config_files::file_layers(root.as_deref()),
-            )
+        // Re-pull rather than trust the payload: VS Code sends `null` (or a
+        // partial object) here and expects the server to ask. The payload
+        // is only the fallback for clients that cannot be asked.
+        let client = match self.pull_client_settings().await {
+            Some(pulled) => Some(pulled),
+            None => Some(params.settings).filter(|v| !v.is_null()),
         };
-        let parsed = Some(client_layers);
-        // The editor-side settings are re-derived too: `lint.min_severity`
-        // lives there, not in `SuspectConfig`, and this handler used to
-        // parse it into one object while the severity floor read the other
-        // — so changing the floor mid-session did nothing until a restart.
-        let file_config = {
-            let st = self.state.read().await;
-            editor_config::for_workspace(st.workspace_root().as_deref(), Some(&params.settings))
-        };
-        let changed = {
-            let mut st = self.state.write().await;
-            let config_changed = match parsed {
-                Some(c) if st.config != c => {
-                    st.config = c;
-                    true
-                }
-                Some(_) | None => false,
-            };
-            let editor_changed = st.editor_config != file_config;
-            if editor_changed {
-                st.editor_config = file_config;
-            }
-            config_changed || editor_changed
-        };
-        if !changed {
-            return;
-        }
-        // The lint floor moved, so anything computed under the old one is
-        // no longer the answer — including the per-document pull cache,
-        // whose entries are pre-filtered by the floor.
-        {
-            let mut st = self.state.write().await;
-            st.ws_diag_cache = None;
-            st.diag_cache.clear();
-        }
-        // The new config re-filters lint findings and inlay tooltips:
-        // republish diagnostics for every open document and ask the client
-        // to re-pull hints. Semantic tokens and lenses are config-free.
-        let uris: Vec<Uri> = {
-            let st = self.state.read().await;
-            st.docs.keys().cloned().collect()
-        };
-        // Pull-diagnostics results re-filter under the new config too.
-        let _ = self.client.workspace_diagnostic_refresh().await;
-        for uri in uris {
-            self.schedule_diagnostics(uri);
-        }
-        if self.client.inlay_hint_refresh().await.is_err() {
-            self.client
-                .log_message(MessageType::WARNING, "inlayHint refresh rejected")
-                .await;
+        if self.reload_config(client).await {
+            self.republish_after_config_change().await;
         }
     }
 
@@ -2370,7 +2398,6 @@ impl LanguageServer for Backend {
             return Ok(action);
         };
         let ws = self.workspace_for(&uri).await;
-        let cfg = self.state.read().await.config.clone();
         let st = self.state.read().await;
         let Some(doc) = st.docs.get(&uri) else {
             return Ok(action);
@@ -2378,7 +2405,17 @@ impl LanguageServer for Backend {
         let Some(url) = to_url(&uri) else {
             return Ok(action);
         };
-        match actions::resolve_code_action(doc, &url, ws.as_ref(), &cfg) {
+        // The published diagnostics' policy, so "fix all" fixes what the
+        // editor shows.
+        match actions::resolve_code_action(
+            doc,
+            &url,
+            ws.as_ref(),
+            &st.config,
+            st.editor_config.settings.lint.ruleset.as_deref(),
+            st.editor_config.settings.validate.strict_format,
+            st.editor_config.min_severity(),
+        ) {
             Some(resolved) => Ok(resolved),
             None => Ok(action),
         }
@@ -4100,6 +4137,160 @@ components:
             .as_str()
             .expect("markdown string");
         assert!(value.contains("### `Pet`"), "card frame missing: {value}");
+
+        answering.abort();
+    }
+
+    /// Configuration reaches the server from three places, and all three
+    /// must re-derive the policy the same way: `initialized` (a pull),
+    /// `didChangeConfiguration` (whose payload VS Code sends as `null`, so
+    /// the server must re-pull), and a configuration file changing on disk
+    /// (`didChangeWatchedFiles`, which used to drop only the workspace).
+    #[tokio::test]
+    async fn configuration_reloads_from_pulls_and_from_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let conf = dir.path().join(".suspect.yaml");
+        std::fs::write(&conf, "lint:\n  min_severity: warning\n").expect("write");
+        std::fs::write(dir.path().join("openapi.yaml"), spec_with_refs(1)).expect("write");
+
+        let (mut service, socket) = service().await;
+        // What the client answers `workspace/configuration` with, changed
+        // as the test goes; and the watchers the server registers.
+        let answer = Arc::new(std::sync::Mutex::new(serde_json::Value::Null));
+        let watchers = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let answering = tokio::spawn({
+            let answer = Arc::clone(&answer);
+            let watchers = Arc::clone(&watchers);
+            async move {
+                use futures::{SinkExt, StreamExt};
+                let mut socket = socket;
+                while let Some(request) = socket.next().await {
+                    let result = match request.method() {
+                        "workspace/configuration" => {
+                            serde_json::json!([answer.lock().unwrap().clone()])
+                        }
+                        "client/registerCapability" => {
+                            let globs = request
+                                .params()
+                                .and_then(|p| {
+                                    p["registrations"][0]["registerOptions"]["watchers"]
+                                        .as_array()
+                                        .cloned()
+                                })
+                                .unwrap_or_default();
+                            watchers.lock().unwrap().extend(
+                                globs
+                                    .iter()
+                                    .filter_map(|w| w["globPattern"].as_str().map(str::to_owned)),
+                            );
+                            serde_json::Value::Null
+                        }
+                        _ => serde_json::Value::Null,
+                    };
+                    if let Some(id) = request.id().cloned() {
+                        socket
+                            .send(tower_lsp::jsonrpc::Response::from_ok(id, result))
+                            .await
+                            .ok();
+                    }
+                }
+            }
+        });
+
+        in_flight(
+            &mut service,
+            1,
+            "initialize",
+            serde_json::json!({
+                "processId": null,
+                "rootUri": format!("file://{}", dir.path().display()),
+                "capabilities": {"workspace": {
+                    "configuration": true,
+                    "didChangeWatchedFiles": {"dynamicRegistration": true},
+                }},
+            }),
+        )
+        .await
+        .expect("initialize answered");
+        let _ = in_flight(&mut service, 0, "initialized", serde_json::json!({})).await;
+
+        async fn floor(service: &LspService<Backend>) -> DiagnosticSeverity {
+            service
+                .inner()
+                .state
+                .read()
+                .await
+                .editor_config
+                .min_severity()
+        }
+        assert_eq!(floor(&service).await, DiagnosticSeverity::WARNING);
+        {
+            let globs = watchers.lock().unwrap();
+            for name in config_file_names() {
+                assert!(
+                    globs.contains(&format!("**/{name}")),
+                    "no watcher for {name}: {globs:?}"
+                );
+            }
+        }
+
+        // The file changes on disk: the floor follows without a restart.
+        std::fs::write(&conf, "lint:\n  min_severity: error\n").expect("write");
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeWatchedFiles",
+            serde_json::json!({"changes": [
+                {"uri": format!("file://{}", conf.display()), "type": 2},
+            ]}),
+        )
+        .await;
+        assert_eq!(
+            floor(&service).await,
+            DiagnosticSeverity::ERROR,
+            "an edited .suspect.yaml must reload"
+        );
+
+        // The client's setting changes; VS Code's notification carries no
+        // settings, so the new value is only reachable by pulling.
+        *answer.lock().unwrap() = serde_json::json!({"lint": {"minSeverity": "information"}});
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeConfiguration",
+            serde_json::json!({"settings": null}),
+        )
+        .await;
+        assert_eq!(
+            floor(&service).await,
+            DiagnosticSeverity::INFORMATION,
+            "didChangeConfiguration must re-pull workspace/configuration"
+        );
+
+        // A disk reload keeps the client layer on top of the file.
+        std::fs::write(&conf, "lint:\n  min_severity: warning\n").expect("write");
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeWatchedFiles",
+            serde_json::json!({"changes": [
+                {"uri": format!("file://{}", conf.display()), "type": 2},
+            ]}),
+        )
+        .await;
+        assert_eq!(floor(&service).await, DiagnosticSeverity::INFORMATION);
+
+        // The setting is reset to VS Code's blank default: the committed
+        // file's floor applies again.
+        *answer.lock().unwrap() = serde_json::json!({"lint": {"minSeverity": ""}});
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeConfiguration",
+            serde_json::json!({"settings": null}),
+        )
+        .await;
+        assert_eq!(floor(&service).await, DiagnosticSeverity::WARNING);
 
         answering.abort();
     }

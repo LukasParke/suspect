@@ -204,6 +204,11 @@ pub struct State {
     pub ws_identity: usize,
     /// Raw initialization options captured in `initialize` for later merge.
     pub pending_init_options: Option<serde_json::Value>,
+    /// The client's last `suspect` settings section (from
+    /// `workspace/configuration`, or a `didChangeConfiguration` payload when
+    /// the client cannot be asked). Kept so a configuration file changing
+    /// on disk can be re-merged under it without another round trip.
+    pub client_settings: Option<serde_json::Value>,
     /// Merged server configuration (initialization options < client section).
     pub config: crate::config_files::SuspectConfig,
     /// Client capabilities from `initialize`, consulted when a feature can

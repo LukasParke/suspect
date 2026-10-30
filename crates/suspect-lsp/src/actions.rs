@@ -94,14 +94,25 @@ pub fn code_actions(
 /// Recomputes the current diagnostic battery server-side (fresher than the
 /// diagnostics snapshot the client holds) and applies every known fix,
 /// dropping conflicting or overlapping edits.
+///
+/// The battery runs under the same policy the published diagnostics do —
+/// the configured `lint.ruleset`, `validate.strict_format` and severity
+/// floor — so "fix all" fixes exactly the findings the editor shows, not
+/// the default ruleset's.
 #[must_use]
 pub fn resolve_code_action(
     doc: &OpenDoc,
     uri: &Url,
     ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
     cfg: &crate::config_files::SuspectConfig,
+    ruleset: Option<&std::path::Path>,
+    strict_format: bool,
+    floor: tower_lsp::lsp_types::DiagnosticSeverity,
 ) -> Option<CodeAction> {
-    let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg, None, false);
+    let diags = crate::diagnostics::filter_at_least(
+        crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg, ruleset, strict_format),
+        floor,
+    );
     let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), &diags);
     if edits.is_empty() {
         return None;
@@ -1422,6 +1433,48 @@ paths:
     }
 
     #[test]
+    fn resolve_runs_under_the_configured_ruleset_and_floor() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+  version: '1'
+paths:
+  /pets/:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: ok
+";
+        let d = open(text);
+        let uri = url("api.yaml");
+        let resolve = |ruleset: Option<&std::path::Path>, floor| {
+            resolve_code_action(&d, &uri, None, &Default::default(), ruleset, false, floor)
+        };
+        let hint = tower_lsp::lsp_types::DiagnosticSeverity::HINT;
+        // The default ruleset flags the trailing slash, and fixes it.
+        assert!(
+            resolve(None, hint).is_some(),
+            "the default ruleset's trailing-slash fix must resolve"
+        );
+        // A configured ruleset with no rules: nothing the editor shows is
+        // fixable, so "fix all" must not fix the default ruleset's findings.
+        let dir = tempfile::tempdir().unwrap();
+        let ruleset = dir.path().join("rules.yaml");
+        std::fs::write(&ruleset, "rules: {}\n").unwrap();
+        assert!(
+            resolve(Some(&ruleset), hint).is_none(),
+            "fix all must use the configured ruleset, not the default"
+        );
+        // A floor above the finding hides it, so it is not fixed either.
+        assert!(
+            resolve(None, tower_lsp::lsp_types::DiagnosticSeverity::ERROR).is_none(),
+            "fix all must not fix findings below the configured floor"
+        );
+    }
+
+    #[test]
     fn fix_all_defers_edit_and_resolve_recomputes_it() {
         let text = "\
 openapi: 3.1.0
@@ -1454,8 +1507,16 @@ paths:
             .expect("fixAll action present");
         assert!(inline.edit.is_some());
         // Resolve recomputes from a fresh battery and produces an edit.
-        let resolved = resolve_code_action(&d, &uri, None, &Default::default())
-            .expect("resolvable fixes exist");
+        let resolved = resolve_code_action(
+            &d,
+            &uri,
+            None,
+            &Default::default(),
+            None,
+            false,
+            tower_lsp::lsp_types::DiagnosticSeverity::HINT,
+        )
+        .expect("resolvable fixes exist");
         let edit = resolved.edit.as_ref().and_then(|we| match we {
             tower_lsp::lsp_types::WorkspaceEdit {
                 changes: Some(changes),
