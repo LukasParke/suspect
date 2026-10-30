@@ -17,6 +17,8 @@ use crate::output::{Finding, Severity};
 /// A `suspect.project.json` manifest.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectManifest {
+    /// Directory holding the manifest; configuration resolves from here.
+    pub root: PathBuf,
     /// Manifest schema version; must be `1`.
     pub version: u32,
     /// Project name (defaults to the directory name).
@@ -316,6 +318,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
     });
 
     Ok(ProjectManifest {
+        root: dir.clone(),
         version: 1,
         name: object
             .get("name")
@@ -562,9 +565,12 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
                 .with_file_name(format!("spec.{name}.yaml")),
         );
     }
+    // The project's own configuration, as `suspect ci` and the editor
+    // resolve it; a rejected value is a usage error here.
+    let config = crate::settings::resolve_one(&project.root, suspect_config::Layer::flags())?;
+    let strict_format = config.settings.validate.strict_format;
     for spec in &specs {
         let ws = loader.load(spec)?;
-        let strict_format = crate::commands::validate::configured_strict_format(spec);
         let findings = crate::commands::validate::validate_workspace(&ws, spec, strict_format);
         let errors = findings
             .iter()

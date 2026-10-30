@@ -837,6 +837,15 @@ Each step leaves `main` green and shippable.
    `crates/suspect-cli/tests/config_agreement.rs` (the Problem 1 and 3
    reproductions as fixtures; `lint` and `ci` must report the same
    severities); existing `cli.rs` cases updated. 1 day.
+   **Done.** `for_invocation` is deleted; the CLI helpers live in
+   `cli/src/settings.rs` (`start`, `resolve`, `emit_warnings`). In `ci` a
+   rejected value fails only the stage that owns the key (`lint.*` the lint
+   stage, `validate.*` the validate stage; a broken file or `extends` both),
+   rather than exiting 2, as the Goals ask ("a failing CI stage that names
+   it"). `project build` resolves from the manifest directory and exits 2 on
+   a rejected value. `fmt` keeps the rule that a passed `--json`/`--yaml`
+   overrides both `format.json` and `format.yaml`. `codegen --profile` is
+   still applied after resolve (the flag is a typed profile, not a string).
 4. **LSP on `resolve`**. `ResolvedCache` in `state.rs`; delete
    `editor_config.rs`, the config half of `config_files.rs`, and
    `EditorConfig::min_severity`; `lint_diagnostics` takes `LintSettings`;

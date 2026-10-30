@@ -174,11 +174,14 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
             build_project(manifest, args.skip_tests);
         }
         let mut stages = Vec::new();
+        // One resolution per project, from the manifest's directory: the
+        // same layers and precedence `suspect lint` and the editor use.
+        let config = project_config(manifest);
         if wanted.contains(&"validate") {
-            stages.push(validate_stage(manifest));
+            stages.push(validate_stage(manifest, &config));
         }
         if wanted.contains(&"lint") {
-            stages.push(lint_stage(manifest));
+            stages.push(lint_stage(manifest, &config));
         }
         if wanted.contains(&"contract") {
             stages.push(contract_stage(manifest));
@@ -311,20 +314,75 @@ fn stage(name: &str, exit: i32, errors: usize, warnings: usize, summary: String)
     }
 }
 
+/// A project's configuration, resolved from its manifest's directory.
+///
+/// A rejected value does not stop the gate: the stage the key belongs to
+/// fails and names it, and the other stages run on what did apply.
+pub struct ProjectConfig {
+    /// The settings that applied.
+    pub resolved: suspect_config::Resolved,
+    /// Rejected values and unreadable files, each with `file:line`.
+    pub problems: Vec<suspect_config::Notice>,
+}
+
+impl ProjectConfig {
+    /// The problems a stage owns: those naming one of its keys (messages
+    /// start with the quoted key), plus a broken file or `extends`, which
+    /// fail every stage that reads configuration.
+    fn problems_for(&self, section: &str) -> Vec<String> {
+        self.problems
+            .iter()
+            .filter(|p| {
+                let named = p
+                    .message
+                    .strip_prefix('`')
+                    .and_then(|m| m.split(['.', '`']).next());
+                matches!(named, None | Some("extends")) || named == Some(section)
+            })
+            .map(ToString::to_string)
+            .collect()
+    }
+}
+
+/// [`ProjectConfig`] for one manifest.
+#[must_use]
+pub fn project_config(manifest: &Path) -> ProjectConfig {
+    let dir = manifest.parent().unwrap_or(Path::new("."));
+    match suspect_config::resolve(dir) {
+        Ok(resolved) => {
+            crate::settings::emit_warnings(&resolved);
+            ProjectConfig {
+                resolved,
+                problems: Vec::new(),
+            }
+        }
+        Err(error) => {
+            crate::settings::emit_warnings(&error.resolved);
+            ProjectConfig {
+                resolved: *error.resolved,
+                problems: error.problems,
+            }
+        }
+    }
+}
+
 /// Lints the published spec with the project's ruleset and severity floor.
 ///
-/// A project may declare its own `lint:` section; otherwise the shared
-/// `.suspect.yaml` settings apply, exactly as they do for `suspect lint`
-/// run by hand — so CI and a developer see the same findings.
-fn lint_stage(manifest: &Path) -> StageResult {
+/// The settings come from [`project_config`], exactly as they do for
+/// `suspect lint` run by hand, so CI and a developer see the same
+/// findings. A rejected lint value fails the stage and names the value.
+fn lint_stage(manifest: &Path, config: &ProjectConfig) -> StageResult {
     let Some(spec) = spec_to_check(manifest) else {
         return stage("lint", 0, 0, 0, "no entry or published spec".to_owned());
     };
-    let (ruleset, floor) = lint_policy(manifest);
-    let overrides = match lint_overrides(manifest) {
-        Ok(overrides) => overrides,
-        Err(error) => return stage("lint", 1, 1, 0, error.to_string()),
-    };
+    let problems = config.problems_for("lint");
+    if !problems.is_empty() {
+        return stage("lint", 1, problems.len(), 0, problems.join("; "));
+    }
+    let lint = &config.resolved.settings.lint;
+    let ruleset = lint.ruleset.clone();
+    let floor = crate::commands::lint::floor(lint);
+    let overrides = crate::commands::lint::LintOverrides::from_settings(lint);
     let findings = match crate::commands::lint::lint_findings(
         &[spec],
         ruleset.as_deref(),
@@ -346,87 +404,13 @@ fn lint_stage(manifest: &Path) -> StageResult {
         warnings,
         match (&ruleset, floor == crate::output::Severity::Hint) {
             (Some(ruleset), _) => format!("{} ruleset", ruleset.display()),
+            (None, _) if overrides.skip_builtin => {
+                "no ruleset (lint.recommended: false)".to_owned()
+            }
             (None, true) => "built-in ruleset".to_owned(),
             (None, false) => format!("built-in ruleset, at or above {floor:?}"),
         },
     )
-}
-
-/// A project's own lint policy, else the shared configuration file.
-fn lint_policy(manifest: &Path) -> (Option<PathBuf>, crate::output::Severity) {
-    let dir = manifest.parent().unwrap_or(Path::new("."));
-    let declared: Option<serde_json::Value> = std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok());
-    let ruleset = declared
-        .as_ref()
-        .and_then(|value| value.get("lint"))
-        .and_then(|lint| lint.get("ruleset"))
-        .and_then(|v| v.as_str())
-        .map(|rel| dir.join(rel))
-        .or_else(|| {
-            suspect_config::for_invocation(Some(manifest))
-                .ok()
-                .and_then(|loaded| loaded.settings.lint.ruleset)
-        });
-    let floor = declared
-        .as_ref()
-        .and_then(|value| value.get("lint"))
-        .and_then(|lint| lint.get("min_severity"))
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .or_else(|| {
-            suspect_config::for_invocation(Some(manifest))
-                .ok()
-                .and_then(|loaded| loaded.settings.lint.min_severity)
-        })
-        .and_then(
-            // The gate keeps running on a bad floor, but says so: an
-            // unknown name falls back to `hint` loudly, not silently.
-            |name| match crate::parse_severity_floor(&name, "lint.min_severity") {
-                Ok(severity) => Some(severity),
-                Err(e) => {
-                    eprintln!("warning: {e}; using hint");
-                    None
-                }
-            },
-        )
-        .unwrap_or(crate::output::Severity::Hint);
-    (ruleset, floor)
-}
-
-/// The project's lint policy beyond ruleset and floor: the design-class
-/// severity and per-rule overrides, from the manifest with the shared
-/// settings file as fallback — the same layering as the ruleset.
-///
-/// A committed policy naming an unknown severity is an error: the lint
-/// stage fails and names the bad value, as `suspect lint` does.
-fn lint_overrides(manifest: &Path) -> anyhow::Result<crate::commands::lint::LintOverrides> {
-    let declared: Option<serde_json::Value> = std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok());
-    let from_manifest = declared.as_ref().and_then(|value| value.get("lint"));
-    let (design, rules) = match from_manifest {
-        Some(lint) => (
-            lint.get("design")
-                .and_then(|v| v.as_str())
-                .map(str::to_owned),
-            lint.get("rules").and_then(|v| v.as_object()).map(|m| {
-                m.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_ascii_lowercase())))
-                    .collect::<std::collections::BTreeMap<String, String>>()
-            }),
-        ),
-        None => (None, None),
-    };
-    let settings = suspect_config::for_invocation(Some(manifest))
-        .map(|loaded| loaded.settings.lint)
-        .ok();
-    let design = design.or_else(|| settings.as_ref().and_then(|s| s.design.clone()));
-    let rules = rules
-        .or_else(|| settings.map(|s| s.rules))
-        .unwrap_or_default();
-    crate::commands::lint::LintOverrides::from_config(design.as_deref(), &rules)
 }
 
 /// Builds one project through the full pipeline, reporting as it goes.
@@ -442,7 +426,7 @@ fn build_project(manifest: &Path, skip_tests: bool) {
     }
 }
 
-fn validate_stage(manifest: &Path) -> StageResult {
+fn validate_stage(manifest: &Path, config: &ProjectConfig) -> StageResult {
     let Some(spec) = published_spec(manifest) else {
         return stage("validate", 0, 0, 0, "no published spec declared".to_owned());
     };
@@ -455,7 +439,11 @@ fn validate_stage(manifest: &Path) -> StageResult {
             format!("{} was never published", spec.display()),
         );
     }
-    let strict_format = crate::commands::validate::configured_strict_format(&spec);
+    let problems = config.problems_for("validate");
+    if !problems.is_empty() {
+        return stage("validate", 1, problems.len(), 0, problems.join("; "));
+    }
+    let strict_format = config.resolved.settings.validate.strict_format;
     let findings = crate::commands::validate::validate_file(&spec, None, strict_format);
     let errors = findings
         .iter()

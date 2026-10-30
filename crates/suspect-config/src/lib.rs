@@ -502,22 +502,6 @@ impl Loaded {
 /// The manifest file name the loader composes policy from.
 pub const MANIFEST_NAME: &str = "suspect.project.json";
 
-/// The configuration for one invocation: the settings file discovered
-/// from the input's directory, with the project manifest's policy
-/// sections layered underneath when one sits on the walk up.
-///
-/// # Errors
-/// Config file discovery and parsing failures.
-pub fn for_invocation(input: Option<&Path>) -> Result<Loaded, file::ConfigError> {
-    if let Some(found) = discover(Path::new("."))? {
-        return Ok(found);
-    }
-    match input {
-        Some(path) => Ok(discover(path)?.unwrap_or_default()),
-        None => Ok(Loaded::default()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

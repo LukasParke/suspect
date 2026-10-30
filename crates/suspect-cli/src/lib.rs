@@ -19,6 +19,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 pub use output::{Finding, Severity};
+use suspect_config::{Layer, Raw};
 use suspect_source::{Source, Uri};
 
 /// Serialization choice for commands that produce structured output.
@@ -580,45 +581,48 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             strict_format,
             text,
         } => {
-            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let strict_format = suspect_config::resolve_bool(
-                strict_format,
-                "SUSPECT_STRICT_FORMAT",
-                loaded.settings.validate.strict_format,
-            );
+            // A clap bool cannot say "explicitly false": only a passed flag
+            // enters the flag layer.
+            let flags = Layer::flags()
+                .set(
+                    "validate.strict_format",
+                    strict_format.then_some(Raw::Bool(true)),
+                    "--strict-format",
+                )
+                .set(
+                    "validate.reference_allowlist",
+                    reference_allowlist.map(Raw::Path),
+                    "--reference-allowlist",
+                );
+            let resolved = settings::resolve(&paths, flags)?;
+            let validate = &resolved.settings.validate;
             commands::validate::validate(
                 &paths,
                 text.format,
-                reference_allowlist.as_deref(),
-                strict_format,
+                validate.reference_allowlist.as_deref(),
+                validate.strict_format,
             )
         }
         Command::Admission(args) => commands::admission::admission(&args),
         Command::Breaking(args) => commands::breaking::breaking(&args),
         Command::DocsGen(mut args) => {
-            let loaded = suspect_config::for_invocation(Some(&args.input))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let settings = &loaded.settings;
-            if args.style.is_none()
-                && let Some(style) = settings.docs.style.as_deref()
-            {
-                args.style = Some(match style {
-                    "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
-                    "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
-                    "html" => commands::docs_gen_cmd::DocsStyle::Html,
-                    other => {
-                        return Err(anyhow::anyhow!(
-                            "docs style `{other}` is not one of: markdown, sveltekit, html"
-                        ));
-                    }
-                });
-            }
-            if args.output.is_none()
-                && let Some(out) = &settings.docs.output
-            {
-                args.output = Some(out.clone());
-            }
+            let style = args
+                .style
+                .and_then(|s| ValueEnum::to_possible_value(&s))
+                .map(|v| Raw::Str(v.get_name().to_owned()));
+            let flags = Layer::flags().set("docs.style", style, "--style").set(
+                "docs.output",
+                args.output.take().map(Raw::Path),
+                "--output",
+            );
+            let resolved = settings::resolve_one(&args.input, flags)?;
+            let docs = &resolved.settings.docs;
+            // The table restricts `docs.style` to the enum's names.
+            args.style = docs
+                .style
+                .as_deref()
+                .and_then(|style| commands::docs_gen_cmd::DocsStyle::from_str(style, false).ok());
+            args.output.clone_from(&docs.output);
             commands::docs_gen_cmd::docs_gen(&args)
         }
         Command::Stubs(args) => commands::stubs::stubs(&args),
@@ -632,50 +636,23 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             min_severity,
             text,
         } => {
-            // Configuration supplies defaults; an explicit flag wins.
-            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let settings = &loaded.settings;
-            // flag > env > config > default, decided in one place.
-            let ruleset = suspect_config::resolve::Resolution::new(
-                ruleset.map(Some),
-                std::env::var_os("SUSPECT_LINT_RULESET")
-                    .filter(|v| !v.is_empty())
-                    .map(|v| Some(PathBuf::from(v))),
-                settings.lint.ruleset.clone().map(Some),
-                None,
-            )
-            .value;
-            let env_floor = match std::env::var("SUSPECT_LINT_MIN_SEVERITY") {
-                Ok(v) if !v.trim().is_empty() => {
-                    Some(parse_severity_floor(&v, "SUSPECT_LINT_MIN_SEVERITY")?)
-                }
-                _ => None,
-            };
-            let config_floor = settings
-                .lint
-                .min_severity
-                .as_deref()
-                .map(|v| parse_severity_floor(v, "lint.min_severity"))
-                .transpose()?;
-            let min_severity = suspect_config::resolve::Resolution::new(
-                min_severity,
-                env_floor,
-                config_floor,
-                output::Severity::Hint,
-            )
-            .value;
+            // flag > env > config > default, decided by `resolve`.
+            let flags = Layer::flags()
+                .set("lint.ruleset", ruleset.map(Raw::Path), "--ruleset")
+                .set(
+                    "lint.min_severity",
+                    min_severity.map(|s| Raw::Str(s.label().to_owned())),
+                    "--min-severity",
+                );
+            let resolved = settings::resolve(&paths, flags)?;
+            let lint = &resolved.settings.lint;
             // Committed policy: design-class severity and per-rule
             // overrides reach the CLI the same way they reach the editor.
-            let overrides = commands::lint::LintOverrides::from_config(
-                settings.lint.design.as_deref(),
-                &settings.lint.rules,
-            )
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let overrides = commands::lint::LintOverrides::from_settings(lint);
             commands::lint::lint(
                 &paths,
-                ruleset.as_deref(),
-                min_severity,
+                lint.ruleset.as_deref(),
+                commands::lint::floor(lint),
                 &overrides,
                 text.format,
             )
@@ -687,13 +664,13 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             json,
             yaml,
         } => {
-            let loaded =
-                suspect_config::for_invocation(Some(&input)).map_err(|e| anyhow::anyhow!("{e}"))?;
-            // A typed --json/--yaml flag wins; otherwise the file decides.
+            // A typed --json/--yaml flag wins over both settings; otherwise
+            // the file decides.
+            let resolved = settings::resolve_one(&input, Layer::flags())?;
             let (json, yaml) = if json || yaml {
                 (json, yaml)
             } else {
-                (loaded.settings.format.json, loaded.settings.format.yaml)
+                (resolved.settings.format.json, resolved.settings.format.yaml)
             };
             commands::fmt::fmt(&input, output.as_deref(), json, yaml)
         }
