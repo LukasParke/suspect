@@ -6,6 +6,10 @@ codes stay a separate category, shown only when codegen is configured
 (2026-10-29). Severity names are parsed by one function (already fixed; this
 proposal moves that function, it does not reopen it).
 
+
+Fixed since this was written (2026-10-30, see the
+[index](README.md#already-fixed)): `rules check` reporting `off` findings as warnings, and `ci` forcing `strict_format` off. The Problem section keeps
+them as evidence.
 ## Summary
 
 For a user: `suspect check` runs every check the editor runs and exits 1 on

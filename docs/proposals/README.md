@@ -142,7 +142,30 @@ parallel. One person working alone needs the full ~46 days.
 
 ## Already fixed
 
-Defects fixed directly, alongside this proposal:
+Found while writing the full proposals and fixed directly (2026-10-30):
+
+- `suspect ci`: one unrecognized severity in `lint.rules` silently dropped
+  every override; the lint stage now fails and names the value. `ci` and
+  `project build` now honour `validate.strict_format` (and
+  `SUSPECT_STRICT_FORMAT`) as `suspect validate` does.
+- `suspect rules check` reported a TS finding with severity `off` as a
+  warning; `off` now drops it.
+- Editor: an unknown `lint.min_severity`, `lint.rules` or `lint.design`
+  severity, or a config file that failed to load, was applied silently; the
+  server now shows a warning naming the key. Floor names go through the
+  shared parser.
+- `suspect config [INPUT]` help described discovery backwards.
+- VS Code Live SDK Preview sent the whole `sdk.importNames` map as
+  `importName`, so the first render failed with `-32602`.
+- CI: the `test` job had no Bun, so the `suspect-rules` worker tests passed
+  without running; `native-evidence.yml` named test targets that do not
+  exist and hid the error with `|| true`, so 8 of 10 backends ran nothing.
+  It now selects `<prefix>*` targets and fails on a real failure.
+- Docs: 4 dead links removed; `examples/sdk-demo.json`, which the README's
+  SDK demo needs, is restored (five operations, five backends; `--check`
+  reports current).
+
+Defects fixed directly, alongside the first version of this proposal:
 
 - `suspect drift --format sarif` panicked (`unimplemented!()`).
 - `suspect rules` always exited 0; Bun-unavailable exited 1 instead of 2;

@@ -6,6 +6,10 @@ registry. Decided: native-toolchain fallbacks all go through
 `suspect_codegen::toolchain` (done: `python`, `terraform` and nested mise
 layouts were added). The source document records this under P7.
 
+
+Fixed since this was written (2026-10-30, see the
+[index](README.md#already-fixed)): Bun missing from the `ci.yml` `test` job and `native-evidence.yml` naming test targets that do not exist. The Problem section keeps
+them as evidence.
 ## Summary
 
 A contributor runs `cargo xtask ci` and gets the same commands, flags and

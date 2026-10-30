@@ -115,5 +115,5 @@ manifests using the platform `IrSpec`; SDK packages and native docs consume
   [session performance](SDK-SESSION-PERFORMANCE.md). The completed Mac baseline
   remains observational after timing-noise qualification failed.
 - [Historical M0–M2 evidence](SDK-M0-M2-EXIT.md) and
-  [OpenRouter acceptance](OPENROUTER-ACCEPTANCE.md). Archived counts describe
+  OpenRouter acceptance. Archived counts describe
   their pinned binaries and inputs, not current acceptance.

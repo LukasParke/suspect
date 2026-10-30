@@ -13,7 +13,7 @@ The API facts come from the tracked OpenRouter public description at commit
 `bd4953b29f34de134ed4be27b2803c5622a756c3c63bc8617636b6abe5de1821`.
 It contains 103 operations and 786 component schemas. Ignored local generated
 specifications have different contents and are not the source for this note.
-See [the acceptance corpus](OPENROUTER-ACCEPTANCE.md),
+See the acceptance corpus,
 [semantic requirements](SDK-OPENAPI-RESEARCH.md), and
 [the implementation plan](SDK-GENERATION-PLAN.md).
 

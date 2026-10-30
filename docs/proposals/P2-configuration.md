@@ -5,6 +5,10 @@ policy lives only in `.suspect.yaml`; a manifest references it
 (`"config": ".suspect.yaml"`); a manifest that still carries policy gets a
 one-release deprecation warning.
 
+
+Fixed since this was written (2026-10-30, see the
+[index](README.md#already-fixed)): `ci` dropping every override on one bad name, `ci` and `project build` ignoring `validate.strict_format`, the editor mapping an unknown floor to `hint` silently, and the `config [INPUT]` help text. The Problem section keeps
+them as evidence.
 ## Summary
 
 For a user: every command and the editor apply the same settings to the

@@ -172,7 +172,7 @@ recorded separately. `ENV-ACCEPTANCE.json` records both clean independent review
 20 passing focused host checks, warnings-denied Clippy/Rustdoc, successful
 formatting and stable source bytes for this corrected integration.
 
-The resulting **[automatic-env live edition](../LIVE-ENV-DEMO-README.md)** is now
+The resulting **automatic-env live edition** is now
 independently accepted: `./demo-live-env.sh all` runs the twelve prebuilt native
 consumers, with optional per-language/JavaScript selection. Main verified the
 3,179-file delivery seal, 611 corrected package files and all 52 controlled

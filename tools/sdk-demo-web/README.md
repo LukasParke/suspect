@@ -23,7 +23,7 @@ confirmation. **Ready** means local preflight; it is not a live API result.
 
 This launcher uses Python's standard library and local CSS/JavaScript/system fonts.
 It needs the prepared workspace described in
-[`LIVE-ENV-DEMO-README.md`](../../LIVE-ENV-DEMO-README.md). Its packages are local
+`LIVE-ENV-DEMO-README.md`. Its packages are local
 version `0.1.0`. The complete native programs, package READMEs, and verified pins
 are linked from the page.
 

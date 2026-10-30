@@ -44,6 +44,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The suspect-rules worker tests return early without Bun; install it
+      # so they run here instead of passing vacuously.
+      - uses: oven-sh/setup-bun@v2
       - run: cargo test --workspace
   bench-smoke:
     runs-on: ubuntu-latest

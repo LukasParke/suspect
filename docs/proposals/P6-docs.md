@@ -7,6 +7,10 @@ reference pages. Decided: `README.platform.md` is already merged into
 is already generated from clap and checked by a test (see the source
 document, P6 "Done so far").
 
+
+Fixed since this was written (2026-10-30, see the
+[index](README.md#already-fixed)): the 4 broken links and the missing `examples/sdk-demo.json`. The Problem section keeps
+them as evidence.
 ## Summary
 
 A reader finds every user document under four directories: `docs/guide/`
