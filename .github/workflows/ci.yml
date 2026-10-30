@@ -69,3 +69,9 @@ jobs:
           cargo package
           -p suspect-source -p suspect-syntax -p suspect-low -p suspect-ref
           -p suspect-jsonpath -p suspect-oas -p suspect-overlay
+  # One lockstep version across crates, lockfiles, editors and the rules SDK.
+  check-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo run -p xtask -- check-versions

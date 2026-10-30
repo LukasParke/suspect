@@ -545,6 +545,16 @@ workflow does, required secrets), and its "Checks" list is replaced by
    `ci.yml`. Tests: xtask unit test that bumps a temp copy of the manifests
    and re-reads them; `suspect-rules` test that the shim version equals
    `CARGO_PKG_VERSION`. 0.5 day.
+   **Done** (`xtask/src/versions.rs`). Deviations: edits are byte-range
+   replacements located by a line-oriented TOML reader and a small JSON
+   scanner instead of `toml_edit`/`semver`, so xtask gains no dependencies;
+   `bump` also rewrites the path packages in `Cargo.lock` and
+   `editors/zed/Cargo.lock` (otherwise `--locked` builds fail after a bump);
+   `check-versions` also requires every member to use `version.workspace =
+   true`. `bump` does not run git-cliff yet (`cliff.toml` is step 4). The
+   shim manifest is now part of the worker cache-dir hash, so a new version
+   does not reuse a stale staged shim. CI runs `cargo run -p xtask --
+   check-versions` until P7's `cargo xtask` alias lands.
 3. **Windows and macOS CI.** New `ci.yml` jobs: `cargo test -p suspect-cli
    -p suspect-low -p suspect-ref` on `windows-2022` and `macos-14`.
    Implement `Silenced` on Windows (open `NUL` and redirect fds 1 and 2 with

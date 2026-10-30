@@ -2,6 +2,7 @@
 
 mod sdk_full;
 mod sdk_m3_m6;
+mod versions;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -12,6 +13,8 @@ const USAGE: &str = "\
 tasks:
   sdk-full [options]              Verify the maintained twelve-language full SDK plan.
   sdk-m3-m6 [options]             Verify the current native SDK and iteration milestones.
+  bump <version>                  Set the one toolchain version in every manifest and lockfile.
+  check-versions [--tag vX.Y.Z]   Fail when any version line (or the tag) differs.
   fetch-corpus [--force]          Download real-world OpenAPI specs into corpus/ (gitignored).
   gen-fixtures [options]          Generate deterministic synthetic OpenAPI 3.1 fixtures.
     --paths N                     Number of path items (default 100).
@@ -33,6 +36,8 @@ fn main() -> Result<()> {
         "gen-fixtures" => gen_fixtures(rest),
         "sdk-full" => sdk_full::run(rest),
         "sdk-m3-m6" => sdk_m3_m6::run(rest),
+        "bump" => versions::run_bump(rest),
+        "check-versions" => versions::run_check(rest),
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
             Ok(())
