@@ -13,7 +13,8 @@ import {
 import { registerTesting } from './testing';
 import { registerProjectView } from './projectView';
 import { openSuspectConfig, setSeverityFloor } from './config';
-import { EDITOR_OWNED_COMMANDS, generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
+import { generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
+import { suspectCapabilities } from './protocol';
 import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
@@ -60,8 +61,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerNotebook(context);
 	sdkGeneration = registerSdkGeneration(context);
 
-	// Register the editor-owned server commands before the client starts, so
-	// every id the client filters out of the server's list already exists.
+	// Register the editor-owned server commands before the client starts:
+	// the client declares these ids as its own in the handshake.
 	context.subscriptions.push(...registerServerCommands(() => client));
 	context.subscriptions.push(...registerLiveSdkPreview(() => client));
 	// The committed config layers the server merges under the editor settings:
@@ -112,27 +113,24 @@ function startClient(): void {
 	};
 	const current = new LanguageClient('suspect', 'Suspect', serverOptions, clientOptions);
 	client = current;
-	// The server advertises several commands the extension registers itself
-	// (its palette/editor handlers forward to the server). The client
-	// registers every advertised id as a VS Code command, and a duplicate
-	// throws "command already exists", aborting the client start. Keep the
-	// editor's handlers as the single owner of those ids, including for LSP
-	// lenses, and register every other server command normally.
-	const commands = current.getFeature('workspace/executeCommand');
-	const registerCommands = commands.register.bind(commands);
-	commands.register = (data) => registerCommands({
-		...data,
-		registerOptions: { ...data.registerOptions, commands: data.registerOptions.commands.filter((command) => !EDITOR_OWNED_COMMANDS.has(command)) },
-	});
+	// Declares the server command ids the extension registers itself, so the
+	// server leaves them out of executeCommandProvider and the client does
+	// not register them twice.
+	current.registerFeature(suspectCapabilities());
 	void Promise.resolve(current.start()).then(
 		() => warnOnVersionMismatch(current),
 		(err: unknown) => {
 			if (client === current) client = undefined;
 			const message = errorMessage(err);
 			const missing = /ENOENT|Launching server using command/.test(message);
+			// A server older than the experimental.suspect handshake ignores
+			// the declared commands and advertises ids this extension owns.
+			const tooOld = /command '[^']+' already exists/.test(message);
 			const text = missing
 				? `Suspect CLI not found at \`${binary}\`. Install it or set suspect.basePath to the CLI (or its directory).`
-				: `Suspect language server failed to start: ${message}`;
+				: tooOld
+					? `The Suspect CLI at \`${binary}\` is older than this extension. Update it or set suspect.basePath to a newer build.`
+					: `Suspect language server failed to start: ${message}`;
 			void vscode.window.showWarningMessage(text, 'Open Settings').then((choice) => {
 				if (choice === 'Open Settings') {
 					void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');

@@ -75,10 +75,11 @@ export type ServerCommand = (typeof SERVER_COMMANDS)[number];
 export const RUN_WORKFLOW_COMMAND = 'suspect.runWorkflow';
 
 /**
- * Every server-advertised command id the extension registers itself.
- * vscode-languageclient registers each id the server advertises as a VS Code
- * command; registering one that already exists throws and aborts the client
- * start, so these must be filtered out of the server's list.
+ * Every server command id the extension registers itself. Sent as
+ * `experimental.suspect.clientCommands` (protocol.ts), so the server leaves
+ * them out of `executeCommandProvider`: vscode-languageclient registers each
+ * listed id as a VS Code command, and a duplicate throws and aborts the
+ * client start.
  */
 export const EDITOR_OWNED_COMMANDS: ReadonlySet<string> = new Set<string>([RUN_WORKFLOW_COMMAND, ...SERVER_COMMANDS]);
 

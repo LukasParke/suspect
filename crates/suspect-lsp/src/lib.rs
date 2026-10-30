@@ -45,6 +45,7 @@ pub mod links;
 pub mod markdown;
 mod meaning;
 pub mod navigation;
+pub mod protocol;
 pub mod pull;
 mod rank;
 mod refactor;
@@ -708,6 +709,7 @@ fn yaml_file_filter() -> Vec<FileOperationFilter> {
 #[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
+        let client_commands = protocol::client_commands(&params.capabilities);
         {
             let mut st = self.state.write().await;
             st.root = params.root_uri.as_ref().and_then(|u| u.to_file_path().ok());
@@ -812,25 +814,11 @@ impl LanguageServer for Backend {
                         work_done_progress_options: WorkDoneProgressOptions::default(),
                     },
                 )),
+                // Server commands minus the ones the client declared as
+                // its own: a client registers every listed id, and one it
+                // already registered itself would collide.
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: [
-                        links::SHOW_REFS_COMMAND.to_owned(),
-                        links::OPEN_REF_COMMAND.to_owned(),
-                        links::ADD_OPERATION_ID_COMMAND.to_owned(),
-                        "suspect.generateExample".to_owned(),
-                        "suspect.showRefGraph".to_owned(),
-                        "suspect.breakingChanges".to_owned(),
-                        "suspect.contractCoverage".to_owned(),
-                        "suspect.changeImpact".to_owned(),
-                        "suspect.verifyContract".to_owned(),
-                        "suspect.runService".to_owned(),
-                        "suspect.extractSchema".to_owned(),
-                        "suspect.inlineSchema".to_owned(),
-                        "suspect.editorLatency".to_owned(),
-                        run_lenses::RUN_WORKFLOW_COMMAND.to_owned(),
-                        run_lenses::RENDER_PREVIEW_COMMAND.to_owned(),
-                    ]
-                    .to_vec(),
+                    commands: protocol::registered_commands(&client_commands),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 workspace: Some(WorkspaceServerCapabilities {
@@ -859,6 +847,7 @@ impl LanguageServer for Backend {
                         }),
                     }),
                 }),
+                experimental: Some(protocol::experimental()),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {

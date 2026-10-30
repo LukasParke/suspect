@@ -2258,3 +2258,110 @@ fn a_pulling_client_is_not_also_pushed_diagnostics() {
         "the server pushed diagnostics to a client that pulls them"
     );
 }
+
+/// `capabilities.experimental.suspect`: every advertised custom request is
+/// implemented. Each is sent with empty params, so a real handler answers
+/// with an invalid-params error, never "method not found".
+#[test]
+fn every_advertised_request_is_implemented() {
+    let (_ws, editor) = shared();
+    let suspect = &editor.initialize_result()["capabilities"]["experimental"]["suspect"];
+    assert_eq!(suspect["protocol"], 1, "{suspect}");
+    let requests = suspect["requests"]
+        .as_object()
+        .expect("experimental.suspect.requests");
+    assert!(
+        requests.contains_key("suspect/renderSdk"),
+        "renderSdk is not advertised: {suspect}"
+    );
+    let not_found = |method: &str| {
+        editor
+            .request_outcome(method, serde_json::json!({}))
+            .unwrap_or_else(|e| panic!("{e}"))
+            .is_err_and(|message| message.to_ascii_lowercase().contains("method not found"))
+    };
+    // The check can tell an unknown method apart.
+    assert!(not_found("suspect/notAMethod"));
+    for (method, version) in requests {
+        assert!(
+            version.as_u64().is_some_and(|v| v >= 1),
+            "{method}: {version}"
+        );
+        assert!(
+            !not_found(method),
+            "{method} is advertised but not implemented"
+        );
+    }
+}
+
+/// A client that declares nothing gets every server command registered,
+/// and the advertisement carries each with a version.
+#[test]
+fn a_client_without_declared_commands_gets_every_command() {
+    let (_ws, editor) = shared();
+    let caps = &editor.initialize_result()["capabilities"];
+    let registered: Vec<&str> = caps["executeCommandProvider"]["commands"]
+        .as_array()
+        .expect("executeCommandProvider.commands")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    let advertised = caps["experimental"]["suspect"]["commands"]
+        .as_object()
+        .expect("experimental.suspect.commands");
+    assert_eq!(registered.len(), advertised.len());
+    for id in &registered {
+        assert!(
+            advertised.contains_key(*id),
+            "{id} registered, not advertised"
+        );
+    }
+    assert!(registered.contains(&"suspect.showRefGraph"));
+}
+
+/// Ids a client declares in `experimental.suspect.clientCommands` are left
+/// out of `executeCommandProvider` (the client registers them itself) and
+/// still execute when the client forwards them.
+#[test]
+fn declared_client_commands_are_not_registered_but_still_run() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let mut capabilities = editor_capabilities();
+    capabilities["experimental"] = serde_json::json!({ "suspect": {
+        "clientCommands": ["suspect.showRefGraph", "suspect.runWorkflow"],
+    } });
+    let editor = Editor::start(&ws.root, capabilities);
+    let caps = &editor.initialize_result()["capabilities"];
+    let registered: Vec<&str> = caps["executeCommandProvider"]["commands"]
+        .as_array()
+        .expect("executeCommandProvider.commands")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        !registered.contains(&"suspect.showRefGraph"),
+        "{registered:?}"
+    );
+    assert!(
+        !registered.contains(&"suspect.runWorkflow"),
+        "{registered:?}"
+    );
+    assert!(registered.contains(&"suspect.showRefs"), "{registered:?}");
+    let advertised = &caps["experimental"]["suspect"]["commands"];
+    assert_eq!(advertised["suspect.showRefGraph"], 1, "{advertised}");
+
+    let text = std::fs::read_to_string(&ws.openapi).expect("read");
+    editor.open(&ws.openapi, &text);
+    let graph = editor
+        .request(
+            "workspace/executeCommand",
+            serde_json::json!({"command": "suspect.showRefGraph", "arguments": []}),
+        )
+        .expect("showRefGraph");
+    assert!(
+        graph
+            .get("mermaid")
+            .is_some_and(serde_json::Value::is_string),
+        "a declared command must still execute: {graph}"
+    );
+}

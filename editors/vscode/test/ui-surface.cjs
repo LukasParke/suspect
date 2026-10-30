@@ -204,8 +204,9 @@ test('the extension manifest contributes one view, one controller, and commands 
 		const source = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
 		for (const match of source.matchAll(/registerCommand\('([^']+)'/g)) registered.add(match[1]);
 	}
+	// Ids starting with `_` are internal and need no contribution.
 	for (const name of registered) {
-		assert.ok(commands.has(name), `registered command ${name} is not in the manifest`);
+		assert.ok(commands.has(name) || name.startsWith('_'), `registered command ${name} is not in the manifest`);
 	}
 
 	// No menu references a command that does not exist; implementation
@@ -297,21 +298,44 @@ test('server commands travel over executeCommand and the admission review over i
 	);
 });
 
-test('every server-advertised command the extension registers itself is filtered from the language client', () => {
-	// vscode-languageclient registers each advertised executeCommand id as a
+test('every server command the extension registers itself is declared in the handshake', () => {
+	// vscode-languageclient registers each id in executeCommandProvider as a
 	// VS Code command; a duplicate of a locally registered id throws and
-	// aborts the client start. The filter list must cover every local id.
+	// aborts the client start. The client declares its own ids in
+	// experimental.suspect.clientCommands and the server leaves them out.
 	const registered = [];
 	const stub = { commands: { registerCommand: (id) => { registered.push(id); return { dispose() {} }; } } };
-	const { registerServerCommands, EDITOR_OWNED_COMMANDS, SERVER_COMMANDS, RUN_WORKFLOW_COMMAND } = loadModule('serverCommands', stub);
+	const modules = new Map();
+	const { registerServerCommands, EDITOR_OWNED_COMMANDS, SERVER_COMMANDS, RUN_WORKFLOW_COMMAND } = loadModule('serverCommands', stub, modules);
 	registerServerCommands(() => undefined);
 	assert.deepEqual(registered, [...SERVER_COMMANDS]);
-	for (const id of registered) assert.ok(EDITOR_OWNED_COMMANDS.has(id), `${id} is registered locally but not filtered`);
 	assert.equal(RUN_WORKFLOW_COMMAND, 'suspect.runWorkflow');
 	assert.ok(EDITOR_OWNED_COMMANDS.has(RUN_WORKFLOW_COMMAND));
+
+	const { suspectCapabilities, clientProtocol } = loadModule('protocol', stub, modules);
+	const declared = new Set(clientProtocol().clientCommands);
+	for (const id of [...registered, RUN_WORKFLOW_COMMAND]) assert.ok(declared.has(id), `${id} is registered locally but not declared`);
+	const capabilities = { experimental: { other: 1 } };
+	suspectCapabilities().fillClientCapabilities(capabilities);
+	assert.deepEqual(capabilities.experimental.other, 1, 'other experimental capabilities survive');
+	assert.deepEqual(capabilities.experimental.suspect.clientCommands, [...EDITOR_OWNED_COMMANDS]);
+
 	const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
-	assert.ok(extension.includes('!EDITOR_OWNED_COMMANDS.has(command)'), 'the client filters with the exported list');
+	assert.ok(extension.includes('registerFeature(suspectCapabilities())'), 'the client sends the declaration');
+	assert.ok(!extension.includes('commands.register ='), 'the language client is not patched');
 	assert.ok(extension.includes("configurationSection: 'suspect'"), 'settings changes reach the server');
+});
+
+test('features are checked against the server advertisement', () => {
+	const { requestVersion, serverProtocol } = loadModule('protocol', {});
+	const client = (experimental) => ({ initializeResult: { capabilities: { experimental } } });
+	const advertised = client({ suspect: { protocol: 1, requests: { 'suspect/renderSdk': 1 }, commands: {} } });
+	assert.equal(requestVersion(advertised, 'suspect/renderSdk'), 1);
+	assert.equal(requestVersion(advertised, 'suspect/documentKind'), undefined);
+	// A server older than the advertisement is protocol 0.
+	assert.equal(serverProtocol(client(undefined)), undefined);
+	assert.equal(requestVersion(client(undefined), 'suspect/renderSdk'), undefined);
+	assert.equal(requestVersion(undefined, 'suspect/renderSdk'), undefined);
 });
 
 test('the CLI binary honors the deprecated suspect.server.path only while suspect.basePath is default', () => {
