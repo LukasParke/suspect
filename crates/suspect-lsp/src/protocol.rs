@@ -14,11 +14,41 @@
 //! them out of `executeCommandProvider`, so the client does not register
 //! them twice, and still executes them when the client forwards them.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tower_lsp::lsp_types::ClientCapabilities;
 use tower_lsp::lsp_types::request::Request;
 
 use crate::{generation_contract, links, render_sdk, run_lenses};
+
+/// `suspect/documentKind`: what the server takes a document to be, the
+/// same value that gates its document features.
+pub enum DocumentKindRequest {}
+
+/// Params of `suspect/documentKind`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentKindParams {
+    /// The document; read from disk when it is not open.
+    pub uri: String,
+}
+
+/// Result of `suspect/documentKind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentKindResult {
+    /// `openapi`, `swagger`, `arazzo`, `overlay`, `load`, `config`,
+    /// `fragment` or `none`.
+    pub kind: String,
+    /// The spec family's `major.minor` (`"3.1"`, `"1.0"`), for the spec
+    /// kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+impl Request for DocumentKindRequest {
+    type Params = DocumentKindParams;
+    type Result = DocumentKindResult;
+    const METHOD: &'static str = "suspect/documentKind";
+}
 
 /// A protocol entry and its version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +77,10 @@ pub const REQUESTS: &[Versioned] = &[
     #[cfg(feature = "live-run")]
     Versioned {
         name: <run_lenses::RunWorkflowRequest as Request>::METHOD,
+        version: 1,
+    },
+    Versioned {
+        name: <DocumentKindRequest as Request>::METHOD,
         version: 1,
     },
 ];

@@ -62,7 +62,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::generation_contract::GenerationContractResult;
-use state::{OpenDoc, State, lsp_range, offset_of_utf16};
+use state::{DocKind, FragmentIndex, OpenDoc, State, lsp_range, offset_of_utf16};
 use std::collections::HashMap;
 use suspect_source::Uri;
 use tower_lsp::Client;
@@ -1191,6 +1191,9 @@ impl LanguageServer for Backend {
         ) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let Some(ws) = self.workspace_for(&uri).await else {
             return Ok(None);
         };
@@ -1251,6 +1254,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         // Cached like its whole-document siblings (folds, links): the
         // outline is re-requested on focus changes, and a tab switch back
         // to an unchanged file should not re-walk the tree.
@@ -1949,6 +1955,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         // The document is taken and the guard released before the
         // workspace is asked for: holding one across the other is what
         // deadlocked this handler, and with it every request behind it.
@@ -1987,6 +1996,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let st = self.state.read().await;
         let Some(doc) = st.docs.get(&uri) else {
             return Ok(None);
@@ -2220,6 +2232,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document_position.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let ws = self.workspace_for(&uri).await;
         // The document is cloned out and the guard released before the
         // match below: the `Refs` arm needs the semantic index, and taking
@@ -2374,6 +2389,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         // Resolve the workspace first: `workspace_for` may take the state
         // write lock, so it must not run under this handler's read guard.
         let ws = self.workspace_for(&uri).await;
@@ -2467,6 +2485,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let st = self.state.read().await;
         let Some(doc) = st.docs.get(&uri) else {
             return Ok(None);
@@ -2965,6 +2986,79 @@ impl Backend {
             .await;
     }
     /// Handler for the `suspect/runWorkflow` custom request.
+    /// `suspect/documentKind`. An open document is a lookup; a closed one
+    /// is parsed from disk, as `did_open` would.
+    async fn document_kind_request(
+        &self,
+        params: protocol::DocumentKindParams,
+    ) -> JsonRpcResult<protocol::DocumentKindResult> {
+        let invalid = |message: String| tower_lsp::jsonrpc::Error::invalid_params(message);
+        let uri = Uri::parse(&params.uri).map_err(|e| invalid(format!("{}: {e}", params.uri)))?;
+        let open = {
+            let st = self.state.read().await;
+            st.docs.get(&uri).map(|d| (d.kind, d.low.sniff_family()))
+        };
+        let (own, family) = match open {
+            Some(known) => known,
+            None => {
+                let path = uri
+                    .as_path()
+                    .ok_or_else(|| invalid(format!("not a file: {}", params.uri)))?;
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| invalid(format!("cannot read {}: {e}", path.display())))?;
+                let low = suspect_low::LowDoc::parse(
+                    uri.clone(),
+                    suspect_source::Source::from_vec(bytes),
+                );
+                (DocKind::of(&uri, &low), low.sniff_family())
+            }
+        };
+        let kind = self.doc_kind(&uri, Some(own)).await;
+        Ok(protocol::DocumentKindResult {
+            kind: kind.as_str().to_owned(),
+            version: state::family_version(family).map(str::to_owned),
+        })
+    }
+
+    /// What `uri` is: its own kind (an open document's, or `own` for one
+    /// that is not open), with a family-less document refined to
+    /// `Fragment` when it belongs to a loaded spec.
+    async fn doc_kind(&self, uri: &Uri, own: Option<DocKind>) -> DocKind {
+        let own = match own {
+            Some(kind) => kind,
+            None => match self.state.read().await.docs.get(uri) {
+                Some(doc) => doc.kind,
+                None => return DocKind::None,
+            },
+        };
+        if own != DocKind::None {
+            return own;
+        }
+        let Some(ws) = self.workspace_for(uri).await else {
+            return DocKind::None;
+        };
+        let cached = self.state.read().await.cached_fragments(&ws);
+        let index = match cached {
+            Some(index) => index,
+            None => {
+                // Built without the lock, like the reference index.
+                let root = self.state.read().await.root.clone();
+                let built = Arc::new(FragmentIndex::build(&ws, root.as_deref()));
+                self.state.write().await.store_fragments(&ws, built.clone());
+                built
+            }
+        };
+        index.kind_of(uri, own)
+    }
+
+    /// Whether the document features answer for `uri`. Diagnostics, lenses,
+    /// inlay hints and semantic tokens are already empty for a family-less
+    /// document; formatting, hover, completion, code actions, symbols and
+    /// links check this, so `docker-compose.yml` is left alone.
+    async fn serves(&self, uri: &Uri) -> bool {
+        self.doc_kind(uri, None).await.is_served()
+    }
+
     async fn run_workflow_request(
         &self,
         params: run_lenses::RunWorkflowParams,
@@ -3308,6 +3402,10 @@ async fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
         .custom_method(
             <render_sdk::RenderSdkRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::render_sdk_request,
+        )
+        .custom_method(
+            <protocol::DocumentKindRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::document_kind_request,
         )
         .finish()
 }

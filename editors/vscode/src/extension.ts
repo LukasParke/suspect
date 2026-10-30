@@ -15,6 +15,7 @@ import { registerProjectView } from './projectView';
 import { openSuspectConfig, setSeverityFloor } from './config';
 import { generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
 import { suspectCapabilities } from './protocol';
+import { DocumentKindTracker, trackDocumentKind } from './documentKind';
 import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
@@ -31,6 +32,8 @@ let gatewayStatus: vscode.StatusBarItem | undefined;
 let sdkGeneration: SdkGenerationController | undefined;
 /** The extension's own package version, sent to the server, which checks it. */
 let extensionVersion: string | undefined;
+/** Keeps the `suspect.documentKind` context key current; shared across client restarts. */
+let documentKinds: DocumentKindTracker | undefined;
 /** Watches the committed config layers; shared across client restarts. */
 let configWatcher: vscode.FileSystemWatcher | undefined;
 
@@ -64,6 +67,8 @@ export function activate(context: vscode.ExtensionContext): void {
 	// the client declares these ids as its own in the handshake.
 	context.subscriptions.push(...registerServerCommands(() => client));
 	context.subscriptions.push(...registerLiveSdkPreview(() => client));
+	documentKinds = trackDocumentKind(() => client);
+	context.subscriptions.push(...documentKinds.disposables);
 	// The committed config layers the server merges under the editor settings:
 	// suspect-config's CONFIG_NAMES plus the project manifest.
 	configWatcher = vscode.workspace.createFileSystemWatcher('**/{.suspect.yaml,.suspect.yml,suspect.yaml,suspect.yml,suspect.project.json}');
@@ -116,7 +121,7 @@ function startClient(): void {
 	// server leaves them out of executeCommandProvider and the client does
 	// not register them twice, and the extension version the server checks.
 	current.registerFeature(suspectCapabilities(extensionVersion));
-	void Promise.resolve(current.start()).catch((err: unknown) => {
+	void Promise.resolve(current.start()).then(() => documentKinds?.refresh(), (err: unknown) => {
 		if (client === current) client = undefined;
 		const message = errorMessage(err);
 		const missing = /ENOENT|Launching server using command/.test(message);

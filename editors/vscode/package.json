@@ -13,7 +13,9 @@
 		"onLanguage:json",
 		"workspaceContains:**/suspect.project.json",
 		"workspaceContains:**/.suspect.yaml",
-		"workspaceContains:**/*.arazzo.{yaml,yml}"
+		"workspaceContains:**/*.arazzo.{yaml,yml}",
+		"workspaceContains:**/*.openapi.{yaml,yml,json}",
+		"workspaceContains:**/*.overlay.{yaml,yml}"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
@@ -364,17 +366,17 @@
 			"editor/context": [
 				{
 					"command": "suspect.generateExample",
-					"when": "editorTextFocus && resourceScheme == file",
+					"when": "editorTextFocus && resourceScheme == file && suspect.documentKind =~ /^(openapi|fragment)$/",
 					"group": "9_suspect"
 				},
 				{
 					"command": "suspect.extractSchema",
-					"when": "editorTextFocus && resourceScheme == file",
+					"when": "editorTextFocus && resourceScheme == file && suspect.documentKind =~ /^(openapi|fragment)$/",
 					"group": "9_suspect"
 				},
 				{
 					"command": "suspect.inlineSchema",
-					"when": "editorTextFocus && resourceScheme == file",
+					"when": "editorTextFocus && resourceScheme == file && suspect.documentKind =~ /^(openapi|fragment)$/",
 					"group": "9_suspect"
 				}
 			]

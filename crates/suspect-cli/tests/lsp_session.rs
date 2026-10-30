@@ -2425,3 +2425,144 @@ fn an_extension_one_patch_apart_gets_no_warning() {
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(version_warnings(&editor), Vec::<String>::new());
 }
+
+/// A project with non-spec YAML and JSON beside the spec: `api/` holds the
+/// spec and a `$ref`'d fragment, the root holds a compose file, a package
+/// manifest and the suspect config.
+struct MixedProject {
+    _dir: tempfile::TempDir,
+    root: std::path::PathBuf,
+    spec: std::path::PathBuf,
+    fragment: std::path::PathBuf,
+    compose: std::path::PathBuf,
+    package: std::path::PathBuf,
+}
+
+const PET_FRAGMENT: &str = "type: object\nproperties:\n  name:\n    type: string\n";
+const COMPOSE: &str = "services:\n    web:\n        image: nginx\n";
+const PACKAGE: &str = "{\"name\":\"x\",\"version\":\"1.0.0\",\"scripts\":{\"build\":\"tsc\"}}\n";
+
+fn mixed_project() -> MixedProject {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    let api = root.join("api");
+    std::fs::create_dir_all(api.join("schemas")).expect("dirs");
+    let spec = api.join("openapi.yaml");
+    std::fs::write(
+        &spec,
+        "openapi: 3.1.0\ninfo:\n  title: Pets\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Pet:\n      $ref: 'schemas/Pet.yaml'\n",
+    )
+    .expect("spec");
+    let fragment = api.join("schemas/Pet.yaml");
+    std::fs::write(&fragment, PET_FRAGMENT).expect("fragment");
+    let compose = root.join("docker-compose.yml");
+    std::fs::write(&compose, COMPOSE).expect("compose");
+    let package = root.join("package.json");
+    std::fs::write(&package, PACKAGE).expect("package");
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "lint:\n  min_severity: warning\n",
+    )
+    .expect("config");
+    std::fs::write(root.join("notes.yaml"), "todo: []\n").expect("notes");
+    MixedProject {
+        _dir: dir,
+        root,
+        spec,
+        fragment,
+        compose,
+        package,
+    }
+}
+
+fn formatting(editor: &Editor, uri: &str) -> Value {
+    editor
+        .request(
+            "textDocument/formatting",
+            serde_json::json!({
+                "textDocument": {"uri": uri},
+                "options": {"tabSize": 2, "insertSpaces": true},
+            }),
+        )
+        .expect("formatting")
+}
+
+/// The server leaves non-spec YAML and JSON alone: no formatting, hover,
+/// symbols or links on `docker-compose.yml` and `package.json`, while a
+/// `$ref`'d fragment keeps hover.
+#[test]
+fn non_spec_documents_get_no_formatting_or_hover_and_fragments_keep_hover() {
+    let project = mixed_project();
+    let editor = Editor::start(&project.root, editor_capabilities());
+    let spec_text = std::fs::read_to_string(&project.spec).expect("read");
+    editor.open(&project.spec, &spec_text);
+    let fragment = editor.open(&project.fragment, PET_FRAGMENT);
+    let compose = editor.open(&project.compose, COMPOSE);
+    let package = editor.open(&project.package, PACKAGE);
+
+    for uri in [&compose, &package] {
+        assert_eq!(formatting(&editor, uri), Value::Null, "formatting {uri}");
+        let hover = editor
+            .request(
+                "textDocument/hover",
+                serde_json::json!({"textDocument": {"uri": uri}, "position": at(1, 3)}),
+            )
+            .expect("hover");
+        assert_eq!(hover, Value::Null, "hover {uri}");
+        for method in ["textDocument/documentSymbol", "textDocument/documentLink"] {
+            let answer = editor.request(method, doc(uri)).expect(method);
+            assert_eq!(answer, Value::Null, "{method} {uri}");
+        }
+    }
+
+    let (line, column) = (3, 3); // `name` under `properties`
+    let text = editor
+        .hover(&fragment, line, column)
+        .expect("fragment hover");
+    assert!(!text.is_empty(), "a $ref'd fragment lost its hover");
+}
+
+/// `suspect/documentKind` reports the same kind the gating uses, for open
+/// documents and for files that are not open.
+#[test]
+fn document_kind_names_each_document() {
+    let project = mixed_project();
+    let editor = Editor::start(&project.root, editor_capabilities());
+    let spec_text = std::fs::read_to_string(&project.spec).expect("read");
+    editor.open(&project.spec, &spec_text);
+    editor.open(&project.compose, COMPOSE);
+
+    let kind = |path: &std::path::Path| {
+        editor
+            .request(
+                "suspect/documentKind",
+                serde_json::json!({"uri": url_of(path)}),
+            )
+            .expect("documentKind")
+    };
+    let table = [
+        (project.spec.clone(), "openapi", Some("3.1")),
+        (project.fragment.clone(), "fragment", None),
+        (project.compose.clone(), "none", None),
+        (project.package.clone(), "none", None),
+        (project.root.join(".suspect.yaml"), "config", None),
+        (project.root.join("notes.yaml"), "none", None),
+    ];
+    for (path, want, version) in table {
+        let answer = kind(&path);
+        assert_eq!(answer["kind"], want, "{}: {answer}", path.display());
+        assert_eq!(
+            answer.get("version").and_then(Value::as_str),
+            version,
+            "{}: {answer}",
+            path.display()
+        );
+    }
+    let missing = editor
+        .request_outcome(
+            "suspect/documentKind",
+            serde_json::json!({"uri": url_of(&project.root.join("absent.yaml"))}),
+        )
+        .expect("an answer");
+    assert!(missing.is_err(), "a missing file is an error: {missing:?}");
+}

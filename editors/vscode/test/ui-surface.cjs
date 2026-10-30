@@ -342,6 +342,39 @@ test('features are checked against the server advertisement', () => {
 	assert.equal(requestVersion(undefined, 'suspect/renderSdk'), undefined);
 });
 
+test('spec-only editor entries follow the server document kind, and spec files activate the extension', () => {
+	const context = packageManifest.contributes.menus['editor/context'];
+	for (const name of ['suspect.generateExample', 'suspect.extractSchema', 'suspect.inlineSchema']) {
+		const entry = context.find((e) => e.command === name);
+		assert.ok(entry, `${name} is in the editor context menu`);
+		assert.match(entry.when, /suspect\.documentKind =~ \/\^\(openapi\|fragment\)\$\//, `${name} is gated on the document kind`);
+	}
+	const events = packageManifest.activationEvents;
+	for (const glob of ['**/*.openapi.{yaml,yml,json}', '**/*.overlay.{yaml,yml}', '**/*.arazzo.{yaml,yml}']) {
+		assert.ok(events.includes(`workspaceContains:${glob}`), `activates on ${glob}`);
+	}
+	// An OpenAPI document named api.json must still activate.
+	assert.ok(events.includes('onLanguage:yaml') && events.includes('onLanguage:json'));
+});
+
+test('the document kind comes from the server, and only when it offers the request', async () => {
+	const { documentKind, DOCUMENT_KIND_REQUEST } = loadModule('documentKind', {});
+	const sent = [];
+	const client = (requests, answer) => ({
+		initializeResult: { capabilities: { experimental: { suspect: { protocol: 1, requests, commands: {} } } } },
+		sendRequest: async (method, params) => { sent.push([method, params]); if (answer instanceof Error) throw answer; return answer; },
+	});
+	const file = { scheme: 'file', toString: () => 'file:///w/openapi.yaml' };
+	assert.equal(await documentKind(client({ [DOCUMENT_KIND_REQUEST]: 1 }, { kind: 'openapi', version: '3.1' }), file), 'openapi');
+	assert.deepEqual(sent, [['suspect/documentKind', { uri: 'file:///w/openapi.yaml' }]]);
+	// A server that predates the request is not asked.
+	assert.equal(await documentKind(client({}, { kind: 'openapi' }), file), undefined);
+	assert.equal(sent.length, 1);
+	assert.equal(await documentKind(undefined, file), undefined);
+	assert.equal(await documentKind(client({ [DOCUMENT_KIND_REQUEST]: 1 }, { kind: 'none' }), { scheme: 'untitled', toString: () => 'untitled:1' }), undefined);
+	assert.equal(await documentKind(client({ [DOCUMENT_KIND_REQUEST]: 1 }, new Error('gone')), file), undefined);
+});
+
 test('the CLI binary honors the deprecated suspect.server.path only while suspect.basePath is default', () => {
 	const settings = new Map();
 	const stub = { workspace: { getConfiguration: () => ({ get: (key) => settings.get(key) }) } };

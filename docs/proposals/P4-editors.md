@@ -721,12 +721,25 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    (VS Code) first, then `initializationOptions.extensionVersion` (Zed,
    merged into the user's `lsp.suspect-lsp.initialization_options`). A
    version that does not parse is not a mismatch.
-3. **`DocKind`, gating, `suspect/documentKind`.** `state.rs`, `lib.rs`
+3. **Done.** **`DocKind`, gating, `suspect/documentKind`.** `state.rs`, `lib.rs`
    handlers, VS Code context key and `when` clauses, activation globs, Zed
    README opt-out. Tests: an `lsp_session` case that opens
    `docker-compose.yml`, `package.json` and a `$ref`'d fragment and
    asserts no formatting or hover on the first two and hover on the
    fragment; a `documentKind` table test. 1 day.
+   As built: `OpenDoc.kind` holds the document's own kind (family or
+   config name); `Fragment` is resolved against a `FragmentIndex` cached
+   per workspace state (the workspace pointer plus its document count,
+   which grows as documents load). Open question 2 is taken with one
+   narrowing: a spec at the workspace root does not make the whole tree
+   fragments (its `package.json`, `docker-compose.yml` and `.github/`
+   would all qualify), so there only `$ref` targets count; a spec in
+   `api/` claims `api/` and below. `version` in the result is the family's
+   `major.minor`. The context key refreshes on editor switches, on save of
+   the active document and once the client starts; a server without the
+   request leaves it unset, which hides the three spec-only menu entries.
+   The host smoke was not extended (VS Code has no API to read a context
+   key).
 4. **Settings generation** (after P2.7). `editors/vscode/scripts/settings.cjs`,
    `settings.editor.json`, `schemas/suspect.schema.json`,
    `src/settings.generated.ts`, `test/settings.cjs`; regenerate
