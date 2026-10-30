@@ -24,6 +24,9 @@ cargo deny check                      # cargo install cargo-deny
 
 # VS Code extension
 cd editors/vscode && npm ci && npm run compile && npm run test:headless
+# ...and in a real VS Code window (desktop session; macOS app path by default,
+# SUSPECT_VSCODE_BIN overrides it)
+cargo build -p suspect-cli && (cd editors/vscode && npm run test:host:smoke)
 
 # Zed extension
 cd editors/zed && rustup target add wasm32-wasip1 && cargo build --target wasm32-wasip1

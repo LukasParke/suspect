@@ -450,7 +450,8 @@
 		"test:generation": "node --test test/generation*.cjs",
 		"test:generation:protocol": "node --test test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs",
 		"test:generation:host": "node test/native-host/run.cjs",
-		"test:generation:host:inputs": "node --test test/native-host/contract.test.cjs"
+		"test:generation:host:inputs": "node --test test/native-host/contract.test.cjs",
+		"test:host:smoke": "node test/host-smoke/run.cjs"
 	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.0"

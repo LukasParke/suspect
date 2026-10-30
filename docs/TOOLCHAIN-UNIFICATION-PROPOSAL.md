@@ -393,6 +393,13 @@ Defects fixed directly, alongside this proposal:
   the server cwd; code actions used a different diagnostic set than published
   diagnostics; initialization options were consumed on first read, so later
   reloads and `runWorkflow` lost them.
+- LSP, found by running the extension in a real VS Code: the server both
+  pushed and served pulled diagnostics, so VS Code listed every finding
+  twice; `workspace/diagnostic` ignored the severity floor; pull result ids
+  hashed the unfiltered findings, so a floor change answered "unchanged";
+  and a report computed under the old policy could be cached after a config
+  change cleared the caches. `npm run test:host:smoke` now checks this in a
+  real VS Code window.
 - Zed: binary lookup inside the WASI sandbox, `binary.path` ignored, README
   documented methods the server does not implement; smoke script hard-coded
   a local path and the wrong server id.
