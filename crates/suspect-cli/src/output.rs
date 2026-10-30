@@ -12,8 +12,10 @@ pub enum Severity {
     /// Stylistic or preference-level note; never affects the exit code.
     Hint,
     /// Informational message worth surfacing but not actionable.
+    #[value(alias = "information")]
     Info,
     /// Suspicious construct that likely deserves attention.
+    #[value(alias = "warn")]
     Warning,
     /// Definite problem; makes the command exit 1.
     Error,
@@ -39,6 +41,19 @@ impl Severity {
             Severity::Info => "INFO",
             Severity::Warning => "WARNING",
             Severity::Error => "ERROR",
+        }
+    }
+
+    /// Maps a configured severity name onto the unified model; `None` for
+    /// `off`, which has no rank.
+    #[must_use]
+    pub fn from_config(name: suspect_config::SeverityName) -> Option<Self> {
+        match name {
+            suspect_config::SeverityName::Error => Some(Severity::Error),
+            suspect_config::SeverityName::Warning => Some(Severity::Warning),
+            suspect_config::SeverityName::Info => Some(Severity::Info),
+            suspect_config::SeverityName::Hint => Some(Severity::Hint),
+            suspect_config::SeverityName::Off => None,
         }
     }
 }

@@ -253,7 +253,8 @@ pub fn arazzo_diff(args: &ArazzoDiffArgs) -> anyhow::Result<i32> {
         .collect();
     match args.text.format {
         crate::OutputFormat::Text => output::print_findings(&rendered),
-        crate::OutputFormat::Json | crate::OutputFormat::Sarif => output::print_json(&findings)?,
+        crate::OutputFormat::Json => output::print_json(&rendered)?,
+        crate::OutputFormat::Sarif => crate::sarif::print_sarif(&rendered)?,
     }
     Ok(i32::from(!findings.is_empty()))
 }

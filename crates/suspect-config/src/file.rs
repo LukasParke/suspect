@@ -85,6 +85,7 @@ fn load_manifest_policy(path: &Path) -> Loaded {
             settings: crate::Settings::default(),
             path: None,
             root: dir,
+            explicit: crate::ExplicitBools::default(),
         },
     }
 }
@@ -118,13 +119,20 @@ pub fn load(path: &Path) -> Result<Loaded, ConfigError> {
             .map(str::to_owned)
             .filter(|s| !s.is_empty())
     };
-    let bool_at = |section: &str, key: &str| -> bool {
-        doc.root()
-            .get(section)
-            .and_then(|s| s.get(key))
-            .and_then(|v| v.as_str())
-            .is_some_and(|v| v == "true")
+    // A YAML/JSON boolean (`true`, `False`, ...); a quoted `"true"` or
+    // `"false"` is accepted too, as earlier files spelled it that way.
+    // `None` when the key is absent, so a layer can say `false` explicitly.
+    let bool_at = |section: &str, key: &str| -> Option<bool> {
+        let value = doc.root().get(section)?.get(key)?;
+        value.as_bool().or_else(|| match value.as_str()? {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        })
     };
+    let strict_format = bool_at("validate", "strict_format");
+    let format_json = bool_at("format", "json");
+    let format_yaml = bool_at("format", "yaml");
     // `lint.rules`: rule id → severity, as a plain mapping.
     let lint_rules = doc
         .root()
@@ -154,11 +162,11 @@ pub fn load(path: &Path) -> Result<Loaded, ConfigError> {
                 rules: lint_rules,
             },
             validate: crate::ValidateSettings {
-                strict_format: bool_at("validate", "strict_format"),
+                strict_format: strict_format.unwrap_or(false),
             },
             format: crate::FormatSettings {
-                json: bool_at("format", "json"),
-                yaml: bool_at("format", "yaml"),
+                json: format_json.unwrap_or(false),
+                yaml: format_yaml.unwrap_or(false),
             },
             docs: crate::DocsSettings {
                 style: text_at("docs", "style"),
@@ -172,5 +180,77 @@ pub fn load(path: &Path) -> Result<Loaded, ConfigError> {
         },
         path: Some(path.to_path_buf()),
         root,
+        explicit: crate::ExplicitBools {
+            strict_format,
+            format_json,
+            format_yaml,
+        },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load_text(text: &str) -> Loaded {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".suspect.yaml");
+        std::fs::write(&path, text).expect("write");
+        load(&path).expect("load")
+    }
+
+    #[test]
+    fn booleans_parse_as_yaml_booleans() {
+        let loaded = load_text("validate:\n  strict_format: True\nformat:\n  json: false\n");
+        assert!(loaded.settings.validate.strict_format);
+        assert_eq!(loaded.explicit.strict_format, Some(true));
+        assert!(!loaded.settings.format.json);
+        assert_eq!(loaded.explicit.format_json, Some(false));
+        assert_eq!(loaded.explicit.format_yaml, None, "absent stays unset");
+    }
+
+    #[test]
+    fn json_style_booleans_parse() {
+        let loaded = load_text("{\"validate\": {\"strict_format\": true}}\n");
+        assert!(loaded.settings.validate.strict_format);
+    }
+
+    #[test]
+    fn a_settings_file_false_overrides_a_manifest_true() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(crate::MANIFEST_NAME),
+            r#"{"validate": {"strict_format": true}}"#,
+        )
+        .expect("manifest");
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "validate:\n  strict_format: false\n",
+        )
+        .expect("settings");
+        let found = discover(dir.path().join("openapi.yaml").as_path())
+            .expect("discover")
+            .expect("found");
+        assert!(!found.settings.validate.strict_format);
+        assert_eq!(found.explicit.strict_format, Some(false));
+    }
+
+    #[test]
+    fn an_absent_key_leaves_the_manifest_value() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(crate::MANIFEST_NAME),
+            r#"{"validate": {"strict_format": true}}"#,
+        )
+        .expect("manifest");
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: warn\n",
+        )
+        .expect("settings");
+        let found = discover(dir.path().join("openapi.yaml").as_path())
+            .expect("discover")
+            .expect("found");
+        assert!(found.settings.validate.strict_format);
+    }
 }

@@ -25,9 +25,11 @@ use std::path::{Path, PathBuf};
 
 pub mod file;
 pub mod resolve;
+pub mod severity;
 
 pub use file::{CONFIG_NAMES, discover, load};
 pub use resolve::{Layer, Resolution, resolve_bool, resolve_str};
+pub use severity::{SeverityName, parse_severity};
 
 /// The toolchain's settings.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -104,6 +106,21 @@ pub struct Loaded {
     pub path: Option<PathBuf>,
     /// The directory relative paths resolve against.
     pub root: PathBuf,
+    /// Which boolean settings this layer set explicitly, so layering can
+    /// let a higher layer turn a lower layer's `true` back off.
+    pub explicit: ExplicitBools,
+}
+
+/// The boolean settings a layer carried explicitly: `None` when the key
+/// was absent, `Some(value)` when it was written (including `false`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExplicitBools {
+    /// `validate.strict_format`.
+    pub strict_format: Option<bool>,
+    /// `format.json`.
+    pub format_json: Option<bool>,
+    /// `format.yaml`.
+    pub format_yaml: Option<bool>,
 }
 
 impl Loaded {
@@ -114,6 +131,7 @@ impl Loaded {
             settings: Settings::default(),
             path: None,
             root: PathBuf::from("."),
+            explicit: ExplicitBools::default(),
         }
     }
 
@@ -187,6 +205,9 @@ impl Loaded {
         let resolve = |relative: &str| root.join(relative);
         let lint = policy.get("lint");
         let validate = policy.get("validate");
+        let strict_format = validate
+            .and_then(|v| v.get("strict_format"))
+            .and_then(serde_json::Value::as_bool);
         Loaded {
             settings: Settings {
                 lint: crate::LintSettings {
@@ -219,15 +240,16 @@ impl Loaded {
                         .unwrap_or_default(),
                 },
                 validate: crate::ValidateSettings {
-                    strict_format: validate
-                        .and_then(|v| v.get("strict_format"))
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false),
+                    strict_format: strict_format.unwrap_or(false),
                 },
                 ..Settings::default()
             },
             path: None,
             root,
+            explicit: ExplicitBools {
+                strict_format,
+                ..ExplicitBools::default()
+            },
         }
     }
 
@@ -238,15 +260,47 @@ impl Loaded {
     pub fn layered(base: Loaded, upper: Loaded) -> Loaded {
         let mut s = base.settings;
         let u = upper.settings;
+        // Booleans: the upper layer wins whenever it wrote the key, `false`
+        // included. A hand-built layer without `explicit` still counts a
+        // `true` as set.
+        let pick = |upper_explicit: Option<bool>,
+                    upper_value: bool,
+                    base_explicit: Option<bool>,
+                    base_value: bool| {
+            upper_explicit
+                .or(upper_value.then_some(true))
+                .or(base_explicit)
+                .or(base_value.then_some(true))
+        };
+        let explicit = ExplicitBools {
+            strict_format: pick(
+                upper.explicit.strict_format,
+                u.validate.strict_format,
+                base.explicit.strict_format,
+                s.validate.strict_format,
+            ),
+            format_json: pick(
+                upper.explicit.format_json,
+                u.format.json,
+                base.explicit.format_json,
+                s.format.json,
+            ),
+            format_yaml: pick(
+                upper.explicit.format_yaml,
+                u.format.yaml,
+                base.explicit.format_yaml,
+                s.format.yaml,
+            ),
+        };
         s.lint.ruleset = u.lint.ruleset.or(s.lint.ruleset);
         s.lint.min_severity = u.lint.min_severity.or(s.lint.min_severity);
         s.lint.design = u.lint.design.or(s.lint.design);
         for (code, severity) in u.lint.rules {
             s.lint.rules.insert(code, severity);
         }
-        s.validate.strict_format |= u.validate.strict_format;
-        s.format.json |= u.format.json;
-        s.format.yaml |= u.format.yaml;
+        s.validate.strict_format = explicit.strict_format.unwrap_or(false);
+        s.format.json = explicit.format_json.unwrap_or(false);
+        s.format.yaml = explicit.format_yaml.unwrap_or(false);
         s.docs.style = u.docs.style.or(s.docs.style);
         s.docs.out = u.docs.out.or(s.docs.out);
         s.codegen.out = u.codegen.out.or(s.codegen.out);
@@ -260,6 +314,7 @@ impl Loaded {
             } else {
                 upper.root
             },
+            explicit,
         }
     }
 }
@@ -320,6 +375,7 @@ mod tests {
             },
             path: Some(PathBuf::from("/p/.suspect.yaml")),
             root: PathBuf::from("/p"),
+            explicit: ExplicitBools::default(),
         };
         let text = loaded.describe();
         for expected in [
@@ -417,6 +473,7 @@ mod manifest_layer_tests {
             },
             path: None,
             root: dir.path().to_path_buf(),
+            explicit: ExplicitBools::default(),
         };
         let layered = Loaded::layered(base, upper);
         // The settings file wins for the keys it carries; the manifest's
@@ -450,6 +507,7 @@ mod manifest_layer_tests {
             },
             path: None,
             root: dir.path().to_path_buf(),
+            explicit: ExplicitBools::default(),
         };
         let layered = Loaded::layered(base, upper);
         // The settings file wins where it carries a value; the manifest

@@ -32,7 +32,8 @@ pub fn build_linter(ruleset: Option<&Path>) -> anyhow::Result<Linter> {
     match ruleset {
         None => Ok(Linter::spectral_default()),
         Some(path) => {
-            let source = Source::from_path(path)?;
+            let source = Source::from_path(path)
+                .map_err(|e| anyhow::anyhow!("ruleset {}: {e}", path.display()))?;
             let uri = Uri::from_path(path)?;
             let doc = LowDoc::parse(uri, source);
             Linter::from_ruleset(&doc).map_err(|e| anyhow::anyhow!("ruleset error: {e}"))

@@ -94,6 +94,9 @@ pub fn resolve_str(
 }
 
 /// Resolves a boolean setting from an environment variable name.
+///
+/// A clap `bool` flag cannot say "explicitly false", so only `true` counts
+/// as a flag value; an unset flag defers to the environment, then config.
 #[must_use]
 pub fn resolve_bool(flag: bool, key: &str, config: bool) -> bool {
     let env = std::env::var(key).ok().map(|v| {
@@ -102,7 +105,7 @@ pub fn resolve_bool(flag: bool, key: &str, config: bool) -> bool {
             "1" | "true" | "yes" | "on"
         )
     });
-    Resolution::new(Some(flag), env, Some(config), false).value
+    Resolution::new(flag.then_some(true), env, Some(config), false).value
 }
 
 #[cfg(test)]
@@ -181,5 +184,7 @@ mod tests {
         // only when set; the helper's contract is documented in the module.
         assert!(resolve_bool(true, "SUSPECT_TEST_UNSET_BOOL", false));
         assert!(!resolve_bool(false, "SUSPECT_TEST_UNSET_BOOL", false));
+        // An unset flag must not shadow the config value.
+        assert!(resolve_bool(false, "SUSPECT_TEST_UNSET_BOOL", true));
     }
 }

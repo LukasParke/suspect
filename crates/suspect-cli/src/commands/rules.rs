@@ -14,26 +14,21 @@ use suspect_source::{Source, Uri};
 use crate::output::{self, Finding, Severity};
 use crate::{OutputFormat, TextFormat};
 
+/// A rule's declared severity, with the shared config spellings
+/// (`warn`, `information`, ...); absent, `off`, or unknown names report as
+/// a warning.
 fn severity_from_str(s: Option<&str>) -> Severity {
-    match s {
-        Some("error") => Severity::Error,
-        Some("info") => Severity::Info,
-        Some("hint") => Severity::Hint,
-        _ => Severity::Warning,
-    }
+    s.and_then(suspect_config::parse_severity)
+        .and_then(Severity::from_config)
+        .unwrap_or(Severity::Warning)
 }
 
-fn load_doc(path: &std::path::Path) -> LowDoc {
-    match std::fs::read(path) {
-        Ok(bytes) => LowDoc::parse(
-            Uri::from(path.to_string_lossy().into_owned().leak() as &str),
-            Source::from_vec(bytes),
-        ),
-        Err(e) => {
-            eprintln!("error: {}: {e}", path.display());
-            std::process::exit(2);
-        }
-    }
+fn load_doc(path: &std::path::Path) -> anyhow::Result<LowDoc> {
+    let bytes = std::fs::read(path).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+    Ok(LowDoc::parse(
+        Uri::from(path.to_string_lossy().into_owned().leak() as &str),
+        Source::from_vec(bytes),
+    ))
 }
 
 fn to_findings(doc: &LowDoc, shown: &str, findings: Vec<suspect_rules::TsFinding>) -> Vec<Finding> {
@@ -60,16 +55,17 @@ fn to_findings(doc: &LowDoc, shown: &str, findings: Vec<suspect_rules::TsFinding
 }
 
 /// `suspect rules check <documents>` — run TS rules from `.suspect/rules`
-/// against each document through the Bun sidecar.
+/// against each document through the Bun sidecar. Returns 1 when an
+/// error-severity finding is reported, else 0.
 ///
 /// # Errors
-/// Document or runtime failures.
+/// Document or runtime failures, including an unavailable Bun.
 pub fn check(
     paths: &[PathBuf],
     timeout_ms: Option<u64>,
     min_severity: Severity,
     text: TextFormat,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<i32> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
@@ -81,7 +77,7 @@ async fn check_async(
     timeout_ms: Option<u64>,
     min_severity: Severity,
     text: TextFormat,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<i32> {
     let workspace_root = std::env::current_dir()?;
     let mut host = match RuleHost::start(StartOptions {
         workspace_root: workspace_root.clone(),
@@ -98,12 +94,10 @@ async fn check_async(
                 "no TS rules found (looked in {}) — nothing to do",
                 workspace_root.join(".suspect/rules").display()
             );
-            return Ok(());
+            return Ok(0);
         }
-        Err(RulesError::BunUnavailable(msg)) => {
-            eprintln!("error: {msg}");
-            std::process::exit(1);
-        }
+        // An environment failure, not a finding: surfaces as exit 2.
+        Err(RulesError::BunUnavailable(msg)) => return Err(anyhow::anyhow!("{msg}")),
         Err(e) => return Err(anyhow::anyhow!("{e}")),
     };
 
@@ -111,7 +105,7 @@ async fn check_async(
 
     let mut all: Vec<Finding> = Vec::new();
     for path in paths {
-        let doc = load_doc(path);
+        let doc = load_doc(path)?;
         let started = Instant::now();
         let found = host
             .evaluate(&doc)
@@ -129,7 +123,8 @@ async fn check_async(
 
     all.retain(|f| f.severity >= min_severity);
     match text.format {
-        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&all)?,
+        OutputFormat::Json => output::print_json(&all)?,
+        OutputFormat::Sarif => crate::sarif::print_sarif(&all)?,
         OutputFormat::Text => output::print_findings(&all),
     }
 
@@ -139,10 +134,7 @@ async fn check_async(
         eprintln!("disabled this session: {}", list.join(", "));
     }
     host.shutdown().await.ok();
-    if all.iter().any(|f| f.severity == Severity::Error) {
-        std::process::exit(1);
-    }
-    Ok(())
+    Ok(i32::from(all.iter().any(|f| f.severity == Severity::Error)))
 }
 
 /// `suspect rules new <name>` — scaffold a rule file under
@@ -178,7 +170,7 @@ async fn bench_async(
     timeout_ms: Option<u64>,
 ) -> anyhow::Result<()> {
     let workspace_root = std::env::current_dir()?;
-    let doc = load_doc(&path);
+    let doc = load_doc(&path)?;
 
     let started = Instant::now();
     let mut host = RuleHost::start(StartOptions {
@@ -269,7 +261,7 @@ impl RulesCmd {
     ///
     /// # Errors
     /// Whatever the selected subcommand surfaces.
-    pub fn run(self) -> anyhow::Result<()> {
+    pub fn run(self) -> anyhow::Result<i32> {
         match self {
             Self::Check {
                 paths,
@@ -277,12 +269,12 @@ impl RulesCmd {
                 min_severity,
                 text,
             } => check(&paths, Some(timeout_ms), min_severity, text),
-            Self::New { name, dir } => new(&name, dir),
+            Self::New { name, dir } => new(&name, dir).map(|()| 0),
             Self::Bench {
                 path,
                 iterations,
                 timeout_ms,
-            } => bench(path, iterations, Some(timeout_ms)),
+            } => bench(path, iterations, Some(timeout_ms)).map(|()| 0),
         }
     }
 }

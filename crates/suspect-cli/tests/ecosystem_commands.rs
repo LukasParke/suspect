@@ -58,9 +58,28 @@ definitions:
         String::from_utf8_lossy(&status.stderr)
     );
     let text = std::fs::read_to_string(&output).unwrap();
-    assert!(text.contains("\"openapi\": \"3.1.0\""));
+    // YAML in, YAML out.
+    assert!(text.contains("openapi: 3.1.0"), "{text}");
+    assert!(!text.trim_start().starts_with('{'), "{text}");
     assert!(text.contains("#/components/schemas/Pet"));
     assert!(text.contains("servers"));
+
+    // `--format json` overrides the extension.
+    let json_out = dir.path().join("upgraded.out");
+    let status = std::process::Command::new(binary())
+        .args([
+            "upgrade",
+            input.to_str().unwrap(),
+            "--output",
+            json_out.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let text = std::fs::read_to_string(&json_out).unwrap();
+    assert!(text.contains("\"openapi\": \"3.1.0\""), "{text}");
 }
 
 #[test]
@@ -173,6 +192,38 @@ fn arazzo_diff_is_quiet_when_compatible() {
     assert!(
         !stdout.contains("arazzo-breaking-change"),
         "identical revisions must report no findings: {stdout}"
+    );
+}
+
+#[test]
+fn arazzo_diff_json_and_sarif_carry_the_rendered_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = write(dir.path(), "old.arazzo.yaml", SUITE_OLD);
+    let new = write(dir.path(), "new.arazzo.yaml", SUITE_NEW_BREAKING);
+    let run = |format: &str| {
+        let output = std::process::Command::new(binary())
+            .args([
+                "arazzo-diff",
+                old.to_str().unwrap(),
+                new.to_str().unwrap(),
+                "--format",
+                format,
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "breaks exit 1");
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let json = run("json");
+    let first = &json.as_array().expect("finding array")[0];
+    // The shared Finding shape, not the upstream break records.
+    assert_eq!(first["code"], "arazzo-breaking-change");
+    assert_eq!(first["line"], 1);
+    let sarif = run("sarif");
+    assert_eq!(sarif["version"], "2.1.0");
+    assert_eq!(
+        sarif["runs"][0]["results"][0]["ruleId"],
+        "arazzo-breaking-change"
     );
 }
 
@@ -620,6 +671,73 @@ fn config_supplies_defaults_and_explicit_flags_win() {
             .starts_with('{'),
         "configured format.json applied"
     );
+}
+
+#[test]
+fn lint_severity_names_share_one_parser_and_unknown_names_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "api.yaml",
+        "openapi: 3.1.0\ninfo: {title: Lint API, version: '1'}\npaths: {}\n",
+    );
+    let lint = |config: &str| {
+        std::fs::write(root.join(".suspect.yaml"), config).unwrap();
+        std::process::Command::new(binary())
+            .args(["lint", "api.yaml"])
+            .env_remove("SUSPECT_LINT_MIN_SEVERITY")
+            .env_remove("SUSPECT_LINT_RULESET")
+            .current_dir(root)
+            .output()
+            .unwrap()
+    };
+    // `warn` is the ruleset spelling of `warning`.
+    let ok = lint("lint:\n  min_severity: warn\n");
+    assert_ne!(
+        ok.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    // An unknown name is a usage error naming the value, not a silent hint.
+    let bad = lint("lint:\n  min_severity: fatal\n");
+    assert_eq!(bad.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(stderr.contains("`fatal`"), "{stderr}");
+}
+
+#[test]
+fn lint_ruleset_resolves_flag_then_env_then_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "api.yaml",
+        "openapi: 3.1.0\ninfo: {title: Lint API, version: '1'}\npaths: {}\n",
+    );
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "lint:\n  ruleset: from-config.yaml\n",
+    )
+    .unwrap();
+    let lint = |env: Option<&str>, flag: Option<&str>| {
+        let mut cmd = std::process::Command::new(binary());
+        cmd.args(["lint", "api.yaml"]).current_dir(root);
+        if let Some(flag) = flag {
+            cmd.args(["--ruleset", flag]);
+        }
+        match env {
+            Some(env) => cmd.env("SUSPECT_LINT_RULESET", env),
+            None => cmd.env_remove("SUSPECT_LINT_RULESET"),
+        };
+        let output = cmd.output().unwrap();
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    // None of the rulesets exist, so the error names the one that won.
+    assert!(lint(None, None).contains("from-config.yaml"));
+    assert!(lint(Some("from-env.yaml"), None).contains("from-env.yaml"));
+    assert!(lint(Some("from-env.yaml"), Some("from-flag.yaml")).contains("from-flag.yaml"));
 }
 
 #[test]

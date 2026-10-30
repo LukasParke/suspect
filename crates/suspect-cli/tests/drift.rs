@@ -175,3 +175,56 @@ fn untested_operations_are_coverage_not_gaps() {
     assert_eq!(report.summary.endpoints_captured, 1);
     assert_eq!(report.summary.endpoints_in_spec, 6);
 }
+
+// ------------------------------------------------------------ binary contract
+
+const CLI_SPEC: &str = "openapi: 3.1.0\ninfo: {title: Drift, version: '1'}\npaths:\n  /pets:\n    get:\n      parameters:\n        - {name: limit, in: query, schema: {type: integer}}\n      responses:\n        '200': {description: ok}\n";
+
+/// Runs `suspect drift` over a spec and a one-line-per-record traffic file.
+fn run_drift(traffic: &str, extra: &[&str]) -> std::process::Output {
+    let dir = tempfile::tempdir().unwrap();
+    let spec = dir.path().join("openapi.yaml");
+    let cassette = dir.path().join("traffic.jsonl");
+    std::fs::write(&spec, CLI_SPEC).unwrap();
+    std::fs::write(&cassette, traffic).unwrap();
+    std::process::Command::new(env!("CARGO_BIN_EXE_suspect"))
+        .arg("drift")
+        .arg(&spec)
+        .arg(&cassette)
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+const GAPPY_TRAFFIC: &str = "{\"id\":\"1\",\"method\":\"GET\",\"url\":\"http://x/pets?limit=1&debug=1\",\"status\":200}\n{\"id\":\"2\",\"method\":\"DELETE\",\"url\":\"http://x/pets\",\"status\":204}\n";
+
+#[test]
+fn exit_on_gap_reports_findings_as_exit_1() {
+    let output = run_drift(GAPPY_TRAFFIC, &["--exit-on-gap"]);
+    assert_eq!(output.status.code(), Some(1));
+    let clean = run_drift(
+        "{\"id\":\"1\",\"method\":\"GET\",\"url\":\"http://x/pets?limit=1\",\"status\":200}\n",
+        &["--exit-on-gap"],
+    );
+    assert_eq!(clean.status.code(), Some(0));
+}
+
+#[test]
+fn sarif_reports_each_gap_as_a_result() {
+    let output = run_drift(GAPPY_TRAFFIC, &["--format", "sarif"]);
+    assert_eq!(output.status.code(), Some(0), "gaps alone do not fail");
+    let log: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(log["version"], "2.1.0");
+    let results = log["runs"][0]["results"].as_array().unwrap();
+    let rules: Vec<&str> = results
+        .iter()
+        .map(|r| r["ruleId"].as_str().unwrap())
+        .collect();
+    assert_eq!(rules, ["drift-missing-endpoint", "drift-query-param-gap"]);
+
+    // An empty traffic file is a valid, empty log.
+    let empty = run_drift("", &["--format", "sarif"]);
+    assert!(empty.status.success());
+    let log: serde_json::Value = serde_json::from_slice(&empty.stdout).unwrap();
+    assert!(log["runs"][0]["results"].as_array().unwrap().is_empty());
+}

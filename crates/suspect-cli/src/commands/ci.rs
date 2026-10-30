@@ -377,13 +377,17 @@ fn lint_policy(manifest: &Path) -> (Option<PathBuf>, crate::output::Severity) {
                 .ok()
                 .and_then(|loaded| loaded.settings.lint.min_severity)
         })
-        .and_then(|name| match name.to_ascii_lowercase().as_str() {
-            "error" => Some(crate::output::Severity::Error),
-            "warning" => Some(crate::output::Severity::Warning),
-            "info" => Some(crate::output::Severity::Info),
-            "hint" => Some(crate::output::Severity::Hint),
-            _ => None,
-        })
+        .and_then(
+            // The gate keeps running on a bad floor, but says so: an
+            // unknown name falls back to `hint` loudly, not silently.
+            |name| match crate::parse_severity_floor(&name, "lint.min_severity") {
+                Ok(severity) => Some(severity),
+                Err(e) => {
+                    eprintln!("warning: {e}; using hint");
+                    None
+                }
+            },
+        )
         .unwrap_or(crate::output::Severity::Hint);
     (ruleset, floor)
 }

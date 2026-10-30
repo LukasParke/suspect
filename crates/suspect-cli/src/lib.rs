@@ -126,7 +126,7 @@ pub enum Command {
         #[command(flatten)]
         text: TextFormat,
     },
-    /// Apply an Overlay 1.0 document to a target document.
+    /// Apply, explain, or synthesize (`diff`) Overlay 1.0/1.1 documents.
     Overlay {
         /// The overlay subcommand to run.
         #[command(subcommand)]
@@ -192,7 +192,7 @@ pub enum Command {
         /// the CI-passed auth token lives here, for instance.
         #[arg(long = "ignore-param", value_name = "NAME")]
         ignore_param: Vec<String>,
-        /// Exit with status 2 when the traffic addresses undeclared
+        /// Exit with status 1 when the traffic addresses undeclared
         /// endpoints or parameters.
         #[arg(long)]
         exit_on_gap: bool,
@@ -232,7 +232,8 @@ pub enum Command {
         /// Stop after this many ticks (for scripts; omit to watch).
         #[arg(long, hide = true)]
         max_ticks: Option<u64>,
-        /// Newline-delimited JSON tick records instead of human text.
+        /// `text` for human lines, `json` for newline-delimited JSON tick
+        /// records; `sarif` is not supported and is rejected.
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
@@ -243,7 +244,8 @@ pub enum Command {
         source: PathBuf,
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// Structured JSON report instead of human text.
+        /// `text` for a human report, `json` for a structured report;
+        /// `sarif` is not supported and is rejected.
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
@@ -514,15 +516,29 @@ pub enum Command {
     Lsp,
 }
 
-/// Parses a severity name from a configuration file.
-fn parse_severity(name: &str) -> Option<output::Severity> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "error" => Some(output::Severity::Error),
-        "warning" => Some(output::Severity::Warning),
-        "info" => Some(output::Severity::Info),
-        "hint" => Some(output::Severity::Hint),
-        _ => None,
+/// Parses a severity floor named in configuration or the environment
+/// (`error`, `warning`/`warn`, `info`/`information`, `hint`); `origin`
+/// names where it came from in the error.
+///
+/// # Errors
+/// An unrecognized name, or `off` (a floor cannot be switched off).
+pub fn parse_severity_floor(name: &str, origin: &str) -> anyhow::Result<output::Severity> {
+    match suspect_config::parse_severity(name) {
+        Some(parsed) => output::Severity::from_config(parsed).ok_or_else(|| {
+            anyhow::anyhow!("{origin}: severity `off` is not a valid minimum severity")
+        }),
+        None => Err(anyhow::anyhow!(
+            "{origin}: unrecognized severity `{name}` (expected error, warning, info, or hint)"
+        )),
     }
+}
+
+/// Usage error for commands whose report has no SARIF shape.
+fn reject_sarif(command: &str, format: OutputFormat) -> anyhow::Result<()> {
+    if format == OutputFormat::Sarif {
+        anyhow::bail!("`suspect {command}` does not support --format sarif (use text or json)");
+    }
+    Ok(())
 }
 
 /// `--format json|text` for commands with structured output. Declared per
@@ -543,7 +559,8 @@ pub enum ReportFormat {
     Ndjson,
 }
 
-/// Top-level CLI shape (`suspect --format json <command> ...`).
+/// Top-level CLI shape (`suspect <command> ...`); output-format flags such
+/// as `--format` belong to each subcommand (`suspect lint --format json`).
 #[derive(Debug, Parser)]
 #[command(name = "suspect", version, about = "OpenAPI/Arazzo/Overlay toolkit")]
 pub struct Cli {
@@ -610,7 +627,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::ArazzoDiff(args) => commands::arazzo_diff::arazzo_diff(&args),
         Command::OverlayDryRun(args) => commands::overlay_dry_run::overlay_dry_run(&args),
         Command::Upgrade(args) => commands::upgrade::upgrade(&args),
-        Command::Rules { cmd } => cmd.run().map(|_| 0),
+        Command::Rules { cmd } => cmd.run(),
         Command::Lint {
             paths,
             ruleset,
@@ -621,18 +638,32 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
             let settings = &loaded.settings;
-            let ruleset = ruleset.or_else(|| settings.lint.ruleset.clone());
             // flag > env > config > default, decided in one place.
+            let ruleset = suspect_config::resolve::Resolution::new(
+                ruleset.map(Some),
+                std::env::var_os("SUSPECT_LINT_RULESET")
+                    .filter(|v| !v.is_empty())
+                    .map(|v| Some(PathBuf::from(v))),
+                settings.lint.ruleset.clone().map(Some),
+                None,
+            )
+            .value;
+            let env_floor = match std::env::var("SUSPECT_LINT_MIN_SEVERITY") {
+                Ok(v) if !v.trim().is_empty() => {
+                    Some(parse_severity_floor(&v, "SUSPECT_LINT_MIN_SEVERITY")?)
+                }
+                _ => None,
+            };
+            let config_floor = settings
+                .lint
+                .min_severity
+                .as_deref()
+                .map(|v| parse_severity_floor(v, "lint.min_severity"))
+                .transpose()?;
             let min_severity = suspect_config::resolve::Resolution::new(
                 min_severity,
-                std::env::var("SUSPECT_LINT_MIN_SEVERITY")
-                    .ok()
-                    .and_then(|v| parse_severity(&v)),
-                settings
-                    .lint
-                    .min_severity
-                    .as_deref()
-                    .and_then(parse_severity),
+                env_floor,
+                config_floor,
                 output::Severity::Hint,
             )
             .value;
@@ -720,17 +751,23 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             interval_ms,
             max_ticks,
             format,
-        } => commands::bridge::bridge(
-            &spec,
-            interval_ms,
-            max_ticks,
-            matches!(format, OutputFormat::Json),
-        ),
+        } => {
+            reject_sarif("bridge", format)?;
+            commands::bridge::bridge(
+                &spec,
+                interval_ms,
+                max_ticks,
+                matches!(format, OutputFormat::Json),
+            )
+        }
         Command::Reverse {
             source,
             spec,
             format,
-        } => commands::reverse::reverse(&source, &spec, matches!(format, OutputFormat::Json)),
+        } => {
+            reject_sarif("reverse", format)?;
+            commands::reverse::reverse(&source, &spec, matches!(format, OutputFormat::Json))
+        }
         Command::Stateful {
             spec,
             base_url,
