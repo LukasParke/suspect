@@ -805,6 +805,20 @@ Each step leaves `main` green and shippable.
    `crates/suspect-config/tests/resolve.rs` precedence matrix
    (default/manifest/file/env/editor/flag x scalar/bool/map), table vs
    struct round-trip. 1 day.
+   **Done.** Deviations: the legacy `for_invocation`/`discover`/`Loaded`
+   stayed as they were (not wrappers) until steps 3-4 moved their callers,
+   because `resolve` rejects bad values that the legacy callers reported
+   themselves; the old precedence enum `resolve::Layer` is now `LayerKind`
+   (the name `Layer` is the new layer struct). `Kind` also has `Section`,
+   `List`, `Object` (`extensions`) and `Targets` (manifest `codegen`); `Raw`
+   also has `List` and `Json`. `resolve_with` returns
+   `Err(ConfigError { problems, resolved })`, carrying the settings that did
+   apply, so the LSP can keep working; `resolve_found` takes a discovery the
+   caller already ran (the LSP cache key). `Settings` keeps canonical
+   strings for `lint.min_severity`/`design`/`rules` (validated and
+   normalized by `resolve`) with typed accessors (`floor()`,
+   `design_severity()`, `rule_severities()`). `docs.output` with the
+   `docs.out` alias (open question 8) landed here with the table.
 2. **`suspect config --explain`** (`--format json`, `--set-only`) and
    the fixed help text for `config [INPUT]`. Files: `cli/src/lib.rs`
    (`Command::Config`). Tests: `crates/suspect-cli/tests/config_explain.rs`

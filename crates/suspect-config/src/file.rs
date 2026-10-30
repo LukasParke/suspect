@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::layer::{Layer, Notice, Origin};
 use crate::{Loaded, Settings};
 
 /// File names searched, in order.
@@ -90,6 +91,140 @@ fn load_manifest_policy(path: &Path) -> Loaded {
     }
 }
 
+/// Parses `path` into a document, or a notice naming the first problem.
+fn parse_doc(path: &Path, origin: impl Fn(u32) -> Origin) -> Result<suspect_low::LowDoc, Notice> {
+    let text = std::fs::read_to_string(path).map_err(|e| Notice {
+        origin: origin(1),
+        message: format!("cannot read: {e}"),
+    })?;
+    let uri = suspect_source::Uri::from_path(path).map_err(|e| Notice {
+        origin: origin(1),
+        message: e.to_string(),
+    })?;
+    let doc = suspect_low::LowDoc::parse(uri, suspect_source::Source::from_vec(text.into_bytes()));
+    if let Some(error) = doc.syntax_errors().first() {
+        let inner = doc.inner();
+        let line = inner
+            .line_index()
+            .line_col(inner.bytes(), error.range.start)
+            .0
+            + 1;
+        return Err(Notice {
+            origin: origin(line),
+            message: error.message.clone(),
+        });
+    }
+    Ok(doc)
+}
+
+fn file_origin(path: &Path) -> impl Fn(u32) -> Origin + '_ {
+    move |line| Origin::File {
+        path: path.to_path_buf(),
+        line,
+    }
+}
+
+/// One settings file as a layer, plus the parent its `extends` names.
+///
+/// # Errors
+/// An unreadable or syntactically broken file: the whole layer is dropped.
+pub(crate) fn settings_layer(path: &Path) -> Result<(Layer, Option<PathBuf>), Notice> {
+    let doc = parse_doc(path, file_origin(path))?;
+    let base = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let mut layer = Layer::default();
+    layer.read_node(&doc.root(), "", &base, &file_origin(path));
+    let extends = match layer.entries.remove("extends") {
+        Some((crate::layer::Raw::Path(parent), _)) => Some(crate::discover::normalize(&parent)),
+        _ => None,
+    };
+    Ok((layer, extends))
+}
+
+/// The file an `extends` key names, as the layer under the extending file.
+/// One level only: the parent may not extend again.
+///
+/// # Errors
+/// A missing or broken parent, a cycle, or a second level.
+pub(crate) fn extended_layer(child: &Path, parent: &Path) -> Result<Layer, Notice> {
+    let at = Origin::File {
+        path: child.to_path_buf(),
+        line: 1,
+    };
+    if crate::discover::normalize(parent) == crate::discover::normalize(child) {
+        return Err(Notice {
+            origin: at,
+            message: "`extends` names this file itself".to_owned(),
+        });
+    }
+    if !parent.is_file() {
+        return Err(Notice {
+            origin: at,
+            message: format!("`extends`: {} does not exist", parent.display()),
+        });
+    }
+    let (layer, again) = settings_layer(parent)?;
+    if again.is_some() {
+        return Err(Notice {
+            origin: Origin::File {
+                path: parent.to_path_buf(),
+                line: 1,
+            },
+            message: "`extends` is one level only; this file is itself extended".to_owned(),
+        });
+    }
+    Ok(layer)
+}
+
+/// The deprecated policy sections of a manifest (`lint`, `validate`,
+/// `editor`) as the lowest file layer, with the settings file's key
+/// spellings. `None` when the manifest carries none of them or does not
+/// parse (`suspect project check` reports a broken manifest).
+pub(crate) fn manifest_layer(path: &Path) -> Option<Layer> {
+    let origin = |line| Origin::Manifest {
+        path: path.to_path_buf(),
+        line,
+    };
+    let doc = parse_doc(path, origin).ok()?;
+    let root = doc.root();
+    let base = path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    let mut layer = Layer::default();
+    let mut present = false;
+    for entry in root.entries() {
+        let Some(value) = entry.value else { continue };
+        match entry.key {
+            "lint" | "validate" => {
+                present = true;
+                layer.read_node(&value, entry.key, &base, &origin);
+            }
+            "editor" => {
+                present = true;
+                for sub in value.entries() {
+                    let Some(node) = sub.value else { continue };
+                    let scope = match sub.key {
+                        "inlay_hints" | "inlayHints" => "editor.inlay_hints",
+                        "ref" | "refs" => "ref",
+                        "formatting" => {
+                            layer.sections.push("format");
+                            "format"
+                        }
+                        _ => continue,
+                    };
+                    layer.read_node(&node, scope, &base, &origin);
+                }
+            }
+            _ => {}
+        }
+    }
+    // Spelling notices belong to the settings file; `project check` and the
+    // editor's schema check cover the manifest.
+    layer.warnings.clear();
+    present.then_some(layer)
+}
+
 /// Parses one configuration file.
 ///
 /// # Errors
@@ -160,23 +295,27 @@ pub fn load(path: &Path) -> Result<Loaded, ConfigError> {
                 min_severity: text_at("lint", "min_severity"),
                 design: text_at("lint", "design"),
                 rules: lint_rules,
+                ..crate::LintSettings::default()
             },
             validate: crate::ValidateSettings {
                 strict_format: strict_format.unwrap_or(false),
+                ..crate::ValidateSettings::default()
             },
             format: crate::FormatSettings {
                 json: format_json.unwrap_or(false),
                 yaml: format_yaml.unwrap_or(false),
+                ..crate::FormatSettings::default()
             },
             docs: crate::DocsSettings {
                 style: text_at("docs", "style"),
-                out: text_at("docs", "out").map(resolve),
+                output: text_at("docs", "out").map(resolve),
             },
             codegen: crate::CodegenSettings {
                 out: text_at("codegen", "out").map(resolve),
                 profile: text_at("codegen", "profile"),
                 package_version: text_at("codegen", "package_version"),
             },
+            ..Settings::default()
         },
         path: Some(path.to_path_buf()),
         root,

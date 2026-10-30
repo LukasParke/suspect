@@ -618,7 +618,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
                 });
             }
             if args.output.is_none()
-                && let Some(out) = &settings.docs.out
+                && let Some(out) = &settings.docs.output
             {
                 args.output = Some(out.clone());
             }
