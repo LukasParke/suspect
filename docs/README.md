@@ -86,7 +86,7 @@ Architecture and contract design for the shared SDK pipeline.
 
 Internal planning, milestone exit evidence and dated reviews. Kept for
 context; not user documentation. The current alignment plan is the
-[toolchain unification proposal](TOOLCHAIN-UNIFICATION-PROPOSAL.md).
+[toolchain unification proposal](proposals/README.md).
 
 - [Folding Arbiter into suspect — Architecture Plan](ARBITER-FOLD-PLAN.md)
 - [Folding charte.rs into suspect — Architecture Plan](CODE-FOLD-PLAN.md)

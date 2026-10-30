@@ -213,7 +213,7 @@ offline tests, and drift checks.
 
 The next platform features are tracked in
 [docs/FEATURE-ROADMAP.md](docs/FEATURE-ROADMAP.md); the toolchain alignment
-plan is [docs/TOOLCHAIN-UNIFICATION-PROPOSAL.md](docs/TOOLCHAIN-UNIFICATION-PROPOSAL.md).
+plan is [docs/proposals/](docs/proposals/README.md).
 
 ## Notable engineering
 
