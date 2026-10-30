@@ -696,24 +696,50 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    `sdk.importNames[profile]` the way `extension.ts:407` does. Test: a
    headless case asserting the request params carry a string or nothing.
    1 hour.
-1. **Protocol table, `experimental.suspect`, client-declared commands.**
+1. **Done.** **Protocol table, `experimental.suspect`, client-declared commands.**
    New `crates/suspect-lsp/src/protocol.rs`; `lib.rs` `initialize` and
    `service()`; `editors/vscode/src/protocol.ts` (new), `extension.ts`
    (delete the override). Tests: in `crates/suspect-cli/tests/lsp_session.rs`,
    every advertised request answers, and declared ids are left out of
    `executeCommandProvider`; in `test/ui-surface.cjs`, every
    `registerCommand` id is contributed or starts with `_`. 1 day.
-2. **Server-side version handshake.** `initialized` compares
+   As built: custom methods are still registered one by one in `service()`
+   (each has its own handler type), so the table drives the advertisement
+   and `executeCommandProvider`, and the session test checks every
+   advertised request against the registration. `suspect/runWorkflow` stays
+   registered without `live-run` (it answers with an error) but is not
+   advertised. A server older than this handshake still lists the
+   extension's ids, which now fails the client start with "command already
+   exists"; the extension names that case ("older than this extension")
+   instead of a generic start failure.
+2. **Done.** **Server-side version handshake.** `initialized` compares
    `extensionVersion`. Zed sends it through
    `language_server_initialization_options`. Delete
    `warnOnVersionMismatch`. Test: a session with `0.0.9` gets one
    `showMessage`, and a patch difference gets none. 0.5 day.
-3. **`DocKind`, gating, `suspect/documentKind`.** `state.rs`, `lib.rs`
+   As built: the server reads `experimental.suspect.extensionVersion`
+   (VS Code) first, then `initializationOptions.extensionVersion` (Zed,
+   merged into the user's `lsp.suspect-lsp.initialization_options`). A
+   version that does not parse is not a mismatch.
+3. **Done.** **`DocKind`, gating, `suspect/documentKind`.** `state.rs`, `lib.rs`
    handlers, VS Code context key and `when` clauses, activation globs, Zed
    README opt-out. Tests: an `lsp_session` case that opens
    `docker-compose.yml`, `package.json` and a `$ref`'d fragment and
    asserts no formatting or hover on the first two and hover on the
    fragment; a `documentKind` table test. 1 day.
+   As built: `OpenDoc.kind` holds the document's own kind (family or
+   config name); `Fragment` is resolved against a `FragmentIndex` cached
+   per workspace state (the workspace pointer plus its document count,
+   which grows as documents load). Open question 2 is taken with one
+   narrowing: a spec at the workspace root does not make the whole tree
+   fragments (its `package.json`, `docker-compose.yml` and `.github/`
+   would all qualify), so there only `$ref` targets count; a spec in
+   `api/` claims `api/` and below. `version` in the result is the family's
+   `major.minor`. The context key refreshes on editor switches, on save of
+   the active document and once the client starts; a server without the
+   request leaves it unset, which hides the three spec-only menu entries.
+   The host smoke was not extended (VS Code has no API to read a context
+   key).
 4. **Settings generation** (after P2.7). `editors/vscode/scripts/settings.cjs`,
    `settings.editor.json`, `schemas/suspect.schema.json`,
    `src/settings.generated.ts`, `test/settings.cjs`; regenerate

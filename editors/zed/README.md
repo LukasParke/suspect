@@ -35,6 +35,22 @@ both options.
 }
 ```
 
+## Non-spec YAML and JSON
+
+Zed starts the server for every YAML and JSON buffer, because a language
+config cannot look at file contents. The server decides per document: on
+files that are not OpenAPI, Swagger, Arazzo, Overlay, load profiles,
+suspect config or fragments of a loaded spec (a `$ref` target, or a file in
+a spec's directory below the workspace root), it returns no hover,
+formatting, completion, code actions, symbols or links, and no
+diagnostics. `docker-compose.yml` and `package.json` are left alone.
+
+To keep the server off JSON buffers entirely:
+
+```json
+{ "languages": { "JSON": { "language_servers": ["!suspect-lsp", "..."] } } }
+```
+
 ## Install (as a dev extension)
 
 ```sh
@@ -96,6 +112,12 @@ settings:
 from the editor layer over the committed `.suspect.yaml` /
 `suspect.project.json` files.
 
+The extension sends `extensionVersion` in the server's initialization options,
+merged into anything you set under `lsp.suspect-lsp.initialization_options`.
+The server compares it with its own version and shows one warning when the
+major or minor release differs (for example a `binary.path` pointing at an
+older build).
+
 ## What works
 
 - Full LSP feature set over stdio (`suspect lsp`): diagnostics (validation +
@@ -108,7 +130,9 @@ from the editor layer over the committed `.suspect.yaml` /
   `suspect.extractSchema`, `suspect.inlineSchema`), reachable from code
   actions and lenses.
 - Custom requests the server implements: `suspect/runWorkflow`,
-  `suspect/generationContract` and `suspect/renderSdk`. Zed has no UI for
+  `suspect/generationContract`, `suspect/renderSdk` and
+  `suspect/documentKind`, each listed with a version in the server's
+  `capabilities.experimental.suspect`. Zed has no UI for
   custom requests, so these are only reachable from other clients today.
 
 ## Pending

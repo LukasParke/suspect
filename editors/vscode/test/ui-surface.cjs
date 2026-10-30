@@ -204,8 +204,9 @@ test('the extension manifest contributes one view, one controller, and commands 
 		const source = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');
 		for (const match of source.matchAll(/registerCommand\('([^']+)'/g)) registered.add(match[1]);
 	}
+	// Ids starting with `_` are internal and need no contribution.
 	for (const name of registered) {
-		assert.ok(commands.has(name), `registered command ${name} is not in the manifest`);
+		assert.ok(commands.has(name) || name.startsWith('_'), `registered command ${name} is not in the manifest`);
 	}
 
 	// No menu references a command that does not exist; implementation
@@ -297,21 +298,81 @@ test('server commands travel over executeCommand and the admission review over i
 	);
 });
 
-test('every server-advertised command the extension registers itself is filtered from the language client', () => {
-	// vscode-languageclient registers each advertised executeCommand id as a
+test('every server command the extension registers itself is declared in the handshake', () => {
+	// vscode-languageclient registers each id in executeCommandProvider as a
 	// VS Code command; a duplicate of a locally registered id throws and
-	// aborts the client start. The filter list must cover every local id.
+	// aborts the client start. The client declares its own ids in
+	// experimental.suspect.clientCommands and the server leaves them out.
 	const registered = [];
 	const stub = { commands: { registerCommand: (id) => { registered.push(id); return { dispose() {} }; } } };
-	const { registerServerCommands, EDITOR_OWNED_COMMANDS, SERVER_COMMANDS, RUN_WORKFLOW_COMMAND } = loadModule('serverCommands', stub);
+	const modules = new Map();
+	const { registerServerCommands, EDITOR_OWNED_COMMANDS, SERVER_COMMANDS, RUN_WORKFLOW_COMMAND } = loadModule('serverCommands', stub, modules);
 	registerServerCommands(() => undefined);
 	assert.deepEqual(registered, [...SERVER_COMMANDS]);
-	for (const id of registered) assert.ok(EDITOR_OWNED_COMMANDS.has(id), `${id} is registered locally but not filtered`);
 	assert.equal(RUN_WORKFLOW_COMMAND, 'suspect.runWorkflow');
 	assert.ok(EDITOR_OWNED_COMMANDS.has(RUN_WORKFLOW_COMMAND));
+
+	const { suspectCapabilities, clientProtocol } = loadModule('protocol', stub, modules);
+	const declared = new Set(clientProtocol().clientCommands);
+	for (const id of [...registered, RUN_WORKFLOW_COMMAND]) assert.ok(declared.has(id), `${id} is registered locally but not declared`);
+	const capabilities = { experimental: { other: 1 } };
+	suspectCapabilities('0.1.0').fillClientCapabilities(capabilities);
+	assert.deepEqual(capabilities.experimental.other, 1, 'other experimental capabilities survive');
+	assert.deepEqual(capabilities.experimental.suspect.clientCommands, [...EDITOR_OWNED_COMMANDS]);
+	// The server compares this against its own version and warns once.
+	assert.equal(capabilities.experimental.suspect.extensionVersion, '0.1.0');
+	assert.equal(clientProtocol().extensionVersion, undefined);
+
 	const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
-	assert.ok(extension.includes('!EDITOR_OWNED_COMMANDS.has(command)'), 'the client filters with the exported list');
+	assert.ok(extension.includes('registerFeature(suspectCapabilities(extensionVersion))'), 'the client sends the declaration');
+	assert.ok(!extension.includes('warnOnVersionMismatch'), 'the version check is the server\'s');
+	assert.ok(!extension.includes('commands.register ='), 'the language client is not patched');
 	assert.ok(extension.includes("configurationSection: 'suspect'"), 'settings changes reach the server');
+});
+
+test('features are checked against the server advertisement', () => {
+	const { requestVersion, serverProtocol } = loadModule('protocol', {});
+	const client = (experimental) => ({ initializeResult: { capabilities: { experimental } } });
+	const advertised = client({ suspect: { protocol: 1, requests: { 'suspect/renderSdk': 1 }, commands: {} } });
+	assert.equal(requestVersion(advertised, 'suspect/renderSdk'), 1);
+	assert.equal(requestVersion(advertised, 'suspect/documentKind'), undefined);
+	// A server older than the advertisement is protocol 0.
+	assert.equal(serverProtocol(client(undefined)), undefined);
+	assert.equal(requestVersion(client(undefined), 'suspect/renderSdk'), undefined);
+	assert.equal(requestVersion(undefined, 'suspect/renderSdk'), undefined);
+});
+
+test('spec-only editor entries follow the server document kind, and spec files activate the extension', () => {
+	const context = packageManifest.contributes.menus['editor/context'];
+	for (const name of ['suspect.generateExample', 'suspect.extractSchema', 'suspect.inlineSchema']) {
+		const entry = context.find((e) => e.command === name);
+		assert.ok(entry, `${name} is in the editor context menu`);
+		assert.match(entry.when, /suspect\.documentKind =~ \/\^\(openapi\|fragment\)\$\//, `${name} is gated on the document kind`);
+	}
+	const events = packageManifest.activationEvents;
+	for (const glob of ['**/*.openapi.{yaml,yml,json}', '**/*.overlay.{yaml,yml}', '**/*.arazzo.{yaml,yml}']) {
+		assert.ok(events.includes(`workspaceContains:${glob}`), `activates on ${glob}`);
+	}
+	// An OpenAPI document named api.json must still activate.
+	assert.ok(events.includes('onLanguage:yaml') && events.includes('onLanguage:json'));
+});
+
+test('the document kind comes from the server, and only when it offers the request', async () => {
+	const { documentKind, DOCUMENT_KIND_REQUEST } = loadModule('documentKind', {});
+	const sent = [];
+	const client = (requests, answer) => ({
+		initializeResult: { capabilities: { experimental: { suspect: { protocol: 1, requests, commands: {} } } } },
+		sendRequest: async (method, params) => { sent.push([method, params]); if (answer instanceof Error) throw answer; return answer; },
+	});
+	const file = { scheme: 'file', toString: () => 'file:///w/openapi.yaml' };
+	assert.equal(await documentKind(client({ [DOCUMENT_KIND_REQUEST]: 1 }, { kind: 'openapi', version: '3.1' }), file), 'openapi');
+	assert.deepEqual(sent, [['suspect/documentKind', { uri: 'file:///w/openapi.yaml' }]]);
+	// A server that predates the request is not asked.
+	assert.equal(await documentKind(client({}, { kind: 'openapi' }), file), undefined);
+	assert.equal(sent.length, 1);
+	assert.equal(await documentKind(undefined, file), undefined);
+	assert.equal(await documentKind(client({ [DOCUMENT_KIND_REQUEST]: 1 }, { kind: 'none' }), { scheme: 'untitled', toString: () => 'untitled:1' }), undefined);
+	assert.equal(await documentKind(client({ [DOCUMENT_KIND_REQUEST]: 1 }, new Error('gone')), file), undefined);
 });
 
 test('the CLI binary honors the deprecated suspect.server.path only while suspect.basePath is default', () => {

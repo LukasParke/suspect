@@ -2258,3 +2258,311 @@ fn a_pulling_client_is_not_also_pushed_diagnostics() {
         "the server pushed diagnostics to a client that pulls them"
     );
 }
+
+/// `capabilities.experimental.suspect`: every advertised custom request is
+/// implemented. Each is sent with empty params, so a real handler answers
+/// with an invalid-params error, never "method not found".
+#[test]
+fn every_advertised_request_is_implemented() {
+    let (_ws, editor) = shared();
+    let suspect = &editor.initialize_result()["capabilities"]["experimental"]["suspect"];
+    assert_eq!(suspect["protocol"], 1, "{suspect}");
+    let requests = suspect["requests"]
+        .as_object()
+        .expect("experimental.suspect.requests");
+    assert!(
+        requests.contains_key("suspect/renderSdk"),
+        "renderSdk is not advertised: {suspect}"
+    );
+    let not_found = |method: &str| {
+        editor
+            .request_outcome(method, serde_json::json!({}))
+            .unwrap_or_else(|e| panic!("{e}"))
+            .is_err_and(|message| message.to_ascii_lowercase().contains("method not found"))
+    };
+    // The check can tell an unknown method apart.
+    assert!(not_found("suspect/notAMethod"));
+    for (method, version) in requests {
+        assert!(
+            version.as_u64().is_some_and(|v| v >= 1),
+            "{method}: {version}"
+        );
+        assert!(
+            !not_found(method),
+            "{method} is advertised but not implemented"
+        );
+    }
+}
+
+/// A client that declares nothing gets every server command registered,
+/// and the advertisement carries each with a version.
+#[test]
+fn a_client_without_declared_commands_gets_every_command() {
+    let (_ws, editor) = shared();
+    let caps = &editor.initialize_result()["capabilities"];
+    let registered: Vec<&str> = caps["executeCommandProvider"]["commands"]
+        .as_array()
+        .expect("executeCommandProvider.commands")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    let advertised = caps["experimental"]["suspect"]["commands"]
+        .as_object()
+        .expect("experimental.suspect.commands");
+    assert_eq!(registered.len(), advertised.len());
+    for id in &registered {
+        assert!(
+            advertised.contains_key(*id),
+            "{id} registered, not advertised"
+        );
+    }
+    assert!(registered.contains(&"suspect.showRefGraph"));
+}
+
+/// Ids a client declares in `experimental.suspect.clientCommands` are left
+/// out of `executeCommandProvider` (the client registers them itself) and
+/// still execute when the client forwards them.
+#[test]
+fn declared_client_commands_are_not_registered_but_still_run() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let mut capabilities = editor_capabilities();
+    capabilities["experimental"] = serde_json::json!({ "suspect": {
+        "clientCommands": ["suspect.showRefGraph", "suspect.runWorkflow"],
+    } });
+    let editor = Editor::start(&ws.root, capabilities);
+    let caps = &editor.initialize_result()["capabilities"];
+    let registered: Vec<&str> = caps["executeCommandProvider"]["commands"]
+        .as_array()
+        .expect("executeCommandProvider.commands")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(
+        !registered.contains(&"suspect.showRefGraph"),
+        "{registered:?}"
+    );
+    assert!(
+        !registered.contains(&"suspect.runWorkflow"),
+        "{registered:?}"
+    );
+    assert!(registered.contains(&"suspect.showRefs"), "{registered:?}");
+    let advertised = &caps["experimental"]["suspect"]["commands"];
+    assert_eq!(advertised["suspect.showRefGraph"], 1, "{advertised}");
+
+    let text = std::fs::read_to_string(&ws.openapi).expect("read");
+    editor.open(&ws.openapi, &text);
+    let graph = editor
+        .request(
+            "workspace/executeCommand",
+            serde_json::json!({"command": "suspect.showRefGraph", "arguments": []}),
+        )
+        .expect("showRefGraph");
+    assert!(
+        graph
+            .get("mermaid")
+            .is_some_and(serde_json::Value::is_string),
+        "a declared command must still execute: {graph}"
+    );
+}
+
+/// The `showMessage` warnings about the extension version.
+fn version_warnings(editor: &Editor) -> Vec<String> {
+    editor
+        .notifications()
+        .into_iter()
+        .filter(|(method, _)| method == "window/showMessage")
+        .filter_map(|(_, params)| params["message"].as_str().map(str::to_owned))
+        .filter(|message| message.contains("is serving an extension built for"))
+        .collect()
+}
+
+/// The server checks the extension version it is told about and warns once
+/// on a minor mismatch: from the capabilities (VS Code) or from the
+/// initialization options (Zed).
+#[test]
+fn an_extension_for_another_minor_release_gets_one_warning() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let mut capabilities = editor_capabilities();
+    capabilities["experimental"] =
+        serde_json::json!({ "suspect": { "extensionVersion": "0.0.9" } });
+    let editor = Editor::start(&ws.root, capabilities);
+    assert!(editor.wait_for_notification("window/showMessage", Duration::from_secs(10)));
+    // Past the config reload that follows `initialized`.
+    std::thread::sleep(Duration::from_millis(500));
+    let warnings = version_warnings(&editor);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("built for 0.0.x"),
+        "the warning names the extension's release: {warnings:?}"
+    );
+
+    let zed = Editor::start_with(
+        &ws.root,
+        editor_capabilities(),
+        Some(serde_json::json!({ "extensionVersion": "0.0.9" })),
+    );
+    assert!(zed.wait_for_notification("window/showMessage", Duration::from_secs(10)));
+    assert_eq!(version_warnings(&zed).len(), 1);
+}
+
+/// A patch difference is not a mismatch.
+#[test]
+fn an_extension_one_patch_apart_gets_no_warning() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    let server = env!("CARGO_PKG_VERSION");
+    let (major_minor, _) = server.rsplit_once('.').expect("x.y.z");
+    let mut capabilities = editor_capabilities();
+    capabilities["experimental"] =
+        serde_json::json!({ "suspect": { "extensionVersion": format!("{major_minor}.99") } });
+    let editor = Editor::start(&ws.root, capabilities);
+    // A round trip after `initialized`, so its warning would have arrived.
+    editor
+        .request("workspace/symbol", serde_json::json!({"query": "x"}))
+        .expect("workspace/symbol");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(version_warnings(&editor), Vec::<String>::new());
+}
+
+/// A project with non-spec YAML and JSON beside the spec: `api/` holds the
+/// spec and a `$ref`'d fragment, the root holds a compose file, a package
+/// manifest and the suspect config.
+struct MixedProject {
+    _dir: tempfile::TempDir,
+    root: std::path::PathBuf,
+    spec: std::path::PathBuf,
+    fragment: std::path::PathBuf,
+    compose: std::path::PathBuf,
+    package: std::path::PathBuf,
+}
+
+const PET_FRAGMENT: &str = "type: object\nproperties:\n  name:\n    type: string\n";
+const COMPOSE: &str = "services:\n    web:\n        image: nginx\n";
+const PACKAGE: &str = "{\"name\":\"x\",\"version\":\"1.0.0\",\"scripts\":{\"build\":\"tsc\"}}\n";
+
+fn mixed_project() -> MixedProject {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().canonicalize().expect("canonical root");
+    let api = root.join("api");
+    std::fs::create_dir_all(api.join("schemas")).expect("dirs");
+    let spec = api.join("openapi.yaml");
+    std::fs::write(
+        &spec,
+        "openapi: 3.1.0\ninfo:\n  title: Pets\n  version: '1'\npaths: {}\ncomponents:\n  schemas:\n    Pet:\n      $ref: 'schemas/Pet.yaml'\n",
+    )
+    .expect("spec");
+    let fragment = api.join("schemas/Pet.yaml");
+    std::fs::write(&fragment, PET_FRAGMENT).expect("fragment");
+    let compose = root.join("docker-compose.yml");
+    std::fs::write(&compose, COMPOSE).expect("compose");
+    let package = root.join("package.json");
+    std::fs::write(&package, PACKAGE).expect("package");
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "lint:\n  min_severity: warning\n",
+    )
+    .expect("config");
+    std::fs::write(root.join("notes.yaml"), "todo: []\n").expect("notes");
+    MixedProject {
+        _dir: dir,
+        root,
+        spec,
+        fragment,
+        compose,
+        package,
+    }
+}
+
+fn formatting(editor: &Editor, uri: &str) -> Value {
+    editor
+        .request(
+            "textDocument/formatting",
+            serde_json::json!({
+                "textDocument": {"uri": uri},
+                "options": {"tabSize": 2, "insertSpaces": true},
+            }),
+        )
+        .expect("formatting")
+}
+
+/// The server leaves non-spec YAML and JSON alone: no formatting, hover,
+/// symbols or links on `docker-compose.yml` and `package.json`, while a
+/// `$ref`'d fragment keeps hover.
+#[test]
+fn non_spec_documents_get_no_formatting_or_hover_and_fragments_keep_hover() {
+    let project = mixed_project();
+    let editor = Editor::start(&project.root, editor_capabilities());
+    let spec_text = std::fs::read_to_string(&project.spec).expect("read");
+    editor.open(&project.spec, &spec_text);
+    let fragment = editor.open(&project.fragment, PET_FRAGMENT);
+    let compose = editor.open(&project.compose, COMPOSE);
+    let package = editor.open(&project.package, PACKAGE);
+
+    for uri in [&compose, &package] {
+        assert_eq!(formatting(&editor, uri), Value::Null, "formatting {uri}");
+        let hover = editor
+            .request(
+                "textDocument/hover",
+                serde_json::json!({"textDocument": {"uri": uri}, "position": at(1, 3)}),
+            )
+            .expect("hover");
+        assert_eq!(hover, Value::Null, "hover {uri}");
+        for method in ["textDocument/documentSymbol", "textDocument/documentLink"] {
+            let answer = editor.request(method, doc(uri)).expect(method);
+            assert_eq!(answer, Value::Null, "{method} {uri}");
+        }
+    }
+
+    let (line, column) = (3, 3); // `name` under `properties`
+    let text = editor
+        .hover(&fragment, line, column)
+        .expect("fragment hover");
+    assert!(!text.is_empty(), "a $ref'd fragment lost its hover");
+}
+
+/// `suspect/documentKind` reports the same kind the gating uses, for open
+/// documents and for files that are not open.
+#[test]
+fn document_kind_names_each_document() {
+    let project = mixed_project();
+    let editor = Editor::start(&project.root, editor_capabilities());
+    let spec_text = std::fs::read_to_string(&project.spec).expect("read");
+    editor.open(&project.spec, &spec_text);
+    editor.open(&project.compose, COMPOSE);
+
+    let kind = |path: &std::path::Path| {
+        editor
+            .request(
+                "suspect/documentKind",
+                serde_json::json!({"uri": url_of(path)}),
+            )
+            .expect("documentKind")
+    };
+    let table = [
+        (project.spec.clone(), "openapi", Some("3.1")),
+        (project.fragment.clone(), "fragment", None),
+        (project.compose.clone(), "none", None),
+        (project.package.clone(), "none", None),
+        (project.root.join(".suspect.yaml"), "config", None),
+        (project.root.join("notes.yaml"), "none", None),
+    ];
+    for (path, want, version) in table {
+        let answer = kind(&path);
+        assert_eq!(answer["kind"], want, "{}: {answer}", path.display());
+        assert_eq!(
+            answer.get("version").and_then(Value::as_str),
+            version,
+            "{}: {answer}",
+            path.display()
+        );
+    }
+    let missing = editor
+        .request_outcome(
+            "suspect/documentKind",
+            serde_json::json!({"uri": url_of(&project.root.join("absent.yaml"))}),
+        )
+        .expect("an answer");
+    assert!(missing.is_err(), "a missing file is an error: {missing:?}");
+}

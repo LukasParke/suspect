@@ -87,6 +87,8 @@ pub struct Editor {
     running: Arc<AtomicBool>,
     /// Root the server was told about.
     pub root: std::path::PathBuf,
+    /// The server's `initialize` result.
+    initialize_result: std::sync::OnceLock<serde_json::Value>,
 }
 
 impl Drop for Editor {
@@ -114,6 +116,16 @@ impl Editor {
     /// `capabilities` is the client's own advertised capability set; pass
     /// [`editor_capabilities`] for a realistic one.
     pub fn start(root: &Path, capabilities: serde_json::Value) -> Self {
+        Self::start_with(root, capabilities, None)
+    }
+
+    /// [`Editor::start`] with `initializationOptions` in the `initialize`
+    /// request.
+    pub fn start_with(
+        root: &Path,
+        capabilities: serde_json::Value,
+        initialization_options: Option<serde_json::Value>,
+    ) -> Self {
         // The server binary defaults to this crate's own build, and
         // `SUSPECT_BENCH_EXE` overrides it — which is how a run against an
         // older revision is compared with a run against this one: the same
@@ -234,8 +246,9 @@ impl Editor {
             next_id: AtomicI64::new(1),
             running,
             root: root.to_path_buf(),
+            initialize_result: std::sync::OnceLock::new(),
         };
-        editor.handshake(capabilities);
+        editor.handshake(capabilities, initialization_options);
         editor
     }
 
@@ -249,28 +262,34 @@ impl Editor {
         )
     }
 
-    fn handshake(&self, capabilities: serde_json::Value) {
+    fn handshake(
+        &self,
+        capabilities: serde_json::Value,
+        initialization_options: Option<serde_json::Value>,
+    ) {
         let root_uri = url_of(&self.root);
+        let mut params = serde_json::json!({
+            "processId": serde_json::Value::Null,
+            "rootUri": root_uri,
+            "workspaceFolders": [{
+                "uri": root_uri, "name": self.root.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "root".to_owned()),
+            }],
+            "clientInfo": {"name": "suspect-lsp-tests", "version": "1"},
+            "capabilities": capabilities,
+        });
+        if let Some(options) = initialization_options {
+            params["initializationOptions"] = options;
+        }
         let value = self
-            .request(
-                "initialize",
-                serde_json::json!({
-                    "processId": serde_json::Value::Null,
-                    "rootUri": root_uri,
-                    "workspaceFolders": [{
-                        "uri": root_uri, "name": self.root.file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "root".to_owned()),
-                    }],
-                    "clientInfo": {"name": "suspect-lsp-tests", "version": "1"},
-                    "capabilities": capabilities,
-                }),
-            )
+            .request("initialize", params)
             .expect("initialize must be answered");
         assert!(
             value.get("capabilities").is_some(),
             "initialize must return capabilities, got {value}"
         );
+        let _ = self.initialize_result.set(value);
         self.notify("initialized", serde_json::json!({}));
     }
 
@@ -345,6 +364,27 @@ impl Editor {
                 .expect("condvar");
             inbox = guard;
         }
+    }
+
+    /// The server's `initialize` result.
+    pub fn initialize_result(&self) -> &serde_json::Value {
+        self.initialize_result
+            .get()
+            .expect("the handshake stores the initialize result")
+    }
+
+    /// Issues one request and waits for it, keeping an error answer
+    /// apart from a result: `Ok(Err(message))` when the server replied
+    /// with an error.
+    pub fn request_outcome(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<Result<serde_json::Value, String>, NoReply> {
+        let id = self.issue(method, params);
+        let value = self.await_one(id, method)?;
+        let error = self.inbox.0.lock().expect("inbox").errors.get(&id).cloned();
+        Ok(error.map_or(Ok(value), Err))
     }
 
     /// Issues one request and waits for it.

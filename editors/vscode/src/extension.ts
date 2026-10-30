@@ -13,7 +13,9 @@ import {
 import { registerTesting } from './testing';
 import { registerProjectView } from './projectView';
 import { openSuspectConfig, setSeverityFloor } from './config';
-import { EDITOR_OWNED_COMMANDS, generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
+import { generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
+import { suspectCapabilities } from './protocol';
+import { DocumentKindTracker, trackDocumentKind } from './documentKind';
 import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
@@ -28,9 +30,10 @@ let client: LanguageClient | undefined;
 let gateway: GatewayState | undefined;
 let gatewayStatus: vscode.StatusBarItem | undefined;
 let sdkGeneration: SdkGenerationController | undefined;
-/** The extension's own package version, compared against the server's. */
+/** The extension's own package version, sent to the server, which checks it. */
 let extensionVersion: string | undefined;
-let versionMismatchWarned = false;
+/** Keeps the `suspect.documentKind` context key current; shared across client restarts. */
+let documentKinds: DocumentKindTracker | undefined;
 /** Watches the committed config layers; shared across client restarts. */
 let configWatcher: vscode.FileSystemWatcher | undefined;
 
@@ -60,10 +63,12 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerNotebook(context);
 	sdkGeneration = registerSdkGeneration(context);
 
-	// Register the editor-owned server commands before the client starts, so
-	// every id the client filters out of the server's list already exists.
+	// Register the editor-owned server commands before the client starts:
+	// the client declares these ids as its own in the handshake.
 	context.subscriptions.push(...registerServerCommands(() => client));
 	context.subscriptions.push(...registerLiveSdkPreview(() => client));
+	documentKinds = trackDocumentKind(() => client);
+	context.subscriptions.push(...documentKinds.disposables);
 	// The committed config layers the server merges under the editor settings:
 	// suspect-config's CONFIG_NAMES plus the project manifest.
 	configWatcher = vscode.workspace.createFileSystemWatcher('**/{.suspect.yaml,.suspect.yml,suspect.yaml,suspect.yml,suspect.project.json}');
@@ -112,50 +117,27 @@ function startClient(): void {
 	};
 	const current = new LanguageClient('suspect', 'Suspect', serverOptions, clientOptions);
 	client = current;
-	// The server advertises several commands the extension registers itself
-	// (its palette/editor handlers forward to the server). The client
-	// registers every advertised id as a VS Code command, and a duplicate
-	// throws "command already exists", aborting the client start. Keep the
-	// editor's handlers as the single owner of those ids, including for LSP
-	// lenses, and register every other server command normally.
-	const commands = current.getFeature('workspace/executeCommand');
-	const registerCommands = commands.register.bind(commands);
-	commands.register = (data) => registerCommands({
-		...data,
-		registerOptions: { ...data.registerOptions, commands: data.registerOptions.commands.filter((command) => !EDITOR_OWNED_COMMANDS.has(command)) },
-	});
-	void Promise.resolve(current.start()).then(
-		() => warnOnVersionMismatch(current),
-		(err: unknown) => {
-			if (client === current) client = undefined;
-			const message = errorMessage(err);
-			const missing = /ENOENT|Launching server using command/.test(message);
-			const text = missing
-				? `Suspect CLI not found at \`${binary}\`. Install it or set suspect.basePath to the CLI (or its directory).`
+	// Declares the server command ids the extension registers itself, so the
+	// server leaves them out of executeCommandProvider and the client does
+	// not register them twice, and the extension version the server checks.
+	current.registerFeature(suspectCapabilities(extensionVersion));
+	void Promise.resolve(current.start()).then(() => documentKinds?.refresh(), (err: unknown) => {
+		if (client === current) client = undefined;
+		const message = errorMessage(err);
+		const missing = /ENOENT|Launching server using command/.test(message);
+		// A server older than the experimental.suspect handshake ignores
+		// the declared commands and advertises ids this extension owns.
+		const tooOld = /command '[^']+' already exists/.test(message);
+		const text = missing
+			? `Suspect CLI not found at \`${binary}\`. Install it or set suspect.basePath to the CLI (or its directory).`
+			: tooOld
+				? `The Suspect CLI at \`${binary}\` is older than this extension. Update it or set suspect.basePath to a newer build.`
 				: `Suspect language server failed to start: ${message}`;
-			void vscode.window.showWarningMessage(text, 'Open Settings').then((choice) => {
-				if (choice === 'Open Settings') {
-					void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
-				}
-			});
-		},
-	);
-}
-
-/** Warns (once per session, non-blocking) when the server is a different build than the extension. */
-function warnOnVersionMismatch(current: LanguageClient): void {
-	const serverVersion = current.initializeResult?.serverInfo?.version;
-	if (versionMismatchWarned || !serverVersion || !extensionVersion || serverVersion === extensionVersion) {
-		return;
-	}
-	versionMismatchWarned = true;
-	void vscode.window.showWarningMessage(
-		`Suspect CLI ${serverVersion} differs from the extension version ${extensionVersion}; some editor features may not match the server.`,
-		'Open Settings',
-	).then((choice) => {
-		if (choice === 'Open Settings') {
-			void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
-		}
+		void vscode.window.showWarningMessage(text, 'Open Settings').then((choice) => {
+			if (choice === 'Open Settings') {
+				void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
+			}
+		});
 	});
 }
 
