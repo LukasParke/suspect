@@ -177,7 +177,7 @@ export function registerLiveSdkPreview(getClient: ClientGetter): vscode.Disposab
 				profile: pick.label as SdkProfile,
 				packageName,
 				packageVersion: config.get<string>('sdk.packageVersion', '0.1.0'),
-				importName: config.get<string>('sdk.importNames') || undefined,
+				importName: config.get<Record<string, string>>('sdk.importNames', {})[pick.label] || undefined,
 				operationIds: config.get<string[]>('sdk.operationIds', []),
 			});
 			active.start();
