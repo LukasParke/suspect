@@ -874,3 +874,131 @@ mod tests {
         assert_eq!(entry["response_body"]["sha256"], sha.as_str());
     }
 }
+
+/// The workflows and [`JOBS`] cannot drift: every job of `ci.yml` and
+/// `platform.yml` is a row of the table, its only `run:` step is
+/// `cargo xtask ci <id> --ci`, and every Rust toolchain step installs the
+/// version pinned in `rust-toolchain.toml`.
+#[cfg(test)]
+mod drift {
+    use super::*;
+    use suspect_low::{LowDoc, NodeRef};
+
+    fn parse(path: &Path) -> LowDoc {
+        let text = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let uri = suspect_source::Uri::from_path(path).unwrap();
+        LowDoc::parse(uri, suspect_source::Source::from_vec(text))
+    }
+
+    fn str_at<'d>(node: NodeRef<'d>, key: &str) -> Option<&'d str> {
+        node.get(key).and_then(|v| v.as_str())
+    }
+
+    fn pinned_channel(root: &Path) -> String {
+        let text = std::fs::read_to_string(root.join("rust-toolchain.toml")).unwrap();
+        text.lines()
+            .find_map(|line| line.trim().strip_prefix("channel = "))
+            .map(|v| v.trim_matches('"').to_owned())
+            .expect("rust-toolchain.toml sets channel")
+    }
+
+    #[test]
+    fn workflow_jobs_match_the_job_table() {
+        let root = crate::repo_root();
+        let mut seen = Vec::new();
+        for workflow in [CI_YML, PLATFORM_YML] {
+            let doc = parse(&root.join(workflow));
+            let jobs = doc.root().get("jobs").expect("jobs").entries();
+            assert!(!jobs.is_empty(), "{workflow}: no jobs");
+            for entry in jobs {
+                let id = entry.key;
+                let job = JOBS.iter().find(|j| j.name == id).unwrap_or_else(|| {
+                    panic!("{workflow}: job `{id}` is not in xtask/src/ci.rs JOBS")
+                });
+                assert_eq!(
+                    job.workflow, workflow,
+                    "job `{id}` is listed under another workflow"
+                );
+                let value = entry.value.expect("job body");
+                assert!(
+                    value.get("defaults").is_none(),
+                    "{workflow}: job `{id}` sets defaults; the xtask job picks its own directories"
+                );
+                let steps = value.get("steps").expect("steps").items();
+                let runs = steps
+                    .iter()
+                    .filter_map(|step| str_at(*step, "run"))
+                    .map(str::trim)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    runs,
+                    vec![format!("cargo xtask ci {id} --ci")],
+                    "{workflow}: job `{id}` must have exactly one run step, `cargo xtask ci {id} --ci`; \
+                     setup belongs in `uses:` steps"
+                );
+                assert!(
+                    steps.iter().any(|step| str_at(*step, "uses")
+                        .is_some_and(|u| u.starts_with("dtolnay/rust-toolchain@"))),
+                    "{workflow}: job `{id}` runs cargo xtask without a Rust toolchain step"
+                );
+                seen.push(id.to_owned());
+            }
+        }
+        for job in JOBS {
+            assert!(
+                seen.iter().any(|id| id == job.name),
+                "JOBS row `{}` has no job in {}",
+                job.name,
+                job.workflow
+            );
+        }
+    }
+
+    #[test]
+    fn every_rust_toolchain_step_uses_the_pinned_version() {
+        let root = crate::repo_root();
+        let channel = pinned_channel(&root);
+        let dir = root.join(".github/workflows");
+        let mut checked = 0;
+        for file in std::fs::read_dir(&dir).unwrap() {
+            let path = file.unwrap().path();
+            if path.extension().is_none_or(|ext| ext != "yml") {
+                continue;
+            }
+            let doc = parse(&path);
+            let Some(jobs) = doc.root().get("jobs") else {
+                continue;
+            };
+            for job in jobs.entries() {
+                let Some(steps) = job.value.and_then(|v| v.get("steps")) else {
+                    continue;
+                };
+                for step in steps.items() {
+                    let Some(uses) = str_at(step, "uses") else {
+                        continue;
+                    };
+                    if !uses.starts_with("dtolnay/rust-toolchain@") {
+                        continue;
+                    }
+                    let name = path.file_name().unwrap().to_string_lossy();
+                    assert_eq!(
+                        uses, "dtolnay/rust-toolchain@master",
+                        "{name}: job `{}` must pass the toolchain explicitly",
+                        job.key
+                    );
+                    assert_eq!(
+                        step.get("with").and_then(|w| str_at(w, "toolchain")),
+                        Some(channel.as_str()),
+                        "{name}: job `{}` must install rust-toolchain.toml's {channel}",
+                        job.key
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(
+            checked >= JOBS.len(),
+            "found only {checked} toolchain steps"
+        );
+    }
+}

@@ -527,7 +527,15 @@ the tools: those runs now fail instead of passing.
    `run_summary` line follow it), as the old `grep -q` did. Fixtures, gateway child process with a free
    port, readiness poll, live run, cassette writer and offline run. Tests:
    the job itself, run locally and once in a PR. 0.5 day.
-3. **Workflows call the xtask, and the drift test.** Rewrites the `run:`
+3. **Workflows call the xtask, and the drift test.** **Done.** Also adds
+   `rust-toolchain.toml` (open question 1: `1.99.1`, with rustfmt and
+   clippy). Workflows install it with `dtolnay/rust-toolchain@master`
+   and `toolchain: "1.99.1"`; a second drift test checks every
+   `dtolnay/rust-toolchain` step in `.github/workflows/` against the file
+   (`docs.yml`, `application-targets.yml` and `native-evidence.yml`
+   included; `sdk-session-performance.yml` keeps its own pinned
+   `RUSTUP_TOOLCHAIN`). The drift test also rejects job-level `defaults`.
+   Rewrites the `run:`
    lines in `ci.yml` and `platform.yml`. Adds toolchain/cache steps to
    `ci.yml`, moves `cargo-deny` to install-action, drops `RUSTFLAGS`, and
    adds `links` if P6 step 1 has landed. Adds the drift test. Updates the

@@ -7,39 +7,28 @@
 - `editors/vscode`, `editors/zed` — editor clients for `suspect lsp`;
   `editors/multiclient` holds Neovim/Zed smoke scripts.
 - `rules-runtime/` — the TypeScript SDK and Bun worker for custom rules.
-- `xtask/` — corpus fetching and SDK verification tasks.
+- `xtask/` — `cargo xtask ci`, corpus fetching and SDK verification tasks.
 - `docs/` — see [docs/README.md](docs/README.md) for the index.
 
 ## Checks
 
-CI runs the same commands; run them before opening a pull request.
+`cargo xtask ci` runs every job CI runs, with the same commands; `cargo xtask
+ci --list` shows them, `cargo xtask ci clippy test` runs a subset, and a CI
+failure names the job to rerun locally. Jobs whose tool is missing fail with
+an install hint; `--skip-missing` reports them as skipped instead.
+
+`cargo xtask ci fmt clippy test` is the quick loop. The full run includes
+`bench-smoke`, `corpus-validation` (downloads real-world specs),
+`platform-smoke`, the editor extensions, `rules-runtime` and `links` (lychee
+0.24.2, offline; see `lychee.toml`). `rust-toolchain.toml` pins the Rust
+version CI uses.
+
+The real-host VS Code smoke needs a desktop session and stays manual (macOS
+app path by default, `SUSPECT_VSCODE_BIN` overrides it):
 
 ```sh
-# Rust
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
-cargo deny check                      # cargo install cargo-deny
-
-# Relative links in tracked Markdown (lychee 0.24.2, offline; see lychee.toml)
-cargo xtask ci links
-
-# VS Code extension
-cd editors/vscode && npm ci && npm run compile && npm run test:headless
-# ...and in a real VS Code window (desktop session; macOS app path by default,
-# SUSPECT_VSCODE_BIN overrides it)
 cargo build -p suspect-cli && (cd editors/vscode && npm run test:host:smoke)
-
-# Zed extension
-cd editors/zed && rustup target add wasm32-wasip1 && cargo build --target wasm32-wasip1
-
-# Custom rules runtime
-cd rules-runtime && bun test
 ```
-
-The corpus suite needs the real-world specs:
-`cargo run -p xtask -- fetch-corpus && cargo test -p suspect-cli --test corpus_suite`.
 
 ## Generated files
 
