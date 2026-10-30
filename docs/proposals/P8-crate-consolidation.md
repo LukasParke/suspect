@@ -227,7 +227,7 @@ Each step is one PR, independent of the others, and leaves `cargo test
    `suspect-cli`; update `commands/watch.rs` and `examples/platform_bench.rs`;
    delete the crate and its `Cargo.toml:40` line; update README. Tests: the
    moved `watch/tests.rs` runs under `cargo test -p suspect-cli --lib`.
-   1-2 h.
+   1-2 h. **Done.**
 3. **Merge `suspect-reverse` and `suspect-upgrade` into `suspect_cli`.**
    Same pattern; add `regex.workspace = true`; update `commands/reverse.rs`,
    `commands/upgrade.rs`, `examples/analysis_demo.rs`,

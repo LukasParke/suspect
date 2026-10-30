@@ -1,5 +1,4 @@
-#![deny(missing_docs)]
-//! suspect-watch: debounced filesystem watching for document trees.
+//! Debounced filesystem watching for document trees (`--watch` modes).
 //!
 //! [`watch`] spawns a dedicated thread running a `notify` recommended
 //! watcher over the given roots and coalesces bursts of modifications

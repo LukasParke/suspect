@@ -121,7 +121,6 @@ at it (guarded by `prepareRename`; cross-file edits land in one atomic
 | `suspect-rex` | Arazzo runtime expressions: parsing and evaluation |
 | `suspect-journal` | Structured JSONL journals, traffic records, Suspect Cassette format |
 | `suspect-gateway` | HTTP contract gateway: mock, proxy, validate, record, replay |
-| `suspect-watch` | Debounced filesystem watching for `--watch` modes |
 | `suspect-rules` | TS/JS custom rule runtime (Bun sidecar) |
 | `suspect-reverse` | Route extraction from server code, cross-referenced with the spec |
 | `suspect-upgrade` | Swagger 2.0 → OpenAPI 3.1 upgrader |

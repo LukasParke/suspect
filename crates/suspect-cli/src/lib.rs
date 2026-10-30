@@ -13,6 +13,7 @@ pub mod output;
 pub mod sarif;
 /// FD-level output silencing for machine-readable runs.
 pub mod silence;
+pub mod watch;
 
 use std::path::PathBuf;
 

@@ -37,7 +37,6 @@ suspect-gen = { path = "crates/suspect-gen", version = "0.1.0" }
 suspect-artifact = { path = "crates/suspect-artifact", version = "0.1.0" }
 suspect-codegen = { path = "crates/suspect-codegen", version = "0.1.0" }
 suspect-gateway = { path = "crates/suspect-gateway", version = "0.1.0" }
-suspect-watch = { path = "crates/suspect-watch", version = "0.1.0" }
 suspect-faker = { path = "crates/suspect-faker", version = "0.1.0" }
 suspect-upgrade = { path = "crates/suspect-upgrade", version = "0.1.0" }
 

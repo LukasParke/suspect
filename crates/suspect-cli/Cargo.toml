@@ -46,7 +46,7 @@ libc.workspace = true
 sha2.workspace = true
 rayon.workspace = true
 anyhow.workspace = true
-suspect-watch.workspace = true
+notify.workspace = true
 suspect-gateway.workspace = true
 
 [features]

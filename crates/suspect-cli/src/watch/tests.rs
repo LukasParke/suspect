@@ -3,7 +3,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::{DebounceEvent, is_watched, watch};
+use super::{DebounceEvent, is_watched, watch};
 
 /// Debounce window used by every test: short enough to stay fast, long
 /// enough to coalesce two writes issued back to back.

@@ -659,7 +659,7 @@ fn bench_gen(ir: &IrSpec) -> anyhow::Result<()> {
 fn bench_watch() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let (tx, rx) = std::sync::mpsc::channel();
-    let _handle = suspect_watch::watch(
+    let _handle = suspect_cli::watch::watch(
         vec![dir.path().to_path_buf()],
         Duration::from_millis(10),
         tx,

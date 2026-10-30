@@ -2105,6 +2105,7 @@ dependencies = [
  "bytes",
  "clap",
  "libc",
+ "notify",
  "rayon",
  "reqwest",
  "serde",
@@ -2132,7 +2133,6 @@ dependencies = [
  "suspect-test",
  "suspect-upgrade",
  "suspect-validate",
- "suspect-watch",
  "tempfile",
  "tokio",
  "tower-lsp",
@@ -2520,14 +2520,6 @@ dependencies = [
  "suspect-schema",
  "suspect-source",
  "thiserror",
-]
-
-[[package]]
-name = "suspect-watch"
-version = "0.1.0"
-dependencies = [
- "notify",
- "tempfile",
 ]
 
 [[package]]
