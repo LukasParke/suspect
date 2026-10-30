@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 import { parseArazzo } from './parse';
 import { registerNotebook } from './notebook';
-import { errorMessage, gatewayPort, spawnSuspectRun, suspectBinary } from './runner';
+import { BINARY_SETTINGS, errorMessage, gatewayPort, spawnSuspectRun, suspectBinary } from './runner';
 import {
 	Generation, generationArgs, isSdkProfile, SDK_PROFILE_DIRECTORIES, SdkProfile, availableSdkProfiles, runGeneration, readCurrentSdkArtifact, readSdkSessionIdentity,
 	SdkCompatibilityProfile, readSdkCompatibilityProfiles, SdkSessionHandle, SdkSessionIdentity, SdkSessionRecord, startSdkSession,
@@ -13,7 +13,7 @@ import {
 import { registerTesting } from './testing';
 import { registerProjectView } from './projectView';
 import { openSuspectConfig, setSeverityFloor } from './config';
-import { generationContract, registerServerCommands } from './serverCommands';
+import { EDITOR_OWNED_COMMANDS, generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
 import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
@@ -28,10 +28,16 @@ let client: LanguageClient | undefined;
 let gateway: GatewayState | undefined;
 let gatewayStatus: vscode.StatusBarItem | undefined;
 let sdkGeneration: SdkGenerationController | undefined;
+/** The extension's own package version, compared against the server's. */
+let extensionVersion: string | undefined;
+let versionMismatchWarned = false;
+/** Watches the committed config layers; shared across client restarts. */
+let configWatcher: vscode.FileSystemWatcher | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
+	extensionVersion = (context.extension?.packageJSON as { version?: string } | undefined)?.version;
 	context.subscriptions.push(
-		vscode.commands.registerCommand('suspect.runWorkflow', (uri?: vscode.Uri | string, workflow?: string) =>
+		vscode.commands.registerCommand(RUN_WORKFLOW_COMMAND, (uri?: vscode.Uri | string, workflow?: string) =>
 			runWorkflowCommand(uri, workflow),
 		),
 		vscode.commands.registerCommand('suspect.startGateway', () => startGateway()),
@@ -54,12 +60,18 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerNotebook(context);
 	sdkGeneration = registerSdkGeneration(context);
 
-	startClient();
+	// Register the editor-owned server commands before the client starts, so
+	// every id the client filters out of the server's list already exists.
 	context.subscriptions.push(...registerServerCommands(() => client));
 	context.subscriptions.push(...registerLiveSdkPreview(() => client));
+	// The committed config layers the server merges under the editor settings:
+	// suspect-config's CONFIG_NAMES plus the project manifest.
+	configWatcher = vscode.workspace.createFileSystemWatcher('**/{.suspect.yaml,.suspect.yml,suspect.yaml,suspect.yml,suspect.project.json}');
+	context.subscriptions.push(configWatcher);
+	startClient();
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration('suspect.basePath')) {
+			if (BINARY_SETTINGS.some((key) => event.affectsConfiguration(key))) {
 				void restartClient();
 			}
 		}),
@@ -77,8 +89,9 @@ export async function deactivate(): Promise<void> {
 }
 
 function startClient(): void {
+	const binary = suspectBinary();
 	const serverOptions: ServerOptions = {
-		command: suspectBinary(),
+		command: binary,
 		args: ['lsp'],
 		// Executables use stdio by default. An explicit transport makes the client
 		// append --stdio, which the canonical `suspect lsp` command does not accept.
@@ -88,20 +101,61 @@ function startClient(): void {
 			{ scheme: 'file', language: 'yaml' },
 			{ scheme: 'file', language: 'json' },
 		],
+		synchronize: {
+			// Sends the `suspect.*` settings on start and on every change
+			// (workspace/didChangeConfiguration), so the server's lint floor,
+			// rules and hints follow the editor settings live.
+			configurationSection: 'suspect',
+			// Config-file edits reach the server as didChangeWatchedFiles.
+			fileEvents: configWatcher,
+		},
 	};
-	client = new LanguageClient('suspect', 'Suspect', serverOptions, clientOptions);
-	// Both the LSP and the editor advertise this workflow action. Keep the editor's
-	// picker/progress implementation as its single owner, including for LSP lenses,
-	// while registering every other server command normally.
-	const commands = client.getFeature('workspace/executeCommand');
+	const current = new LanguageClient('suspect', 'Suspect', serverOptions, clientOptions);
+	client = current;
+	// The server advertises several commands the extension registers itself
+	// (its palette/editor handlers forward to the server). The client
+	// registers every advertised id as a VS Code command, and a duplicate
+	// throws "command already exists", aborting the client start. Keep the
+	// editor's handlers as the single owner of those ids, including for LSP
+	// lenses, and register every other server command normally.
+	const commands = current.getFeature('workspace/executeCommand');
 	const registerCommands = commands.register.bind(commands);
 	commands.register = (data) => registerCommands({
 		...data,
-		registerOptions: { ...data.registerOptions, commands: data.registerOptions.commands.filter((command) => command !== 'suspect.runWorkflow') },
+		registerOptions: { ...data.registerOptions, commands: data.registerOptions.commands.filter((command) => !EDITOR_OWNED_COMMANDS.has(command)) },
 	});
-	void Promise.resolve(client.start()).catch((err: unknown) => {
-		vscode.window.showWarningMessage(`Suspect language server failed to start: ${errorMessage(err)}`);
-		client = undefined;
+	void Promise.resolve(current.start()).then(
+		() => warnOnVersionMismatch(current),
+		(err: unknown) => {
+			if (client === current) client = undefined;
+			const message = errorMessage(err);
+			const missing = /ENOENT|Launching server using command/.test(message);
+			const text = missing
+				? `Suspect CLI not found at \`${binary}\`. Install it or set suspect.basePath to the CLI (or its directory).`
+				: `Suspect language server failed to start: ${message}`;
+			void vscode.window.showWarningMessage(text, 'Open Settings').then((choice) => {
+				if (choice === 'Open Settings') {
+					void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
+				}
+			});
+		},
+	);
+}
+
+/** Warns (once per session, non-blocking) when the server is a different build than the extension. */
+function warnOnVersionMismatch(current: LanguageClient): void {
+	const serverVersion = current.initializeResult?.serverInfo?.version;
+	if (versionMismatchWarned || !serverVersion || !extensionVersion || serverVersion === extensionVersion) {
+		return;
+	}
+	versionMismatchWarned = true;
+	void vscode.window.showWarningMessage(
+		`Suspect CLI ${serverVersion} differs from the extension version ${extensionVersion}; some editor features may not match the server.`,
+		'Open Settings',
+	).then((choice) => {
+		if (choice === 'Open Settings') {
+			void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
+		}
 	});
 }
 
@@ -545,7 +599,7 @@ class SdkGenerationController implements vscode.Disposable {
 			vscode.commands.registerCommand('suspect.stopSdkWatch', () => this.stop()),
 			vscode.commands.registerCommand('suspect.showSdkPreview', () => this.showLatest()),
 			vscode.workspace.onDidChangeConfiguration((event) => {
-				if (['suspect.basePath', 'suspect.sdk.sessionConfig', 'suspect.sdk.sessionOutput'].some((key) => event.affectsConfiguration(key))) {
+				if ([...BINARY_SETTINGS, 'suspect.sdk.sessionConfig', 'suspect.sdk.sessionOutput'].some((key) => event.affectsConfiguration(key))) {
 					void this.stop('SDK settings changed. Start an SDK preview or watch again.');
 				}
 			}),

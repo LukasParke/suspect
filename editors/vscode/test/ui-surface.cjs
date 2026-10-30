@@ -170,8 +170,12 @@ test('the severity floor resolves by precedence and names its source', () => {
 		{ value: 'error', source: '.suspect.yaml' },
 	);
 	assert.deepEqual(
-		resolveFloor({ setting: 'information', manifest: 'warning', workspaceYaml: 'lint:\n  min_severity: error\n' }),
-		{ value: 'information', source: 'editor setting' },
+		resolveFloor({ setting: 'info', manifest: 'warning', workspaceYaml: 'lint:\n  min_severity: error\n' }),
+		{ value: 'info', source: 'editor setting' },
+	);
+	assert.deepEqual(
+		resolveFloor({ setting: null, workspaceYaml: 'lint:\n  min_severity: error\n' }),
+		{ value: 'error', source: '.suspect.yaml' },
 	);
 	assert.deepEqual(resolveFloor({ setting: '', workspaceYaml: 'lint: {}\n' }), { value: 'hint', source: 'default' });
 });
@@ -220,7 +224,14 @@ test('the extension manifest contributes one view, one controller, and commands 
 
 	// The settings the Testing view reads exist in the shape the code expects.
 	const props = contributes.configuration.properties;
-	assert.deepEqual(props['suspect.lint.minSeverity'].enum, ['error', 'warning', 'information', 'hint']);
+	// One severity spelling across settings: minSeverity matches the rule
+	// severity enum (`info`), and unset (null) defers to .suspect.yaml.
+	assert.deepEqual(props['suspect.lint.minSeverity'].enum, ['error', 'warning', 'info', 'hint', null]);
+	assert.equal(props['suspect.lint.minSeverity'].default, null);
+	for (const severity of ['error', 'warning', 'info', 'hint']) assert.ok(props['suspect.lint.rules'].additionalProperties.enum.includes(severity));
+	// The legacy extension's binary setting survives as a deprecated alias.
+	assert.equal(props['suspect.server.path'].type, 'string');
+	assert.ok(props['suspect.server.path'].deprecationMessage.includes('suspect.basePath'));
 	assert.equal(props['suspect.ci.baseline'].type, 'string');
 });
 
@@ -284,4 +295,34 @@ test('server commands travel over executeCommand and the admission review over i
 		extension.includes('generationContract('),
 		'generation consults the admission review before running',
 	);
+});
+
+test('every server-advertised command the extension registers itself is filtered from the language client', () => {
+	// vscode-languageclient registers each advertised executeCommand id as a
+	// VS Code command; a duplicate of a locally registered id throws and
+	// aborts the client start. The filter list must cover every local id.
+	const registered = [];
+	const stub = { commands: { registerCommand: (id) => { registered.push(id); return { dispose() {} }; } } };
+	const { registerServerCommands, EDITOR_OWNED_COMMANDS, SERVER_COMMANDS, RUN_WORKFLOW_COMMAND } = loadModule('serverCommands', stub);
+	registerServerCommands(() => undefined);
+	assert.deepEqual(registered, [...SERVER_COMMANDS]);
+	for (const id of registered) assert.ok(EDITOR_OWNED_COMMANDS.has(id), `${id} is registered locally but not filtered`);
+	assert.equal(RUN_WORKFLOW_COMMAND, 'suspect.runWorkflow');
+	assert.ok(EDITOR_OWNED_COMMANDS.has(RUN_WORKFLOW_COMMAND));
+	const extension = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+	assert.ok(extension.includes('!EDITOR_OWNED_COMMANDS.has(command)'), 'the client filters with the exported list');
+	assert.ok(extension.includes("configurationSection: 'suspect'"), 'settings changes reach the server');
+});
+
+test('the CLI binary honors the deprecated suspect.server.path only while suspect.basePath is default', () => {
+	const settings = new Map();
+	const stub = { workspace: { getConfiguration: () => ({ get: (key) => settings.get(key) }) } };
+	const { suspectBinary } = loadModule('runner', stub);
+	assert.equal(suspectBinary(), 'suspect');
+	settings.set('server.path', '/opt/legacy/suspect');
+	assert.equal(suspectBinary(), '/opt/legacy/suspect');
+	settings.set('basePath', 'suspect');
+	assert.equal(suspectBinary(), '/opt/legacy/suspect');
+	settings.set('basePath', '/opt/current/suspect');
+	assert.equal(suspectBinary(), '/opt/current/suspect');
 });

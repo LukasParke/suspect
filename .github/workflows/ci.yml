@@ -30,6 +30,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: cargo doc --workspace --no-deps
+  # Advisories, licenses, bans and sources per the root deny.toml.
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --workspace
+          manifest-path: ./Cargo.toml
   test:
     runs-on: ubuntu-latest
     steps:

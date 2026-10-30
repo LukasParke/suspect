@@ -9,29 +9,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            .
-
-      - name: Format check
-        run: cargo fmt --all --check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Tests
-        run: cargo test --workspace
-
+  # fmt / clippy / cargo test for the workspace run in ci.yml; this workflow
+  # covers the end-to-end smoke plus the editor clients and the rules runtime.
   platform-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -202,29 +181,11 @@ jobs:
           if [ -f "$SMOKE/gateway.pid" ]; then kill "$(cat "$SMOKE/gateway.pid")" || true; fi
           tail -5 "$SMOKE/gateway.log" || true
 
-  vscode-build:
+  vscode-extension:
     runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Build VS Code extension (skipped without npm)
-        shell: bash
-        run: |
-          if ! command -v npm >/dev/null 2>&1; then
-            echo "npm not available on this runner; skipping vscode-build"
-            exit 0
-          fi
-          cd .vscode-suspect
-          npm install
-          node --check extension.js
-
-  zed-check:
-    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
     steps:
       - uses: actions/checkout@v4
 
@@ -233,10 +194,69 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
+            .
+
+      # The generation tests drive the real CLI rather than a spawn mock.
+      - name: Build suspect CLI (debug)
+        working-directory: .
+        run: cargo build -p suspect-cli
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Compile
+        run: npm run compile
+
+      # Everything that runs without a VS Code extension host. The real-host
+      # gate (test:generation:host) needs pinned VS Code/Playwright inputs and
+      # runs in its own workflow.
+      - name: Headless tests
+        run: npm run test:headless
+
+      - name: CLI-backed generation tests
+        env:
+          SUSPECT_TEST_BINARY: ${{ github.workspace }}/target/debug/suspect
+        run: npm run test:generation
+
+  zed-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Add the WASI target Zed loads extensions from
+        run: rustup target add wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
             editors/zed
 
       # The extension crate is intentionally outside the repository workspace
       # (root members are crates/* and xtask); it carries its own [workspace]
-      # table so this host-target check never touches the root lockfile.
-      - name: Check Zed extension (host target)
-        run: cargo check --manifest-path editors/zed/Cargo.toml
+      # table and lockfile so this build never touches the root lockfile.
+      - name: Build Zed extension (wasm32-wasip1)
+        run: cargo build --locked --manifest-path editors/zed/Cargo.toml --target wasm32-wasip1
+
+  rules-runtime:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rules-runtime
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install
+        run: bun install
+
+      - name: Test
+        run: bun test

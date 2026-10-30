@@ -45,6 +45,12 @@
 					"default": "suspect",
 					"description": "Path to the suspect CLI: a directory containing the `suspect` executable, the executable itself, or bare `suspect` to resolve from $PATH."
 				},
+				"suspect.server.path": {
+					"type": "string",
+					"default": "",
+					"description": "Deprecated alias of suspect.basePath, kept from the retired legacy extension. Used only while suspect.basePath is left at its default.",
+					"deprecationMessage": "Use suspect.basePath instead. suspect.server.path is only honored while suspect.basePath is left at its default."
+				},
 				"suspect.sdk.packageName": {
 					"type": "string",
 					"default": "",
@@ -86,15 +92,26 @@
 					"description": "TCP port bound by the mock gateway on 127.0.0.1."
 				},
 				"suspect.lint.minSeverity": {
-					"type": "string",
+					"type": [
+						"string",
+						"null"
+					],
 					"enum": [
 						"error",
 						"warning",
-						"information",
-						"hint"
+						"info",
+						"hint",
+						null
 					],
-					"default": "",
-					"description": "Minimum severity of findings reported. Empty defers to the committed .suspect.yaml; the committed floor still applies below what this allows."
+					"enumDescriptions": [
+						"Only errors.",
+						"Errors and warnings.",
+						"Everything but hints.",
+						"Everything.",
+						"Unset: defer to lint.min_severity in the committed .suspect.yaml / suspect.project.json (server default: hint)."
+					],
+					"default": null,
+					"markdownDescription": "Minimum severity of findings reported (`lint.min_severity` in `.suspect.yaml`). Leave unset (`null`) to defer to the committed configuration. Uses the same `info` spelling as `suspect.lint.rules` / `suspect.lint.design`; the server also accepts `information`."
 				},
 				"suspect.ci.baseline": {
 					"type": "string",
@@ -429,6 +446,7 @@
 	"scripts": {
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./",
+		"test:headless": "node --test test/manifest.cjs test/sdk-fixtures.cjs test/ui-surface.cjs test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs test/native-host/contract.test.cjs",
 		"test:generation": "node --test test/generation*.cjs",
 		"test:generation:protocol": "node --test test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs",
 		"test:generation:host": "node test/native-host/run.cjs",

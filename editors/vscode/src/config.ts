@@ -13,7 +13,7 @@ import * as vscode from 'vscode';
 const FLOORS: { label: string; detail: string; value: string }[] = [
 	{ label: 'Error', detail: 'only errors — the publish gate', value: 'error' },
 	{ label: 'Warning', detail: 'errors and warnings — the recommended default', value: 'warning' },
-	{ label: 'Information', detail: 'everything but hints', value: 'information' },
+	{ label: 'Information', detail: 'everything but hints', value: 'info' },
 	{ label: 'Hint', detail: 'show everything', value: 'hint' },
 ];
 
@@ -27,7 +27,7 @@ export interface FloorResolution {
  * The floor in effect, by precedence: the editor setting, the committed
  * `.suspect.yaml`, the project manifest, then the server default. Pure.
  */
-export function resolveFloor(input: { setting?: string; workspaceYaml?: string; manifest?: string }): FloorResolution {
+export function resolveFloor(input: { setting?: string | null; workspaceYaml?: string; manifest?: string }): FloorResolution {
 	if (input.setting) return { value: input.setting, source: 'editor setting' };
 	const fromYaml = input.workspaceYaml?.match(/^\s*min_severity:\s*(\w+)/m)?.[1];
 	if (fromYaml) return { value: fromYaml, source: '.suspect.yaml' };
@@ -37,7 +37,7 @@ export function resolveFloor(input: { setting?: string; workspaceYaml?: string; 
 
 /** `resolveFloor` over the live workspace. */
 export async function effectiveFloor(root: string | undefined, manifestFloor?: string): Promise<FloorResolution> {
-	const setting = vscode.workspace.getConfiguration('suspect').get<string>('lint.minSeverity');
+	const setting = vscode.workspace.getConfiguration('suspect').get<string | null>('lint.minSeverity');
 	let workspaceYaml: string | undefined;
 	if (root !== undefined) {
 		try {

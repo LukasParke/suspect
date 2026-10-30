@@ -6,13 +6,23 @@
 # script never touches global Zed settings (they hold user secrets); the
 # fixture carries its own project-local .zed/settings.json.
 #
+# Requires the dev extension in editors/zed to be installed (it registers the
+# `suspect-lsp` language server); the fixture points that server at the
+# binary below via `lsp.suspect-lsp.binary.path`.
+#
+#    SUSPECT_BIN=/path/to/suspect ./editors/multiclient/zed_smoke.sh
+#
+# SUSPECT_BIN defaults to <repo>/target/release/suspect.
+#
 # Verifies: Zed spawns the server as a child; the process stays alive; and
 # Zed's log records no LSP error for suspect. Prints SMOKE| lines for each
 # check and exits non-zero on failure.
 
 set -u
 
-SUSPECT=/Users/luke/github/suspect-core-pr/target/release/suspect
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+SUSPECT="${SUSPECT_BIN:-$ROOT/target/release/suspect}"
 FIXTURE=$(mktemp -d /tmp/suspect-zed-smoke.XXXXXX)
 ZED_LOG="$HOME/Library/Application Support/Zed/log/Zed.log"
 
@@ -21,7 +31,7 @@ if ! command -v zed >/dev/null 2>&1; then
   exit 0
 fi
 if [ ! -x "$SUSPECT" ]; then
-  echo "SMOKE|no suspect binary — build first"
+  echo "SMOKE|no suspect binary at $SUSPECT — cargo build --release -p suspect-cli or set SUSPECT_BIN"
   exit 1
 fi
 
@@ -57,7 +67,7 @@ mkdir -p "$FIXTURE/.zed"
 cat > "$FIXTURE/.zed/settings.json" <<EOF
 {
   "lsp": {
-    "suspect": {
+    "suspect-lsp": {
       "binary": {
         "path": "$SUSPECT",
         "arguments": ["lsp"]
@@ -66,7 +76,7 @@ cat > "$FIXTURE/.zed/settings.json" <<EOF
   },
   "languages": {
     "YAML": {
-      "language_servers": ["suspect"]
+      "language_servers": ["suspect-lsp", "..."]
     }
   }
 }

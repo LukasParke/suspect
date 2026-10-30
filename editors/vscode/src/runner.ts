@@ -52,9 +52,28 @@ function config(): vscode.WorkspaceConfiguration {
 	return vscode.workspace.getConfiguration('suspect');
 }
 
-/** Resolve the suspect CLI path from `suspect.basePath`. */
+/**
+ * Settings that select the CLI binary: `suspect.basePath`, plus the
+ * deprecated `suspect.server.path` from the retired legacy extension.
+ */
+export const BINARY_SETTINGS: readonly string[] = ['suspect.basePath', 'suspect.server.path'];
+
+/**
+ * The configured CLI location: `suspect.basePath` when set to anything but
+ * its default, else the deprecated `suspect.server.path` alias, else bare
+ * `suspect` (resolved from $PATH).
+ */
+function configuredBase(): string {
+	const base = (config().get<string>('basePath') ?? '').trim();
+	if (base && base !== 'suspect') return base;
+	const legacy = (config().get<string>('server.path') ?? '').trim();
+	if (legacy) return legacy;
+	return base || 'suspect';
+}
+
+/** Resolve the suspect CLI path from `suspect.basePath` (or its deprecated alias). */
 export function suspectBinary(): string {
-	const base = (config().get<string>('basePath') ?? 'suspect').trim();
+	const base = configuredBase();
 	if (!base || base === 'suspect') {
 		return 'suspect';
 	}

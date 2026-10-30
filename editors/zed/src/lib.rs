@@ -1,17 +1,24 @@
 //! suspect-zed: Zed extension that wires the `suspect` language server into
 //! YAML and JSON buffers.
 //!
-//! The extension never ships its own binary: it locates the `suspect` CLI on
-//! the host (honoring a `SUSPECT_PATH` override) and spawns `suspect lsp`
-//! over stdio. Workspace configuration is forwarded from the user's Zed
-//! `lsp.suspect-lsp.settings` under the `suspect` section shape the server
-//! expects (`{ "suspect": { "basePath", "testBaseUrl" } }`).
-
-use std::path::PathBuf;
+//! The extension never ships its own binary. It resolves the `suspect` CLI
+//! through Zed's host APIs (extensions run in a WASI sandbox, so the host's
+//! `PATH` and filesystem are not visible to `std::env` / `std::fs`):
+//!
+//! 1. `lsp.suspect-lsp.binary.path` (plus optional `arguments` / `env`) from
+//!    the user's Zed settings;
+//! 2. `suspect` found on the worktree's shell `PATH` (`Worktree::which`).
+//!
+//! Workspace configuration is forwarded from `lsp.suspect-lsp.settings`
+//! under the `suspect` section the server reads
+//! (`{ "suspect": { "lint": .., "ref": .., "inlayHints": .. } }`).
 
 use zed_extension_api::{
     self as zed, settings::LspSettings, Command, LanguageServerId, Result, Worktree,
 };
+
+/// The executable name searched on the worktree's `PATH`.
+const BINARY: &str = "suspect";
 
 /// The Zed extension entry point.
 struct SuspectExtension;
@@ -24,9 +31,9 @@ impl zed::Extension for SuspectExtension {
     /// Configuration sent during `initialize` and refreshed on every
     /// `workspace/didChangeConfiguration`.
     ///
-    /// Reads the user's per-worktree `lsp.suspect-lsp.settings` and re-wraps
-    /// the two keys the suspect server understands into the `{ "suspect": .. }`
-    /// section it expects. Unset keys serialize as `null`.
+    /// Forwards the user's per-worktree `lsp.suspect-lsp.settings` verbatim
+    /// under the `{ "suspect": .. }` section. Settings that are already
+    /// wrapped in a `suspect` key are passed through unchanged.
     fn language_server_workspace_configuration(
         &mut self,
         language_server_id: &LanguageServerId,
@@ -34,70 +41,52 @@ impl zed::Extension for SuspectExtension {
     ) -> Result<Option<zed::serde_json::Value>> {
         let settings = LspSettings::for_worktree(language_server_id.as_ref(), worktree)?
             .settings
-            .unwrap_or_default();
-
-        Ok(Some(zed::serde_json::json!({
-            "suspect": {
-                "basePath": settings.get("basePath"),
-                "testBaseUrl": settings.get("testBaseUrl"),
-            }
-        })))
+            .unwrap_or_else(|| zed::serde_json::json!({}));
+        if settings.get("suspect").is_some() {
+            return Ok(Some(settings));
+        }
+        Ok(Some(zed::serde_json::json!({ "suspect": settings })))
     }
 
-    /// Locates the `suspect` CLI: `SUSPECT_PATH` wins outright, otherwise the
-    /// binary is searched along `PATH`. Spawned as `suspect lsp`.
+    /// Spawns `suspect lsp`, honoring a configured binary first.
     fn language_server_command(
         &mut self,
-        _language_server_id: &LanguageServerId,
-        _worktree: &Worktree,
+        language_server_id: &LanguageServerId,
+        worktree: &Worktree,
     ) -> Result<Command> {
-        let path = locate_binary("suspect")?;
-        Ok(Command::new(path.to_string_lossy().into_owned()).arg("lsp"))
-    }
-}
+        let binary = LspSettings::for_worktree(language_server_id.as_ref(), worktree)
+            .ok()
+            .and_then(|settings| settings.binary);
 
-/// Resolves an executable name to a full path.
-///
-/// Order of precedence:
-/// 1. the `SUSPECT_PATH` environment variable, taken verbatim;
-/// 2. the first directory on `PATH` containing an executable `<name>`.
-fn locate_binary(name: &str) -> Result<PathBuf> {
-    if let Some(override_path) = std::env::var_os("SUSPECT_PATH") {
-        if !override_path.is_empty() {
-            return Ok(PathBuf::from(override_path));
+        if let Some(path) = binary
+            .as_ref()
+            .and_then(|b| b.path.clone())
+            .filter(|p| !p.trim().is_empty())
+        {
+            let args = binary
+                .as_ref()
+                .and_then(|b| b.arguments.clone())
+                .unwrap_or_else(|| vec!["lsp".to_owned()]);
+            let env = binary
+                .as_ref()
+                .and_then(|b| b.env.clone())
+                .unwrap_or_default();
+            return Ok(Command::new(path).args(args).envs(env));
         }
-    }
 
-    let search_path = std::env::var_os("PATH").unwrap_or_default();
-    for dir in std::env::split_paths(&search_path) {
-        let candidate = dir.join(name);
-        if is_executable(&candidate) {
-            return Ok(candidate);
+        if let Some(path) = worktree.which(BINARY) {
+            let args = binary
+                .and_then(|b| b.arguments)
+                .unwrap_or_else(|| vec!["lsp".to_owned()]);
+            return Ok(Command::new(path).args(args).envs(worktree.shell_env()));
         }
-    }
 
-    Err(format!(
-        "`{name}` was not found on PATH; install the suspect CLI \
-         (`cargo install --path crates/suspect-cli`) or point the \
-         SUSPECT_PATH environment variable at the binary"
-    )
-    .into())
-}
-
-/// Returns whether `path` exists and is executable by its owner/group/others
-/// on unix; other platforms only require regular-file existence.
-fn is_executable(path: &std::path::Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        match std::fs::metadata(path) {
-            Ok(meta) => meta.permissions().mode() & 0o111 != 0,
-            Err(_) => false,
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        path.is_file()
+        Err(format!(
+            "`{BINARY}` was not found on the worktree's PATH. Install the suspect CLI \
+             (`cargo install --path crates/suspect-cli`) or set \
+             `lsp.{}.binary.path` in your Zed settings to the executable.",
+            language_server_id.as_ref()
+        ))
     }
 }
 
