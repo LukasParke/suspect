@@ -511,7 +511,11 @@ the tools: those runs now fail instead of passing.
 
 ## Implementation plan
 
-1. **Alias and `ci` skeleton.** Adds `.cargo/config.toml`, plus
+1. **Alias and `ci` skeleton.** **Done.** Deviation: rustfmt, clippy and
+   cargo-deny are probed with `cargo <sub> --version` (what the job runs)
+   rather than `rustup component list`, so a non-rustup install works; a
+   missing tool reports `MISSING` and exit 2 wins only when no job failed.
+   Adds `.cargo/config.toml`, plus
    `xtask/src/ci.rs` with the job table, probes, `--list`, `--skip-missing`,
    `--fail-fast` and the summary. Ports `fmt`, `clippy`, `docs`,
    `cargo-deny`, `test`, `bench-smoke`, `corpus-validation`,

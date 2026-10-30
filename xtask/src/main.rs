@@ -1,5 +1,6 @@
 //! Workspace automation: corpus fetch, fixture generation, benches.
 
+mod ci;
 mod sdk_full;
 mod sdk_m3_m6;
 
@@ -10,6 +11,7 @@ use anyhow::{Context, Result, bail};
 
 const USAGE: &str = "\
 tasks:
+  ci [JOB...] [flags]             Run the CI jobs locally (`cargo xtask ci --help`).
   sdk-full [options]              Verify the maintained twelve-language full SDK plan.
   sdk-m3-m6 [options]             Verify the current native SDK and iteration milestones.
   fetch-corpus [--force]          Download real-world OpenAPI specs into corpus/ (gitignored).
@@ -29,6 +31,7 @@ fn main() -> Result<()> {
     let task = args.first().map(String::as_str).unwrap_or_default();
     let rest = &args[1.min(args.len())..];
     match task {
+        "ci" => ci::run(rest),
         "fetch-corpus" => fetch_corpus(rest),
         "gen-fixtures" => gen_fixtures(rest),
         "sdk-full" => sdk_full::run(rest),
@@ -42,6 +45,14 @@ fn main() -> Result<()> {
             std::process::exit(2);
         }
     }
+}
+
+/// The repository root (the parent of `xtask/`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask lives one level below the repository root")
+        .to_path_buf()
 }
 
 // ---------------------------------------------------------------------------
