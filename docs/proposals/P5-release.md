@@ -535,6 +535,11 @@ workflow does, required secrets), and its "Checks" list is replaced by
    -p suspect-syntax -p suspect-low -p suspect-ref -p suspect-jsonpath -p
    suspect-oas -p suspect-overlay`. Files: every `Cargo.toml`,
    `.github/workflows/ci.yml`, 8 new small files. 3-4 h.
+   **Done.** 16 crates are `publish = false` (23 after P8, minus the seven).
+   `suspect-rules` also gained the missing `rust-version.workspace`. The YAML
+   grammar's `LICENSE` is upstream's file from tree-sitter-grammars/tree-sitter-yaml
+   v0.7.2 (its `parser.c` is byte-identical to the vendored one); a
+   `grammars/yaml/README.md` records the origin and the local scanner patch.
 2. **One version.** `cargo xtask bump` and `cargo xtask check-versions`;
    `discover.rs:110` uses `CARGO_PKG_VERSION`; `check-versions` in
    `ci.yml`. Tests: xtask unit test that bumps a temp copy of the manifests

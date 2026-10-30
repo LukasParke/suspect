@@ -8,6 +8,8 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 authors = ["Luke"]
+repository = "https://github.com/LukasParke/suspect"
+homepage = "https://github.com/LukasParke/suspect"
 
 [workspace.dependencies]
 sha2 = "0.10"
