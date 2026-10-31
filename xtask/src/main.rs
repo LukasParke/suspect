@@ -14,6 +14,7 @@ use anyhow::{Context, Result, bail};
 const USAGE: &str = "\
 tasks:
   ci [JOB...] [flags]             Run the CI jobs locally (`cargo xtask ci --help`).
+  bless                           Regenerate the checked-in generated docs (bless tests).
   verify-sdk [options]            Verify the maintained twelve-language SDK plan
                                   (was sdk-full).
   verify-sdk-demo [options]       Verify the frozen five-backend M3/M6 demo scope
@@ -40,6 +41,7 @@ fn main() -> Result<()> {
     }
     match task {
         "ci" => ci::run(rest),
+        "bless" => bless(rest),
         "fetch-corpus" => fetch_corpus(rest),
         "gen-fixtures" => gen_fixtures(rest),
         "verify-sdk" => sdk_full::run(rest),
@@ -67,6 +69,52 @@ fn canonical_task(task: &str) -> (&str, Option<String>) {
         Some((old, new)) => (new, Some(format!("xtask: '{old}' is now '{new}'"))),
         None => (task, None),
     }
+}
+
+/// The tests that compare a checked-in generated file with its renderer and
+/// rewrite it when `SUSPECT_BLESS` is set: (package, test target, extra env).
+/// `feature_manifest` still reads `SUSPECT_REGEN_FEATURES` until P6 step 6
+/// moves it to `SUSPECT_BLESS`.
+type BlessTest = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+const BLESS_TESTS: &[BlessTest] = &[
+    ("suspect-cli", "cli_reference", &[]),
+    (
+        "suspect-codegen",
+        "feature_manifest",
+        &[("SUSPECT_REGEN_FEATURES", "1")],
+    ),
+];
+
+/// `cargo xtask bless`: runs every bless test with `SUSPECT_BLESS=1`.
+fn bless(args: &[String]) -> Result<()> {
+    if let Some(arg) = args.first() {
+        if arg == "-h" || arg == "--help" {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        bail!("bless: unknown argument {arg:?}");
+    }
+    let root = repo_root();
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    for (package, test, env) in BLESS_TESTS {
+        println!("$ SUSPECT_BLESS=1 cargo test -p {package} --test {test}");
+        let mut cmd = std::process::Command::new(&cargo);
+        cmd.args(["test", "-p", package, "--test", test])
+            .current_dir(&root)
+            .env("SUSPECT_BLESS", "1");
+        for (key, value) in *env {
+            cmd.env(key, value);
+        }
+        let status = cmd.status().context("spawn cargo test")?;
+        if !status.success() {
+            bail!("bless: cargo test -p {package} --test {test} exited with {status}");
+        }
+    }
+    Ok(())
 }
 
 /// The repository root (the parent of `xtask/`).
@@ -1072,6 +1120,15 @@ mod tests {
                     .len(),
                 5
             );
+        }
+    }
+
+    #[test]
+    fn every_bless_test_target_exists() {
+        let root = repo_root();
+        for (package, test, _) in BLESS_TESTS {
+            let path = root.join(format!("crates/{package}/tests/{test}.rs"));
+            assert!(path.is_file(), "bless test {} is missing", path.display());
         }
     }
 

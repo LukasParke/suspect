@@ -576,7 +576,11 @@ the tools: those runs now fail instead of passing.
    1 day.
 7. **Fix `native-evidence.yml`.** Filter-based selection, correct prefixes,
    no `|| true`. Tests: one `workflow_dispatch` run per backend. 0.25 day.
-8. **`cargo xtask bless`.** Runs the P6 bless tests with `SUSPECT_BLESS=1`.
+8. **`cargo xtask bless`.** **Done.** Runs `cli_reference` and
+   `feature_manifest` (the latter also with `SUSPECT_REGEN_FEATURES=1`
+   until P6 step 6 renames its variable); a unit test checks both targets
+   exist, so P6 step 6's `reference_docs.rs` rename must update
+   `BLESS_TESTS` in `xtask/src/main.rs`. Runs the P6 bless tests with `SUSPECT_BLESS=1`.
    0.1 day.
 
 Total about 4.5 days. Steps 4-8 do not depend on each other. Step 3 depends
