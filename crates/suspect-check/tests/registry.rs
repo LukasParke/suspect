@@ -5,9 +5,9 @@
 //! The corpus is every YAML/JSON file under `crates/*/tests/fixtures`
 //! (including this crate's broken Swagger, Arazzo, Overlay and load-profile
 //! documents),
-//! `docs/demo`, `examples` and, when fetched, `corpus/`. SDK admission is
-//! not run here: it passes through the open-ended `http-*` codes of the
-//! shared HTTP admission layer, which are not tabled yet.
+//! `docs/demo`, `examples` and, when fetched, `corpus/`. SDK admission runs
+//! too (with the `sdk` feature); its open-ended `http-*` and contract codes
+//! are registered by family.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -86,11 +86,18 @@ fn run_checks(path: &Path, linter: &suspect_lint::Linter, emitted: &mut Emitted)
             let Ok(workspace) = suspect_ref::WorkspaceBuilder::new().root(dir).build() else {
                 return;
             };
-            let session = suspect_oas::Session::new(Arc::new(workspace));
+            let workspace = Arc::new(workspace);
+            let session = suspect_oas::Session::new(Arc::clone(&workspace));
             let Some(entry) = path.to_str() else { return };
             if let Ok(diagnostics) = suspect_validate::validate_entry(&session, entry) {
                 for d in diagnostics {
                     record(emitted, CheckId::Validate, d.code, path);
+                }
+            }
+            #[cfg(feature = "sdk")]
+            if workspace.load_all(entry).is_ok() {
+                for f in suspect_check::checks::admission(&workspace, &low) {
+                    record(emitted, CheckId::Admission, &f.code, path);
                 }
             }
         }
@@ -144,7 +151,10 @@ fn every_emitted_code_is_registered() {
             CheckId::Overlay,
             CheckId::LoadProfile,
             CheckId::Lint,
-        ],
+        ]
+        .into_iter()
+        .chain(cfg!(feature = "sdk").then_some(CheckId::Admission))
+        .collect::<Vec<_>>(),
         "corpus did not exercise every producer"
     );
     eprintln!(

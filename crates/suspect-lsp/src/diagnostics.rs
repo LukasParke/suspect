@@ -83,16 +83,64 @@ pub fn findings(ws: Option<&Arc<Workspace>>, low: &LowDoc, policy: &Policy) -> V
 /// The diagnostics for one document under its settings: syntax, the
 /// configuration-file schema, OAS 3.x and Swagger 2.0 validation, lint,
 /// Arazzo, Overlay, markdown, vendor-extension schemas and load profiles,
-/// with `lint.rules`, `lint.design`, `lint.recommended` and the severity
-/// floor applied.
+/// with `lint.rules`, `lint.design`, `lint.recommended`, suppressions and
+/// the severity floor applied. SDK findings follow `codegen:` in
+/// `settings` alone; [`compute_diagnostics_for`] also reads the manifest.
 #[must_use]
 pub fn compute_diagnostics(
     ws: Option<&Arc<Workspace>>,
     low: &LowDoc,
     settings: &suspect_config::Settings,
 ) -> Vec<Diagnostic> {
-    let policy = Policy::from_settings(settings);
-    findings(ws, low, &policy)
+    diagnostics_under(ws, low, &Policy::from_settings(settings), Vec::new())
+}
+
+/// The diagnostics for one document under its resolved configuration:
+/// [`compute_diagnostics`], with SDK findings and admission on when the
+/// configuration or the project manifest configures codegen.
+#[must_use]
+pub fn compute_diagnostics_for(
+    ws: Option<&Arc<Workspace>>,
+    low: &LowDoc,
+    resolved: &suspect_config::Resolved,
+) -> Vec<Diagnostic> {
+    diagnostics_under(ws, low, &Policy::from_resolved(resolved), Vec::new())
+}
+
+/// [`compute_diagnostics_for`] with `extra` findings (the TS rules' for
+/// this run) merged before policy. `registry` replaces the builtin one
+/// when the running rules extend it with their ids.
+#[must_use]
+pub fn compute_diagnostics_with(
+    ws: Option<&Arc<Workspace>>,
+    low: &LowDoc,
+    resolved: &suspect_config::Resolved,
+    extra: Vec<Finding>,
+    registry: Option<Arc<Registry>>,
+) -> Vec<Diagnostic> {
+    let mut policy = Policy::from_resolved(resolved);
+    if let Some(registry) = registry {
+        policy.registry = registry;
+    }
+    diagnostics_under(ws, low, &policy, extra)
+}
+
+/// Every check for one document plus `extra` findings, under `policy`,
+/// as LSP diagnostics.
+#[must_use]
+pub fn diagnostics_under(
+    ws: Option<&Arc<Workspace>>,
+    low: &LowDoc,
+    policy: &Policy,
+    extra: Vec<Finding>,
+) -> Vec<Diagnostic> {
+    let cx = Context {
+        workspace: ws,
+        policy,
+    };
+    let mut raw = suspect_check::check_document(&cx, low);
+    raw.extend(extra);
+    suspect_check::apply_policy(raw, low, policy)
         .iter()
         .map(|f| to_lsp(f, low, &policy.registry))
         .collect()
@@ -171,6 +219,63 @@ mod tests {
                 Some(NumberOrString::String("info-license".to_owned()))
             );
         }
+    }
+
+    #[test]
+    fn admission_refusals_show_when_codegen_is_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = "openapi: 3.1.0\ninfo:\n  title: T\n  version: '1'\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          description: ok\n";
+        let path = dir.path().join("api.yaml");
+        std::fs::write(&path, text).unwrap();
+        let ws = suspect_ref::WorkspaceBuilder::new()
+            .root(dir.path())
+            .build()
+            .unwrap();
+        ws.load_all("api.yaml").unwrap();
+        let ws = Arc::new(ws);
+        let low = LowDoc::parse(
+            suspect_source::Uri::from_path(&path).unwrap(),
+            suspect_source::Source::from_vec(text.as_bytes().to_vec()),
+        );
+        let codes = |dir: &std::path::Path| -> Vec<String> {
+            let resolved = suspect_config::resolve(dir).unwrap();
+            compute_diagnostics_for(Some(&ws), &low, &resolved)
+                .into_iter()
+                .filter_map(|d| match d.code {
+                    Some(NumberOrString::String(code)) => Some(code),
+                    _ => None,
+                })
+                .collect()
+        };
+        let without = codes(dir.path());
+        assert!(!without.iter().any(|c| c == "http-operation-id"));
+        assert!(!without.iter().any(|c| c == "sdk-operation-missing-id"));
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "codegen:\n  profile: typescript-http\n",
+        )
+        .unwrap();
+        let with = codes(dir.path());
+        assert!(with.iter().any(|c| c == "http-operation-id"), "{with:?}");
+        assert!(with.iter().any(|c| c == "sdk-operation-missing-id"));
+    }
+
+    #[test]
+    fn suppressions_apply_in_the_editor() {
+        let text = "openapi: 3.1.0\ninfo:\n  title: T\n  version: '1'\npaths: {}\n";
+        let has = |text: &str| {
+            compute_diagnostics(None, &low("api.yaml", text), &Default::default())
+                .iter()
+                .any(|d| d.code == Some(NumberOrString::String("info-contact".to_owned())))
+        };
+        assert!(has(text));
+        assert!(!has(&format!(
+            "# suspect-disable-file info-contact\n{text}"
+        )));
+        assert!(!has(&text.replace(
+            "info:\n",
+            "# suspect-disable-next-line info-contact\ninfo:\n"
+        )));
     }
 
     #[test]

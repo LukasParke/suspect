@@ -128,8 +128,7 @@ pub fn workspace_pull(
                 return Some((uri.clone(), cached));
             }
             let resolved = settings_for(&uri);
-            let diagnostics =
-                crate::diagnostics::compute_diagnostics(Some(ws), low, &resolved.settings);
+            let diagnostics = crate::diagnostics::compute_diagnostics_for(Some(ws), low, &resolved);
             cache.store(uri.clone(), diagnostics.clone());
             Some((uri, diagnostics))
         })

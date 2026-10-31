@@ -397,6 +397,9 @@ pub struct State {
     /// pointer) and that workspace's document count, which grows as
     /// documents load.
     pub fragment_cache: Option<((usize, usize), Arc<FragmentIndex>)>,
+    /// The TypeScript rule runtime (`rules.enabled`), started on first
+    /// use. Its own lock, held across a TS run, never the state lock.
+    pub rule_host: Arc<tokio::sync::Mutex<crate::rule_host::RuleSlot>>,
 }
 
 impl State {

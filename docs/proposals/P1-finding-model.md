@@ -955,11 +955,69 @@ releasable on its own.
    collisions, `rules-runtime-unavailable`, the LSP `RuleHost` lifecycle and
    epoch bump. Tests: bun-gated integration test in `suspect-check/tests`,
    plus an LSP test with a stub host. Estimate: 1 day.
+   **Done** (the non-CLI half; `check`'s use of it is step 5's).
+   `suspect_check::rules`: `check_rules(&mut dyn RuleSource, &LowDoc)`
+   (`RuleSource` is implemented by `RuleHost` and by test stubs),
+   `to_finding`, `collisions` (`Collision`, with `finding()` on the rule
+   file), `rule_files` over every `rules.roots` directory, `start` (a
+   `Startup` of `NoRules`, `Unavailable`, `Started` or `Failed`) and
+   `runtime_unavailable`. `RulesError` is `suspect_rules::Error`. Two new
+   registered codes: `rules-runtime-unavailable` (warning) and
+   `rules-id-collision` (error). `Registry` gains `with_dynamic` (TS rule
+   ids, rejecting builtin names), `is_builtin_name` and `is_known`.
+   Deviations: dynamic entries are ids only, since TS rule metadata has no
+   summary or severity. A colliding rule's findings are skipped by
+   `check_rules`, so they are never read as the builtin's. Custom ruleset
+   codes are not collision-checked, because step 4 lets a redefined rule
+   keep a builtin name. In the editor (`suspect_lsp::rule_host`), the
+   server keeps one `RuleSlot` in `State`, started lazily for the
+   workspace root and the workspace's `rules.roots` on the first push or
+   document pull of a document whose settings set `rules.enabled`. TS
+   findings join the builtin findings before `apply_policy`
+   (`diagnostics::compute_diagnostics_with`), with the slot's registry. A
+   worker error, a start failure or a run over 5 s (the host's own
+   deadline is 250 ms) drops the TS part and goes to the log. Without bun
+   each document gets the `rules-runtime-unavailable` warning. Collisions
+   are published once per start as errors on the rule files. A
+   watched change under a rules root stops the host instead of calling
+   `RuleHost::reload`, so added and removed files are picked up; it bumps
+   `policy_epoch` and republishes. The watcher glob gains
+   `**/.suspect/rules/**/*.{ts,js,mts,mjs}`. The workspace pull does not
+   run TS rules (open documents get them through the document pull and
+   push). The TS run precedes the builtin pass rather than running beside
+   it; it is bounded by the deadlines above.
 7. **Inline and extension suppression.** `suspect_check::suppress`, the
    `x-suspect-disable` builtin schema, unknown-code and unused-suppression
    findings, and JSON `suppressed`. Tests: YAML comment on a pair, on a
    sequence item, file-level, in JSON via the extension; alias names in
    suppressions; `syntax-error` is not suppressible. Estimate: 1 day.
+   **Done.** `suspect_check::suppress` (`collect`, `apply`, `problems`,
+   `Directive`, `Form`) runs as step 5 of `apply_policy`, so the editor
+   honours suppressions with no LSP change. `apply_policy_report` returns
+   a `PolicyOutcome { findings, suppressed }` (the floor applies to both);
+   `apply_policy` returns its `findings`. `suspect_diag::render::json_report`
+   renders `{"findings": [...], "suppressed": [...]}` for step 5's
+   `--format json`. `CheckId` gains `Suppression` for
+   `suppression-unknown-code` (warning) and `suppression-unused` (hint,
+   emitted only when `lint.rules.suppression-unused` sets a severity).
+   The extension check has a builtin `x-suspect-disable` schema (array of
+   non-empty strings). Codes resolve through the registry, so aliases
+   work; codes of a custom ruleset and dynamic TS ids count as known.
+   Deviations: the comment is spelled `# suspect-disable-next-line`, with
+   `# suspect-disable` accepted as the short form; both apply to the next
+   node (pair or sequence item) and its subtree, not to a line. A
+   trailing comment (`get: # suspect-disable ...`) applies to the node its
+   own line starts. `# suspect-disable-file` is honoured anywhere in the
+   document, not only in the first comment block. `x-suspect-disable`
+   covers its mapping and the pair or sequence item the mapping is the
+   value of, so a finding anchored on the key is covered too; a bare
+   string value is not honoured (and fails the schema). Naming
+   `syntax-error` (or `syntax`) gives `suppression-unknown-code` with
+   "cannot be suppressed"; a directive with no codes gives it too. A
+   document without the text `suspect-disable` costs one byte scan.
+   Tests: `crates/suspect-check/tests/suppress.rs` and an LSP unit test in
+   `diagnostics.rs`. The VS Code host smoke assertion is not added here
+   (`editors/` belongs to the P4 work).
 8. **Baseline.** `--write-baseline`, `--baseline`, `check.baseline`, SARIF
    `partialFingerprints`/`baselineState`. Tests: write then check exits 0;
    adding one finding exits 1 and shows only that one; moving an operation to
@@ -969,6 +1027,48 @@ releasable on its own.
    admission findings in `check_document` behind the `sdk` feature. Tests:
    `sdk-operation-missing-id` is absent without `codegen:` and present with
    it; refusals appear in the editor when configured. Estimate: 0.5 day.
+   **Done** (the non-CLI half; `--sdk`/`--no-sdk` are step 5's and set
+   `Policy::sdk`). `suspect_check::codegen_configured(&Resolved)` is true
+   when any `codegen.*` key is set or the manifest lists `codegen`
+   targets or `release.targets` (an empty `"codegen": []`, as
+   `project init` writes, does not count); the manifest answer is cached
+   by file stamp. `Policy::from_resolved` sets `sdk` from it;
+   `Policy::from_settings` sees only the `codegen:` section, and
+   `Policy::default()` now has `sdk: false`. `check_document` runs
+   `checks::admission` (behind the `sdk` feature, which now also pulls in
+   `suspect-ir`) when `policy.sdk`, `CheckId::Admission` is selected and
+   a workspace is loaded, for OpenAPI 3.x documents. Severity comes from
+   the finding kind: refusal error, contract limitation warning, advice
+   info. Findings located in another document are reported at document
+   level. Identical admission findings (same code, range and message;
+   shared admission repeats a servers-list refusal once per operation)
+   are reported once. The LSP golden gains three lines: the session
+   workspace's manifest configures codegen, so `http-server-unsupported`
+   on its servers and `http-operation-id` on the two petstore operations
+   appear; its missing-`operationId` assertion now excludes the
+   admission code. The remaining admission codes are registered by family,
+   because per-code tables are impractical (about 200 `http-*` codes are
+   named at their refusal sites in `http_contract.rs` and
+   `http_protocol/`, and the contract compiler passes codes through
+   variables): `suspect_diag::RuleFamily { prefix, rule }`,
+   `suspect_codegen::admission::families()` (`http-`, `DUPLICATE_`,
+   `AMBIGUOUS_`, `INVALID_`, `invalid-`, `HTTP_REFERENCE`,
+   `UNSUPPORTED_`, `unsupported-`, `UNKNOWN_`, `RECURSIVE_`), and
+   `Registry::{with_families, family, families}`. `Registry::info` falls
+   back to the longest matching family when no table lists the code
+   (exact entries win, so `invalid-ref` stays a validate code), and a TS
+   rule id in a family counts as a collision. The registry corpus test
+   now runs admission too. The editor builds its policy with
+   `Policy::from_resolved` on the push, both pulls and fix-all
+   (`diagnostics::compute_diagnostics_for`, `compute_diagnostics_with`
+   now taking `&Resolved`, `diagnostics_under`,
+   `actions::resolve_code_action_under`); `compute_diagnostics(settings)`
+   stays for callers without a resolved configuration. Admission compiles
+   the contract on every run while `sdk` is on. With `sdk` on, a missing
+   or duplicate `operationId` is reported by validate, by the `sdk-*`
+   readiness code and by admission (`http-operation-id`,
+   `DUPLICATE_OPERATION_ID`); these differ in position and class, so they
+   are v2 alias candidates rather than v1 aliases.
 
 Total: about 9 days. The short version estimated 4-5 days. The difference is
 the LSP-only checks that have to move (step 3), the parity harness (step 5)

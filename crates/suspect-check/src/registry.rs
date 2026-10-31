@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use suspect_diag::render::RuleLookup;
-use suspect_diag::{CheckId, RuleInfo, Severity};
+use suspect_diag::{CheckId, RuleFamily, RuleInfo, Severity};
 
 /// Overlay structure codes (`suspect_overlay::validate_overlay`). The table
 /// lives here because `suspect-overlay` is a publishable foundation crate
@@ -57,6 +57,36 @@ const PASS_RULES: &[RuleInfo] = &[
         Severity::Error,
         "Vendor extension value fails its registered schema",
     ),
+    RuleInfo::new(
+        crate::rules::RUNTIME_UNAVAILABLE,
+        CheckId::Rules,
+        Severity::Warning,
+        "TypeScript rules are configured but bun is not on PATH",
+    ),
+    RuleInfo::new(
+        crate::rules::ID_COLLISION,
+        CheckId::Rules,
+        Severity::Error,
+        "TypeScript rule id reuses a builtin code or alias",
+    ),
+    RuleInfo {
+        how_to_fix: "Name a code or alias the checks report; `syntax-error` cannot be suppressed.",
+        ..RuleInfo::new(
+            crate::suppress::UNKNOWN_CODE,
+            CheckId::Suppression,
+            Severity::Warning,
+            "Suppression names an unknown or unsuppressible code",
+        )
+    },
+    RuleInfo {
+        how_to_fix: "Remove the suppression, or the code it no longer needs.",
+        ..RuleInfo::new(
+            crate::suppress::UNUSED,
+            CheckId::Suppression,
+            Severity::Hint,
+            "Suppression matched no finding (off unless `lint.rules` turns it on)",
+        )
+    },
 ];
 
 /// Alias table v1: canonical code, then the codes that report the same
@@ -116,6 +146,16 @@ pub fn builtin_tables() -> Vec<&'static [RuleInfo]> {
     tables
 }
 
+/// The builtin code families: admission's open-ended `http-*` and
+/// contract-compiler codes, registered by prefix.
+#[must_use]
+pub fn builtin_families() -> &'static [RuleFamily] {
+    #[cfg(feature = "sdk")]
+    return suspect_codegen::admission::families();
+    #[cfg(not(feature = "sdk"))]
+    return &[];
+}
+
 /// A code registered by two tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RegistryError {
@@ -132,6 +172,11 @@ pub enum RegistryError {
     UnknownCanonical {
         /// The code.
         code: &'static str,
+    },
+    /// A dynamic rule (a TS rule id) names a builtin code or alias.
+    Collision {
+        /// The rule id.
+        code: String,
     },
 }
 
@@ -151,6 +196,9 @@ impl std::fmt::Display for RegistryError {
             Self::UnknownCanonical { code } => {
                 write!(f, "alias entry names unregistered code `{code}`")
             }
+            Self::Collision { code } => {
+                write!(f, "rule id `{code}` reuses a builtin code or alias")
+            }
         }
     }
 }
@@ -169,6 +217,10 @@ pub struct Registry {
     order: Vec<&'static str>,
     /// Alias -> canonical codes, in [`ALIASES`] order.
     alias_to: HashMap<&'static str, Vec<&'static str>>,
+    /// Codes known at run time only (TS rule ids), by check.
+    dynamic: HashMap<Box<str>, CheckId>,
+    /// Prefix families for open-ended codes, consulted after `by_code`.
+    families: Vec<RuleFamily>,
 }
 
 impl Registry {
@@ -180,7 +232,7 @@ impl Registry {
     #[must_use]
     pub fn builtin() -> Self {
         match Self::from_tables(&builtin_tables()).and_then(|r| r.with_aliases(ALIASES)) {
-            Ok(registry) => registry,
+            Ok(registry) => registry.with_families(builtin_families()),
             Err(error) => panic!("builtin rule tables conflict: {error}"),
         }
     }
@@ -205,6 +257,65 @@ impl Registry {
             }
         }
         Ok(self)
+    }
+
+    /// Adds prefix families: a code no table lists takes the metadata of
+    /// the family with its longest matching prefix.
+    #[must_use]
+    pub fn with_families(mut self, families: &[RuleFamily]) -> Self {
+        self.families.extend_from_slice(families);
+        self
+    }
+
+    /// The family `code` belongs to (longest prefix), when no table lists
+    /// it exactly.
+    #[must_use]
+    pub fn family(&self, code: &str) -> Option<&RuleFamily> {
+        if self.by_code.contains_key(code) {
+            return None;
+        }
+        self.families
+            .iter()
+            .filter(|f| code.starts_with(f.prefix))
+            .max_by_key(|f| f.prefix.len())
+    }
+
+    /// Every family, in registration order.
+    #[must_use]
+    pub fn families(&self) -> &[RuleFamily] {
+        &self.families
+    }
+
+    /// Adds codes known only at run time (TS rule ids), so suppressions
+    /// naming them are recognized.
+    ///
+    /// # Errors
+    /// [`RegistryError::Collision`] when a code is a builtin code or alias.
+    pub fn with_dynamic(
+        mut self,
+        codes: impl IntoIterator<Item = (String, CheckId)>,
+    ) -> Result<Self, RegistryError> {
+        for (code, check) in codes {
+            if self.is_builtin_name(&code) {
+                return Err(RegistryError::Collision { code });
+            }
+            self.dynamic.insert(code.into_boxed_str(), check);
+        }
+        Ok(self)
+    }
+
+    /// Whether `code` is a builtin code, an alias, or in a builtin family.
+    #[must_use]
+    pub fn is_builtin_name(&self, code: &str) -> bool {
+        self.by_code.contains_key(code)
+            || self.alias_to.contains_key(code)
+            || self.family(code).is_some()
+    }
+
+    /// Whether `code` is known at all: builtin, an alias, or dynamic.
+    #[must_use]
+    pub fn is_known(&self, code: &str) -> bool {
+        self.is_builtin_name(code) || self.dynamic.contains_key(code)
     }
 
     /// Merges `tables`.
@@ -255,10 +366,12 @@ impl Registry {
         }
     }
 
-    /// Metadata for a canonical code.
+    /// Metadata for a canonical code, else for the family it belongs to.
     #[must_use]
     pub fn info(&self, code: &str) -> Option<&RuleInfo> {
-        self.by_code.get(code)
+        self.by_code
+            .get(code)
+            .or_else(|| self.family(code).map(|f| &f.rule))
     }
 
     /// Every rule, in registration order.
@@ -354,5 +467,33 @@ mod tests {
             registry.rule("overlay-empty-actions").map(|r| r.default),
             Some(Severity::Error)
         );
+    }
+
+    #[cfg(feature = "sdk")]
+    #[test]
+    fn families_answer_open_ended_admission_codes() {
+        let registry = Registry::builtin();
+        // Exact entries win over the family.
+        let exact = registry.info("http-operation-id").unwrap();
+        assert_eq!(exact.code, "http-operation-id");
+        assert!(registry.family("http-operation-id").is_none());
+        let member = registry.info("http-query-parameter-style").unwrap();
+        assert_eq!(member.code, "http-*");
+        assert_eq!(member.check, CheckId::Admission);
+        assert_eq!(member.class, suspect_diag::RuleClass::Sdk);
+        assert!(!member.summary.is_empty());
+        assert_eq!(
+            registry.info("HTTP_REFERENCE_CYCLE").map(|r| r.code),
+            Some("HTTP_REFERENCE*")
+        );
+        // `invalid-ref` is a validate code; the `invalid-` family does not
+        // take it over.
+        assert_eq!(
+            registry.info("invalid-ref").map(|r| r.check),
+            Some(CheckId::Validate)
+        );
+        assert!(registry.is_known("unsupported-schema-keyword"));
+        assert!(registry.is_builtin_name("http-anything"));
+        assert!(!registry.is_known("team-rule"));
     }
 }

@@ -59,7 +59,8 @@ pub struct Policy {
     /// Whether `lint.ruleset` names a ruleset.
     pub custom_ruleset: bool,
     /// Whether SDK-readiness findings ([`RuleClass::Sdk`], admission) are
-    /// kept. On until P1 step 9 detects configured codegen.
+    /// kept, and admission runs: on when codegen is configured
+    /// ([`codegen_configured`]), off by default.
     pub sdk: bool,
     /// `validate.strict_format`.
     pub strict_format: bool,
@@ -80,7 +81,7 @@ impl Default for Policy {
             design: None,
             recommended: true,
             custom_ruleset: false,
-            sdk: true,
+            sdk: false,
             strict_format: false,
             linter: spectral_default(),
             extensions: ExtensionSchemas::default(),
@@ -125,7 +126,18 @@ impl Policy {
             strict_format: settings.validate.strict_format,
             linter,
             extensions: ExtensionSchemas::from_value(settings.extensions.as_ref()),
+            sdk: codegen_in_settings(&settings.codegen),
             ..Self::default()
+        }
+    }
+
+    /// [`Policy::from_settings`] for a resolved configuration, with SDK
+    /// findings on when it configures codegen ([`codegen_configured`]).
+    #[must_use]
+    pub fn from_resolved(resolved: &suspect_config::Resolved) -> Self {
+        Self {
+            sdk: codegen_configured(resolved),
+            ..Self::from_settings(&resolved.settings)
         }
     }
 
@@ -168,6 +180,61 @@ impl Policy {
             .info(&finding.code)
             .map_or(RuleClass::Document, |info| info.class)
     }
+}
+
+/// Whether a resolved configuration configures codegen, which turns on
+/// the SDK-readiness category (decided 2026-10-29): any key of the
+/// `codegen:` section is set, or the project manifest declares codegen
+/// targets (`codegen`) or SDK release targets (`release.targets`). A
+/// flag (`check --sdk` / `--no-sdk`) overrides it by setting
+/// [`Policy::sdk`].
+#[must_use]
+pub fn codegen_configured(resolved: &suspect_config::Resolved) -> bool {
+    codegen_in_settings(&resolved.settings.codegen)
+        || resolved
+            .manifest
+            .as_deref()
+            .is_some_and(manifest_declares_targets)
+}
+
+fn codegen_in_settings(codegen: &suspect_config::CodegenSettings) -> bool {
+    codegen.out.is_some() || codegen.profile.is_some() || codegen.package_version.is_some()
+}
+
+/// Whether a manifest lists codegen or release targets; cached by path
+/// and file stamp, since the editor asks on every run.
+fn manifest_declares_targets(path: &Path) -> bool {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (Stamp, bool)>>> = OnceLock::new();
+    let Ok(meta) = std::fs::metadata(path) else {
+        return false;
+    };
+    let stamp = (meta.modified().ok(), meta.len());
+    let cache = CACHE.get_or_init(Mutex::default);
+    if let Some((cached, answer)) = cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(path)
+        && *cached == stamp
+    {
+        return *answer;
+    }
+    let non_empty = |v: Option<&serde_json::Value>| match v {
+        Some(serde_json::Value::Array(items)) => !items.is_empty(),
+        Some(serde_json::Value::Object(map)) => !map.is_empty(),
+        _ => false,
+    };
+    let answer = std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|manifest| {
+            non_empty(manifest.get("codegen"))
+                || non_empty(manifest.get("release").and_then(|r| r.get("targets")))
+        });
+    cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(path.to_path_buf(), (stamp, answer));
+    answer
 }
 
 /// The builtin packs, compiled once per process.
@@ -225,13 +292,32 @@ fn cached_ruleset(path: &Path) -> Option<Arc<suspect_lint::Linter>> {
 ///    else the finding's own severity; `off` drops the finding.
 /// 4. **Category gates**: SDK-readiness findings only with `policy.sdk`;
 ///    lint and markdown findings only when lint is enabled.
-/// 5. *(P1 step 7: suppressions.)*
-/// 6. **Floor**: findings below `policy.floor` are dropped.
+/// 5. **Suppressions**: findings an inline `# suspect-disable…` comment
+///    or an `x-suspect-disable` extension covers are set aside (see
+///    [`crate::suppress`]); problems with the suppressions themselves are
+///    added, subject to overrides.
+/// 6. **Floor**: findings below `policy.floor` are dropped, from the
+///    suppressed list too.
 #[must_use]
 pub fn apply_policy(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> Vec<Finding> {
-    let _ = doc;
+    apply_policy_report(findings, doc, policy).findings
+}
+
+/// What [`apply_policy_report`] keeps and what suppressions hid.
+#[derive(Debug, Clone, Default)]
+pub struct PolicyOutcome {
+    /// Findings to report.
+    pub findings: Vec<Finding>,
+    /// Findings an inline or extension suppression hid (`--format json`
+    /// lists them under `suppressed`).
+    pub suppressed: Vec<Finding>,
+}
+
+/// [`apply_policy`], also returning the suppressed findings.
+#[must_use]
+pub fn apply_policy_report(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> PolicyOutcome {
     let canonical = canonicalize(findings, policy);
-    dedupe(canonical, &policy.registry)
+    let gated: Vec<Finding> = dedupe(canonical, &policy.registry)
         .into_iter()
         .filter_map(|mut finding| {
             // 3. Overrides.
@@ -255,10 +341,33 @@ pub fn apply_policy(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> Ve
             {
                 return None;
             }
-            // 6. Floor.
-            (finding.severity >= policy.floor).then_some(finding)
+            Some(finding)
         })
-        .collect()
+        .collect();
+    // 5. Suppressions.
+    let custom =
+        |code: &str| policy.custom_ruleset && policy.linter.rule_codes().any(|c| c == code);
+    let mut directives = crate::suppress::collect(doc, &policy.registry, &custom);
+    let (mut kept, suppressed) = crate::suppress::apply(gated, doc, &mut directives);
+    // `suppression-unused` is off unless configured.
+    let unused = match policy.override_for(crate::suppress::UNUSED) {
+        Some(Level::On(severity)) => Some(severity),
+        _ => None,
+    };
+    for mut problem in crate::suppress::problems(doc, &directives, unused) {
+        match policy.override_for(&problem.code) {
+            Some(Level::Off) => continue,
+            Some(Level::On(severity)) => problem.severity = severity,
+            None => {}
+        }
+        kept.push(problem);
+    }
+    // 6. Floor.
+    let floor = |f: &Finding| f.severity >= policy.floor;
+    PolicyOutcome {
+        findings: kept.into_iter().filter(floor).collect(),
+        suppressed: suppressed.into_iter().filter(floor).collect(),
+    }
 }
 
 /// A finding and the code it was emitted with, when canonicalization

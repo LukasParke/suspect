@@ -49,6 +49,8 @@ pub enum CheckId {
     Rules,
     /// SDK generation admission.
     Admission,
+    /// Problems with inline or extension suppressions themselves.
+    Suppression,
     /// A command-local finding outside the check pass (I/O errors,
     /// `breaking`, `drift` and other report commands).
     Command,
@@ -72,6 +74,7 @@ impl CheckId {
             Self::Config => "config",
             Self::Rules => "rules",
             Self::Admission => "admission",
+            Self::Suppression => "suppression",
             Self::Command => "command",
         }
     }
@@ -204,6 +207,19 @@ impl RuleInfo {
             aliases: &[],
         }
     }
+}
+
+/// Metadata for an open-ended family of codes sharing a prefix (the SDK
+/// HTTP admission layer passes through ~200 `http-*` codes). A registry
+/// answers a code no table lists exactly with the family of its longest
+/// matching prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuleFamily {
+    /// The shared prefix (`http-`).
+    pub prefix: &'static str,
+    /// What every member has in common; `rule.code` is the family's
+    /// display name (`http-*`).
+    pub rule: RuleInfo,
 }
 
 fn serialize_uri<S: serde::Serializer>(uri: &Uri, serializer: S) -> Result<S::Ok, S::Error> {

@@ -148,6 +148,7 @@ openapi.yaml:728:7-755:50 warning suspect-lint security-no-delete-without-id: DE
 openapi.yaml:730:14-730:21 warning suspect oas-tag-undeclared: tag `devices` on delete operation is not declared in the root `tags`
 openapi.yaml:759:14-759:21 warning suspect oas-tag-undeclared: tag `devices` on patch operation is not declared in the root `tags`
 openapi.yaml:789:14-789:22 warning suspect oas-tag-undeclared: tag `discover` on post operation is not declared in the root `tags`
+openapi.yaml:7:3-10:23 error suspect http-server-unsupported: exactly one static absolute HTTPS server is supported
 openapi.yaml:818:14-818:22 warning suspect oas-tag-undeclared: tag `discover` on put operation is not declared in the root `tags`
 openapi.yaml:845:7-872:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
 openapi.yaml:847:14-847:22 warning suspect oas-tag-undeclared: tag `discover` on delete operation is not declared in the root `tags`
@@ -203,12 +204,14 @@ workflows/health.arazzo.yaml: (none)
 .suspect.yaml: (none)
 suspect.project.json:13:3-13:9 warning suspect config-manifest-policy: `lint` in a project manifest is deprecated and is ignored from the next release; move it to .suspect.yaml and add "config": ".suspect.yaml" to the manifest (`suspect config migrate` does both)
 petstore.yaml:17:5-25:49 error suspect oas-path-param-not-declared: path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it
+petstore.yaml:18:7-25:49 error suspect http-operation-id: a non-empty operationId is required
 petstore.yaml:18:7-25:49 error suspect-lint path-params: Operation `get` of "/pets/{petId}" does not declare path parameter {petId}
 petstore.yaml:18:7-25:49 warning suspect oas-operation-missing-operationId: get operation is missing an operationId
 petstore.yaml:18:7-25:49 warning suspect-lint operation-4xx-response: Operation should have at least one 4XX response.
 petstore.yaml:18:7-25:49 warning suspect-lint operation-tags: Operation should have non-empty `tags` array.
 petstore.yaml:3:3-4:19 warning suspect-lint info-contact: Info object should contain a contact object.
 petstore.yaml:3:3-4:19 warning suspect-lint info-license: Info object should contain a license object.
+petstore.yaml:8:7-15:50 error suspect http-operation-id: a non-empty operationId is required
 petstore.yaml:8:7-15:50 warning suspect oas-operation-missing-operationId: get operation is missing an operationId
 petstore.yaml:8:7-15:50 warning suspect-lint operation-4xx-response: Operation should have at least one 4XX response.
 petstore.yaml:8:7-15:50 warning suspect-lint operation-tags: Operation should have non-empty `tags` array.

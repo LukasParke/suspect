@@ -13,7 +13,7 @@ publish = false
 [features]
 default = ["sdk"]
 # SDK admission codes (pulls in suspect-codegen).
-sdk = ["dep:suspect-codegen"]
+sdk = ["dep:suspect-codegen", "dep:suspect-ir"]
 
 [dependencies]
 serde_json.workspace = true
@@ -30,7 +30,11 @@ suspect-arazzo.workspace = true
 suspect-overlay.workspace = true
 suspect-schema.workspace = true
 suspect-test.workspace = true
+suspect-rules.workspace = true
 suspect-codegen = { workspace = true, optional = true }
+suspect-ir = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+suspect-codegen.workspace = true
