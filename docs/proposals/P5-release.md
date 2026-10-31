@@ -535,11 +535,26 @@ workflow does, required secrets), and its "Checks" list is replaced by
    -p suspect-syntax -p suspect-low -p suspect-ref -p suspect-jsonpath -p
    suspect-oas -p suspect-overlay`. Files: every `Cargo.toml`,
    `.github/workflows/ci.yml`, 8 new small files. 3-4 h.
+   **Done.** 16 crates are `publish = false` (23 after P8, minus the seven).
+   `suspect-rules` also gained the missing `rust-version.workspace`. The YAML
+   grammar's `LICENSE` is upstream's file from tree-sitter-grammars/tree-sitter-yaml
+   v0.7.2 (its `parser.c` is byte-identical to the vendored one); a
+   `grammars/yaml/README.md` records the origin and the local scanner patch.
 2. **One version.** `cargo xtask bump` and `cargo xtask check-versions`;
    `discover.rs:110` uses `CARGO_PKG_VERSION`; `check-versions` in
    `ci.yml`. Tests: xtask unit test that bumps a temp copy of the manifests
    and re-reads them; `suspect-rules` test that the shim version equals
    `CARGO_PKG_VERSION`. 0.5 day.
+   **Done** (`xtask/src/versions.rs`). Deviations: edits are byte-range
+   replacements located by a line-oriented TOML reader and a small JSON
+   scanner instead of `toml_edit`/`semver`, so xtask gains no dependencies;
+   `bump` also rewrites the path packages in `Cargo.lock` and
+   `editors/zed/Cargo.lock` (otherwise `--locked` builds fail after a bump);
+   `check-versions` also requires every member to use `version.workspace =
+   true`. `bump` does not run git-cliff yet (`cliff.toml` is step 4). The
+   shim manifest is now part of the worker cache-dir hash, so a new version
+   does not reuse a stale staged shim. CI runs `cargo run -p xtask --
+   check-versions` until P7's `cargo xtask` alias lands.
 3. **Windows and macOS CI.** New `ci.yml` jobs: `cargo test -p suspect-cli
    -p suspect-low -p suspect-ref` on `windows-2022` and `macos-14`.
    Implement `Silenced` on Windows (open `NUL` and redirect fds 1 and 2 with
@@ -547,6 +562,25 @@ workflow does, required secrets), and its "Checks" list is replaced by
    do not follow the CRT fds, use `SetStdHandle` instead) with a test that a
    gate's `--format json` output is one document. Fix what else fails. 1-2 days, depending on
    findings.
+   **Done, Windows unverified.** Rust's std does not use CRT descriptors on
+   Windows (it calls `GetStdHandle` per write, and `Command` inherits the
+   standard handles), so `Silenced` swaps the handles with `SetStdHandle`
+   onto an open `NUL` file, declared directly against kernel32 so
+   `suspect-cli` gains no dependency. Both platforms now flush std's
+   buffers before and after the swap, so a partial line written while
+   silenced no longer leaks into the document. The test
+   (`silence::tests`) re-runs the test binary as a child, silences it, and
+   asserts that output from the child and from a grandchild it spawns is
+   dropped while output before and after reaches the real streams; the
+   existing `ci_reports_a_machine_readable_aggregate` already parses a
+   gate's whole `--format json` stdout as one document. The Windows code
+   type-checks and passes clippy for `x86_64-pc-windows-msvc` (module
+   alone) and `x86_64-pc-windows-gnu` (`suspect-cli`, `suspect-low`,
+   `suspect-ref`, all targets, `zig cc` for the C build scripts; the msvc
+   target needs the Windows SDK headers for those). It has not run on
+   Windows, so the `test-windows` job is `continue-on-error` until its first
+   green run, and checks out with `core.autocrlf false`. Known risk:
+   `suspect release-publish` runs target commands through `sh -c`.
 4. **cargo-dist and changelog.** `dist init` with the config above;
    generated `release.yml`; `dist generate --check` in `ci.yml`;
    `cliff.toml`; `CHANGELOG.md` with the `v0.1.0` entry;
