@@ -486,11 +486,11 @@ mod tests {
             registry.info("HTTP_REFERENCE_CYCLE").map(|r| r.code),
             Some("HTTP_REFERENCE*")
         );
-        // `invalid-ref` is a validate code; the `invalid-` family does not
+        // `invalid-ref` is a `$ref` code; the `invalid-` family does not
         // take it over.
         assert_eq!(
             registry.info("invalid-ref").map(|r| r.check),
-            Some(CheckId::Validate)
+            Some(CheckId::Ref)
         );
         assert!(registry.is_known("unsupported-schema-keyword"));
         assert!(registry.is_builtin_name("http-anything"));

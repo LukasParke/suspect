@@ -2100,6 +2100,7 @@ dependencies = [
 name = "suspect-check"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "suspect-arazzo",
  "suspect-codegen",
@@ -2139,6 +2140,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "suspect-arazzo",
+ "suspect-check",
  "suspect-codegen",
  "suspect-config",
  "suspect-diag",

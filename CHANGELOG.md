@@ -36,6 +36,17 @@ entry is a summary rather than a generated list.
 - Arazzo workflow testing against live servers or recorded cassettes,
   contract and load testing, a mock gateway with recording, replay and drift
   analysis.
-- `suspect ci` and `suspect check` as CI gates with text, JSON and SARIF
+- `suspect check` runs every check the editor runs (syntax, `$ref`s,
+  OpenAPI, Swagger 2.0, Arazzo, Overlay, load profiles, lint, markdown,
+  vendor extensions, configuration files, TypeScript rules, and SDK
+  readiness when codegen is configured) under one policy, and exits 1 on
+  an error-severity finding; `validate` and `lint` are filters of it
+  (`--only`). Inline (`# suspect-disable`, `x-suspect-disable`) and
+  baseline (`--baseline`, `check.baseline`) suppression. Text, JSON, SARIF
+  and JUnit output. The parse census `check` used to print is in `stats`.
+  Finding JSON is `{"findings": [...], "suppressed": [...]}` with
+  lowercase severities, and lint rules that duplicate a validation code
+  report under that code (`alias_of` names the old one).
+- `suspect ci` as a workspace gate (one `check` stage) with text and JSON
   output (JUnit for load runs); Swagger 2.0 to 3.1 upgrade; semantic and
   breaking-change diff; Overlay apply, explain and synthesis.

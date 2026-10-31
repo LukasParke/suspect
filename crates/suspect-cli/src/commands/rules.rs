@@ -109,6 +109,7 @@ async fn check_async(
         );
         return Ok(0);
     }
+    let files = rule_files.len();
     let mut host = match RuleHost::start(StartOptions {
         workspace_root: workspace_root.clone(),
         rule_files,
@@ -119,6 +120,14 @@ async fn check_async(
     .await
     {
         Ok(Some(host)) => host,
+        // The host declines to start without bun in `auto` mode; rules
+        // exist, so that is an environment error here (exit 2), where
+        // `check` reports a warning and goes on.
+        Ok(None) if suspect_rules::discover::find_bun().is_none() => {
+            return Err(anyhow::anyhow!(
+                "{files} TypeScript rule file(s) not run: bun is not on PATH (install from https://bun.sh)"
+            ));
+        }
         Ok(None) => {
             eprintln!(
                 "no TS rules found (looked in {}) — nothing to do",

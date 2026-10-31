@@ -16,6 +16,7 @@ default = ["sdk"]
 sdk = ["dep:suspect-codegen", "dep:suspect-ir"]
 
 [dependencies]
+serde.workspace = true
 serde_json.workspace = true
 suspect-diag.workspace = true
 suspect-config.workspace = true

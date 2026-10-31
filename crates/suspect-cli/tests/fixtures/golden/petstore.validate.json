@@ -1,86 +1,75 @@
-[
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "oas-operation-missing-operationId",
-    "message": "get operation is missing an operationId\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name.",
-    "line": 8,
-    "col": 7,
-    "range": {
-      "start": 94,
-      "end": 303
+{
+  "findings": [
+    {
+      "check": "validate",
+      "code": "oas-operation-missing-operationId",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 8,
+      "message": "get operation is missing an operationId",
+      "pointer": "/paths/~1pets/get",
+      "range": {
+        "end": 303,
+        "start": 94
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "validate",
+      "code": "oas-operation-no-error-response",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 8,
+      "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response",
+      "pointer": "/paths/~1pets/get",
+      "range": {
+        "end": 303,
+        "start": 94
+      },
+      "severity": "info"
+    },
+    {
+      "check": "validate",
+      "code": "oas-path-param-not-declared",
+      "col": 5,
+      "file": "docs/demo/petstore.yaml",
+      "line": 17,
+      "message": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it",
+      "pointer": "/paths/~1pets~1{petId}",
+      "range": {
+        "end": 541,
+        "start": 325
+      },
+      "severity": "error"
+    },
+    {
+      "check": "validate",
+      "code": "oas-operation-missing-operationId",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 18,
+      "message": "get operation is missing an operationId",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "range": {
+        "end": 541,
+        "start": 336
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "validate",
+      "code": "oas-operation-no-error-response",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 18,
+      "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "range": {
+        "end": 541,
+        "start": 336
+      },
+      "severity": "info"
     }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "oas-operation-no-error-response",
-    "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response\nhow to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.",
-    "line": 8,
-    "col": 7,
-    "range": {
-      "start": 94,
-      "end": 303
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "sdk-operation-missing-id",
-    "message": "GET operation has no `operationId`; SDK generation falls back to `GET /pets` selection\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name.",
-    "line": 8,
-    "col": 7,
-    "range": {
-      "start": 94,
-      "end": 303
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Error",
-    "code": "oas-path-param-not-declared",
-    "message": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it\nhow to fix: Declare every `{var}` in the path as an `in: path` parameter on the path item or operation.",
-    "line": 17,
-    "col": 5,
-    "range": {
-      "start": 325,
-      "end": 541
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "oas-operation-missing-operationId",
-    "message": "get operation is missing an operationId\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name.",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "oas-operation-no-error-response",
-    "message": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response\nhow to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "sdk-operation-missing-id",
-    "message": "GET operation has no `operationId`; SDK generation falls back to `GET /pets/{petId}` selection\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name.",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  }
-]
+  ],
+  "suppressed": []
+}

@@ -453,6 +453,15 @@ pub static SETTINGS: &[Setting] = &[
     .editor("diff.baseline")
     .editor_aliases(&["ci.baseline"])
     .flags(&["ci --baseline"]),
+    section("check", "The `suspect check` gate."),
+    row(
+        "check.baseline",
+        Kind::Path,
+        "Findings baseline file: findings recorded there do not fail `check`, \
+         `validate`, `lint` or the `ci` check stage. Write one with \
+         `suspect check --write-baseline`. The editor ignores it.",
+    )
+    .flags(&["check --baseline"]),
     section("rules", "TypeScript rule plugins."),
     row(
         "rules.enabled",

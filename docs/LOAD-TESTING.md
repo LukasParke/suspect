@@ -215,7 +215,8 @@ in-process and 43k req/s sustained over sockets with zero drops.
 ## Editor support
 
 `*.load.yaml` files are a recognized document family (`Load10`):
-`suspect check` labels them and the LSP publishes profile diagnostics
-(bad durations, phase shapes, `ensure` syntax, missing data files, and
-unknown workflow ids when the Arazzo document is in the workspace) at
-the offending line.
+`suspect stats` labels them, and `suspect check` and the LSP report the
+same profile diagnostics (bad durations, phase shapes, `ensure` syntax,
+missing data files, and unknown workflow ids when the Arazzo document
+is loaded) at the offending line. `suspect check --only load-profile`
+runs only these.

@@ -60,16 +60,9 @@ pub enum Strategy {
 /// `release`, `dev`); old flat names are rewritten by [`legacy`].
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats.
-    Check {
-        /// Documents to check.
-        #[arg(required = true)]
-        paths: Vec<PathBuf>,
-        /// Output format for the per-file reports.
-        #[command(flatten)]
-        report: Report,
-    },
-    /// Validate OpenAPI syntax and semantic requirements, reporting located findings.
+    /// Run every check the editor runs; exit 1 when an error-severity finding remains.
+    Check(commands::check::CheckArgs),
+    /// Validate document structure and semantics: `check` with the validation checks.
     Validate {
         /// OpenAPI documents to validate.
         #[arg(required = true)]
@@ -85,7 +78,7 @@ pub enum Command {
         #[command(flatten)]
         findings: Findings,
     },
-    /// Run spectral-style lint rules over documents.
+    /// Run spectral-style, markdown and TypeScript rules: `check` with the lint checks.
     Lint {
         /// Documents to lint.
         #[arg(required = true)]
@@ -128,7 +121,7 @@ pub enum Command {
     },
     /// Upgrade Swagger 2.0 documents to OpenAPI 3.1.
     Upgrade(commands::upgrade::UpgradeArgs),
-    /// Structural counts for a document.
+    /// Structural counts and the `$ref` census for a document.
     Stats {
         /// Input document.
         path: PathBuf,
@@ -637,7 +630,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<Exit> {
 
 fn dispatch(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
-        Command::Check { paths, report } => commands::check::check(&paths, report.format),
+        Command::Check(args) => commands::check::check(args),
         Command::Validate {
             paths,
             reference_allowlist,
@@ -657,14 +650,15 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                     reference_allowlist.map(Raw::Path),
                     "--reference-allowlist",
                 );
-            let resolved = settings::resolve(&paths, flags)?;
-            let validate = &resolved.settings.validate;
-            commands::validate::validate(
-                &paths,
-                findings.format,
-                validate.reference_allowlist.as_deref(),
-                validate.strict_format,
-            )
+            commands::check::command(&commands::check::Request {
+                paths: &paths,
+                flags,
+                checks: Some(commands::check::VALIDATE.to_vec()),
+                rules: None,
+                sdk: None,
+                write_baseline: None,
+                format: findings.format,
+            })
         }
         Command::Lint {
             paths,
@@ -680,18 +674,15 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                     min_severity.map(|s| Raw::Str(s.label().to_owned())),
                     "--min-severity",
                 );
-            let resolved = settings::resolve(&paths, flags)?;
-            let lint = &resolved.settings.lint;
-            // Committed policy: design-class severity and per-rule
-            // overrides reach the CLI the same way they reach the editor.
-            let overrides = commands::lint::LintOverrides::from_settings(lint);
-            commands::lint::lint(
-                &paths,
-                lint.ruleset.as_deref(),
-                commands::lint::floor(lint),
-                &overrides,
-                findings.format,
-            )
+            commands::check::command(&commands::check::Request {
+                paths: &paths,
+                flags,
+                checks: Some(commands::check::LINT.to_vec()),
+                rules: None,
+                sdk: None,
+                write_baseline: None,
+                format: findings.format,
+            })
         }
         Command::Fmt {
             input,

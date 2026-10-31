@@ -2,13 +2,9 @@ docs/demo/petstore.yaml:8:7 [WARNING] oas-operation-missing-operationId: get ope
 how to fix: Add an `operationId` so generated SDK methods carry a stable name.
 docs/demo/petstore.yaml:8:7 [INFO] oas-operation-no-error-response: operation `<unnamed>` (get) declares no `default` or 4XX/5XX response
 how to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.
-docs/demo/petstore.yaml:8:7 [INFO] sdk-operation-missing-id: GET operation has no `operationId`; SDK generation falls back to `GET /pets` selection
-how to fix: Add an `operationId` so generated SDK methods carry a stable name.
 docs/demo/petstore.yaml:17:5 [ERROR] oas-path-param-not-declared: path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it
 how to fix: Declare every `{var}` in the path as an `in: path` parameter on the path item or operation.
 docs/demo/petstore.yaml:18:7 [WARNING] oas-operation-missing-operationId: get operation is missing an operationId
 how to fix: Add an `operationId` so generated SDK methods carry a stable name.
 docs/demo/petstore.yaml:18:7 [INFO] oas-operation-no-error-response: operation `<unnamed>` (get) declares no `default` or 4XX/5XX response
 how to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.
-docs/demo/petstore.yaml:18:7 [INFO] sdk-operation-missing-id: GET operation has no `operationId`; SDK generation falls back to `GET /pets/{petId}` selection
-how to fix: Add an `operationId` so generated SDK methods carry a stable name.

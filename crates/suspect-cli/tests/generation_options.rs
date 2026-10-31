@@ -309,6 +309,83 @@ fn suspect_yaml_codegen_defaults_fill_omitted_flags() {
 }
 
 #[test]
+fn suspect_yaml_supplies_package_name_operation_ids_and_import_names() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    write_api(root);
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "codegen:\n  profile: python-http\n  package_name: settings-sdk\n  \
+         package_version: 1.2.3\n  out: generated\n  operation_ids: [getCurrentKey]\n  \
+         import_names:\n    python-http: settings_sdk\n",
+    )
+    .expect("settings");
+    let output = run(root, &["codegen", "api.yaml"]);
+    assert!(
+        output.status.success(),
+        "the settings must supply every required value: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let generated = root.join("generated");
+    let files: Vec<String> = walk(&generated)
+        .into_iter()
+        .map(|p| {
+            p.strip_prefix(&generated)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert!(
+        files.iter().any(|f| f.contains("settings_sdk")),
+        "the configured import name names the package: {files:?}"
+    );
+    let all: String = walk(&generated)
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect();
+    assert!(all.contains("settings-sdk"), "the configured package name");
+    // A flag still wins over the file.
+    let output = run(
+        root,
+        &[
+            "codegen",
+            "api.yaml",
+            "--package-name",
+            "flag-sdk",
+            "-o",
+            "flagged",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let all: String = walk(&root.join("flagged"))
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect();
+    assert!(all.contains("flag-sdk") && !all.contains("settings-sdk"));
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+#[test]
 fn a_yaml_defaults_file_reaches_the_generated_artifacts() {
     let directory = tempfile::tempdir().expect("tempdir");
     let root = directory.path();

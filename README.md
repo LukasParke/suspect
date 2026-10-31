@@ -146,14 +146,15 @@ at it (guarded by `prepareRename`; cross-file edits land in one atomic
 ## CLI
 
 ```console
-$ suspect check spec.yaml              # parse + resolve report, cycle census
-$ suspect validate spec.yaml           # source-located semantic findings
-$ suspect lint spec/ --format json     # Spectral-style linting
+$ suspect check spec.yaml              # every check the editor runs; exit 1 on errors
+$ suspect check spec.yaml --format sarif --baseline .suspect-baseline.json
+$ suspect validate spec.yaml           # check, structure and semantics only
+$ suspect lint spec.yaml --format json # check, lint/markdown/TypeScript rules only
 $ suspect bundle api.yaml --strategy inline -o bundled.yaml
 $ suspect overlay apply overlay.yaml api.yaml -o out.yaml
 $ suspect diff structural old.yaml new.yaml
 $ suspect diff breaking old.yaml new.yaml   # consumer-breaking changes (OpenAPI or Arazzo)
-$ suspect stats api.yaml
+$ suspect stats api.yaml               # counts, `$ref` edges and cycle census
 $ suspect fmt api.yaml --to json
 $ suspect test run flows.arazzo.yaml --base-url http://localhost:8080 --input petName=Rex
 $ suspect test load profile.load.yaml  # Artillery-style load test from Arazzo scenarios

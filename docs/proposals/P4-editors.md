@@ -779,8 +779,10 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    offer). `settings.editor.json` keeps only `basePath` and `server.path`.
    The SDK commands and Live SDK Preview read `src/codegenSettings.ts`: the
    typed getter, else the value `suspect/explainConfig` resolved from
-   `.suspect.yaml`, else the table default. The CLI's `codegen` flags do
-   not read the new keys yet (`--package-name` is still required).
+   `.suspect.yaml`, else the table default. The CLI's `codegen` command
+   reads `codegen.package_name`, `package_version`, `import_names` (by
+   profile), `operation_ids` and `compatibility_profiles` as defaults
+   below its flags; a list flag replaces the configured list.
 5. **Server reads the editor layer through `resolve_with`** (after P2.1).
    Delete `editor_config::apply_client`, the client half of
    `parse_config`, and the manifest `editor` unwrapping. Migrate the

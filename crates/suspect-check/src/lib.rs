@@ -10,12 +10,14 @@
 //! (docs/proposals/P1-finding-model.md, "Crate graph").
 
 pub mod checks;
+mod locate;
 mod policy;
 pub mod registry;
 pub mod rules;
 pub mod suppress;
 
 pub use checks::{Context, check_document};
+pub use locate::pointer_at;
 pub use policy::{
     CheckSet, Policy, PolicyOutcome, apply_policy, apply_policy_report, codegen_configured,
 };

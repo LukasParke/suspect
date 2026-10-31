@@ -32,7 +32,9 @@ pub struct Context<'a> {
 /// so the editor can run it on a blocking thread.
 ///
 /// Checks route by [`LowDoc::sniff_family`]. A document with syntax errors
-/// still gets every check, as the editor has always run them.
+/// still gets every check, as the editor has always run them. Only
+/// findings of the checks in `policy.checks` are returned (validation
+/// runs for `ref` alone, but its non-`$ref` findings are dropped).
 #[must_use]
 pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
     let policy = cx.policy;
@@ -78,6 +80,8 @@ pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
     {
         out.extend(admission(ws, doc));
     }
+    // Validate reports `$ref` codes too; `--only` keeps the checks it names.
+    out.retain(|f| on(f.check));
     out
 }
 
@@ -124,9 +128,17 @@ pub fn admission(ws: &Arc<Workspace>, low: &LowDoc) -> Vec<Finding> {
         .collect()
 }
 
-/// Tree-sitter recovery errors from the parse.
+/// Tree-sitter recovery errors from the parse. A `.json` document that
+/// parsed without them must also be strict JSON: format sniffing may have
+/// read it as YAML, which accepts `"\x41"`, so its first strict-parse
+/// error is reported.
 #[must_use]
 pub fn syntax(low: &LowDoc) -> Vec<Finding> {
+    if low.syntax_errors().is_empty()
+        && let Some(finding) = strict_json(low)
+    {
+        return vec![finding];
+    }
     low.syntax_errors()
         .iter()
         .map(|e| {
@@ -140,6 +152,38 @@ pub fn syntax(low: &LowDoc) -> Vec<Finding> {
             .with_range(e.range.clone())
         })
         .collect()
+}
+
+/// The strict JSON parse error of a `.json` document, if any.
+fn strict_json(low: &LowDoc) -> Option<Finding> {
+    let json = low
+        .uri()
+        .as_str()
+        .rsplit('.')
+        .next()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"));
+    if !json {
+        return None;
+    }
+    let bytes = low.inner().bytes();
+    let error = serde_json::from_slice::<serde::de::IgnoredAny>(bytes).err()?;
+    let line = u32::try_from(error.line().saturating_sub(1)).unwrap_or(u32::MAX);
+    let offset = low
+        .inner()
+        .line_index()
+        .line_range(bytes, line)
+        .map_or(0, |range| range.start + error.column().saturating_sub(1))
+        .min(bytes.len());
+    Some(
+        Finding::new(
+            CheckId::Syntax,
+            SYNTAX_CODE,
+            Severity::Error,
+            low.uri().clone(),
+            error.to_string(),
+        )
+        .with_range(offset..offset),
+    )
 }
 
 /// `.suspect.yaml` and `suspect.project.json` against their schema; other

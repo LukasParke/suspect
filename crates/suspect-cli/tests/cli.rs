@@ -5,12 +5,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use suspect_cli::commands::check::check_file;
-use suspect_cli::commands::lint::LintOverrides;
-use suspect_cli::commands::lint::lint_findings;
+use suspect_cli::commands::check;
 use suspect_cli::commands::overlay::{OverlayCmd, apply_docs};
 use suspect_cli::commands::stats::stats_of;
-use suspect_cli::{DocFormat, FindingsFormat, Severity, Strategy, bundle, diff};
+use suspect_cli::{DocFormat, FindingsFormat, Strategy, bundle, diff};
+use suspect_diag::Severity as DiagSeverity;
 
 fn ws_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -71,45 +70,50 @@ impl Drop for TempDir {
     }
 }
 
-// ---- check -----------------------------------------------------------
+// ---- stats census ----------------------------------------------------
 
 #[test]
-fn check_reports_family_and_clean_syntax() {
-    let tmp = TempDir::new("check");
+fn stats_reports_family_census_and_clean_syntax() {
+    let tmp = TempDir::new("census");
     let input = write_inline_spec(&tmp.0, "spec.yaml");
-    let report = check_file(&input);
+    let report = stats_of(&input).expect("stats");
     assert_eq!(report.family, "Oas31");
     assert_eq!(report.syntax_errors, 0);
-    assert!(
-        report.findings.is_empty(),
-        "unexpected findings: {:?}",
-        report.findings
-    );
     assert!(report.ref_edges > 0);
+    assert_eq!(report.workspace_docs, 1);
 }
 
 #[test]
-fn check_counts_syntax_errors_on_broken_file() {
+fn stats_counts_syntax_errors_on_broken_file() {
     let tmp = TempDir::new("broken");
     let path = tmp.write("broken.yaml", "openapi: 3.1.0\npaths: [1, 2\n  bad: : :\n");
-    let report = check_file(&path);
+    let report = stats_of(&path).expect("stats");
     assert!(report.syntax_errors > 0, "expected syntax errors");
-    assert!(report.findings.iter().any(|f| f.code == "syntax-error"));
-    assert!(
-        report
-            .findings
-            .iter()
-            .any(|f| f.severity == Severity::Error)
-    );
 }
 
-#[test]
-fn check_reports_unreadable_file_as_error_finding() {
-    let report = check_file(Path::new("/nonexistent/suspect-cli-missing.yaml"));
-    assert!(report.findings.iter().any(|f| f.code == "io-error"));
+// ---- lint (the check pass with the lint filter) ------------------------
+
+/// `(code, severity)` of every `suspect lint` finding on `spec`, under
+/// `config` as the directory's `.suspect.yaml`.
+fn lint_codes(dir: &TempDir, spec: &Path, config: &str) -> Vec<(String, DiagSeverity)> {
+    std::fs::write(dir.path(".suspect.yaml"), config).unwrap();
+    let resolved = suspect_config::resolve(&dir.0).expect("valid settings");
+    let options = check::Options::new(&resolved, Some(check::LINT), None, None);
+    check::run(
+        std::slice::from_ref(&spec.to_path_buf()),
+        &resolved,
+        &options,
+    )
+    .expect("lint runs")
+    .findings
+    .iter()
+    .map(|f| (f.code.to_string(), f.severity))
+    .collect()
 }
 
-// ---- lint ------------------------------------------------------------
+fn has(findings: &[(String, DiagSeverity)], code: &str) -> Option<DiagSeverity> {
+    findings.iter().find(|(c, _)| c == code).map(|(_, s)| *s)
+}
 
 fn tiny_spec_with_findings(dir: &TempDir) -> PathBuf {
     dir.write(
@@ -126,52 +130,31 @@ fn tiny_spec_with_findings(dir: &TempDir) -> PathBuf {
 }
 
 #[test]
-fn lint_flags_missing_operation_id() {
+fn lint_flags_missing_operation_id_under_the_canonical_code() {
     let tmp = TempDir::new("lint");
     let spec = tiny_spec_with_findings(&tmp);
-    let findings =
-        lint_findings(&[spec], None, Severity::Hint, &LintOverrides::default()).expect("lint runs");
-    assert!(
-        findings.iter().any(|f| f.code == "operation-operationId"),
-        "expected operationId finding, got {:?}",
-        findings
-            .iter()
-            .map(|f| (&f.code, f.severity))
-            .collect::<Vec<_>>()
+    let findings = lint_codes(&tmp, &spec, "{}\n");
+    // `operation-operationId` is an alias: one finding, canonical code and
+    // severity.
+    assert_eq!(
+        has(&findings, "oas-operation-missing-operationId"),
+        Some(DiagSeverity::Warning),
+        "{findings:?}"
     );
-    // JSON shape: every finding serializes with all documented fields.
-    for f in &findings {
-        let v = serde_json::to_value(f).expect("serialize");
-        for key in ["file", "severity", "code", "message", "line", "col"] {
-            assert!(v.get(key).is_some(), "missing JSON field {key}");
-        }
-    }
+    assert!(has(&findings, "operation-operationId").is_none());
 }
 
 #[test]
 fn lint_min_severity_filters() {
     let tmp = TempDir::new("lintmin");
     let spec = tiny_spec_with_findings(&tmp);
-    let all = lint_findings(
-        std::slice::from_ref(&spec),
-        None,
-        Severity::Hint,
-        &LintOverrides::default(),
-    )
-    .expect("lint runs");
+    let all = lint_codes(&tmp, &spec, "{}\n");
     assert!(!all.is_empty());
-    let errors_only = lint_findings(&[spec], None, Severity::Error, &LintOverrides::default())
-        .expect("lint runs");
-    assert!(errors_only.iter().all(|f| f.severity == Severity::Error));
-    assert!(errors_only.len() <= all.len());
-    // Every error in `all` survives in `errors_only`.
-    for f in all.iter().filter(|f| f.severity == Severity::Error) {
-        assert!(
-            errors_only
-                .iter()
-                .any(|g| g.code == f.code && g.line == f.line),
-            "error finding {f:?} lost by filter"
-        );
+    let warnings = lint_codes(&tmp, &spec, "lint:\n  min_severity: warning\n");
+    assert!(warnings.iter().all(|(_, s)| *s >= DiagSeverity::Warning));
+    assert!(warnings.len() < all.len());
+    for f in all.iter().filter(|(_, s)| *s >= DiagSeverity::Warning) {
+        assert!(warnings.contains(f), "{f:?} lost by the floor");
     }
 }
 
@@ -189,25 +172,33 @@ fn lint_exit_codes_clean_vs_findings() {
          \x20     responses:\n\
          \x20       '200':\n         description: ok\n",
     );
-    let dirty = tiny_spec_with_findings(&tmp);
-    let code_clean = suspect_cli::commands::lint::lint(
-        &[clean],
-        None,
-        Severity::Error,
-        &LintOverrides::default(),
-        FindingsFormat::Text,
-    )
-    .expect("lint runs");
-    assert_eq!(code_clean, 0, "clean spec must exit 0");
-    let code_dirty = suspect_cli::commands::lint::lint(
-        &[dirty],
-        None,
-        Severity::Error,
-        &LintOverrides::default(),
-        FindingsFormat::Text,
-    )
-    .expect("lint runs");
-    assert_eq!(code_dirty, 1, "spec with Error findings must exit 1");
+    // An undeclared path parameter is a lint error (`path-params`).
+    let dirty = tmp.write(
+        "dirty.yaml",
+        "openapi: \"3.0.0\"\n\
+         info:\n  title: t\n  version: \"1\"\n\
+         paths:\n\
+         \x20 /ping/{id}:\n\
+         \x20   get:\n\
+         \x20     operationId: getPing\n\
+         \x20     responses:\n\
+         \x20       '200':\n         description: ok\n",
+    );
+    let lint = |path: &Path| {
+        suspect_cli::commands::check::command(&check::Request {
+            paths: &[path.to_path_buf()],
+            flags: suspect_config::Layer::flags(),
+            checks: Some(check::LINT.to_vec()),
+            rules: None,
+            sdk: None,
+            write_baseline: None,
+            format: FindingsFormat::Text,
+        })
+        .expect("lint runs")
+    };
+    std::fs::write(tmp.path(".suspect.yaml"), "lint:\n  min_severity: error\n").unwrap();
+    assert_eq!(lint(&clean), 0, "clean spec must exit 0");
+    assert_eq!(lint(&dirty), 1, "spec with error findings must exit 1");
 }
 
 /// A spec with one design-class finding (plaintext server URL — truthful
@@ -232,80 +223,46 @@ fn design_and_document_spec(dir: &TempDir) -> PathBuf {
 fn lint_design_policy_separates_api_design_from_document_accuracy() {
     let tmp = TempDir::new("lintdesign");
     let spec = design_and_document_spec(&tmp);
+    let design = "security-server-https-only";
+    let document = "oas-operation-missing-operationId";
 
     // Default: both classes are reported.
-    let all = lint_findings(
-        std::slice::from_ref(&spec),
-        None,
-        Severity::Hint,
-        &LintOverrides::default(),
-    )
-    .expect("lint runs");
-    assert!(
-        all.iter().any(|f| f.code == "security-server-https-only"),
-        "expected design finding, got {:?}",
-        all.iter().map(|f| &f.code).collect::<Vec<_>>()
-    );
-    assert!(all.iter().any(|f| f.code == "operation-operationId"));
+    let all = lint_codes(&tmp, &spec, "{}\n");
+    assert!(has(&all, design).is_some(), "{all:?}");
+    assert!(has(&all, document).is_some());
 
     // `design: off` drops the whole design class; accuracy survives.
-    let off = LintOverrides::from_config(Some("off"), &Default::default()).expect("valid policy");
-    let kept =
-        lint_findings(std::slice::from_ref(&spec), None, Severity::Hint, &off).expect("lint runs");
-    assert!(
-        kept.iter().all(|f| f.code != "security-server-https-only"),
-        "design finding survived design: off: {:?}",
-        kept.iter().map(|f| &f.code).collect::<Vec<_>>()
-    );
-    assert!(kept.iter().any(|f| f.code == "operation-operationId"));
+    let kept = lint_codes(&tmp, &spec, "lint:\n  design: off\n");
+    assert!(has(&kept, design).is_none(), "{kept:?}");
+    assert!(has(&kept, document).is_some());
 
     // `design: info` downgrades instead of dropping — visible, not gating.
-    let info = LintOverrides::from_config(Some("info"), &Default::default()).expect("valid policy");
-    let downgraded =
-        lint_findings(std::slice::from_ref(&spec), None, Severity::Hint, &info).expect("lint runs");
-    assert_eq!(
-        downgraded
-            .iter()
-            .find(|f| f.code == "security-server-https-only")
-            .map(|f| f.severity),
-        Some(Severity::Info)
+    let downgraded = lint_codes(&tmp, &spec, "lint:\n  design: info\n");
+    assert_eq!(has(&downgraded, design), Some(DiagSeverity::Info));
+
+    // A per-rule override wins over the class.
+    let mixed = lint_codes(
+        &tmp,
+        &spec,
+        "lint:\n  design: off\n  rules:\n    security-server-https-only: info\n",
     );
+    assert_eq!(has(&mixed, design), Some(DiagSeverity::Info));
 
-    // A per-rule override wins over the class: one rule kept as `info`
-    // while the rest of the class is off.
-    let mut rules = std::collections::BTreeMap::new();
-    rules.insert("security-server-https-only".to_owned(), "info".to_owned());
-    let mixed = LintOverrides::from_config(Some("off"), &rules).expect("valid policy");
-    let mixed_findings = lint_findings(std::slice::from_ref(&spec), None, Severity::Hint, &mixed)
-        .expect("lint runs");
-    assert_eq!(
-        mixed_findings
-            .iter()
-            .find(|f| f.code == "security-server-https-only")
-            .map(|f| f.severity),
-        Some(Severity::Info)
+    // Per-rule `off` drops a single document rule, through its alias too.
+    let dropped = lint_codes(
+        &tmp,
+        &spec,
+        "lint:\n  rules:\n    operation-operationId: off\n",
     );
+    assert!(has(&dropped, document).is_none(), "{dropped:?}");
+    assert!(has(&dropped, design).is_some());
 
-    // Per-rule `off` drops a single document rule.
-    let mut rules = std::collections::BTreeMap::new();
-    rules.insert("operation-operationId".to_owned(), "off".to_owned());
-    let drop_one = LintOverrides::from_config(None, &rules).expect("valid policy");
-    let dropped = lint_findings(std::slice::from_ref(&spec), None, Severity::Hint, &drop_one)
-        .expect("lint runs");
-    assert!(dropped.iter().all(|f| f.code != "operation-operationId"));
-    assert!(
-        dropped
-            .iter()
-            .any(|f| f.code == "security-server-https-only")
-    );
-
-    // The editor's severity vocabulary is accepted too.
-    let warning =
-        LintOverrides::from_config(Some("warning"), &Default::default()).expect("valid policy");
-    assert_eq!(warning.design, Some(suspect_lint::Severity::Warn));
-
-    // An unrecognized severity name is loud, not silently absent.
-    assert!(LintOverrides::from_config(Some("loud"), &Default::default()).is_err());
+    // The editor's severity vocabulary is accepted, and an unrecognized
+    // name is loud, not silently absent.
+    let warning = lint_codes(&tmp, &spec, "lint:\n  design: warn\n");
+    assert_eq!(has(&warning, design), Some(DiagSeverity::Warning));
+    std::fs::write(tmp.path(".suspect.yaml"), "lint:\n  design: loud\n").unwrap();
+    assert!(suspect_config::resolve(&tmp.0).is_err());
 }
 
 // ---- overlay ---------------------------------------------------------
