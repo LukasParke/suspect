@@ -43,7 +43,7 @@ impl ValueEnum for SdkProfile {
 }
 
 impl SdkProfile {
-    fn name(self) -> &'static str {
+    pub(super) fn name(self) -> &'static str {
         self.0.name()
     }
     fn owner(self) -> &'static str {
