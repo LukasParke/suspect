@@ -315,11 +315,20 @@ pub(crate) const JOBS: &[Job] = &[
     Job {
         name: "zed-extension",
         workflow: PLATFORM_YML,
-        commands: "cargo build --locked --manifest-path editors/zed/Cargo.toml --target wasm32-wasip1",
+        commands: "cargo test --locked --manifest-path editors/zed/Cargo.toml; \
+                   cargo build --locked --manifest-path editors/zed/Cargo.toml --target wasm32-wasip1",
         tools: &[Tool::Wasm32Wasip1],
         run: |ctx| {
             // The extension has its own [workspace] and lockfile; the root
-            // lockfile is never touched.
+            // lockfile is never touched. The download helpers are tested on
+            // the host; the extension itself is the WASI build.
+            ctx.cargo(&[
+                "test",
+                "--locked",
+                "--manifest-path",
+                "editors/zed/Cargo.toml",
+            ])
+            .run()?;
             ctx.cargo(&[
                 "build",
                 "--locked",

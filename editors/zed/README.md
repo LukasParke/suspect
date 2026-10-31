@@ -5,25 +5,25 @@ the `suspect` language server (`suspect lsp`). The extension registers a
 `suspect-lsp` language server for **YAML** and **JSON** buffers; YAML/JSON
 language grammars themselves come from Zed's built-ins.
 
-## Prerequisites
+## The server binary
 
-The `suspect` CLI must be installed somewhere Zed can find it:
-
-```sh
-# from the repository root
-cargo install --path crates/suspect-cli
-```
-
-The extension resolves the server binary in this order:
+Nothing to install on macOS (Apple silicon and Intel), Linux (x86-64 and
+arm64) and Windows (x86-64). The extension resolves the server binary in
+this order:
 
 1. `lsp.suspect-lsp.binary.path` in your Zed settings (with optional
    `binary.arguments`, default `["lsp"]`, and `binary.env`);
-2. an executable named `suspect` on the worktree's shell `PATH` (resolved by
-   Zed on the host; the extension itself runs in a WASI sandbox and cannot
-   read `PATH` or the filesystem directly).
+2. the `suspect` release build matching this extension's version: on first
+   start the extension downloads `suspect-cli-<triple>.tar.gz` (`.zip` on
+   Windows) from the GitHub release `v<version>`, checks it against the
+   release's `.sha256` file, and unpacks the binary into its work directory
+   (`suspect-<version>/`); later starts reuse it, and a new extension
+   version removes the old copy;
+3. an executable named `suspect` on the worktree's shell `PATH` (resolved by
+   Zed on the host): other platforms, or no network on first start.
 
-If neither is found the language server fails to start with an error naming
-both options.
+If none is found the language server fails to start with an error naming
+the options. To keep your own build, set `binary.path`:
 
 ```json
 {

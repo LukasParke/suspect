@@ -11,6 +11,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 zed_extension_api = "0.6"
+# The managed download (src/download.rs): checksum, gunzip, untar. All
+# pure Rust, so they build for wasm32-wasip1.
+sha2 = "0.10"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4", default-features = false }
 
 # Intentionally NOT a member of the repository workspace (its members are
 # `crates/*` and `xtask`, both outside `editors/`). This empty [workspace]

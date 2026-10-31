@@ -851,6 +851,33 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    unpacking (host `cargo test`); the `zed-extension` CI job keeps
    building for `wasm32-wasip1`; `zed_smoke.sh` gains a no-`PATH` run.
    1 day.
+   **Done, not run against a real release** (none exists yet). The licence
+   files and `repository` were P5 step 5. New `editors/zed/src/download.rs`
+   holds the pure helpers: `triple(os, arch)` (the table above; others
+   fall through to `PATH`), `asset_name` (`suspect-cli-<triple>.tar.gz`,
+   `.zip` for Windows per P5's asset contract, so the extension also reads
+   zip: a minimal central-directory reader for stored and deflated members
+   instead of the `zip` crate), `parse_sha256` (first token, 64 hex
+   digits), `verify_sha256` (`sha2`), and `extract_binary` (`flate2` with
+   the Rust backend + `tar`, no default features), which takes only the
+   `suspect[.exe]` member at depth 1 or 2 and writes nothing else.
+   `lib.rs` `managed_binary`: reuse `suspect-<V>/suspect` when present,
+   else `github_release_by_tag_name("LukasParke/suspect", "v<V>")`, fetch
+   the `.sha256` and the archive with `http_client` (`RedirectPolicy::FollowAll`
+   for GitHub's asset redirect), verify, unpack into `suspect-<V>.partial/`
+   and rename it into place, `make_file_executable`, delete other
+   `suspect-*` directories; installation status is `Downloading`, then
+   `None`, or `Failed(<reason and the options>)` when the download and
+   `PATH` both fail. The order is `binary.path`, managed, `PATH`. Tests: six
+   host unit tests (triples and names, checksums, tar.gz at the root, one
+   directory down and too deep, zip stored and deflated); the
+   `zed-extension` CI job (`cargo xtask ci zed-extension`) now runs them
+   before the `wasm32-wasip1` build. The work-directory `std::fs` access is
+   the pattern other Zed extensions use, but has not been exercised in a
+   running Zed here. `zed_smoke.sh` gains `ZED_SMOKE_MANAGED=1` (no
+   `binary.path`, `suspect` must be absent from `PATH`, expects the process
+   from the extension's work directory); it skips while release `v<V>`
+   does not exist, so it is a documented manual check.
 9. **Publishing jobs** in P5's release workflow: VSIX matrix, `vsce` and
    `ovsx` publishing, Zed registry PR. Account setup (publisher, Open VSX
    namespace, tokens) is outside the estimate. 0.5 day.
