@@ -116,7 +116,7 @@ pub struct Setting {
     /// Client settings key under `suspect.`: the path with each segment in
     /// camelCase (`lint.minSeverity`). Rows with one become editor settings.
     pub editor: Option<&'static str>,
-    /// Older client keys still accepted, with a warning naming [`Self::editor`].
+    /// Older client keys still accepted, with a warning naming `editor`.
     pub editor_aliases: &'static [&'static str],
     /// Flags that set it, for `--explain` and the CLI reference.
     pub flags: &'static [&'static str],
