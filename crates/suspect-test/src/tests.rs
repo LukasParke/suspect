@@ -2365,7 +2365,7 @@ async fn cross_workflow_step_depends_on_orders_the_workflows() {
 }
 
 /// When the prerequisite step fails, or its workflow is not part of the
-/// run (`suspect test --workflow use-pet`), the dependent step can never
+/// run (`suspect test run --workflow use-pet`), the dependent step can never
 /// become ready: it fails with a diagnosis naming the missing step instead
 /// of being skipped silently or hanging.
 #[tokio::test(flavor = "multi_thread")]

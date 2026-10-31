@@ -6,7 +6,7 @@
 //! naming analysis) runs in this process over the live workspace document,
 //! so generation-time failures surface as a queryable report while
 //! writing. Nothing is generated; the report is the admission layer's own
-//! output, byte-identical to what `suspect admission` prints.
+//! output, byte-identical to what `suspect gen admission` prints.
 
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Range;

@@ -537,7 +537,6 @@ fn contract_stage(manifest: &Path) -> StageResult {
         input: spec,
         out,
         to: None,
-        json: false,
         overlays: Vec::new(),
         check: true,
     });

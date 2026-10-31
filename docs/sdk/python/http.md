@@ -9,7 +9,7 @@ Package configuration supplies identity; it does not supply API semantics.
 ```sh
 suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile python-http --package-name example-sdk --package-version 0.1.0 \
-  --out generated-python
+  --output generated-python
 ```
 
 The package is written under `generated-python/python/`. Add `--check --format json`

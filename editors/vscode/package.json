@@ -63,7 +63,7 @@
 					},
 					"uniqueItems": true,
 					"default": null,
-					"markdownDescription": "Versioned source interpretations to opt into (`suspect codegen --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. `codegen.compatibility_profiles` in `.suspect.yaml`; unset (`null`) uses the committed value (default `[]`).",
+					"markdownDescription": "Versioned source interpretations to opt into (`suspect gen sdk --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. `codegen.compatibility_profiles` in `.suspect.yaml`; unset (`null`) uses the committed value (default `[]`).",
 					"scope": "resource"
 				},
 				"suspect.sdk.compatibilityProfiles": {

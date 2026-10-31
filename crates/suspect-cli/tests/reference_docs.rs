@@ -50,7 +50,6 @@ fn cli_page() -> String {
     );
     render(&mut cmd, "suspect", &mut out);
     exit_statuses(&mut out);
-    renamed(&mut out);
     out
 }
 
@@ -79,51 +78,6 @@ fn exit_statuses(out: &mut String) {
         .unwrap();
     }
     out.push('\n');
-}
-
-/// The legacy rewrite table: old names keep working until they are removed.
-fn renamed(out: &mut String) {
-    use suspect_cli::legacy::{DEFAULT_SUB, RENAMED, removed_in};
-    writeln!(out, "## Renamed commands\n").unwrap();
-    writeln!(
-        out,
-        "The old names still run the new command and print one deprecation \
-         line on stderr; stdout and the exit status are unchanged. They are \
-         removed in {}. Under `diff`, `test` and `gen`, a first argument named \
-         like a subcommand (`suspect diff breaking other.yaml`) runs that \
-         subcommand; write `./breaking` for a file.\n",
-        removed_in()
-    )
-    .unwrap();
-    writeln!(out, "| Old | New | Note |\n|---|---|---|").unwrap();
-    for row in RENAMED {
-        let note = match row.old {
-            "arazzo-diff" => "the family of NEW picks the differ",
-            "reverse" => "positionals are `SPEC SOURCE`",
-            "codegen-compare" => "`--before`/`--after` are positionals `OLD NEW`",
-            "overlay-dry-run" => "targets `overlay apply` rejects are rejected",
-            _ => "",
-        };
-        writeln!(
-            out,
-            "| `suspect {}` | `suspect {}` | {note} |",
-            row.old,
-            row.replacement()
-        )
-        .unwrap();
-    }
-    for (group, sub) in DEFAULT_SUB {
-        writeln!(
-            out,
-            "| `suspect {group} <args>` | `suspect {group} {sub} <args>` | |"
-        )
-        .unwrap();
-    }
-    writeln!(
-        out,
-        "| `suspect why CONSTRAINT --spec SPEC` | `suspect why SPEC CONSTRAINT` | |"
-    )
-    .unwrap();
 }
 
 /// Compares `rendered` with `docs/reference/<page>`, or writes it when
@@ -260,36 +214,22 @@ fn diagnostics_page() -> String {
     out
 }
 
-/// A setting's flag as the setting table writes it (`gateway --port`),
-/// spelled with today's command path (`suspect traffic gateway --port`).
+/// A setting's flag as the setting table writes it (`traffic gateway
+/// --port`), with the `suspect` prefix.
 ///
 /// # Panics
 /// When the command or the flag does not exist, so a renamed flag cannot
 /// leave the page pointing at nothing.
 fn current_flag(flag: &str) -> String {
-    use suspect_cli::legacy::{DEFAULT_SUB, RENAMED};
     let (command, long) = flag.rsplit_once(' ').expect("`<command> --<flag>`");
-    let mut words: Vec<&str> = command.split(' ').collect();
-    if let Some(row) = RENAMED.iter().find(|r| r.old == words[0]) {
-        words.splice(0..1, row.new.iter().copied());
-    } else if let (1, Some((_, sub))) = (
-        words.len(),
-        DEFAULT_SUB.iter().find(|(group, _)| *group == words[0]),
-    ) {
-        words.push(sub);
-    }
+    let words: Vec<&str> = command.split(' ').collect();
     let root = suspect_cli::Cli::command();
     let leaf = words
         .iter()
         .try_fold(&root, |cmd, name| cmd.find_subcommand(name))
         .unwrap_or_else(|| panic!("setting flag `{flag}`: no command `{}`", words.join(" ")));
     let name = long.trim_start_matches("--");
-    let known = leaf.get_arguments().any(|arg| {
-        arg.get_long() == Some(name)
-            || arg
-                .get_all_aliases()
-                .is_some_and(|aliases| aliases.contains(&name))
-    });
+    let known = leaf.get_arguments().any(|arg| arg.get_long() == Some(name));
     assert!(
         known,
         "setting flag `{flag}`: `suspect {}` has no `{long}`",

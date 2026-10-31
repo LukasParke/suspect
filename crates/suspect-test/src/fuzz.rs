@@ -1,4 +1,4 @@
-//! Deterministic schema-driven mutant generation for `suspect fuzz`.
+//! Deterministic schema-driven mutant generation for `suspect test fuzz`.
 //!
 //! A *mutant* replaces one scalar input field's value with a pathological
 //! value (wrong type, empty, oversize, negative, unicode bomb, or null).

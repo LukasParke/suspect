@@ -1,4 +1,4 @@
-//! `suspect stateful`: generate and run stateful dependency-graph test
+//! `suspect test stateful`: generate and run stateful dependency-graph test
 //! sequences against a live server.
 //!
 //! The generator (`suspect-test::stateful`) auto-discovers resource
@@ -11,7 +11,7 @@ use std::path::Path;
 
 use suspect_test::stateful;
 
-/// Runs `suspect stateful`.
+/// Runs `suspect test stateful`.
 ///
 /// # Errors
 /// Workspace loading and IR compilation failures.

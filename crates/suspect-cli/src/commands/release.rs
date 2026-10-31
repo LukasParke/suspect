@@ -13,7 +13,7 @@ use clap::Args;
 
 use crate::ReportFormat;
 
-/// One release-plan review.
+/// One release plan review.
 #[derive(Debug, Args)]
 pub struct ReleasePlanArgs {
     /// The previous spec revision (file mode only).
@@ -161,7 +161,7 @@ pub fn plan(old: &Path, new: &Path) -> anyhow::Result<ReleasePlan> {
         "No wire-breaking changes detected; regenerate SDKs to pick up additions.".to_owned()
     } else {
         format!(
-            "{} wire-breaking change(s) detected. Run `suspect codegen-compare` for per-SDK native-interface deltas, regenerate each SDK, and review the breaking findings above before publishing.",
+            "{} wire-breaking change(s) detected. Run `suspect diff sdk` for per-SDK native-interface deltas, regenerate each SDK, and review the breaking findings above before publishing.",
             breaks.len()
         )
     };
@@ -176,7 +176,7 @@ pub fn plan(old: &Path, new: &Path) -> anyhow::Result<ReleasePlan> {
     })
 }
 
-/// Runs the release-plan command.
+/// Runs the release plan command.
 ///
 /// # Errors
 /// File IO or contract failures.

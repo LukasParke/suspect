@@ -69,13 +69,13 @@ pub struct CodegenTarget {
     pub check: bool,
     /// Generation options: interpretation profiles, credential env mapping,
     /// and SDK defaults (pagination, OAuth lifecycle) — the same schema
-    /// `suspect codegen --defaults` accepts.
+    /// `suspect gen sdk --defaults` accepts.
     pub generation: suspect_codegen::backend::GenerationOptions,
 }
 
 /// Lifts the generation options of one manifest codegen target into its
 /// [`GenerationOptions`](suspect_codegen::backend::GenerationOptions): the
-/// `options` object (the `codegen --defaults` schema) plus the
+/// `options` object (the `gen sdk --defaults` schema) plus the
 /// `compatibility_profiles`/`credential_env`/`sdk_defaults` keys beside it.
 ///
 /// # Errors
@@ -508,7 +508,7 @@ fn check_config(manifest: &Path, project: &ProjectManifest, findings: &mut Vec<F
     }
 }
 
-/// A `release` section parses as `release-publish` reads it.
+/// A `release` section parses as `release publish` reads it.
 fn check_release(manifest: &Path, findings: &mut Vec<Finding>) {
     let has_release = std::fs::read(manifest)
         .ok()
@@ -702,7 +702,6 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
                 input: project.publish_output.clone(),
                 out: out.clone(),
                 to: None,
-                json: false,
                 overlays: Vec::new(),
                 check: false,
             },

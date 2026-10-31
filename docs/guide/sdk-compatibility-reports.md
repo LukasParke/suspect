@@ -7,7 +7,7 @@ descriptors and the resolved HTTP/schema graph directly.
 ## Integration API
 
 The library API is exposed through `suspect diff sdk`, using the same
-twelve-backend registry and configurations as `codegen-session`. See
+twelve-backend registry and configurations as `gen session`. See
 [the CLI workflow](sdk-incremental-generation.md#native-and-wire-compatibility).
 
 ```rust,ignore

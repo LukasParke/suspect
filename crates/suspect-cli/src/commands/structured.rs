@@ -1,6 +1,6 @@
 //! JSON or YAML input files read through serde.
 //!
-//! Generator inputs (`codegen --defaults`, `codegen-session --config`,
+//! Generator inputs (`gen sdk --defaults`, `gen session --config`,
 //! `--mapping`, `--target-config`, `--inputs`, the release manifest) are
 //! serde documents. A `.yaml`/`.yml` file is parsed with `LowDoc` and
 //! converted to JSON text, then handed to the same serde parser, so both

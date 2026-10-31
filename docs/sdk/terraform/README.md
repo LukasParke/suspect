@@ -73,14 +73,14 @@ suspect gen terraform \
   crates/suspect-codegen/tests/fixtures/terraform-v1/openapi.json \
   --mapping crates/suspect-codegen/tests/fixtures/terraform-v1/mapping.json \
   --target-config crates/suspect-codegen/tests/fixtures/terraform-v1/target.json \
-  --out generated-terraform --format json
+  --output generated-terraform --format json
 
 # Read-only ownership/drift check, including absent/current/user-edited outputs.
 suspect gen terraform \
   crates/suspect-codegen/tests/fixtures/terraform-v1/openapi.json \
   --mapping crates/suspect-codegen/tests/fixtures/terraform-v1/mapping.json \
   --target-config crates/suspect-codegen/tests/fixtures/terraform-v1/target.json \
-  --out generated-terraform --check --format json
+  --output generated-terraform --check --format json
 ```
 
 Use `--pins <manifest> --cache-dir <directory>` instead of the positional source

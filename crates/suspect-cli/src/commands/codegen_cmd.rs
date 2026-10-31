@@ -49,13 +49,13 @@ pub struct CodegenArgs {
     pub compatibility_profile: Vec<SdkCompatibilityProfile>,
     /// Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding
     /// `compatibility_profiles`, `credential_env` and `sdk_defaults`
-    /// (the same schema `codegen-session` accepts). Flag-declared
+    /// (the same schema `gen session` accepts). Flag-declared
     /// compatibility profiles are added on top.
     #[arg(long, value_name = "FILE")]
     pub defaults: Option<PathBuf>,
     /// Output root for generated artifacts. Defaults to `.suspect.yaml`'s
     /// `codegen.out`, then `codegen-out`.
-    #[arg(short = 'o', long = "output", alias = "out", value_name = "DIR")]
+    #[arg(short = 'o', long = "output", value_name = "DIR")]
     pub out: Option<PathBuf>,
     /// Check ownership and drift without writing.
     #[arg(long)]
@@ -71,7 +71,7 @@ pub struct CodegenArgs {
 /// Propagates invalid configuration, source loading and emission failures.
 pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     // The `.suspect.yaml` codegen section supplies flag defaults, the
-    // same precedence `suspect docs` uses for style and output: an
+    // same precedence `suspect gen docs` uses for style and output: an
     // explicit flag always wins, the file fills what the flag omitted,
     // and with neither the historical defaults apply.
     let inputs: Vec<PathBuf> = args

@@ -1,7 +1,7 @@
 name: application-targets
 
-# Application targets: the Go/Cobra API CLI (`suspect codegen-cli`) and the
-# TypeScript stdio MCP server (`suspect codegen-mcp`). Four explicit jobs run
+# Application targets: the Go/Cobra API CLI (`suspect gen cli`) and the
+# TypeScript stdio MCP server (`suspect gen mcp`). Four explicit jobs run
 # the portable application suites only — never the whole workspace and never
 # all corpus-dependent ignored tests. The two native jobs build and drive real
 # emitted artifacts against loopback HTTP fixtures; no upstream API is
@@ -145,7 +145,7 @@ jobs:
           cargo test -p suspect-codegen
           --test mcp -- --include-ignored
 
-  # `suspect codegen-cli` / `suspect codegen-mcp`: argument handling, report
+  # `suspect gen cli` / `suspect gen mcp`: argument handling, report
   # formats, check/current/drift, input failures, ownership conflicts and
   # application profile discovery.
   commands:

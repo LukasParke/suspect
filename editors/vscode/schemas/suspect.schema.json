@@ -20,7 +20,7 @@
       "properties": {
         "compatibility_profiles": {
           "default": [],
-          "description": "Versioned source interpretations to opt into (`suspect codegen --compatibility-profile`). Empty keeps ordinary OpenAPI semantics.",
+          "description": "Versioned source interpretations to opt into (`suspect gen sdk --compatibility-profile`). Empty keeps ordinary OpenAPI semantics.",
           "items": {
             "enum": [
               "legacy-binary-string-v1",
@@ -103,7 +103,7 @@
         },
         "session": {
           "additionalProperties": false,
-          "description": "The editor's SDK preview/watch session (`suspect codegen-session`).",
+          "description": "The editor's SDK preview/watch session (`suspect gen session`).",
           "properties": {
             "config": {
               "description": "Session config (JSON) naming the spec and targets. Unset: the editor asks for one.",

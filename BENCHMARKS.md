@@ -198,9 +198,9 @@ now runs validation and admission on their own threads beside lint
 pick up another document's lint and doubled the worst case), so the
 pass is as long as lint, and admission no longer adds to it.
 
-## CLI end-to-end (`suspect bench`)
+## CLI end-to-end (`suspect dev bench`)
 
-`suspect bench <fixture> --iters N` reports parse / low-model / resolve /
+`suspect dev bench <fixture> --iters N` reports parse / low-model / resolve /
 validate / lint / lsp-edit / schema-compile / jsonpath / overlay stage means
 for any single file — the same numbers the criterion suites measure, from the
 shipped binary.

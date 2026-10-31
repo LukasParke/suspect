@@ -1,4 +1,4 @@
-//! `suspect contract`: emit a machine-readable contract package.
+//! `suspect gen contract`: emit a machine-readable contract package.
 //!
 //! The toolchain reads OpenAPI everywhere; this command is where suspect
 //! *writes* one. A contract package is:
@@ -11,7 +11,7 @@
 //!   markers, and the source files, so a consumer can tell exactly which
 //!   inputs produced it.
 //! - `contract.lock.json` — the source digest keyed by relative path,
-//!   written so `suspect contract --check` can prove a package is current
+//!   written so `suspect gen contract --check` can prove a package is current
 //!   without re-reading the whole closure.
 //!
 //! Overlay profiles apply before emission (`--profile public`), so a
@@ -36,17 +36,13 @@ pub struct ContractArgs {
     #[arg(
         short = 'o',
         long = "output",
-        alias = "out",
         value_name = "DIR",
         default_value = "contract"
     )]
     pub out: PathBuf,
     /// Description serialization [default: yaml].
-    #[arg(long = "to", value_enum, conflicts_with = "json")]
+    #[arg(long = "to", value_enum)]
     pub to: Option<crate::DocFormat>,
-    /// Old spelling of `--to json`.
-    #[arg(long, hide = true)]
-    pub json: bool,
     /// Overlay documents applied in order before emission (repeatable).
     #[arg(long = "overlay", value_name = "FILE")]
     pub overlays: Vec<PathBuf>,
@@ -256,10 +252,7 @@ pub fn contract_on_workspace(
 
     mark("ir");
     if args.check {
-        let description_path = description_path(
-            &args.out,
-            args.json || args.to == Some(crate::DocFormat::Json),
-        );
+        let description_path = description_path(&args.out, args.to == Some(crate::DocFormat::Json));
         let manifest_path = args.out.join("manifest.json");
         let lock_path = args.out.join("contract.lock.json");
         let mut stale: Vec<String> = Vec::new();
@@ -315,10 +308,7 @@ pub fn contract_on_workspace(
     }
 
     std::fs::create_dir_all(&args.out)?;
-    let description_path = description_path(
-        &args.out,
-        args.json || args.to == Some(crate::DocFormat::Json),
-    );
+    let description_path = description_path(&args.out, args.to == Some(crate::DocFormat::Json));
     std::fs::write(&description_path, &description)?;
     std::fs::write(
         args.out.join("manifest.json"),

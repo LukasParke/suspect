@@ -1525,7 +1525,7 @@ pub(super) fn editor_stages() -> Vec<Stage> {
 pub(super) fn package_stages() -> Vec<Stage> {
     let mut steps = Vec::new();
     for (id, flag, status, success, code) in [("preview", "--preview", "drift", false, 1), ("generate", "", "written", true, 0), ("drift", "--check", "current", true, 0)] {
-        let mut item = stage(&format!("five-op-{id}"), BOTH, "{out}/bin/suspect", &["gen", "session", "--config", "{out}/configs/five-operations.json", "--out", "{work}/packages", "--format", "json"], "{workspace}");
+        let mut item = stage(&format!("five-op-{id}"), BOTH, "{out}/bin/suspect", &["gen", "session", "--config", "{out}/configs/five-operations.json", "--output", "{work}/packages", "--format", "ndjson"], "{workspace}");
         if !flag.is_empty() { item.args.push(flag.into()); }
         item.expected_exit = code;
         item.criterion = Criterion::Json { report: None, assertions: BTreeMap::from([("/format".into(), json!("suspect.sdk.session.v1")), ("/status".into(), json!(status)), ("/success".into(), json!(success))]) };

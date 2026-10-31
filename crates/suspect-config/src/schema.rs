@@ -56,7 +56,7 @@ pub const SEVERITIES: &[&str] = &["error", "warning", "info", "hint"];
 pub const POLICY_SEVERITIES: &[&str] = &["error", "warning", "info", "hint", "off"];
 const DOC_STYLES: &[&str] = &["html", "markdown", "sveltekit"];
 const REPORTS: &[&str] = &["text", "ndjson"];
-/// `suspect codegen --compatibility-profile` names, kept in step with
+/// `suspect gen sdk --compatibility-profile` names, kept in step with
 /// `suspect_codegen`'s `CompatibilityProfile::ALL` by
 /// `crates/suspect-lsp/tests/codegen_settings.rs`.
 pub const COMPATIBILITY_PROFILES: &[&str] = &[
@@ -260,14 +260,14 @@ pub static SETTINGS: &[Setting] = &[
         "Emit JSON regardless of the input extension.",
     )
     .default("false")
-    .flags(&["fmt --json"]),
+    .flags(&["fmt --to"]),
     row(
         "format.yaml",
         Kind::Bool,
         "Emit YAML regardless of the input extension.",
     )
     .default("false")
-    .flags(&["fmt --yaml"]),
+    .flags(&["fmt --to"]),
     row(
         "format.sort_keys",
         Kind::Bool,
@@ -284,13 +284,13 @@ pub static SETTINGS: &[Setting] = &[
         Kind::Enum(DOC_STYLES),
         "Output style for the reference site.",
     )
-    .flags(&["docs --style"]),
+    .flags(&["gen docs --style"]),
     row(
         "docs.output",
         Kind::Path,
         "Output root for generated documentation.",
     )
-    .flags(&["docs --output"])
+    .flags(&["gen docs --output"])
     .aliases(&["docs.out"]),
     section("codegen", "Defaults applied to SDK generation."),
     row(
@@ -298,8 +298,8 @@ pub static SETTINGS: &[Setting] = &[
         Kind::Path,
         "Default output root, relative to the file that sets it.",
     )
-    .flags(&["codegen --out"]),
-    row("codegen.profile", Kind::Str, "Default native profile id.").flags(&["codegen --profile"]),
+    .flags(&["gen sdk --output"]),
+    row("codegen.profile", Kind::Str, "Default native profile id.").flags(&["gen sdk --profile"]),
     row(
         "codegen.package_name",
         Kind::Str,
@@ -316,7 +316,7 @@ pub static SETTINGS: &[Setting] = &[
     )
     .editor("codegen.packageVersion")
     .editor_aliases(&["sdk.packageVersion"])
-    .flags(&["codegen --package-version"]),
+    .flags(&["gen sdk --package-version"]),
     row(
         "codegen.import_names",
         Kind::Map(&Kind::Str),
@@ -339,7 +339,7 @@ pub static SETTINGS: &[Setting] = &[
     row(
         "codegen.compatibility_profiles",
         Kind::EnumList(COMPATIBILITY_PROFILES),
-        "Versioned source interpretations to opt into (`suspect codegen \
+        "Versioned source interpretations to opt into (`suspect gen sdk \
          --compatibility-profile`). Empty keeps ordinary OpenAPI semantics.",
     )
     .default("[]")
@@ -347,7 +347,7 @@ pub static SETTINGS: &[Setting] = &[
     .editor_aliases(&["sdk.compatibilityProfiles"]),
     section(
         "codegen.session",
-        "The editor's SDK preview/watch session (`suspect codegen-session`).",
+        "The editor's SDK preview/watch session (`suspect gen session`).",
     ),
     row(
         "codegen.session.config",
@@ -406,10 +406,10 @@ pub static SETTINGS: &[Setting] = &[
         .editor("test.baseUrl")
         .editor_aliases(&["testBaseUrl"])
         .flags(&[
-            "test --base-url",
-            "fuzz --base-url",
-            "stateful --base-url",
-            "load --base-url",
+            "test run --base-url",
+            "test fuzz --base-url",
+            "test stateful --base-url",
+            "test load --base-url",
         ])
         .aliases(&["run.base_url"]),
     row(
@@ -419,29 +419,29 @@ pub static SETTINGS: &[Setting] = &[
          `.suspect/credentials.json` discovered upward.",
     )
     .env("SUSPECT_CREDENTIALS")
-    .flags(&["test --credentials", "auth check --credentials"]),
+    .flags(&["test run --credentials", "auth check --credentials"]),
     row(
         "test.report",
         Kind::Enum(REPORTS),
         "Event stream format for `suspect test`.",
     )
     .default("text")
-    .flags(&["test --report"]),
+    .flags(&["test run --format"]),
     section("gateway", "The mock/proxy gateway."),
     row("gateway.port", Kind::Port, "Port the gateway listens on.")
         .default("8080")
         .editor("gateway.port")
         .editor_aliases(&["gatewayPort"])
-        .flags(&["gateway --port"]),
+        .flags(&["traffic gateway --port"]),
     row("gateway.mode", Kind::Enum(GATEWAY_MODES), "Operating mode.")
         .default("mock")
-        .flags(&["gateway --mode"]),
+        .flags(&["traffic gateway --mode"]),
     row(
         "gateway.upstream",
         Kind::Url,
         "Upstream base URL for proxy, validate and record modes.",
     )
-    .flags(&["gateway --upstream"]),
+    .flags(&["traffic gateway --upstream"]),
     section("diff", "Change detection against git history."),
     row(
         "diff.baseline",
@@ -623,7 +623,7 @@ pub static MANIFEST: &[Setting] = &[
         "release",
         Kind::Object,
         "SDK release: the version every target carries and how each is published \
-         (`release-publish`, `release-workflow`). Replaces a standalone `release.json`.",
+         (`release publish`, `release workflow`). Replaces a standalone `release.json`.",
     ),
     section(
         "tests",
@@ -700,23 +700,23 @@ pub static TARGET_FIELDS: &[Setting] = &[
     row(
         "credential_env",
         Kind::Object,
-        "Credential environment variable mapping (`codegen --defaults` schema).",
+        "Credential environment variable mapping (`gen sdk --defaults` schema).",
     ),
     row(
         "sdk_defaults",
         Kind::Object,
-        "SDK defaults: pagination, OAuth lifecycle (`codegen --defaults` schema).",
+        "SDK defaults: pagination, OAuth lifecycle (`gen sdk --defaults` schema).",
     ),
     row(
         "options",
         Kind::Object,
-        "Generation options in the `codegen --defaults` schema (`compatibility_profiles`, \
+        "Generation options in the `gen sdk --defaults` schema (`compatibility_profiles`, \
          `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both.",
     ),
 ];
 
 /// The fields of the manifest `release` section. `release` is one
-/// [`Kind::Object`] row in [`MANIFEST`]: `release-publish` validates it,
+/// [`Kind::Object`] row in [`MANIFEST`]: `release publish` validates it,
 /// and the JSON Schema spells these fields out.
 pub static RELEASE_FIELDS: &[Setting] = &[
     row(

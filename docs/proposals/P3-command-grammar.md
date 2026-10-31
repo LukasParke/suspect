@@ -838,6 +838,32 @@ step that changes the tree.
 7. **(N+2) Removal.** Delete `legacy.rs` rows, hidden aliases and
    `overlay_dry_run.rs`. Migrate the 22 test files to the new names.
    Estimate: 0.5 day.
+   **Done** (in release N, with step 6). `legacy.rs` is deleted (all of
+   it: `RENAMED`, `DEFAULT_SUB`, `flag_notes`), so `main.rs` parses argv
+   directly and the "Renamed commands" section is gone from
+   `docs/reference/cli.md`. Removed: `--out` on every generator, `--report`
+   on `test run`/`test load`, `--inputs`, `--json` on the report files,
+   `--format` on `bundle`/`upgrade`, `fmt --json/--yaml`, `gen contract
+   --json`, `traffic drift --exit-on-gap`, the `json` value of stream
+   `--format`, `why --spec`, `diff routes --source-first`, `diff sdk
+   --before/--after` (both positionals are required) and `test run
+   --offline`. `gen template --diff` now requires `--check`, like the
+   design's `Check` struct. `commands/overlay_dry_run.rs` and
+   `ArazzoDiffArgs` are deleted. `cli_conventions.rs` rejects any command
+   alias, flag alias, hidden command or hidden flag (two script limits,
+   `gen bridge --max-ticks` and `gen session --max-iterations`, are
+   allowlisted, and the `--min-severity` values `warn`/`information` are
+   synonyms, not old spellings), and asserts that every old name and flag
+   is a usage error. The test files, xtask, `tools/sdk-demo`, workflows,
+   docs, code comments and the setting table's flag column (`traffic
+   gateway --port`, `gen sdk --output`, ...) use the new names. Two
+   fixes found on the way: the application inventory's `command` field
+   (`gen profiles --kind applications`) and its text report now say
+   `gen cli`/`gen mcp`, and the LSP's `suspect.verifyContract` and
+   `suspect.runService` now run the server's own executable
+   (`current_exe`) with `gen contract --output` instead of `suspect
+   contract --out` from `PATH`, which the VS Code bundled binary is not
+   on.
 
 Total for release N: 5 days (the short version estimated 3.5 days; the
 interrupt path, the positional changes and the exit table account for the

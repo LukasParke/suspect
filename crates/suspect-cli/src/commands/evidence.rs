@@ -1,4 +1,4 @@
-//! `suspect evidence`: the SDK verification matrix as data.
+//! `suspect dev evidence`: the SDK verification matrix as data.
 //!
 //! The per-backend acceptance suites are opt-in (`#[ignore]`) because they
 //! need a native toolchain, which means "which backend is verified against

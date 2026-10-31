@@ -79,7 +79,7 @@ suspect gen mcp [SPEC] --mapping <FILE> --target-config <FILE> [OPTIONS]
 | `--insecure-test-origin <ORIGIN>` | Numeric-loopback origin from an explicitly acquired test manifest. Repeatable; requires `--pins`. |
 | `--mapping <FILE>` | Closed, versioned application surface mapping JSON. Required. |
 | `--target-config <FILE>` | Identity, credential policy and runtime bounds JSON. Required. |
-| `-o`, `--out <DIR>` | Output root. Defaults to `cli-out` for `codegen-cli`, `mcp-out` for `codegen-mcp`. |
+| `-o`, `--output <DIR>` | Output root. Defaults to `cli-out` for `gen cli`, `mcp-out` for `gen mcp`. |
 | `--check` | Read-only ownership/drift check. Never writes. |
 | `--format <text\|json>` | Text diagnostics (default) or one structured generation report. |
 
@@ -90,7 +90,7 @@ cache or the output root.
 Exit status is `0` only for status `generated` or `current`; `1` for `drift`,
 `conflict` and `failed`.
 
-| | `codegen-cli` | `codegen-mcp` |
+| | `gen cli` | `gen mcp` |
 | --- | --- | --- |
 | Mapping profile | `suspect.application.cli.v1` | `suspect.application.mcp.v1` |
 | Surface manifest format | `suspect.application.cli.surface.v1` | `suspect.application.mcp.surface.v1` |
@@ -114,8 +114,8 @@ Application profiles are listed separately from SDK language profiles:
 
 ```console
 $ suspect gen profiles --kind applications
-codegen-cli	suspect.application.cli.v1	suspect.application.cli.surface.v1	suspect-cli-app:lifecycle-v1
-codegen-mcp	suspect.application.mcp.v1	suspect.application.mcp.surface.v1	suspect-mcp-app:lifecycle-v1
+gen cli	suspect.application.cli.v1	suspect.application.cli.surface.v1	suspect-cli-app:lifecycle-v1
+gen mcp	suspect.application.mcp.v1	suspect.application.mcp.surface.v1	suspect-mcp-app:lifecycle-v1
 ```
 
 `--format json` emits `"format": "suspect.application.profiles.v1"` with one
@@ -196,7 +196,7 @@ plane with `getWidget`, `createWidget` and `purgeWidgets`.
 $ suspect gen cli $WORK/widgets.openapi.json \
     --mapping $WORK/cli-mapping.json \
     --target-config $WORK/cli-target.json \
-    --out $WORK/widgetctl --format json
+    --output $WORK/widgetctl --format json
 {
   "artifacts": [
     "application-surface.json",
@@ -224,7 +224,7 @@ $ suspect gen cli $WORK/widgets.openapi.json \
 ```
 
 42 artifacts, exit status `0`. The text form of the same run prints
-`codegen-cli generated: 3 mapped SDK operations, 42 planned artifacts
+`gen cli generated: 3 mapped SDK operations, 42 planned artifacts
 (suspect.application.cli.v1)`.
 
 ### 4. Build — environment-dependent (Go toolchain)
@@ -342,7 +342,7 @@ A mapping that names operations no exact command surface can carry:
 $ suspect gen cli $WORK/widgets.openapi.json --mapping $WORK/cli-mapping-refused.json …
 …/widgets.openapi.json:123:18 [cli-unsupported-media] response "200" needs either no content or exactly one concrete JSON media with a generated codec (/paths/~1blobs~1{id}/get/responses/200; mapping /commands/0)
 …/widgets.openapi.json:136:11 [cli-parameter-unrepresentable] source parameter "id" cannot be carried by one exact flag: a flag carries only a native string, boolean, integer or number scalar (/paths/~1matrices~1{id}/get/parameters/0; mapping /commands/1/parameters/id)
-codegen-cli failed: 0 mapped SDK operations, 0 planned artifacts (suspect.application.cli.v1)
+gen cli failed: 0 mapped SDK operations, 0 planned artifacts (suspect.application.cli.v1)
 ```
 
 Exit `1`, and the output root is never created. Each diagnostic carries the
@@ -457,8 +457,8 @@ unprojectable.
 $ suspect gen mcp $WORK/widgets.openapi.json \
     --mapping $WORK/mcp-mapping.json \
     --target-config $WORK/mcp-target.json \
-    --out $WORK/widget-mcp
-codegen-mcp generated: 3 mapped SDK operations, 34 planned artifacts (suspect.application.mcp.v1)
+    --output $WORK/widget-mcp
+gen mcp generated: 3 mapped SDK operations, 34 planned artifacts (suspect.application.mcp.v1)
 
 $ ls $WORK/widget-mcp
 application-surface.json  package-lock.json  package.json  README.md  server  tsconfig.json  typescript
@@ -579,7 +579,7 @@ $ suspect gen mcp $WORK/widgets.openapi.json --mapping $WORK/mcp-mapping-refused
 …:132:18 [mcp-unsupported-media] response "200" needs either no content or exactly one concrete JSON media with a generated codec (/paths/~1blobs~1{id}/get/responses/200; mapping /tools/0)
 …:176:45 [mcp-unsupported-schema] the declared request body has no exact tool input projection: arbitrary JSON has no tool input projection: its numbers would already be rounded by the client's own JSON parser before the server could preserve them (/paths/~1loose/post/requestBody/content/application~1json/schema/properties/anything; mapping /tools/2/input/body)
 …:151:41 [mcp-unsupported-schema] the declared request body has no exact tool input projection: this schema admits both a number and a string, so one JSON string at the tool boundary would have two meanings; expose a single concrete type instead (/paths/~1selectors/post/requestBody/content/application~1json/schema/properties/pick; mapping /tools/1/input/body)
-codegen-mcp failed: 0 mapped SDK operations, 0 planned artifacts (suspect.application.mcp.v1)
+gen mcp failed: 0 mapped SDK operations, 0 planned artifacts (suspect.application.mcp.v1)
 ```
 
 ## CLI mapping reference
@@ -997,12 +997,12 @@ so a planning or ownership refusal leaves the output root exactly as it was.
 | `failed` | Input, mapping, planning or package refusals. Nothing is written. | 1 |
 
 ```console
-$ suspect gen cli … --out $WORK/widgetctl --check
-codegen-cli current: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
+$ suspect gen cli … --output $WORK/widgetctl --check
+gen cli current: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
 # exit 0
 
-$ suspect gen cli … --target-config $WORK/cli-target-drift.json --out $WORK/widgetctl --check
-codegen-cli drift: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
+$ suspect gen cli … --target-config $WORK/cli-target-drift.json --output $WORK/widgetctl --check
+gen cli drift: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
 # exit 1, nothing written
 ```
 
@@ -1010,23 +1010,23 @@ A hand edit to an owned artifact is preserved, not overwritten:
 
 ```console
 $ printf '// hand edit\n' >> $WORK/widgetctl/cmd/widgetctl/main.go
-$ suspect gen cli … --out $WORK/widgetctl
+$ suspect gen cli … --output $WORK/widgetctl
 …/cmd/widgetctl/main.go:1:1 [application-cli-artifact-conflict] owned output was edited after its recorded generation; preserving user changes (; mapping )
-codegen-cli conflict: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
+gen cli conflict: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
 # exit 1; the edit is still there afterwards
 ```
 
 The two owners never cross:
 
 ```console
-$ suspect gen mcp … --out $WORK/widgetctl
+$ suspect gen mcp … --output $WORK/widgetctl
 …/widgetctl/application-surface.json:1:1 [application-mcp-artifact-conflict] owned by `suspect-cli-app:lifecycle-v1`; owner `suspect-mcp-app:lifecycle-v1` cannot overwrite or adopt it (; mapping )
-codegen-mcp conflict: 3 mapped SDK operations, 34 planned artifacts (suspect.application.mcp.v1)
+gen mcp conflict: 3 mapped SDK operations, 34 planned artifacts (suspect.application.mcp.v1)
 # exit 1
 ```
 
 Unowned files in the root are left alone: after `npm ci` and `npm run build`
-created `node_modules/` and `dist/`, `codegen-mcp --check` still reported
+created `node_modules/` and `dist/`, `gen mcp --check` still reported
 `current`.
 
 ## Pinned inputs
@@ -1041,8 +1041,8 @@ $ suspect acquire $WORK/pins.json --cache-dir $WORK/cache --format json
 $ rm $WORK/widgets.openapi.json      # the entry document is gone
 $ suspect gen cli --pins $WORK/pins.json --cache-dir $WORK/cache \
     --mapping $WORK/cli-mapping.json --target-config $WORK/cli-target.json \
-    --out $WORK/pinned-out
-codegen-cli generated: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
+    --output $WORK/pinned-out
+gen cli generated: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
 # exit 0
 ```
 
@@ -1065,7 +1065,7 @@ one shared implementation.
 | `application-operation-missing` | The selector identifies zero outgoing operations. | Check the exact `operationId` spelling, or use the exact `METHOD /path` template including path-parameter braces. |
 | `application-operation-ambiguous` | The selector identifies more than one. | Two declarations reuse one `operationId`; select by `METHOD /path` instead, or fix the source. |
 | `application-document-outside-entry-tree` | A document the surface manifest would name lies outside the entry document's directory tree, so it has no machine-independent relative form. | Move the referenced document inside the entry tree, or expose an operation that does not reach it. Usually a shared `$ref` library above the entry, such as a Parameter Object in `../shared/params.json`. |
-| `application-path-item-unplanned` | The selector resolved, but the canonical SDK plan does not carry that operation at the resolved source. In practice: a Path Item reached through a `$ref`, which `codegen-cli` cannot bind. | Declare the operation in the entry document's own `paths`. See [Known limitations](#known-limitations) — `codegen-mcp` does support referenced Path Items. |
+| `application-path-item-unplanned` | The selector resolved, but the canonical SDK plan does not carry that operation at the resolved source. In practice: a Path Item reached through a `$ref`, which `gen cli` cannot bind. | Declare the operation in the entry document's own `paths`. See [Known limitations](#known-limitations) — `gen mcp` does support referenced Path Items. |
 
 Selector resolution runs before any binding, so the two selector codes
 short-circuit the rest of the mapping. The document-scope check runs after
@@ -1073,7 +1073,7 @@ binding, once the exact set of manifest-visible documents is known, and is
 located at both the offending contract source and the mapping pointer that
 reached it.
 
-### `codegen-cli`
+### `gen cli`
 
 | Code | Meaning | Typical fix |
 | --- | --- | --- |
@@ -1093,7 +1093,7 @@ reached it.
 | `cli-body-policy` | `body.kind` disagrees with whether the operation declares a request body. | Use `json_document` when it does, `none` when it does not. |
 | `cli-unsupported-media` | A request body or a response does not have exactly one concrete JSON media with a generated codec, and is not an HTTP-forbidden-body status. | Expose a JSON operation; see [Known limitations](#known-limitations). |
 
-### `codegen-mcp`
+### `gen mcp`
 
 | Code | Meaning | Typical fix |
 | --- | --- | --- |
@@ -1233,12 +1233,12 @@ one layer later than a client-side validator would, and it is not
 self-describing in the published schema beyond the prose. String enumerations
 are unaffected: they keep their exact `const` members.
 
-**`codegen-cli` does not support a Path Item reached through a `$ref`; the two
+**`gen cli` does not support a Path Item reached through a `$ref`; the two
 targets differ here.** With
 `"/things/{id}": {"$ref": "nested/paths.json#/things"}` in the entry document,
 the contract resolves the selector to the operation's own declaration in the
 referenced document, but the canonical Go SDK plan does not record it at that
-source, so `codegen-cli` cannot bind it and refuses at generation with
+source, so `gen cli` cannot bind it and refuses at generation with
 `application-path-item-unplanned`. Run against the committed fixture
 `crates/suspect-codegen/tests/fixtures/application-scope/`, whose
 `api/referenced-path.json` is exactly that entry (`$FIXTURE` below is that
@@ -1247,16 +1247,16 @@ directory):
 ```console
 $ suspect gen cli $FIXTURE/api/referenced-path.json \
     --mapping $WORK/cli-mapping.json --target-config $WORK/cli-target-anon.json \
-    --out $WORK/out
+    --output $WORK/out
 file://$FIXTURE/api/nested/paths.json:4:12 [application-path-item-unplanned] selector "getThingByReference" resolves to the operation declared at file://$FIXTURE/api/nested/paths.json /things/get, which the canonical SDK plan does not carry at that source; a Path Item reached through a `$ref` is outside this application target's bounded profile - declare the operation in the entry document's own `paths` instead (/things/get; mapping /commands/0/selector)
-codegen-cli failed: 0 mapped SDK operations, 0 planned artifacts (suspect.application.cli.v1)
+gen cli failed: 0 mapped SDK operations, 0 planned artifacts (suspect.application.cli.v1)
 ```
 
 The mapping selects `getThingByReference` onto the command path
 `["things", "get"]` with its one `id` parameter — the same shape the
 `api_cli` test suite uses for this fixture.
 
-`codegen-mcp` **does** support it: its canonical SDK plan records the operation
+`gen mcp` **does** support it: its canonical SDK plan records the operation
 at the referenced source, so the tool binds normally and the referenced
 document is recorded relative to the entry directory like any other (subject
 to the document-scope rule above). This asymmetry is a property of the two

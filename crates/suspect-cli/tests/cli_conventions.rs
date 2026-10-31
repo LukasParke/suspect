@@ -90,17 +90,13 @@ fn output_is_one_flag_with_a_short_form() {
     enforce("output flags", |path, cmd| {
         let mut bad = Vec::new();
         if let Some(arg) = long(cmd, "output")
-            && !arg.is_hide_set()
             && arg.get_short() != Some('o')
         {
             bad.push(format!("{path}: --output has no -o"));
         }
         for name in ["out", "json", "yaml"] {
-            if let Some(arg) = long(cmd, name)
-                && !arg.is_hide_set()
-                && !allowed(path, name)
-            {
-                bad.push(format!("{path}: visible --{name}"));
+            if long(cmd, name).is_some() && !allowed(path, name) {
+                bad.push(format!("{path}: --{name}"));
             }
         }
         bad
@@ -139,8 +135,8 @@ fn check_and_diff_are_switches_and_diff_needs_check() {
 fn report_files_take_a_file_and_report_is_not_a_flag() {
     enforce("report flags", |path, cmd| {
         let mut bad = Vec::new();
-        if long(cmd, "report").is_some_and(|arg| !arg.is_hide_set()) {
-            bad.push(format!("{path}: visible --report"));
+        if long(cmd, "report").is_some() {
+            bad.push(format!("{path}: --report (use --format or --report-file)"));
         }
         for name in ["report-file", "junit", "journal", "inputs-file"] {
             if let Some(arg) = long(cmd, name)
@@ -176,187 +172,253 @@ fn sarif_is_rejected_by_clap_where_it_was_never_rendered() {
     for argv in [
         &["suspect", "ci", "--format", "sarif"][..],
         &[
-            "suspect",
-            "release-plan",
-            "a.yaml",
-            "b.yaml",
-            "--format",
-            "sarif",
+            "suspect", "release", "plan", "a.yaml", "b.yaml", "--format", "sarif",
         ],
-        &["suspect", "bridge", "a.yaml", "--format", "sarif"],
-        &[
-            "suspect", "why", "type", "--spec", "a.yaml", "--format", "sarif",
-        ],
+        &["suspect", "gen", "bridge", "a.yaml", "--format", "sarif"],
+        &["suspect", "why", "a.yaml", "type", "--format", "sarif"],
     ] {
-        let argv = argv.iter().map(Into::into).collect();
-        let (argv, _) = suspect_cli::legacy::rewrite(argv);
-        let err = suspect_cli::Cli::try_parse_from(&argv).expect_err("sarif must be rejected");
+        let err = suspect_cli::Cli::try_parse_from(argv).expect_err("sarif must be rejected");
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue, "{argv:?}");
     }
 }
 
-/// Parses like the binary does: old names go through the legacy rewrite.
+/// Parses `suspect <argv>`.
 fn parse(argv: &[&str]) -> suspect_cli::Command {
-    let argv: Vec<std::ffi::OsString> = std::iter::once("suspect")
+    let argv: Vec<&str> = std::iter::once("suspect")
         .chain(argv.iter().copied())
-        .map(Into::into)
         .collect();
-    let (argv, _) = suspect_cli::legacy::rewrite(argv);
     match suspect_cli::Cli::try_parse_from(&argv) {
         Ok(cli) => cli.command,
         Err(err) => panic!("{argv:?}: {err}"),
     }
 }
 
-/// The old spelling parses to exactly the value the new one does.
-fn same(old: &[&str], new: &[&str]) {
-    assert_eq!(
-        format!("{:?}", parse(old)),
-        format!("{:?}", parse(new)),
-        "{old:?} vs {new:?}"
+/// `suspect <argv>` is a clap usage error.
+fn rejected(argv: &[&str]) {
+    let argv: Vec<&str> = std::iter::once("suspect")
+        .chain(argv.iter().copied())
+        .collect();
+    assert!(
+        suspect_cli::Cli::try_parse_from(&argv).is_err(),
+        "{argv:?} still parses"
     );
 }
 
+/// Hidden arguments that are not old spellings: limits for scripts and
+/// tests that a user never types.
+const HIDDEN: &[(&str, &str, &str)] = &[
+    (
+        "suspect gen bridge",
+        "max-ticks",
+        "stops the bridge after N ticks for scripts",
+    ),
+    (
+        "suspect gen session",
+        "max-iterations",
+        "stops a watch after N iterations for process-level tests",
+    ),
+];
+
+/// Value aliases that are synonyms, not old spellings.
+const VALUE_SYNONYMS: &[(&str, &str, &str)] = &[
+    (
+        "min-severity",
+        "information",
+        "the config severity parser's name",
+    ),
+    ("min-severity", "warn", "the config severity parser's name"),
+];
+
 #[test]
-fn renamed_flags_keep_their_old_spellings() {
-    // --out on every generator that now takes -o/--output.
-    for (cmd, rest) in [
-        ("gen", &["s.yaml", "--preset", "docs-md"][..]),
-        ("codegen", &["s.yaml", "--package-name", "p"]),
-        (
-            "codegen-terraform",
-            &["s.yaml", "--mapping", "m", "--target-config", "t"],
-        ),
-        (
-            "codegen-cli",
-            &["s.yaml", "--mapping", "m", "--target-config", "t"],
-        ),
-        (
-            "codegen-mcp",
-            &["s.yaml", "--mapping", "m", "--target-config", "t"],
-        ),
-        ("codegen-session", &["--config", "c.json"]),
-        ("contract", &["s.yaml"]),
-        ("stubs", &["s.yaml", "--backend", "rust-axum"]),
-    ] {
-        let mut old = vec![cmd];
-        old.extend_from_slice(rest);
-        let mut new = old.clone();
-        old.extend(["--out", "dir"]);
-        new.extend(["-o", "dir"]);
-        same(&old, &new);
-        new.splice(new.len() - 2..new.len() - 1, ["--output"]);
-        same(&old, &new);
+fn no_command_flag_or_value_has_an_old_spelling() {
+    let mut root = suspect_cli::Cli::command();
+    root.build();
+    let mut bad = Vec::new();
+    fn commands(cmd: &clap::Command, path: String, bad: &mut Vec<String>) {
+        if cmd.get_all_aliases().next().is_some()
+            || cmd.get_all_short_flag_aliases().next().is_some()
+        {
+            bad.push(format!("{path}: command alias"));
+        }
+        if cmd.is_hide_set() {
+            bad.push(format!("{path}: hidden command"));
+        }
+        for sub in cmd.get_subcommands().filter(|s| s.get_name() != "help") {
+            commands(sub, format!("{path} {}", sub.get_name()), bad);
+        }
     }
-    // --format json|yaml on bundle and upgrade is now --to.
-    same(
-        &["bundle", "a.yaml", "--format", "json"],
-        &["bundle", "a.yaml", "--to", "json"],
-    );
-    same(
-        &["upgrade", "a.yaml", "--format", "yaml"],
-        &["upgrade", "a.yaml", "--to", "yaml"],
-    );
-    // upgrade --output gains -o.
-    same(
-        &["upgrade", "a.yaml", "--output", "b.yaml"],
-        &["upgrade", "a.yaml", "-o", "b.yaml"],
-    );
-    // docs --output gains -o.
-    same(
-        &["docs", "a.yaml", "--output", "site"],
-        &["docs", "a.yaml", "-o", "site"],
-    );
-    // drift --exit-on-gap is --check.
-    same(
-        &["drift", "a.yaml", "t.jsonl", "--exit-on-gap"],
-        &["drift", "a.yaml", "t.jsonl", "--check"],
-    );
-    // load --json FILE is --report-file FILE.
-    same(
-        &["load", "p.yaml", "--json", "r.json"],
-        &["load", "p.yaml", "--report-file", "r.json"],
-    );
-    // --inputs FILE is --inputs-file FILE on test and load.
-    same(
-        &["test", "a.yaml", "--inputs", "i.yaml"],
-        &["test", "a.yaml", "--inputs-file", "i.yaml"],
-    );
-    same(
-        &["load", "p.yaml", "--inputs", "i.yaml"],
-        &["load", "p.yaml", "--inputs-file", "i.yaml"],
-    );
-    // --report on test and load is --format.
-    same(
-        &["test", "a.yaml", "--report", "ndjson"],
-        &["test", "a.yaml", "--format", "ndjson"],
-    );
-    same(
-        &["load", "p.yaml", "--report", "ndjson"],
-        &["load", "p.yaml", "--format", "ndjson"],
-    );
+    commands(&root, "suspect".to_owned(), &mut bad);
+    for (path, cmd) in leaves() {
+        for arg in cmd.get_arguments() {
+            let name = arg.get_long().unwrap_or(arg.get_id().as_str());
+            if arg.get_all_aliases().is_some() || arg.get_all_short_aliases().is_some() {
+                bad.push(format!("{path} --{name}: flag alias"));
+            }
+            if arg.is_hide_set()
+                && !["help", "version"].contains(&name)
+                && !HIDDEN.iter().any(|(p, f, _)| *p == path && *f == name)
+            {
+                bad.push(format!("{path} --{name}: hidden flag"));
+            }
+            for value in arg.get_possible_values() {
+                for alias in value.get_name_and_aliases().skip(1) {
+                    if !VALUE_SYNONYMS
+                        .iter()
+                        .any(|(f, a, _)| *f == name && *a == alias)
+                    {
+                        bad.push(format!("{path} --{name}: value alias {alias}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "old spellings remain:\n{}", bad.join("\n"));
 }
 
 #[test]
-fn old_switches_map_onto_the_new_flags() {
-    use suspect_cli::{Command, DocFormat, GenCmd, TestCmd};
-    // fmt --json/--yaml are hidden and conflict with --to.
-    let Command::Fmt { json, out, .. } = parse(&["fmt", "a.yaml", "--json"]) else {
-        panic!("fmt")
-    };
-    assert!(json && out.to.is_none());
-    let Command::Fmt { yaml, .. } = parse(&["fmt", "a.yaml", "--yaml"]) else {
-        panic!("fmt")
-    };
-    assert!(yaml);
+fn removed_names_and_flags_are_usage_errors() {
+    // The flat names the grouped tree replaced.
+    for old in [
+        "breaking",
+        "arazzo-diff",
+        "impact",
+        "codegen-compare",
+        "reverse",
+        "overlay-dry-run",
+        "docs",
+        "docs-gen",
+        "codegen",
+        "stubs",
+        "contract",
+        "codegen-terraform",
+        "codegen-cli",
+        "codegen-mcp",
+        "codegen-session",
+        "bridge",
+        "codegen-profiles",
+        "admission",
+        "stateful",
+        "fuzz",
+        "load",
+        "replay",
+        "gateway",
+        "drift",
+        "har",
+        "release-plan",
+        "release-publish",
+        "release-workflow",
+        "bench",
+        "evidence",
+    ] {
+        rejected(&[old, "a.yaml", "b.yaml"]);
+    }
+    // Groups do not fall back to their old leaf.
+    rejected(&["diff", "a.yaml", "b.yaml"]);
+    rejected(&["test", "a.arazzo.yaml"]);
+    rejected(&["gen", "a.yaml", "--preset", "docs-md"]);
+    // Old flag spellings.
+    rejected(&["gen", "sdk", "s.yaml", "--out", "dir"]);
+    rejected(&["gen", "session", "--config", "c.json", "--format", "json"]);
+    rejected(&["gen", "template", "s.yaml", "--preset", "docs-md", "--diff"]);
+    rejected(&["gen", "contract", "a.yaml", "--json"]);
+    rejected(&["fmt", "a.yaml", "--json"]);
+    rejected(&["fmt", "a.yaml", "--yaml"]);
+    rejected(&["bundle", "a.yaml", "--format", "json"]);
+    rejected(&["upgrade", "a.yaml", "--format", "yaml"]);
+    rejected(&["traffic", "drift", "a.yaml", "t.jsonl", "--exit-on-gap"]);
+    rejected(&["test", "load", "p.yaml", "--json", "r.json"]);
+    rejected(&["test", "load", "p.yaml", "--report", "ndjson"]);
+    rejected(&["test", "run", "a.yaml", "--report", "ndjson"]);
+    rejected(&["test", "run", "a.yaml", "--inputs", "i.yaml"]);
+    rejected(&[
+        "test",
+        "run",
+        "a.yaml",
+        "--cassette",
+        "c.jsonl",
+        "--offline",
+    ]);
+    rejected(&["why", "type", "--spec", "a.yaml"]);
+    rejected(&["diff", "routes", "src", "a.yaml", "--source-first"]);
+    rejected(&["diff", "sdk", "--before", "a.json", "--after", "b.json"]);
+}
+
+#[test]
+fn new_spellings_parse() {
+    use suspect_cli::{Command, DiffCmd, DocFormat, GenCmd, StreamFormat, TestCmd};
     let Command::Fmt { out, .. } = parse(&["fmt", "a.yaml", "--to", "json"]) else {
         panic!("fmt")
     };
     assert_eq!(out.to, Some(DocFormat::Json));
-    assert!(
-        suspect_cli::Cli::try_parse_from(["suspect", "fmt", "a.yaml", "--json", "--to", "yaml"])
-            .is_err()
-    );
-    // contract --json is the old --to json.
-    let Command::Gen(GenCmd::Contract(args)) = parse(&["contract", "a.yaml", "--json"]) else {
-        panic!("contract")
-    };
-    assert!(args.json);
-    let Command::Gen(GenCmd::Contract(args)) = parse(&["contract", "a.yaml", "--to", "json"])
+    let Command::Gen(GenCmd::Contract(args)) =
+        parse(&["gen", "contract", "a.yaml", "--to", "json", "-o", "pkg"])
     else {
-        panic!("contract")
+        panic!("gen contract")
     };
-    assert_eq!(args.to, Some(DocFormat::Json));
-    // gen --diff alone keeps working and implies --check.
-    let Command::Gen(GenCmd::Template { diff, check, .. }) =
-        parse(&["gen", "a.yaml", "--preset", "docs-md", "--diff"])
+    assert_eq!((args.to, args.out), (Some(DocFormat::Json), "pkg".into()));
+    let Command::Gen(GenCmd::Template { diff, check, .. }) = parse(&[
+        "gen", "template", "a.yaml", "--preset", "docs-md", "--check", "--diff",
+    ]) else {
+        panic!("gen template")
+    };
+    assert!(diff && check.check);
+    let Command::Gen(GenCmd::Bridge { stream, .. }) =
+        parse(&["gen", "bridge", "a.yaml", "--format", "ndjson"])
     else {
-        panic!("gen")
+        panic!("gen bridge")
     };
-    assert!(diff && !check.check);
-    // test --offline is a hidden no-op; --cassette no longer needs it.
-    same(
-        &[
-            "test",
-            "a.arazzo.yaml",
-            "--offline",
-            "--cassette",
-            "c.jsonl",
-        ],
-        &[
-            "test",
-            "a.arazzo.yaml",
-            "--cassette",
-            "c.jsonl",
-            "--offline",
-        ],
-    );
-    let Command::Test(TestCmd::Run { cassette, .. }) =
-        parse(&["test", "a.arazzo.yaml", "--cassette", "c.jsonl"])
+    assert_eq!(stream.format, StreamFormat::Ndjson);
+    let Command::Test(TestCmd::Run {
+        format, cassette, ..
+    }) = parse(&[
+        "test",
+        "run",
+        "a.yaml",
+        "--format",
+        "ndjson",
+        "--cassette",
+        "c.jsonl",
+    ])
     else {
-        panic!("test")
+        panic!("test run")
     };
+    assert_eq!(format, Some(StreamFormat::Ndjson));
     assert!(cassette.is_some());
+    let Command::Why {
+        spec, constraint, ..
+    } = parse(&["why", "a.yaml", "type"])
+    else {
+        panic!("why")
+    };
+    assert_eq!((spec, constraint.as_str()), ("a.yaml".into(), "type"));
+    let Command::Diff(DiffCmd::Routes { spec, source, .. }) =
+        parse(&["diff", "routes", "a.yaml", "src"])
+    else {
+        panic!("diff routes")
+    };
+    assert_eq!((spec, source), ("a.yaml".into(), "src".into()));
+    let Command::Diff(DiffCmd::Sdk(args)) = parse(&["diff", "sdk", "a.json", "b.json"]) else {
+        panic!("diff sdk")
+    };
+    assert_eq!((args.old, args.new), ("a.json".into(), "b.json".into()));
+    // -o and --output are one flag on every generator.
+    for words in [
+        &["gen", "template", "s.yaml", "--preset", "docs-md"][..],
+        &["gen", "sdk", "s.yaml", "--package-name", "p"],
+        &["gen", "session", "--config", "c.json"],
+        &["gen", "contract", "s.yaml"],
+        &["gen", "stubs", "s.yaml", "--backend", "rust-axum"],
+    ] {
+        let mut short = words.to_vec();
+        short.extend(["-o", "dir"]);
+        let mut long = words.to_vec();
+        long.extend(["--output", "dir"]);
+        assert_eq!(
+            format!("{:?}", parse(&short)),
+            format!("{:?}", parse(&long)),
+            "{words:?}"
+        );
+    }
 }
 
 #[test]
@@ -364,6 +426,7 @@ fn gateway_mode_is_checked_by_clap() {
     use suspect_cli::commands::gateway::GatewayMode;
     let suspect_cli::Command::Traffic(suspect_cli::TrafficCmd::Gateway { mode, upstream, .. }) =
         parse(&[
+            "traffic",
             "gateway",
             "a.yaml",
             "--mode",
@@ -383,130 +446,10 @@ fn gateway_mode_is_checked_by_clap() {
     assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
 }
 
-#[test]
-fn stream_commands_accept_the_old_spellings() {
-    use suspect_cli::{Command, GenCmd, StreamFormat, TestCmd};
-    // `json` is the old `bridge`/`codegen-session` spelling of `ndjson`.
-    let Command::Gen(GenCmd::Bridge { stream, .. }) =
-        parse(&["bridge", "a.yaml", "--format", "json"])
-    else {
-        panic!("bridge")
-    };
-    assert_eq!(stream.format, StreamFormat::Ndjson);
-    // `--report` is the old `test`/`load` flag.
-    let Command::Test(TestCmd::Run { format, .. }) =
-        parse(&["test", "a.yaml", "--report", "ndjson"])
-    else {
-        panic!("test")
-    };
-    assert_eq!(format, Some(StreamFormat::Ndjson));
-    let Command::Test(TestCmd::Load(args)) = parse(&["load", "p.yaml", "--report", "ndjson"])
-    else {
-        panic!("load")
-    };
-    assert_eq!(args.stream.format, StreamFormat::Ndjson);
-}
-
 /// The clap command at `path` (`["diff", "breaking"]`), if it exists.
 fn find<'c>(root: &'c clap::Command, path: &[&str]) -> Option<&'c clap::Command> {
     path.iter()
         .try_fold(root, |cmd, name| cmd.find_subcommand(name))
-}
-
-#[test]
-fn every_renamed_command_points_at_an_existing_path() {
-    let root = suspect_cli::Cli::command();
-    for row in suspect_cli::legacy::RENAMED {
-        let target = find(&root, row.new)
-            .unwrap_or_else(|| panic!("{} -> {:?} does not exist", row.old, row.new));
-        assert!(
-            target.get_subcommands().next().is_none(),
-            "{} -> {:?} is a group, not a leaf",
-            row.old,
-            row.new
-        );
-        for flag in row.extra {
-            let long = flag.trim_start_matches("--");
-            assert!(
-                target.get_arguments().any(|a| a.get_long() == Some(long)),
-                "{} -> {:?}: extra flag {flag} does not exist",
-                row.old,
-                row.new
-            );
-        }
-        // The old name is gone from the visible top level.
-        assert!(
-            root.get_subcommands()
-                .all(|sub| sub.get_name() != row.old || sub.is_hide_set()),
-            "{} is still a visible top-level command",
-            row.old
-        );
-    }
-    for (group, sub) in suspect_cli::legacy::DEFAULT_SUB {
-        assert!(find(&root, &[group, sub]).is_some(), "{group} {sub}");
-    }
-}
-
-#[test]
-fn old_positional_orders_parse_to_the_new_commands() {
-    use suspect_cli::{Command, DiffCmd};
-    // why CONSTRAINT --spec SPEC == why SPEC CONSTRAINT.
-    let Command::Why {
-        first,
-        constraint,
-        spec,
-        ..
-    } = parse(&["why", "type", "--spec", "a.yaml"])
-    else {
-        panic!("why")
-    };
-    assert_eq!(
-        (first.as_str(), constraint, spec),
-        ("type", None, Some("a.yaml".into()))
-    );
-    let Command::Why {
-        first, constraint, ..
-    } = parse(&["why", "a.yaml", "type"])
-    else {
-        panic!("why")
-    };
-    assert_eq!(
-        (first.as_str(), constraint.as_deref()),
-        ("a.yaml", Some("type"))
-    );
-    // reverse SOURCE SPEC keeps its order behind --source-first.
-    let Command::Diff(DiffCmd::Routes {
-        spec,
-        source,
-        source_first,
-        ..
-    }) = parse(&["reverse", "src", "a.yaml"])
-    else {
-        panic!("reverse")
-    };
-    assert!(source_first);
-    assert_eq!((spec, source), ("src".into(), "a.yaml".into()));
-    // codegen-compare --before/--after fill the OLD NEW positionals.
-    let Command::Diff(DiffCmd::Sdk(args)) =
-        parse(&["codegen-compare", "--before", "a.json", "--after", "b.json"])
-    else {
-        panic!("codegen-compare")
-    };
-    assert_eq!(
-        (args.before, args.after, args.old, args.new),
-        (Some("a.json".into()), Some("b.json".into()), None, None)
-    );
-    let Command::Diff(DiffCmd::Sdk(args)) = parse(&["diff", "sdk", "a.json", "b.json"]) else {
-        panic!("diff sdk")
-    };
-    assert_eq!(
-        (args.old, args.new),
-        (Some("a.json".into()), Some("b.json".into()))
-    );
-    assert!(
-        suspect_cli::Cli::try_parse_from(["suspect", "diff", "sdk", "a.json", "--before", "b"])
-            .is_err()
-    );
 }
 
 #[test]

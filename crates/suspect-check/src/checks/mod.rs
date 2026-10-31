@@ -127,7 +127,7 @@ pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
 }
 
 /// SDK generation admission for an OpenAPI 3.x document: the refusals,
-/// advice and contract limitations `suspect admission` reports. Findings
+/// advice and contract limitations `suspect gen admission` reports. Findings
 /// located in another document are reported at this document's level;
 /// a document the contract compiler cannot open yields nothing.
 #[cfg(feature = "sdk")]

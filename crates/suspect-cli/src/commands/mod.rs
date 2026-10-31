@@ -32,7 +32,6 @@ pub mod inputs;
 pub mod lint;
 pub mod load;
 pub mod overlay;
-pub mod overlay_dry_run;
 pub mod project;
 pub mod publish;
 pub mod release;

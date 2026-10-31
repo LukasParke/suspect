@@ -644,14 +644,26 @@ fn hover_meaning(
     Some(out)
 }
 
+/// The CLI the server belongs to: `suspect lsp` runs inside the `suspect`
+/// binary, so the same executable answers the shelled-out commands even
+/// when it is not on `PATH` (the copy bundled in the VS Code extension).
+fn suspect_cli() -> std::process::Command {
+    std::process::Command::new(
+        std::env::current_exe()
+            .ok()
+            .filter(|exe| exe.file_stem().is_some_and(|stem| stem == "suspect"))
+            .unwrap_or_else(|| "suspect".into()),
+    )
+}
+
 /// Verifies a contract package by invoking the CLI in check mode. The
 /// editor shells out rather than re-implementing: one implementation of
 /// "is the package current", used by both the editor and CI.
 fn suspect_cli_contract_check(spec: &std::path::Path, package: &std::path::Path) -> i32 {
-    let status = std::process::Command::new("suspect")
-        .arg("contract")
+    let status = suspect_cli()
+        .args(["gen", "contract"])
         .arg(spec)
-        .arg("--out")
+        .arg("--output")
         .arg(package)
         .arg("--check")
         .output();
@@ -665,7 +677,7 @@ fn suspect_cli_contract_check(spec: &std::path::Path, package: &std::path::Path)
 
 /// One service's gate, run by the CLI so the editor and CI share it.
 fn suspect_cli_service_gate(dir: &std::path::Path) -> GateReport {
-    let output = std::process::Command::new("suspect")
+    let output = suspect_cli()
         .arg("ci")
         .arg(dir)
         .arg("--format")

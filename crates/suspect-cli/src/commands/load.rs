@@ -1,4 +1,4 @@
-//! `suspect load` — Artillery-style load generation with Arazzo workflows as
+//! `suspect test load` — Artillery-style load generation with Arazzo workflows as
 //! virtual-user scenarios.
 //!
 //! Accepts either a load profile (`*.load.yaml`, `suspectLoad: "1.0"`) or an
@@ -22,7 +22,7 @@ use suspect_test::{HttpClient, InputMap, RunAuth};
 
 use super::http::{HttpSettings, LiveTransport};
 
-/// Parsed `suspect load` arguments.
+/// Parsed `suspect test load` arguments.
 #[derive(Debug, clap::Args)]
 pub struct LoadArgs {
     /// Load profile (`*.load.yaml`) or an Arazzo document (with --workflow).
@@ -58,7 +58,7 @@ pub struct LoadArgs {
     #[arg(long = "input", value_name = "KEY=VALUE")]
     pub input_pairs: Vec<String>,
     /// JSON or YAML object file of workflow inputs applied to every scenario.
-    #[arg(long = "inputs-file", value_name = "FILE", alias = "inputs")]
+    #[arg(long = "inputs-file", value_name = "FILE")]
     pub inputs_file: Option<PathBuf>,
     /// Credentials file for the security schemes the workflows exercise.
     /// Default: `.suspect/credentials.json` discovered by walking up from
@@ -114,7 +114,7 @@ pub enum JitterArg {
     Poisson,
 }
 
-/// Runs `suspect load`.
+/// Runs `suspect test load`.
 ///
 /// Exit codes: `0` every strict `ensure` check passed, `1` an ensure check
 /// failed, `2` configuration/compile error or a failed prerequisite
@@ -262,7 +262,7 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
     };
     if !ndjson {
         println!(
-            "suspect load: {} scenario(s), {} phase(s) against {}  [seed {seed}]",
+            "suspect test load: {} scenario(s), {} phase(s) against {}  [seed {seed}]",
             profile.scenarios.len(),
             profile.phases.len(),
             target
@@ -461,7 +461,7 @@ fn dry_run_text(
 ) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "suspect load --dry-run");
+    let _ = writeln!(out, "suspect test load --dry-run");
     let _ = writeln!(out, "target: {target}");
     let _ = writeln!(out, "seed:   {seed}");
     let _ = writeln!(

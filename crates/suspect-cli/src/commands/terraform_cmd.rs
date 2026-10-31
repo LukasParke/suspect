@@ -46,7 +46,6 @@ pub struct TerraformArgs {
     #[arg(
         short = 'o',
         long = "output",
-        alias = "out",
         value_name = "DIR",
         default_value = "terraform-out"
     )]

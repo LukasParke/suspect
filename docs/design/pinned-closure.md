@@ -9,16 +9,16 @@ has passed acquisition → offline generation/watch/comparison checks.
 ```sh
 suspect acquire api.pins.json --cache-dir .suspect-cache --format json
 
-suspect codegen --pins api.pins.json --cache-dir .suspect-cache \
+suspect gen sdk --pins api.pins.json --cache-dir .suspect-cache \
   --profile typescript-http --package-name @example/sdk \
-  --package-version 0.1.0 --out generated
+  --package-version 0.1.0 --output generated
 
 suspect acquire api.pins.json --cache-dir .suspect-cache --offline --format json
 ```
 
 `acquire` fills missing pins, or explicitly refreshes them with `--refresh` or
 `--stale-before YYYY-MM-DDTHH:MM:SSZ`. Changed bytes or redirect provenance fail;
-the manifest is never rewritten. `codegen --pins` always uses offline cache
+the manifest is never rewritten. `gen sdk --pins` always uses offline cache
 verification and is mutually exclusive with a positional source file.
 
 Session configurations choose `spec` **or** `pins`:
@@ -36,7 +36,7 @@ Session configurations choose `spec` **or** `pins`:
 ```
 
 Both paths are relative to the session configuration. This same configuration
-works with `codegen-session` generation/check/preview/watch and `codegen-compare`.
+works with `gen session` generation/check/preview/watch and `diff sdk`.
 The library entry point is `Session::with_input(Input::Pinned { ... }, config)`.
 
 Before a pinned session reuses a cached Contract or artifact set, it verifies

@@ -173,7 +173,7 @@ pub struct CodegenSettings {
     pub import_names: std::collections::BTreeMap<String, String>,
     /// Exact operationId selectors; empty means every operation.
     pub operation_ids: Vec<String>,
-    /// Compatibility profile names (`suspect codegen --compatibility-profile`).
+    /// Compatibility profile names (`suspect gen sdk --compatibility-profile`).
     pub compatibility_profiles: Vec<String>,
     /// `codegen.session`: the editor's SDK preview/watch session.
     pub session: CodegenSessionSettings,

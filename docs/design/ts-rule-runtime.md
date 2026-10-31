@@ -289,7 +289,7 @@ the loop Telescope leaves to manual fixture runs.
 | Hot reload | ≤ 50ms for changed rule files |
 | Per-node round trips | **Zero** — batched frames, streamed NDJSON findings |
 
-Bench plan: `suspect bench rules-ts` — cold start, per-evaluate overhead,
+Bench plan: `suspect dev bench rules-ts` — cold start, per-evaluate overhead,
 rules/sec at N rules × M nodes, hot-reload latency; recorded per release
 like the existing feature benches.
 

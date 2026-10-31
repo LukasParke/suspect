@@ -1,4 +1,4 @@
-//! `suspect impact`: traffic-backed compatibility analysis.
+//! `suspect diff impact`: traffic-backed compatibility analysis.
 //!
 //! Replays a recorded cassette against two spec revisions and reports the
 //! recorded exchanges that pass the old contract but fail the new one,

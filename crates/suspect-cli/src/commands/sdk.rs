@@ -452,7 +452,7 @@ pub fn profile_by_name(name: &str) -> Option<SdkProfile> {
 ///
 /// The target carries its own package identity, version, selectors and
 /// output root, so a project manifest drives SDK generation through exactly
-/// the same admission and artifact-ownership path as `suspect codegen`.
+/// the same admission and artifact-ownership path as `suspect gen sdk`.
 pub fn generate_codegen_target(
     spec: &std::path::Path,
     target: &super::project::CodegenTarget,

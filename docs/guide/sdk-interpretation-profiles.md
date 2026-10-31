@@ -24,11 +24,11 @@ suspect gen sdk openapi.yaml \
   --operation-id downloadContainerFileContent \
   --package-name example.com/openrouter-sdk --package-version 0.1.0 \
   --compatibility-profile legacy-binary-string-v1 \
-  --out generated
+  --output generated
 ```
 
 The repeatable CLI flag uses a closed, versioned enum. Unsupported names fail
-configuration before emission. `codegen-profiles --format json` advertises
+configuration before emission. `gen profiles --format json` advertises
 `compatibilityProfiles` separately from native backend profiles. Discovery does
 not activate them.
 

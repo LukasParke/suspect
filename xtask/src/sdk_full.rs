@@ -3772,7 +3772,7 @@ fn pinned_stages() -> Vec<Stage> {
             "session",
             "--config",
             "{out}/configs/pinned-session.json",
-            "--out",
+            "--output",
             "{work}/pinned/packages",
             "--watch",
             "--max-iterations",
@@ -3780,7 +3780,7 @@ fn pinned_stages() -> Vec<Stage> {
             "--interval-ms",
             "25",
             "--format",
-            "json",
+            "ndjson",
         ],
         "{workspace}",
     );

@@ -22,7 +22,7 @@
             "type": "array"
           },
           "credential_env": {
-            "description": "Credential environment variable mapping (`codegen --defaults` schema).",
+            "description": "Credential environment variable mapping (`gen sdk --defaults` schema).",
             "type": "object"
           },
           "import_name": {
@@ -43,7 +43,7 @@
           },
           "options": {
             "additionalProperties": false,
-            "description": "Generation options in the `codegen --defaults` schema (`compatibility_profiles`, `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both.",
+            "description": "Generation options in the `gen sdk --defaults` schema (`compatibility_profiles`, `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both.",
             "properties": {
               "compatibility_profiles": {
                 "description": "Interpretation profiles applied to the source (`--compatibility-profile`).",
@@ -53,11 +53,11 @@
                 "type": "array"
               },
               "credential_env": {
-                "description": "Credential environment variable mapping (`codegen --defaults` schema).",
+                "description": "Credential environment variable mapping (`gen sdk --defaults` schema).",
                 "type": "object"
               },
               "sdk_defaults": {
-                "description": "SDK defaults: pagination, OAuth lifecycle (`codegen --defaults` schema).",
+                "description": "SDK defaults: pagination, OAuth lifecycle (`gen sdk --defaults` schema).",
                 "type": "object"
               }
             },
@@ -81,7 +81,7 @@
             "type": "string"
           },
           "sdk_defaults": {
-            "description": "SDK defaults: pagination, OAuth lifecycle (`codegen --defaults` schema).",
+            "description": "SDK defaults: pagination, OAuth lifecycle (`gen sdk --defaults` schema).",
             "type": "object"
           }
         },
@@ -267,7 +267,7 @@
     },
     "release": {
       "additionalProperties": false,
-      "description": "SDK release: the version every target carries and how each is published (`release-publish`, `release-workflow`). Replaces a standalone `release.json`.",
+      "description": "SDK release: the version every target carries and how each is published (`release publish`, `release workflow`). Replaces a standalone `release.json`.",
       "properties": {
         "tag": {
           "description": "The tag that triggers the release workflow; `v` plus the version when unset.",

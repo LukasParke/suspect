@@ -23,11 +23,12 @@ fn missing_profile_exits_2_through_main() {
     let output = Command::new(env!("CARGO_BIN_EXE_suspect"))
         .current_dir(dir.path())
         .args([
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--package-name",
             "fixture",
-            "--out",
+            "--output",
             "output",
         ])
         .output()
@@ -68,7 +69,7 @@ mod sigint {
         }
     }
 
-    /// `load` against a listener that accepts and never answers: Ctrl-C
+    /// `test load` against a listener that accepts and never answers: Ctrl-C
     /// stops arrivals, the grace period drains nothing, and no request
     /// completed, so the run reports 130.
     #[test]
@@ -84,10 +85,10 @@ mod sigint {
             }
         });
         let mut child = Command::new(env!("CARGO_BIN_EXE_suspect"))
-            .args(["load"])
+            .args(["test", "load"])
             .arg(example("flows.arazzo.yaml"))
             .args(["--workflow", "browse", "--rate", "2", "--duration", "60s"])
-            .args(["--grace", "1s", "--timeout", "60s", "--report", "ndjson"])
+            .args(["--grace", "1s", "--timeout", "60s", "--format", "ndjson"])
             .args(["--base-url", &format!("http://127.0.0.1:{port}")])
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -113,7 +114,7 @@ mod sigint {
     #[test]
     fn interrupted_gateway_exits_0() {
         let mut child = Command::new(env!("CARGO_BIN_EXE_suspect"))
-            .args(["gateway"])
+            .args(["traffic", "gateway"])
             .arg(example("petstore.openapi.yaml"))
             .args(["--mode", "mock", "--port", "0"])
             .stdout(Stdio::null())

@@ -19,7 +19,7 @@ pub enum SpecFamily {
     Arazzo10,
     /// `overlay: "1.0.x"`
     Overlay10,
-    /// `suspectLoad: "1.x"` — a `suspect load` profile.
+    /// `suspectLoad: "1.x"` — a `suspect test load` profile.
     Load10,
     /// Anything else (including unparseable roots).
     Unknown,

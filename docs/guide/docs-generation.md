@@ -63,7 +63,7 @@ expressions. The context is the spec's model: `title`, `version`, `servers`,
 ```console
 $ suspect gen template api.yaml --manifest gen.yaml -o out
 $ suspect gen template api.yaml --manifest gen.yaml -o out --check   # exit 1 when out/ is stale
-$ suspect gen template api.yaml --manifest gen.yaml -o out --diff    # also print the diffs
+$ suspect gen template api.yaml --manifest gen.yaml -o out --check --diff   # also print the diffs
 ```
 
 Built-in filters: case conversion (`snake_case`, `camelCase`, `PascalCase`,

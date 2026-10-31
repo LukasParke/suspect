@@ -1,4 +1,4 @@
-//! `suspect reverse`: detect spec drift from server source code.
+//! `suspect diff routes`: detect spec drift from server source code.
 //!
 //! Extracts routes registered in server framework code (Rust axum/actix,
 //! TypeScript Express, Go net/http & Gin) and cross-references them with
@@ -9,7 +9,7 @@ use std::path::Path;
 
 use suspect_ir::IrSpec;
 
-/// Runs `suspect reverse`. Exits 0, or with `check` 1 on undocumented or
+/// Runs `suspect diff routes`. Exits 0, or with `check` 1 on undocumented or
 /// spec-only routes; 2 when no routes are extracted.
 ///
 /// # Errors

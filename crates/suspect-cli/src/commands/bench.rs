@@ -1,4 +1,4 @@
-//! `suspect bench`: wall-clock micro-report of the pipeline stages on one
+//! `suspect dev bench`: wall-clock micro-report of the pipeline stages on one
 //! fixture. Plain `std::time::Instant` timing (no criterion); each stage
 //! runs `--iters` times and the mean is reported.
 
@@ -220,7 +220,7 @@ pub fn bench_of(fixture: &Path, iters: usize) -> anyhow::Result<BenchReport> {
     })
 }
 
-/// `suspect bench <FIXTURE> [--iters N]`: prints the stage table or JSON.
+/// `suspect dev bench <FIXTURE> [--iters N]`: prints the stage table or JSON.
 ///
 /// # Errors
 /// See [`bench_of`]; JSON serialization failures.

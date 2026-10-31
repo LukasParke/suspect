@@ -1,4 +1,4 @@
-//! `suspect drift`: cross-reference recorded traffic against the spec and
+//! `suspect traffic drift`: cross-reference recorded traffic against the spec and
 //! report the gaps — endpoints the traffic exercised that the spec does
 //! not declare, undeclared query parameters on declared endpoints, and
 //! declared operations the traffic never touched.
@@ -351,7 +351,7 @@ pub fn gap_findings(report: &DriftReport, spec_path: &Path) -> Vec<crate::Findin
     findings
 }
 
-/// `suspect drift <SPEC> <TRAFFIC> [--format text|json|sarif|junit]
+/// `suspect traffic drift <SPEC> <TRAFFIC> [--format text|json|sarif|junit]
 /// [--check] [--ignore-param NAME]`. Exits 1 on gaps with
 /// `--check`, else 0.
 ///

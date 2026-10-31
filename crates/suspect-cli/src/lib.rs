@@ -12,7 +12,6 @@ pub mod commands;
 pub mod diff;
 pub mod exit;
 pub mod interrupt;
-pub mod legacy;
 pub mod output;
 pub mod reverse;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
@@ -57,7 +56,7 @@ pub enum Strategy {
 /// Subcommands of the `suspect` binary; each variant is one subcommand and
 /// its doc comment becomes the one-line help text shown by `--help`.
 /// Related commands live in groups (`diff`, `gen`, `test`, `traffic`,
-/// `release`, `dev`); old flat names are rewritten by [`legacy`].
+/// `release`, `dev`).
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Run every check the editor runs; exit 1 when an error-severity finding remains.
@@ -101,12 +100,6 @@ pub enum Command {
         /// Output file and serialization.
         #[command(flatten)]
         out: DocOut,
-        /// Old spelling of `--to json`.
-        #[arg(long, hide = true, conflicts_with_all = ["yaml", "to"])]
-        json: bool,
-        /// Old spelling of `--to yaml`.
-        #[arg(long, hide = true, conflicts_with = "to")]
-        yaml: bool,
     },
     /// Bundle a document and its `$ref` closure into one file.
     Bundle {
@@ -163,16 +156,10 @@ pub enum Command {
     /// Trace a validation failure to its origin: source location, git
     /// blame, and whether recorded traffic ever passed it.
     Why {
-        /// Spec file the failure refers to (with the old `--spec` flag,
-        /// this positional is the constraint).
-        #[arg(value_name = "SPEC")]
-        first: String,
+        /// Spec file the failure refers to.
+        spec: PathBuf,
         /// The constraint that fired (e.g. `type` or the diagnostic text).
-        #[arg(value_name = "CONSTRAINT", required_unless_present = "spec")]
-        constraint: Option<String>,
-        /// Old spelling: `why CONSTRAINT --spec SPEC`.
-        #[arg(long, hide = true, conflicts_with = "constraint")]
-        spec: Option<PathBuf>,
+        constraint: String,
         /// Byte offset of the failing constraint in the spec, when known.
         #[arg(long)]
         offset: Option<usize>,
@@ -253,9 +240,6 @@ pub enum DiffCmd {
         spec: PathBuf,
         /// Server source tree or single file with route registrations.
         source: PathBuf,
-        /// Old positional order (`reverse SOURCE SPEC`): swap the two.
-        #[arg(long, hide = true)]
-        source_first: bool,
         /// `text` for a human report, `json` for a structured report.
         #[command(flatten)]
         report: Report,
@@ -299,7 +283,6 @@ pub enum GenCmd {
         #[arg(
             short = 'o',
             long = "output",
-            alias = "out",
             value_name = "DIR",
             default_value = "gen-out"
         )]
@@ -307,8 +290,8 @@ pub enum GenCmd {
         /// Write nothing; exit 1 when output or ownership drifts.
         #[command(flatten)]
         check: Check,
-        /// Also print unified diffs of drifted files; implies `--check`.
-        #[arg(long)]
+        /// With `--check`: also print unified diffs of drifted files.
+        #[arg(long, requires = "check")]
         diff: bool,
         /// Stable logical owner when sharing an output root across generation streams.
         #[arg(long)]
@@ -371,13 +354,9 @@ pub enum TestCmd {
         /// Run offline against a recorded Suspect Cassette instead of live HTTP.
         #[arg(long)]
         cassette: Option<PathBuf>,
-        /// No effect: `--cassette` alone runs offline. Accepted so old
-        /// invocations keep working.
-        #[arg(long, hide = true)]
-        offline: bool,
         /// Event stream format: human text or one-JSON-per-line ndjson
         /// (default: `test.report`, else `text`).
-        #[arg(long, value_enum, alias = "report")]
+        #[arg(long, value_enum)]
         format: Option<StreamFormat>,
         /// Message broker directory for Arazzo 1.1 AsyncAPI steps:
         /// `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl`
@@ -395,7 +374,7 @@ pub enum TestCmd {
         journal: Option<PathBuf>,
         /// JSON or YAML object file of workflow inputs, applied before `--input`
         /// pairs (which override it).
-        #[arg(long = "inputs-file", value_name = "FILE", alias = "inputs")]
+        #[arg(long = "inputs-file", value_name = "FILE")]
         inputs_file: Option<PathBuf>,
         /// JSON and JUnit report files.
         #[command(flatten)]
@@ -545,8 +524,8 @@ pub enum TrafficCmd {
         #[arg(long = "ignore-param", value_name = "NAME")]
         ignore_param: Vec<String>,
         /// Exit with status 1 when the traffic addresses undeclared
-        /// endpoints or parameters (old spelling: `--exit-on-gap`).
-        #[arg(long, alias = "exit-on-gap")]
+        /// endpoints or parameters.
+        #[arg(long)]
         check: bool,
         /// Output format for the drift report.
         #[command(flatten)]
@@ -684,17 +663,11 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 format: findings.format,
             })
         }
-        Command::Fmt {
-            input,
-            out,
-            json,
-            yaml,
-        } => {
-            // A typed --to (or --json/--yaml) wins over both settings; otherwise
-            // the file decides.
+        Command::Fmt { input, out } => {
+            // A typed --to wins over both settings; otherwise the file decides.
             let resolved = settings::resolve_one(&input, Layer::flags())?;
-            let json = json || out.to == Some(DocFormat::Json);
-            let yaml = yaml || out.to == Some(DocFormat::Yaml);
+            let json = out.to == Some(DocFormat::Json);
+            let yaml = out.to == Some(DocFormat::Yaml);
             let (json, yaml) = if json || yaml {
                 (json, yaml)
             } else {
@@ -726,31 +699,22 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             commands::ci::ci(&args)
         }
         Command::Why {
-            first,
-            constraint,
             spec,
+            constraint,
             offset,
             why_line,
             why_col,
             cassette_dir,
             report,
-        } => {
-            // `why SPEC CONSTRAINT`, or the old `why CONSTRAINT --spec SPEC`.
-            let (spec, constraint) = match (spec, constraint) {
-                (Some(spec), _) => (spec, first),
-                (None, Some(constraint)) => (PathBuf::from(first), constraint),
-                (None, None) => anyhow::bail!("usage: suspect why <SPEC> <CONSTRAINT>"),
-            };
-            commands::why::why(
-                &constraint,
-                &spec,
-                offset,
-                why_line,
-                why_col,
-                cassette_dir.as_deref(),
-                report.format.is_json(),
-            )
-        }
+        } => commands::why::why(
+            &constraint,
+            &spec,
+            offset,
+            why_line,
+            why_col,
+            cassette_dir.as_deref(),
+            report.format.is_json(),
+        ),
         Command::Rules { cmd } => cmd.run(),
         Command::Config(args) => commands::config_cmd::config(&args),
         Command::Auth {
@@ -800,17 +764,9 @@ fn diff_cmd(cmd: DiffCmd) -> anyhow::Result<i32> {
         DiffCmd::Routes {
             spec,
             source,
-            source_first,
             report,
             check,
-        } => {
-            let (spec, source) = if source_first {
-                (source, spec)
-            } else {
-                (spec, source)
-            };
-            commands::reverse::reverse(&source, &spec, report.format.is_json(), check.check)
-        }
+        } => commands::reverse::reverse(&source, &spec, report.format.is_json(), check.check),
     }
 }
 
@@ -861,7 +817,7 @@ fn gen_cmd(cmd: GenCmd) -> anyhow::Result<i32> {
             manifest.as_deref(),
             &out,
             commands::generate::Gate {
-                check: check.check || diff,
+                check: check.check,
                 diff,
             },
             owner.as_deref(),
@@ -900,7 +856,6 @@ fn test_cmd(cmd: TestCmd) -> anyhow::Result<i32> {
             filter,
             inputs,
             cassette,
-            offline: _,
             format,
             message_broker,
             credentials,

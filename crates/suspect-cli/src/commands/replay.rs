@@ -1,4 +1,4 @@
-//! `suspect replay` — re-issues a recorded cassette's requests against a
+//! `suspect test replay` — re-issues a recorded cassette's requests against a
 //! live upstream and reports drift.
 //!
 //! For every `CassetteEntry` the recorded request (method, URL retargeted
@@ -29,7 +29,7 @@ fn replayable(header: &str) -> bool {
     )
 }
 
-/// Runs `suspect replay` against one cassette.
+/// Runs `suspect test replay` against one cassette.
 ///
 /// # Errors
 /// Propagates cassette IO/parse failures and transport setup errors; drift

@@ -45,8 +45,8 @@ Older spelling: `formatting`.
 
 | Key | Type | Default | Description | Env | Editor setting | Flags | Older spellings |
 |---|---|---|---|---|---|---|---|
-| `format.json` | boolean | `false` | Emit JSON regardless of the input extension. |  |  | `suspect fmt --json` |  |
-| `format.yaml` | boolean | `false` | Emit YAML regardless of the input extension. |  |  | `suspect fmt --yaml` |  |
+| `format.json` | boolean | `false` | Emit JSON regardless of the input extension. |  |  | `suspect fmt --to` |  |
+| `format.yaml` | boolean | `false` | Emit YAML regardless of the input extension. |  |  | `suspect fmt --to` |  |
 | `format.sort_keys` | boolean | `false` | Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`. |  | `suspect.format.sortKeys` (was `suspect.formatting.sortKeys`) |  | `formatting.sort_keys`, `formatting.sortKeys` |
 
 ### `docs`
@@ -64,13 +64,13 @@ Defaults applied to SDK generation.
 
 | Key | Type | Default | Description | Env | Editor setting | Flags | Older spellings |
 |---|---|---|---|---|---|---|---|
-| `codegen.out` | path |  | Default output root, relative to the file that sets it. |  |  | `suspect gen sdk --out` |  |
+| `codegen.out` | path |  | Default output root, relative to the file that sets it. |  |  | `suspect gen sdk --output` |  |
 | `codegen.profile` | string |  | Default native profile id. |  |  | `suspect gen sdk --profile` |  |
 | `codegen.package_name` | string |  | Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it. |  | `suspect.codegen.packageName` (was `suspect.sdk.packageName`) |  |  |
 | `codegen.package_version` | string |  | Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata). |  | `suspect.codegen.packageVersion` (was `suspect.sdk.packageVersion`) | `suspect gen sdk --package-version` |  |
 | `codegen.import_names` | map of string | `{}` | SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name. |  | `suspect.codegen.importNames` (was `suspect.sdk.importNames`) |  |  |
 | `codegen.operation_ids` | list of strings | `[]` | Exact `operationId`s to generate. Empty attempts every operation; an unsupported one fails rather than being dropped. |  | `suspect.codegen.operationIds` (was `suspect.sdk.operationIds`) |  |  |
-| `codegen.compatibility_profiles` | list of names: `legacy-binary-string-v1`, `oas30-nullable-in-3.1-v1`, `colon-path-parameters-v1`, `schemaless-stream-events-v1`, `all-of-scoped-mode-v1` | `[]` | Versioned source interpretations to opt into (`suspect codegen --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. |  | `suspect.codegen.compatibilityProfiles` (was `suspect.sdk.compatibilityProfiles`) |  |  |
+| `codegen.compatibility_profiles` | list of names: `legacy-binary-string-v1`, `oas30-nullable-in-3.1-v1`, `colon-path-parameters-v1`, `schemaless-stream-events-v1`, `all-of-scoped-mode-v1` | `[]` | Versioned source interpretations to opt into (`suspect gen sdk --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. |  | `suspect.codegen.compatibilityProfiles` (was `suspect.sdk.compatibilityProfiles`) |  |  |
 | `codegen.session.config` | path |  | Session config (JSON) naming the spec and targets. Unset: the editor asks for one. |  | `suspect.codegen.session.config` (was `suspect.sdk.sessionConfig`) |  |  |
 | `codegen.session.out` | string | `sdk-out` | Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`). |  | `suspect.codegen.session.out` (was `suspect.sdk.sessionOutput`) |  |  |
 
@@ -101,7 +101,7 @@ Contract tests, fuzzing and load runs.
 |---|---|---|---|---|---|---|---|
 | `test.base_url` | URL | `http://localhost:8080` | Base URL requests are sent to. | `SUSPECT_BASE_URL` | `suspect.test.baseUrl` (was `suspect.testBaseUrl`) | `suspect test run --base-url`, `suspect test fuzz --base-url`, `suspect test stateful --base-url`, `suspect test load --base-url` | `run.base_url` |
 | `test.credentials` | path |  | Credentials file for the security schemes tests exercise. Default: `.suspect/credentials.json` discovered upward. | `SUSPECT_CREDENTIALS` |  | `suspect test run --credentials`, `suspect auth check --credentials` |  |
-| `test.report` | string: `text`, `ndjson` | `text` | Event stream format for `suspect test`. |  |  | `suspect test run --report` |  |
+| `test.report` | string: `text`, `ndjson` | `text` | Event stream format for `suspect test`. |  |  | `suspect test run --format` |  |
 
 ### `gateway`
 
@@ -182,7 +182,7 @@ Settings that moved to `.suspect.yaml` (`lint`, `validate`, `editor`) are still 
 | `docs.style` | string: `html`, `markdown`, `sveltekit` |  | Output style. |
 | `docs.output` | path |  | Output root for generated documentation. |
 | `codegen` | list of SDK targets | `[]` | SDK generation targets built from the published spec. |
-| `release` | section |  | SDK release: the version every target carries and how each is published (`release-publish`, `release-workflow`). Replaces a standalone `release.json`. |
+| `release` | section |  | SDK release: the version every target carries and how each is published (`release publish`, `release workflow`). Replaces a standalone `release.json`. |
 | `tests` | section |  | Contract-test targets: Arazzo documents run against `base_url`, or offline from `cassette`. |
 | `tests.arazzo` | list of strings | `[]` | Arazzo documents to compile and run. |
 | `tests.base_url` | URL |  | Base URL for this project's suites. `SUSPECT_BASE_URL` overrides it; it overrides `test.base_url` in `.suspect.yaml`. |
@@ -206,9 +206,9 @@ Each entry of the manifest's `codegen` list.
 | `import_name` | string |  | Explicit import/module/namespace identity where the profile needs one. |
 | `check` | boolean | `false` | When true, only ownership/drift is checked; nothing is written. |
 | `compatibility_profiles` | list of strings |  | Interpretation profiles applied to the source (`--compatibility-profile`). |
-| `credential_env` | section |  | Credential environment variable mapping (`codegen --defaults` schema). |
-| `sdk_defaults` | section |  | SDK defaults: pagination, OAuth lifecycle (`codegen --defaults` schema). |
-| `options` | section |  | Generation options in the `codegen --defaults` schema (`compatibility_profiles`, `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both. |
+| `credential_env` | section |  | Credential environment variable mapping (`gen sdk --defaults` schema). |
+| `sdk_defaults` | section |  | SDK defaults: pagination, OAuth lifecycle (`gen sdk --defaults` schema). |
+| `options` | section |  | Generation options in the `gen sdk --defaults` schema (`compatibility_profiles`, `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both. |
 
 ### `release` fields
 

@@ -94,7 +94,7 @@ test('every getter has a type: objects and lists are not read as strings', () =>
 	assert.match(ts, /export function codegenOperationIds\(scope\?: SettingScope\): readonly string\[\] \| null \{/);
 });
 
-test('compatibility profiles offer every name suspect codegen accepts', () => {
+test('compatibility profiles offer every name suspect gen sdk accepts', () => {
 	const { SDK_COMPATIBILITY_PROFILES } = require('../dist/generation.js');
 	const row = schema.properties.codegen.properties.compatibility_profiles;
 	assert.deepEqual(row.items.enum, [...SDK_COMPATIBILITY_PROFILES]);

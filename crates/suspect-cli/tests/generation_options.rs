@@ -1,4 +1,4 @@
-//! Generation options reach every surface: `suspect codegen --defaults`,
+//! Generation options reach every surface: `suspect gen sdk --defaults`,
 //! the project manifest's codegen targets, and the parse's diagnostics for
 //! unknown keys and typo'd styles.
 
@@ -62,7 +62,8 @@ fn codegen_defaults_file_reaches_the_generated_artifacts() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--profile",
             "python-http",
@@ -104,7 +105,8 @@ fn codegen_defaults_file_reaches_the_generated_artifacts() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--profile",
             "python-http",
@@ -287,7 +289,8 @@ fn suspect_yaml_codegen_defaults_fill_omitted_flags() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--package-name",
             "defaults-test",
@@ -320,7 +323,7 @@ fn suspect_yaml_supplies_package_name_operation_ids_and_import_names() {
          import_names:\n    python-http: settings_sdk\n",
     )
     .expect("settings");
-    let output = run(root, &["codegen", "api.yaml"]);
+    let output = run(root, &["gen", "sdk", "api.yaml"]);
     assert!(
         output.status.success(),
         "the settings must supply every required value: {}",
@@ -349,7 +352,8 @@ fn suspect_yaml_supplies_package_name_operation_ids_and_import_names() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--package-name",
             "flag-sdk",
@@ -398,7 +402,8 @@ fn a_yaml_defaults_file_reaches_the_generated_artifacts() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--profile",
             "python-http",
@@ -426,7 +431,8 @@ fn a_yaml_defaults_file_reaches_the_generated_artifacts() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--profile",
             "python-http",

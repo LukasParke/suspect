@@ -1,4 +1,4 @@
-//! `suspect fuzz` — schema-driven mutant fuzzing of an OpenAPI document's
+//! `suspect test fuzz` — schema-driven mutant fuzzing of an OpenAPI document's
 //! operations against a live server.
 //!
 //! Every operation's query/path parameters and JSON request-body schema are
@@ -71,7 +71,7 @@ enum Verdict {
     Crash(String),
 }
 
-/// Runs `suspect fuzz` against one OpenAPI document.
+/// Runs `suspect test fuzz` against one OpenAPI document.
 ///
 /// # Errors
 /// Propagates workspace/IR compilation failures and transport setup errors;

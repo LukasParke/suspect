@@ -59,7 +59,7 @@ pub fn manifest() -> Value {
     root
 }
 
-/// The `codegen --defaults` keys, which a manifest target may also nest
+/// The `gen sdk --defaults` keys, which a manifest target may also nest
 /// under `options`.
 const GENERATION_OPTIONS: [&str; 3] = ["compatibility_profiles", "credential_env", "sdk_defaults"];
 

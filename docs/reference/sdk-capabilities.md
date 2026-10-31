@@ -4,9 +4,9 @@ Matrix version: **`suspect-sdk-capabilities-v5`**, 2026-09-10.
 
 SDK generation uses one pipeline: source-addressed `Contract` → typed native
 plans → models, checked codecs, HTTP clients, packages and documentation →
-ownership-aware artifacts. `codegen`, `codegen-session`, editor generation and
-`codegen-compare` use the same twelve-backend registry. All twelve language
-features are now enabled by default; `codegen-profiles --format json` reports the
+ownership-aware artifacts. `gen sdk`, `gen session`, editor generation and
+`diff sdk` use the same twelve-backend registry. All twelve language
+features are now enabled by default; `gen profiles --format json` reports the
 exact profiles compiled into the selected binary.
 
 All profiles are **experimental and bounded**. Each has native base-profile
@@ -21,7 +21,7 @@ qualification are still required for the full plan.
 
 ## Native profiles
 
-| Language | `codegen --profile` | Package/docs | Verified native scope |
+| Language | `gen sdk --profile` | Package/docs | Verified native scope |
 | --- | --- | --- | --- |
 | Python | `python-http` | Wheel-source package, `py.typed`, docstrings and Sphinx | Installed M2/five-operation sync/async consumers, strict package/consumer mypy, examples and docs; 12 runtime-review regressions on Python 3.11/3.14 |
 | Go | `go-http` | Standard-library module, Go doc and Sphinx | Independent M2/five-operation consumers, native type controls, examples and docs; nine runtime-review groups on Go 1.23.12/1.27.1 |
@@ -77,7 +77,7 @@ use is supported.
 ```sh
 suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile typescript-http --package-name @example/widgets \
-  --package-version 0.1.0 --out generated
+  --package-version 0.1.0 --output generated
 ```
 
 Package name/version are required configuration. Repeat `--operation-id NAME`
@@ -90,8 +90,8 @@ Ruby/C#/PHP/C++ namespaces. TypeScript, Rust and Dart derive their import identi
 from the package name; the canonical Go target uses package `sdk` within its
 configured module. Those four targets reject an inapplicable import override.
 
-Use [`codegen-session`](../guide/sdk-incremental-generation.md) for a multi-target JSON
-configuration, watch and previews, and [`codegen-compare`](../guide/sdk-compatibility-reports.md)
+Use [`gen session`](../guide/sdk-incremental-generation.md) for a multi-target JSON
+configuration, watch and previews, and [`diff sdk`](../guide/sdk-compatibility-reports.md)
 for snapshot comparison. `suspect gen` renders the `docs-md` preset or custom
 manifests using the platform `IrSpec`; SDK packages and native docs consume
 `Contract` through the native backends.

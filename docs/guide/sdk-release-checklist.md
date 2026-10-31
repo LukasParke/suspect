@@ -37,7 +37,7 @@ release.
 
 - **Available through the session JSON `sdk_defaults` field and the library
   `GenerationOptions.sdk_defaults` — not through `suspect gen sdk` flags.**
-  The single-target `codegen` command forwards only compatibility profiles
+  The single-target `gen sdk` command forwards only compatibility profiles
   today (`crates/suspect-cli/src/commands/codegen_cmd.rs`); a package with
   pagination helpers, the automatic `<ENV_PREFIX>_API_KEY` convention, or
   OAuth lifecycle code must be generated via a session JSON (or the library

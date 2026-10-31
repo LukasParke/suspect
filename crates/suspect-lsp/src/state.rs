@@ -50,7 +50,7 @@ pub enum DocKind {
     Arazzo,
     /// Overlay 1.x.
     Overlay,
-    /// A `suspect load` profile.
+    /// A `suspect test load` profile.
     Load,
     /// `.suspect.yaml` or `suspect.project.json`.
     Config,

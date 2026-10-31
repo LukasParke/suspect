@@ -1,23 +1,9 @@
 //! Breaking changes between two Arazzo documents (`suspect diff breaking`
-//! on Arazzo input; formerly `suspect arazzo-diff`).
+//! on Arazzo input).
 
 use std::path::PathBuf;
 
 use suspect_overlay::Value as Ov;
-
-/// One Arazzo breaking-change review.
-#[derive(Debug, clap::Args)]
-pub struct ArazzoDiffArgs {
-    /// The previous Arazzo revision.
-    #[arg(required = true)]
-    pub old: PathBuf,
-    /// The current Arazzo revision.
-    #[arg(required = true)]
-    pub new: PathBuf,
-    /// Output format for the report.
-    #[command(flatten)]
-    pub findings: crate::Findings,
-}
 
 /// One detected break.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -227,14 +213,6 @@ fn criteria_equal(old: Option<&serde_json::Value>, new: Option<&serde_json::Valu
         (Some(old), Some(new)) => old == new,
         _ => false,
     }
-}
-
-/// Runs the review and prints the report; exits non-zero on breaks.
-///
-/// # Errors
-/// Propagates serialization failures.
-pub fn arazzo_diff(args: &ArazzoDiffArgs) -> anyhow::Result<i32> {
-    arazzo_diff_between(&args.old, &args.new, args.findings.format)
 }
 
 /// Compares two Arazzo revisions and renders the report; exits non-zero on

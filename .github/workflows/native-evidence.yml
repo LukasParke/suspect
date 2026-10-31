@@ -6,7 +6,7 @@ name: native-evidence
 # native toolchain, so "is backend X actually verified right now?" is
 # otherwise unknowable. This job answers it on a schedule without blocking
 # a pull request: it installs each toolchain, runs that backend's suites,
-# and publishes the declared coverage matrix (`suspect evidence`) beside
+# and publishes the declared coverage matrix (`suspect dev evidence`) beside
 # the run results as an artifact.
 #
 # It is deliberately non-blocking for PRs. The blocking correctness gate is
@@ -144,13 +144,13 @@ jobs:
 
       - name: Publish the declared coverage matrix
         run: |
-          ./target/release/suspect evidence --format json > evidence.json
+          ./target/release/suspect dev evidence --format json > evidence.json
           {
             echo "# SDK evidence ${{ matrix.name }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
             echo
             cat toolchain.txt
             echo
-            ./target/release/suspect evidence
+            ./target/release/suspect dev evidence
           } > evidence.md
 
       - name: Upload evidence

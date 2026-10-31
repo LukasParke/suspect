@@ -189,7 +189,7 @@ operation is emitted as its own functions, input types and codec bindings in
 unreferenced package-level symbols at link time.
 
 Gate: verified with real `go build` runs in this session (go1.27.1
-darwin/arm64, generated with the `suspect codegen --profile go-http` CLI on a
+darwin/arm64, generated with the `suspect gen sdk --profile go-http` CLI on a
 two-operation fixture: `listWidgets`, `getGadget`; extended variant adds
 `listGizmos`):
 
@@ -206,7 +206,7 @@ two-operation fixture: `listWidgets`, `getGadget`; extended variant adds
   source-path and build metadata.
 
 Not yet gated: `go build` consumer gates against an `sdk_defaults`-enabled
-fixture (pagination walkers and OAuth lifecycle modules — the CLI `codegen`
+fixture (pagination walkers and OAuth lifecycle modules — the CLI `gen sdk`
 command has no `sdk_defaults` input, so this session's Go fixture exercised
 the plain protocol surface); go build gates in CI.
 

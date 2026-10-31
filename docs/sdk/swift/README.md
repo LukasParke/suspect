@@ -22,7 +22,7 @@ and these five operations in the actual `openrouter-web` checkout:
 ```sh
 suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile swift-http --package-name GeneratedSDK --package-version 0.1.0 \
-  --out generated-swift
+  --output generated-swift
 ```
 
 The CLI/session backend roots the package at `generated-swift/swift/`. Add

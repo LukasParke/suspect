@@ -1,5 +1,5 @@
-//! CLI contract tests: the upgrade, arazzo-diff, and overlay-dry-run
-//! commands behave as documented.
+//! CLI contract tests: `upgrade`, `diff breaking` on Arazzo, `overlay
+//! explain --check` and the other commands behave as documented.
 
 use std::path::Path;
 
@@ -72,7 +72,7 @@ definitions:
             input.to_str().unwrap(),
             "--output",
             json_out.to_str().unwrap(),
-            "--format",
+            "--to",
             "json",
         ])
         .output()
@@ -147,7 +147,12 @@ fn arazzo_diff_reports_every_breaking_class() {
     let old = write(dir.path(), "old.arazzo.yaml", SUITE_OLD);
     let new = write(dir.path(), "new.arazzo.yaml", SUITE_NEW_BREAKING);
     let output = std::process::Command::new(binary())
-        .args(["arazzo-diff", old.to_str().unwrap(), new.to_str().unwrap()])
+        .args([
+            "diff",
+            "breaking",
+            old.to_str().unwrap(),
+            new.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success(), "breaking revisions must fail");
@@ -184,7 +189,12 @@ fn arazzo_diff_is_quiet_when_compatible() {
     let old = write(dir.path(), "old.arazzo.yaml", SUITE_OLD);
     let new = write(dir.path(), "new.arazzo.yaml", SUITE_OLD);
     let output = std::process::Command::new(binary())
-        .args(["arazzo-diff", old.to_str().unwrap(), new.to_str().unwrap()])
+        .args([
+            "diff",
+            "breaking",
+            old.to_str().unwrap(),
+            new.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -203,7 +213,8 @@ fn arazzo_diff_json_and_sarif_carry_the_rendered_findings() {
     let run = |format: &str| {
         let output = std::process::Command::new(binary())
             .args([
-                "arazzo-diff",
+                "diff",
+                "breaking",
                 old.to_str().unwrap(),
                 new.to_str().unwrap(),
                 "--format",
@@ -227,10 +238,10 @@ fn arazzo_diff_json_and_sarif_carry_the_rendered_findings() {
     );
 }
 
-// ------------------------------------------------------------ overlay dry-run
+// ------------------------------------------------------- overlay explain --check
 
 #[test]
-fn overlay_dry_run_reports_matches_without_applying() {
+fn overlay_explain_check_reports_matches_without_applying() {
     let dir = tempfile::tempdir().unwrap();
     let target = write(
         dir.path(),
@@ -263,22 +274,19 @@ actions:
     let dry_run = |overlay: &Path| {
         std::process::Command::new(binary())
             .args([
-                "overlay-dry-run",
+                "overlay",
+                "explain",
+                "--check",
                 overlay.to_str().unwrap(),
                 target.to_str().unwrap(),
             ])
             .output()
             .unwrap()
     };
-    // The old name runs `overlay explain --check`: one action has a
-    // zero-match target, so the exit code flags it.
+    // One action has a zero-match target, so the exit code flags it.
     let output = dry_run(&overlay);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("use `suspect overlay explain --check`"),
-        "{stderr}"
-    );
     assert!(stderr.contains("matched nothing"), "{stderr}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("1 match(es)"), "{stdout}");
@@ -287,11 +295,10 @@ actions:
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
         original,
-        "overlay-dry-run must not modify the target"
+        "overlay explain must not modify the target"
     );
 
-    // A bare-dot target the old dry run normalized is rejected, as
-    // `overlay apply` rejects it, and the note names it.
+    // A bare-dot target is rejected, as `overlay apply` rejects it.
     let bare = write(
         dir.path(),
         "bare.yaml",
@@ -299,13 +306,6 @@ actions:
     );
     let output = dry_run(&bare);
     assert_eq!(output.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains(
-            "note: target \"$.paths./pets.get\" is not RFC 9535; overlay apply rejects it"
-        ),
-        "{stderr}"
-    );
 }
 
 // ---------------------------------------------------------- project build
@@ -412,7 +412,8 @@ paths:
 
     let output = std::process::Command::new(binary())
         .args([
-            "release-plan",
+            "release",
+            "plan",
             "--format",
             "json",
             root.join("old.yaml").to_str().unwrap(),
@@ -493,6 +494,7 @@ components:
 
     let output = std::process::Command::new(binary())
         .args([
+            "diff",
             "impact",
             "--format",
             "json",
@@ -519,6 +521,7 @@ components:
     // The same traffic against identical revisions is unaffected.
     let same = std::process::Command::new(binary())
         .args([
+            "diff",
             "impact",
             root.join("old.yaml").to_str().unwrap(),
             root.join("old.yaml").to_str().unwrap(),
@@ -660,7 +663,7 @@ fn config_supplies_defaults_and_explicit_flags_win() {
 
     // Docs picks up the configured style and output with no flags.
     let docs = std::process::Command::new(binary())
-        .args(["docs", "api.yaml"])
+        .args(["gen", "docs", "api.yaml"])
         .current_dir(root)
         .output()
         .unwrap();
@@ -677,7 +680,7 @@ fn config_supplies_defaults_and_explicit_flags_win() {
     // An explicit flag overrides the configured output.
     let explicit = dir.path().join("elsewhere");
     let docs = std::process::Command::new(binary())
-        .args(["docs", "api.yaml", "--style", "html", "--output"])
+        .args(["gen", "docs", "api.yaml", "--style", "html", "--output"])
         .arg(&explicit)
         .current_dir(root)
         .output()
@@ -800,7 +803,7 @@ components:
     .unwrap();
 
     let output = std::process::Command::new(binary())
-        .args(["contract", "openapi.yaml", "--out", "pkg"])
+        .args(["gen", "contract", "openapi.yaml", "--output", "pkg"])
         .current_dir(root)
         .output()
         .unwrap();
@@ -839,7 +842,14 @@ components:
 
     // Fresh: --check passes.
     let check = std::process::Command::new(binary())
-        .args(["contract", "openapi.yaml", "--out", "pkg", "--check"])
+        .args([
+            "gen",
+            "contract",
+            "openapi.yaml",
+            "--output",
+            "pkg",
+            "--check",
+        ])
         .current_dir(root)
         .output()
         .unwrap();
@@ -856,7 +866,14 @@ components:
     )
     .unwrap();
     let stale = std::process::Command::new(binary())
-        .args(["contract", "openapi.yaml", "--out", "pkg", "--check"])
+        .args([
+            "gen",
+            "contract",
+            "openapi.yaml",
+            "--output",
+            "pkg",
+            "--check",
+        ])
         .current_dir(root)
         .output()
         .unwrap();

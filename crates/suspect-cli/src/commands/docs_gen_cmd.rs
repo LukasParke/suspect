@@ -1,4 +1,4 @@
-//! `suspect docs` — API reference generation in three styles.
+//! `suspect gen docs` — API reference generation in three styles.
 
 use std::path::PathBuf;
 

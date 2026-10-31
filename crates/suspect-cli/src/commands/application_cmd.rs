@@ -42,12 +42,12 @@ pub enum Target {
 }
 
 impl Target {
-    /// Subcommand name, also the diagnostic-code and report discriminator.
+    /// Command path, also the report discriminator.
     #[must_use]
     pub const fn command(self) -> &'static str {
         match self {
-            Self::Cli => "codegen-cli",
-            Self::Mcp => "codegen-mcp",
+            Self::Cli => "gen cli",
+            Self::Mcp => "gen mcp",
         }
     }
 
@@ -136,8 +136,8 @@ pub struct ApplicationArgs {
     #[arg(long)]
     pub target_config: PathBuf,
     /// Output root owning the application and its embedded generated SDK
-    /// [default: cli-out for codegen-cli, mcp-out for codegen-mcp].
-    #[arg(short = 'o', long = "output", alias = "out", value_name = "DIR")]
+    /// [default: cli-out for gen cli, mcp-out for gen mcp].
+    #[arg(short = 'o', long = "output", value_name = "DIR")]
     pub out: Option<PathBuf>,
     /// Read-only ownership/drift check.
     #[arg(long)]

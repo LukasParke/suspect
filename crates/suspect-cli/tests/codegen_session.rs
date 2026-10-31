@@ -18,13 +18,14 @@ fn command(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_suspect"));
     command
         .args([
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "session.json",
-            "--out",
+            "--output",
             "output",
             "--format",
-            "json",
+            "ndjson",
         ])
         .current_dir(root);
     command
@@ -51,13 +52,14 @@ fn a_yaml_configuration_generates_what_the_json_one_does() {
     // Same targets and owner: the YAML session finds nothing to change.
     let output = Command::new(env!("CARGO_BIN_EXE_suspect"))
         .args([
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "session.yaml",
-            "--out",
+            "--output",
             "output",
             "--format",
-            "json",
+            "ndjson",
             "--check",
         ])
         .current_dir(root.path())

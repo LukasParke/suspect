@@ -27,7 +27,6 @@ pub struct SessionArgs {
     #[arg(
         short = 'o',
         long = "output",
-        alias = "out",
         value_name = "DIR",
         default_value = "sdk-out"
     )]

@@ -1,5 +1,5 @@
 //! `codegen.compatibility_profiles` in the setting table accepts exactly the
-//! profiles `suspect codegen --compatibility-profile` does. suspect-config
+//! profiles `suspect gen sdk --compatibility-profile` does. suspect-config
 //! does not depend on suspect-codegen, so the list is checked here.
 
 use suspect_codegen::http_protocol::CompatibilityProfile;

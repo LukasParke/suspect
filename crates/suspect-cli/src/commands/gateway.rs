@@ -1,4 +1,4 @@
-//! `suspect gateway` — run the local mock/proxy/validate/record/replay
+//! `suspect traffic gateway` — run the local mock/proxy/validate/record/replay
 //! server against a spec.
 
 use std::path::{Path, PathBuf};
@@ -48,7 +48,7 @@ fn require_upstream(upstream: Option<&str>) -> anyhow::Result<String> {
         .ok_or_else(|| anyhow::anyhow!("--upstream http://host[:port] is required for this mode"))
 }
 
-/// Runs `suspect gateway` until interrupted.
+/// Runs `suspect traffic gateway` until interrupted.
 ///
 /// # Errors
 /// Propagates bind/spec-loading failures from the gateway.

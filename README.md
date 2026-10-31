@@ -119,9 +119,7 @@ suspect dev           bench | evidence
 ```
 
 Every command and flag is in the generated
-[command reference](docs/reference/cli.md). The old flat names (`breaking`,
-`codegen`, `gateway`, ...) still work with a deprecation warning; the
-reference ends with the rename table. Exit codes are shared: `0` clean, `1`
+[command reference](docs/reference/cli.md). Exit codes are shared: `0` clean, `1`
 findings or failed checks, `2` usage or environment error, `130`
 interrupted.
 

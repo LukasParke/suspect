@@ -129,7 +129,7 @@ Arguments:
 
 Options:
   -o, --output <FILE>  Write the document here instead of stdout
-      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+      --to <TO>        Serialization (default: the `--output` extension, else the input's) [possible values: json, yaml]
   -h, --help           Print help (see more with '--help')
 ```
 
@@ -146,7 +146,7 @@ Arguments:
 Options:
       --strategy <STRATEGY>  Bundling strategy [default: keep] [possible values: keep, inline]
   -o, --output <FILE>        Write the document here instead of stdout
-      --to <TO>              Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+      --to <TO>              Serialization (default: the `--output` extension, else the input's) [possible values: json, yaml]
   -h, --help                 Print help (see more with '--help')
 ```
 
@@ -162,7 +162,7 @@ Arguments:
 
 Options:
   -o, --output <FILE>  Write the document here instead of stdout
-      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+      --to <TO>        Serialization (default: the `--output` extension, else the input's) [possible values: json, yaml]
   -h, --help           Print help (see more with '--help')
 ```
 
@@ -211,7 +211,7 @@ Arguments:
 
 Options:
   -o, --output <FILE>  Write the document here instead of stdout
-      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+      --to <TO>        Serialization (default: the `--output` extension, else the input's) [possible values: json, yaml]
   -h, --help           Print help (see more with '--help')
 ```
 
@@ -245,7 +245,7 @@ Arguments:
 
 Options:
   -o, --output <FILE>  Write the document here instead of stdout
-      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+      --to <TO>        Serialization (default: the `--output` extension, else the input's) [possible values: json, yaml]
   -h, --help           Print help (see more with '--help')
 ```
 
@@ -325,11 +325,11 @@ Options:
 ```text
 Compare wire contracts and native SDK interfaces with migration notes
 
-Usage: suspect diff sdk [OPTIONS] [OLD] [NEW]
+Usage: suspect diff sdk [OPTIONS] <OLD> <NEW>
 
 Arguments:
-  [OLD]  Baseline SDK session configuration; its source is relative to this file
-  [NEW]  Candidate SDK session configuration; its source is relative to this file
+  <OLD>  Baseline SDK session configuration; its source is relative to this file
+  <NEW>  Candidate SDK session configuration; its source is relative to this file
 
 Options:
       --format <FORMAT>  Versioned report JSON or human-readable Markdown migration notes [default: text] [possible values: text, json]
@@ -426,7 +426,7 @@ Options:
       --compatibility-profile <COMPATIBILITY_PROFILE>
           Explicit versioned source interpretation (repeatable); ordinary OpenAPI semantics remain the default, independently of native feature support. Defaults to `.suspect.yaml`'s `codegen.compatibility_profiles` when omitted [possible values: legacy-binary-string-v1, oas30-nullable-in-3.1-v1, colon-path-parameters-v1, schemaless-stream-events-v1, all-of-scoped-mode-v1]
       --defaults <FILE>
-          Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding `compatibility_profiles`, `credential_env` and `sdk_defaults` (the same schema `codegen-session` accepts). Flag-declared compatibility profiles are added on top
+          Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding `compatibility_profiles`, `credential_env` and `sdk_defaults` (the same schema `gen session` accepts). Flag-declared compatibility profiles are added on top
   -o, --output <DIR>
           Output root for generated artifacts. Defaults to `.suspect.yaml`'s `codegen.out`, then `codegen-out`
       --check
@@ -524,7 +524,7 @@ Options:
       --target-config <TARGET_CONFIG>
           Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
   -o, --output <DIR>
-          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
+          Output root owning the application and its embedded generated SDK [default: cli-out for gen cli, mcp-out for gen mcp]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -555,7 +555,7 @@ Options:
       --target-config <TARGET_CONFIG>
           Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
   -o, --output <DIR>
-          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
+          Output root owning the application and its embedded generated SDK [default: cli-out for gen cli, mcp-out for gen mcp]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -579,7 +579,7 @@ Options:
       --manifest <MANIFEST>  Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json` (templates resolved relative to it)
   -o, --output <DIR>         Output root directory [default: gen-out]
       --check                Exit 1 when the result is not clean
-      --diff                 Also print unified diffs of drifted files; implies `--check`
+      --diff                 With `--check`: also print unified diffs of drifted files
       --owner <OWNER>        Stable logical owner when sharing an output root across generation streams
       --adopt-identical      Explicitly adopt only byte-identical unowned output
   -h, --help                 Print help
@@ -686,7 +686,7 @@ Options:
       --credentials <FILE>    Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `test.credentials` and `SUSPECT_CREDENTIALS` override it
       --journal <FILE>        Write the journal to this file (append) instead of stdout
       --inputs-file <FILE>    JSON or YAML object file of workflow inputs, applied before `--input` pairs (which override it)
-      --report-file <FILE>    Write the JSON run report here. `--json` is the old `load` spelling
+      --report-file <FILE>    Write the JSON run report here
       --junit <FILE>          Write a JUnit XML report here
   -h, --help                  Print help (see more with '--help')
 ```
@@ -705,7 +705,7 @@ Options:
       --base-url <BASE_URL>  Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
       --filter <FILTER>      Run only sequences whose target operationId contains this
       --emit                 Print the generated sequences as JSON instead of running them
-      --report-file <FILE>   Write the JSON run report here. `--json` is the old `load` spelling
+      --report-file <FILE>   Write the JSON run report here
       --junit <FILE>         Write a JUnit XML report here
   -h, --help                 Print help
 ```
@@ -728,7 +728,7 @@ Options:
       --evolved                Grammar-evolved, coverage-guided fuzzing: novel response shapes become seeds the campaign exploits
       --rounds <ROUNDS>        Evolved fuzzing: rounds per operation [default: 8]
       --per-round <PER_ROUND>  Evolved fuzzing: requests per round [default: 12]
-      --report-file <FILE>     Write the JSON run report here. `--json` is the old `load` spelling
+      --report-file <FILE>     Write the JSON run report here
       --junit <FILE>           Write a JUnit XML report here
   -h, --help                   Print help
 ```
@@ -765,7 +765,7 @@ Options:
       --timeout <DURATION>          Per-request timeout; overrides the profile
       --http1                       Disable HTTP/2 negotiation
       --insecure                    Accept invalid TLS certificates
-      --report-file <FILE>          Write the JSON run report here. `--json` is the old `load` spelling
+      --report-file <FILE>          Write the JSON run report here
       --junit <FILE>                Write a JUnit XML report here
       --dry-run                     Resolve and print the plan (phases, scenarios, prerequisites) without sending anything
   -h, --help                        Print help (see more with '--help')
@@ -785,7 +785,7 @@ Options:
       --upstream <UPSTREAM>  Upstream base URL the recorded traffic is re-issued against
       --diff                 Print unified diffs of drifted UTF-8 response bodies
       --journal <FILE>       Write the journal to this file (append) instead of stdout
-      --report-file <FILE>   Write the JSON run report here. `--json` is the old `load` spelling
+      --report-file <FILE>   Write the JSON run report here
       --junit <FILE>         Write a JUnit XML report here
   -h, --help                 Print help
 ```
@@ -847,7 +847,7 @@ Arguments:
 
 Options:
       --ignore-param <NAME>  Query parameter names to ignore in gap analysis (repeatable); the CI-passed auth token lives here, for instance
-      --check                Exit with status 1 when the traffic addresses undeclared endpoints or parameters (old spelling: `--exit-on-gap`)
+      --check                Exit with status 1 when the traffic addresses undeclared endpoints or parameters
       --format <FORMAT>      Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help                 Print help (see more with '--help')
 ```
@@ -1012,11 +1012,11 @@ Options:
 ```text
 Trace a validation failure to its origin: source location, git blame, and whether recorded traffic ever passed it
 
-Usage: suspect why [OPTIONS] <SPEC> [CONSTRAINT]
+Usage: suspect why [OPTIONS] <SPEC> <CONSTRAINT>
 
 Arguments:
-  <SPEC>        Spec file the failure refers to (with the old `--spec` flag, this positional is the constraint)
-  [CONSTRAINT]  The constraint that fired (e.g. `type` or the diagnostic text)
+  <SPEC>        Spec file the failure refers to
+  <CONSTRAINT>  The constraint that fired (e.g. `type` or the diagnostic text)
 
 Options:
       --offset <OFFSET>      Byte offset of the failing constraint in the spec, when known
@@ -1322,43 +1322,3 @@ Options:
 | `suspect dev bench` | `0`, `2` | 2: the fixture cannot be loaded |
 | `suspect dev evidence` | `0`, `1`, `2` | 1: a declared feature has no evidence |
 
-## Renamed commands
-
-The old names still run the new command and print one deprecation line on stderr; stdout and the exit status are unchanged. They are removed in 0.3.0. Under `diff`, `test` and `gen`, a first argument named like a subcommand (`suspect diff breaking other.yaml`) runs that subcommand; write `./breaking` for a file.
-
-| Old | New | Note |
-|---|---|---|
-| `suspect breaking` | `suspect diff breaking` |  |
-| `suspect arazzo-diff` | `suspect diff breaking` | the family of NEW picks the differ |
-| `suspect impact` | `suspect diff impact` |  |
-| `suspect codegen-compare` | `suspect diff sdk` | `--before`/`--after` are positionals `OLD NEW` |
-| `suspect reverse` | `suspect diff routes` | positionals are `SPEC SOURCE` |
-| `suspect overlay-dry-run` | `suspect overlay explain --check` | targets `overlay apply` rejects are rejected |
-| `suspect docs` | `suspect gen docs` |  |
-| `suspect docs-gen` | `suspect gen docs` |  |
-| `suspect codegen` | `suspect gen sdk` |  |
-| `suspect stubs` | `suspect gen stubs` |  |
-| `suspect contract` | `suspect gen contract` |  |
-| `suspect codegen-terraform` | `suspect gen terraform` |  |
-| `suspect codegen-cli` | `suspect gen cli` |  |
-| `suspect codegen-mcp` | `suspect gen mcp` |  |
-| `suspect codegen-session` | `suspect gen session` |  |
-| `suspect bridge` | `suspect gen bridge` |  |
-| `suspect codegen-profiles` | `suspect gen profiles` |  |
-| `suspect admission` | `suspect gen admission` |  |
-| `suspect stateful` | `suspect test stateful` |  |
-| `suspect fuzz` | `suspect test fuzz` |  |
-| `suspect load` | `suspect test load` |  |
-| `suspect replay` | `suspect test replay` |  |
-| `suspect gateway` | `suspect traffic gateway` |  |
-| `suspect drift` | `suspect traffic drift` |  |
-| `suspect har` | `suspect traffic har` |  |
-| `suspect release-plan` | `suspect release plan` |  |
-| `suspect release-publish` | `suspect release publish` |  |
-| `suspect release-workflow` | `suspect release workflow` |  |
-| `suspect bench` | `suspect dev bench` |  |
-| `suspect evidence` | `suspect dev evidence` |  |
-| `suspect diff <args>` | `suspect diff structural <args>` | |
-| `suspect test <args>` | `suspect test run <args>` | |
-| `suspect gen <args>` | `suspect gen template <args>` | |
-| `suspect why CONSTRAINT --spec SPEC` | `suspect why SPEC CONSTRAINT` | |

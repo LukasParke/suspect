@@ -11,7 +11,7 @@ those descriptors and the shared `ExamplePlan`.
 ```sh
 suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile go-http --package-name example.com/example-sdk --package-version 0.1.0 \
-  --out generated-go
+  --output generated-go
 ```
 
 The CLI package name supplies the Go module path; the native package is `sdk`

@@ -1,4 +1,4 @@
-//! `suspect drift` unit tests: template matching, exchange parsing, and
+//! `suspect traffic drift` unit tests: template matching, exchange parsing, and
 //! the report computation over a small hand-built spec.
 
 use suspect_cli::commands::drift::{Exchange, drift_report, exchange_from_line, from_method_url};
@@ -180,7 +180,7 @@ fn untested_operations_are_coverage_not_gaps() {
 
 const CLI_SPEC: &str = "openapi: 3.1.0\ninfo: {title: Drift, version: '1'}\npaths:\n  /pets:\n    get:\n      parameters:\n        - {name: limit, in: query, schema: {type: integer}}\n      responses:\n        '200': {description: ok}\n";
 
-/// Runs `suspect drift` over a spec and a one-line-per-record traffic file.
+/// Runs `suspect traffic drift` over a spec and a one-line-per-record traffic file.
 fn run_drift(traffic: &str, extra: &[&str]) -> std::process::Output {
     let dir = tempfile::tempdir().unwrap();
     let spec = dir.path().join("openapi.yaml");
@@ -188,7 +188,7 @@ fn run_drift(traffic: &str, extra: &[&str]) -> std::process::Output {
     std::fs::write(&spec, CLI_SPEC).unwrap();
     std::fs::write(&cassette, traffic).unwrap();
     std::process::Command::new(env!("CARGO_BIN_EXE_suspect"))
-        .arg("drift")
+        .args(["traffic", "drift"])
         .arg(&spec)
         .arg(&cassette)
         .args(extra)
@@ -199,12 +199,12 @@ fn run_drift(traffic: &str, extra: &[&str]) -> std::process::Output {
 const GAPPY_TRAFFIC: &str = "{\"id\":\"1\",\"method\":\"GET\",\"url\":\"http://x/pets?limit=1&debug=1\",\"status\":200}\n{\"id\":\"2\",\"method\":\"DELETE\",\"url\":\"http://x/pets\",\"status\":204}\n";
 
 #[test]
-fn exit_on_gap_reports_findings_as_exit_1() {
-    let output = run_drift(GAPPY_TRAFFIC, &["--exit-on-gap"]);
+fn check_reports_gaps_as_exit_1() {
+    let output = run_drift(GAPPY_TRAFFIC, &["--check"]);
     assert_eq!(output.status.code(), Some(1));
     let clean = run_drift(
         "{\"id\":\"1\",\"method\":\"GET\",\"url\":\"http://x/pets?limit=1\",\"status\":200}\n",
-        &["--exit-on-gap"],
+        &["--check"],
     );
     assert_eq!(clean.status.code(), Some(0));
 }

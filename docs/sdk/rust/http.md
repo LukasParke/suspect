@@ -9,13 +9,13 @@ passes for this bounded profile; emission does not certify a complete SDK.
 ## Generate and consume
 
 ```sh
-cargo run --locked -p suspect-cli -- codegen \
+cargo run --locked -p suspect-cli -- gen sdk \
   ../openrouter-web/projects/docs/openapi/openapi.yaml \
   --profile rust-http \
   --operation-id getCredits --operation-id createKeys --operation-id updateKeys \
   --operation-id listContainerFiles --operation-id getContainerFile \
   --package-name openrouter-sdk --package-version 0.0.0 \
-  --out target/openrouter-rust-package
+  --output target/openrouter-rust-package
 ```
 
 Add `--check --format json` for read-only ownership/drift inspection. Missing,

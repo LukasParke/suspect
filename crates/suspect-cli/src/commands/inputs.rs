@@ -1,5 +1,5 @@
-//! Workflow input binding shared by `suspect test` and `suspect load`:
-//! `--input key=value` pairs and `--inputs file.json` (or `.yaml`) objects become the
+//! Workflow input binding shared by `suspect test run` and `suspect test load`:
+//! `--input key=value` pairs and `--inputs-file file.json` (or `.yaml`) objects become the
 //! caller-supplied [`InputMap`] that overrides Arazzo `parameters` values
 //! and schema defaults.
 

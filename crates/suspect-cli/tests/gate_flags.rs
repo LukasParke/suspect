@@ -1,4 +1,4 @@
-//! `--check` gates: `diff`, `reverse` and `overlay explain` keep exiting 0
+//! `--check` gates: `diff structural`, `diff routes` and `overlay explain` keep exiting 0
 //! by default and exit 1 under `--check` when the result is not clean.
 
 use std::path::{Path, PathBuf};
@@ -40,13 +40,20 @@ fn diff_check_exits_1_only_when_documents_differ() {
         "b.yaml",
         &SPEC.replace("version: '1'", "version: '2'"),
     );
-    assert_eq!(run(&["diff", s(&a), s(&b)]).status.code(), Some(0));
     assert_eq!(
-        run(&["diff", s(&a), s(&b), "--check"]).status.code(),
+        run(&["diff", "structural", s(&a), s(&b)]).status.code(),
+        Some(0)
+    );
+    assert_eq!(
+        run(&["diff", "structural", s(&a), s(&b), "--check"])
+            .status
+            .code(),
         Some(1)
     );
     assert_eq!(
-        run(&["diff", s(&a), s(&a), "--check"]).status.code(),
+        run(&["diff", "structural", s(&a), s(&a), "--check"])
+            .status
+            .code(),
         Some(0)
     );
 }
@@ -62,15 +69,26 @@ fn reverse_check_exits_1_on_undocumented_routes() {
         "app.ts",
         "app.get('/pets', listPets);\napp.post('/owners', createOwner);\n",
     );
-    assert_eq!(run(&["reverse", s(&src), s(&spec)]).status.code(), Some(0));
-    let gated = run(&["reverse", s(&src), s(&spec), "--check", "--format", "json"]);
+    assert_eq!(
+        run(&["diff", "routes", s(&spec), s(&src)]).status.code(),
+        Some(0)
+    );
+    let gated = run(&[
+        "diff",
+        "routes",
+        s(&spec),
+        s(&src),
+        "--check",
+        "--format",
+        "json",
+    ]);
     assert_eq!(gated.status.code(), Some(1));
     let report: serde_json::Value = serde_json::from_slice(&gated.stdout).unwrap();
     assert!(!report["undocumented"].as_array().unwrap().is_empty());
 
     write(&src, "app.ts", "app.get('/pets', listPets);\n");
     assert_eq!(
-        run(&["reverse", s(&src), s(&spec), "--check"])
+        run(&["diff", "routes", s(&spec), s(&src), "--check"])
             .status
             .code(),
         Some(0)
@@ -117,12 +135,13 @@ actions:
 }
 
 #[test]
-fn gen_check_writes_nothing_and_diff_still_works_alone() {
+fn gen_check_writes_nothing_and_diff_needs_check() {
     let dir = tempfile::tempdir().unwrap();
     let spec = write(dir.path(), "openapi.yaml", SPEC);
     let out = dir.path().join("out");
     let check = run(&[
         "gen",
+        "template",
         s(&spec),
         "--preset",
         "docs-md",
@@ -138,14 +157,27 @@ fn gen_check_writes_nothing_and_diff_still_works_alone() {
         "no diffs without --diff: {stdout}"
     );
 
-    // The old `--diff` spelling still gates and prints diffs.
+    // `--diff` adds unified diffs to `--check`; alone it is a usage error.
     let diff = run(&[
         "gen",
+        "template",
         s(&spec),
         "--preset",
         "docs-md",
-        "--out",
+        "--output",
         s(&out),
+        "--diff",
+    ]);
+    assert_eq!(diff.status.code(), Some(2));
+    let diff = run(&[
+        "gen",
+        "template",
+        s(&spec),
+        "--preset",
+        "docs-md",
+        "--output",
+        s(&out),
+        "--check",
         "--diff",
     ]);
     assert_eq!(diff.status.code(), Some(1));
@@ -153,14 +185,23 @@ fn gen_check_writes_nothing_and_diff_still_works_alone() {
     assert!(!out.exists());
 
     assert_eq!(
-        run(&["gen", s(&spec), "--preset", "docs-md", "-o", s(&out)])
-            .status
-            .code(),
+        run(&[
+            "gen",
+            "template",
+            s(&spec),
+            "--preset",
+            "docs-md",
+            "-o",
+            s(&out)
+        ])
+        .status
+        .code(),
         Some(0)
     );
     assert_eq!(
         run(&[
             "gen",
+            "template",
             s(&spec),
             "--preset",
             "docs-md",

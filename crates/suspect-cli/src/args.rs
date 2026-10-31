@@ -47,9 +47,7 @@ pub enum StreamFormat {
     /// Human-readable progress lines.
     #[default]
     Text,
-    /// One JSON object per line. `json` is accepted for the `bridge` and
-    /// `codegen-session` spelling.
-    #[value(alias = "json")]
+    /// One JSON object per line.
     Ndjson,
 }
 
@@ -86,11 +84,11 @@ pub struct Report {
     pub format: ReportFormat,
 }
 
-/// `--format text|ndjson`; `--report` is the old `test`/`load` spelling.
+/// `--format text|ndjson`.
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct Stream {
     /// Event stream format: human lines or one JSON object per line.
-    #[arg(long, value_enum, default_value_t, alias = "report")]
+    #[arg(long, value_enum, default_value_t)]
     pub format: StreamFormat,
 }
 
@@ -101,8 +99,8 @@ pub struct DocOut {
     #[arg(short = 'o', long = "output", value_name = "FILE")]
     pub output: Option<PathBuf>,
     /// Serialization (default: the `--output` extension, else the
-    /// input's). `--format` is the old `bundle`/`upgrade` spelling.
-    #[arg(long = "to", value_enum, alias = "format")]
+    /// input's).
+    #[arg(long = "to", value_enum)]
     pub to: Option<crate::DocFormat>,
 }
 
@@ -117,9 +115,8 @@ pub struct Check {
 /// Machine-readable report files for test commands.
 #[derive(Debug, Clone, Default, Args)]
 pub struct ReportFiles {
-    /// Write the JSON run report here. `--json` is the old `load`
-    /// spelling.
-    #[arg(long = "report-file", value_name = "FILE", alias = "json")]
+    /// Write the JSON run report here.
+    #[arg(long = "report-file", value_name = "FILE")]
     pub report_file: Option<PathBuf>,
     /// Write a JUnit XML report here.
     #[arg(long, value_name = "FILE")]

@@ -317,7 +317,7 @@ async fn prerequisites_run_once_and_feed_users() {
     );
 }
 
-/// `suspect load` shares the plan's dependency resolution: a scenario step
+/// `suspect test load` shares the plan's dependency resolution: a scenario step
 /// whose `dependsOn` names `$workflows.seed.steps.make` makes `seed` a
 /// once-per-run prerequisite, and every user's step then runs (before the
 /// fix it never became ready, so every user's iteration failed).

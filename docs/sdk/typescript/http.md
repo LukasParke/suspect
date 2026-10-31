@@ -6,16 +6,16 @@ profile. `typescript::package::emit_http(&plan, &PackageConfig)` wraps its
 artifacts in a private, installable ESM package with zero runtime dependencies.
 These are experimental capabilities; complete SDK release gates remain open.
 
-The canonical `codegen` CLI exposes this profile without a custom Rust integration:
+The canonical `gen sdk` command exposes this profile without a custom Rust integration:
 
 ```sh
-cargo run --locked -p suspect-cli -- codegen \
+cargo run --locked -p suspect-cli -- gen sdk \
   ../openrouter-web/projects/docs/openapi/openapi.yaml \
   --profile typescript-http \
   --operation-id getCredits --operation-id createKeys --operation-id updateKeys \
   --operation-id listContainerFiles --operation-id getContainerFile \
   --package-name @example/openrouter-sdk --package-version 0.0.0 \
-  --out sdk-out
+  --output sdk-out
 ```
 
 Add `--check --format json` for a read-only CI report. Missing, modified,

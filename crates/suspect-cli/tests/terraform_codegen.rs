@@ -40,13 +40,14 @@ fn yaml_mapping_and_target_config_generate_what_json_does() {
     let from_yaml = run(
         root,
         &[
-            "codegen-terraform",
+            "gen",
+            "terraform",
             "openapi.json",
             "--mapping",
             "mapping.yaml",
             "--target-config",
             "target.yml",
-            "--out",
+            "--output",
             "generated-yaml",
             "--format",
             "json",
@@ -67,13 +68,14 @@ fn yaml_mapping_and_target_config_generate_what_json_does() {
     let rejected = run(
         root,
         &[
-            "codegen-terraform",
+            "gen",
+            "terraform",
             "openapi.json",
             "--mapping",
             "mapping.yaml",
             "--target-config",
             "bad.yaml",
-            "--out",
+            "--output",
             "generated-bad",
             "--format",
             "json",
@@ -111,13 +113,14 @@ fn run(root: &Path, args: &[&str], expected: i32) -> Value {
 
 fn generate(root: &Path, extra: &[&str], expected: i32) -> Value {
     let mut args = vec![
-        "codegen-terraform",
+        "gen",
+        "terraform",
         "openapi.json",
         "--mapping",
         "mapping.json",
         "--target-config",
         "target.json",
-        "--out",
+        "--output",
         "generated",
         "--format",
         "json",
@@ -131,7 +134,7 @@ fn explicit_lifecycle_cli_preserves_sdk_dependency_identity_and_owned_outputs() 
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     fixture(root);
-    let profiles = run(root, &["codegen-profiles", "--format", "json"], 0);
+    let profiles = run(root, &["gen", "profiles", "--format", "json"], 0);
     assert_eq!(profiles["profiles"].as_array().unwrap().len(), 12);
     assert!(
         profiles["profiles"]
@@ -276,7 +279,8 @@ fn cache_only_provider_generation_retains_physical_sources_after_entry_removal()
     std::fs::remove_file(root.join("openapi.json")).unwrap();
     std::fs::remove_file(root.join("schemas.json")).unwrap();
     let args = [
-        "codegen-terraform",
+        "gen",
+        "terraform",
         "--pins",
         "pins.json",
         "--cache-dir",
@@ -285,7 +289,7 @@ fn cache_only_provider_generation_retains_physical_sources_after_entry_removal()
         "mapping.json",
         "--target-config",
         "target.json",
-        "--out",
+        "--output",
         "generated",
         "--format",
         "json",

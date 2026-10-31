@@ -31,13 +31,13 @@ appears once and owns its language subdirectory. Unknown configuration keys and
 unsupported operations produce diagnostics.
 
 ```sh
-suspect gen session --config sdk-session.json --out generated
-suspect gen session --config sdk-session.json --out generated --check --format json
-suspect gen session --config sdk-session.json --out generated --preview --format json
-suspect gen session --config sdk-session.json --out generated --watch --preview --format json
+suspect gen session --config sdk-session.json --output generated
+suspect gen session --config sdk-session.json --output generated --check --format ndjson
+suspect gen session --config sdk-session.json --output generated --preview --format ndjson
+suspect gen session --config sdk-session.json --output generated --watch --preview --format ndjson
 ```
 
-The CLI resolves `--out` from the invocation directory. The editor deliberately
+The CLI resolves `--output` from the invocation directory. The editor deliberately
 resolves its output choice from the configuration directory and passes an
 absolute path. `--preview` and `--check` perform read-only ownership/drift checks;
 preview includes generated artifact contents. `--watch` retains one process and

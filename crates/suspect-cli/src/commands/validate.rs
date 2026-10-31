@@ -1,5 +1,5 @@
 //! OpenAPI validation as `output::Finding`s for the commands that report
-//! it beside their own results (`project build`, `upgrade`, `admission`).
+//! it beside their own results (`project build`, `upgrade`, `gen admission`).
 //! The `validate` command itself is `check` with [`super::check::VALIDATE`].
 
 use std::io::Read;
