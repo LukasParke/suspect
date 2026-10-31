@@ -461,8 +461,8 @@ fn check_kind(path: &str, kind: Kind, raw: Raw, base: Option<&Path>) -> Result<R
                 _ => None,
             };
             match n {
-                Some(n) if kind == Kind::Port && (n == 0 || n > 65535) => {
-                    Err(format!("`{path}`: {n} is not a port (1-65535)"))
+                Some(n) if kind == Kind::Port && n > 65535 => {
+                    Err(format!("`{path}`: {n} is not a port (0-65535)"))
                 }
                 Some(n) => Ok(Raw::Int(n)),
                 None => Err(expected()),

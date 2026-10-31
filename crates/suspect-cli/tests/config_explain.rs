@@ -170,3 +170,51 @@ fn a_bad_value_is_shown_and_exits_2() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("`fatal`"));
 }
+
+/// The settings that replaced flag defaults: a flag beats the file, the
+/// environment sits between them.
+#[test]
+fn flags_beat_env_beat_the_new_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        ".suspect.yaml",
+        "test:\n  credentials: from-file.json\ngateway:\n  port: 9999\ndiff:\n  baseline: origin/main\n",
+    );
+    for name in ["from-file.json", "from-env.json", "from-flag.json"] {
+        write(root, name, "{\"auth\": {}}\n");
+    }
+    let auth = |env: Option<&str>, flag: Option<&str>| {
+        let mut cmd = Command::new(binary());
+        cmd.args(["auth", "check"]).current_dir(root);
+        if let Some(flag) = flag {
+            cmd.args(["--credentials", flag]);
+        }
+        match env {
+            Some(env) => cmd.env("SUSPECT_CREDENTIALS", env),
+            None => cmd.env_remove("SUSPECT_CREDENTIALS"),
+        };
+        String::from_utf8_lossy(&cmd.output().unwrap().stdout).into_owned()
+    };
+    assert!(auth(None, None).contains("from-file.json"));
+    assert!(auth(Some("from-env.json"), None).contains("from-env.json"));
+    assert!(auth(Some("from-env.json"), Some("from-flag.json")).contains("from-flag.json"));
+
+    let out = Command::new(binary())
+        .args(["config", "--explain"])
+        .current_dir(root)
+        .env("SUSPECT_GIT_BASE", "HEAD~3")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        line(&text, "gateway.port").contains(".suspect.yaml:4"),
+        "{text}"
+    );
+    let baseline = line(&text, "diff.baseline");
+    assert!(
+        baseline.contains("HEAD~3") && baseline.contains("env SUSPECT_GIT_BASE"),
+        "{baseline}"
+    );
+}

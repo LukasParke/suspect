@@ -178,7 +178,7 @@ fn bad_values_are_errors_that_keep_the_rest() {
     write(
         dir.path(),
         ".suspect.yaml",
-        "lint:\n  min_severity: fatal\n  rules:\n    info-contact: loud\n    info-license: warn\ngateway:\n  port: 0\n",
+        "lint:\n  min_severity: fatal\n  rules:\n    info-contact: loud\n    info-license: warn\ngateway:\n  port: 70000\n",
     );
     let error = resolve_with(
         dir.path(),

@@ -2731,7 +2731,19 @@ impl Backend {
                 self.progress_begin("suspect.breaking", "Detecting breaking changes")
                     .await;
                 let ws = self.any_workspace().await?;
-                let base = std::env::var("SUSPECT_GIT_BASE").unwrap_or_else(|_| "HEAD~1".into());
+                // `diff.baseline` (editor `suspect.ci.baseline`,
+                // `SUSPECT_GIT_BASE`, `.suspect.yaml`), else the last commit.
+                let base = self
+                    .state
+                    .read()
+                    .await
+                    .resolved
+                    .workspace()
+                    .settings
+                    .diff
+                    .baseline
+                    .clone()
+                    .unwrap_or_else(|| "HEAD~1".into());
                 let mut old = HashMap::new();
                 for uri in ws.uris() {
                     let path = uri.as_str().strip_prefix("file://").unwrap_or(uri.as_str());
@@ -2759,7 +2771,7 @@ impl Backend {
                 }
                 self.progress_end("suspect.breaking", Some(format!("{n} breaking change(s)")))
                     .await;
-                Some(serde_json::json!({ "breaking_changes": n }))
+                Some(serde_json::json!({ "breaking_changes": n, "baseline": base }))
             }
             links::OPEN_REF_COMMAND => {
                 let uri_s = params.arguments.first()?.as_str()?.to_owned();
@@ -3119,8 +3131,19 @@ impl Backend {
         }
         #[cfg(feature = "live-run")]
         {
-            let init_options = self.state.read().await.pending_init_options.clone();
-            let base = base_url(init_options.as_ref());
+            // `test.base_url` for this document: the editor's
+            // `suspect.testBaseUrl` (or `run.baseUrl`), `SUSPECT_BASE_URL`,
+            // the manifest, then `.suspect.yaml` — what `suspect test` uses.
+            let base = self
+                .state
+                .read()
+                .await
+                .resolved
+                .for_uri(&uri)
+                .settings
+                .test
+                .base_url
+                .clone();
             let transport = run_lenses::ReqwestTransport::new();
 
             self.progress_begin(
@@ -3221,13 +3244,6 @@ impl Backend {
             "shown": shown,
         }))
     }
-}
-
-/// Base URL for live runs: initialization options, then `SUSPECT_BASE_URL`,
-/// then the default local address.
-#[cfg(feature = "live-run")]
-fn base_url(init_options: Option<&serde_json::Value>) -> String {
-    run_lenses::base_url_from_options(init_options)
 }
 
 /// Runs the language server over stdio until the client disconnects.

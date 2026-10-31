@@ -22,7 +22,7 @@ pub enum Kind {
     Path,
     /// An absolute URL.
     Url,
-    /// A TCP port, 1-65535.
+    /// A TCP port, 0-65535 (0 picks a free port).
     Port,
     /// A positive whole number.
     Count,

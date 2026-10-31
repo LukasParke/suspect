@@ -66,23 +66,13 @@ pub fn load_credentials(
         Some(path) => Some(
             suspect_test::auth::load_credentials_file(path).map_err(|e| anyhow::anyhow!("{e}"))?,
         ),
-        None => match std::env::var_os("SUSPECT_CREDENTIALS") {
-            Some(env_path) => {
-                let path = std::path::PathBuf::from(env_path);
-                Some(
-                    suspect_test::auth::load_credentials_file(&path)
-                        .map_err(|e| anyhow::anyhow!("{e}"))?,
-                )
-            }
-            None => {
-                suspect_test::auth::discover_credentials(arazzo.parent().unwrap_or(Path::new(".")))
-                    .map(|path| {
-                        suspect_test::auth::load_credentials_file(&path)
-                            .map_err(|e| anyhow::anyhow!("{e}"))
-                    })
-                    .transpose()?
-            }
-        },
+        // `test.credentials` (and `SUSPECT_CREDENTIALS`) arrive as
+        // `credentials`, resolved by the caller.
+        None => suspect_test::auth::discover_credentials(arazzo.parent().unwrap_or(Path::new(".")))
+            .map(|path| {
+                suspect_test::auth::load_credentials_file(&path).map_err(|e| anyhow::anyhow!("{e}"))
+            })
+            .transpose()?,
     };
     Ok(auth.unwrap_or_default())
 }

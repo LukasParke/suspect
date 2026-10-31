@@ -105,8 +105,9 @@ pub fn generation_options_from(
 pub struct ProjectTests {
     /// Arazzo documents to compile and run.
     pub arazzo: Vec<PathBuf>,
-    /// Base URL prepended to operation paths.
-    pub base_url: String,
+    /// Base URL prepended to operation paths, when the manifest sets one.
+    /// `SUSPECT_BASE_URL` beats it; it beats `test.base_url`.
+    pub base_url: Option<String>,
     /// When set, run offline against this cassette instead of live HTTP.
     pub cassette: Option<PathBuf>,
     /// Message broker directory for Arazzo 1.1 AsyncAPI steps.
@@ -301,8 +302,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
             base_url: t
                 .get("base_url")
                 .and_then(|v| v.as_str())
-                .unwrap_or("http://127.0.0.1:8080")
-                .to_owned(),
+                .map(str::to_owned),
             cassette: t.get("cassette").and_then(|v| v.as_str()).map(resolve),
             message_broker: t
                 .get("message_broker")
@@ -736,16 +736,31 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         && let Some(tests) = &project.tests
         && !tests.arazzo.is_empty()
     {
+        // flag (none here) > env > manifest `tests.base_url` >
+        // `.suspect.yaml` `test.base_url` > default: one variable points
+        // every project at a preview deployment.
+        let from_env = matches!(
+            config.origin("test.base_url"),
+            suspect_config::Origin::Env { .. }
+        );
+        let base_url = match &tests.base_url {
+            Some(declared) if !from_env => declared.clone(),
+            _ => config.settings.test.base_url.clone(),
+        };
+        let credentials = tests
+            .credentials
+            .clone()
+            .or_else(|| config.settings.test.credentials.clone());
         for arazzo in &tests.arazzo {
             let exit = crate::commands::test::test_with_messages(
                 arazzo,
-                &tests.base_url,
+                &base_url,
                 None,
                 &tests.inputs,
                 tests.cassette.as_deref(),
                 false,
                 tests.message_broker.as_deref(),
-                tests.credentials.as_deref(),
+                credentials.as_deref(),
                 None,
             )?;
             if exit != 0 {

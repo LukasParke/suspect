@@ -68,57 +68,57 @@ runs:
     - name: Run suspect ${{ inputs.command }}
       shell: bash
       env:
-        SUSPECT_COMMAND: ${{ inputs.command }}
-        SUSPECT_PATHS: ${{ inputs.paths }}
-        SUSPECT_ARAZZO: ${{ inputs.arazzo }}
-        SUSPECT_BASE_URL: ${{ inputs.base-url }}
-        SUSPECT_CASSETTE: ${{ inputs.cassette }}
-        SUSPECT_REPORT: ${{ inputs.report }}
-        SUSPECT_FILTER: ${{ inputs.filter }}
-        SUSPECT_PRESET: ${{ inputs.preset }}
-        SUSPECT_MANIFEST: ${{ inputs.manifest }}
-        SUSPECT_OUT_DIR: ${{ inputs.out-dir }}
-        SUSPECT_DIFF: ${{ inputs.diff }}
-        SUSPECT_EXTRA_ARGS: ${{ inputs.extra-args }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_ARAZZO: ${{ inputs.arazzo }}
+        INPUT_BASE_URL: ${{ inputs.base-url }}
+        INPUT_CASSETTE: ${{ inputs.cassette }}
+        INPUT_REPORT: ${{ inputs.report }}
+        INPUT_FILTER: ${{ inputs.filter }}
+        INPUT_PRESET: ${{ inputs.preset }}
+        INPUT_MANIFEST: ${{ inputs.manifest }}
+        INPUT_OUT_DIR: ${{ inputs.out-dir }}
+        INPUT_DIFF: ${{ inputs.diff }}
+        INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
       run: |
         BIN="./target/release/suspect"
         EXTRA=()
-        if [ -n "$SUSPECT_EXTRA_ARGS" ]; then read -r -a EXTRA <<< "$SUSPECT_EXTRA_ARGS"; fi
+        if [ -n "$INPUT_EXTRA_ARGS" ]; then read -r -a EXTRA <<< "$INPUT_EXTRA_ARGS"; fi
 
-        case "$SUSPECT_COMMAND" in
+        case "$INPUT_COMMAND" in
           check)
-            if [ -z "$SUSPECT_PATHS" ]; then
+            if [ -z "$INPUT_PATHS" ]; then
               echo "input `paths` is required for the check command" >&2
               exit 2
             fi
-            DOCS=$(echo "$SUSPECT_PATHS" | tr '\n' ' ')
+            DOCS=$(echo "$INPUT_PATHS" | tr '\n' ' ')
             # shellcheck disable=SC2086
             "$BIN" check $DOCS --format json "${EXTRA[@]}"
             ;;
           test)
-            if [ -z "$SUSPECT_ARAZZO" ]; then
+            if [ -z "$INPUT_ARAZZO" ]; then
               echo "input `arazzo` is required for the test command" >&2
               exit 2
             fi
-            ARGS=(test "$SUSPECT_ARAZZO" --base-url "$SUSPECT_BASE_URL" --report "$SUSPECT_REPORT")
-            if [ -n "$SUSPECT_FILTER" ]; then ARGS+=(--filter "$SUSPECT_FILTER"); fi
-            if [ -n "$SUSPECT_CASSETTE" ]; then ARGS+=(--offline --cassette "$SUSPECT_CASSETTE"); fi
+            ARGS=(test "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --report "$INPUT_REPORT")
+            if [ -n "$INPUT_FILTER" ]; then ARGS+=(--filter "$INPUT_FILTER"); fi
+            if [ -n "$INPUT_CASSETTE" ]; then ARGS+=(--offline --cassette "$INPUT_CASSETTE"); fi
             "$BIN" "${ARGS[@]}" "${EXTRA[@]}"
             ;;
           gen)
-            if [ -z "$SUSPECT_PRESET" ] && [ -z "$SUSPECT_MANIFEST" ]; then
+            if [ -z "$INPUT_PRESET" ] && [ -z "$INPUT_MANIFEST" ]; then
               echo "one of inputs `preset` or `manifest` is required for the gen command" >&2
               exit 2
             fi
             ARGS=(gen)
-            if [ -n "$SUSPECT_PRESET" ]; then ARGS+=(--preset "$SUSPECT_PRESET");
-            else ARGS+=(--manifest "$SUSPECT_MANIFEST"); fi
-            ARGS+=("--out" "$SUSPECT_OUT_DIR")
-            if [ "$SUSPECT_DIFF" = "true" ]; then ARGS+=(--diff); fi
+            if [ -n "$INPUT_PRESET" ]; then ARGS+=(--preset "$INPUT_PRESET");
+            else ARGS+=(--manifest "$INPUT_MANIFEST"); fi
+            ARGS+=("--out" "$INPUT_OUT_DIR")
+            if [ "$INPUT_DIFF" = "true" ]; then ARGS+=(--diff); fi
             "$BIN" "${ARGS[@]}" "${EXTRA[@]}"
             ;;
           *)
-            echo "unknown command '$SUSPECT_COMMAND' (expected check | test | gen)" >&2
+            echo "unknown command '$INPUT_COMMAND' (expected check | test | gen)" >&2
             exit 2
             ;;
         esac

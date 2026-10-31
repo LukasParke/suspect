@@ -895,6 +895,25 @@ Each step leaves `main` green and shippable.
    `test.base_url`/`diff.baseline`; extension host stops reading
    `SUSPECT_GIT_BASE`; Action variables renamed. Tests: the registry test
    (Testing); per-command flag-beats-config cases in `cli.rs`. 1.5 days.
+   **Done.** The keys landed with the table in step 1; this step wires
+   them. `test`, `fuzz`, `stateful` (`--base-url`), `test --report`,
+   `test`/`auth check --credentials`, `gateway --port/--mode/--upstream`
+   lost their clap defaults and resolve; `load` uses `test.base_url` only
+   when something set it (its default does not beat the profile's
+   `target`); `ci --baseline` falls back to the project's `diff.baseline`;
+   `project build` applies env > manifest `tests.base_url` >
+   `test.base_url` > default (the manifest default `http://127.0.0.1:8080`
+   is gone); `rules check` scans `rules.roots` from the settings root
+   instead of the cwd. `gateway.port` accepts `0` (a free port), as the
+   flag does. `rules.enabled` is in the table and `Settings` for P1; nothing
+   reads it yet. The LSP run lenses read `test.base_url` per document (the
+   top-level `baseUrl` initialization option is no longer read;
+   `run.baseUrl` is an alias of `test.base_url`) and `suspect.breakingChanges`
+   reads `diff.baseline` and returns the baseline it used, which the
+   extension host now shows instead of reading `SUSPECT_GIT_BASE`. The
+   registry test is `crates/suspect-config/tests/env_registry.rs`; its
+   harness list names the toolchain-gate and generator files. The
+   flag-beats-config cases are in `config_explain.rs`.
 7. **JSON Schema**. `json_schema.rs`, bless test, `editors/vscode/schemas/`,
    `jsonValidation`/`yamlValidation` in `package.json`. Tests:
    `crates/suspect-config/tests/json_schema.rs`; a `test/manifest.cjs`

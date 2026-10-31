@@ -21,7 +21,8 @@ pub struct CiArgs {
     /// Root to search for projects.
     #[arg(default_value = ".")]
     root: PathBuf,
-    /// Git ref each project is compared against for breaking changes.
+    /// Git ref each project is compared against for breaking changes
+    /// (default: `diff.baseline` from `.suspect.yaml`, or `SUSPECT_GIT_BASE`).
     #[arg(long, value_name = "REF")]
     baseline: Option<String>,
     /// Only run these stages (repeatable): validate, lint, contract,
@@ -187,7 +188,13 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
             stages.push(contract_stage(manifest));
         }
         if wanted.contains(&"breaking") {
-            stages.push(breaking_stage(manifest, args.baseline.as_deref()));
+            // `--baseline`, else the project's `diff.baseline` (or
+            // `SUSPECT_GIT_BASE`).
+            let baseline =
+                args.baseline
+                    .as_deref()
+                    .or(config.resolved.settings.diff.baseline.as_deref());
+            stages.push(breaking_stage(manifest, baseline));
         }
         if wanted.contains(&"codegen") {
             stages.push(codegen_stage(manifest));
