@@ -635,6 +635,14 @@ workflow does, required secrets), and its "Checks" list is replaced by
 6. **First release.** Create `LukasParke/homebrew-tap`, Marketplace and
    Open VSX publishers, secrets; manual first Zed registry submission; tag
    `v0.1.0`. README "Install" and CONTRIBUTING "Releasing". 0.5 day.
+   **Docs done; the rest is manual and not done.** README "Install" has the
+   commands above plus checksums, attestations and the Action; CONTRIBUTING
+   "Releasing" describes the bump PR, the tag, what each workflow does, and
+   lists the manual prerequisites (tap repository and `HOMEBREW_TAP_TOKEN`,
+   a `release` environment, Marketplace and Open VSX publishers with
+   `VSCE_PAT`/`OVSX_PAT`, the first Zed submission, `ZED_REGISTRY_FORK` and
+   `ZED_EXTENSIONS_TOKEN`). No accounts, repositories, secrets or tags were
+   created.
 7. **GitHub Action from releases.** Rewrite `action.yml`; add a workflow
    that uses `./.github/actions/suspect` against `docs/demo/petstore.yaml`
    on a pinned released version. 2-3 h.

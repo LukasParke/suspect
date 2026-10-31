@@ -20,10 +20,30 @@ OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
 
 ## Install
 
+Prebuilt binaries for macOS, Linux (glibc and static musl) and Windows are
+attached to every [release](https://github.com/LukasParke/suspect/releases)
+(Windows is tier 2 until one release has passed its smoke tests):
+
 ```console
-cargo install --path crates/suspect-cli   # puts `suspect` on PATH
+# macOS and Linux
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/LukasParke/suspect/releases/latest/download/suspect-cli-installer.sh | sh
+# Homebrew
+brew install LukasParke/tap/suspect
+# Windows
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/LukasParke/suspect/releases/latest/download/suspect-cli-installer.ps1 | iex"
+# From source (needs Rust)
+cargo install --locked --git https://github.com/LukasParke/suspect suspect-cli
 suspect --version
 ```
+
+The installers put `suspect` in `~/.cargo/bin`, the same place `cargo
+install` uses. Each archive (`suspect-cli-<target>.tar.gz`, `.zip` on
+Windows) has a `.sha256` file next to it, and `gh attestation verify <file>
+--repo LukasParke/suspect` checks its build provenance.
+
+In GitHub Actions, `LukasParke/suspect/.github/actions/suspect@v<version>`
+downloads the release binary and can run `check`, `test` or `gen`
+([`action.yml`](.github/actions/suspect/action.yml)).
 
 ## LSP — full-featured editor experience
 
@@ -226,9 +246,11 @@ plan is [docs/proposals/](docs/proposals/README.md).
 
 - **VS Code** ([`editors/vscode`](editors/vscode/)): language features via the
   bundled LSP, a Testing-API explorer for Arazzo workflows, an Arazzo notebook,
-  gateway control and SDK generation. Build it with
-  `cd editors/vscode && npm ci && npm run compile`, then run it from VS Code's
-  extension development host or package it with `npx @vscode/vsce package`.
+  gateway control and SDK generation. Releases publish it to the VS Code
+  Marketplace and Open VSX, and attach the `.vsix` to the GitHub release.
+  Build it with `cd editors/vscode && npm ci && npm run compile`, then run it
+  from VS Code's extension development host or package it with
+  `npm run package`.
   The extension finds `suspect` on `PATH`; set `"suspect.basePath"` to use a
   specific binary.
 - **Zed** ([`editors/zed`](editors/zed/)): registers `suspect lsp` for YAML and
