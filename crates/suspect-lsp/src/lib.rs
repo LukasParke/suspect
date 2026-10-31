@@ -49,6 +49,7 @@ mod rank;
 mod refactor;
 pub mod rename;
 pub mod render_sdk;
+pub mod rule_host;
 pub mod run_lenses;
 pub mod semantic;
 pub mod state;
@@ -108,6 +109,59 @@ struct Backend {
     /// build the same answer. Held across the build only — never across
     /// the state lock.
     index_build_lock: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// The TS rule findings for one document: empty unless its settings
+/// enable rules (`rules.enabled`). The host runs for the workspace root
+/// over the workspace's `rules.roots`. Start failures, worker errors and
+/// timeouts go to the log; rule ids that reuse a builtin code are shown as
+/// an error on their rule file.
+async fn ts_rules(
+    state: &Arc<tokio::sync::RwLock<State>>,
+    client: &Client,
+    doc: &OpenDoc,
+    resolved: &suspect_config::Resolved,
+) -> rule_host::RulesRun {
+    if !resolved.settings.rules.enabled {
+        return rule_host::RulesRun::default();
+    }
+    let (slot, root, roots) = {
+        let st = state.read().await;
+        (
+            Arc::clone(&st.rule_host),
+            st.workspace_root().or_else(|| st.root.clone()),
+            st.resolved.workspace().settings.rules.roots.clone(),
+        )
+    };
+    let run = rule_host::run(&slot, root.as_deref(), &roots, &resolved.settings, &doc.low).await;
+    if let Some(message) = &run.log {
+        client
+            .log_message(MessageType::WARNING, format!("suspect: {message}"))
+            .await;
+    }
+    // One publish per file replaces its set, so group first.
+    let mut by_file: std::collections::BTreeMap<&std::path::Path, Vec<Diagnostic>> =
+        std::collections::BTreeMap::new();
+    for collision in &run.collisions {
+        by_file
+            .entry(&collision.file)
+            .or_default()
+            .push(Diagnostic {
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String(
+                    suspect_check::rules::ID_COLLISION.to_owned(),
+                )),
+                source: Some(diagnostics::SOURCE.to_owned()),
+                message: collision.to_string(),
+                ..Diagnostic::default()
+            });
+    }
+    for (file, diagnostics) in by_file {
+        if let Ok(url) = Url::from_file_path(file) {
+            client.publish_diagnostics(url, diagnostics, None).await;
+        }
+    }
+    run
 }
 
 impl Backend {
@@ -266,11 +320,20 @@ impl Backend {
             // a hover sent during an open waited 4.7 seconds behind it. The
             // state lock is not held here, so this was never a lock
             // problem — it was a scheduler problem.
+            let ts = ts_rules(&state, &client, &doc, &policy).await;
             let diags = match tokio::task::spawn_blocking({
                 let ws = ws.clone();
                 let policy = Arc::clone(&policy);
                 let doc = doc.clone();
-                move || diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &policy.settings)
+                move || {
+                    diagnostics::compute_diagnostics_with(
+                        ws.as_ref(),
+                        &doc.low,
+                        &policy.settings,
+                        ts.findings,
+                        ts.registry,
+                    )
+                }
             })
             .await
             {
@@ -1102,11 +1165,41 @@ impl LanguageServer for Backend {
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .is_some_and(|name| config_file_names().any(|c| c == name))
         });
+        // A rule file added, edited or removed under a rules root changes
+        // what the TS rules report: stop the host (the next run starts it
+        // over the current files) and treat it as a policy change.
+        let rules_touched = {
+            let (slot, roots) = {
+                let st = self.state.read().await;
+                (
+                    Arc::clone(&st.rule_host),
+                    st.resolved.workspace().settings.rules.roots.clone(),
+                )
+            };
+            let mut slot = slot.lock().await;
+            let touched = params.changes.iter().any(|change| {
+                change
+                    .uri
+                    .to_file_path()
+                    .is_ok_and(|path| slot.watches(&path, &roots))
+            });
+            if touched {
+                slot.stop();
+            }
+            touched
+        };
+        let mut republish = false;
         if config_touched {
             let client = self.state.read().await.client_settings.clone();
-            if self.reload_config(client).await {
-                self.republish_after_config_change().await;
-            }
+            republish = self.reload_config(client).await;
+        }
+        if rules_touched {
+            let mut st = self.state.write().await;
+            st.policy_epoch = st.policy_epoch.wrapping_add(1);
+            republish = true;
+        }
+        if republish {
+            self.republish_after_config_change().await;
         }
     }
 
@@ -1433,22 +1526,23 @@ impl LanguageServer for Backend {
         // Off the runtime, for the same reason as the push: this is seconds
         // of synchronous work, and holding a worker for that long stalls
         // every other request the editor has in flight.
-        let previous = params.previous_result_id.clone();
-        let id_and_items = tokio::task::spawn_blocking({
+        let ts = ts_rules(&self.state, &self.client, &doc, &policy).await;
+        let items = tokio::task::spawn_blocking({
             let ws = ws.clone();
             let policy = Arc::clone(&policy);
             let doc = doc.clone();
-            move || match &ws {
-                Some(ws) => pull::pull_diagnostics(ws, &doc.low, previous, &policy.settings),
-                None => {
-                    let items =
-                        diagnostics::compute_diagnostics(ws.as_ref(), &doc.low, &policy.settings);
-                    (pull::diagnostics_result_id(&items), items)
-                }
+            move || {
+                diagnostics::compute_diagnostics_with(
+                    ws.as_ref(),
+                    &doc.low,
+                    &policy.settings,
+                    ts.findings,
+                    ts.registry,
+                )
             }
         })
         .await;
-        let Ok((_, items)) = id_and_items else {
+        let Ok(items) = items else {
             return Ok(full_report(None, Vec::new()));
         };
         // The id names what the client is shown: computed after policy
@@ -2030,6 +2124,10 @@ impl LanguageServer for Backend {
                 // matcher skips dotfiles still reports `.suspect.yaml`.
                 watchers: std::iter::once("**/*.{yaml,yml,json}".to_owned())
                     .chain(config_file_names().map(|name| format!("**/{name}")))
+                    // TS rule files under the default rules root.
+                    .chain(std::iter::once(
+                        "**/.suspect/rules/**/*.{ts,js,mts,mjs}".to_owned(),
+                    ))
                     .map(|glob| FileSystemWatcher {
                         glob_pattern: GlobPattern::String(glob),
                         kind: None,
@@ -2184,6 +2282,9 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> JsonRpcResult<()> {
+        // Stops the TS rule worker, if one runs.
+        let slot = Arc::clone(&self.state.read().await.rule_host);
+        slot.lock().await.stop();
         Ok(())
     }
 

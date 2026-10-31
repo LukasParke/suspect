@@ -91,8 +91,31 @@ pub fn compute_diagnostics(
     low: &LowDoc,
     settings: &suspect_config::Settings,
 ) -> Vec<Diagnostic> {
-    let policy = Policy::from_settings(settings);
-    findings(ws, low, &policy)
+    compute_diagnostics_with(ws, low, settings, Vec::new(), None)
+}
+
+/// [`compute_diagnostics`] with `extra` findings (the TS rules' for this
+/// run) merged before policy. `registry` replaces the builtin one when the
+/// running rules extend it with their ids.
+#[must_use]
+pub fn compute_diagnostics_with(
+    ws: Option<&Arc<Workspace>>,
+    low: &LowDoc,
+    settings: &suspect_config::Settings,
+    extra: Vec<Finding>,
+    registry: Option<Arc<Registry>>,
+) -> Vec<Diagnostic> {
+    let mut policy = Policy::from_settings(settings);
+    if let Some(registry) = registry {
+        policy.registry = registry;
+    }
+    let cx = Context {
+        workspace: ws,
+        policy: &policy,
+    };
+    let mut raw = suspect_check::check_document(&cx, low);
+    raw.extend(extra);
+    suspect_check::apply_policy(raw, low, &policy)
         .iter()
         .map(|f| to_lsp(f, low, &policy.registry))
         .collect()

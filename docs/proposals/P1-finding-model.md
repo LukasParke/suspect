@@ -955,6 +955,37 @@ releasable on its own.
    collisions, `rules-runtime-unavailable`, the LSP `RuleHost` lifecycle and
    epoch bump. Tests: bun-gated integration test in `suspect-check/tests`,
    plus an LSP test with a stub host. Estimate: 1 day.
+   **Done** (the non-CLI half; `check`'s use of it is step 5's).
+   `suspect_check::rules`: `check_rules(&mut dyn RuleSource, &LowDoc)`
+   (`RuleSource` is implemented by `RuleHost` and by test stubs),
+   `to_finding`, `collisions` (`Collision`, with `finding()` on the rule
+   file), `rule_files` over every `rules.roots` directory, `start` (a
+   `Startup` of `NoRules`, `Unavailable`, `Started` or `Failed`) and
+   `runtime_unavailable`. `RulesError` is `suspect_rules::Error`. Two new
+   registered codes: `rules-runtime-unavailable` (warning) and
+   `rules-id-collision` (error). `Registry` gains `with_dynamic` (TS rule
+   ids, rejecting builtin names), `is_builtin_name` and `is_known`.
+   Deviations: dynamic entries are ids only, since TS rule metadata has no
+   summary or severity. A colliding rule's findings are skipped by
+   `check_rules`, so they are never read as the builtin's. Custom ruleset
+   codes are not collision-checked, because step 4 lets a redefined rule
+   keep a builtin name. In the editor (`suspect_lsp::rule_host`), the
+   server keeps one `RuleSlot` in `State`, started lazily for the
+   workspace root and the workspace's `rules.roots` on the first push or
+   document pull of a document whose settings set `rules.enabled`. TS
+   findings join the builtin findings before `apply_policy`
+   (`diagnostics::compute_diagnostics_with`), with the slot's registry. A
+   worker error, a start failure or a run over 5 s (the host's own
+   deadline is 250 ms) drops the TS part and goes to the log. Without bun
+   each document gets the `rules-runtime-unavailable` warning. Collisions
+   are published once per start as errors on the rule files. A
+   watched change under a rules root stops the host instead of calling
+   `RuleHost::reload`, so added and removed files are picked up; it bumps
+   `policy_epoch` and republishes. The watcher glob gains
+   `**/.suspect/rules/**/*.{ts,js,mts,mjs}`. The workspace pull does not
+   run TS rules (open documents get them through the document pull and
+   push). The TS run precedes the builtin pass rather than running beside
+   it; it is bounded by the deadlines above.
 7. **Inline and extension suppression.** `suspect_check::suppress`, the
    `x-suspect-disable` builtin schema, unknown-code and unused-suppression
    findings, and JSON `suppressed`. Tests: YAML comment on a pair, on a

@@ -57,6 +57,18 @@ const PASS_RULES: &[RuleInfo] = &[
         Severity::Error,
         "Vendor extension value fails its registered schema",
     ),
+    RuleInfo::new(
+        crate::rules::RUNTIME_UNAVAILABLE,
+        CheckId::Rules,
+        Severity::Warning,
+        "TypeScript rules are configured but bun is not on PATH",
+    ),
+    RuleInfo::new(
+        crate::rules::ID_COLLISION,
+        CheckId::Rules,
+        Severity::Error,
+        "TypeScript rule id reuses a builtin code or alias",
+    ),
 ];
 
 /// Alias table v1: canonical code, then the codes that report the same
@@ -133,6 +145,11 @@ pub enum RegistryError {
         /// The code.
         code: &'static str,
     },
+    /// A dynamic rule (a TS rule id) names a builtin code or alias.
+    Collision {
+        /// The rule id.
+        code: String,
+    },
 }
 
 impl std::fmt::Display for RegistryError {
@@ -150,6 +167,9 @@ impl std::fmt::Display for RegistryError {
             ),
             Self::UnknownCanonical { code } => {
                 write!(f, "alias entry names unregistered code `{code}`")
+            }
+            Self::Collision { code } => {
+                write!(f, "rule id `{code}` reuses a builtin code or alias")
             }
         }
     }
@@ -169,6 +189,8 @@ pub struct Registry {
     order: Vec<&'static str>,
     /// Alias -> canonical codes, in [`ALIASES`] order.
     alias_to: HashMap<&'static str, Vec<&'static str>>,
+    /// Codes known at run time only (TS rule ids), by check.
+    dynamic: HashMap<Box<str>, CheckId>,
 }
 
 impl Registry {
@@ -205,6 +227,36 @@ impl Registry {
             }
         }
         Ok(self)
+    }
+
+    /// Adds codes known only at run time (TS rule ids), so suppressions
+    /// naming them are recognized.
+    ///
+    /// # Errors
+    /// [`RegistryError::Collision`] when a code is a builtin code or alias.
+    pub fn with_dynamic(
+        mut self,
+        codes: impl IntoIterator<Item = (String, CheckId)>,
+    ) -> Result<Self, RegistryError> {
+        for (code, check) in codes {
+            if self.is_builtin_name(&code) {
+                return Err(RegistryError::Collision { code });
+            }
+            self.dynamic.insert(code.into_boxed_str(), check);
+        }
+        Ok(self)
+    }
+
+    /// Whether `code` is a builtin code or alias.
+    #[must_use]
+    pub fn is_builtin_name(&self, code: &str) -> bool {
+        self.by_code.contains_key(code) || self.alias_to.contains_key(code)
+    }
+
+    /// Whether `code` is known at all: builtin, an alias, or dynamic.
+    #[must_use]
+    pub fn is_known(&self, code: &str) -> bool {
+        self.is_builtin_name(code) || self.dynamic.contains_key(code)
     }
 
     /// Merges `tables`.

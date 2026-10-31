@@ -2110,12 +2110,14 @@ dependencies = [
  "suspect-oas",
  "suspect-overlay",
  "suspect-ref",
+ "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",
  "suspect-test",
  "suspect-validate",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -2345,6 +2347,7 @@ dependencies = [
  "suspect-oas",
  "suspect-overlay",
  "suspect-ref",
+ "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",

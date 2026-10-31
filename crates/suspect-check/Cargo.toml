@@ -30,7 +30,10 @@ suspect-arazzo.workspace = true
 suspect-overlay.workspace = true
 suspect-schema.workspace = true
 suspect-test.workspace = true
+suspect-rules.workspace = true
 suspect-codegen = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+suspect-codegen.workspace = true
