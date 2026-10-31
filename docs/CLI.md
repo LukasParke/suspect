@@ -2,7 +2,7 @@
 
 <!-- Generated from the clap command tree by crates/suspect-cli/tests/cli_reference.rs; do not edit by hand. Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`. -->
 
-Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C).
+Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C); per command: [Exit status](#exit-status).
 
 ## `suspect`
 
@@ -1238,6 +1238,67 @@ Options:
       --format <FORMAT>        Output format for the matrix [default: text] [possible values: text, json]
   -h, --help                   Print help (see more with '--help')
 ```
+
+## Exit status
+
+`0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted. Every command that is not a server also exits `130` on Ctrl-C; the table lists `130` only where the command stops gracefully and reports first. Servers exit `0` on Ctrl-C.
+
+| Command | Status | Meaning |
+|---|---|---|
+| `suspect check` | `0`, `1`, `2` | 1: a document has an error-severity finding |
+| `suspect validate` | `0`, `1`, `2` | 1: an error-severity finding |
+| `suspect lint` | `0`, `1`, `2` | 1: an error-severity finding at or above the floor |
+| `suspect fmt` | `0`, `2` | 2: the input cannot be read or written |
+| `suspect bundle` | `0`, `1`, `2` | 1: an unresolved `$ref` or a load error |
+| `suspect upgrade` | `0`, `1`, `2` | 1: the upgraded document fails validation |
+| `suspect stats` | `0`, `2` | 2: the input cannot be read |
+| `suspect overlay apply` | `0`, `2` | 2: a malformed overlay or an invalid action |
+| `suspect overlay explain` | `0`, `1`, `2` | 1 (`--check`): an action matches nothing |
+| `suspect overlay diff` | `0`, `2` | 2: an input cannot be read |
+| `suspect diff structural` | `0`, `1`, `2` | 1 (`--check`): anything differs |
+| `suspect diff breaking` | `0`, `1`, `2` | 1: any break, warnings included |
+| `suspect diff impact` | `0`, `1`, `2` | 1: a recorded exchange breaks against NEW |
+| `suspect diff sdk` | `0`, `1`, `2` | 1: compatibility not proven; 2: input or configuration error |
+| `suspect diff routes` | `0`, `1`, `2` | 1 (`--check`): undocumented or spec-only routes; 2: no routes extracted |
+| `suspect gen docs` | `0`, `2` | 2: the spec cannot be loaded or the output written |
+| `suspect gen sdk` | `0`, `1`, `2` | 1: refused, or (`--check`) the output drifted |
+| `suspect gen stubs` | `0`, `2` | 2: the spec cannot be loaded or the output written |
+| `suspect gen contract` | `0`, `1`, `2` | 1 (`--check`): the package drifted |
+| `suspect gen terraform` | `0`, `1`, `2` | 1: refused, or (`--check`) the output drifted |
+| `suspect gen cli` | `0`, `1`, `2` | 1: refused, or (`--check`) the output drifted |
+| `suspect gen mcp` | `0`, `1`, `2` | 1: refused, or (`--check`) the output drifted |
+| `suspect gen template` | `0`, `1`, `2` | 1 (`--check`/`--diff`): output or ownership drifted |
+| `suspect gen session` | `0`, `1`, `2` | 1: the session record is unsuccessful; 0 on Ctrl-C with `--watch` |
+| `suspect gen bridge` | `0`, `2` | server: 0 on Ctrl-C |
+| `suspect gen profiles` | `0`, `2` | always 0 unless output fails |
+| `suspect gen admission` | `0`, `1`, `2` | 1: an error-severity admission finding |
+| `suspect test run` | `0`, `1`, `2` | 1: a workflow failed; 2: nothing to run (`--filter` matched none) |
+| `suspect test stateful` | `0`, `1`, `2` | 1: a sequence failed; 2: nothing to run (`--filter` matched none) |
+| `suspect test fuzz` | `0`, `1`, `2` | 1: a mutant crashed the server; 2: nothing to run (`--filter` matched none) |
+| `suspect test load` | `0`, `1`, `2`, `130` | 1: an `ensure` gate failed; 130: interrupted before any request |
+| `suspect test replay` | `0`, `1`, `2` | 1: a replayed exchange drifted |
+| `suspect traffic gateway` | `0`, `2` | server: 0 on Ctrl-C |
+| `suspect traffic drift` | `0`, `1`, `2` | 1 (`--check`): undeclared endpoints or parameters |
+| `suspect traffic har` | `0`, `2` | 2: the traffic file cannot be read |
+| `suspect release plan` | `0`, `2` | 2: an input cannot be loaded |
+| `suspect release publish` | `0`, `1`, `2` | 1: preflight blocked or a publish step failed |
+| `suspect release workflow` | `0`, `2` | 2: the release manifest is invalid |
+| `suspect project init` | `0`, `2` | 2: the manifest cannot be written |
+| `suspect project check` | `0`, `1`, `2` | 1: an error-severity finding |
+| `suspect project build` | `0`, `1`, `2` | 1: a build stage failed |
+| `suspect ci` | `0`, `1`, `2` | 1: a stage failed; 2: no project found |
+| `suspect why` | `0`, `2` | 2: the spec or git history cannot be read |
+| `suspect rules check` | `0`, `1`, `2` | 1: an error-severity finding; 2: Bun is unavailable |
+| `suspect rules new` | `0`, `2` | 2: the rule cannot be written |
+| `suspect rules bench` | `0`, `2` | 2: Bun is unavailable |
+| `suspect config` | `0`, `2` | 2: a configuration file or setting is invalid |
+| `suspect config migrate` | `0`, `2` | 2: the manifest cannot be migrated |
+| `suspect auth check` | `0`, `1`, `2` | 1: a security scheme does not resolve |
+| `suspect acquire` | `0`, `1`, `2`, `130` | 1: acquisition or verification failed; 130: cancelled |
+| `suspect watch` | `0`, `2` | server: 0 on Ctrl-C |
+| `suspect lsp` | `0`, `2` | server: 0 on Ctrl-C |
+| `suspect dev bench` | `0`, `2` | 2: the fixture cannot be loaded |
+| `suspect dev evidence` | `0`, `1`, `2` | 1: a declared feature has no evidence |
 
 ## Renamed commands
 

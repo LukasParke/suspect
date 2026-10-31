@@ -810,6 +810,13 @@ step that changes the tree.
    leaf and its extra flags exist; old positional orders parse).
 5. **Exit table.** `exit::DOCUMENTED`, rendered into `docs/CLI.md`. The
    conventions test requires an entry for every leaf. Estimate: 0.5 day.
+   **Done.** Deviations: paths omit the `suspect` prefix (`"diff
+   breaking"`), and `config` has a row although it is a group, because it
+   runs without a subcommand. Rows list `Interrupted` only for `test load`
+   and `acquire`, which drain and report; the rendered "Exit status"
+   section says every other non-server command exits 130 on Ctrl-C. The
+   conventions test also rejects stale or duplicate rows and rows without
+   `0` and `2`.
 6. **(N+1) Editor switch.** VS Code moves to the new names and gets a
    minimum binary version check. `--out` becomes hidden, and flag-alias notes
    are turned on. Estimate: 0.5 day.

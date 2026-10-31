@@ -509,3 +509,37 @@ fn old_positional_orders_parse_to_the_new_commands() {
             .is_err()
     );
 }
+
+#[test]
+fn every_leaf_documents_its_exit_statuses() {
+    use suspect_cli::exit::DOCUMENTED;
+    let documented: Vec<String> = DOCUMENTED
+        .iter()
+        .map(|(path, _, _)| format!("suspect {path}"))
+        .collect();
+    let missing: Vec<String> = leaves()
+        .into_iter()
+        .map(|(path, _)| path)
+        .filter(|path| !documented.contains(path))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "no exit::DOCUMENTED entry for:\n{}",
+        missing.join("\n")
+    );
+    // No stale or duplicate rows; a row may name a runnable group (`config`).
+    let root = suspect_cli::Cli::command();
+    for (i, (path, statuses, _)) in DOCUMENTED.iter().enumerate() {
+        let words: Vec<&str> = path.split(' ').collect();
+        assert!(find(&root, &words).is_some(), "{path} does not exist");
+        assert!(
+            DOCUMENTED[..i].iter().all(|(p, _, _)| p != path),
+            "{path} is listed twice"
+        );
+        assert!(
+            statuses.contains(&suspect_cli::Exit::Clean)
+                && statuses.contains(&suspect_cli::Exit::Usage),
+            "{path}: every command can exit 0 and 2"
+        );
+    }
+}

@@ -1,8 +1,8 @@
 #![deny(missing_docs)]
 //! suspect-cli: the `suspect` binary. Thin `main.rs` delegates here so every
 //! command is a testable library function taking plain arguments and
-//! returning an [`Exit`] (0 clean, 1 findings at/above Error, 2 usage, 130
-//! interrupted).
+//! returning an [`Exit`] (0 clean, 1 findings or failed checks, 2 usage, 130
+//! interrupted; [`exit::DOCUMENTED`] lists each command).
 
 pub mod args;
 /// Git-ref baselines for comparisons.

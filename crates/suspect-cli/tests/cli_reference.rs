@@ -37,11 +37,39 @@ fn reference() -> String {
          <!-- Generated from the clap command tree by \
          crates/suspect-cli/tests/cli_reference.rs; do not edit by hand. \
          Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`. -->\n\n\
-         Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C).\n\n",
+         Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C); per command: [Exit status](#exit-status).\n\n",
     );
     render(&mut cmd, "suspect", &mut out);
+    exit_statuses(&mut out);
     renamed(&mut out);
     out
+}
+
+/// The per-command exit table from `exit::DOCUMENTED`.
+fn exit_statuses(out: &mut String) {
+    writeln!(out, "## Exit status\n").unwrap();
+    writeln!(
+        out,
+        "`0` clean, `1` findings or failed checks, `2` usage or environment \
+         error, `130` interrupted. Every command that is not a server also \
+         exits `130` on Ctrl-C; the table lists `130` only where the command \
+         stops gracefully and reports first. Servers exit `0` on Ctrl-C.\n"
+    )
+    .unwrap();
+    writeln!(out, "| Command | Status | Meaning |\n|---|---|---|").unwrap();
+    for (path, statuses, meaning) in suspect_cli::exit::DOCUMENTED {
+        let codes: Vec<String> = statuses
+            .iter()
+            .map(|status| format!("`{}`", status.code()))
+            .collect();
+        writeln!(
+            out,
+            "| `suspect {path}` | {} | {meaning} |",
+            codes.join(", ")
+        )
+        .unwrap();
+    }
+    out.push('\n');
 }
 
 /// The legacy rewrite table: old names keep working until they are removed.
