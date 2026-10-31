@@ -12,11 +12,9 @@ fn validate(spec: &Path, allowlist: &Path) -> (i32, serde_json::Value) {
         .args(["--format", "json"])
         .output()
         .unwrap();
-    (
-        output.status.code().unwrap(),
-        serde_json::from_slice(&output.stdout)
-            .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr))),
-    )
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    (output.status.code().unwrap(), report["findings"].clone())
 }
 
 #[test]
@@ -51,9 +49,10 @@ fn allowlist_membership_controls_entry_and_reference_loading() {
     assert_eq!(code, 0, "{findings}");
     assert_eq!(findings, serde_json::json!([]));
 
-    // Some(empty) is denial, never the None/unrestricted default.
+    // Some(empty) is denial, never the None/unrestricted default: the
+    // entry itself cannot load.
     std::fs::write(&allowlist, "[]").unwrap();
     let (code, findings) = validate(&spec, &allowlist);
     assert_eq!(code, 1);
-    assert_eq!(findings[0]["code"], "validation-input");
+    assert_eq!(findings[0]["code"], "io-error");
 }

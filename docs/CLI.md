@@ -12,13 +12,13 @@ OpenAPI/Arazzo/Overlay toolkit
 Usage: suspect <COMMAND>
 
 Commands:
-  check     Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats
-  validate  Validate OpenAPI syntax and semantic requirements, reporting located findings
-  lint      Run spectral-style lint rules over documents
+  check     Run every check the editor runs; exit 1 when an error-severity finding remains
+  validate  Validate document structure and semantics: `check` with the validation checks
+  lint      Run spectral-style, markdown and TypeScript rules: `check` with the lint checks
   fmt       Re-emit a document in canonical JSON/YAML form
   bundle    Bundle a document and its `$ref` closure into one file
   upgrade   Upgrade Swagger 2.0 documents to OpenAPI 3.1
-  stats     Structural counts for a document
+  stats     Structural counts and the `$ref` census for a document
   overlay   Apply, explain, or synthesize (`diff`) Overlay 1.0/1.1 documents
   diff      Compare two documents or revisions: structure, breaks, impact, SDKs, routes
   gen       Generate docs, SDKs, stubs, contracts, and applications from a spec
@@ -45,7 +45,7 @@ Options:
 ## `suspect check`
 
 ```text
-Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats
+Run every check the editor runs; exit 1 when an error-severity finding remains
 
 Usage: suspect check [OPTIONS] <PATHS>...
 
@@ -53,14 +53,32 @@ Arguments:
   <PATHS>...  Documents to check
 
 Options:
-      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
-  -h, --help             Print help (see more with '--help')
+      --only <CHECK>
+          Run only these checks (comma-separated or repeated) [possible values: syntax, ref, validate, swagger, arazzo, overlay, load-profile, config, extension, lint, markdown, rules, admission]
+      --parse-only
+          Only parse and resolve `$ref`s: `--only syntax,ref`
+      --sdk
+          Report SDK-readiness findings and run SDK admission (default: when `.suspect.yaml` or the project manifest configures codegen)
+      --no-sdk
+          Do not report SDK-readiness findings, even with codegen configured
+      --ruleset <RULESET>
+          Ruleset document (default: `lint.ruleset`, else the built-in rules)
+      --min-severity <MIN_SEVERITY>
+          Report only findings at or above this severity (default: hint, or `lint.min_severity`) [possible values: hint, info, warning, error]
+      --strict-format
+          Assert JSON-Schema `format` keywords (`validate.strict_format`)
+      --reference-allowlist <REFERENCE_ALLOWLIST>
+          JSON array of absolute document paths; deny every unlisted reference load
+      --format <FORMAT>
+          Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
+  -h, --help
+          Print help (see more with '--help')
 ```
 
 ## `suspect validate`
 
 ```text
-Validate OpenAPI syntax and semantic requirements, reporting located findings
+Validate document structure and semantics: `check` with the validation checks
 
 Usage: suspect validate [OPTIONS] <PATHS>...
 
@@ -81,7 +99,7 @@ Options:
 ## `suspect lint`
 
 ```text
-Run spectral-style lint rules over documents
+Run spectral-style, markdown and TypeScript rules: `check` with the lint checks
 
 Usage: suspect lint [OPTIONS] <PATHS>...
 
@@ -147,7 +165,7 @@ Options:
 ## `suspect stats`
 
 ```text
-Structural counts for a document
+Structural counts and the `$ref` census for a document
 
 Usage: suspect stats [OPTIONS] <PATH>
 
@@ -379,7 +397,7 @@ Options:
 ```text
 Generate a source-selected native SDK package
 
-Usage: suspect gen sdk [OPTIONS] --package-name <PACKAGE_NAME> [SPEC]
+Usage: suspect gen sdk [OPTIONS] [SPEC]
 
 Arguments:
   [SPEC]  Entry OpenAPI document
@@ -394,15 +412,15 @@ Options:
       --profile <PROFILE>
           Native capability profile; unsupported contracts fail before output. Defaults to `.suspect.yaml`'s `codegen.profile` when omitted [possible values: typescript-http, rust-http, python-http, go-http, swift-http, ruby-http, csharp-http, dart-http, cpp-http, kotlin-http, php-http, java-http]
       --operation-id <OPERATION_ID>
-          Exact operationId selector (repeatable); omit to attempt all operations
+          Exact operationId selector (repeatable); omit to attempt all operations. Defaults to `.suspect.yaml`'s `codegen.operation_ids` when omitted
       --package-name <PACKAGE_NAME>
-          Native package identity, independent of the API title
+          Native package identity, independent of the API title. Defaults to `.suspect.yaml`'s `codegen.package_name` when omitted
       --package-version <PACKAGE_VERSION>
           Exact native-compatible package SemVer, independent of API info.version. Defaults to `.suspect.yaml`'s `codegen.package_version` when omitted
       --import-name <IMPORT_NAME>
-          Native import/module identity, independent of the source API semantics
+          Native import/module identity, independent of the source API semantics. Defaults to `.suspect.yaml`'s `codegen.import_names.<profile>`
       --compatibility-profile <COMPATIBILITY_PROFILE>
-          Explicit versioned source interpretation (repeatable); ordinary OpenAPI semantics remain the default, independently of native feature support [possible values: legacy-binary-string-v1, oas30-nullable-in-3.1-v1, colon-path-parameters-v1, schemaless-stream-events-v1, all-of-scoped-mode-v1]
+          Explicit versioned source interpretation (repeatable); ordinary OpenAPI semantics remain the default, independently of native feature support. Defaults to `.suspect.yaml`'s `codegen.compatibility_profiles` when omitted [possible values: legacy-binary-string-v1, oas30-nullable-in-3.1-v1, colon-path-parameters-v1, schemaless-stream-events-v1, all-of-scoped-mode-v1]
       --defaults <FILE>
           Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding `compatibility_profiles`, `credential_env` and `sdk_defaults` (the same schema `codegen-session` accepts). Flag-declared compatibility profiles are added on top
   -o, --output <DIR>
@@ -978,7 +996,7 @@ Arguments:
 
 Options:
       --baseline <REF>   Git ref each project is compared against for breaking changes (default: `diff.baseline` from `.suspect.yaml`, or `SUSPECT_GIT_BASE`)
-      --stage <NAME>     Only run these stages (repeatable): validate, lint, contract, breaking, codegen, test
+      --stage <NAME>     Only run these stages (repeatable): check, contract, breaking, codegen, test. `validate` and `lint` run the check stage with the `suspect validate` or `suspect lint` filter, under that name
       --skip-tests       Skip contract tests (they may need a live server)
       --build            Build every project before gating it: overlays, publication, validation, contract, docs and SDK generation, then the gate. One command from a clean checkout to a verified workspace
       --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
@@ -1245,9 +1263,9 @@ Options:
 
 | Command | Status | Meaning |
 |---|---|---|
-| `suspect check` | `0`, `1`, `2` | 1: a document has an error-severity finding |
-| `suspect validate` | `0`, `1`, `2` | 1: an error-severity finding |
-| `suspect lint` | `0`, `1`, `2` | 1: an error-severity finding at or above the floor |
+| `suspect check` | `0`, `1`, `2` | 1: an error-severity finding remains after policy; 2: a configuration or ruleset error, or a TypeScript rule id that reuses a builtin code |
+| `suspect validate` | `0`, `1`, `2` | 1: an error-severity finding from the validation checks; 2: a configuration error |
+| `suspect lint` | `0`, `1`, `2` | 1: an error-severity lint, markdown or TypeScript rule finding; 2: a configuration or ruleset error |
 | `suspect fmt` | `0`, `2` | 2: the input cannot be read or written |
 | `suspect bundle` | `0`, `1`, `2` | 1: an unresolved `$ref` or a load error |
 | `suspect upgrade` | `0`, `1`, `2` | 1: the upgraded document fails validation |

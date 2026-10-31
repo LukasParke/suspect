@@ -49,6 +49,19 @@ pub fn start(finding: &Finding, src: &dyn Sources) -> (u32, u32) {
         .map_or((1, 1), |(line, col)| (line + 1, col + 1))
 }
 
+/// 1-based end line and column of a finding's range, when `src` resolves
+/// it; `None` for findings located by a [`Position`](crate::Position)
+/// alone.
+#[must_use]
+pub fn end(finding: &Finding, src: &dyn Sources) -> Option<(u32, u32)> {
+    if finding.position.is_some() {
+        return None;
+    }
+    let range = finding.range.as_ref()?;
+    let (line, col) = src.line_col(&finding.document, range.end)?;
+    Some((line + 1, col + 1))
+}
+
 /// One `file:line:col [SEVERITY] code: message` line per finding.
 ///
 /// # Errors
@@ -125,7 +138,8 @@ pub fn sarif_level(severity: Severity) -> &'static str {
 
 /// A SARIF 2.1.0 log. Rules are collected from the findings in first-seen
 /// order; each result references its rule by index and is located at
-/// `file:startLine:startColumn`. A rule found in `rules` gets its summary
+/// `file:startLine:startColumn`, with `endLine`/`endColumn` when the
+/// range end resolves. A rule found in `rules` gets its summary
 /// as `shortDescription` and its fix text as `help`; otherwise the
 /// description is the code.
 #[must_use]
@@ -154,6 +168,14 @@ pub fn sarif(findings: &[Finding], src: &dyn Sources, rules: &dyn RuleLookup) ->
         .iter()
         .map(|f| {
             let (line, col) = start(f, src);
+            let mut region = json!({
+                "startLine": line,
+                "startColumn": col,
+            });
+            if let Some((end_line, end_col)) = end(f, src) {
+                region["endLine"] = json!(end_line);
+                region["endColumn"] = json!(end_col);
+            }
             json!({
                 "ruleId": f.code,
                 "ruleIndex": rule_ids.iter().position(|r| *r == f.code).unwrap_or(0),
@@ -162,10 +184,7 @@ pub fn sarif(findings: &[Finding], src: &dyn Sources, rules: &dyn RuleLookup) ->
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": {"uri": src.display_path(&f.document)},
-                        "region": {
-                            "startLine": line,
-                            "startColumn": col,
-                        },
+                        "region": region,
                     },
                 }],
             })
@@ -436,6 +455,27 @@ mod tests {
             }
             assert!(result["message"]["text"].is_string());
         }
+    }
+
+    #[test]
+    fn sarif_regions_end_where_the_range_ends() {
+        // `title: t` spans 3:3-3:11 in the sample text.
+        let finding =
+            Finding::new(CheckId::Lint, "x", Severity::Warning, uri(), "m").with_range(23..31);
+        let log = sarif(&[finding], &sources(), &NoRules);
+        let region = &log["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(
+            (&region["startLine"], &region["startColumn"]),
+            (&json!(3), &json!(3))
+        );
+        assert_eq!(
+            (&region["endLine"], &region["endColumn"]),
+            (&json!(3), &json!(11))
+        );
+        // A position-only finding has no end.
+        let region = &sarif(&sample(), &sources(), &NoRules)["runs"][0]["results"][0]["locations"]
+            [0]["physicalLocation"]["region"];
+        assert!(region.get("endLine").is_none());
     }
 
     #[test]

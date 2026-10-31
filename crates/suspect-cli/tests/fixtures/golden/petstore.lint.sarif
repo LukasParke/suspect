@@ -12,6 +12,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 19,
+                  "endLine": 4,
                   "startColumn": 3,
                   "startLine": 3
                 }
@@ -33,6 +35,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 19,
+                  "endLine": 4,
                   "startColumn": 3,
                   "startLine": 3
                 }
@@ -54,6 +58,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 19,
+                  "endLine": 4,
                   "startColumn": 3,
                   "startLine": 3
                 }
@@ -75,6 +81,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 19,
+                  "endLine": 4,
                   "startColumn": 3,
                   "startLine": 3
                 }
@@ -96,6 +104,31 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 50,
+                  "endLine": 15,
+                  "startColumn": 7,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation must have an `operationId`."
+          },
+          "ruleId": "oas-operation-missing-operationId",
+          "ruleIndex": 4
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "endColumn": 50,
+                  "endLine": 15,
                   "startColumn": 7,
                   "startLine": 8
                 }
@@ -106,27 +139,6 @@
             "text": "Operation should have at least one 4XX response."
           },
           "ruleId": "operation-4xx-response",
-          "ruleIndex": 4
-        },
-        {
-          "level": "error",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "docs/demo/petstore.yaml"
-                },
-                "region": {
-                  "startColumn": 7,
-                  "startLine": 8
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Operation must have an `operationId`."
-          },
-          "ruleId": "operation-operationId",
           "ruleIndex": 5
         },
         {
@@ -138,6 +150,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 50,
+                  "endLine": 15,
                   "startColumn": 7,
                   "startLine": 8
                 }
@@ -159,6 +173,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 50,
+                  "endLine": 15,
                   "startColumn": 7,
                   "startLine": 8
                 }
@@ -180,6 +196,31 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
+                  "startColumn": 7,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation must have an `operationId`."
+          },
+          "ruleId": "oas-operation-missing-operationId",
+          "ruleIndex": 4
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
                   "startColumn": 7,
                   "startLine": 18
                 }
@@ -190,27 +231,6 @@
             "text": "Operation should have at least one 4XX response."
           },
           "ruleId": "operation-4xx-response",
-          "ruleIndex": 4
-        },
-        {
-          "level": "error",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "docs/demo/petstore.yaml"
-                },
-                "region": {
-                  "startColumn": 7,
-                  "startLine": 18
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "Operation must have an `operationId`."
-          },
-          "ruleId": "operation-operationId",
           "ruleIndex": 5
         },
         {
@@ -222,6 +242,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
                   "startColumn": 7,
                   "startLine": 18
                 }
@@ -243,6 +265,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
                   "startColumn": 7,
                   "startLine": 18
                 }
@@ -264,6 +288,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
                   "startColumn": 7,
                   "startLine": 18
                 }
@@ -285,55 +311,58 @@
             {
               "id": "info-contact",
               "shortDescription": {
-                "text": "info-contact"
+                "text": "Info object should contain a contact object."
               }
             },
             {
               "id": "info-description",
               "shortDescription": {
-                "text": "info-description"
+                "text": "OpenAPI object should have `description`."
               }
             },
             {
               "id": "info-license",
               "shortDescription": {
-                "text": "info-license"
+                "text": "Info object should contain a license object."
               }
             },
             {
               "id": "oas3-api-contact",
               "shortDescription": {
-                "text": "oas3-api-contact"
+                "text": "OpenAPI 3.x API description must have a contact object."
+              }
+            },
+            {
+              "help": {
+                "text": "Add an `operationId` so generated SDK methods carry a stable name."
+              },
+              "id": "oas-operation-missing-operationId",
+              "shortDescription": {
+                "text": "Operation without an operationId"
               }
             },
             {
               "id": "operation-4xx-response",
               "shortDescription": {
-                "text": "operation-4xx-response"
-              }
-            },
-            {
-              "id": "operation-operationId",
-              "shortDescription": {
-                "text": "operation-operationId"
+                "text": "Operation should have at least one 4XX response."
               }
             },
             {
               "id": "operation-tags",
               "shortDescription": {
-                "text": "operation-tags"
+                "text": "Operation should have non-empty `tags` array."
               }
             },
             {
               "id": "security-rate-limit-documented",
               "shortDescription": {
-                "text": "security-rate-limit-documented"
+                "text": "Operations should document rate limiting — a 429 response or rate-limit headers."
               }
             },
             {
               "id": "path-params",
               "shortDescription": {
-                "text": "path-params"
+                "text": "Path template variables must be declared as path parameters."
               }
             }
           ]

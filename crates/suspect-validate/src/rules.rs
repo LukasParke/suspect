@@ -10,9 +10,9 @@ use crate::guidance::{how_to_fix, summary};
 /// `(code, check, default severity)` for every emitted code.
 #[rustfmt::skip]
 const CODES: &[(&str, CheckId, Severity)] = &[
-    ("invalid-ref",                          CheckId::Validate, Severity::Error),
-    ("unresolved-ref",                       CheckId::Validate, Severity::Error),
-    ("ref-outside-allowlist",                CheckId::Validate, Severity::Error),
+    ("invalid-ref",                          CheckId::Ref,      Severity::Error),
+    ("unresolved-ref",                       CheckId::Ref,      Severity::Error),
+    ("ref-outside-allowlist",                CheckId::Ref,      Severity::Error),
     ("oas-callback-invalid",                 CheckId::Validate, Severity::Error),
     ("oas-deprecated-operation",             CheckId::Validate, Severity::Info),
     ("oas-discriminator-missing-property",   CheckId::Validate, Severity::Error),

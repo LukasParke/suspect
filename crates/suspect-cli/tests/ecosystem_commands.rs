@@ -918,7 +918,7 @@ fn ci_gate_reports_every_project_and_isolates_failures() {
     service(root, "svc-b");
     init_git_repo(root);
 
-    // Nothing is published yet: every project fails the validate stage.
+    // Nothing is published yet: every project fails the check stage.
     let first = std::process::Command::new(binary())
         .args(["ci", "."])
         .current_dir(root)
@@ -1024,7 +1024,9 @@ fn ci_reports_a_machine_readable_aggregate() {
         .iter()
         .map(|s| s["stage"].as_str().unwrap())
         .collect();
-    assert!(stages.contains(&"validate"), "{stages:?}");
+    // `validate` and `lint` are one `check` stage now.
+    assert!(stages.contains(&"check"), "{stages:?}");
+    assert!(!stages.contains(&"validate"), "{stages:?}");
     assert!(stages.contains(&"contract"), "{stages:?}");
     assert!(stages.contains(&"breaking"), "{stages:?}");
 }
@@ -1104,7 +1106,7 @@ fn ci_runs_lint_with_the_project_policy() {
             stage["summary"]
                 .as_str()
                 .unwrap()
-                .contains("at or above Error"),
+                .contains("at or above error"),
             "the project's own lint policy applies: {stage}"
         );
     }

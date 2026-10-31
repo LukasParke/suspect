@@ -739,7 +739,8 @@ step that changes the tree.
    warnings), and `output::print_findings_as` is the one dispatch for the
    seven finding commands. `breaking --format json` keeps its break-record
    shape. `check` is `Report` until P1 step 5 makes it a finding command
-   (today it prints parse reports). `config` is `Report` too, so its
+   (today it prints parse reports; P1 step 5 has since moved it to
+   `Findings`). `config` is `Report` too, so its
    `reject_sarif` call is gone. `test` and `load` move to `--format
    text|ndjson` here, with `--report` as a hidden alias (`test` keeps an
    `Option` so `test.report` still applies). The format allowlist holds

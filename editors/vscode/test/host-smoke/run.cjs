@@ -76,8 +76,9 @@ console.log(JSON.stringify(observed, null, 2));
 assert.equal(observed.error, undefined, observed.error);
 assert.ok(observed.activated, 'the extension did not activate');
 assert.ok(observed.serverCommandRegistered, 'the language client never reached running state');
-const expected = cp.spawnSync(binary, ['validate', spec], { encoding: 'utf8' }).stdout.split('\n').filter((l) => /^\S+:\d+:\d+ /.test(l)).length
-	+ cp.spawnSync(binary, ['lint', spec], { encoding: 'utf8' }).stdout.split('\n').filter((l) => /^\S+:\d+:\d+ /.test(l)).length;
+// `check` runs the editor's pass: one finding per problem, where
+// `validate` plus `lint` would count a missing operationId twice.
+const expected = cp.spawnSync(binary, ['check', spec], { encoding: 'utf8' }).stdout.split('\n').filter((l) => /^\S+:\d+:\d+ /.test(l)).length;
 assert.equal(observed.before.length, expected, `expected each of the CLI's ${expected} findings once`);
 assert.ok(observed.after.length > 0 && observed.after.every((severity) => severity === 0),
 	`suspect.lint.minSeverity=error left non-error findings: ${observed.after}`);

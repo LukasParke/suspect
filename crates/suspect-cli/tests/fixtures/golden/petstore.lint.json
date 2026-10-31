@@ -1,158 +1,189 @@
-[
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "info-contact",
-    "message": "Info object should contain a contact object.",
-    "line": 3,
-    "col": 3,
-    "range": {
-      "start": 23,
-      "end": 62
+{
+  "findings": [
+    {
+      "check": "lint",
+      "code": "info-contact",
+      "col": 3,
+      "file": "docs/demo/petstore.yaml",
+      "line": 3,
+      "message": "Info object should contain a contact object.",
+      "pointer": "/info",
+      "range": {
+        "end": 62,
+        "start": 23
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "info-description",
+      "col": 3,
+      "file": "docs/demo/petstore.yaml",
+      "line": 3,
+      "message": "OpenAPI object should have `description`.",
+      "pointer": "/info",
+      "range": {
+        "end": 62,
+        "start": 23
+      },
+      "severity": "info"
+    },
+    {
+      "check": "lint",
+      "code": "info-license",
+      "col": 3,
+      "file": "docs/demo/petstore.yaml",
+      "line": 3,
+      "message": "Info object should contain a license object.",
+      "pointer": "/info",
+      "range": {
+        "end": 62,
+        "start": 23
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "oas3-api-contact",
+      "col": 3,
+      "file": "docs/demo/petstore.yaml",
+      "line": 3,
+      "message": "OpenAPI 3.x API description must have a contact object.",
+      "pointer": "/info",
+      "range": {
+        "end": 62,
+        "start": 23
+      },
+      "severity": "info"
+    },
+    {
+      "alias_of": "operation-operationId",
+      "check": "lint",
+      "code": "oas-operation-missing-operationId",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 8,
+      "message": "Operation must have an `operationId`.",
+      "pointer": "/paths/~1pets/get",
+      "range": {
+        "end": 303,
+        "start": 94
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "operation-4xx-response",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 8,
+      "message": "Operation should have at least one 4XX response.",
+      "pointer": "/paths/~1pets/get",
+      "range": {
+        "end": 303,
+        "start": 94
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "operation-tags",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 8,
+      "message": "Operation should have non-empty `tags` array.",
+      "pointer": "/paths/~1pets/get",
+      "range": {
+        "end": 303,
+        "start": 94
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "security-rate-limit-documented",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 8,
+      "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
+      "pointer": "/paths/~1pets/get",
+      "range": {
+        "end": 303,
+        "start": 94
+      },
+      "severity": "info"
+    },
+    {
+      "alias_of": "operation-operationId",
+      "check": "lint",
+      "code": "oas-operation-missing-operationId",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 18,
+      "message": "Operation must have an `operationId`.",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "range": {
+        "end": 541,
+        "start": 336
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "operation-4xx-response",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 18,
+      "message": "Operation should have at least one 4XX response.",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "range": {
+        "end": 541,
+        "start": 336
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "operation-tags",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 18,
+      "message": "Operation should have non-empty `tags` array.",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "range": {
+        "end": 541,
+        "start": 336
+      },
+      "severity": "warning"
+    },
+    {
+      "check": "lint",
+      "code": "path-params",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 18,
+      "message": "Operation `get` of \"/pets/{petId}\" does not declare path parameter {petId}",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "range": {
+        "end": 541,
+        "start": 336
+      },
+      "severity": "error"
+    },
+    {
+      "check": "lint",
+      "code": "security-rate-limit-documented",
+      "col": 7,
+      "file": "docs/demo/petstore.yaml",
+      "line": 18,
+      "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
+      "pointer": "/paths/~1pets~1{petId}/get",
+      "range": {
+        "end": 541,
+        "start": 336
+      },
+      "severity": "info"
     }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "info-description",
-    "message": "OpenAPI object should have `description`.",
-    "line": 3,
-    "col": 3,
-    "range": {
-      "start": 23,
-      "end": 62
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "info-license",
-    "message": "Info object should contain a license object.",
-    "line": 3,
-    "col": 3,
-    "range": {
-      "start": 23,
-      "end": 62
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "oas3-api-contact",
-    "message": "OpenAPI 3.x API description must have a contact object.",
-    "line": 3,
-    "col": 3,
-    "range": {
-      "start": 23,
-      "end": 62
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "operation-4xx-response",
-    "message": "Operation should have at least one 4XX response.",
-    "line": 8,
-    "col": 7,
-    "range": {
-      "start": 94,
-      "end": 303
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Error",
-    "code": "operation-operationId",
-    "message": "Operation must have an `operationId`.",
-    "line": 8,
-    "col": 7,
-    "range": {
-      "start": 94,
-      "end": 303
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "operation-tags",
-    "message": "Operation should have non-empty `tags` array.",
-    "line": 8,
-    "col": 7,
-    "range": {
-      "start": 94,
-      "end": 303
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "security-rate-limit-documented",
-    "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
-    "line": 8,
-    "col": 7,
-    "range": {
-      "start": 94,
-      "end": 303
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "operation-4xx-response",
-    "message": "Operation should have at least one 4XX response.",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Error",
-    "code": "operation-operationId",
-    "message": "Operation must have an `operationId`.",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Warning",
-    "code": "operation-tags",
-    "message": "Operation should have non-empty `tags` array.",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Error",
-    "code": "path-params",
-    "message": "Operation `get` of \"/pets/{petId}\" does not declare path parameter {petId}",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  },
-  {
-    "file": "docs/demo/petstore.yaml",
-    "severity": "Info",
-    "code": "security-rate-limit-documented",
-    "message": "Operations should document rate limiting — a 429 response or rate-limit headers.",
-    "line": 18,
-    "col": 7,
-    "range": {
-      "start": 336,
-      "end": 541
-    }
-  }
-]
+  ],
+  "suppressed": []
+}

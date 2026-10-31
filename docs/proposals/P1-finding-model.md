@@ -951,6 +951,69 @@ releasable on its own.
    filters, and `check_parity.rs` runs the CLI and the LSP harness
    (`tests/support/editor.rs`) on the same fixtures and compares
    `(code, severity, range)`. Estimate: 1.5 days.
+   **Done.** `suspect_cli::commands::check` (`CheckArgs`, `Request`,
+   `command`, `Options`, `run` -> `Outcome`, `Shown`, `print`, `text`;
+   `VALIDATE`, `LINT`, `PARSE` filters; `CheckName` for `--only`). Each
+   input gets its own workspace (`ref.max_docs`, the reference allowlist)
+   and runs `check_document`, then TS rules, then `apply_policy_report`
+   per document (validation findings in a referenced document are
+   canonicalized and suppressed against that document); identical
+   findings from two inputs are reported once. `validate` and `lint` are
+   `command` with a filter; `check --only` takes the `CheckId` names
+   (comma-separated or repeated), `--parse-only` conflicts with `--only`,
+   `--sdk`/`--no-sdk` set `Policy::sdk`, and `check` also takes
+   `--ruleset`, `--min-severity`, `--strict-format` and
+   `--reference-allowlist`. Output: text keeps the `file:line:col` line and
+   prints the registry's `how to fix:` line under it (messages no longer
+   carry it), with `N suppressed finding(s) hidden` on stderr; JSON is
+   `render::json_report` (lowercase severities, `check`, `pointer`,
+   `range`) plus `alias_of` on renamed lint findings; SARIF uses the
+   registry for rule text and gains `endLine`/`endColumn`; JUnit is
+   `render::junit`. Every located finding gets a pointer
+   (`suspect_check::pointer_at`, the deepest value containing its range;
+   the CLI computes it, the editor does not). `ci` runs one `check` stage
+   by default; `--stage validate` / `--stage lint` run it with that filter
+   under the old name (the VS Code Testing view asks for those), and the
+   stage runs with SDK findings off, because the `codegen` stage gates
+   generation itself (admission refuses a spec without one HTTPS server
+   that the generator still renders). `stats` gains `syntax_errors`,
+   `ref_edges`, `legal_cycles`, `illegal_cycles`, `workspace_docs`,
+   `workspace_edges` (`family_label` moved there). TS rules run when
+   `rules.enabled` is set and the filter includes `rules`, or when
+   `--only` names `rules`; no rule files is nothing, no Bun is a
+   `rules-runtime-unavailable` warning per input, a collision or a worker
+   failure exits 2 (per-document deadline 10 s). `rules check` now exits 2
+   when rule files exist and Bun does not (it printed "no TS rules found"
+   and exited 0, against its exit-table row). Also: `$ref` codes
+   (`invalid-ref`, `unresolved-ref`, `ref-outside-allowlist`) are
+   `CheckId::Ref` in the validate table, so `--only ref` keeps them;
+   `check_document` returns only findings of the selected checks; a
+   `.json` document with no recovery errors must also parse as strict
+   JSON (`syntax-error` at the first error), which `validate` did by
+   extension. Deviations: no syntax short-circuit, so a broken file gets
+   every check, as in the editor (the parity test requires it); syntax
+   errors are also reported for every document of an input's loaded
+   `$ref` closure, as `validate` did. An unreadable input is an
+   `io-error` finding (exit 1), and `validation-input` is gone.
+   `project build`, `upgrade` and `admission` still use the old
+   `validate_file`/`validate_workspace` (validation only, output
+   `Finding`s); only the commands moved. `lint` on petstore still exits 1
+   (`path-params` is an error); the missing-operationId finding is the
+   warning under its canonical code. Goldens
+   (`tests/fixtures/golden/petstore.*`, regenerated): validate drops the
+   two `sdk-operation-missing-id` lines (no codegen configured); lint
+   shows `oas-operation-missing-operationId` (warning, with how-to-fix)
+   for `operation-operationId` (error); JSON moves to the report object
+   with lowercase severities and no how-to-fix in messages; SARIF gains
+   rule summaries, help and region ends;
+   `petstore.check.*` are new. Tests: `tests/check.rs` (exit statuses,
+   filters, `--parse-only`, the newly CLI-run checks, the SDK category,
+   suppression output, SARIF/JUnit, TS rules with and without Bun,
+   `stats`), `tests/check_parity.rs` (CLI vs editor on eleven fixtures,
+   equal `(code, severity, start, end)`), and the ported `cli.rs`,
+   `validation.rs`, `pinned_validation.rs`, `lint_locations.rs`,
+   `config_agreement.rs` and `ecosystem_commands.rs`. The VS Code host
+   smoke compares the editor's count with `suspect check`.
 6. **TS rules in `check` and (opt-in) in the LSP.** `check_rules`, registry
    collisions, `rules-runtime-unavailable`, the LSP `RuleHost` lifecycle and
    epoch bump. Tests: bun-gated integration test in `suspect-check/tests`,

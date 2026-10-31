@@ -174,8 +174,7 @@ fn allowlist_has_no_stale_entries() {
 #[test]
 fn sarif_is_rejected_by_clap_where_it_was_never_rendered() {
     for argv in [
-        &["suspect", "check", "a.yaml", "--format", "sarif"][..],
-        &["suspect", "ci", "--format", "sarif"],
+        &["suspect", "ci", "--format", "sarif"][..],
         &[
             "suspect",
             "release-plan",

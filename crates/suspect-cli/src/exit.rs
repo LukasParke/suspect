@@ -62,17 +62,21 @@ pub const DOCUMENTED: &[(&str, &[Exit], &str)] = &[
     (
         "check",
         &[Clean, Findings, Usage],
-        "1: a document has an error-severity finding",
+        "1: an error-severity finding remains after policy; 2: a \
+         configuration or ruleset error, or a TypeScript rule id that reuses \
+         a builtin code",
     ),
     (
         "validate",
         &[Clean, Findings, Usage],
-        "1: an error-severity finding",
+        "1: an error-severity finding from the validation checks; 2: a \
+         configuration error",
     ),
     (
         "lint",
         &[Clean, Findings, Usage],
-        "1: an error-severity finding at or above the floor",
+        "1: an error-severity lint, markdown or TypeScript rule finding; 2: a \
+         configuration or ruleset error",
     ),
     (
         "fmt",

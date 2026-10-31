@@ -12,6 +12,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 50,
+                  "endLine": 15,
                   "startColumn": 7,
                   "startLine": 8
                 }
@@ -19,7 +21,7 @@
             }
           ],
           "message": {
-            "text": "get operation is missing an operationId\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name."
+            "text": "get operation is missing an operationId"
           },
           "ruleId": "oas-operation-missing-operationId",
           "ruleIndex": 0
@@ -33,6 +35,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 50,
+                  "endLine": 15,
                   "startColumn": 7,
                   "startLine": 8
                 }
@@ -40,31 +44,10 @@
             }
           ],
           "message": {
-            "text": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response\nhow to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable."
+            "text": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response"
           },
           "ruleId": "oas-operation-no-error-response",
           "ruleIndex": 1
-        },
-        {
-          "level": "note",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "docs/demo/petstore.yaml"
-                },
-                "region": {
-                  "startColumn": 7,
-                  "startLine": 8
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "GET operation has no `operationId`; SDK generation falls back to `GET /pets` selection\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name."
-          },
-          "ruleId": "sdk-operation-missing-id",
-          "ruleIndex": 2
         },
         {
           "level": "error",
@@ -75,6 +58,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
                   "startColumn": 5,
                   "startLine": 17
                 }
@@ -82,10 +67,10 @@
             }
           ],
           "message": {
-            "text": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it\nhow to fix: Declare every `{var}` in the path as an `in: path` parameter on the path item or operation."
+            "text": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it"
           },
           "ruleId": "oas-path-param-not-declared",
-          "ruleIndex": 3
+          "ruleIndex": 2
         },
         {
           "level": "warning",
@@ -96,6 +81,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
                   "startColumn": 7,
                   "startLine": 18
                 }
@@ -103,7 +90,7 @@
             }
           ],
           "message": {
-            "text": "get operation is missing an operationId\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name."
+            "text": "get operation is missing an operationId"
           },
           "ruleId": "oas-operation-missing-operationId",
           "ruleIndex": 0
@@ -117,6 +104,8 @@
                   "uri": "docs/demo/petstore.yaml"
                 },
                 "region": {
+                  "endColumn": 49,
+                  "endLine": 25,
                   "startColumn": 7,
                   "startLine": 18
                 }
@@ -124,31 +113,10 @@
             }
           ],
           "message": {
-            "text": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response\nhow to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable."
+            "text": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response"
           },
           "ruleId": "oas-operation-no-error-response",
           "ruleIndex": 1
-        },
-        {
-          "level": "note",
-          "locations": [
-            {
-              "physicalLocation": {
-                "artifactLocation": {
-                  "uri": "docs/demo/petstore.yaml"
-                },
-                "region": {
-                  "startColumn": 7,
-                  "startLine": 18
-                }
-              }
-            }
-          ],
-          "message": {
-            "text": "GET operation has no `operationId`; SDK generation falls back to `GET /pets/{petId}` selection\nhow to fix: Add an `operationId` so generated SDK methods carry a stable name."
-          },
-          "ruleId": "sdk-operation-missing-id",
-          "ruleIndex": 2
         }
       ],
       "tool": {
@@ -157,27 +125,30 @@
           "name": "suspect",
           "rules": [
             {
+              "help": {
+                "text": "Add an `operationId` so generated SDK methods carry a stable name."
+              },
               "id": "oas-operation-missing-operationId",
               "shortDescription": {
-                "text": "oas-operation-missing-operationId"
+                "text": "Operation without an operationId"
               }
             },
             {
+              "help": {
+                "text": "Add a `default` response or a 4XX/5XX response so client error handling is predictable."
+              },
               "id": "oas-operation-no-error-response",
               "shortDescription": {
-                "text": "oas-operation-no-error-response"
+                "text": "Operation without an error response"
               }
             },
             {
-              "id": "sdk-operation-missing-id",
-              "shortDescription": {
-                "text": "sdk-operation-missing-id"
-              }
-            },
-            {
+              "help": {
+                "text": "Declare every `{var}` in the path as an `in: path` parameter on the path item or operation."
+              },
               "id": "oas-path-param-not-declared",
               "shortDescription": {
-                "text": "oas-path-param-not-declared"
+                "text": "Path template variable without a declared parameter"
               }
             }
           ]

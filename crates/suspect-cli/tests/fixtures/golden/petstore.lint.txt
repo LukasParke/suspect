@@ -2,12 +2,14 @@ docs/demo/petstore.yaml:3:3 [WARNING] info-contact: Info object should contain a
 docs/demo/petstore.yaml:3:3 [INFO] info-description: OpenAPI object should have `description`.
 docs/demo/petstore.yaml:3:3 [WARNING] info-license: Info object should contain a license object.
 docs/demo/petstore.yaml:3:3 [INFO] oas3-api-contact: OpenAPI 3.x API description must have a contact object.
+docs/demo/petstore.yaml:8:7 [WARNING] oas-operation-missing-operationId: Operation must have an `operationId`.
+how to fix: Add an `operationId` so generated SDK methods carry a stable name.
 docs/demo/petstore.yaml:8:7 [WARNING] operation-4xx-response: Operation should have at least one 4XX response.
-docs/demo/petstore.yaml:8:7 [ERROR] operation-operationId: Operation must have an `operationId`.
 docs/demo/petstore.yaml:8:7 [WARNING] operation-tags: Operation should have non-empty `tags` array.
 docs/demo/petstore.yaml:8:7 [INFO] security-rate-limit-documented: Operations should document rate limiting — a 429 response or rate-limit headers.
+docs/demo/petstore.yaml:18:7 [WARNING] oas-operation-missing-operationId: Operation must have an `operationId`.
+how to fix: Add an `operationId` so generated SDK methods carry a stable name.
 docs/demo/petstore.yaml:18:7 [WARNING] operation-4xx-response: Operation should have at least one 4XX response.
-docs/demo/petstore.yaml:18:7 [ERROR] operation-operationId: Operation must have an `operationId`.
 docs/demo/petstore.yaml:18:7 [WARNING] operation-tags: Operation should have non-empty `tags` array.
 docs/demo/petstore.yaml:18:7 [ERROR] path-params: Operation `get` of "/pets/{petId}" does not declare path parameter {petId}
 docs/demo/petstore.yaml:18:7 [INFO] security-rate-limit-documented: Operations should document rate limiting — a 429 response or rate-limit headers.

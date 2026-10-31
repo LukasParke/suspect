@@ -1,8 +1,9 @@
-//! Golden output for `validate` and `lint` on `docs/demo/petstore.yaml`.
+//! Golden output for `check`, `validate` and `lint` on
+//! `docs/demo/petstore.yaml`.
 //!
-//! Text and SARIF render through `suspect_diag::render`; these files were
-//! recorded before that switch, so a byte of drift fails here. Regenerate
-//! after an intended change with:
+//! All three run the check pass and render through `suspect_diag::render`
+//! (P1 step 5), so a byte of drift fails here. Regenerate after an
+//! intended change with:
 //!
 //! ```text
 //! SUSPECT_BLESS=1 cargo test -p suspect-cli --test finding_output
@@ -37,6 +38,26 @@ fn check(command: &str, format: &str, golden: &str) {
          `SUSPECT_BLESS=1 cargo test -p suspect-cli --test finding_output`\n--- actual\n{actual}",
         path.display()
     );
+}
+
+#[test]
+fn check_text() {
+    check("check", "text", "petstore.check.txt");
+}
+
+#[test]
+fn check_json() {
+    check("check", "json", "petstore.check.json");
+}
+
+#[test]
+fn check_sarif() {
+    check("check", "sarif", "petstore.check.sarif");
+}
+
+#[test]
+fn check_junit() {
+    check("check", "junit", "petstore.check.junit.xml");
 }
 
 #[test]

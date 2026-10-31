@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="suspect" tests="16" failures="10" errors="0">
+  <testsuite name="docs/demo/petstore.yaml" tests="16" failures="10" errors="0">
+    <testcase name="info-contact" classname="docs/demo/petstore.yaml:3:3">
+      <failure type="warning" message="Info object should contain a contact object."/>
+    </testcase>
+    <testcase name="info-description" classname="docs/demo/petstore.yaml:3:3">
+      <system-out>[INFO] OpenAPI object should have `description`.</system-out>
+    </testcase>
+    <testcase name="info-license" classname="docs/demo/petstore.yaml:3:3">
+      <failure type="warning" message="Info object should contain a license object."/>
+    </testcase>
+    <testcase name="oas3-api-contact" classname="docs/demo/petstore.yaml:3:3">
+      <system-out>[INFO] OpenAPI 3.x API description must have a contact object.</system-out>
+    </testcase>
+    <testcase name="oas-operation-missing-operationId" classname="docs/demo/petstore.yaml:8:7">
+      <failure type="warning" message="get operation is missing an operationId"/>
+    </testcase>
+    <testcase name="oas-operation-no-error-response" classname="docs/demo/petstore.yaml:8:7">
+      <system-out>[INFO] operation `&lt;unnamed&gt;` (get) declares no `default` or 4XX/5XX response</system-out>
+    </testcase>
+    <testcase name="operation-4xx-response" classname="docs/demo/petstore.yaml:8:7">
+      <failure type="warning" message="Operation should have at least one 4XX response."/>
+    </testcase>
+    <testcase name="operation-tags" classname="docs/demo/petstore.yaml:8:7">
+      <failure type="warning" message="Operation should have non-empty `tags` array."/>
+    </testcase>
+    <testcase name="security-rate-limit-documented" classname="docs/demo/petstore.yaml:8:7">
+      <system-out>[INFO] Operations should document rate limiting — a 429 response or rate-limit headers.</system-out>
+    </testcase>
+    <testcase name="oas-path-param-not-declared" classname="docs/demo/petstore.yaml:17:5">
+      <failure type="error" message="path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it"/>
+    </testcase>
+    <testcase name="oas-operation-missing-operationId" classname="docs/demo/petstore.yaml:18:7">
+      <failure type="warning" message="get operation is missing an operationId"/>
+    </testcase>
+    <testcase name="oas-operation-no-error-response" classname="docs/demo/petstore.yaml:18:7">
+      <system-out>[INFO] operation `&lt;unnamed&gt;` (get) declares no `default` or 4XX/5XX response</system-out>
+    </testcase>
+    <testcase name="operation-4xx-response" classname="docs/demo/petstore.yaml:18:7">
+      <failure type="warning" message="Operation should have at least one 4XX response."/>
+    </testcase>
+    <testcase name="operation-tags" classname="docs/demo/petstore.yaml:18:7">
+      <failure type="warning" message="Operation should have non-empty `tags` array."/>
+    </testcase>
+    <testcase name="path-params" classname="docs/demo/petstore.yaml:18:7">
+      <failure type="error" message="Operation `get` of &quot;/pets/{petId}&quot; does not declare path parameter {petId}"/>
+    </testcase>
+    <testcase name="security-rate-limit-documented" classname="docs/demo/petstore.yaml:18:7">
+      <system-out>[INFO] Operations should document rate limiting — a 429 response or rate-limit headers.</system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

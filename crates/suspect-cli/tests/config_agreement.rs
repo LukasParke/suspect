@@ -55,27 +55,28 @@ fn command(cwd: &Path) -> Command {
     cmd
 }
 
-/// `(code, severity)` for every `suspect lint --format json` finding.
+/// `(code, severity)` for every `suspect lint --format json` finding
+/// (`findings` of the report; severities are lowercase).
 fn lint(cwd: &Path, spec: &str) -> Vec<(String, String)> {
     let out = command(cwd)
         .args(["lint", spec, "--format", "json"])
         .output()
         .unwrap();
-    let findings: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+    let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
         panic!(
             "{e}: {}{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         )
     });
-    let mut pairs: Vec<(String, String)> = findings
+    let mut pairs: Vec<(String, String)> = report["findings"]
         .as_array()
         .unwrap()
         .iter()
         .map(|f| {
             (
                 f["code"].as_str().unwrap().to_owned(),
-                f["severity"].as_str().unwrap().to_ascii_lowercase(),
+                f["severity"].as_str().unwrap().to_owned(),
             )
         })
         .collect();
