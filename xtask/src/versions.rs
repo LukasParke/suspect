@@ -81,7 +81,41 @@ pub fn run_bump(args: &[String]) -> Result<()> {
         println!("updated {rel}");
     }
     println!("all version lines are {version}");
-    Ok(())
+    prepend_changelog(&root, version)
+}
+
+/// Prepends the commits since the last tag to `CHANGELOG.md` with
+/// git-cliff (`cliff.toml`). Without git-cliff the bump still succeeds and
+/// says how to add the section.
+fn prepend_changelog(root: &Path, version: &str) -> Result<()> {
+    let tag = format!("v{version}");
+    let args = [
+        "--unreleased",
+        "--tag",
+        tag.as_str(),
+        "--prepend",
+        "CHANGELOG.md",
+    ];
+    let shown = format!("git cliff {}", args.join(" "));
+    match std::process::Command::new("git-cliff")
+        .args(args)
+        .current_dir(root)
+        .status()
+    {
+        Ok(status) if status.success() => {
+            println!("updated CHANGELOG.md ({shown})");
+            Ok(())
+        }
+        Ok(status) => bail!("`{shown}` exited with {status}"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            println!(
+                "git-cliff not found; CHANGELOG.md not updated. Install it \
+                 (cargo install --locked git-cliff) and run `{shown}`"
+            );
+            Ok(())
+        }
+        Err(e) => Err(e).with_context(|| format!("spawn `{shown}`")),
+    }
 }
 
 pub fn run_check(args: &[String]) -> Result<()> {

@@ -586,19 +586,95 @@ workflow does, required secrets), and its "Checks" list is replaced by
    `cliff.toml`; `CHANGELOG.md` with the `v0.1.0` entry;
    `THIRD-PARTY-NOTICES.md` via cargo-about. Dry run with a
    `v0.1.0-rc.1` tag on a fork. 1 day.
+   **Done, rc dry run not run** (no tag pushed, no fork). cargo-dist 0.32.0;
+   `dist plan` lists exactly the "Asset contract" archives, `.sha256` files,
+   installers, `suspect.rb` and `source.tar.gz`, and every archive carries
+   `suspect`, both licences, `README.md`, `CHANGELOG.md` and
+   `THIRD-PARTY-NOTICES.md`. The CI job is `dist-check` (`cargo xtask ci
+   dist-check`, `dist generate --check`; CI installs `cargo-dist@0.32.0`
+   with `taiki-e/install-action`). Deviations: dist puts
+   `x86_64-apple-darwin` on its default `macos-15-intel` runner (native, not
+   cross from `macos-14`) and builds musl with `musl-tools` rather than
+   zigbuild; `[dist.github-custom-job-permissions]` gives the editor publish
+   job `contents: read` instead of dist's default `id-token`/`packages`
+   grant, which would make the reusable workflow's own `permissions` invalid.
+   `include` lists only `THIRD-PARTY-NOTICES.md`, because dist includes
+   `LICENSE-*`, `README.md` and `CHANGELOG.md` by itself.
+   `THIRD-PARTY-NOTICES.md` comes from cargo-about 0.9.3 (`about.toml` with
+   `deny.toml`'s allow list and the seven release targets, `about.hbs`) over
+   `suspect-cli`'s normal dependencies; it names the two vendored grammars
+   by hand because they are not crates. `CHANGELOG.md` holds the
+   hand-written `0.1.0` entry, dated "Unreleased" until the release PR sets
+   the date. `cargo xtask bump` now runs `git cliff --unreleased --tag
+   v<V> --prepend CHANGELOG.md` when `git-cliff` is on `PATH`, and prints
+   the command otherwise.
 5. **Editor packaging.** `package-editors.yml`, `publish-editors.yml`;
    `editors/vscode` `package.json` fields, `LICENSE`, `.vscodeignore`,
    `@vscode/vsce`/`ovsx` dev dependencies; `editors/zed` `repository` and
    licence files. Test: the rc tag produces an installable `.vsix`
    (`code --install-extension`). 0.5-1 day.
+   **Done, rc tag not run.** No tag was pushed; locally `npx vsce package`
+   builds `suspect-vscode-0.1.0.vsix` (335 files, 518 KB) and `code
+   --install-extension` into a throwaway extensions dir installs
+   `suspect.suspect-vscode@0.1.0`. `package-editors.yml` builds, tests and
+   packages the universal `.vsix` (after `check-versions --tag`), installs it
+   into a headless VS Code, runs the Testing-section `smoke` job (checksum,
+   binary at depth 1-2, `suspect --version`, `suspect check
+   docs/demo/petstore.yaml` exit 0 or 1, on `ubuntu-22.04` with musl,
+   `macos-14`, `windows-2022`) and an `asset-names` job for the archive,
+   checksum and `.vsix` names. `publish-editors.yml` downloads the `.vsix`
+   from the release, verifies it and publishes with the pinned `vsce`/`ovsx`
+   (4.1.0 / 1.3.0) in a `release` environment; each registry step runs only
+   when its secret is set. Additions: `media/icon.png` (128 px PNG drawn from
+   `suspect.svg`; vsce rejects SVG icons), `homepage`, `bugs`, `categories`,
+   `keywords`, a `package` script. `private: true` stays (vsce ignores it; it
+   still blocks `npm publish`). The Zed licence files are copies of
+   `LICENSE-MIT`/`LICENSE-APACHE` (Zed reads any `LICENSE*` at the extension
+   root). Gap: `editors/vscode` has no `README.md`, so the Marketplace page
+   will be empty until one is written.
 6. **First release.** Create `LukasParke/homebrew-tap`, Marketplace and
    Open VSX publishers, secrets; manual first Zed registry submission; tag
    `v0.1.0`. README "Install" and CONTRIBUTING "Releasing". 0.5 day.
+   **Docs done; the rest is manual and not done.** README "Install" has the
+   commands above plus checksums, attestations and the Action; CONTRIBUTING
+   "Releasing" describes the bump PR, the tag, what each workflow does, and
+   lists the manual prerequisites (tap repository and `HOMEBREW_TAP_TOKEN`,
+   a `release` environment, Marketplace and Open VSX publishers with
+   `VSCE_PAT`/`OVSX_PAT`, the first Zed submission, `ZED_REGISTRY_FORK` and
+   `ZED_EXTENSIONS_TOKEN`). No accounts, repositories, secrets or tags were
+   created.
 7. **GitHub Action from releases.** Rewrite `action.yml`; add a workflow
    that uses `./.github/actions/suspect` against `docs/demo/petstore.yaml`
    on a pinned released version. 2-3 h.
+   **Done; the workflow cannot pass before v0.1.0 exists.** `action.yml`
+   takes `version` (`0.2.0`, `v0.2.0` or `latest`; default
+   `github.action_ref` when it is a `v*` tag, else an error asking for the
+   input), maps `RUNNER_OS`/`RUNNER_ARCH` to the editor triples (musl on
+   Linux), downloads the archive and `.sha256` with curl, verifies,
+   extracts (7-Zip for the Windows zip), finds `suspect` at depth 1-2 and
+   puts it on `PATH`. Additions: `command` may be empty (install only);
+   outputs `version`, `path`, `exit-code`; `fail-on-findings: false` lets a
+   `check` that exits 1 pass. `.github/workflows/action-smoke.yml` runs the
+   action on `ubuntu-22.04`, `ubuntu-22.04-arm`, `macos-14` and
+   `windows-2022` against `docs/demo/petstore.yaml` with version `0.1.0`;
+   it is `workflow_dispatch` only until the first release, then gains a
+   `release: published` trigger. The install and run steps were exercised
+   locally against a fake release (correct version, missing version, bad
+   checksum, findings tolerated and not).
 8. **Zed registry automation.** Script the extensions-repo PR in
    `publish-editors.yml` once the first submission is merged. 2 h.
+   **Done, not run.** `.github/scripts/zed-registry-pr.sh <version>` checks
+   that the tag commit is on `main` (Zed builds only branch commits) and that
+   `editors/zed/extension.toml` has the version, makes a shallow,
+   blob-less clone of `zed-industries/extensions`, sets `version` in the
+   existing `[suspect]` table, moves the submodule gitlink with `git
+   update-index` (no submodule fetch), syncs the fork, pushes
+   `suspect-v<V>` to it and opens the PR with `gh`. It refuses when the
+   registry has no `[suspect]` entry, so the first submission stays manual.
+   The `zed` job in `publish-editors.yml` runs it only when the
+   `ZED_EXTENSIONS_TOKEN` secret and the `ZED_REGISTRY_FORK` repository
+   variable are set. Tested with `DRY_RUN=1` against local fake repositories
+   (version edited, gitlink moved, version mismatch rejected).
 
 Steps 1-3 are useful on their own and can land before the tooling decision
 in step 4. Each step leaves main green.

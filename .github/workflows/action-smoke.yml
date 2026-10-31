@@ -1,0 +1,58 @@
+# Exercises .github/actions/suspect against a pinned release on each runner
+# OS. Manual only until the first release (v0.1.0) is published: before
+# that the download has nothing to fetch and this workflow fails. After the
+# first release, add `release: types: [published]` (and a schedule if
+# wanted) and move the pinned default forward with each release.
+name: action-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'suspect release to install (e.g. 0.1.0 or latest)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: read
+
+jobs:
+  action-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-22.04-arm, macos-14, windows-2022]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # Install only: `suspect` is on PATH for later steps.
+      - id: install
+        uses: ./.github/actions/suspect
+        with:
+          version: ${{ inputs.version }}
+      - name: Installed version
+        shell: bash
+        env:
+          WANT: ${{ inputs.version }}
+          GOT: ${{ steps.install.outputs.version }}
+        run: |
+          suspect --version
+          [ "$WANT" = latest ] || [ "$GOT" = "${WANT#v}" ]
+      # The check gate on the demo spec. Findings (exit 1) are expected and
+      # tolerated here; exit 2 or a crash fails.
+      - id: check
+        uses: ./.github/actions/suspect
+        with:
+          version: ${{ inputs.version }}
+          command: check
+          paths: docs/demo/petstore.yaml
+          fail-on-findings: 'false'
+      - name: Check exit code
+        shell: bash
+        env:
+          RC: ${{ steps.check.outputs.exit-code }}
+        run: |
+          echo "suspect check exited $RC"
+          [ "$RC" = 0 ] || [ "$RC" = 1 ]

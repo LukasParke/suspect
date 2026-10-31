@@ -1,0 +1,166 @@
+# Global artifacts job of the cargo-dist release (dist-workspace.toml,
+# `global-artifacts-jobs`). release.yml calls it after the binaries are built;
+# everything uploaded as `artifacts-*` is attached to the GitHub release.
+# docs/proposals/P5-release.md, "Editor packaging" and "Testing".
+name: package-editors
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: dist-manifest.json from the plan job
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PLAN: ${{ inputs.plan }}
+
+jobs:
+  # The universal .vsix (no binary inside) and its checksum.
+  vscode:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Version from the plan
+        run: |
+          TAG=$(jq -r '.announcement_tag' <<< "$PLAN")
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+      - name: Every version line matches the tag
+        run: cargo xtask check-versions --tag "$TAG"
+      - name: Build and test
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run compile
+          npm run test:headless
+      - name: Package
+        working-directory: editors/vscode
+        run: |
+          npx vsce package --out "suspect-vscode-${VERSION}.vsix"
+          sha256sum "suspect-vscode-${VERSION}.vsix" > "suspect-vscode-${VERSION}.vsix.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: artifacts-package-editors
+          path: |
+            editors/vscode/suspect-vscode-*.vsix
+            editors/vscode/suspect-vscode-*.vsix.sha256
+
+  # Install the .vsix into a headless VS Code: the manifest the Marketplace
+  # will see must load.
+  vscode-install:
+    needs: vscode
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: artifacts-package-editors
+      - name: code --install-extension
+        run: |
+          sudo snap install code --classic
+          sha256sum -c suspect-vscode-*.vsix.sha256
+          dir=$(mktemp -d)
+          code --extensions-dir "$dir/ext" --user-data-dir "$dir/data" --install-extension suspect-vscode-*.vsix
+          code --extensions-dir "$dir/ext" --user-data-dir "$dir/data" --list-extensions --show-versions | tee installed.txt
+          grep -qx "suspect.suspect-vscode@${PLAN_VERSION}" installed.txt
+        env:
+          PLAN_VERSION: ${{ fromJson(inputs.plan).releases[0].app_version }}
+
+  # Each archive a client downloads works on a clean runner: checksum,
+  # binary at depth 1 or 2, `suspect --version`, and `suspect check` on the
+  # demo spec exiting 0 or 1. Linux uses the static musl build, as editors do.
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            triple: x86_64-unknown-linux-musl
+            ext: tar.gz
+          - runner: macos-14
+            triple: aarch64-apple-darwin
+            ext: tar.gz
+          - runner: windows-2022
+            triple: x86_64-pc-windows-msvc
+            ext: zip
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-build-local-*
+          path: dist
+          merge-multiple: true
+      - name: Verify, extract, run
+        env:
+          ASSET: suspect-cli-${{ matrix.triple }}.${{ matrix.ext }}
+          VERSION: ${{ fromJson(inputs.plan).releases[0].app_version }}
+        run: |
+          set -euo pipefail
+          sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi; }
+          want=$(awk '{print $1; exit}' "dist/$ASSET.sha256")
+          got=$(sha "dist/$ASSET" | awk '{print $1}')
+          [ "$want" = "$got" ] || { echo "checksum mismatch: $want != $got" >&2; exit 1; }
+          mkdir unpacked
+          # Git Bash's tar cannot read zip; the Windows runners ship 7-Zip.
+          case "$ASSET" in
+            *.zip) 7z x -y -ounpacked "dist/$ASSET" >/dev/null ;;
+            *) tar -xzf "dist/$ASSET" -C unpacked ;;
+          esac
+          bin=$(find unpacked -maxdepth 2 -type f \( -name suspect -o -name suspect.exe \) | head -n1)
+          [ -n "$bin" ] || { echo "no suspect binary at depth 1 or 2" >&2; find unpacked >&2; exit 1; }
+          "$bin" --version | tee version.txt
+          grep -qx "suspect $VERSION" version.txt
+          rc=0
+          "$bin" check docs/demo/petstore.yaml || rc=$?
+          echo "suspect check exited $rc"
+          [ "$rc" -le 1 ]
+
+  # Every name in the asset contract exists (P5 "Asset contract"). The
+  # installers, formula and source tarball come from dist's global job.
+  asset-names:
+    needs: vscode
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: artifacts-*
+          path: dist
+          merge-multiple: true
+      - name: Compare
+        env:
+          VERSION: ${{ fromJson(inputs.plan).releases[0].app_version }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for triple in aarch64-apple-darwin x86_64-apple-darwin \
+              x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
+              x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            for f in "suspect-cli-$triple.tar.gz" "suspect-cli-$triple.tar.gz.sha256"; do
+              [ -f "dist/$f" ] || { echo "missing $f"; missing=1; }
+            done
+          done
+          for f in suspect-cli-x86_64-pc-windows-msvc.zip suspect-cli-x86_64-pc-windows-msvc.zip.sha256 \
+              "suspect-vscode-$VERSION.vsix" "suspect-vscode-$VERSION.vsix.sha256"; do
+            [ -f "dist/$f" ] || { echo "missing $f"; missing=1; }
+          done
+          ls dist
+          exit "$missing"

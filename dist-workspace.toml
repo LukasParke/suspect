@@ -1,0 +1,47 @@
+# cargo-dist configuration (docs/proposals/P5-release.md, "Release tooling").
+# After editing this file run `dist generate` and commit the regenerated
+# .github/workflows/release.yml; CI (`cargo xtask ci dist-plan`) fails when
+# they drift.
+[workspace]
+members = ["cargo:."]
+
+[dist]
+# The dist version that generated release.yml; `dist` refuses to run with
+# another one. Upgrades are deliberate: `dist init` with the new version.
+cargo-dist-version = "0.32.0"
+ci = "github"
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+  "x86_64-pc-windows-msvc",
+]
+installers = ["shell", "powershell", "homebrew"]
+tap = "LukasParke/homebrew-tap"
+formula = "suspect"
+publish-jobs = ["homebrew", "./publish-editors"]
+global-artifacts-jobs = ["./package-editors"]
+# Zed's download_file cannot unpack .tar.xz, so the editors' asset contract
+# is .tar.gz on unix and .zip on Windows (P5 "Asset contract").
+unix-archive = ".tar.gz"
+windows-archive = ".zip"
+checksum = "sha256"
+install-path = "CARGO_HOME"
+# LICENSE-*, README.md and CHANGELOG.md are included automatically.
+include = ["THIRD-PARTY-NOTICES.md"]
+pr-run-mode = "plan"
+github-attestations = true
+
+[dist.github-custom-runners]
+# The glibc floor of the gnu builds is the runner's glibc (2.35 on 22.04).
+x86_64-unknown-linux-gnu = "ubuntu-22.04"
+aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"
+aarch64-unknown-linux-musl = "ubuntu-22.04-arm"
+
+[dist.github-custom-job-permissions]
+# Replaces dist's default publish-job grant (id-token, packages). The job
+# only reads the repository; the registry tokens are secrets.
+publish-editors = { contents = "read" }

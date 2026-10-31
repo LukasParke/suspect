@@ -41,6 +41,7 @@ pub(crate) enum Tool {
     Npm,
     Bun,
     Wasm32Wasip1,
+    Dist,
 }
 
 impl Tool {
@@ -54,6 +55,7 @@ impl Tool {
             Tool::Npm => "npm",
             Tool::Bun => "bun",
             Tool::Wasm32Wasip1 => "rustup target wasm32-wasip1",
+            Tool::Dist => "dist (cargo-dist)",
         }
     }
 
@@ -72,6 +74,9 @@ impl Tool {
             }
             Tool::Bun => "install from https://bun.sh (CI: oven-sh/setup-bun@v2)",
             Tool::Wasm32Wasip1 => "rustup target add wasm32-wasip1",
+            Tool::Dist => {
+                "cargo install --locked cargo-dist@<cargo-dist-version in dist-workspace.toml> (CI: taiki-e/install-action@v2, tool: cargo-dist)"
+            }
         }
     }
 
@@ -84,6 +89,7 @@ impl Tool {
             Tool::Lychee => probe_ok(Command::new("lychee").arg("--version")),
             Tool::Npm => probe_ok(Command::new(npm()).arg("--version")),
             Tool::Bun => probe_ok(Command::new("bun").arg("--version")),
+            Tool::Dist => probe_ok(Command::new("dist").arg("--version")),
             Tool::Node => {
                 let out = probe_output(Command::new("node").arg("--version"))?;
                 let major = out
@@ -250,6 +256,17 @@ pub(crate) const JOBS: &[Job] = &[
         run: |_| {
             println!("$ cargo xtask check-versions");
             crate::versions::run_check(&[])
+        },
+    },
+    Job {
+        name: "dist-check",
+        workflow: CI_YML,
+        commands: "dist generate --check (release.yml matches dist-workspace.toml)",
+        tools: &[Tool::Dist],
+        run: |ctx| {
+            Step::new("dist", &["generate", "--check"])
+                .dir(&ctx.root)
+                .run()
         },
     },
     Job {
