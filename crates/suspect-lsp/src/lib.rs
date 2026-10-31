@@ -171,8 +171,10 @@ impl Backend {
         }
         let problems = fresh.problems();
         let warnings = fresh.warnings();
+        let client_changed;
         {
             let mut st = self.state.write().await;
+            client_changed = st.client_settings != client;
             st.client_settings = client;
             if changed {
                 st.policy_epoch = st.policy_epoch.wrapping_add(1);
@@ -187,8 +189,12 @@ impl Backend {
                     .show_message(MessageType::WARNING, format!("suspect: {problem}"))
                     .await;
             }
-            // Deprecations go to the log; the manifest itself carries a
-            // diagnostic on each deprecated key.
+        }
+        // Deprecations go to the log, once per change of the files or of the
+        // client's settings (an old client key such as `testBaseUrl` logs a
+        // line naming its replacement); the manifest itself carries a
+        // diagnostic on each deprecated key.
+        if changed || client_changed {
             for warning in warnings {
                 self.client
                     .log_message(MessageType::WARNING, format!("suspect: {warning}"))
@@ -2466,7 +2472,7 @@ impl LanguageServer for Backend {
         };
         // Formatting options are ignored: the canonical form uses a
         // two-space indent regardless of editor configuration. Key
-        // reordering follows `suspect.formatting.sortKeys`.
+        // reordering follows `format.sort_keys` (`suspect.format.sortKeys`).
         let _ = &params.options;
         let Some(url) = to_url(&uri) else {
             return Ok(None);
@@ -2755,7 +2761,7 @@ impl Backend {
                 self.progress_begin("suspect.breaking", "Detecting breaking changes")
                     .await;
                 let ws = self.any_workspace().await?;
-                // `diff.baseline` (editor `suspect.ci.baseline`,
+                // `diff.baseline` (editor `suspect.diff.baseline`,
                 // `SUSPECT_GIT_BASE`, `.suspect.yaml`), else the last commit.
                 let base = self
                     .state
@@ -3229,7 +3235,7 @@ impl Backend {
         #[cfg(feature = "live-run")]
         {
             // `test.base_url` for this document: the editor's
-            // `suspect.testBaseUrl` (or `run.baseUrl`), `SUSPECT_BASE_URL`,
+            // `suspect.test.baseUrl` (or `run.baseUrl`), `SUSPECT_BASE_URL`,
             // the manifest, then `.suspect.yaml` — what `suspect test` uses.
             let base = self
                 .state

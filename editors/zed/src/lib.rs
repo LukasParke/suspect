@@ -11,7 +11,7 @@
 //!
 //! Workspace configuration is forwarded from `lsp.suspect-lsp.settings`
 //! under the `suspect` section the server reads
-//! (`{ "suspect": { "lint": .., "ref": .., "inlayHints": .. } }`).
+//! (`{ "suspect": { "lint": .., "ref": .., "editor": .. } }`).
 //!
 //! The initialization options carry `extensionVersion`, which the server
 //! compares with its own version (it warns once on a major or minor

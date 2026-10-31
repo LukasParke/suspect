@@ -82,8 +82,8 @@ repository root lockfile.
 Everything under `lsp.suspect-lsp.settings` is forwarded to the server as
 workspace configuration under the `suspect` section (it is wrapped for you;
 settings already nested under a `suspect` key are passed through unchanged).
-The keys the server reads mirror `.suspect.yaml` and the VS Code `suspect.*`
-settings:
+The keys the server reads are the `.suspect.yaml` keys, in camelCase (the
+VS Code `suspect.*` settings) or snake_case:
 
 ```json
 {
@@ -99,13 +99,18 @@ settings:
         },
         "validate": { "strictFormat": false },
         "ref": { "maxDocs": 500 },
-        "inlayHints": { "refTargets": true, "properties": true },
-        "formatting": { "sortKeys": false }
+        "editor": { "inlayHints": { "refs": true, "properties": true } },
+        "format": { "sortKeys": false },
+        "test": { "baseUrl": "http://localhost:8080" }
       }
     }
   }
 }
 ```
+
+The older spellings (`inlayHints.*`, `formatting.sortKeys`, `testBaseUrl`,
+`gatewayPort`, `ci.baseline`) still work for two releases; the server logs
+one line naming the replacement for each.
 
 `lint.minSeverity` accepts `error`, `warning`, `info` (or `information`) and
 `hint`; leave it unset to defer to the committed `.suspect.yaml`. Settings

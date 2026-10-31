@@ -158,7 +158,7 @@ Client posts updated settings:
     "operation-tag-defined": "off",        // silence Spectral rule the team rejected
     "oas-operation-missing-operationId": "error"
   },
-  "suspect.inlayHints.refTargets": true,
+  "suspect.editor.inlayHints.refs": true,
   "suspect.format.indent": 2
 }
 ```
@@ -848,7 +848,7 @@ At initialize the server requests `sections: ["suspect"]` and receives:
 {"suspect": {
   "lint": {"recommended": true, "rules": {"info-contact": "warn"}},
   "ref": {"maxDocs": 500},
-  "inlayHints": {"refTargets": true}
+  "editor": {"inlayHints": {"refs": true}}
 }}
 ```
 and builds `suspect_lint::Linter` accordingly instead of always `Linter::spectral_default()`.

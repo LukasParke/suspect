@@ -771,6 +771,21 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    `parse_config`, and the manifest `editor` unwrapping. Migrate the
    `editor_config.rs` unit tests to `suspect-config`. Old-spelling
    aliases and log lines. 1 day.
+   **Done.** P2 step 4 had already deleted `editor_config.rs` and the
+   client half of `parse_config` and moved the pulled section into
+   `resolve_found` (editor above env, as open question 1 recommends); the
+   manifest `editor` section is P2's deprecated manifest layer, read for
+   one more release, so it stays until P2's removal. What this step adds:
+   `Layer::from_editor` reads current spellings first and an old client
+   key (`editor_aliases`, or a deprecated file spelling reached through
+   the snake_case fallback) only when the current key is unset in the same
+   section, with a warning `editor suspect.testBaseUrl: deprecated setting;
+   use suspect.test.baseUrl`; a `null`/blank old key (VS Code sends every
+   contributed key) warns about nothing. The server logs these
+   (`window/logMessage`) whenever the files or the client's settings
+   change, not only when the effective values change. Tests: the alias
+   read in `layer.rs`; `crates/suspect-cli/tests/lsp_editor_settings.rs`
+   for the log line. The Zed README documents the new spellings.
 6. **Renamed settings migration and `suspect/explainConfig`** with the
    status-bar item; delete `config.ts`'s regex. Tests: a host-smoke case
    (the floor picker shows the layer), a unit test for the alias read.
