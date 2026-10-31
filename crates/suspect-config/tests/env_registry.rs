@@ -13,6 +13,8 @@ use suspect_config::schema;
 const HARNESSES: &[&str] = &[
     // `#[ignore]` toolchain gates' binary overrides.
     "suspect-codegen/src/toolchain.rs",
+    // Opt-in gates' named inputs, including deprecated spellings.
+    "suspect-codegen/src/test_inputs.rs",
     "suspect-codegen/src/swift_sdk/protocol_next_harness.rs",
     "suspect-codegen/src/swift_sdk/validation.rs",
     "suspect-codegen/src/swift_sdk/validation_v2_support.rs",
