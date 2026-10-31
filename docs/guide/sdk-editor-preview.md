@@ -41,9 +41,7 @@ spec's workspace folder, and the action opens that package's `README.md`.
 `suspect.codegen.packageName`, `packageVersion`, and `operationIds` supply
 initial prompt values; unset, the committed `codegen.package_name`,
 `codegen.package_version` and `codegen.operation_ids` from `.suspect.yaml` do.
-Every `suspect.codegen.*` setting is that `.suspect.yaml` key, and the old
-`suspect.sdk.*` spellings still apply with a deprecation warning (the extension
-offers to move them).
+Every `suspect.codegen.*` setting is that `.suspect.yaml` key.
 
 The **Markdown documentation** choice invokes `suspect gen template SPEC --preset docs-md`.
 The **Custom template manifest** choice asks for a TOML manifest and invokes

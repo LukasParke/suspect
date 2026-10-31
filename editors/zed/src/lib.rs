@@ -260,8 +260,8 @@ mod tests {
             json!({ "extensionVersion": version })
         );
         assert_eq!(
-            with_extension_version(Some(json!({ "run": { "baseUrl": "http://x" } }))),
-            json!({ "run": { "baseUrl": "http://x" }, "extensionVersion": version })
+            with_extension_version(Some(json!({ "test": { "baseUrl": "http://x" } }))),
+            json!({ "test": { "baseUrl": "http://x" }, "extensionVersion": version })
         );
         assert_eq!(
             with_extension_version(Some(json!({ "extensionVersion": "9.9.9" }))),

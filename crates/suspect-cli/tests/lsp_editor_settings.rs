@@ -24,18 +24,6 @@ fn log_lines(editor: &Editor) -> Vec<String> {
         .collect()
 }
 
-/// Waits until a log line satisfies `want`, and returns it.
-fn wait_for_log(editor: &Editor, want: impl Fn(&str) -> bool) -> Option<String> {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while Instant::now() < deadline {
-        if let Some(line) = log_lines(editor).into_iter().find(|l| want(l)) {
-            return Some(line);
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    None
-}
-
 /// The `lint.min_severity` row of `suspect/explainConfig`, once it reports
 /// `want` (configuration changes apply asynchronously).
 fn floor_row(editor: &Editor, want: &str) -> serde_json::Value {
@@ -150,15 +138,31 @@ fn camel_case_and_snake_case_client_keys_resolve_alike() {
 }
 
 #[test]
-fn an_old_client_key_applies_and_logs_its_replacement() {
+fn an_old_client_key_is_ignored() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ws = Workspace::build(dir.path());
     let editor = Editor::start(&ws.root, editor_capabilities());
+    // The floor change marks when the server has applied the section.
     editor.notify(
         "workspace/didChangeConfiguration",
-        serde_json::json!({"settings": {"suspect": {"testBaseUrl": "http://old.example:1"}}}),
+        serde_json::json!({"settings": {"suspect": {
+            "testBaseUrl": "http://old.example:1",
+            "lint": {"minSeverity": "info"}
+        }}}),
     );
-    let line = wait_for_log(&editor, |l| l.contains("suspect.testBaseUrl"));
-    let line = line.unwrap_or_else(|| panic!("no log line: {:?}", log_lines(&editor)));
-    assert!(line.contains("use `suspect.test.baseUrl`"), "{line}");
+    let report = floor_row(&editor, "info");
+    let base = report["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["key"] == "test.base_url")
+        .cloned()
+        .unwrap_or_default();
+    assert_ne!(base["value"], "http://old.example:1", "{base}");
+    assert_ne!(base["layer"], "editor", "{base}");
+    assert!(
+        !log_lines(&editor).iter().any(|l| l.contains("testBaseUrl")),
+        "{:?}",
+        log_lines(&editor)
+    );
 }

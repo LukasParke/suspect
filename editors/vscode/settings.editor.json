@@ -3,11 +3,5 @@
 		"type": "string",
 		"default": "suspect",
 		"description": "Path to the suspect CLI: a directory containing the `suspect` executable, the executable itself, or bare `suspect` to resolve from $PATH."
-	},
-	"suspect.server.path": {
-		"type": "string",
-		"default": "",
-		"description": "Deprecated alias of suspect.basePath, kept from the retired legacy extension. Used only while suspect.basePath is left at its default.",
-		"deprecationMessage": "Use suspect.basePath instead. suspect.server.path is only honored while suspect.basePath is left at its default."
 	}
 }

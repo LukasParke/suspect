@@ -53,7 +53,7 @@ test('each exposed config key is one setting: suspect. plus the camelCase path',
 	}
 });
 
-test('renamed settings stay as deprecated aliases with a null default', () => {
+test('renamed settings are gone: only the current keys are contributed', () => {
 	for (const [from, to] of [
 		['suspect.testBaseUrl', 'suspect.test.baseUrl'],
 		['suspect.gatewayPort', 'suspect.gateway.port'],
@@ -68,28 +68,26 @@ test('renamed settings stay as deprecated aliases with a null default', () => {
 		['suspect.sdk.compatibilityProfiles', 'suspect.codegen.compatibilityProfiles'],
 		['suspect.sdk.sessionConfig', 'suspect.codegen.session.config'],
 		['suspect.sdk.sessionOutput', 'suspect.codegen.session.out'],
+		['suspect.server.path', 'suspect.basePath'],
 	]) {
 		assert.ok(props[to], `${to} is contributed`);
-		assert.ok(props[from], `${from} is still contributed`);
-		assert.equal(props[from].default, null, `${from}: an untouched old key must not override the files`);
-		assert.ok(props[from].deprecationMessage.includes(to), `${from} names ${to}`);
-		assert.match(generated.typescript, new RegExp(`\\{ from: '${from}', to: '${to}' \\}`));
+		assert.equal(props[from], undefined, `${from} is no longer contributed`);
+		assert.ok(!generated.typescript.includes(`'${from.replace(/^suspect\./, '')}'`), `${from} is not read`);
 	}
+	for (const prop of Object.values(props)) assert.equal(prop.deprecationMessage, undefined);
 });
 
 test('editor-only settings come from settings.editor.json unchanged', () => {
 	const editorOnly = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'settings.editor.json'), 'utf8'));
-	for (const key of ['suspect.basePath', 'suspect.server.path']) {
-		assert.deepEqual(props[key], editorOnly[key]);
-	}
-	assert.ok(props['suspect.server.path'].deprecationMessage.includes('suspect.basePath'));
+	assert.deepEqual(Object.keys(editorOnly), ['suspect.basePath']);
+	assert.deepEqual(props['suspect.basePath'], editorOnly['suspect.basePath']);
 });
 
 test('every getter has a type: objects and lists are not read as strings', () => {
 	const ts = generated.typescript;
 	assert.match(ts, /export function lintMinSeverity\(scope\?: SettingScope\): "error" \| "warning" \| "info" \| "hint" \| null/);
 	assert.match(ts, /export function lintRules\(scope\?: SettingScope\): Readonly<Record<string, "error" \| "warning" \| "info" \| "hint" \| "off">> \| null/);
-	assert.match(ts, /export function testBaseUrl\(scope\?: SettingScope\): string \| null \{\n\treturn first<string>\(scope, \['test.baseUrl', 'testBaseUrl'\]\);/);
+	assert.match(ts, /export function testBaseUrl\(scope\?: SettingScope\): string \| null \{\n\treturn read<string>\(scope, 'test.baseUrl'\);/);
 	assert.match(ts, /export function codegenImportNames\(scope\?: SettingScope\): Readonly<Record<string, string>> \| null \{/);
 	assert.match(ts, /export function codegenOperationIds\(scope\?: SettingScope\): readonly string\[\] \| null \{/);
 });

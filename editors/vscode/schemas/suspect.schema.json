@@ -34,9 +34,6 @@
           "type": "array",
           "uniqueItems": true,
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.sdk.compatibilityProfiles"
-            ],
             "key": "suspect.codegen.compatibilityProfiles",
             "scope": "resource"
           }
@@ -49,9 +46,6 @@
           "description": "SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name.",
           "type": "object",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.sdk.importNames"
-            ],
             "key": "suspect.codegen.importNames",
             "scope": "resource"
           }
@@ -64,9 +58,6 @@
           },
           "type": "array",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.sdk.operationIds"
-            ],
             "key": "suspect.codegen.operationIds",
             "scope": "resource"
           }
@@ -79,9 +70,6 @@
           "description": "Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it.",
           "type": "string",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.sdk.packageName"
-            ],
             "key": "suspect.codegen.packageName",
             "scope": "resource"
           }
@@ -90,9 +78,6 @@
           "description": "Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata).",
           "type": "string",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.sdk.packageVersion"
-            ],
             "key": "suspect.codegen.packageVersion",
             "scope": "resource"
           }
@@ -109,9 +94,6 @@
               "description": "Session config (JSON) naming the spec and targets. Unset: the editor asks for one.",
               "type": "string",
               "x-suspect-editor": {
-                "aliases": [
-                  "suspect.sdk.sessionConfig"
-                ],
                 "key": "suspect.codegen.session.config",
                 "scope": "resource"
               }
@@ -121,9 +103,6 @@
               "description": "Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`).",
               "type": "string",
               "x-suspect-editor": {
-                "aliases": [
-                  "suspect.sdk.sessionOutput"
-                ],
                 "key": "suspect.codegen.session.out",
                 "scope": "resource"
               }
@@ -142,9 +121,6 @@
           "description": "Git ref compared against for breaking changes (`suspect ci`, the editor's breaking-changes command; the editor falls back to `HEAD~1`).",
           "type": "string",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.ci.baseline"
-            ],
             "key": "suspect.diff.baseline",
             "scope": "resource"
           },
@@ -186,9 +162,6 @@
               "description": "Show property type-annotation inlay hints.",
               "type": "boolean",
               "x-suspect-editor": {
-                "aliases": [
-                  "suspect.inlayHints.properties"
-                ],
                 "key": "suspect.editor.inlayHints.properties",
                 "scope": "resource"
               }
@@ -198,9 +171,6 @@
               "description": "Show resolved `$ref` target inlay hints.",
               "type": "boolean",
               "x-suspect-editor": {
-                "aliases": [
-                  "suspect.inlayHints.refs"
-                ],
                 "key": "suspect.editor.inlayHints.refs",
                 "scope": "resource"
               }
@@ -233,9 +203,6 @@
           "description": "Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`.",
           "type": "boolean",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.formatting.sortKeys"
-            ],
             "key": "suspect.format.sortKeys",
             "scope": "resource"
           }
@@ -272,9 +239,6 @@
           "minimum": 0,
           "type": "integer",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.gatewayPort"
-            ],
             "key": "suspect.gateway.port",
             "scope": "resource"
           }
@@ -411,9 +375,6 @@
           "format": "uri",
           "type": "string",
           "x-suspect-editor": {
-            "aliases": [
-              "suspect.testBaseUrl"
-            ],
             "key": "suspect.test.baseUrl",
             "scope": "resource"
           },

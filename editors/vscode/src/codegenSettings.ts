@@ -1,7 +1,7 @@
 /**
  * The `codegen.*` values the SDK commands and Live SDK Preview start from:
- * the editor setting (`suspect.codegen.*`, then its old `suspect.sdk.*`
- * spelling), else the value the server resolved from `.suspect.yaml`
+ * the editor setting (`suspect.codegen.*`), else the value the server
+ * resolved from `.suspect.yaml`
  * (`suspect/explainConfig`), else the setting table's default.
  */
 import type * as vscode from 'vscode';
@@ -59,6 +59,4 @@ export async function codegenDefaults(client: LanguageClient | undefined, scope?
 export const SESSION_SETTINGS = [
 	'suspect.codegen.session.config',
 	'suspect.codegen.session.out',
-	'suspect.sdk.sessionConfig',
-	'suspect.sdk.sessionOutput',
 ] as const;

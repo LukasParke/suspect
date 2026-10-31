@@ -367,7 +367,7 @@ test('multi-root selection honors the selected folder config and resolves output
 	h.vscode.workspace.workspaceFolders = [{ uri: Uri.file(path.join(h.root, 'workspace A')), name: 'A', index: 0 }, chosen];
 	h.vscode.window.showWorkspaceFolderPick = async () => chosen;
 	h.vscode.workspace.getConfiguration = (_section, resource) => ({
-		get: (key, fallback) => key === 'sdk.sessionConfig' ? resource?.fsPath === chosen.uri.fsPath ? 'nested/sdk.json' : 'global.json' : fallback,
+		get: (key, fallback) => key === 'codegen.session.config' ? resource?.fsPath === chosen.uri.fsPath ? 'nested/sdk.json' : 'global.json' : fallback,
 	});
 	h.input = async () => '../generated';
 	await h.commands.get('suspect.watchSdk')();
@@ -583,7 +583,7 @@ test('picker sends configured native import/module/namespace overrides exactly a
 	]) {
 		await t.test(profile, async (t) => {
 			const h = await editor(t);
-			h.settings.set('sdk.importNames', { [profile]: importName, 'unselected-profile': 'unused' });
+			h.settings.set('codegen.importNames', { [profile]: importName, 'unselected-profile': 'unused' });
 			h.vscode.window.activeTextEditor = { document: { uri: Uri.file(h.source) } };
 			h.pick = async (items) => items.find((item) => item.generationKind === profile);
 			const inputs = [packageName, '1.2.3', '["getCredits"]'];
@@ -631,8 +631,8 @@ test('a pending picker generates with the same CLI whose profiles it discovered'
 
 test('picker enables compatibility only from explicit settings and passes it alongside the native import name', async (t) => {
 	const h = await editor(t);
-	h.settings.set('sdk.compatibilityProfiles', ['legacy-binary-string-v1']);
-	h.settings.set('sdk.importNames', { 'python-http': 'custom_editor_sdk' });
+	h.settings.set('codegen.compatibilityProfiles', ['legacy-binary-string-v1']);
+	h.settings.set('codegen.importNames', { 'python-http': 'custom_editor_sdk' });
 	h.vscode.window.activeTextEditor = { document: { uri: Uri.file(h.source) } };
 	h.pick = async (items) => items.find((item) => item.generationKind === 'python-http');
 	const inputs = ['fixture-editor-python', '1.2.3', '[" --exact; $(prose)"]'];
@@ -662,7 +662,7 @@ test('unknown or malformed compatibility settings fail before package prompts or
 		await t.test(JSON.stringify(compatibilityProfiles), async (t) => {
 			const h = await editor(t);
 			h.inventory.compatibilityProfiles = ['future-profile', '$(touch sentinel)'];
-			h.settings.set('sdk.compatibilityProfiles', compatibilityProfiles);
+			h.settings.set('codegen.compatibilityProfiles', compatibilityProfiles);
 			h.vscode.window.activeTextEditor = { document: { uri: Uri.file(h.source) } };
 			h.pick = async (items) => items.find((item) => item.generationKind === 'typescript-http');
 			await h.run('suspect.genPreset');
@@ -679,7 +679,7 @@ test('unknown or malformed compatibility settings fail before package prompts or
 
 test('session actions retain saved compatibility semantics and display the canonical report instead of applying picker settings', async (t) => {
 	const h = await editor(t);
-	h.settings.set('sdk.compatibilityProfiles', ['legacy-binary-string-v1']);
+	h.settings.set('codegen.compatibilityProfiles', ['legacy-binary-string-v1']);
 	const config = JSON.parse(await fs.readFile(h.config, 'utf8'));
 	config.compatibility_profiles = [];
 	const ordinary = JSON.stringify(config, null, 2);

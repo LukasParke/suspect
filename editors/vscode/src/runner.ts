@@ -48,23 +48,15 @@ export interface SuspectRunHandle {
 	kill(): void;
 }
 
-/**
- * Settings that select the CLI binary: `suspect.basePath`, plus the
- * deprecated `suspect.server.path` from the retired legacy extension.
- */
-export const BINARY_SETTINGS: readonly string[] = ['suspect.basePath', 'suspect.server.path'];
+/** Settings that select the CLI binary. */
+export const BINARY_SETTINGS: readonly string[] = ['suspect.basePath'];
 
 /**
- * The configured CLI location: `suspect.basePath` when set to anything but
- * its default, else the deprecated `suspect.server.path` alias, else bare
- * `suspect` (resolved from $PATH).
+ * The configured CLI location: `suspect.basePath`, else bare `suspect`
+ * (resolved from $PATH).
  */
 function configuredBase(): string {
-	const base = settings.basePath().trim();
-	if (base && base !== 'suspect') return base;
-	const legacy = settings.serverPath().trim();
-	if (legacy) return legacy;
-	return base || 'suspect';
+	return settings.basePath().trim() || 'suspect';
 }
 
 /** The executable's file name on this platform. */
@@ -97,8 +89,8 @@ export function bundledBinary(root: string | undefined = extensionRoot): string 
 }
 
 /**
- * The resolution order: an explicit `suspect.basePath` (or the deprecated
- * `suspect.server.path`), the binary bundled with this extension version,
+ * The resolution order: an explicit `suspect.basePath`, the binary bundled
+ * with this extension version,
  * then `suspect` on `PATH`. The bundled copy comes before `PATH` so a stale
  * `cargo install` does not win over the build this extension was made for.
  * Pure apart from the file checks.
@@ -129,7 +121,7 @@ export function suspectBinary(): string {
 }
 
 /**
- * `suspect.test.baseUrl` (or the old `suspect.testBaseUrl`). `undefined`
+ * `suspect.test.baseUrl`. `undefined`
  * leaves `--base-url` off, so the CLI applies `test.base_url` from the
  * committed `.suspect.yaml`.
  */
@@ -137,7 +129,7 @@ export function testBaseUrl(): string | undefined {
 	return settings.testBaseUrl() ?? undefined;
 }
 
-/** `suspect.gateway.port` (or the old `suspect.gatewayPort`), else 8080. */
+/** `suspect.gateway.port`, else 8080. */
 export function gatewayPort(): number {
 	return settings.gatewayPort() ?? 8080;
 }

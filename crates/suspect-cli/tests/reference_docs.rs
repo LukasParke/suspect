@@ -288,18 +288,9 @@ fn settings_table(out: &mut String, table: &'static [suspect_config::schema::Set
             );
             open = true;
         }
-        let editor = setting.editor.map_or_else(String::new, |key| {
-            let mut text = format!("`suspect.{key}`");
-            if !setting.editor_aliases.is_empty() {
-                let old: Vec<String> = setting
-                    .editor_aliases
-                    .iter()
-                    .map(|a| format!("suspect.{a}"))
-                    .collect();
-                write!(text, " (was {})", codes(old.iter().map(String::as_str))).unwrap();
-            }
-            text
-        });
+        let editor = setting
+            .editor
+            .map_or_else(String::new, |key| format!("`suspect.{key}`"));
         let flags: Vec<String> = setting.flags.iter().map(|f| current_flag(f)).collect();
         writeln!(
             out,

@@ -220,28 +220,7 @@ test('the configuration status names the settings file and opens the explain rep
 	assert.equal(await explainConfig(undefined, file), undefined);
 });
 
-test('renamed settings move once, at the level they are set, without overwriting a new value', () => {
-	const { pendingMoves, TARGETS } = loadModule('migrateSettings', {});
-	const values = {
-		'suspect.testBaseUrl': { globalValue: 'http://user:1', workspaceValue: 'http://ws:2' },
-		'suspect.test.baseUrl': { workspaceValue: 'http://new:3' },
-		'suspect.gatewayPort': { workspaceFolderValue: 9000 },
-		'suspect.ci.baseline': { workspaceValue: '' },
-	};
-	const inspect = (key) => values[key];
-	assert.deepEqual(pendingMoves(inspect, false), [
-		{ from: 'suspect.testBaseUrl', to: 'suspect.test.baseUrl', target: TARGETS.global, value: 'http://user:1' },
-	]);
-	assert.deepEqual(pendingMoves(inspect, true).map((m) => [m.from, m.target]), [
-		['suspect.gatewayPort', TARGETS.workspaceFolder],
-		['suspect.testBaseUrl', TARGETS.global],
-	]);
-	assert.deepEqual(pendingMoves(() => undefined, true), []);
-	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
-	assert.match(source, /offerSettingsMigration\(context\)/);
-});
-
-test('SDK defaults: the codegen setting, then the old sdk spelling, then .suspect.yaml, then the default', () => {
+test('SDK defaults: the codegen setting, then .suspect.yaml, then the default', () => {
 	const values = new Map();
 	const stub = { workspace: { getConfiguration: () => ({ get: (key) => values.get(key) }) } };
 	const { codegenDefaultsFrom } = loadModule('codegenSettings', stub);
@@ -262,12 +241,13 @@ test('SDK defaults: the codegen setting, then the old sdk spelling, then .suspec
 	assert.deepEqual(fromFile.operationIds, ['getFile']);
 	assert.deepEqual(fromFile.compatibilityProfiles, ['colon-path-parameters-v1']);
 	assert.equal(fromFile.sessionConfig, '/w/sdk.json');
+	// The old `suspect.sdk.*` spellings are not read.
 	values.set('sdk.packageName', 'old-key');
 	values.set('sdk.sessionOutput', '../old-out');
 	values.set('codegen.importNames', { 'ruby-http': 'Editor' });
 	const edited = codegenDefaultsFrom(report);
-	assert.equal(edited.packageName, 'old-key');
-	assert.equal(edited.sessionOut, '../old-out');
+	assert.equal(edited.packageName, 'from-file');
+	assert.equal(edited.sessionOut, 'sdk-out');
 	assert.deepEqual(edited.importNames, { 'ruby-http': 'Editor' });
 	values.set('codegen.packageName', 'new-key');
 	assert.equal(codegenDefaultsFrom(report).packageName, 'new-key');
@@ -326,11 +306,9 @@ test('the extension manifest contributes one view, one controller, and commands 
 	assert.deepEqual(props['suspect.lint.minSeverity'].enum, [...lint.min_severity.enum, null]);
 	assert.equal(props['suspect.lint.minSeverity'].default, null);
 	assert.deepEqual(props['suspect.lint.rules'].additionalProperties.enum, lint.rules.additionalProperties.enum);
-	// The legacy extension's binary setting survives as a deprecated alias.
-	assert.equal(props['suspect.server.path'].type, 'string');
-	assert.ok(props['suspect.server.path'].deprecationMessage.includes('suspect.basePath'));
+	assert.equal(props['suspect.server.path'], undefined, 'the legacy binary setting is gone');
 	assert.deepEqual(props['suspect.diff.baseline'].type, [schema.properties.diff.properties.baseline.type, 'null']);
-	assert.ok(props['suspect.ci.baseline'].deprecationMessage.includes('suspect.diff.baseline'));
+	assert.equal(props['suspect.ci.baseline'], undefined);
 });
 
 test('only one test controller is created', () => {
@@ -499,15 +477,14 @@ test('the document kind comes from the server, and only when it offers the reque
 	assert.equal(await documentKind(client({ [DOCUMENT_KIND_REQUEST]: 1 }, new Error('gone')), file), undefined);
 });
 
-test('the CLI binary honors the deprecated suspect.server.path only while suspect.basePath is default', () => {
+test('the CLI binary is suspect.basePath, else bare suspect; suspect.server.path is not read', () => {
 	const settings = new Map();
 	const stub = { workspace: { getConfiguration: () => ({ get: (key, fallback) => (settings.has(key) ? settings.get(key) : fallback) }) } };
-	const { suspectBinary } = loadModule('runner', stub);
+	const { suspectBinary, BINARY_SETTINGS } = loadModule('runner', stub);
+	assert.deepEqual(BINARY_SETTINGS, ['suspect.basePath']);
 	assert.equal(suspectBinary(), 'suspect');
 	settings.set('server.path', '/opt/legacy/suspect');
-	assert.equal(suspectBinary(), '/opt/legacy/suspect');
-	settings.set('basePath', 'suspect');
-	assert.equal(suspectBinary(), '/opt/legacy/suspect');
+	assert.equal(suspectBinary(), 'suspect');
 	settings.set('basePath', '/opt/current/suspect');
 	assert.equal(suspectBinary(), '/opt/current/suspect');
 });

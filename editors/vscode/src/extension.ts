@@ -15,7 +15,6 @@ import { registerProjectView } from './projectView';
 import { openSuspectConfig, setSeverityFloor, useClient } from './config';
 import { codegenDefaults, SESSION_SETTINGS } from './codegenSettings';
 import { ConfigStatus, explainConfig, explainRow, registerConfigStatus } from './explainConfig';
-import { offerSettingsMigration } from './migrateSettings';
 import { generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
 import { MIN_CLI_VERSION, suspectCapabilities, tooOldServer } from './protocol';
 import { DocumentKindTracker, trackDocumentKind } from './documentKind';
@@ -97,7 +96,6 @@ export function activate(context: vscode.ExtensionContext): void {
 	configStatus = registerConfigStatus(() => client, configWatcher);
 	context.subscriptions.push(...configStatus.disposables);
 	startClient();
-	void offerSettingsMigration(context);
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (BINARY_SETTINGS.some((key) => event.affectsConfiguration(key))) {

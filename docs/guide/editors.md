@@ -75,8 +75,7 @@ extension development host or package it with `npm run package`.
 It finds the `suspect` binary in this order:
 
 1. `suspect.basePath`: a directory containing `suspect`, the executable
-   itself, or bare `suspect`. The older `suspect.server.path` is used only
-   while `suspect.basePath` is left at its default.
+   itself, or bare `suspect`.
 2. The binary bundled in a platform VSIX (`bin/suspect`), so a stale
    `cargo install` on `PATH` does not win over the build the extension was
    made for.
@@ -90,10 +89,8 @@ Settings use the `.suspect.yaml` keys in camelCase under `suspect.`:
 `suspect.lint.minSeverity`, `suspect.lint.rules`, `suspect.validate.strictFormat`,
 `suspect.editor.inlayHints.refs`, `suspect.test.baseUrl`, `suspect.gateway.port`,
 `suspect.codegen.packageName` and so on. An editor setting is layered over
-`.suspect.yaml`, and one left empty defers to the file. Older spellings
-(`suspect.inlayHints.refs`, `suspect.testBaseUrl`, `suspect.gatewayPort`,
-`suspect.sdk.*`, `suspect.ci.baseline`) still work, and the server logs the
-replacement. `Suspect: Explain Configuration` shows every effective setting
+`.suspect.yaml`, and one left empty defers to the file. `Suspect: Explain
+Configuration` shows every effective setting
 and the layer it came from, editor settings included (what `suspect config
 --explain` shows, plus the layer the CLI cannot see), and `Suspect: Open
 Configuration` opens

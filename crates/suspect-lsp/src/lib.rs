@@ -243,10 +243,10 @@ impl Backend {
                     .await;
             }
         }
-        // Deprecations go to the log, once per change of the files or of the
-        // client's settings (an old client key such as `testBaseUrl` logs a
-        // line naming its replacement); the manifest itself carries a
-        // diagnostic on each deprecated key.
+        // Warnings (an unknown settings-file key, an ignored manifest policy
+        // section) go to the log, once per change of the files or of the
+        // client's settings; the manifest itself carries a diagnostic on
+        // each ignored section.
         if changed || client_changed {
             for warning in warnings {
                 self.client
@@ -3355,7 +3355,7 @@ impl Backend {
         #[cfg(feature = "live-run")]
         {
             // `test.base_url` for this document: the editor's
-            // `suspect.test.baseUrl` (or `run.baseUrl`), `SUSPECT_BASE_URL`,
+            // `suspect.test.baseUrl`, `SUSPECT_BASE_URL`,
             // the manifest, then `.suspect.yaml` — what `suspect test` uses.
             let base = self
                 .state

@@ -4,8 +4,8 @@
 //! The checked-in copies under `editors/vscode/schemas/` are kept current
 //! by `tests/json_schema.rs` (`SUSPECT_BLESS=1` rewrites them). Each
 //! property carries `description` and `default` from the table, `enum`
-//! from its kind, `x-suspect-editor` (the client setting, its scope and
-//! its older client keys; the VS Code settings are generated from it) and
+//! from its kind, `x-suspect-editor` (the client setting and its scope; the
+//! VS Code settings are generated from it) and
 //! `x-suspect-env` where the table names them. The manifest's ignored
 //! policy sections are listed with `deprecated: true`.
 
@@ -122,16 +122,7 @@ fn property(setting: &Setting) -> Value {
         out["default"] = default;
     }
     if let Some(key) = setting.editor {
-        let mut editor = json!({"key": format!("suspect.{key}"), "scope": "resource"});
-        if !setting.editor_aliases.is_empty() {
-            let old: Vec<String> = setting
-                .editor_aliases
-                .iter()
-                .map(|alias| format!("suspect.{alias}"))
-                .collect();
-            editor["aliases"] = json!(old);
-        }
-        out["x-suspect-editor"] = editor;
+        out["x-suspect-editor"] = json!({"key": format!("suspect.{key}"), "scope": "resource"});
     }
     if let Some(var) = setting.env {
         out["x-suspect-env"] = json!(var);
@@ -210,8 +201,7 @@ mod tests {
         assert!(p["docs"]["properties"]["out"].is_null());
         assert_eq!(
             p["test"]["properties"]["base_url"]["x-suspect-editor"],
-            json!({"key": "suspect.test.baseUrl", "scope": "resource",
-                   "aliases": ["suspect.testBaseUrl"]})
+            json!({"key": "suspect.test.baseUrl", "scope": "resource"})
         );
     }
 

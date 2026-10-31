@@ -10,38 +10,11 @@ function config(scope: SettingScope): vscode.WorkspaceConfiguration {
 	return vscode.workspace.getConfiguration('suspect', scope);
 }
 
-/** The first of `keys` that is set; blank strings and `null` are unset. */
-function first<T>(scope: SettingScope, keys: readonly string[]): T | null {
-	const settings = config(scope);
-	for (const key of keys) {
-		const value = settings.get<T | null>(key);
-		if (value !== undefined && value !== null && value !== '') return value;
-	}
-	return null;
+/** The value of `key`; blank strings and `null` are unset. */
+function read<T>(scope: SettingScope, key: string): T | null {
+	const value = config(scope).get<T | null>(key);
+	return value === undefined || value === null || value === '' ? null : value;
 }
-
-/** A renamed setting: the old key, still read, and the key that replaced it. */
-export interface RenamedSetting {
-	readonly from: string;
-	readonly to: string;
-}
-
-/** Every renamed setting, full keys (`suspect.testBaseUrl` -> `suspect.test.baseUrl`). */
-export const RENAMED_SETTINGS: readonly RenamedSetting[] = [
-	{ from: 'suspect.sdk.compatibilityProfiles', to: 'suspect.codegen.compatibilityProfiles' },
-	{ from: 'suspect.sdk.importNames', to: 'suspect.codegen.importNames' },
-	{ from: 'suspect.sdk.operationIds', to: 'suspect.codegen.operationIds' },
-	{ from: 'suspect.sdk.packageName', to: 'suspect.codegen.packageName' },
-	{ from: 'suspect.sdk.packageVersion', to: 'suspect.codegen.packageVersion' },
-	{ from: 'suspect.sdk.sessionConfig', to: 'suspect.codegen.session.config' },
-	{ from: 'suspect.sdk.sessionOutput', to: 'suspect.codegen.session.out' },
-	{ from: 'suspect.ci.baseline', to: 'suspect.diff.baseline' },
-	{ from: 'suspect.inlayHints.properties', to: 'suspect.editor.inlayHints.properties' },
-	{ from: 'suspect.inlayHints.refs', to: 'suspect.editor.inlayHints.refs' },
-	{ from: 'suspect.formatting.sortKeys', to: 'suspect.format.sortKeys' },
-	{ from: 'suspect.gatewayPort', to: 'suspect.gateway.port' },
-	{ from: 'suspect.testBaseUrl', to: 'suspect.test.baseUrl' },
-];
 
 /** Editor setting -> the `.suspect.yaml` key it sets. */
 export const CONFIG_KEYS: Readonly<Record<string, string>> = {
@@ -67,112 +40,107 @@ export const CONFIG_KEYS: Readonly<Record<string, string>> = {
 	'suspect.validate.strictFormat': 'validate.strict_format',
 };
 
-/** `suspect.codegen.compatibilityProfiles`, then `suspect.sdk.compatibilityProfiles`; `codegen.compatibility_profiles` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.codegen.compatibilityProfiles`; `codegen.compatibility_profiles` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function codegenCompatibilityProfiles(scope?: SettingScope): readonly ("legacy-binary-string-v1" | "oas30-nullable-in-3.1-v1" | "colon-path-parameters-v1" | "schemaless-stream-events-v1" | "all-of-scoped-mode-v1")[] | null {
-	return first<readonly ("legacy-binary-string-v1" | "oas30-nullable-in-3.1-v1" | "colon-path-parameters-v1" | "schemaless-stream-events-v1" | "all-of-scoped-mode-v1")[]>(scope, ['codegen.compatibilityProfiles', 'sdk.compatibilityProfiles']);
+	return read<readonly ("legacy-binary-string-v1" | "oas30-nullable-in-3.1-v1" | "colon-path-parameters-v1" | "schemaless-stream-events-v1" | "all-of-scoped-mode-v1")[]>(scope, 'codegen.compatibilityProfiles');
 }
 
-/** `suspect.codegen.importNames`, then `suspect.sdk.importNames`; `codegen.import_names` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.codegen.importNames`; `codegen.import_names` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function codegenImportNames(scope?: SettingScope): Readonly<Record<string, string>> | null {
-	return first<Readonly<Record<string, string>>>(scope, ['codegen.importNames', 'sdk.importNames']);
+	return read<Readonly<Record<string, string>>>(scope, 'codegen.importNames');
 }
 
-/** `suspect.codegen.operationIds`, then `suspect.sdk.operationIds`; `codegen.operation_ids` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.codegen.operationIds`; `codegen.operation_ids` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function codegenOperationIds(scope?: SettingScope): readonly string[] | null {
-	return first<readonly string[]>(scope, ['codegen.operationIds', 'sdk.operationIds']);
+	return read<readonly string[]>(scope, 'codegen.operationIds');
 }
 
-/** `suspect.codegen.packageName`, then `suspect.sdk.packageName`; `codegen.package_name` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.codegen.packageName`; `codegen.package_name` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function codegenPackageName(scope?: SettingScope): string | null {
-	return first<string>(scope, ['codegen.packageName', 'sdk.packageName']);
+	return read<string>(scope, 'codegen.packageName');
 }
 
-/** `suspect.codegen.packageVersion`, then `suspect.sdk.packageVersion`; `codegen.package_version` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.codegen.packageVersion`; `codegen.package_version` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function codegenPackageVersion(scope?: SettingScope): string | null {
-	return first<string>(scope, ['codegen.packageVersion', 'sdk.packageVersion']);
+	return read<string>(scope, 'codegen.packageVersion');
 }
 
-/** `suspect.codegen.session.config`, then `suspect.sdk.sessionConfig`; `codegen.session.config` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.codegen.session.config`; `codegen.session.config` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function codegenSessionConfig(scope?: SettingScope): string | null {
-	return first<string>(scope, ['codegen.session.config', 'sdk.sessionConfig']);
+	return read<string>(scope, 'codegen.session.config');
 }
 
-/** `suspect.codegen.session.out`, then `suspect.sdk.sessionOutput`; `codegen.session.out` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.codegen.session.out`; `codegen.session.out` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function codegenSessionOut(scope?: SettingScope): string | null {
-	return first<string>(scope, ['codegen.session.out', 'sdk.sessionOutput']);
+	return read<string>(scope, 'codegen.session.out');
 }
 
-/** `suspect.diff.baseline`, then `suspect.ci.baseline`; `diff.baseline` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.diff.baseline`; `diff.baseline` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function diffBaseline(scope?: SettingScope): string | null {
-	return first<string>(scope, ['diff.baseline', 'ci.baseline']);
+	return read<string>(scope, 'diff.baseline');
 }
 
-/** `suspect.editor.inlayHints.properties`, then `suspect.inlayHints.properties`; `editor.inlay_hints.properties` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.editor.inlayHints.properties`; `editor.inlay_hints.properties` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function editorInlayHintsProperties(scope?: SettingScope): boolean | null {
-	return first<boolean>(scope, ['editor.inlayHints.properties', 'inlayHints.properties']);
+	return read<boolean>(scope, 'editor.inlayHints.properties');
 }
 
-/** `suspect.editor.inlayHints.refs`, then `suspect.inlayHints.refs`; `editor.inlay_hints.refs` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.editor.inlayHints.refs`; `editor.inlay_hints.refs` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function editorInlayHintsRefs(scope?: SettingScope): boolean | null {
-	return first<boolean>(scope, ['editor.inlayHints.refs', 'inlayHints.refs']);
+	return read<boolean>(scope, 'editor.inlayHints.refs');
 }
 
-/** `suspect.format.sortKeys`, then `suspect.formatting.sortKeys`; `format.sort_keys` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.format.sortKeys`; `format.sort_keys` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function formatSortKeys(scope?: SettingScope): boolean | null {
-	return first<boolean>(scope, ['format.sortKeys', 'formatting.sortKeys']);
+	return read<boolean>(scope, 'format.sortKeys');
 }
 
-/** `suspect.gateway.port`, then `suspect.gatewayPort`; `gateway.port` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.gateway.port`; `gateway.port` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function gatewayPort(scope?: SettingScope): number | null {
-	return first<number>(scope, ['gateway.port', 'gatewayPort']);
+	return read<number>(scope, 'gateway.port');
 }
 
 /** `suspect.lint.design`; `lint.design` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function lintDesign(scope?: SettingScope): "error" | "warning" | "info" | "hint" | "off" | null {
-	return first<"error" | "warning" | "info" | "hint" | "off">(scope, ['lint.design']);
+	return read<"error" | "warning" | "info" | "hint" | "off">(scope, 'lint.design');
 }
 
 /** `suspect.lint.minSeverity`; `lint.min_severity` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function lintMinSeverity(scope?: SettingScope): "error" | "warning" | "info" | "hint" | null {
-	return first<"error" | "warning" | "info" | "hint">(scope, ['lint.minSeverity']);
+	return read<"error" | "warning" | "info" | "hint">(scope, 'lint.minSeverity');
 }
 
 /** `suspect.lint.recommended`; `lint.recommended` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function lintRecommended(scope?: SettingScope): boolean | null {
-	return first<boolean>(scope, ['lint.recommended']);
+	return read<boolean>(scope, 'lint.recommended');
 }
 
 /** `suspect.lint.rules`; `lint.rules` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function lintRules(scope?: SettingScope): Readonly<Record<string, "error" | "warning" | "info" | "hint" | "off">> | null {
-	return first<Readonly<Record<string, "error" | "warning" | "info" | "hint" | "off">>>(scope, ['lint.rules']);
+	return read<Readonly<Record<string, "error" | "warning" | "info" | "hint" | "off">>>(scope, 'lint.rules');
 }
 
 /** `suspect.lint.ruleset`; `lint.ruleset` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function lintRuleset(scope?: SettingScope): string | null {
-	return first<string>(scope, ['lint.ruleset']);
+	return read<string>(scope, 'lint.ruleset');
 }
 
 /** `suspect.ref.maxDocs`; `ref.max_docs` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function refMaxDocs(scope?: SettingScope): number | null {
-	return first<number>(scope, ['ref.maxDocs']);
+	return read<number>(scope, 'ref.maxDocs');
 }
 
-/** `suspect.test.baseUrl`, then `suspect.testBaseUrl`; `test.base_url` in .suspect.yaml. `null`: unset, the committed value applies. */
+/** `suspect.test.baseUrl`; `test.base_url` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function testBaseUrl(scope?: SettingScope): string | null {
-	return first<string>(scope, ['test.baseUrl', 'testBaseUrl']);
+	return read<string>(scope, 'test.baseUrl');
 }
 
 /** `suspect.validate.strictFormat`; `validate.strict_format` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function validateStrictFormat(scope?: SettingScope): boolean | null {
-	return first<boolean>(scope, ['validate.strictFormat']);
+	return read<boolean>(scope, 'validate.strictFormat');
 }
 
 /** `suspect.basePath` (editor-only). */
 export function basePath(scope?: SettingScope): string {
 	return config(scope).get<string>('basePath', "suspect");
-}
-
-/** `suspect.server.path` (editor-only). Deprecated. */
-export function serverPath(scope?: SettingScope): string {
-	return config(scope).get<string>('server.path', "");
 }

@@ -908,6 +908,24 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    registry PR was P5 step 8 (`zed-registry-pr.sh`). A headless test keeps
    the target lists of `package-target.cjs`, `package-editors.yml` and
    `publish-editors.yml` equal.
+10. **(N+2) End of the renamed-settings window** (Compatibility): the old
+    client keys and `suspect.server.path` go.
+    **Done** (in release N: no release had been tagged, so the window
+    protected no published version). The setting table's `editor_aliases`
+    column, `Found::alias` and the editor layer's second pass are deleted,
+    so `testBaseUrl`, `gatewayPort`, `ci.baseline`, `formatting.sortKeys`,
+    `inlayHints.*` and `sdk.*` are unknown client keys, skipped without a
+    log line like any other client key; `x-suspect-editor` no longer has
+    `aliases`. VS Code contributes only the current keys (no deprecated
+    settings, no `RENAMED_SETTINGS`; each generated getter reads one key),
+    `src/migrateSettings.ts` and its activation offer are deleted, and
+    `suspect.basePath` is the only binary setting (`suspect.server.path` is
+    gone from `settings.editor.json` and `runner.ts`). The Zed README and
+    the editor guides no longer list old spellings. Tests:
+    `layer.rs::old_client_keys_are_ignored`,
+    `lsp_editor_settings.rs::an_old_client_key_is_ignored`, and
+    `test/settings.cjs` asserts that none of the old keys is contributed
+    or read.
 
 Total: about 7-8 days. The suggested-order table in the source document
 gives 2-3 days for P4. The difference is mostly steps 3, 7 and 8, which

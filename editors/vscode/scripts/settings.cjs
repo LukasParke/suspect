@@ -8,10 +8,9 @@
 // Outputs: package.json `contributes.configuration` and
 // src/settings.generated.ts (one typed getter per setting).
 //
-// A schema property with `x-suspect-editor: {key, scope, aliases?}` becomes
-// one setting named `key`; each alias (the key's older spelling) becomes a
-// deprecated setting the getter still reads. Config-backed settings are
-// `[T, "null"]` with default `null`: unset defers to the committed files.
+// A schema property with `x-suspect-editor: {key, scope}` becomes one setting
+// named `key`. Config-backed settings are `[T, "null"]` with default `null`:
+// unset defers to the committed files.
 //
 //   node scripts/settings.cjs          print what would change, exit 1 on drift
 //   node scripts/settings.cjs --write  rewrite both files (npm run settings:write)
@@ -63,7 +62,7 @@ function shown(value) {
 	return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-/** One config-backed setting and its deprecated spellings. */
+/** One config-backed setting per exposed schema property. */
 function configSettings(schema) {
 	const settings = [];
 	for (const [configKey, prop] of exposed(schema)) {
@@ -75,20 +74,7 @@ function configSettings(schema) {
 			markdownDescription: `${prop.description} \`${configKey}\` in \`.suspect.yaml\`; unset (\`null\`) uses the committed value${fallback}.`,
 			scope: editor.scope,
 		};
-		settings.push({ key: editor.key, configKey, prop, contribution, aliases: editor.aliases ?? [] });
-		for (const alias of editor.aliases ?? []) {
-			settings.push({
-				key: alias,
-				deprecatedFor: editor.key,
-				contribution: {
-					...shape(prop),
-					default: null,
-					markdownDescription: `Deprecated: use \`${editor.key}\`.`,
-					deprecationMessage: `Use ${editor.key} instead.`,
-					scope: editor.scope,
-				},
-			});
-		}
+		settings.push({ key: editor.key, configKey, prop, contribution });
 	}
 	return settings;
 }
@@ -136,26 +122,11 @@ function typescript(configBacked, editorOnly) {
 		"\treturn vscode.workspace.getConfiguration('suspect', scope);",
 		'}',
 		'',
-		'/** The first of `keys` that is set; blank strings and `null` are unset. */',
-		'function first<T>(scope: SettingScope, keys: readonly string[]): T | null {',
-		'\tconst settings = config(scope);',
-		'\tfor (const key of keys) {',
-		'\t\tconst value = settings.get<T | null>(key);',
-		"\t\tif (value !== undefined && value !== null && value !== '') return value;",
-		'\t}',
-		'\treturn null;',
+		'/** The value of `key`; blank strings and `null` are unset. */',
+		'function read<T>(scope: SettingScope, key: string): T | null {',
+		'\tconst value = config(scope).get<T | null>(key);',
+		"\treturn value === undefined || value === null || value === '' ? null : value;",
 		'}',
-		'',
-		'/** A renamed setting: the old key, still read, and the key that replaced it. */',
-		'export interface RenamedSetting {',
-		'\treadonly from: string;',
-		'\treadonly to: string;',
-		'}',
-		'',
-		'/** Every renamed setting, full keys (`suspect.testBaseUrl` -> `suspect.test.baseUrl`). */',
-		'export const RENAMED_SETTINGS: readonly RenamedSetting[] = [',
-		...configBacked.filter((s) => s.deprecatedFor).map((s) => `\t{ from: '${s.key}', to: '${s.deprecatedFor}' },`),
-		'];',
 		'',
 		'/** Editor setting -> the `.suspect.yaml` key it sets. */',
 		'export const CONFIG_KEYS: Readonly<Record<string, string>> = {',
@@ -163,24 +134,21 @@ function typescript(configBacked, editorOnly) {
 		'};',
 	];
 	for (const setting of configBacked.filter((s) => s.configKey)) {
-		const keys = [setting.key, ...setting.aliases].map((k) => `'${k.replace(/^suspect\./, '')}'`);
 		const type = tsType(setting.contribution);
-		const old = setting.aliases.length ? `, then ${setting.aliases.map((a) => `\`${a}\``).join(', ')}` : '';
 		lines.push(
 			'',
-			`/** \`${setting.key}\`${old}; \`${setting.configKey}\` in .suspect.yaml. \`null\`: unset, the committed value applies. */`,
+			`/** \`${setting.key}\`; \`${setting.configKey}\` in .suspect.yaml. \`null\`: unset, the committed value applies. */`,
 			`export function ${getterName(setting.key)}(scope?: SettingScope): ${type} | null {`,
-			`\treturn first<${type}>(scope, [${keys.join(', ')}]);`,
+			`\treturn read<${type}>(scope, '${setting.key.replace(/^suspect\./, '')}');`,
 			'}',
 		);
 	}
 	for (const [key, contribution] of Object.entries(editorOnly)) {
 		const type = tsType(contribution);
 		const fallback = JSON.stringify(contribution.default);
-		const deprecated = contribution.deprecationMessage ? ' Deprecated.' : '';
 		lines.push(
 			'',
-			`/** \`${key}\` (editor-only).${deprecated} */`,
+			`/** \`${key}\` (editor-only). */`,
 			`export function ${getterName(key)}(scope?: SettingScope): ${type} {`,
 			`\treturn config(scope).get<${type}>('${key.replace(/^suspect\./, '')}', ${fallback});`,
 			'}',

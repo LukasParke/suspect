@@ -45,7 +45,7 @@ Formatter output.
 |---|---|---|---|---|---|---|
 | `format.json` | boolean | `false` | Emit JSON regardless of the input extension. |  |  | `suspect fmt --to` |
 | `format.yaml` | boolean | `false` | Emit YAML regardless of the input extension. |  |  | `suspect fmt --to` |
-| `format.sort_keys` | boolean | `false` | Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`. |  | `suspect.format.sortKeys` (was `suspect.formatting.sortKeys`) |  |
+| `format.sort_keys` | boolean | `false` | Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`. |  | `suspect.format.sortKeys` |  |
 
 ### `docs`
 
@@ -64,13 +64,13 @@ Defaults applied to SDK generation.
 |---|---|---|---|---|---|---|
 | `codegen.out` | path |  | Default output root, relative to the file that sets it. |  |  | `suspect gen sdk --output` |
 | `codegen.profile` | string |  | Default native profile id. |  |  | `suspect gen sdk --profile` |
-| `codegen.package_name` | string |  | Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it. |  | `suspect.codegen.packageName` (was `suspect.sdk.packageName`) |  |
-| `codegen.package_version` | string |  | Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata). |  | `suspect.codegen.packageVersion` (was `suspect.sdk.packageVersion`) | `suspect gen sdk --package-version` |
-| `codegen.import_names` | map of string | `{}` | SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name. |  | `suspect.codegen.importNames` (was `suspect.sdk.importNames`) |  |
-| `codegen.operation_ids` | list of strings | `[]` | Exact `operationId`s to generate. Empty attempts every operation; an unsupported one fails rather than being dropped. |  | `suspect.codegen.operationIds` (was `suspect.sdk.operationIds`) |  |
-| `codegen.compatibility_profiles` | list of names: `legacy-binary-string-v1`, `oas30-nullable-in-3.1-v1`, `colon-path-parameters-v1`, `schemaless-stream-events-v1`, `all-of-scoped-mode-v1` | `[]` | Versioned source interpretations to opt into (`suspect gen sdk --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. |  | `suspect.codegen.compatibilityProfiles` (was `suspect.sdk.compatibilityProfiles`) |  |
-| `codegen.session.config` | path |  | Session config (JSON) naming the spec and targets. Unset: the editor asks for one. |  | `suspect.codegen.session.config` (was `suspect.sdk.sessionConfig`) |  |
-| `codegen.session.out` | string | `sdk-out` | Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`). |  | `suspect.codegen.session.out` (was `suspect.sdk.sessionOutput`) |  |
+| `codegen.package_name` | string |  | Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it. |  | `suspect.codegen.packageName` |  |
+| `codegen.package_version` | string |  | Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata). |  | `suspect.codegen.packageVersion` | `suspect gen sdk --package-version` |
+| `codegen.import_names` | map of string | `{}` | SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name. |  | `suspect.codegen.importNames` |  |
+| `codegen.operation_ids` | list of strings | `[]` | Exact `operationId`s to generate. Empty attempts every operation; an unsupported one fails rather than being dropped. |  | `suspect.codegen.operationIds` |  |
+| `codegen.compatibility_profiles` | list of names: `legacy-binary-string-v1`, `oas30-nullable-in-3.1-v1`, `colon-path-parameters-v1`, `schemaless-stream-events-v1`, `all-of-scoped-mode-v1` | `[]` | Versioned source interpretations to opt into (`suspect gen sdk --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. |  | `suspect.codegen.compatibilityProfiles` |  |
+| `codegen.session.config` | path |  | Session config (JSON) naming the spec and targets. Unset: the editor asks for one. |  | `suspect.codegen.session.config` |  |
+| `codegen.session.out` | string | `sdk-out` | Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`). |  | `suspect.codegen.session.out` |  |
 
 ### `ref`
 
@@ -86,8 +86,8 @@ Editor-only behaviour.
 
 | Key | Type | Default | Description | Env | Editor setting | Flags |
 |---|---|---|---|---|---|---|
-| `editor.inlay_hints.refs` | boolean | `true` | Show resolved `$ref` target inlay hints. |  | `suspect.editor.inlayHints.refs` (was `suspect.inlayHints.refs`) |  |
-| `editor.inlay_hints.properties` | boolean | `true` | Show property type-annotation inlay hints. |  | `suspect.editor.inlayHints.properties` (was `suspect.inlayHints.properties`) |  |
+| `editor.inlay_hints.refs` | boolean | `true` | Show resolved `$ref` target inlay hints. |  | `suspect.editor.inlayHints.refs` |  |
+| `editor.inlay_hints.properties` | boolean | `true` | Show property type-annotation inlay hints. |  | `suspect.editor.inlayHints.properties` |  |
 
 ### `test`
 
@@ -95,7 +95,7 @@ Contract tests, fuzzing and load runs.
 
 | Key | Type | Default | Description | Env | Editor setting | Flags |
 |---|---|---|---|---|---|---|
-| `test.base_url` | URL | `http://localhost:8080` | Base URL requests are sent to. | `SUSPECT_BASE_URL` | `suspect.test.baseUrl` (was `suspect.testBaseUrl`) | `suspect test run --base-url`, `suspect test fuzz --base-url`, `suspect test stateful --base-url`, `suspect test load --base-url` |
+| `test.base_url` | URL | `http://localhost:8080` | Base URL requests are sent to. | `SUSPECT_BASE_URL` | `suspect.test.baseUrl` | `suspect test run --base-url`, `suspect test fuzz --base-url`, `suspect test stateful --base-url`, `suspect test load --base-url` |
 | `test.credentials` | path |  | Credentials file for the security schemes tests exercise. Default: `.suspect/credentials.json` discovered upward. | `SUSPECT_CREDENTIALS` |  | `suspect test run --credentials`, `suspect auth check --credentials` |
 | `test.report` | string: `text`, `ndjson` | `text` | Event stream format for `suspect test`. |  |  | `suspect test run --format` |
 
@@ -105,7 +105,7 @@ The mock/proxy gateway.
 
 | Key | Type | Default | Description | Env | Editor setting | Flags |
 |---|---|---|---|---|---|---|
-| `gateway.port` | port | `8080` | Port the gateway listens on. |  | `suspect.gateway.port` (was `suspect.gatewayPort`) | `suspect traffic gateway --port` |
+| `gateway.port` | port | `8080` | Port the gateway listens on. |  | `suspect.gateway.port` | `suspect traffic gateway --port` |
 | `gateway.mode` | string: `mock`, `proxy`, `validate`, `record`, `replay`, `scenario` | `mock` | Operating mode. |  |  | `suspect traffic gateway --mode` |
 | `gateway.upstream` | URL |  | Upstream base URL for proxy, validate and record modes. |  |  | `suspect traffic gateway --upstream` |
 
@@ -115,7 +115,7 @@ Change detection against git history.
 
 | Key | Type | Default | Description | Env | Editor setting | Flags |
 |---|---|---|---|---|---|---|
-| `diff.baseline` | string |  | Git ref compared against for breaking changes (`suspect ci`, the editor's breaking-changes command; the editor falls back to `HEAD~1`). | `SUSPECT_GIT_BASE` | `suspect.diff.baseline` (was `suspect.ci.baseline`) | `suspect ci --baseline` |
+| `diff.baseline` | string |  | Git ref compared against for breaking changes (`suspect ci`, the editor's breaking-changes command; the editor falls back to `HEAD~1`). | `SUSPECT_GIT_BASE` | `suspect.diff.baseline` | `suspect ci --baseline` |
 
 ### `check`
 

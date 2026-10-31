@@ -116,8 +116,6 @@ pub struct Setting {
     /// Client settings key under `suspect.`: the path with each segment in
     /// camelCase (`lint.minSeverity`). Rows with one become editor settings.
     pub editor: Option<&'static str>,
-    /// Older client keys still accepted, with a warning naming `editor`.
-    pub editor_aliases: &'static [&'static str],
     /// Flags that set it, for `--explain` and the CLI reference.
     pub flags: &'static [&'static str],
 }
@@ -130,7 +128,6 @@ const fn row(path: &'static str, kind: Kind, doc: &'static str) -> Setting {
         doc,
         env: None,
         editor: None,
-        editor_aliases: &[],
         flags: &[],
     }
 }
@@ -150,10 +147,6 @@ impl Setting {
     }
     const fn editor(mut self, key: &'static str) -> Self {
         self.editor = Some(key);
-        self
-    }
-    const fn editor_aliases(mut self, keys: &'static [&'static str]) -> Self {
-        self.editor_aliases = keys;
         self
     }
     const fn flags(mut self, flags: &'static [&'static str]) -> Self {
@@ -268,8 +261,7 @@ pub static SETTINGS: &[Setting] = &[
          Defaults to `true` when a `format` section exists, else `false`.",
     )
     .default("false")
-    .editor("format.sortKeys")
-    .editor_aliases(&["formatting.sortKeys"]),
+    .editor("format.sortKeys"),
     section("docs", "Reference documentation generation."),
     row(
         "docs.style",
@@ -297,8 +289,7 @@ pub static SETTINGS: &[Setting] = &[
         "Native package identity, independent of the API title. The editor's SDK \
          commands and Live SDK Preview start from it.",
     )
-    .editor("codegen.packageName")
-    .editor_aliases(&["sdk.packageName"]),
+    .editor("codegen.packageName"),
     row(
         "codegen.package_version",
         Kind::Str,
@@ -306,7 +297,6 @@ pub static SETTINGS: &[Setting] = &[
          stable version (no prerelease or build metadata).",
     )
     .editor("codegen.packageVersion")
-    .editor_aliases(&["sdk.packageVersion"])
     .flags(&["gen sdk --package-version"]),
     row(
         "codegen.import_names",
@@ -316,8 +306,7 @@ pub static SETTINGS: &[Setting] = &[
          from the package name.",
     )
     .default("{}")
-    .editor("codegen.importNames")
-    .editor_aliases(&["sdk.importNames"]),
+    .editor("codegen.importNames"),
     row(
         "codegen.operation_ids",
         Kind::List,
@@ -325,8 +314,7 @@ pub static SETTINGS: &[Setting] = &[
          unsupported one fails rather than being dropped.",
     )
     .default("[]")
-    .editor("codegen.operationIds")
-    .editor_aliases(&["sdk.operationIds"]),
+    .editor("codegen.operationIds"),
     row(
         "codegen.compatibility_profiles",
         Kind::EnumList(COMPATIBILITY_PROFILES),
@@ -334,8 +322,7 @@ pub static SETTINGS: &[Setting] = &[
          --compatibility-profile`). Empty keeps ordinary OpenAPI semantics.",
     )
     .default("[]")
-    .editor("codegen.compatibilityProfiles")
-    .editor_aliases(&["sdk.compatibilityProfiles"]),
+    .editor("codegen.compatibilityProfiles"),
     section(
         "codegen.session",
         "The editor's SDK preview/watch session (`suspect gen session`).",
@@ -346,8 +333,7 @@ pub static SETTINGS: &[Setting] = &[
         "Session config (JSON) naming the spec and targets. Unset: the editor asks \
          for one.",
     )
-    .editor("codegen.session.config")
-    .editor_aliases(&["sdk.sessionConfig"]),
+    .editor("codegen.session.config"),
     row(
         "codegen.session.out",
         Kind::Str,
@@ -355,8 +341,7 @@ pub static SETTINGS: &[Setting] = &[
          the session config's directory (not `codegen.out`).",
     )
     .default("sdk-out")
-    .editor("codegen.session.out")
-    .editor_aliases(&["sdk.sessionOutput"]),
+    .editor("codegen.session.out"),
     section("ref", "Reference-workspace tuning."),
     row(
         "ref.max_docs",
@@ -373,22 +358,19 @@ pub static SETTINGS: &[Setting] = &[
         "Show resolved `$ref` target inlay hints.",
     )
     .default("true")
-    .editor("editor.inlayHints.refs")
-    .editor_aliases(&["inlayHints.refs"]),
+    .editor("editor.inlayHints.refs"),
     row(
         "editor.inlay_hints.properties",
         Kind::Bool,
         "Show property type-annotation inlay hints.",
     )
     .default("true")
-    .editor("editor.inlayHints.properties")
-    .editor_aliases(&["inlayHints.properties"]),
+    .editor("editor.inlayHints.properties"),
     section("test", "Contract tests, fuzzing and load runs."),
     row("test.base_url", Kind::Url, "Base URL requests are sent to.")
         .default("http://localhost:8080")
         .env("SUSPECT_BASE_URL")
         .editor("test.baseUrl")
-        .editor_aliases(&["testBaseUrl"])
         .flags(&[
             "test run --base-url",
             "test fuzz --base-url",
@@ -414,7 +396,6 @@ pub static SETTINGS: &[Setting] = &[
     row("gateway.port", Kind::Port, "Port the gateway listens on.")
         .default("8080")
         .editor("gateway.port")
-        .editor_aliases(&["gatewayPort"])
         .flags(&["traffic gateway --port"]),
     row("gateway.mode", Kind::Enum(GATEWAY_MODES), "Operating mode.")
         .default("mock")
@@ -434,7 +415,6 @@ pub static SETTINGS: &[Setting] = &[
     )
     .env("SUSPECT_GIT_BASE")
     .editor("diff.baseline")
-    .editor_aliases(&["ci.baseline"])
     .flags(&["ci --baseline"]),
     section("check", "The `suspect check` gate."),
     row(
@@ -799,17 +779,15 @@ pub static DEBUG_VARS: &[DebugVar] = &[
 pub struct Found {
     /// The row.
     pub setting: &'static Setting,
-    /// The alias spelling used, when it was not the canonical path.
-    pub alias: Option<&'static str>,
 }
 
 /// The row for `path` in `table`.
 #[must_use]
 pub fn lookup_in(table: &'static [Setting], path: &str) -> Option<Found> {
-    table.iter().find(|s| s.path == path).map(|setting| Found {
-        setting,
-        alias: None,
-    })
+    table
+        .iter()
+        .find(|s| s.path == path)
+        .map(|setting| Found { setting })
 }
 
 /// The [`SETTINGS`] row for `path`.
@@ -819,26 +797,12 @@ pub fn lookup(path: &str) -> Option<Found> {
 }
 
 /// The [`SETTINGS`] row a client settings key names: the `editor` column
-/// first (`lint.minSeverity`), then an older client key (`testBaseUrl`,
-/// reported as the alias), then the path with each camelCase segment
+/// first (`lint.minSeverity`), then the path with each camelCase segment
 /// converted to snake_case.
 #[must_use]
 pub fn lookup_editor(key: &str) -> Option<Found> {
     if let Some(setting) = SETTINGS.iter().find(|s| s.editor == Some(key)) {
-        return Some(Found {
-            setting,
-            alias: None,
-        });
-    }
-    let old = SETTINGS.iter().find_map(|setting| {
-        let alias = setting.editor_aliases.iter().find(|a| **a == key)?;
-        Some(Found {
-            setting,
-            alias: Some(alias),
-        })
-    });
-    if old.is_some() {
-        return old;
+        return Some(Found { setting });
     }
     let snake: Vec<String> = key.split('.').map(snake_case).collect();
     lookup(&snake.join(".")).or_else(|| lookup(key))
@@ -927,11 +891,14 @@ mod tests {
             "lint.min_severity"
         );
         assert!(lookup_editor("inlayHints.refTargets").is_none());
-        let old = lookup_editor("testBaseUrl").unwrap();
-        assert_eq!(old.setting.path, "test.base_url");
-        assert_eq!(old.alias, Some("testBaseUrl"));
-        assert!(lookup_editor("test.baseUrl").unwrap().alias.is_none());
-        assert!(lookup_editor("test.base_url").unwrap().alias.is_none());
+        assert!(
+            lookup_editor("testBaseUrl").is_none(),
+            "old client keys are gone"
+        );
+        assert_eq!(
+            lookup_editor("test.baseUrl").unwrap().setting.path,
+            "test.base_url"
+        );
         assert!(lookup_editor("basePath").is_none());
     }
 
@@ -939,17 +906,10 @@ mod tests {
     fn editor_keys_are_the_camel_case_path() {
         for setting in SETTINGS {
             let Some(key) = setting.editor else {
-                assert!(setting.editor_aliases.is_empty(), "{}", setting.path);
                 continue;
             };
             let camel: Vec<String> = setting.path.split('.').map(camel_case).collect();
             assert_eq!(key, camel.join("."), "{}", setting.path);
-            for alias in setting.editor_aliases {
-                assert!(
-                    SETTINGS.iter().all(|s| s.editor != Some(alias)),
-                    "{alias} names another setting"
-                );
-            }
         }
     }
 

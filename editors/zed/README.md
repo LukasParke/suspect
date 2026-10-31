@@ -108,10 +108,6 @@ VS Code `suspect.*` settings) or snake_case:
 }
 ```
 
-The older spellings (`inlayHints.*`, `formatting.sortKeys`, `testBaseUrl`,
-`gatewayPort`, `ci.baseline`) still work for two releases; the server logs
-one line naming the replacement for each.
-
 `lint.minSeverity` accepts `error`, `warning`, `info` (or `information`) and
 `hint`; leave it unset to defer to the committed `.suspect.yaml`. Settings
 from the editor layer over the committed `.suspect.yaml` /

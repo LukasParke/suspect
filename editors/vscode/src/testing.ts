@@ -136,7 +136,7 @@ interface Counts {
 /** Shown where no editor setting or manifest names the base URL. */
 const CONFIGURED_BASE_URL = 'test.base_url from .suspect.yaml';
 
-/** `suspect.diff.baseline` (or the old `suspect.ci.baseline`); empty leaves the CLI's `diff.baseline`. */
+/** `suspect.diff.baseline`; empty leaves the CLI's `diff.baseline`. */
 function ciBaseline(): string {
 	return (diffBaseline() ?? '').trim();
 }

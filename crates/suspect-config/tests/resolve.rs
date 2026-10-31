@@ -512,7 +512,7 @@ fn blank_or_null_editor_strings_do_not_override_the_file() {
     ] {
         let client = serde_json::json!({
             "suspect": {"lint": {"minSeverity": blank, "ruleset": blank, "design": blank},
-                        "inlayHints": {"refs": false}}
+                        "editor": {"inlayHints": {"refs": false}}}
         });
         let editor = [&client];
         let r = resolve_with(
