@@ -29,7 +29,7 @@ pub mod severity;
 
 pub use file::{CONFIG_NAMES, discover, load};
 pub use resolve::{Layer, Resolution, resolve_bool, resolve_str};
-pub use severity::{SeverityName, parse_severity};
+pub use severity::{Level, SeverityName, parse_level, parse_severity};
 
 /// The toolchain's settings.
 #[derive(Debug, Clone, Default, PartialEq)]

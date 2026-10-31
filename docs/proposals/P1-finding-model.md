@@ -813,6 +813,19 @@ releasable on its own.
    so command output is byte-identical. Tests: the severity tests move, the
    SARIF 2.1.0 test moves, and a golden text test runs on petstore.
    Estimate: 1 day.
+   **Done.** Deviations: `Finding` has an extra `position: Option<Position>`
+   for producers that know a line but no byte offset (`breaking`, CLI
+   findings converted from `output::Finding`), and `CheckId` has a
+   `Command` variant for command-local findings outside the check pass.
+   CLI JSON output keeps its own serializer (`"severity": "Warning"`), because
+   `render::json` uses the lowercase names and would change the bytes; it
+   switches in step 5. SARIF `endLine`/`endColumn` and
+   `partialFingerprints` are not added yet (they change output; step 8).
+   `SeverityName`/`parse_severity` are kept as wrappers over `parse_level`
+   but not yet `#[deprecated]`, since the LSP's `editor_config.rs` (being
+   rewritten by P2) still calls them. Goldens:
+   `crates/suspect-cli/tests/finding_output.rs` covers text, JSON and SARIF
+   for `validate` and `lint`.
 2. **Rule tables and the registry.** `rules()` in validate (from
    `guidance.rs` plus default severities), lint (from packs, plus
    `Rule::builtin`), arazzo, overlay, load profile, admission.

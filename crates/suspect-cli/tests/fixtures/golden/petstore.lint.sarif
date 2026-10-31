@@ -1,0 +1,345 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 3,
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Info object should contain a contact object."
+          },
+          "ruleId": "info-contact",
+          "ruleIndex": 0
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 3,
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "OpenAPI object should have `description`."
+          },
+          "ruleId": "info-description",
+          "ruleIndex": 1
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 3,
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Info object should contain a license object."
+          },
+          "ruleId": "info-license",
+          "ruleIndex": 2
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 3,
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "OpenAPI 3.x API description must have a contact object."
+          },
+          "ruleId": "oas3-api-contact",
+          "ruleIndex": 3
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation should have at least one 4XX response."
+          },
+          "ruleId": "operation-4xx-response",
+          "ruleIndex": 4
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation must have an `operationId`."
+          },
+          "ruleId": "operation-operationId",
+          "ruleIndex": 5
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation should have non-empty `tags` array."
+          },
+          "ruleId": "operation-tags",
+          "ruleIndex": 6
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operations should document rate limiting — a 429 response or rate-limit headers."
+          },
+          "ruleId": "security-rate-limit-documented",
+          "ruleIndex": 7
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation should have at least one 4XX response."
+          },
+          "ruleId": "operation-4xx-response",
+          "ruleIndex": 4
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation must have an `operationId`."
+          },
+          "ruleId": "operation-operationId",
+          "ruleIndex": 5
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation should have non-empty `tags` array."
+          },
+          "ruleId": "operation-tags",
+          "ruleIndex": 6
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operation `get` of \"/pets/{petId}\" does not declare path parameter {petId}"
+          },
+          "ruleId": "path-params",
+          "ruleIndex": 8
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docs/demo/petstore.yaml"
+                },
+                "region": {
+                  "startColumn": 7,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Operations should document rate limiting — a 429 response or rate-limit headers."
+          },
+          "ruleId": "security-rate-limit-documented",
+          "ruleIndex": 7
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/LukasParke/suspect",
+          "name": "suspect",
+          "rules": [
+            {
+              "id": "info-contact",
+              "shortDescription": {
+                "text": "info-contact"
+              }
+            },
+            {
+              "id": "info-description",
+              "shortDescription": {
+                "text": "info-description"
+              }
+            },
+            {
+              "id": "info-license",
+              "shortDescription": {
+                "text": "info-license"
+              }
+            },
+            {
+              "id": "oas3-api-contact",
+              "shortDescription": {
+                "text": "oas3-api-contact"
+              }
+            },
+            {
+              "id": "operation-4xx-response",
+              "shortDescription": {
+                "text": "operation-4xx-response"
+              }
+            },
+            {
+              "id": "operation-operationId",
+              "shortDescription": {
+                "text": "operation-operationId"
+              }
+            },
+            {
+              "id": "operation-tags",
+              "shortDescription": {
+                "text": "operation-tags"
+              }
+            },
+            {
+              "id": "security-rate-limit-documented",
+              "shortDescription": {
+                "text": "security-rate-limit-documented"
+              }
+            },
+            {
+              "id": "path-params",
+              "shortDescription": {
+                "text": "path-params"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

@@ -1,0 +1,17 @@
+[package]
+name = "suspect-diag"
+description = "One finding model, severity parser and text/JSON/SARIF renderers for the suspect toolchain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+# Joins the public foundation set after P1 (docs/proposals/P5-release.md).
+publish = false
+
+[dependencies]
+suspect-source.workspace = true
+serde.workspace = true
+serde_json.workspace = true
