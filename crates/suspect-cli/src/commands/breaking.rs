@@ -4,7 +4,8 @@
 //! component removals, newly-required members, security additions,
 //! media-type removal, `additionalProperties: false`, parameter
 //! requiredness, webhook removal) between `OLD` and `NEW`, printing
-//! located findings. Exit code is non-zero when any break exists.
+//! located findings. Arazzo revisions go to the Arazzo differ instead.
+//! Exit code is non-zero when any break exists.
 
 use std::path::PathBuf;
 
@@ -138,16 +139,32 @@ pub fn breaking(args: &BreakingArgs) -> anyhow::Result<i32> {
             .ok_or_else(|| anyhow::anyhow!("--baseline requires --current <NEW>"))?;
         let staged =
             crate::baseline::materialize(git_ref, new).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let outcome = breaking_between(&staged, new, args.findings.format);
+        let outcome = by_family(&staged, new, args.findings.format);
         crate::baseline::cleanup(&staged);
         return outcome;
     }
     let (Some(old), Some(new)) = (args.old.as_deref(), args.new.as_deref()) else {
         anyhow::bail!(
-            "usage: suspect breaking <OLD> <NEW> | suspect breaking --current <NEW> --baseline <REF>"
+            "usage: suspect diff breaking <OLD> <NEW> | suspect diff breaking --current <NEW> --baseline <REF>"
         );
     };
-    breaking_between(old, new, args.findings.format)
+    by_family(old, new, args.findings.format)
+}
+
+/// Picks the differ from NEW's family: Arazzo documents go to the Arazzo
+/// differ, everything else to the OpenAPI break differ. Each keeps its
+/// own report shape.
+fn by_family(
+    old: &std::path::Path,
+    new: &std::path::Path,
+    format: FindingsFormat,
+) -> anyhow::Result<i32> {
+    let family = crate::load_doc(new).map(|doc| doc.sniff_family());
+    if matches!(family, Ok(suspect_low::SpecFamily::Arazzo10)) {
+        super::arazzo_diff::arazzo_diff_between(old, new, format)
+    } else {
+        breaking_between(old, new, format)
+    }
 }
 
 /// Compares two revisions and renders the report.

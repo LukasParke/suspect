@@ -310,7 +310,7 @@ pub fn contract_on_workspace(
         for reason in &stale {
             eprintln!("stale: {reason}");
         }
-        eprintln!("run `suspect contract` to refresh the package");
+        eprintln!("run `suspect gen contract` to refresh the package");
         return Ok(1);
     }
 

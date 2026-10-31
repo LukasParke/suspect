@@ -9,7 +9,7 @@ those descriptors and the shared `ExamplePlan`.
 ## Generate
 
 ```sh
-suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile go-http --package-name example.com/example-sdk --package-version 0.1.0 \
   --out generated-go
 ```

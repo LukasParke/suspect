@@ -40,7 +40,53 @@ fn reference() -> String {
          Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C).\n\n",
     );
     render(&mut cmd, "suspect", &mut out);
+    renamed(&mut out);
     out
+}
+
+/// The legacy rewrite table: old names keep working until they are removed.
+fn renamed(out: &mut String) {
+    use suspect_cli::legacy::{DEFAULT_SUB, RENAMED, removed_in};
+    writeln!(out, "## Renamed commands\n").unwrap();
+    writeln!(
+        out,
+        "The old names still run the new command and print one deprecation \
+         line on stderr; stdout and the exit status are unchanged. They are \
+         removed in {}. Under `diff`, `test` and `gen`, a first argument named \
+         like a subcommand (`suspect diff breaking other.yaml`) runs that \
+         subcommand; write `./breaking` for a file.\n",
+        removed_in()
+    )
+    .unwrap();
+    writeln!(out, "| Old | New | Note |\n|---|---|---|").unwrap();
+    for row in RENAMED {
+        let note = match row.old {
+            "arazzo-diff" => "the family of NEW picks the differ",
+            "reverse" => "positionals are `SPEC SOURCE`",
+            "codegen-compare" => "`--before`/`--after` are positionals `OLD NEW`",
+            "overlay-dry-run" => "targets `overlay apply` rejects are rejected",
+            _ => "",
+        };
+        writeln!(
+            out,
+            "| `suspect {}` | `suspect {}` | {note} |",
+            row.old,
+            row.replacement()
+        )
+        .unwrap();
+    }
+    for (group, sub) in DEFAULT_SUB {
+        writeln!(
+            out,
+            "| `suspect {group} <args>` | `suspect {group} {sub} <args>` | |"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "| `suspect why CONSTRAINT --spec SPEC` | `suspect why SPEC CONSTRAINT` | |"
+    )
+    .unwrap();
 }
 
 #[test]

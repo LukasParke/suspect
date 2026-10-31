@@ -20,7 +20,7 @@ and these five operations in the actual `openrouter-web` checkout:
 ## Entry points and artifacts
 
 ```sh
-suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile swift-http --package-name GeneratedSDK --package-version 0.1.0 \
   --out generated-swift
 ```

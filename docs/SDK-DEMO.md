@@ -10,7 +10,7 @@ From the repository root, with `openrouter-web` checked out beside `suspect`:
 
 ```sh
 cargo build --locked -p suspect-cli --bin suspect
-./target/debug/suspect codegen-session \
+./target/debug/suspect gen session \
   --config examples/sdk-demo.json --out target/sdk-demo --format json
 ```
 
@@ -32,10 +32,10 @@ connect the emitted symbols to the original OpenAPI document and JSON Pointer.
 ## Show reproducible output and preview
 
 ```sh
-./target/debug/suspect codegen-session \
+./target/debug/suspect gen session \
   --config examples/sdk-demo.json --out target/sdk-demo --check --format json
 
-./target/debug/suspect codegen-session \
+./target/debug/suspect gen session \
   --config examples/sdk-demo.json --out target/sdk-demo --preview --format json
 ```
 

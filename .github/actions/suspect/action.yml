@@ -1,7 +1,8 @@
 name: 'suspect'
 description: >
   Install a released suspect CLI (checksum-verified, no Rust toolchain) and
-  optionally run one of its subcommands (check | test | gen).
+  optionally run one of its subcommands (check | test | gen; `test` runs
+  `suspect test run`, `gen` runs `suspect gen template`).
 inputs:
   version:
     description: >
@@ -191,7 +192,7 @@ runs:
               echo "input 'arazzo' is required for the test command" >&2
               exit 2
             fi
-            ARGS=(test "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --format "$INPUT_REPORT")
+            ARGS=(test run "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --format "$INPUT_REPORT")
             if [ -n "$INPUT_FILTER" ]; then ARGS+=(--filter "$INPUT_FILTER"); fi
             if [ -n "$INPUT_CASSETTE" ]; then ARGS+=(--cassette "$INPUT_CASSETTE"); fi
             "$BIN" "${ARGS[@]}" "${EXTRA[@]}" || rc=$?
@@ -201,7 +202,7 @@ runs:
               echo "one of inputs 'preset' or 'manifest' is required for the gen command" >&2
               exit 2
             fi
-            ARGS=(gen)
+            ARGS=(gen template)
             if [ -n "$INPUT_PRESET" ]; then ARGS+=(--preset "$INPUT_PRESET");
             else ARGS+=(--manifest "$INPUT_MANIFEST"); fi
             ARGS+=("--output" "$INPUT_OUT_DIR")

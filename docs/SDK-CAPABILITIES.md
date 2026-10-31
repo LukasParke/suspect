@@ -75,7 +75,7 @@ use is supported.
 ## Commands
 
 ```sh
-suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile typescript-http --package-name @example/widgets \
   --package-version 0.1.0 --out generated
 ```

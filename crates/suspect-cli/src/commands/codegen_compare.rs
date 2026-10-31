@@ -15,11 +15,17 @@ use suspect_ir::contract::Contract;
 #[derive(Debug, Args)]
 pub struct CompareArgs {
     /// Baseline SDK session configuration; its source is relative to this file.
-    #[arg(long)]
-    pub before: PathBuf,
+    #[arg(value_name = "OLD", required_unless_present = "before")]
+    pub old: Option<PathBuf>,
     /// Candidate SDK session configuration; its source is relative to this file.
-    #[arg(long)]
-    pub after: PathBuf,
+    #[arg(value_name = "NEW", required_unless_present = "after")]
+    pub new: Option<PathBuf>,
+    /// Old spelling of the OLD positional.
+    #[arg(long, hide = true, conflicts_with = "old")]
+    pub before: Option<PathBuf>,
+    /// Old spelling of the NEW positional.
+    #[arg(long, hide = true, conflicts_with = "new")]
+    pub after: Option<PathBuf>,
     /// Versioned report JSON or human-readable Markdown migration notes.
     #[arg(long, value_enum, default_value = "text")]
     pub format: ReportFormat,
@@ -34,9 +40,15 @@ fn load(input: &suspect_codegen::generation_session::Input) -> Result<Arc<Contra
 /// # Errors
 /// Propagates output failures. Input/comparison failures are structured results.
 pub fn compare(args: CompareArgs) -> Result<i32> {
+    // clap requires each side as a positional or its old flag.
+    let before = args.old.as_ref().or(args.before.as_ref());
+    let after = args.new.as_ref().or(args.after.as_ref());
+    let (Some(before), Some(after)) = (before, after) else {
+        anyhow::bail!("usage: suspect diff sdk <OLD> <NEW>");
+    };
     let result = (|| -> Result<compatibility::CompatibilityReport> {
-        let (old_path, old) = super::codegen_session::read_config(&args.before)?;
-        let (new_path, new) = super::codegen_session::read_config(&args.after)?;
+        let (old_path, old) = super::codegen_session::read_config(before)?;
+        let (new_path, new) = super::codegen_session::read_config(after)?;
         let old_contract = load(&old_path)?;
         let new_contract = load(&new_path)?;
         Ok(if old.operation_ids == new.operation_ids {

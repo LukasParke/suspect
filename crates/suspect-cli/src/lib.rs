@@ -12,6 +12,7 @@ pub mod commands;
 pub mod diff;
 pub mod exit;
 pub mod interrupt;
+pub mod legacy;
 pub mod output;
 pub mod reverse;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
@@ -53,19 +54,12 @@ pub enum Strategy {
     /// Materialize the document with every `$ref` replaced by its resolved target.
     Inline,
 }
-
 /// Subcommands of the `suspect` binary; each variant is one subcommand and
 /// its doc comment becomes the one-line help text shown by `--help`.
+/// Related commands live in groups (`diff`, `gen`, `test`, `traffic`,
+/// `release`, `dev`); old flat names are rewritten by [`legacy`].
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Acquire a hash-pinned document closure or verify its offline cache.
-    Acquire(commands::acquire_cmd::AcquireArgs),
-    /// Manage and verify credentials for the testing flows.
-    Auth {
-        /// The auth subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::auth::AuthCmd,
-    },
     /// Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats.
     Check {
         /// Documents to check.
@@ -91,27 +85,6 @@ pub enum Command {
         #[command(flatten)]
         findings: Findings,
     },
-    /// Run the generation admission layer over documents without generating.
-    Admission(commands::admission::AdmissionArgs),
-    /// Detect consumer-breaking changes between two spec revisions.
-    Breaking(commands::breaking::BreakingArgs),
-    /// Generate API reference docs (HTML, Markdown, or a SvelteKit site).
-    #[command(name = "docs", alias = "docs-gen")]
-    DocsGen(commands::docs_gen_cmd::DocsGenArgs),
-    /// Generate typed server stubs from an OpenAPI document.
-    Stubs(commands::stubs::StubsArgs),
-    /// Detect breaking changes between two Arazzo documents.
-    ArazzoDiff(commands::arazzo_diff::ArazzoDiffArgs),
-    /// Report overlay action target matches without applying.
-    OverlayDryRun(commands::overlay_dry_run::OverlayDryRunArgs),
-    /// Upgrade Swagger 2.0 documents to OpenAPI 3.1.
-    Upgrade(commands::upgrade::UpgradeArgs),
-    /// Run TS/JS custom rules (Bun sidecar) over documents.
-    Rules {
-        /// The rules subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::rules::RulesCmd,
-    },
     /// Run spectral-style lint rules over documents.
     Lint {
         /// Documents to lint.
@@ -128,12 +101,6 @@ pub enum Command {
         #[command(flatten)]
         findings: Findings,
     },
-    /// Apply, explain, or synthesize (`diff`) Overlay 1.0/1.1 documents.
-    Overlay {
-        /// The overlay subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::overlay::OverlayCmd,
-    },
     /// Re-emit a document in canonical JSON/YAML form.
     Fmt {
         /// Input document.
@@ -148,14 +115,6 @@ pub enum Command {
         #[arg(long, hide = true, conflicts_with = "to")]
         yaml: bool,
     },
-    /// Structural counts for a document.
-    Stats {
-        /// Input document.
-        path: PathBuf,
-        /// Output format for the counts table.
-        #[command(flatten)]
-        report: Report,
-    },
     /// Bundle a document and its `$ref` closure into one file.
     Bundle {
         /// Entry document.
@@ -167,8 +126,115 @@ pub enum Command {
         #[command(flatten)]
         out: DocOut,
     },
+    /// Upgrade Swagger 2.0 documents to OpenAPI 3.1.
+    Upgrade(commands::upgrade::UpgradeArgs),
+    /// Structural counts for a document.
+    Stats {
+        /// Input document.
+        path: PathBuf,
+        /// Output format for the counts table.
+        #[command(flatten)]
+        report: Report,
+    },
+    /// Apply, explain, or synthesize (`diff`) Overlay 1.0/1.1 documents.
+    Overlay {
+        /// The overlay subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::overlay::OverlayCmd,
+    },
+    /// Compare two documents or revisions: structure, breaks, impact, SDKs, routes.
+    #[command(subcommand)]
+    Diff(DiffCmd),
+    /// Generate docs, SDKs, stubs, contracts, and applications from a spec.
+    #[command(subcommand)]
+    Gen(GenCmd),
+    /// Run workflows, stateful sequences, fuzzing, load, or replay against a server.
+    #[command(subcommand)]
+    Test(TestCmd),
+    /// Serve, record, and analyze HTTP traffic.
+    #[command(subcommand)]
+    Traffic(TrafficCmd),
+    /// Plan, publish, and automate SDK releases.
+    #[command(subcommand)]
+    Release(ReleaseCmd),
+    /// Build and check a suspect project from one manifest.
+    #[command(name = "project")]
+    Project {
+        /// The project subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::project::ProjectCmd,
+    },
+    /// Run validate, contract, breaking, codegen, and tests across every
+    /// project in a workspace as one gate.
+    Ci(commands::ci::CiArgs),
+    /// Trace a validation failure to its origin: source location, git
+    /// blame, and whether recorded traffic ever passed it.
+    Why {
+        /// Spec file the failure refers to (with the old `--spec` flag,
+        /// this positional is the constraint).
+        #[arg(value_name = "SPEC")]
+        first: String,
+        /// The constraint that fired (e.g. `type` or the diagnostic text).
+        #[arg(value_name = "CONSTRAINT", required_unless_present = "spec")]
+        constraint: Option<String>,
+        /// Old spelling: `why CONSTRAINT --spec SPEC`.
+        #[arg(long, hide = true, conflicts_with = "constraint")]
+        spec: Option<PathBuf>,
+        /// Byte offset of the failing constraint in the spec, when known.
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Line of the failing constraint (1-based), with `--why-col`.
+        #[arg(long)]
+        why_line: Option<usize>,
+        /// Column of the failing constraint (1-based), with `--why-line`.
+        #[arg(long)]
+        why_col: Option<usize>,
+        /// Directory of recorded cassettes searched for historical
+        /// traffic (`.jsonl`/`.ndjson`/`.json` files).
+        #[arg(long, value_name = "DIR")]
+        cassette_dir: Option<PathBuf>,
+        /// Human timeline or one JSON document.
+        #[command(flatten)]
+        report: Report,
+    },
+    /// Run TS/JS custom rules (Bun sidecar) over documents.
+    Rules {
+        /// The rules subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::rules::RulesCmd,
+    },
+    /// Show the configuration in effect, or with `--explain` every setting
+    /// and where its value came from.
+    Config(commands::config_cmd::ConfigArgs),
+    /// Manage and verify credentials for the testing flows.
+    Auth {
+        /// The auth subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::auth::AuthCmd,
+    },
+    /// Acquire a hash-pinned document closure or verify its offline cache.
+    Acquire(commands::acquire_cmd::AcquireArgs),
+    /// Re-run a command whenever documents change under the given roots.
+    Watch {
+        /// Directories (or files) watched recursively for yaml/yml/json changes.
+        #[arg(required = true)]
+        roots: Vec<PathBuf>,
+        /// Command (with arguments) to run and re-run on each change burst.
+        #[arg(last = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Run the language server over stdio.
+    Lsp,
+    /// Developer tools: pipeline benchmarks and the SDK evidence matrix.
+    #[command(subcommand)]
+    Dev(DevCmd),
+}
+
+/// `suspect diff`: compare two documents or revisions.
+#[derive(Debug, Subcommand)]
+pub enum DiffCmd {
     /// Semantic structural diff between two documents.
-    Diff {
+    Structural {
         /// Left-hand document.
         a: PathBuf,
         /// Right-hand document.
@@ -180,49 +246,86 @@ pub enum Command {
         #[command(flatten)]
         check: Check,
     },
-    /// Cross-reference recorded traffic against the spec: endpoints the
-    /// traffic exercised that the spec does not declare, undeclared query
-    /// parameters, and declared operations the traffic never touched.
-    Drift {
+    /// Detect consumer-breaking changes between two OpenAPI or Arazzo
+    /// revisions (the family of NEW picks the differ).
+    Breaking(commands::breaking::BreakingArgs),
+    /// Evaluate recorded traffic against a candidate contract revision.
+    Impact(commands::impact::ImpactArgs),
+    /// Compare wire contracts and native SDK interfaces with migration notes.
+    Sdk(commands::codegen_compare::CompareArgs),
+    /// Extract server framework routes and cross-reference them with the
+    /// spec: undocumented endpoints, spec-only endpoints, method drift.
+    Routes {
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// Traffic file: a Suspect Cassette (gateway `--mode record`) or a
-        /// Suspect Journal (gateway `--journal`); records are recognized
-        /// line by line.
-        traffic: PathBuf,
-        /// Query parameter names to ignore in gap analysis (repeatable);
-        /// the CI-passed auth token lives here, for instance.
-        #[arg(long = "ignore-param", value_name = "NAME")]
-        ignore_param: Vec<String>,
-        /// Exit with status 1 when the traffic addresses undeclared
-        /// endpoints or parameters (old spelling: `--exit-on-gap`).
-        #[arg(long, alias = "exit-on-gap")]
-        check: bool,
-        /// Output format for the drift report.
-        #[command(flatten)]
-        findings: Findings,
-    },
-    /// Export recorded traffic as an HTTP Archive (HAR 1.2) — the
-    /// interchange format profiling and debugging tools read. Accepts a
-    /// Suspect Cassette or a Suspect Journal.
-    Har {
-        /// Traffic file: a Suspect Cassette or Suspect Journal.
-        traffic: PathBuf,
-        /// Write the archive here instead of stdout.
-        #[arg(long, short = 'o', value_name = "FILE")]
-        output: Option<PathBuf>,
-    },
-    /// Wall-clock micro-benchmark of the pipeline stages on one fixture.
-    Bench {
-        /// Fixture document.
-        fixture: PathBuf,
-        /// Iterations per stage (mean reported).
-        #[arg(long, default_value_t = 3)]
-        iters: usize,
-        /// Output format for the stage table.
+        /// Server source tree or single file with route registrations.
+        source: PathBuf,
+        /// Old positional order (`reverse SOURCE SPEC`): swap the two.
+        #[arg(long, hide = true)]
+        source_first: bool,
+        /// `text` for a human report, `json` for a structured report.
         #[command(flatten)]
         report: Report,
+        /// `--check`: exit 1 on undocumented or spec-only routes.
+        #[command(flatten)]
+        check: Check,
     },
+}
+
+/// `suspect gen`: generate artifacts from a spec.
+#[derive(Debug, Subcommand)]
+pub enum GenCmd {
+    /// Generate API reference docs (HTML, Markdown, or a SvelteKit site).
+    Docs(commands::docs_gen_cmd::DocsGenArgs),
+    /// Generate a source-selected native SDK package.
+    Sdk(commands::codegen_cmd::CodegenArgs),
+    /// Generate typed server stubs from an OpenAPI document.
+    Stubs(commands::stubs::StubsArgs),
+    /// Emit or verify a machine-readable contract package.
+    Contract(commands::contract::ContractArgs),
+    /// Generate a Terraform provider through explicit lifecycle mappings and the generated Go SDK.
+    Terraform(commands::terraform_cmd::TerraformArgs),
+    /// Generate a Go/Cobra API CLI application over its own embedded generated Go SDK.
+    Cli(commands::application_cmd::ApplicationArgs),
+    /// Generate a TypeScript stdio MCP server over its own embedded generated TypeScript SDK.
+    Mcp(commands::application_cmd::ApplicationArgs),
+    /// Render custom template manifests (or the `docs-md` starter preset)
+    /// from an OpenAPI document.
+    Template {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Shipped preset: `docs-md`, a starting point for custom
+        /// templates (reference docs: `suspect gen docs`).
+        #[arg(long, conflicts_with = "manifest", value_parser=["docs-md"])]
+        preset: Option<String>,
+        /// Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json`
+        /// (templates resolved relative to it).
+        #[arg(long, conflicts_with = "preset")]
+        manifest: Option<PathBuf>,
+        /// Output root directory.
+        #[arg(
+            short = 'o',
+            long = "output",
+            visible_alias = "out",
+            value_name = "DIR",
+            default_value = "gen-out"
+        )]
+        out: PathBuf,
+        /// Write nothing; exit 1 when output or ownership drifts.
+        #[command(flatten)]
+        check: Check,
+        /// Also print unified diffs of drifted files; implies `--check`.
+        #[arg(long)]
+        diff: bool,
+        /// Stable logical owner when sharing an output root across generation streams.
+        #[arg(long)]
+        owner: Option<String>,
+        /// Explicitly adopt only byte-identical unowned output.
+        #[arg(long)]
+        adopt_identical: bool,
+    },
+    /// Persistent canonical SDK generation with readonly preview and watch mode.
+    Session(commands::codegen_session::SessionArgs),
     /// Run the live contract bridge: watch the spec and emit regeneration
     /// plans, evolution proposals, and reconciliation conflicts.
     Bridge {
@@ -239,42 +342,24 @@ pub enum Command {
         #[command(flatten)]
         stream: Stream,
     },
-    /// Extract server framework routes and cross-reference them with the
-    /// spec: undocumented endpoints, spec-only endpoints, method drift.
-    Reverse {
-        /// Server source tree or single file with route registrations.
-        source: PathBuf,
-        /// Entry OpenAPI document.
-        spec: PathBuf,
-        /// `text` for a human report, `json` for a structured report.
+    /// List the native SDK or application profiles available in this CLI build.
+    Profiles {
+        /// Profile family: native SDK backends, or application targets.
+        #[arg(long, value_enum, default_value_t = commands::sdk_profiles::ProfileKind::Sdk)]
+        kind: commands::sdk_profiles::ProfileKind,
+        /// Human-readable inventory or versioned JSON for editor integration.
         #[command(flatten)]
         report: Report,
-        /// `--check`: exit 1 on undocumented or spec-only routes.
-        #[command(flatten)]
-        check: Check,
     },
-    /// Generate and run stateful dependency-graph test sequences against a
-    /// live server.
-    Stateful {
-        /// Entry OpenAPI document.
-        spec: PathBuf,
-        /// Base URL prepended to operation paths (default: `test.base_url`
-        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
-        /// `http://localhost:8080`).
-        #[arg(long)]
-        base_url: Option<String>,
-        /// Run only sequences whose target operationId contains this.
-        #[arg(long)]
-        filter: Option<String>,
-        /// Print the generated sequences as JSON instead of running them.
-        #[arg(long)]
-        emit: bool,
-        /// JSON and JUnit report files.
-        #[command(flatten)]
-        report_files: ReportFiles,
-    },
+    /// Run the generation admission layer over documents without generating.
+    Admission(commands::admission::AdmissionArgs),
+}
+
+/// `suspect test`: exercise a live (or recorded) server.
+#[derive(Debug, Subcommand)]
+pub enum TestCmd {
     /// Compile an Arazzo document into an executable suite and run it.
-    Test {
+    Run {
         /// Arazzo document describing the workflows.
         arazzo: PathBuf,
         /// Base URL prepended to operation paths (default: `test.base_url`
@@ -323,9 +408,26 @@ pub enum Command {
         #[command(flatten)]
         report_files: ReportFiles,
     },
-    /// Run Arazzo workflows as weighted virtual-user scenarios under a phased
-    /// load profile, with latency/throughput metrics and SLO gates.
-    Load(Box<commands::load::LoadArgs>),
+    /// Generate and run stateful dependency-graph test sequences against a
+    /// live server.
+    Stateful {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Base URL prepended to operation paths (default: `test.base_url`
+        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
+        /// `http://localhost:8080`).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Run only sequences whose target operationId contains this.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Print the generated sequences as JSON instead of running them.
+        #[arg(long)]
+        emit: bool,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
+    },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
         /// Entry OpenAPI document.
@@ -358,31 +460,9 @@ pub enum Command {
         #[command(flatten)]
         report_files: ReportFiles,
     },
-    /// Trace a validation failure to its origin: source location, git
-    /// blame, and whether recorded traffic ever passed it.
-    Why {
-        /// The constraint that fired (e.g. `type` or the diagnostic text).
-        constraint: String,
-        /// Spec file the failure refers to.
-        #[arg(long)]
-        spec: PathBuf,
-        /// Byte offset of the failing constraint in the spec, when known.
-        #[arg(long)]
-        offset: Option<usize>,
-        /// Line of the failing constraint (1-based), with `--why-col`.
-        #[arg(long)]
-        why_line: Option<usize>,
-        /// Column of the failing constraint (1-based), with `--why-line`.
-        #[arg(long)]
-        why_col: Option<usize>,
-        /// Directory of recorded cassettes searched for historical
-        /// traffic (`.jsonl`/`.ndjson`/`.json` files).
-        #[arg(long, value_name = "DIR")]
-        cassette_dir: Option<PathBuf>,
-        /// Human timeline or one JSON document.
-        #[command(flatten)]
-        report: Report,
-    },
+    /// Run Arazzo workflows as weighted virtual-user scenarios under a phased
+    /// load profile, with latency/throughput metrics and SLO gates.
+    Load(Box<commands::load::LoadArgs>),
     /// Re-issue a recorded cassette against an upstream and report drift.
     Replay {
         /// Recorded Suspect Cassette to replay from.
@@ -400,48 +480,11 @@ pub enum Command {
         #[command(flatten)]
         report_files: ReportFiles,
     },
-    /// Render documentation or custom template manifests from an OpenAPI document.
-    Gen {
-        /// Entry OpenAPI document.
-        spec: PathBuf,
-        /// Shipped documentation preset.
-        #[arg(long, conflicts_with = "manifest", value_parser=["docs-md"])]
-        preset: Option<String>,
-        /// Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json`
-        /// (templates resolved relative to it).
-        #[arg(long, conflicts_with = "preset")]
-        manifest: Option<PathBuf>,
-        /// Output root directory.
-        #[arg(
-            short = 'o',
-            long = "output",
-            visible_alias = "out",
-            value_name = "DIR",
-            default_value = "gen-out"
-        )]
-        out: PathBuf,
-        /// Write nothing; exit 1 when output or ownership drifts.
-        #[command(flatten)]
-        check: Check,
-        /// Also print unified diffs of drifted files; implies `--check`.
-        #[arg(long)]
-        diff: bool,
-        /// Stable logical owner when sharing an output root across generation streams.
-        #[arg(long)]
-        owner: Option<String>,
-        /// Explicitly adopt only byte-identical unowned output.
-        #[arg(long)]
-        adopt_identical: bool,
-    },
-    /// Re-run a command whenever documents change under the given roots.
-    Watch {
-        /// Directories (or files) watched recursively for yaml/yml/json changes.
-        #[arg(required = true)]
-        roots: Vec<PathBuf>,
-        /// Command (with arguments) to run and re-run on each change burst.
-        #[arg(last = true, allow_hyphen_values = true)]
-        command: Vec<String>,
-    },
+}
+
+/// `suspect traffic`: serve, record, and analyze HTTP traffic.
+#[derive(Debug, Subcommand)]
+pub enum TrafficCmd {
     /// Serve a spec as a mock, or proxy/validate/record against an upstream,
     /// or replay a recorded cassette.
     Gateway {
@@ -494,58 +537,67 @@ pub enum Command {
         #[arg(long = "redact-json-key", value_name = "KEY")]
         redact_json_keys: Vec<String>,
     },
-    /// Generate a source-selected native SDK package.
-    Codegen(commands::codegen_cmd::CodegenArgs),
-    /// Generate a Terraform provider through explicit lifecycle mappings and the generated Go SDK.
-    CodegenTerraform(commands::terraform_cmd::TerraformArgs),
-    /// Generate a Go/Cobra API CLI application over its own embedded generated Go SDK.
-    CodegenCli(commands::application_cmd::ApplicationArgs),
-    /// Generate a TypeScript stdio MCP server over its own embedded generated TypeScript SDK.
-    CodegenMcp(commands::application_cmd::ApplicationArgs),
-    /// List the native SDK or application profiles available in this CLI build.
-    CodegenProfiles {
-        /// Profile family: native SDK backends, or application targets.
-        #[arg(long, value_enum, default_value_t = commands::sdk_profiles::ProfileKind::Sdk)]
-        kind: commands::sdk_profiles::ProfileKind,
-        /// Human-readable inventory or versioned JSON for editor integration.
+    /// Cross-reference recorded traffic against the spec: endpoints the
+    /// traffic exercised that the spec does not declare, undeclared query
+    /// parameters, and declared operations the traffic never touched.
+    Drift {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Traffic file: a Suspect Cassette (gateway `--mode record`) or a
+        /// Suspect Journal (gateway `--journal`); records are recognized
+        /// line by line.
+        traffic: PathBuf,
+        /// Query parameter names to ignore in gap analysis (repeatable);
+        /// the CI-passed auth token lives here, for instance.
+        #[arg(long = "ignore-param", value_name = "NAME")]
+        ignore_param: Vec<String>,
+        /// Exit with status 1 when the traffic addresses undeclared
+        /// endpoints or parameters (old spelling: `--exit-on-gap`).
+        #[arg(long, alias = "exit-on-gap")]
+        check: bool,
+        /// Output format for the drift report.
+        #[command(flatten)]
+        findings: Findings,
+    },
+    /// Export recorded traffic as an HTTP Archive (HAR 1.2) — the
+    /// interchange format profiling and debugging tools read. Accepts a
+    /// Suspect Cassette or a Suspect Journal.
+    Har {
+        /// Traffic file: a Suspect Cassette or Suspect Journal.
+        traffic: PathBuf,
+        /// Write the archive here instead of stdout.
+        #[arg(long, short = 'o', value_name = "FILE")]
+        output: Option<PathBuf>,
+    },
+}
+
+/// `suspect release`: SDK release planning and publishing.
+#[derive(Debug, Subcommand)]
+pub enum ReleaseCmd {
+    /// Recommend a release version and changelog from two spec revisions.
+    Plan(commands::release::ReleasePlanArgs),
+    /// Plan and execute SDK publishing across registries.
+    Publish(commands::publish::PublishArgs),
+    /// Render the release manifest as a tag-triggered CI workflow.
+    Workflow(commands::publish::WorkflowArgs),
+}
+
+/// `suspect dev`: tools for developing suspect itself.
+#[derive(Debug, Subcommand)]
+pub enum DevCmd {
+    /// Wall-clock micro-benchmark of the pipeline stages on one fixture.
+    Bench {
+        /// Fixture document.
+        fixture: PathBuf,
+        /// Iterations per stage (mean reported).
+        #[arg(long, default_value_t = 3)]
+        iters: usize,
+        /// Output format for the stage table.
         #[command(flatten)]
         report: Report,
     },
-    /// Persistent canonical SDK generation with readonly preview and watch mode.
-    CodegenSession(commands::codegen_session::SessionArgs),
-    /// Compare wire contracts and native SDK interfaces with migration notes.
-    CodegenCompare(commands::codegen_compare::CompareArgs),
-    /// Recommend a release version and changelog from two spec revisions.
-    #[command(name = "release-plan")]
-    ReleasePlan(commands::release::ReleasePlanArgs),
-    /// Evaluate recorded traffic against a candidate contract revision.
-    #[command(name = "impact")]
-    Impact(commands::impact::ImpactArgs),
-    /// Plan and execute SDK publishing across registries.
-    #[command(name = "release-publish")]
-    ReleasePublish(commands::publish::PublishArgs),
-    /// Render the release manifest as a tag-triggered CI workflow.
-    #[command(name = "release-workflow")]
-    ReleaseWorkflow(commands::publish::WorkflowArgs),
     /// Print the SDK verification matrix: backend x feature -> evidence.
     Evidence(commands::evidence::EvidenceArgs),
-    /// Run validate, contract, breaking, codegen, and tests across every
-    /// project in a workspace as one gate.
-    Ci(commands::ci::CiArgs),
-    /// Emit or verify a machine-readable contract package.
-    Contract(commands::contract::ContractArgs),
-    /// Show the configuration in effect, or with `--explain` every setting
-    /// and where its value came from.
-    Config(commands::config_cmd::ConfigArgs),
-    /// Build and check a suspect project from one manifest.
-    #[command(name = "project")]
-    Project {
-        /// The project subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::project::ProjectCmd,
-    },
-    /// Run the language server over stdio.
-    Lsp,
 }
 
 /// Parses a severity floor named in configuration or the environment
@@ -614,33 +666,6 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 validate.strict_format,
             )
         }
-        Command::Admission(args) => commands::admission::admission(&args),
-        Command::Breaking(args) => commands::breaking::breaking(&args),
-        Command::DocsGen(mut args) => {
-            let style = args
-                .style
-                .and_then(|s| ValueEnum::to_possible_value(&s))
-                .map(|v| Raw::Str(v.get_name().to_owned()));
-            let flags = Layer::flags().set("docs.style", style, "--style").set(
-                "docs.output",
-                args.output.take().map(Raw::Path),
-                "--output",
-            );
-            let resolved = settings::resolve_one(&args.input, flags)?;
-            let docs = &resolved.settings.docs;
-            // The table restricts `docs.style` to the enum's names.
-            args.style = docs
-                .style
-                .as_deref()
-                .and_then(|style| commands::docs_gen_cmd::DocsStyle::from_str(style, false).ok());
-            args.output.clone_from(&docs.output);
-            commands::docs_gen_cmd::docs_gen(&args)
-        }
-        Command::Stubs(args) => commands::stubs::stubs(&args),
-        Command::ArazzoDiff(args) => commands::arazzo_diff::arazzo_diff(&args),
-        Command::OverlayDryRun(args) => commands::overlay_dry_run::overlay_dry_run(&args),
-        Command::Upgrade(args) => commands::upgrade::upgrade(&args),
-        Command::Rules { cmd } => cmd.run(),
         Command::Lint {
             paths,
             ruleset,
@@ -668,7 +693,6 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 findings.format,
             )
         }
-        Command::Overlay { cmd } => commands::overlay::run(cmd),
         Command::Fmt {
             input,
             out,
@@ -687,94 +711,57 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             };
             commands::fmt::fmt(&input, out.output.as_deref(), json, yaml)
         }
-        Command::Stats { path, report } => commands::stats::stats(&path, report.format),
         Command::Bundle {
             input,
             strategy,
             out,
         } => bundle::bundle(&input, out.output.as_deref(), strategy, out.to),
-        Command::Diff {
-            a,
-            b,
-            report,
-            check,
-        } => diff::diff_files(&a, &b, report.format, check.check),
-        Command::Drift {
-            spec,
-            traffic,
-            ignore_param,
-            check,
-            findings,
-        } => commands::drift::drift(&spec, &traffic, &ignore_param, check, findings.format),
-        Command::Har { traffic, output } => commands::har::har(&traffic, output.as_deref()),
-        Command::Bench {
-            fixture,
-            iters,
-            report,
-        } => commands::bench::bench(&fixture, iters, report.format),
-        Command::Load(args) => commands::load::load(*args),
-        Command::Fuzz {
-            spec,
-            base_url,
-            runs,
-            filter,
-            journal,
-            evolved,
-            rounds,
-            per_round,
-            report_files,
-        } => commands::fuzz::fuzz(
-            &spec,
-            &test_settings(&spec, base_url, None, None)?.base_url,
-            runs,
-            filter.as_deref(),
-            journal.as_deref(),
-            evolved,
-            rounds,
-            per_round,
-            &report_files,
-        ),
-        Command::Replay {
-            cassette,
-            upstream,
-            diff,
-            journal,
-            report_files,
-        } => commands::replay::replay(
-            &cassette,
-            &upstream,
-            diff,
-            journal.as_deref(),
-            &report_files,
-        ),
-        Command::Bridge {
-            spec,
-            interval_ms,
-            max_ticks,
-            stream,
-        } => {
-            interrupt::server();
-            commands::bridge::bridge(&spec, interval_ms, max_ticks, stream.format.is_ndjson())
+        Command::Upgrade(args) => commands::upgrade::upgrade(&args),
+        Command::Stats { path, report } => commands::stats::stats(&path, report.format),
+        Command::Overlay { cmd } => commands::overlay::run(cmd),
+        Command::Diff(cmd) => diff_cmd(cmd),
+        Command::Gen(cmd) => gen_cmd(cmd),
+        Command::Test(cmd) => test_cmd(cmd),
+        Command::Traffic(cmd) => traffic_cmd(cmd),
+        Command::Release(cmd) => match cmd {
+            ReleaseCmd::Plan(args) => commands::release::release_plan(&args),
+            ReleaseCmd::Publish(args) => commands::publish::publish(&args),
+            ReleaseCmd::Workflow(args) => commands::publish::workflow(&args),
+        },
+        Command::Project { cmd } => commands::project::run(cmd),
+        Command::Ci(args) => {
+            // The gate reports its own aggregate, so a failing stage is a
+            // reported verdict rather than a raised error.
+            commands::ci::ci(&args)
         }
-        Command::Reverse {
-            source,
+        Command::Why {
+            first,
+            constraint,
             spec,
+            offset,
+            why_line,
+            why_col,
+            cassette_dir,
             report,
-            check,
-        } => commands::reverse::reverse(&source, &spec, report.format.is_json(), check.check),
-        Command::Stateful {
-            spec,
-            base_url,
-            filter,
-            emit,
-            report_files,
-        } => commands::stateful::stateful(
-            &spec,
-            &test_settings(&spec, base_url, None, None)?.base_url,
-            filter.as_deref(),
-            emit,
-            &report_files,
-        ),
+        } => {
+            // `why SPEC CONSTRAINT`, or the old `why CONSTRAINT --spec SPEC`.
+            let (spec, constraint) = match (spec, constraint) {
+                (Some(spec), _) => (spec, first),
+                (None, Some(constraint)) => (PathBuf::from(first), constraint),
+                (None, None) => anyhow::bail!("usage: suspect why <SPEC> <CONSTRAINT>"),
+            };
+            commands::why::why(
+                &constraint,
+                &spec,
+                offset,
+                why_line,
+                why_col,
+                cassette_dir.as_deref(),
+                report.format.is_json(),
+            )
+        }
+        Command::Rules { cmd } => cmd.run(),
+        Command::Config(args) => commands::config_cmd::config(&args),
         Command::Auth {
             cmd: commands::auth::AuthCmd::Check { credentials },
         } => {
@@ -786,7 +773,137 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             let resolved = settings::resolve(&[], flags)?;
             commands::auth::check(resolved.settings.test.credentials.as_deref())
         }
-        Command::Test {
+        Command::Acquire(args) => commands::acquire_cmd::acquire(args),
+        Command::Watch { roots, command } => {
+            interrupt::server();
+            commands::watch::watch(&roots, &command)
+        }
+        Command::Lsp => {
+            interrupt::server();
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(suspect_lsp::run_server());
+            Ok(0)
+        }
+        Command::Dev(cmd) => match cmd {
+            DevCmd::Bench {
+                fixture,
+                iters,
+                report,
+            } => commands::bench::bench(&fixture, iters, report.format),
+            DevCmd::Evidence(args) => commands::evidence::evidence(&args),
+        },
+    }
+}
+
+fn diff_cmd(cmd: DiffCmd) -> anyhow::Result<i32> {
+    match cmd {
+        DiffCmd::Structural {
+            a,
+            b,
+            report,
+            check,
+        } => diff::diff_files(&a, &b, report.format, check.check),
+        DiffCmd::Breaking(args) => commands::breaking::breaking(&args),
+        DiffCmd::Impact(args) => commands::impact::impact(&args),
+        DiffCmd::Sdk(args) => commands::codegen_compare::compare(args),
+        DiffCmd::Routes {
+            spec,
+            source,
+            source_first,
+            report,
+            check,
+        } => {
+            let (spec, source) = if source_first {
+                (source, spec)
+            } else {
+                (spec, source)
+            };
+            commands::reverse::reverse(&source, &spec, report.format.is_json(), check.check)
+        }
+    }
+}
+
+fn gen_cmd(cmd: GenCmd) -> anyhow::Result<i32> {
+    match cmd {
+        GenCmd::Docs(mut args) => {
+            let style = args
+                .style
+                .and_then(|s| ValueEnum::to_possible_value(&s))
+                .map(|v| Raw::Str(v.get_name().to_owned()));
+            let flags = Layer::flags().set("docs.style", style, "--style").set(
+                "docs.output",
+                args.output.take().map(Raw::Path),
+                "--output",
+            );
+            let resolved = settings::resolve_one(&args.input, flags)?;
+            let docs = &resolved.settings.docs;
+            // The table restricts `docs.style` to the enum's names.
+            args.style = docs
+                .style
+                .as_deref()
+                .and_then(|style| commands::docs_gen_cmd::DocsStyle::from_str(style, false).ok());
+            args.output.clone_from(&docs.output);
+            commands::docs_gen_cmd::docs_gen(&args)
+        }
+        GenCmd::Sdk(args) => commands::codegen_cmd::codegen(args),
+        GenCmd::Stubs(args) => commands::stubs::stubs(&args),
+        GenCmd::Contract(args) => commands::contract::contract(&args),
+        GenCmd::Terraform(args) => commands::terraform_cmd::generate(args),
+        GenCmd::Cli(args) => {
+            commands::application_cmd::generate(commands::application_cmd::Target::Cli, args)
+        }
+        GenCmd::Mcp(args) => {
+            commands::application_cmd::generate(commands::application_cmd::Target::Mcp, args)
+        }
+        GenCmd::Template {
+            spec,
+            preset,
+            manifest,
+            out,
+            check,
+            diff,
+            owner,
+            adopt_identical,
+        } => commands::generate::generate(
+            &spec,
+            preset.as_deref(),
+            manifest.as_deref(),
+            &out,
+            commands::generate::Gate {
+                check: check.check || diff,
+                diff,
+            },
+            owner.as_deref(),
+            adopt_identical,
+        ),
+        GenCmd::Session(args) => {
+            if args.watch {
+                interrupt::server();
+            }
+            commands::codegen_session::generate(args)
+        }
+        GenCmd::Bridge {
+            spec,
+            interval_ms,
+            max_ticks,
+            stream,
+        } => {
+            interrupt::server();
+            commands::bridge::bridge(&spec, interval_ms, max_ticks, stream.format.is_ndjson())
+        }
+        GenCmd::Profiles { kind, report } => match kind {
+            commands::sdk_profiles::ProfileKind::Sdk => commands::sdk_profiles::list(report.format),
+            commands::sdk_profiles::ProfileKind::Applications => {
+                commands::sdk_profiles::list_applications(report.format)
+            }
+        },
+        GenCmd::Admission(args) => commands::admission::admission(&args),
+    }
+}
+
+fn test_cmd(cmd: TestCmd) -> anyhow::Result<i32> {
+    match cmd {
+        TestCmd::Run {
             arazzo,
             base_url,
             filter,
@@ -814,45 +931,60 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 &report_files,
             )
         }
-        Command::Why {
-            constraint,
+        TestCmd::Stateful {
             spec,
-            offset,
-            why_line,
-            why_col,
-            cassette_dir,
-            report,
-        } => commands::why::why(
-            &constraint,
+            base_url,
+            filter,
+            emit,
+            report_files,
+        } => commands::stateful::stateful(
             &spec,
-            offset,
-            why_line,
-            why_col,
-            cassette_dir.as_deref(),
-            report.format.is_json(),
+            &test_settings(&spec, base_url, None, None)?.base_url,
+            filter.as_deref(),
+            emit,
+            &report_files,
         ),
-        Command::Gen {
+        TestCmd::Fuzz {
             spec,
-            preset,
-            manifest,
-            out,
-            check,
+            base_url,
+            runs,
+            filter,
+            journal,
+            evolved,
+            rounds,
+            per_round,
+            report_files,
+        } => commands::fuzz::fuzz(
+            &spec,
+            &test_settings(&spec, base_url, None, None)?.base_url,
+            runs,
+            filter.as_deref(),
+            journal.as_deref(),
+            evolved,
+            rounds,
+            per_round,
+            &report_files,
+        ),
+        TestCmd::Load(args) => commands::load::load(*args),
+        TestCmd::Replay {
+            cassette,
+            upstream,
             diff,
-            owner,
-            adopt_identical,
-        } => commands::generate::generate(
-            &spec,
-            preset.as_deref(),
-            manifest.as_deref(),
-            &out,
-            commands::generate::Gate {
-                check: check.check || diff,
-                diff,
-            },
-            owner.as_deref(),
-            adopt_identical,
+            journal,
+            report_files,
+        } => commands::replay::replay(
+            &cassette,
+            &upstream,
+            diff,
+            journal.as_deref(),
+            &report_files,
         ),
-        Command::Gateway {
+    }
+}
+
+fn traffic_cmd(cmd: TrafficCmd) -> anyhow::Result<i32> {
+    match cmd {
+        TrafficCmd::Gateway {
             spec,
             port,
             mode,
@@ -898,51 +1030,14 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 &redact_json_keys,
             )
         }
-        Command::Watch { roots, command } => {
-            interrupt::server();
-            commands::watch::watch(&roots, &command)
-        }
-        Command::Acquire(args) => commands::acquire_cmd::acquire(args),
-        Command::Codegen(args) => commands::codegen_cmd::codegen(args),
-        Command::CodegenTerraform(args) => commands::terraform_cmd::generate(args),
-        Command::CodegenCli(args) => {
-            commands::application_cmd::generate(commands::application_cmd::Target::Cli, args)
-        }
-        Command::CodegenMcp(args) => {
-            commands::application_cmd::generate(commands::application_cmd::Target::Mcp, args)
-        }
-        Command::CodegenProfiles { kind, report } => match kind {
-            commands::sdk_profiles::ProfileKind::Sdk => commands::sdk_profiles::list(report.format),
-            commands::sdk_profiles::ProfileKind::Applications => {
-                commands::sdk_profiles::list_applications(report.format)
-            }
-        },
-        Command::CodegenSession(args) => {
-            if args.watch {
-                interrupt::server();
-            }
-            commands::codegen_session::generate(args)
-        }
-        Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
-        Command::Config(args) => commands::config_cmd::config(&args),
-        Command::Evidence(args) => commands::evidence::evidence(&args),
-        Command::Ci(args) => {
-            // The gate reports its own aggregate, so a failing stage is a
-            // reported verdict rather than a raised error.
-            commands::ci::ci(&args)
-        }
-        Command::Contract(args) => commands::contract::contract(&args),
-        Command::ReleasePlan(args) => commands::release::release_plan(&args),
-        Command::ReleasePublish(args) => commands::publish::publish(&args),
-        Command::ReleaseWorkflow(args) => commands::publish::workflow(&args),
-        Command::Impact(args) => commands::impact::impact(&args),
-        Command::Project { cmd } => commands::project::run(cmd),
-        Command::Lsp => {
-            interrupt::server();
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(suspect_lsp::run_server());
-            Ok(0)
-        }
+        TrafficCmd::Drift {
+            spec,
+            traffic,
+            ignore_param,
+            check,
+            findings,
+        } => commands::drift::drift(&spec, &traffic, &ignore_param, check, findings.format),
+        TrafficCmd::Har { traffic, output } => commands::har::har(&traffic, output.as_deref()),
     }
 }
 

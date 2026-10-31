@@ -252,33 +252,59 @@ paths:
         r#"overlay: 1.0.0
 info: {title: Polish, version: '1'}
 actions:
-  - target: '$.paths./pets.get'
+  - target: "$.paths['/pets'].get"
     update:
       summary: Lists every pet
-  - target: '$.paths./missing'
+  - target: "$.paths['/missing']"
     update: {summary: never matches}
 "#,
     );
     let original = std::fs::read_to_string(&target).unwrap();
-    let output = std::process::Command::new(binary())
-        .args([
-            "overlay-dry-run",
-            overlay.to_str().unwrap(),
-            target.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    // One action has a zero-match target: the exit code flags it.
-    assert!(!output.status.success());
+    let dry_run = |overlay: &Path| {
+        std::process::Command::new(binary())
+            .args([
+                "overlay-dry-run",
+                overlay.to_str().unwrap(),
+                target.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    // The old name runs `overlay explain --check`: one action has a
+    // zero-match target, so the exit code flags it.
+    let output = dry_run(&overlay);
+    assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("matches=1"), "{stderr}");
-    assert!(stderr.contains("matches=0"), "{stderr}");
-    assert!(stderr.contains("1 zero-match actions"), "{stderr}");
+    assert!(
+        stderr.contains("use `suspect overlay explain --check`"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("matched nothing"), "{stderr}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("1 match(es)"), "{stdout}");
+    assert!(stdout.contains("0 match(es)"), "{stdout}");
     // Dry run: the target file must be untouched.
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
         original,
         "overlay-dry-run must not modify the target"
+    );
+
+    // A bare-dot target the old dry run normalized is rejected, as
+    // `overlay apply` rejects it, and the note names it.
+    let bare = write(
+        dir.path(),
+        "bare.yaml",
+        "overlay: 1.0.0\ninfo: {title: Bare, version: '1'}\nactions:\n  - target: '$.paths./pets.get'\n    update: {summary: s}\n",
+    );
+    let output = dry_run(&bare);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "note: target \"$.paths./pets.get\" is not RFC 9535; overlay apply rejects it"
+        ),
+        "{stderr}"
     );
 }
 
@@ -1150,7 +1176,7 @@ const RELEASE_TARGETS: &str = r#"[{"backend": "typescript", "directory": "sdk/ts
 fn release_publish(root: &Path, extra: &[&str]) -> std::process::Output {
     std::process::Command::new(binary())
         .current_dir(root)
-        .args(["release-publish", "--format", "json"])
+        .args(["release", "publish", "--format", "json"])
         .args(extra)
         .output()
         .unwrap()

@@ -151,39 +151,42 @@ $ suspect validate spec.yaml           # source-located semantic findings
 $ suspect lint spec/ --format json     # Spectral-style linting
 $ suspect bundle api.yaml --strategy inline -o bundled.yaml
 $ suspect overlay apply overlay.yaml api.yaml -o out.yaml
-$ suspect diff old.yaml new.yaml
+$ suspect diff structural old.yaml new.yaml
+$ suspect diff breaking old.yaml new.yaml   # consumer-breaking changes (OpenAPI or Arazzo)
 $ suspect stats api.yaml
 $ suspect fmt api.yaml --to json
-$ suspect bench fixture.yaml           # per-stage timings
-$ suspect test flows.arazzo.yaml --base-url http://localhost:8080 --input petName=Rex
-$ suspect load profile.load.yaml       # Artillery-style load test from Arazzo scenarios
+$ suspect test run flows.arazzo.yaml --base-url http://localhost:8080 --input petName=Rex
+$ suspect test load profile.load.yaml  # Artillery-style load test from Arazzo scenarios
 $ suspect lsp                          # stdio language server
-$ suspect gateway api.yaml -p 8080 --mode mock
-$ suspect gateway api.yaml -p 9000 --mode record --upstream http://staging:80 --cassette rec.scj
-$ suspect gateway api.yaml -p 9001 --mode replay --cassette rec.scj
-$ suspect test flows.arazzo.yaml --cassette rec.scj
-$ suspect fuzz api.yaml --base-url http://localhost:8080 --runs 50
-$ suspect watch . -- suspect test flows.arazzo.yaml --cassette rec.scj
+$ suspect traffic gateway api.yaml -p 8080 --mode mock
+$ suspect traffic gateway api.yaml -p 9000 --mode record --upstream http://staging:80 --cassette rec.scj
+$ suspect traffic gateway api.yaml -p 9001 --mode replay --cassette rec.scj
+$ suspect test run flows.arazzo.yaml --cassette rec.scj
+$ suspect test fuzz api.yaml --base-url http://localhost:8080 --runs 50
+$ suspect watch . -- suspect test run flows.arazzo.yaml --cassette rec.scj
 $ suspect config                       # settings in effect, and where they came from
 ```
 
 Every command is listed with its flags in the generated
 [command reference](docs/CLI.md); the [documentation index](docs/README.md)
-groups the guides. Exit codes are shared: `0` clean, `1` findings or failed
-checks, `2` usage or environment error.
+groups the guides. Related commands live in groups (`diff`, `gen`, `test`,
+`traffic`, `release`, `dev`); the old flat names (`breaking`, `codegen`,
+`gateway`, ...) still work with a deprecation warning, and the reference ends
+with the full rename table. Exit codes are shared: `0` clean, `1` findings or
+failed checks, `2` usage or environment error.
 
 ## SDK generation
 
 Generate the shared create/update/list/get example contract:
 
 ```sh
-suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile typescript-http --package-name @example/widgets \
   --package-version 0.1.0 -o generated
 ```
 
-Profiles are the twelve registered backends listed by `suspect
-codegen-profiles` (`typescript-http`, `python-http`, `go-http`, `rust-http`,
+Profiles are the twelve registered backends listed by `suspect gen
+profiles` (`typescript-http`, `python-http`, `go-http`, `rust-http`,
 `swift-http`, `java-http`, `kotlin-http`, `csharp-http`, `ruby-http`,
 `php-http`, `dart-http`, `cpp-http`). Package identity is explicit
 configuration. Repeat
@@ -192,15 +195,17 @@ all outgoing operations. Unsupported selected contracts produce source-linked
 diagnostics before output. Add `--check --format json` for read-only drift checks.
 
 For multi-target generation, watch and editor previews, use
-[`codegen-session`](docs/SDK-INCREMENTAL-GENERATION.md). Compare source snapshots
-and generated interfaces with [`codegen-compare`](docs/SDK-COMPATIBILITY-REPORTS.md).
-Markdown and custom templates use `suspect gen api.yaml --preset docs-md` or
-`suspect gen api.yaml --manifest FILE`; native SDK docs are emitted by each profile.
+[`gen session`](docs/SDK-INCREMENTAL-GENERATION.md). Compare source snapshots
+and generated interfaces with [`diff sdk`](docs/SDK-COMPATIBILITY-REPORTS.md).
+Markdown reference docs use `suspect gen docs api.yaml --style markdown`.
+Custom templates use `suspect gen template api.yaml --manifest FILE`; the
+`--preset docs-md` starter there is a base for writing your own templates.
+Native SDK docs are emitted by each profile.
 
 ## Contract and load testing
 
-`suspect test` compiles an Arazzo document into an executable suite and
-runs it against a live server or a recorded cassette; `suspect load` runs
+`suspect test run` compiles an Arazzo document into an executable suite and
+runs it against a live server or a recorded cassette; `suspect test load` runs
 the **same workflows** as weighted virtual-user scenarios under a phased
 arrival profile (`arrivalRate`/`rampTo`, `arrivalCount`, `pause`,
 closed-loop `vus`), with HDR-histogram latency percentiles, status and
@@ -211,11 +216,11 @@ and the runnable example in [`examples/load/`](examples/load/).
 
 ## Gateway, recording and replay
 
-`suspect gateway` serves a spec as a mock, or proxies an upstream while
+`suspect traffic gateway` serves a spec as a mock, or proxies an upstream while
 validating, recording or replaying traffic. Recorded traffic feeds offline
-contract tests (`suspect test --cassette`), drift reports
-(`suspect drift`), HAR export (`suspect har`) and impact analysis
-(`suspect impact`).
+contract tests (`suspect test run --cassette`), drift reports
+(`suspect traffic drift`), HAR export (`suspect traffic har`) and impact
+analysis (`suspect diff impact`).
 
 ### Cassette format
 

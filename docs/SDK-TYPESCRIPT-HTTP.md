@@ -26,7 +26,7 @@ are reported rather than silently omitted. Success describes the selected
 profile, not full-document validation. Run `suspect validate` separately to
 detect defects outside the selected operation closures. Generated output lives
 under `sdk-out/typescript/`; package building is explicit and no package manager
-or publication command is invoked by `suspect codegen`.
+or publication command is invoked by `suspect gen sdk`.
 
 The CLI-to-package native gate uses the tracked source directly, installs the
 emitted tarball, compiles a strict TypeScript consumer, calls a localhost credits

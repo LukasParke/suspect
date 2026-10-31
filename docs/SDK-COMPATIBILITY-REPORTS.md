@@ -6,7 +6,7 @@ descriptors and the resolved HTTP/schema graph directly.
 
 ## Integration API
 
-The library API is exposed through `suspect codegen-compare`, using the same
+The library API is exposed through `suspect diff sdk`, using the same
 twelve-backend registry and configurations as `codegen-session`. See
 [the CLI workflow](SDK-INCREMENTAL-GENERATION.md#native-and-wire-compatibility).
 

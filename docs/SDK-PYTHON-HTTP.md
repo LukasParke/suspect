@@ -7,7 +7,7 @@ Package configuration supplies identity; it does not supply API semantics.
 ## Generate
 
 ```sh
-suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
+suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile python-http --package-name example-sdk --package-version 0.1.0 \
   --out generated-python
 ```
