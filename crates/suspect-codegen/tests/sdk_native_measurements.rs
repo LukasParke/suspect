@@ -24,8 +24,8 @@ fn python() -> Result<PathBuf, String> {
 fn collector_unit_and_adversarial_evidence_checks() {
     let python = match python() {
         Ok(python) => python,
-        Err(skip) => {
-            eprintln!("skipping the native collector host checks: {skip}");
+        Err(message) => {
+            suspect_codegen::toolchain::skip("python", &message);
             return;
         }
     };

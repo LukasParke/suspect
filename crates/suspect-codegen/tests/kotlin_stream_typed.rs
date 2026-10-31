@@ -205,12 +205,10 @@ fn discriminated_sse_operations_emit_typed_event_flows() {
 
     // The emitted package typechecks when the JVM toolchain is available.
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_stream_typed: no JDK 21 found; emission assertions only");
-        return;
+        panic!("kotlin_stream_typed: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_stream_typed: no Maven found; emission assertions only");
-        return;
+        panic!("kotlin_stream_typed: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&files, root.path()).unwrap();
@@ -352,12 +350,10 @@ fn plan_carries_the_compiled_stream_semantics() {
 #[test]
 fn native_typed_events_drive_scripted_streams() {
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_stream_typed: no JDK 21 found; degrading to static assertions");
-        return;
+        panic!("kotlin_stream_typed: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_stream_typed: no Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_stream_typed: no Maven found");
     };
     let files = generate(stream_document());
     let root = tempfile::tempdir().unwrap();

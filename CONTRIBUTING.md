@@ -40,12 +40,25 @@ cargo build -p suspect-cli && (cd editors/vscode && npm run test:host:smoke)
 
 ## Native SDK gates
 
-Behavioral gates that compile and run generated SDKs need real toolchains
-(Go, JDK/Maven, .NET, Swift, Dart, Node, Ruby, PHP, Python). They are opt-in
-(`#[ignore]`) or skip with a message naming what is missing.
-`crates/suspect-codegen/src/toolchain.rs` declares each tool, its minimum
-version and its `SUSPECT_*_BIN` override; run
-`cargo test -p suspect-codegen -- --ignored` to include them.
+Tests that compile and run generated SDKs need real toolchains (Go, JDK/Maven,
+.NET, Swift, Dart, Node, Ruby, PHP, Python). The rule:
+
+- A test in the default suite may skip when a tool is missing. It prints one
+  `skipped:` line naming the tool and how to install it.
+- A test marked `#[ignore]` is an explicit gate. When you run it
+  (`cargo test -p suspect-codegen -- --ignored`), a missing tool or input
+  fails it. No gate passes by skipping.
+- CI sets `SUSPECT_REQUIRE_TOOLS` for the tools it installs, so a skip there
+  is a failure.
+
+Use `suspect_codegen::toolchain::optional` in default-suite tests and
+`toolchain::require` in `#[ignore]` gates; `toolchain.rs` declares each tool,
+its minimum version and its `SUSPECT_*_BIN` override. Gates that read the
+OpenRouter specification need `OPENROUTER_WEB_ROOT=/path/to/openrouter-web`
+and get it from `suspect_codegen::test_inputs`.
+
+The corpus suite skips without `corpus/` (`cargo xtask fetch-corpus`), unless
+`SUSPECT_REQUIRE_CORPUS=1`, which `cargo xtask ci corpus-validation` sets.
 
 ## Conventions
 

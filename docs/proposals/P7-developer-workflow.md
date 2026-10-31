@@ -557,7 +557,18 @@ the tools: those runs now fail instead of passing.
    variable. Tests: unit tests for root vs deprecated-file resolution with a
    temp dir; `cargo test --workspace` (sites are under `#[ignore]`, so this
    checks compilation); `verify-sdk --check-syntax`. 1 day.
-6. **Skip/fail rule.** Adds `toolchain::optional`/`require`, migrates the 71
+6. **Skip/fail rule.** **Done.** Deviations: 84 `#[ignore]` early
+   returns (the scan above missed the "emission assertions only" form) became
+   `panic!` with the original detection kept, because several tools are not
+   manifest tools (cmake, the C++ compiler, tsc, an offline cargo registry);
+   new manifest-tool code uses `require`. The default-suite sites use
+   `optional` (Go, Python, Node) or the new `toolchain::skip(id, what)` for
+   requirements that are not one manifest tool (`python-httpx`, required only
+   by `all`). `tool_available` stays in the four `typescript_*` gates (it
+   probes `tsc`); the corpus skips in `suspect-ir`, `-lint`, `-low` and
+   `-validate` are unchanged. `SUSPECT_REQUIRE_TOOLS` is not yet in the P2.4
+   env registry (P2 owns it). Bun in the `test` job came with cf67733; the
+   variable is set by `cargo xtask ci test --ci`. Adds `toolchain::optional`/`require`, migrates the 71
    + 28 skip sites and the 6 hand-rolled probes, adds `SUSPECT_REQUIRE_TOOLS` and `SUSPECT_REQUIRE_CORPUS`,
    updates the `ci.yml` `test` job (Bun + variable), and updates the
    `CONTRIBUTING.md` "Native SDK gates" text. Tests: the `toolchain.rs` unit

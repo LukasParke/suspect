@@ -1330,8 +1330,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
 #[test]
 fn native_lifecycle_counts_requests_and_protects_secrets() {
     let Some(ruby) = ruby() else {
-        eprintln!("ruby_oauth: no Ruby >= 3.3 toolchain; degrading to static assertions");
-        return;
+        panic!("ruby_oauth: no Ruby >= 3.3 toolchain");
     };
     let root = tempfile::tempdir().unwrap();
     // The interactive package compiles every executable flow plus the
@@ -1368,8 +1367,7 @@ fn native_lifecycle_counts_requests_and_protects_secrets() {
 #[test]
 fn native_discovery_lifecycle_resolves_compiled_precedence() {
     let Some(ruby) = ruby() else {
-        eprintln!("ruby_oauth: no Ruby >= 3.3 toolchain; degrading to static assertions");
-        return;
+        panic!("ruby_oauth: no Ruby >= 3.3 toolchain");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&discovery_document(), &discovery_options());
@@ -1407,8 +1405,7 @@ fn native_discovery_lifecycle_resolves_compiled_precedence() {
 #[test]
 fn native_replay_lifecycle_budgets_one_refresh_and_one_replay() {
     let Some(ruby) = ruby() else {
-        eprintln!("ruby_oauth replay: no Ruby >= 3.3 toolchain; degrading to static assertions");
-        return;
+        panic!("ruby_oauth replay: no Ruby >= 3.3 toolchain");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&replay_document(), &replay_options());

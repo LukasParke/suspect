@@ -267,8 +267,7 @@ fn tool_available(name: &str) -> bool {
 #[test]
 fn typed_stream_events_compile_strictly_with_the_package() {
     if !tool_available("tsc") {
-        eprintln!("tsc is not on PATH; skipping the strict typed-events compile check");
-        return;
+        panic!("tsc is not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(stream_document()), directory.path()).unwrap();
@@ -505,8 +504,7 @@ const client = {};
 #[test]
 fn typed_stream_events_drive_stubbed_streams_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
-        eprintln!("tsc/node are not on PATH; skipping the behavioral typed-events check");
-        return;
+        panic!("tsc/node are not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(stream_document()), directory.path()).unwrap();

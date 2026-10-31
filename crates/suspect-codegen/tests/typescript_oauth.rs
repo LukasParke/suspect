@@ -412,8 +412,7 @@ fn tool_available(name: &str) -> bool {
 #[test]
 fn generated_oauth_module_compiles_strictly_with_the_package() {
     if !tool_available("tsc") {
-        eprintln!("tsc is not on PATH; skipping the strict OAuth compile check");
-        return;
+        panic!("tsc is not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -453,8 +452,7 @@ fn generated_oauth_module_compiles_strictly_with_the_package() {
 #[test]
 fn oauth_lifecycle_behaves_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
-        eprintln!("tsc/node are not on PATH; skipping the behavioral OAuth check");
-        return;
+        panic!("tsc/node are not on PATH");
     }
     let fetch_available = Command::new("node")
         .arg("-e")
@@ -462,8 +460,7 @@ fn oauth_lifecycle_behaves_in_node() {
         .output()
         .is_ok_and(|output| output.status.success());
     if !fetch_available {
-        eprintln!("node lacks native fetch; skipping the behavioral OAuth check");
-        return;
+        panic!("node lacks native fetch");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -515,8 +512,7 @@ fn oauth_lifecycle_behaves_in_node() {
 #[test]
 fn discovery_lifecycle_behaves_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
-        eprintln!("tsc/node are not on PATH; skipping the discovery behavioral check");
-        return;
+        panic!("tsc/node are not on PATH");
     }
     let fetch_available = Command::new("node")
         .arg("-e")
@@ -524,8 +520,7 @@ fn discovery_lifecycle_behaves_in_node() {
         .output()
         .is_ok_and(|output| output.status.success());
     if !fetch_available {
-        eprintln!("node lacks native fetch; skipping the discovery behavioral check");
-        return;
+        panic!("node lacks native fetch");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -1205,8 +1200,7 @@ fn replaying_credentials_emit_conditionally_with_stream_protection() {
 #[test]
 fn replay_lifecycle_behaves_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
-        eprintln!("tsc/node are not on PATH; skipping the replay behavioral check");
-        return;
+        panic!("tsc/node are not on PATH");
     }
     let fetch_available = Command::new("node")
         .arg("-e")
@@ -1214,8 +1208,7 @@ fn replay_lifecycle_behaves_in_node() {
         .output()
         .is_ok_and(|output| output.status.success());
     if !fetch_available {
-        eprintln!("node lacks native fetch; skipping the replay behavioral check");
-        return;
+        panic!("node lacks native fetch");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
