@@ -21,14 +21,22 @@ env:
   PLAN: ${{ inputs.plan }}
 
 jobs:
-  # The .vsix built by package-editors, downloaded from the release and
-  # checked against its .sha256, goes to the Marketplace and Open VSX.
+  # Every .vsix built by package-editors, downloaded from the release and
+  # checked against its .sha256, goes to the Marketplace and Open VSX: one
+  # per VS Code target with the binary inside (TARGETS, the same list as
+  # package-editors' vscode-platform matrix and
+  # editors/vscode/scripts/package-target.cjs), plus the universal one that
+  # serves every other platform (docs/proposals/P4-editors.md, step 9). Both
+  # registries read the target from each VSIX's manifest. One job with a
+  # loop rather than a matrix, so the `release` environment asks for one
+  # approval, and the universal VSIX goes first.
   vscode:
     runs-on: ubuntu-22.04
     environment: release
     env:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
+      TARGETS: darwin-arm64 darwin-x64 linux-x64 linux-arm64 alpine-x64 alpine-arm64 win32-x64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,27 +46,37 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: editors/vscode/package-lock.json
-      - name: Download the release .vsix
+      - name: Download the release .vsix files
         run: |
           set -euo pipefail
           TAG=$(jq -r '.announcement_tag' <<< "$PLAN")
-          VSIX="suspect-vscode-${TAG#v}.vsix"
+          V="${TAG#v}"
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
-          curl --proto '=https' --tlsv1.2 -fsSLO "$base/$VSIX"
-          curl --proto '=https' --tlsv1.2 -fsSLO "$base/$VSIX.sha256"
-          sha256sum -c "$VSIX.sha256"
-          echo "VSIX=$PWD/$VSIX" >> "$GITHUB_ENV"
+          mkdir vsix
+          list="suspect-vscode-$V.vsix"
+          for target in $TARGETS; do list="$list suspect-vscode-$target-$V.vsix"; done
+          for f in $list; do
+            curl --proto '=https' --tlsv1.2 -fsSL -o "vsix/$f" "$base/$f"
+            curl --proto '=https' --tlsv1.2 -fsSL -o "vsix/$f.sha256" "$base/$f.sha256"
+            (cd vsix && sha256sum -c "$f.sha256")
+          done
+          echo "VSIX_LIST=$list" >> "$GITHUB_ENV"
+          echo "VSIX_DIR=$PWD/vsix" >> "$GITHUB_ENV"
       # The pinned @vscode/vsce and ovsx from package-lock.json.
       - run: npm ci
         working-directory: editors/vscode
       - name: Publish to the VS Code Marketplace
         if: env.VSCE_PAT != ''
         working-directory: editors/vscode
-        run: npx vsce publish --packagePath "$VSIX"
+        run: |
+          set -euo pipefail
+          for f in $VSIX_LIST; do npx vsce publish --packagePath "$VSIX_DIR/$f"; done
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
         working-directory: editors/vscode
-        run: npx ovsx publish "$VSIX"
+        run: |
+          set -euo pipefail
+          for f in $VSIX_LIST; do npx ovsx publish "$VSIX_DIR/$f"; done
       - name: Skipped registries
         if: env.VSCE_PAT == '' || env.OVSX_PAT == ''
         run: |

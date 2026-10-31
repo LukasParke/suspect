@@ -881,6 +881,16 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
 9. **Publishing jobs** in P5's release workflow: VSIX matrix, `vsce` and
    `ovsx` publishing, Zed registry PR. Account setup (publisher, Open VSX
    namespace, tokens) is outside the estimate. 0.5 day.
+   **Done, not run** (no tag, no accounts). The VSIX matrix is step 7's
+   `vscode-platform` job in `package-editors.yml`; `publish-editors.yml`'s
+   `vscode` job now downloads the universal VSIX and the seven platform
+   VSIXs from the release, checks each `.sha256`, and publishes all eight
+   with `vsce publish --packagePath` and `ovsx publish`, each registry
+   gated on its secret as before. It is one job with a loop rather than a
+   matrix, so the `release` environment asks for one approval. The Zed
+   registry PR was P5 step 8 (`zed-registry-pr.sh`). A headless test keeps
+   the target lists of `package-target.cjs`, `package-editors.yml` and
+   `publish-editors.yml` equal.
 
 Total: about 7-8 days. The suggested-order table in the source document
 gives 2-3 days for P4. The difference is mostly steps 3, 7 and 8, which

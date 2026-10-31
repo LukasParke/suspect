@@ -492,4 +492,13 @@ test('the VSIX ships the bundle and leaves node_modules and sources out', () => 
 	assert.ok(packageManifest.contributes.commands.some((c) => c.command === 'suspect.locateBinary'));
 	const { TARGETS } = require('../scripts/package-target.cjs');
 	assert.deepEqual(Object.keys(TARGETS).sort(), ['alpine-arm64', 'alpine-x64', 'darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']);
+	// The release workflows package and publish the same targets.
+	const workflows = path.join(__dirname, '..', '..', '..', '.github', 'workflows');
+	const packaging = fs.readFileSync(path.join(workflows, 'package-editors.yml'), 'utf8');
+	const publishing = fs.readFileSync(path.join(workflows, 'publish-editors.yml'), 'utf8');
+	const published = publishing.match(/^\s+TARGETS: (.+)$/m)[1].trim().split(/\s+/);
+	assert.deepEqual(published.sort(), Object.keys(TARGETS).sort(), 'publish-editors.yml TARGETS');
+	for (const [target, triple] of Object.entries(TARGETS)) {
+		assert.ok(packaging.includes(`{ target: ${target}, triple: ${triple},`), `package-editors.yml packages ${target} from ${triple}`);
+	}
 });
