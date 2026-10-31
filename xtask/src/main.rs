@@ -20,7 +20,8 @@ tasks:
                                   (was sdk-full).
   verify-sdk-demo [options]       Verify the frozen five-backend M3/M6 demo scope
                                   (was sdk-m3-m6).
-  bump <version>                  Set the one toolchain version in every manifest and lockfile.
+  bump <version>                  Set the one toolchain version in every manifest and lockfile,
+                                  then prepend its CHANGELOG.md section (git-cliff, if installed).
   check-versions [--tag vX.Y.Z]   Fail when any version line (or the tag) differs.
   fetch-corpus [--force]          Download real-world OpenAPI specs into corpus/ (gitignored).
   gen-fixtures [options]          Generate deterministic synthetic OpenAPI 3.1 fixtures.

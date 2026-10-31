@@ -586,6 +586,28 @@ workflow does, required secrets), and its "Checks" list is replaced by
    `cliff.toml`; `CHANGELOG.md` with the `v0.1.0` entry;
    `THIRD-PARTY-NOTICES.md` via cargo-about. Dry run with a
    `v0.1.0-rc.1` tag on a fork. 1 day.
+   **Done, rc dry run not run** (no tag pushed, no fork). cargo-dist 0.32.0;
+   `dist plan` lists exactly the "Asset contract" archives, `.sha256` files,
+   installers, `suspect.rb` and `source.tar.gz`, and every archive carries
+   `suspect`, both licences, `README.md`, `CHANGELOG.md` and
+   `THIRD-PARTY-NOTICES.md`. The CI job is `dist-check` (`cargo xtask ci
+   dist-check`, `dist generate --check`; CI installs `cargo-dist@0.32.0`
+   with `taiki-e/install-action`). Deviations: dist puts
+   `x86_64-apple-darwin` on its default `macos-15-intel` runner (native, not
+   cross from `macos-14`) and builds musl with `musl-tools` rather than
+   zigbuild; `[dist.github-custom-job-permissions]` gives the editor publish
+   job `contents: read` instead of dist's default `id-token`/`packages`
+   grant, which would make the reusable workflow's own `permissions` invalid.
+   `include` lists only `THIRD-PARTY-NOTICES.md`, because dist includes
+   `LICENSE-*`, `README.md` and `CHANGELOG.md` by itself.
+   `THIRD-PARTY-NOTICES.md` comes from cargo-about 0.9.3 (`about.toml` with
+   `deny.toml`'s allow list and the seven release targets, `about.hbs`) over
+   `suspect-cli`'s normal dependencies; it names the two vendored grammars
+   by hand because they are not crates. `CHANGELOG.md` holds the
+   hand-written `0.1.0` entry, dated "Unreleased" until the release PR sets
+   the date. `cargo xtask bump` now runs `git cliff --unreleased --tag
+   v<V> --prepend CHANGELOG.md` when `git-cliff` is on `PATH`, and prints
+   the command otherwise.
 5. **Editor packaging.** `package-editors.yml`, `publish-editors.yml`;
    `editors/vscode` `package.json` fields, `LICENSE`, `.vscodeignore`,
    `@vscode/vsce`/`ovsx` dev dependencies; `editors/zed` `repository` and
