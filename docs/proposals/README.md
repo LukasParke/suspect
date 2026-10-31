@@ -1,8 +1,11 @@
 # Toolchain unification proposals
 
 Status: **implemented** (2026-10-31) on branch `t3/unify-toolchain-review`,
-except the steps that by design belong to later releases or need accounts
-outside this repository (see [Implementation status](#implementation-status)).
+except the steps that need accounts outside this repository (see
+[Implementation status](#implementation-status)). The steps first scheduled
+for one and two releases later (removing deprecated names) were done before
+the first release as well: no version had been tagged, so the deprecation
+windows protected nothing published, and `0.1.0` ships the final names.
 Each proposal below has its own document with the evidence, the design, the
 PR-sized implementation plan (each step marked **Done.** with its
 deviations), tests, alternatives, risks and open questions. Concrete defects
@@ -13,13 +16,13 @@ found while writing them were fixed directly and are listed in
 
 | | Done | Not done, by design |
 |---|---|---|
-| [P1](P1-finding-model.md) | steps 1–9 | — |
-| [P2](P2-configuration.md) | steps 1–8 | N+1: manifest `lint`/`validate`/`editor` policy is ignored instead of warned about |
-| [P3](P3-command-grammar.md) | steps 1–5 | step 6 (N+1: editors switch to the new names, `--out` hidden) and step 7 (N+2: legacy names removed) |
-| [P4](P4-editors.md) | steps 0–9 | publisher and registry account setup (P5 step 6) |
+| [P1](P1-finding-model.md) | steps 1–9; step 10 (one-release `alias_of` and `syntax` alias removed) | — |
+| [P2](P2-configuration.md) | steps 1–8; step 9 (manifest policy ignored and fails `project check`, old file spellings and standalone `release.json` removed) | — |
+| [P3](P3-command-grammar.md) | steps 1–7 (step 6: editors on the new names, CLI version check; step 7: legacy names and flag spellings removed) | — |
+| [P4](P4-editors.md) | steps 0–10 (step 10: renamed editor settings and `suspect.server.path` removed) | publisher and registry account setup (P5 step 6) |
 | [P5](P5-release.md) | steps 1–5, 7, 8; step 6 docs | step 6: create the Homebrew tap, Marketplace / Open VSX publishers, secrets, the first Zed submission, and tag `v0.1.0` (CONTRIBUTING "Releasing" lists them) |
-| [P6](P6-docs.md) | steps 1–7 | — |
-| [P7](P7-developer-workflow.md) | steps 1–8 | — |
+| [P6](P6-docs.md) | steps 1–8 (step 8: `SUSPECT_REGEN_FEATURES` removed) | — |
+| [P7](P7-developer-workflow.md) | steps 1–9 (step 9: old xtask task names and OpenRouter variables removed) | — |
 | [P8](P8-crate-consolidation.md) | steps 1–5 | — |
 
 Open questions were settled with their recommended answers; deviations from
@@ -93,7 +96,7 @@ agree on them; change them in both places or not at all.
 |---|---|---|
 | `suspect-diag` is a leaf crate holding `Finding`, `Severity`, the one severity parser, and the text/JSON/SARIF/JUnit renderers; `suspect-config` re-exports the parser | P1 | P2, P3 (format enums render through it), P5 (public crate after P1) |
 | One setting table in `suspect-config` drives parsing, env vars, `--explain`, LSP hover, and the checked-in JSON Schema (`editors/vscode/schemas/`, `SUSPECT_BLESS` pattern) | P2 | P4 (generated VS Code settings), P6 (generated config and env reference pages) |
-| Precedence: default < manifest (deprecated) < `.suspect.yaml` < env < editor setting = flag. `lint.rules.<id>` merges per key in every tool | P2 | P1 (policy input), P4 |
+| Precedence: default < `.suspect.yaml` < env < editor setting = flag (a manifest's old policy sections are ignored). `lint.rules.<id>` merges per key in every tool | P2 | P1 (policy input), P4 |
 | Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted; long-running servers exit `0` on Ctrl-C | P3 | P1, P7, `CONTRIBUTING.md` |
 | Release assets: `suspect-cli-{TRIPLE}.tar.gz` (`.zip` on Windows) plus `.sha256` per archive; Linux editors use the static musl build | P5 | P4 (Zed download, VS Code platform VSIX) |
 | `cargo xtask ci <job>`, one subcommand per CI job, checked against the workflows by a test | P7 | P6 (`links` job), P5 (`check-versions`, `package-foundation`) |
@@ -153,7 +156,7 @@ code moved several of them:
 | 2 | P1; in parallel P4 steps 1–3 and P7 steps 1–5 | ~9 days | P3 renders P1 findings; P4 steps 1–3 need nothing else |
 | 3 | P3 steps 1–5; in parallel P5 steps 1–6 and P6 steps 3–6 | ~6 days | P5's first tag should carry the new command tree |
 | 4 | P4 steps 4–9; P6 step 7; P2 step 8 | ~5 days | needs the P2 schema and the P5 release assets |
-| later | P3 steps 6–7 and P2's manifest-policy removal, one and two releases after phase 3 | ~1 day | deprecation windows |
+| later | P3 steps 6–7 and P2's manifest-policy removal, one and two releases after phase 3 (done before the first release instead) | ~1 day | deprecation windows |
 
 About 30 working days of calendar time with two people working in
 parallel. One person working alone needs the full ~46 days.
