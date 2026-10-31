@@ -50,6 +50,45 @@ impl Request for DocumentKindRequest {
     const METHOD: &'static str = "suspect/documentKind";
 }
 
+/// `suspect/explainConfig`: the server's own `suspect config --explain`,
+/// editor layer included (the CLI cannot see it). The result is
+/// [`explain_config`]'s object.
+pub enum ExplainConfigRequest {}
+
+/// Params of `suspect/explainConfig`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ExplainConfigParams {
+    /// The document whose configuration to explain; the workspace root's
+    /// when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+}
+
+impl Request for ExplainConfigRequest {
+    type Params = ExplainConfigParams;
+    type Result = Value;
+    const METHOD: &'static str = "suspect/explainConfig";
+}
+
+/// The `suspect/explainConfig` result: [`suspect_config::Resolved::explain_json`]
+/// (`root`, `config`, `files`, `values` with `key`, `value`, `origin`,
+/// `layer` and `trace`, `warnings`, `errors`) plus `source`, the file a
+/// status bar names (the settings file, else the manifest, else `null` for
+/// built-in defaults), and `error`, the first rejected value or `null`.
+#[must_use]
+pub fn explain_config(resolved: &suspect_config::Resolved) -> Value {
+    let mut report = resolved.explain_json();
+    let source = resolved
+        .config
+        .as_deref()
+        .or(resolved.manifest.as_deref())
+        .and_then(|p| p.file_name())
+        .map(|name| name.to_string_lossy().into_owned());
+    report["source"] = json!(source);
+    report["error"] = json!(resolved.errors.first().map(ToString::to_string));
+    report
+}
+
 /// A protocol entry and its version.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Versioned {
@@ -81,6 +120,10 @@ pub const REQUESTS: &[Versioned] = &[
     },
     Versioned {
         name: <DocumentKindRequest as Request>::METHOD,
+        version: 1,
+    },
+    Versioned {
+        name: <ExplainConfigRequest as Request>::METHOD,
         version: 1,
     },
 ];

@@ -29,6 +29,9 @@ fs.mkdirSync(path.join(workspace, '.vscode'), { recursive: true });
 const spec = path.join(workspace, 'petstore.yaml');
 fs.copyFileSync(path.join(repo, 'docs/demo/petstore.yaml'), spec);
 fs.writeFileSync(path.join(workspace, '.vscode/settings.json'), JSON.stringify({ 'suspect.basePath': binary }));
+// A floor the editor setting later overrides; `hint` filters nothing, so the
+// CLI's finding count below is unchanged.
+fs.writeFileSync(path.join(workspace, '.suspect.yaml'), 'lint:\n  min_severity: hint\n');
 const report = path.join(root, 'report.json');
 
 const env = { ...process.env, SUSPECT_SMOKE_SPEC: spec, SUSPECT_SMOKE_REPORT: report };
@@ -55,5 +58,8 @@ const expected = cp.spawnSync(binary, ['validate', spec], { encoding: 'utf8' }).
 assert.equal(observed.before.length, expected, `expected each of the CLI's ${expected} findings once`);
 assert.ok(observed.after.length > 0 && observed.after.every((severity) => severity === 0),
 	`suspect.lint.minSeverity=error left non-error findings: ${observed.after}`);
+assert.match(observed.settingsFile ?? '', /\.suspect\.yaml$/, 'the explain report names the settings file');
+assert.match(observed.floorRow ?? '', /\| error \| editor setting \| .*\.suspect\.yaml:2 = hint; editor suspect\.lint\.minSeverity = error \|/,
+	'the explain report shows the editor layer over .suspect.yaml');
 fs.rmSync(root, { recursive: true, force: true });
 console.log('host smoke: ok');

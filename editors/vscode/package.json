@@ -368,6 +368,10 @@
 				"title": "Suspect: Open Configuration"
 			},
 			{
+				"command": "suspect.explainConfig",
+				"title": "Suspect: Explain Configuration"
+			},
+			{
 				"command": "suspect.project.refresh",
 				"title": "Suspect: Refresh Project View",
 				"icon": "$(refresh)"

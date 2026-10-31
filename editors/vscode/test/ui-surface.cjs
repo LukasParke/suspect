@@ -161,23 +161,84 @@ test('CI stage results are read from suspect ci --format json', () => {
 	assert.deepEqual(parseCiStages('{"projects":[{"stages":"nope"}]}'), []);
 });
 
-test('the severity floor resolves by precedence and names its source', () => {
+// A `suspect/explainConfig` report, as the server sends it.
+function report(floor, extra = {}) {
+	return {
+		root: '/w', config: '/w/.suspect.yaml', source: '.suspect.yaml', error: null, files: ['/w/.suspect.yaml'],
+		values: [
+			{ key: 'lint.min_severity', value: floor.value, origin: floor.origin, layer: floor.layer, trace: floor.trace ?? [] },
+			{ key: 'gateway.port', value: 8080, origin: 'default', layer: 'default', trace: [] },
+		],
+		warnings: [], errors: [], ...extra,
+	};
+}
+
+test('the severity floor comes from the server report and names its layer', () => {
 	const { resolveFloor } = loadModule('config', {});
+	// Without a report (no server, or one older than explainConfig): the
+	// setting, then the manifest, then the default. No file parsing.
 	assert.deepEqual(resolveFloor({}), { value: 'hint', source: 'default' });
 	assert.deepEqual(resolveFloor({ manifest: 'warning' }), { value: 'warning', source: 'suspect.project.json' });
-	assert.deepEqual(
-		resolveFloor({ manifest: 'warning', workspaceYaml: '# policy\nlint:\n  # floor\n  min_severity: error\n' }),
-		{ value: 'error', source: '.suspect.yaml' },
-	);
-	assert.deepEqual(
-		resolveFloor({ setting: 'info', manifest: 'warning', workspaceYaml: 'lint:\n  min_severity: error\n' }),
-		{ value: 'info', source: 'editor setting' },
-	);
-	assert.deepEqual(
-		resolveFloor({ setting: null, workspaceYaml: 'lint:\n  min_severity: error\n' }),
-		{ value: 'error', source: '.suspect.yaml' },
-	);
-	assert.deepEqual(resolveFloor({ setting: '', workspaceYaml: 'lint: {}\n' }), { value: 'hint', source: 'default' });
+	assert.deepEqual(resolveFloor({ setting: 'info', manifest: 'warning' }), { value: 'info', source: 'editor setting' });
+	// With one, the report is the answer, whatever the setting says.
+	const fromFile = report({ value: 'error', origin: '/w/api/.suspect.yaml:3', layer: 'file' });
+	assert.deepEqual(resolveFloor({ setting: null, report: fromFile, manifest: 'warning' }), { value: 'error', source: '.suspect.yaml' });
+	const fromEditor = report({ value: 'warning', origin: 'editor suspect.lint.minSeverity', layer: 'editor' });
+	assert.deepEqual(resolveFloor({ setting: 'warning', report: fromEditor }), { value: 'warning', source: 'editor setting' });
+	const fromEnv = report({ value: 'info', origin: 'env SUSPECT_LINT_MIN_SEVERITY', layer: 'env' });
+	assert.deepEqual(resolveFloor({ report: fromEnv }), { value: 'info', source: 'SUSPECT_LINT_MIN_SEVERITY' });
+	assert.deepEqual(resolveFloor({ report: report({ value: 'hint', origin: 'default', layer: 'default' }) }), { value: 'hint', source: 'default' });
+	// The regex over .suspect.yaml is gone.
+	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'config.ts'), 'utf8');
+	assert.ok(!source.includes('min_severity:'), 'config.ts must not parse .suspect.yaml itself');
+});
+
+test('the configuration status names the settings file and opens the explain report', async () => {
+	const { statusText, renderReport, explainConfig, EXPLAIN_CONFIG_REQUEST } = loadModule('explainConfig', {});
+	const floor = { value: 'warning', origin: 'editor suspect.lint.minSeverity', layer: 'editor', trace: [['/w/.suspect.yaml:2', 'error'], ['editor suspect.lint.minSeverity', 'warning']] };
+	assert.equal(statusText(report(floor)).text, 'suspect: .suspect.yaml');
+	assert.equal(statusText(report(floor, { config: null, source: null, files: [] })).text, 'suspect: defaults');
+	const broken = statusText(report(floor, { error: '/w/.suspect.yaml:2: `lint.min_severity`: unrecognized severity `fatal`' }));
+	assert.match(broken.text, /^\$\(warning\) suspect: \.suspect\.yaml$/);
+	assert.match(broken.tooltip, /fatal/);
+	const text = renderReport(report(floor, { errors: ['bad'] }));
+	assert.match(text, /\| `lint\.min_severity` \| warning \| editor setting \| \/w\/\.suspect\.yaml:2 = error; editor suspect\.lint\.minSeverity = warning \|/);
+	assert.match(text, /## Rejected values\n\n- bad/);
+
+	// Asked only of a server that advertises the request.
+	const sent = [];
+	const client = (requests, answer) => ({
+		initializeResult: { capabilities: { experimental: { suspect: { protocol: 1, requests, commands: {} } } } },
+		sendRequest: async (method, params) => { sent.push([method, params]); return answer; },
+	});
+	const file = { scheme: 'file', toString: () => 'file:///w/openapi.yaml' };
+	assert.equal((await explainConfig(client({ [EXPLAIN_CONFIG_REQUEST]: 1 }, report(floor)), file)).source, '.suspect.yaml');
+	assert.deepEqual(sent, [['suspect/explainConfig', { uri: 'file:///w/openapi.yaml' }]]);
+	assert.equal(await explainConfig(client({}, report(floor)), file), undefined);
+	await explainConfig(client({ [EXPLAIN_CONFIG_REQUEST]: 1 }, report(floor)), { scheme: 'untitled' });
+	assert.deepEqual(sent.at(-1), ['suspect/explainConfig', {}], 'an untitled document asks for the workspace');
+	assert.equal(await explainConfig(undefined, file), undefined);
+});
+
+test('renamed settings move once, at the level they are set, without overwriting a new value', () => {
+	const { pendingMoves, TARGETS } = loadModule('migrateSettings', {});
+	const values = {
+		'suspect.testBaseUrl': { globalValue: 'http://user:1', workspaceValue: 'http://ws:2' },
+		'suspect.test.baseUrl': { workspaceValue: 'http://new:3' },
+		'suspect.gatewayPort': { workspaceFolderValue: 9000 },
+		'suspect.ci.baseline': { workspaceValue: '' },
+	};
+	const inspect = (key) => values[key];
+	assert.deepEqual(pendingMoves(inspect, false), [
+		{ from: 'suspect.testBaseUrl', to: 'suspect.test.baseUrl', target: TARGETS.global, value: 'http://user:1' },
+	]);
+	assert.deepEqual(pendingMoves(inspect, true).map((m) => [m.from, m.target]), [
+		['suspect.gatewayPort', TARGETS.workspaceFolder],
+		['suspect.testBaseUrl', TARGETS.global],
+	]);
+	assert.deepEqual(pendingMoves(() => undefined, true), []);
+	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+	assert.match(source, /offerSettingsMigration\(context\)/);
 });
 
 test('the extension manifest contributes one view, one controller, and commands that exist', () => {

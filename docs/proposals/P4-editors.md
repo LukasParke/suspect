@@ -790,6 +790,31 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    status-bar item; delete `config.ts`'s regex. Tests: a host-smoke case
    (the floor picker shows the layer), a unit test for the alias read.
    0.5-1 day.
+   **Done.** `suspect/explainConfig` (`protocol::ExplainConfigRequest`, in
+   `REQUESTS` at version 1) takes `{uri?}` and returns
+   `Resolved::explain_json()` for that document's configuration (the
+   workspace's without one) plus `source` (the settings file's name, else
+   the manifest's, else `null`) and `error` (the first rejected value).
+   VS Code: `src/explainConfig.ts` (status-bar item `suspect: .suspect.yaml`,
+   `suspect: defaults`, or a warning icon with the error in the tooltip;
+   refreshed on client start, editor switches, `suspect.*` changes and
+   config-file events) and a new `suspect.explainConfig` command ("Explain
+   Configuration") that opens the report as Markdown; the floor picker and
+   the Project view read `lint.min_severity` and its layer from the report,
+   and without a server that offers it fall back to the setting, the
+   manifest, then `hint` (no file parsing). The gateway uses the report's
+   `gateway.port` for the spec. `src/migrateSettings.ts` offers once per
+   workspace to move set old values to their new keys at the same level
+   (user, workspace, folder), skipping a level where the new key is
+   already set. Tests: `lsp_editor_settings.rs` (editor over
+   `.suspect.yaml` with the trace, a rejected value as `error`, camelCase
+   and snake_case payloads alike); `ui-surface.cjs` (floor from the
+   report, status text, rendering, gating, move planning); the host smoke
+   now writes a `.suspect.yaml` and asserts the report row
+   `| error | editor setting | .suspect.yaml:2 = hint; editor
+   suspect.lint.minSeverity = error |` (run locally, green). The P4 sample
+   result shape (`values[].layer`, `trace`) is P2's `explain_json`, which
+   also carries `origin`, `root`, `config`, `files`, `warnings`, `errors`.
 7. **VS Code bundled binary** (after P5 artifacts). `runner.ts`
    resolution order, "Locate binary…", terminal `PATH`, esbuild bundle,
    `.vscodeignore`, `package.json` publishing fields. Test: host smoke with

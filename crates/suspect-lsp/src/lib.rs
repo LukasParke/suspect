@@ -2982,6 +2982,29 @@ impl Backend {
     /// Handler for the `suspect/runWorkflow` custom request.
     /// `suspect/documentKind`. An open document is a lookup; a closed one
     /// is parsed from disk, as `did_open` would.
+    /// `suspect/explainConfig`: where each effective setting of `uri`'s
+    /// configuration (the workspace's without one) came from, the editor
+    /// layer included.
+    async fn explain_config_request(
+        &self,
+        params: protocol::ExplainConfigParams,
+    ) -> JsonRpcResult<serde_json::Value> {
+        let invalid = |message: String| tower_lsp::jsonrpc::Error::invalid_params(message);
+        let uri = params
+            .uri
+            .as_deref()
+            .map(|text| Uri::parse(text).map_err(|e| invalid(format!("{text}: {e}"))))
+            .transpose()?;
+        let resolved = {
+            let st = self.state.read().await;
+            match &uri {
+                Some(uri) => st.resolved.for_uri(uri),
+                None => st.resolved.workspace(),
+            }
+        };
+        Ok(protocol::explain_config(&resolved))
+    }
+
     async fn document_kind_request(
         &self,
         params: protocol::DocumentKindParams,
@@ -3404,6 +3427,10 @@ async fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
         .custom_method(
             <protocol::DocumentKindRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::document_kind_request,
+        )
+        .custom_method(
+            <protocol::ExplainConfigRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::explain_config_request,
         )
         .finish()
 }

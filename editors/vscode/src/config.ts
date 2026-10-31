@@ -9,6 +9,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { LanguageClient } from 'vscode-languageclient/node';
+import { ExplainReport, explainConfig, explainRow, layerLabel } from './explainConfig';
 import { lintMinSeverity } from './settings.generated';
 
 const FLOORS: { label: string; detail: string; value: string }[] = [
@@ -20,34 +22,37 @@ const FLOORS: { label: string; detail: string; value: string }[] = [
 
 export interface FloorResolution {
 	value: string;
-	/** Where the value comes from, in the words the UI shows. */
-	source: 'editor setting' | '.suspect.yaml' | 'suspect.project.json' | 'default';
+	/** Where the value comes from, in the words the UI shows: `editor setting`, `.suspect.yaml`, `default`, ... */
+	source: string;
 }
 
 /**
- * The floor in effect, by precedence: the editor setting, the committed
- * `.suspect.yaml`, the project manifest, then the server default. Pure.
+ * The floor in effect. The server's `suspect/explainConfig` report is the
+ * answer (it resolves the files, the environment and the editor settings
+ * exactly as diagnostics do); without one (no server, or one that predates
+ * the request) only the editor setting and the manifest's deprecated floor
+ * are known. Pure.
  */
-export function resolveFloor(input: { setting?: string | null; workspaceYaml?: string; manifest?: string }): FloorResolution {
+export function resolveFloor(input: { setting?: string | null; report?: ExplainReport; manifest?: string }): FloorResolution {
+	const row = explainRow(input.report, 'lint.min_severity');
+	if (row && typeof row.value === 'string') return { value: row.value, source: layerLabel(row) };
 	if (input.setting) return { value: input.setting, source: 'editor setting' };
-	const fromYaml = input.workspaceYaml?.match(/^\s*min_severity:\s*(\w+)/m)?.[1];
-	if (fromYaml) return { value: fromYaml, source: '.suspect.yaml' };
 	if (input.manifest) return { value: input.manifest, source: 'suspect.project.json' };
 	return { value: 'hint', source: 'default' };
 }
 
-/** `resolveFloor` over the live workspace. */
+let clientOf: () => LanguageClient | undefined = () => undefined;
+
+/** The running language client the floor is read from. */
+export function useClient(getClient: () => LanguageClient | undefined): void {
+	clientOf = getClient;
+}
+
+/** `resolveFloor` over the live workspace: the configuration of a document in `root`. */
 export async function effectiveFloor(root: string | undefined, manifestFloor?: string): Promise<FloorResolution> {
-	const setting = lintMinSeverity();
-	let workspaceYaml: string | undefined;
-	if (root !== undefined) {
-		try {
-			workspaceYaml = await fs.promises.readFile(path.join(root, '.suspect.yaml'), 'utf8');
-		} catch {
-			workspaceYaml = undefined;
-		}
-	}
-	return resolveFloor({ setting, workspaceYaml, manifest: manifestFloor });
+	const at = root === undefined ? undefined : vscode.Uri.file(path.join(root, 'suspect.project.json'));
+	const report = await explainConfig(clientOf(), at);
+	return resolveFloor({ setting: lintMinSeverity(), report, manifest: manifestFloor });
 }
 
 function workspaceRoot(): string | undefined {

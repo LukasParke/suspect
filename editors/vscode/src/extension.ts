@@ -12,7 +12,9 @@ import {
 } from './generation';
 import { registerTesting } from './testing';
 import { registerProjectView } from './projectView';
-import { openSuspectConfig, setSeverityFloor } from './config';
+import { openSuspectConfig, setSeverityFloor, useClient } from './config';
+import { ConfigStatus, explainConfig, explainRow, registerConfigStatus } from './explainConfig';
+import { offerSettingsMigration } from './migrateSettings';
 import { generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
 import { suspectCapabilities } from './protocol';
 import { DocumentKindTracker, trackDocumentKind } from './documentKind';
@@ -37,6 +39,8 @@ let extensionVersion: string | undefined;
 let documentKinds: DocumentKindTracker | undefined;
 /** Watches the committed config layers; shared across client restarts. */
 let configWatcher: vscode.FileSystemWatcher | undefined;
+/** The status-bar item naming the settings file in effect; shared across client restarts. */
+let configStatus: ConfigStatus | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	extensionVersion = (context.extension?.packageJSON as { version?: string } | undefined)?.version;
@@ -74,7 +78,11 @@ export function activate(context: vscode.ExtensionContext): void {
 	// suspect-config's CONFIG_NAMES plus the project manifest.
 	configWatcher = vscode.workspace.createFileSystemWatcher('**/{.suspect.yaml,.suspect.yml,suspect.yaml,suspect.yml,suspect.project.json}');
 	context.subscriptions.push(configWatcher);
+	useClient(() => client);
+	configStatus = registerConfigStatus(() => client, configWatcher);
+	context.subscriptions.push(...configStatus.disposables);
 	startClient();
+	void offerSettingsMigration(context);
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
 			if (BINARY_SETTINGS.some((key) => event.affectsConfiguration(key))) {
@@ -122,7 +130,7 @@ function startClient(): void {
 	// server leaves them out of executeCommandProvider and the client does
 	// not register them twice, and the extension version the server checks.
 	current.registerFeature(suspectCapabilities(extensionVersion));
-	void Promise.resolve(current.start()).then(() => documentKinds?.refresh(), (err: unknown) => {
+	void Promise.resolve(current.start()).then(() => Promise.all([documentKinds?.refresh(), configStatus?.refresh()]), (err: unknown) => {
 		if (client === current) client = undefined;
 		const message = errorMessage(err);
 		const missing = /ENOENT|Launching server using command/.test(message);
@@ -287,7 +295,9 @@ async function startGateway(): Promise<void> {
 	if (!spec) {
 		return;
 	}
-	const port = gatewayPort();
+	// The editor setting, else `gateway.port` as the server resolved it for this spec.
+	const configured = explainRow(await explainConfig(client, spec), 'gateway.port')?.value;
+	const port = typeof configured === 'number' && configured > 0 ? configured : gatewayPort();
 	const specLabel = vscode.workspace.asRelativePath(spec);
 	let child: cp.ChildProcess;
 	try {
