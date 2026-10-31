@@ -190,13 +190,16 @@ pub(crate) const JOBS: &[Job] = &[
     Job {
         name: "test",
         workflow: CI_YML,
-        commands: "cargo test --workspace (with --ci: SUSPECT_REQUIRE_TOOLS=bun,node,python)",
+        commands: "cargo test --workspace (with --ci: SUSPECT_REQUIRE_TOOLS=bun,node,python, CARGO_PROFILE_DEV_DEBUG=0)",
         tools: &[],
         run: |ctx| {
             let mut step = ctx.cargo(&["test", "--workspace"]);
             if ctx.ci {
                 // CI installs these, so a default-suite skip for them is a failure.
                 step = step.env("SUSPECT_REQUIRE_TOOLS", "bun,node,python");
+                // ~390 test binaries with full debug info exhaust the hosted
+                // runner's disk at link time; CI needs no debugger.
+                step = step.env("CARGO_PROFILE_DEV_DEBUG", "0");
             }
             step.run()
         },
