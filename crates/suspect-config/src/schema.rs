@@ -42,6 +42,8 @@ pub enum Kind {
     Map(&'static Kind),
     /// A list of strings.
     List,
+    /// A list of names, each from a fixed set.
+    EnumList(&'static [&'static str]),
     /// An opaque section owned by one consumer (`extensions`).
     Object,
     /// A list of SDK target objects (manifest `codegen`).
@@ -54,6 +56,16 @@ pub const SEVERITIES: &[&str] = &["error", "warning", "info", "hint"];
 pub const POLICY_SEVERITIES: &[&str] = &["error", "warning", "info", "hint", "off"];
 const DOC_STYLES: &[&str] = &["html", "markdown", "sveltekit"];
 const REPORTS: &[&str] = &["text", "ndjson"];
+/// `suspect codegen --compatibility-profile` names, kept in step with
+/// `suspect_codegen`'s `CompatibilityProfile::ALL` by
+/// `crates/suspect-lsp/tests/codegen_settings.rs`.
+pub const COMPATIBILITY_PROFILES: &[&str] = &[
+    "legacy-binary-string-v1",
+    "oas30-nullable-in-3.1-v1",
+    "colon-path-parameters-v1",
+    "schemaless-stream-events-v1",
+    "all-of-scoped-mode-v1",
+];
 const GATEWAY_MODES: &[&str] = &["mock", "proxy", "validate", "record", "replay", "scenario"];
 
 impl Kind {
@@ -70,6 +82,7 @@ impl Kind {
             Self::Count => "integer",
             Self::Map(_) => "map",
             Self::List => "list of strings",
+            Self::EnumList(_) => "list of names",
             Self::Object => "section",
             Self::Targets => "list of SDK targets",
         }
@@ -79,7 +92,7 @@ impl Kind {
     #[must_use]
     pub const fn values(self) -> &'static [&'static str] {
         match self {
-            Self::Enum(values) => values,
+            Self::Enum(values) | Self::EnumList(values) => values,
             Self::Severity => SEVERITIES,
             Self::PolicySeverity => POLICY_SEVERITIES,
             _ => &[],
@@ -288,11 +301,71 @@ pub static SETTINGS: &[Setting] = &[
     .flags(&["codegen --out"]),
     row("codegen.profile", Kind::Str, "Default native profile id.").flags(&["codegen --profile"]),
     row(
+        "codegen.package_name",
+        Kind::Str,
+        "Native package identity, independent of the API title. The editor's SDK \
+         commands and Live SDK Preview start from it.",
+    )
+    .editor("codegen.packageName")
+    .editor_aliases(&["sdk.packageName"]),
+    row(
         "codegen.package_version",
         Kind::Str,
-        "Default package version.",
+        "Default package SemVer, independent of `info.version`. Swift requires a \
+         stable version (no prerelease or build metadata).",
     )
+    .editor("codegen.packageVersion")
+    .editor_aliases(&["sdk.packageVersion"])
     .flags(&["codegen --package-version"]),
+    row(
+        "codegen.import_names",
+        Kind::Map(&Kind::Str),
+        "SDK profile to native import/module/namespace name, for example \
+         `{python-http: widgets_sdk}`. A profile without an entry derives its name \
+         from the package name.",
+    )
+    .default("{}")
+    .editor("codegen.importNames")
+    .editor_aliases(&["sdk.importNames"]),
+    row(
+        "codegen.operation_ids",
+        Kind::List,
+        "Exact `operationId`s to generate. Empty attempts every operation; an \
+         unsupported one fails rather than being dropped.",
+    )
+    .default("[]")
+    .editor("codegen.operationIds")
+    .editor_aliases(&["sdk.operationIds"]),
+    row(
+        "codegen.compatibility_profiles",
+        Kind::EnumList(COMPATIBILITY_PROFILES),
+        "Versioned source interpretations to opt into (`suspect codegen \
+         --compatibility-profile`). Empty keeps ordinary OpenAPI semantics.",
+    )
+    .default("[]")
+    .editor("codegen.compatibilityProfiles")
+    .editor_aliases(&["sdk.compatibilityProfiles"]),
+    section(
+        "codegen.session",
+        "The editor's SDK preview/watch session (`suspect codegen-session`).",
+    ),
+    row(
+        "codegen.session.config",
+        Kind::Path,
+        "Session config (JSON) naming the spec and targets. Unset: the editor asks \
+         for one.",
+    )
+    .editor("codegen.session.config")
+    .editor_aliases(&["sdk.sessionConfig"]),
+    row(
+        "codegen.session.out",
+        Kind::Str,
+        "Initial output root for session preview/watch/drift checks, relative to \
+         the session config's directory (not `codegen.out`).",
+    )
+    .default("sdk-out")
+    .editor("codegen.session.out")
+    .editor_aliases(&["sdk.sessionOutput"]),
     section("ref", "Reference-workspace tuning.").aliases(&["refs"]),
     row(
         "ref.max_docs",

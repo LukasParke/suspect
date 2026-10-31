@@ -163,8 +163,36 @@ pub struct CodegenSettings {
     pub out: Option<PathBuf>,
     /// Default native profile.
     pub profile: Option<String>,
+    /// Default native package identity.
+    pub package_name: Option<String>,
     /// Default package version.
     pub package_version: Option<String>,
+    /// SDK profile -> native import/module/namespace name.
+    pub import_names: std::collections::BTreeMap<String, String>,
+    /// Exact operationId selectors; empty means every operation.
+    pub operation_ids: Vec<String>,
+    /// Compatibility profile names (`suspect codegen --compatibility-profile`).
+    pub compatibility_profiles: Vec<String>,
+    /// `codegen.session`: the editor's SDK preview/watch session.
+    pub session: CodegenSessionSettings,
+}
+
+/// `codegen.session:` settings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CodegenSessionSettings {
+    /// Session config file.
+    pub config: Option<PathBuf>,
+    /// Initial output root, relative to the session config's directory.
+    pub out: String,
+}
+
+impl Default for CodegenSessionSettings {
+    fn default() -> Self {
+        Self {
+            config: None,
+            out: "sdk-out".to_owned(),
+        }
+    }
 }
 
 /// `ref:` settings.

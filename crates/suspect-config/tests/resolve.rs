@@ -401,6 +401,7 @@ fn sample(setting: &schema::Setting) -> Option<String> {
         Kind::PolicySeverity => "off".into(),
         Kind::Map(_) => "{some-rule: off}".into(),
         Kind::List => "[a]".into(),
+        Kind::EnumList(values) => format!("[{}]", values[0]),
         Kind::Object => "{x-thing: {after: info}}".into(),
     })
 }

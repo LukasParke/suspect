@@ -7,17 +7,118 @@
       "additionalProperties": false,
       "description": "Defaults applied to SDK generation.",
       "properties": {
+        "compatibility_profiles": {
+          "default": [],
+          "description": "Versioned source interpretations to opt into (`suspect codegen --compatibility-profile`). Empty keeps ordinary OpenAPI semantics.",
+          "items": {
+            "enum": [
+              "legacy-binary-string-v1",
+              "oas30-nullable-in-3.1-v1",
+              "colon-path-parameters-v1",
+              "schemaless-stream-events-v1",
+              "all-of-scoped-mode-v1"
+            ],
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "x-suspect-editor": {
+            "aliases": [
+              "suspect.sdk.compatibilityProfiles"
+            ],
+            "key": "suspect.codegen.compatibilityProfiles",
+            "scope": "resource"
+          }
+        },
+        "import_names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name.",
+          "type": "object",
+          "x-suspect-editor": {
+            "aliases": [
+              "suspect.sdk.importNames"
+            ],
+            "key": "suspect.codegen.importNames",
+            "scope": "resource"
+          }
+        },
+        "operation_ids": {
+          "default": [],
+          "description": "Exact `operationId`s to generate. Empty attempts every operation; an unsupported one fails rather than being dropped.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "x-suspect-editor": {
+            "aliases": [
+              "suspect.sdk.operationIds"
+            ],
+            "key": "suspect.codegen.operationIds",
+            "scope": "resource"
+          }
+        },
         "out": {
           "description": "Default output root, relative to the file that sets it.",
           "type": "string"
         },
+        "package_name": {
+          "description": "Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it.",
+          "type": "string",
+          "x-suspect-editor": {
+            "aliases": [
+              "suspect.sdk.packageName"
+            ],
+            "key": "suspect.codegen.packageName",
+            "scope": "resource"
+          }
+        },
         "package_version": {
-          "description": "Default package version.",
-          "type": "string"
+          "description": "Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata).",
+          "type": "string",
+          "x-suspect-editor": {
+            "aliases": [
+              "suspect.sdk.packageVersion"
+            ],
+            "key": "suspect.codegen.packageVersion",
+            "scope": "resource"
+          }
         },
         "profile": {
           "description": "Default native profile id.",
           "type": "string"
+        },
+        "session": {
+          "additionalProperties": false,
+          "description": "The editor's SDK preview/watch session (`suspect codegen-session`).",
+          "properties": {
+            "config": {
+              "description": "Session config (JSON) naming the spec and targets. Unset: the editor asks for one.",
+              "type": "string",
+              "x-suspect-editor": {
+                "aliases": [
+                  "suspect.sdk.sessionConfig"
+                ],
+                "key": "suspect.codegen.session.config",
+                "scope": "resource"
+              }
+            },
+            "out": {
+              "default": "sdk-out",
+              "description": "Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`).",
+              "type": "string",
+              "x-suspect-editor": {
+                "aliases": [
+                  "suspect.sdk.sessionOutput"
+                ],
+                "key": "suspect.codegen.session.out",
+                "scope": "resource"
+              }
+            }
+          },
+          "type": "object"
         }
       },
       "type": "object"

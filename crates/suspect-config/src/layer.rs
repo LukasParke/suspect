@@ -380,7 +380,7 @@ impl Layer {
                         (Raw::Json(node_json(&value)), at),
                     );
                 }
-                Kind::List => match value.kind() {
+                Kind::List | Kind::EnumList(_) => match value.kind() {
                     ValueKind::Array => {
                         let items = value
                             .items()
@@ -558,17 +558,28 @@ fn check_kind(path: &str, kind: Kind, raw: Raw, base: Option<&Path>) -> Result<R
                 _ => value,
             }))
         }
-        Kind::List => match raw {
-            Raw::List(items) => Ok(Raw::List(items)),
-            other => Ok(Raw::List(
-                text(&other)
+        Kind::List | Kind::EnumList(_) => {
+            let items = match raw {
+                Raw::List(items) => items,
+                other => text(&other)
                     .ok_or_else(expected)?
                     .split(',')
                     .map(|s| s.trim().to_owned())
                     .filter(|s| !s.is_empty())
                     .collect(),
-            )),
-        },
+            };
+            let allowed = kind.values();
+            if let Some(bad) = items
+                .iter()
+                .find(|item| !allowed.is_empty() && !allowed.contains(&item.as_str()))
+            {
+                return Err(format!(
+                    "`{path}`: `{bad}` is not one of: {}",
+                    allowed.join(", ")
+                ));
+            }
+            Ok(Raw::List(items))
+        }
         Kind::Str | Kind::Url => Ok(Raw::Str(text(&raw).ok_or_else(expected)?)),
         Kind::Object | Kind::Targets => match raw {
             Raw::Json(_) => Ok(raw),
@@ -742,6 +753,64 @@ mod tests {
             );
             assert_eq!(layer.warnings.len(), 1);
         }
+    }
+
+    #[test]
+    fn old_sdk_keys_set_the_codegen_rows() {
+        let layer = Layer::from_editor(
+            &serde_json::json!({
+                "sdk": {
+                    "packageName": "widgets",
+                    "importNames": {"python-http": "widgets_sdk", "ruby-http": "Old"},
+                    "operationIds": ["getWidget"],
+                    "compatibilityProfiles": ["colon-path-parameters-v1"],
+                    "sessionConfig": "sdk.json",
+                    "sessionOutput": "../out",
+                    "packageVersion": null
+                },
+                "codegen": {"importNames": {"ruby-http": "New"}, "packageVersion": null}
+            }),
+            Path::new("/w"),
+        );
+        assert!(layer.errors.is_empty(), "{:?}", layer.errors);
+        assert_eq!(
+            layer.get("codegen.package_name"),
+            Some(&Raw::Str("widgets".into()))
+        );
+        assert_eq!(
+            layer.get("codegen.import_names.python-http"),
+            Some(&Raw::Str("widgets_sdk".into()))
+        );
+        // Per profile, the current spelling wins.
+        assert_eq!(
+            layer.get("codegen.import_names.ruby-http"),
+            Some(&Raw::Str("New".into()))
+        );
+        assert_eq!(
+            layer.get("codegen.compatibility_profiles"),
+            Some(&Raw::List(vec!["colon-path-parameters-v1".into()]))
+        );
+        assert_eq!(
+            layer.get("codegen.session.config"),
+            Some(&Raw::Path("/w/sdk.json".into()))
+        );
+        assert_eq!(
+            layer.get("codegen.session.out"),
+            Some(&Raw::Str("../out".into()))
+        );
+        assert_eq!(layer.get("codegen.package_version"), None);
+        assert_eq!(layer.warnings.len(), 6, "{:?}", layer.warnings);
+    }
+
+    #[test]
+    fn compatibility_profiles_are_checked_by_name() {
+        let layer = Layer::from_editor(
+            &serde_json::json!({"codegen": {"compatibilityProfiles": ["future-profile"]}}),
+            Path::new("/"),
+        );
+        assert_eq!(layer.errors.len(), 1, "{:?}", layer.errors);
+        assert!(layer.errors[0].message.contains("`future-profile`"));
+        assert!(layer.entries.is_empty());
     }
 
     #[test]
