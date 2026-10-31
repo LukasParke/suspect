@@ -4,6 +4,30 @@
 	"description": "Run Arazzo workflows, drive the mock gateway, and generate canonical SDKs, documentation or custom templates from OpenAPI documents.",
 	"version": "0.1.0",
 	"publisher": "suspect",
+	"license": "MIT OR Apache-2.0",
+	"icon": "media/icon.png",
+	"homepage": "https://github.com/LukasParke/suspect/tree/main/editors/vscode",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/LukasParke/suspect.git",
+		"directory": "editors/vscode"
+	},
+	"bugs": {
+		"url": "https://github.com/LukasParke/suspect/issues"
+	},
+	"categories": [
+		"Programming Languages",
+		"Linters",
+		"Testing",
+		"Formatters"
+	],
+	"keywords": [
+		"openapi",
+		"swagger",
+		"arazzo",
+		"overlay",
+		"lsp"
+	],
 	"private": true,
 	"engines": {
 		"vscode": "^1.85.0"
@@ -453,7 +477,8 @@
 		"test:generation:protocol": "node --test test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs",
 		"test:generation:host": "node test/native-host/run.cjs",
 		"test:generation:host:inputs": "node --test test/native-host/contract.test.cjs",
-		"test:host:smoke": "node test/host-smoke/run.cjs"
+		"test:host:smoke": "node test/host-smoke/run.cjs",
+		"package": "vsce package"
 	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.0"
@@ -461,6 +486,8 @@
 	"devDependencies": {
 		"@types/node": "^20.11.0",
 		"@types/vscode": "^1.85.0",
+		"@vscode/vsce": "4.1.0",
+		"ovsx": "1.3.0",
 		"typescript": "^5.4.0"
 	}
 }

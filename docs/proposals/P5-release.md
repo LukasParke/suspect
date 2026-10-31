@@ -591,6 +591,25 @@ workflow does, required secrets), and its "Checks" list is replaced by
    `@vscode/vsce`/`ovsx` dev dependencies; `editors/zed` `repository` and
    licence files. Test: the rc tag produces an installable `.vsix`
    (`code --install-extension`). 0.5-1 day.
+   **Done, rc tag not run.** No tag was pushed; locally `npx vsce package`
+   builds `suspect-vscode-0.1.0.vsix` (335 files, 518 KB) and `code
+   --install-extension` into a throwaway extensions dir installs
+   `suspect.suspect-vscode@0.1.0`. `package-editors.yml` builds, tests and
+   packages the universal `.vsix` (after `check-versions --tag`), installs it
+   into a headless VS Code, runs the Testing-section `smoke` job (checksum,
+   binary at depth 1-2, `suspect --version`, `suspect check
+   docs/demo/petstore.yaml` exit 0 or 1, on `ubuntu-22.04` with musl,
+   `macos-14`, `windows-2022`) and an `asset-names` job for the archive,
+   checksum and `.vsix` names. `publish-editors.yml` downloads the `.vsix`
+   from the release, verifies it and publishes with the pinned `vsce`/`ovsx`
+   (4.1.0 / 1.3.0) in a `release` environment; each registry step runs only
+   when its secret is set. Additions: `media/icon.png` (128 px PNG drawn from
+   `suspect.svg`; vsce rejects SVG icons), `homepage`, `bugs`, `categories`,
+   `keywords`, a `package` script. `private: true` stays (vsce ignores it; it
+   still blocks `npm publish`). The Zed licence files are copies of
+   `LICENSE-MIT`/`LICENSE-APACHE` (Zed reads any `LICENSE*` at the extension
+   root). Gap: `editors/vscode` has no `README.md`, so the Marketplace page
+   will be empty until one is written.
 6. **First release.** Create `LukasParke/homebrew-tap`, Marketplace and
    Open VSX publishers, secrets; manual first Zed registry submission; tag
    `v0.1.0`. README "Install" and CONTRIBUTING "Releasing". 0.5 day.

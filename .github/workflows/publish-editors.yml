@@ -1,0 +1,66 @@
+# Publish job of the cargo-dist release (dist-workspace.toml,
+# `publish-jobs`). release.yml calls it after the GitHub release exists and
+# skips it for pre-release tags. Every job runs in the `release` environment
+# (required reviewers) and does nothing but print a notice when its secret
+# is not set, so a fork or a repository without publisher accounts still
+# completes the release. docs/proposals/P5-release.md, "Editor packaging".
+name: publish-editors
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        description: dist-manifest.json from the plan job
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PLAN: ${{ inputs.plan }}
+
+jobs:
+  # The .vsix built by package-editors, downloaded from the release and
+  # checked against its .sha256, goes to the Marketplace and Open VSX.
+  vscode:
+    runs-on: ubuntu-22.04
+    environment: release
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - name: Download the release .vsix
+        run: |
+          set -euo pipefail
+          TAG=$(jq -r '.announcement_tag' <<< "$PLAN")
+          VSIX="suspect-vscode-${TAG#v}.vsix"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
+          curl --proto '=https' --tlsv1.2 -fsSLO "$base/$VSIX"
+          curl --proto '=https' --tlsv1.2 -fsSLO "$base/$VSIX.sha256"
+          sha256sum -c "$VSIX.sha256"
+          echo "VSIX=$PWD/$VSIX" >> "$GITHUB_ENV"
+      # The pinned @vscode/vsce and ovsx from package-lock.json.
+      - run: npm ci
+        working-directory: editors/vscode
+      - name: Publish to the VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        working-directory: editors/vscode
+        run: npx vsce publish --packagePath "$VSIX"
+      - name: Publish to Open VSX
+        if: env.OVSX_PAT != ''
+        working-directory: editors/vscode
+        run: npx ovsx publish "$VSIX"
+      - name: Skipped registries
+        if: env.VSCE_PAT == '' || env.OVSX_PAT == ''
+        run: |
+          [ -n "$VSCE_PAT" ] || echo "::notice::VSCE_PAT is not set; the VS Code Marketplace was skipped"
+          [ -n "$OVSX_PAT" ] || echo "::notice::OVSX_PAT is not set; Open VSX was skipped"

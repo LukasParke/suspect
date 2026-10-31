@@ -1,0 +1,11 @@
+# Not shipped in the .vsix. vsce already leaves out devDependencies; the
+# production node_modules (vscode-languageclient) stays because the extension
+# has no bundler.
+src/**
+test/**
+tsconfig.json
+dist/**/*.map
+*.vsix
+*.vsix.sha256
+.vscode/**
+.vscode-test/**
