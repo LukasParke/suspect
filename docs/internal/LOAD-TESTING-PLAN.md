@@ -8,7 +8,7 @@ phased arrival profile, with latency/throughput/error metrics and SLO gates.
 
 Status: `shipped` — phases A–E landed 2026-10-10 (see §14 for what each
 phase delivered and §18 for deferred items); user guide in
-[LOAD-TESTING.md](LOAD-TESTING.md). Nothing here was a greenfield bet: the
+[LOAD-TESTING.md](../LOAD-TESTING.md). Nothing here was a greenfield bet: the
 plan compiler,
 executor, rex evaluator, journal, and gateway already exist; this is a
 second *execution mode* over them.

@@ -1,6 +1,6 @@
 # TS/JS Custom Rules on a Bun Sidecar — Design
 
-Amendment to `docs/CODE-FOLD-PLAN.md` (§ P2/P2.5). Adds a third rule source —
+Amendment to [`docs/internal/CODE-FOLD-PLAN.md`](internal/CODE-FOLD-PLAN.md) (§ P2/P2.5). Adds a third rule source —
 user-authored TypeScript rules — alongside native Rust rules (suspect-lint)
 and the fact-space/union evaluation model. Inspired by Telescope's custom-rule
 DX (`defineRule`, visitor pattern, `ctx.report`/`ctx.locate`, zod schemas,

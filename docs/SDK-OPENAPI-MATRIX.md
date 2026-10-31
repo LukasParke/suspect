@@ -1,7 +1,7 @@
 # OpenAPI support matrix for SDK generation
 
 Normative feature matrix for the SDK program
-([SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) §13), published with
+([SDK-GOLDEN-DEFAULTS-PLAN.md](internal/SDK-GOLDEN-DEFAULTS-PLAN.md) §13), published with
 **honest statuses verified against the current tree** (2026-09-15). The target
 is complete coverage of OpenAPI 3.0.x, 3.1.x, and 3.2.x across all twelve
 native backends; this table records where that work actually stands today.
@@ -67,7 +67,7 @@ protocol documents.
 
 ## Sources
 
-- Plan and scope: [SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) §13.
+- Plan and scope: [SDK-GOLDEN-DEFAULTS-PLAN.md](internal/SDK-GOLDEN-DEFAULTS-PLAN.md) §13.
 - Capability baselines: [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
 - Credential runtime: [SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md).
 - User-facing behavior: [SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md).

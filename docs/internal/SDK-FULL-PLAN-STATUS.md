@@ -154,7 +154,7 @@ continue separately; numerical qualification does not hold this web delivery.
 #### Accepted native execution and example baseline
 
 **The original automatic-env edition remains the accepted preparation reference:**
-[LIVE-ENV-DEMO-README.md](../LIVE-ENV-DEMO-README.md). Current authenticated execution
+[LIVE-ENV-DEMO-README.md](../../LIVE-ENV-DEMO-README.md). Current authenticated execution
 uses the webpage's guarded repair registry. The sealed older Dart executable has
 the subsequently discovered TLS defect and must not be used for authenticated
 fallback; its historical controlled receipts are preserved.
@@ -206,7 +206,7 @@ pass. This six-operation scope is distinct from Main's supplemental two-read
 admission snapshot. `LIVE-DEMO-README.md` and `demo-live.sh` now provide source
 excerpts, real read-only execution, secure prompt/environment handling, status
 confirmation, deadlines/cancellation and nonzero failures. **Final live delivery-02
-is accepted:** [LIVE-DEMO-README.md](../LIVE-DEMO-README.md) and
+is accepted:** [LIVE-DEMO-README.md](../../LIVE-DEMO-README.md) and
 `./demo-live.sh all` are the accepted original human entry. Main independently verified all
 1,276 seal hashes, 1,245 protected files with metadata, 593 package files and 39
 actual controlled transcripts/wire exchanges in
@@ -224,7 +224,7 @@ runner SHA-256 is `578b79a4a34bf5a55966e217c96d3322ac31955ad9bf2015de09d9bcb85d3
 The frozen `5d3cecd1…` packages use explicitly documented wrapper-supplied runtime
 credentials; native environment helpers belong to the next configured edition.
 
-The optional **[live v2 observability addendum](../examples/sdk-demo-live/observability/README.md)**
+The optional **[live v2 observability addendum](../../examples/sdk-demo-live/observability/README.md)**
 and `./demo-live-v2.sh all` are also verified. Only the TypeScript/Python callers
 are replaced; the existing prebuilt SDKs and accepted redaction-safe runner are
 reused. Main checked 680 new seal hashes, 3,113 protected files with metadata and
@@ -238,7 +238,7 @@ success is claimed. The original live entry and its seal remain intact.
 
 #### Explicit environment policy implementation
 
-The canonical contract is recorded in [SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md):
+The canonical contract is recorded in [SDK-CREDENTIAL-ENV.md](../SDK-CREDENTIAL-ENV.md):
 
 ```json
 "credential_env": {
@@ -570,7 +570,7 @@ mistake requiring an optional timeout field on older completed command records;
 the corrected receipt records that field's absence explicitly. The README is
 ready and delivered independently of the remaining full-plan gates.
 
-The optional **[reviewed Terraform addendum](../examples/sdk-demo-all/terraform-reviewed/README.md)**
+The optional **[reviewed Terraform addendum](../../examples/sdk-demo-all/terraform-reviewed/README.md)**
 is also ready. Its prepared root is
 `target/sdk-demo-readme-20260911-01/candidate-02/terraform-reviewed-01/`; the
 additive seal is `candidate-02/delivery-02/`. Main verified all 192 new sealed
@@ -660,7 +660,7 @@ its eventual promotion receives a fresh source delta.
   checksummed SDK dependency, and native Terraform address/HCL acceptance.
   `review-closure-01.json` pins both clean axes and their independent evidence,
   preserving original Standards P2/P2 and Spec P1/P2 rankings. The same docs owner
-  delivered the [reviewed Terraform addendum](../examples/sdk-demo-all/terraform-reviewed/README.md)
+  delivered the [reviewed Terraform addendum](../../examples/sdk-demo-all/terraform-reviewed/README.md)
   and passed its
   bounded ten-step local workflow with a newly built Go 1.23.12 provider, SHA-256
   `077219ba674e0ca062b45c114fa21b1115aa1322cba9d4467c97419f23a5c51f`.

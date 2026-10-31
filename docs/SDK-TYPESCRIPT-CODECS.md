@@ -102,7 +102,7 @@ required tracked OpenRouter inputs:
 `target/typescript-model-codecs-integrated-tests.log`. The source validator and
 generated schema validator retain separate normative/adversarial conformance
 gates. Complete workspace checks and native package/docs gates are recorded at
-their own checkpoints in [SDK-PROGRESS.md](SDK-PROGRESS.md).
+their own checkpoints in [SDK-PROGRESS.md](internal/SDK-PROGRESS.md).
 
 Additional-property admission and portable pattern validation now pass the
 actual tracked `ChatRequest` and `ChatResult` codec consumers, including

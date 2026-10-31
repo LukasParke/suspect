@@ -5,7 +5,7 @@ time. Every command and file name below was verified against this tree on
 2026-09-15; package metadata claims come from an empirical twelve-backend
 generation run (methodology in [§7](#7-how-this-checklist-was-verified)). It
 complements the program plan
-([SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) M9) and the
+([SDK-GOLDEN-DEFAULTS-PLAN.md](internal/SDK-GOLDEN-DEFAULTS-PLAN.md) M9) and the
 capability evidence in [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
 
 One hard rule governs the program: the pinned byte fixtures across all twelve
@@ -153,7 +153,7 @@ CI toolchain. Every per-language gate writes its machine-readable record to
   — the host/adversarial checks for the `repeated-v1` methodology. The
   actual native collection is the ignored entrypoint, run only with all six
   `SUSPECT_SDK_FULL_*` variables exported by the `cargo xtask verify-sdk` runner (see
-  [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md)); a release claim about cost
+  [SDK-NATIVE-COSTS.md](internal/SDK-NATIVE-COSTS.md)); a release claim about cost
   numbers requires that fresh integrated run.
 
 ### Determinism and drift
@@ -224,7 +224,7 @@ Verified against the §3 generation run:
   exact dependency pins; Kotlin 2.4.20/1.11.0, Java 21 (same for Java-only);
   PHP `^8.3`, phpstan `2.2.13`; Dart `>=3.9.4 <4.0.0`; Ruby `>= 3.3.12`;
   Swift tools 6.0; C++ CMake 3.24 / C++20; Go 1.23. The full maintained
-  toolchain matrix is [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md).
+  toolchain matrix is [SDK-NATIVE-COSTS.md](internal/SDK-NATIVE-COSTS.md).
 
 ## 5. Compatibility report as a release gate
 
@@ -264,7 +264,7 @@ These are not automatable from this repository today; each is a human
 check with a place to record the decision:
 
 1. **Toolchain pins.** Confirm the publishing host matches the maintained
-   tiers in [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md) (Node 22/24,
+   tiers in [SDK-NATIVE-COSTS.md](internal/SDK-NATIVE-COSTS.md) (Node 22/24,
    Python 3.11/3.14, Rust 1.88/stable, Go 1.23/1.27, Swift 6.0/6.3,
    JDK 21/25, .NET 8/10, Kotlin 2.4.20, Ruby 3.3/4.0, PHP 8.3/8.5,
    Dart 3.9/3.13, Clang 21). CI-pending gates called out in
@@ -309,14 +309,14 @@ check with a place to record the decision:
 ## References
 
 - [SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md) — user guide.
-- [SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) — program plan,
+- [SDK-GOLDEN-DEFAULTS-PLAN.md](internal/SDK-GOLDEN-DEFAULTS-PLAN.md) — program plan,
   M9 definition.
 - [SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md) — credential runtime
   semantics.
 - [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md) — normative feature matrix.
 - [SDK-ELIMINATION-AUDIT.md](SDK-ELIMINATION-AUDIT.md) — elimination gates
   and their CI-pending remainder.
-- [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md) — `repeated-v1` methodology and
+- [SDK-NATIVE-COSTS.md](internal/SDK-NATIVE-COSTS.md) — `repeated-v1` methodology and
   maintained toolchain tiers.
 - [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md) — capability evidence matrix.
 - [SDK-COMPATIBILITY-REPORTS.md](SDK-COMPATIBILITY-REPORTS.md) — the

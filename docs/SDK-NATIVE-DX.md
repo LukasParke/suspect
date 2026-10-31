@@ -2,8 +2,8 @@
 
 Broad interface proposal, 2026-09-08. The user approved the implemented
 selected-operation M0–M2 baseline on 2026-09-09; see
-[the approval record](SDK-M0-M2-DX-APPROVAL.md) and
-[native slice call sites](SDK-M2-CALLSITES.md). This broader proposal also covers
+[the approval record](internal/SDK-M0-M2-DX-APPROVAL.md) and
+[native slice call sites](internal/SDK-M2-CALLSITES.md). This broader proposal also covers
 future media/streaming/resource APIs. Those snippets retain their own native
 verification requirements and are not evidence of those features being shipped.
 
@@ -14,8 +14,8 @@ The API facts come from the tracked OpenRouter public description at commit
 It contains 103 operations and 786 component schemas. Ignored local generated
 specifications have different contents and are not the source for this note.
 See the acceptance corpus,
-[semantic requirements](SDK-OPENAPI-RESEARCH.md), and
-[the implementation plan](SDK-GENERATION-PLAN.md).
+[semantic requirements](internal/SDK-OPENAPI-RESEARCH.md), and
+[the implementation plan](internal/SDK-GENERATION-PLAN.md).
 
 ## Interface decisions
 
@@ -713,7 +713,7 @@ Acceptance cases for the proposed protocol expansion:
    package, runtime and documentation costs. A fast incomplete SDK is not the
    baseline from which a production fidelity regression can be justified.
 
-The implemented baseline is documented in [SDK-M2-CALLSITES.md](SDK-M2-CALLSITES.md).
+The implemented baseline is documented in [SDK-M2-CALLSITES.md](internal/SDK-M2-CALLSITES.md).
 The broader interfaces above require their protocol-specific OpenRouter and
 independent conformance gates before support is added.
 

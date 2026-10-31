@@ -32,7 +32,7 @@ The CLI-to-package native gate uses the tracked source directly, installs the
 emitted tarball, compiles a strict TypeScript consumer, calls a localhost credits
 server, checks exact decimals, and builds/validates TypeDoc. The editor uses the
 same profile for generation and the shared session command for watch/preview.
-Current verification is recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md) and
+Current verification is recorded in [SDK-PROGRESS.md](internal/SDK-PROGRESS.md) and
 [editor integration](SDK-EDITOR-PREVIEW.md).
 
 ## Admitted contract

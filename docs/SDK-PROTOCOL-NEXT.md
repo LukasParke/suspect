@@ -2,7 +2,7 @@
 
 Source analysis begun 2026-09-08, with implementation context updated for the
 five-profile pipeline. Corpus facts use openrouter-web revision `db378a2a…`
-and the four inputs in [SDK-SESSION-HANDOFF.md](SDK-SESSION-HANDOFF.md#pinned-corpus). Sections
+and the four inputs in [SDK-SESSION-HANDOFF.md](internal/SDK-SESSION-HANDOFF.md#pinned-corpus). Sections
 marked **Proposal** are engineering recommendations, not researched facts and
 not implemented support.
 

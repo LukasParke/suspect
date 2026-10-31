@@ -84,7 +84,7 @@ OPENROUTER_WEB_ROOT=/path/to/openrouter-web \
 ```
 
 `SUSPECT_PYTHON_BIN` selects the interpreter. The declared floor is Python 3.11;
-current integrated evidence and remaining gates are in [progress](SDK-PROGRESS.md).
+current integrated evidence and remaining gates are in [progress](internal/SDK-PROGRESS.md).
 
 New scoped and resource evidence is recorded in
 `target/sdk-python-scoped-completion-01/` and

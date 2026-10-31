@@ -11,11 +11,11 @@ exact profiles compiled into the selected binary.
 
 All profiles are **experimental and bounded**. Each has native base-profile
 package/type/wire/docs evidence. Expanded protocol and scoped-schema capabilities
-require their own native witnesses. [The live integration checkpoint](SDK-FULL-PLAN-STATUS.md)
+require their own native witnesses. [The live integration checkpoint](internal/SDK-FULL-PLAN-STATUS.md)
 records those results and the outstanding full-plan gates.
 
 The earlier sealed five-language matrix verified all 208 criteria in its
-[demo scope](SDK-DEMO.md). It remains a historical regression baseline. Fresh
+[demo scope](internal/SDK-DEMO.md). It remains a historical regression baseline. Fresh
 twelve-language integrated acceptance, native costs and strict numerical M6
 qualification are still required for the full plan.
 
@@ -42,7 +42,7 @@ specification. The independent shared M2 fixture exercises create/update/list/ge
 presence/null, exact numbers, unions, recursion and strict wire behavior.
 
 The seven additional language base reports and subsequent protocol reports are
-indexed in [the live checkpoint](SDK-FULL-PLAN-STATUS.md). Their profile promotion
+indexed in [the live checkpoint](internal/SDK-FULL-PLAN-STATUS.md). Their profile promotion
 does not claim completion of active schema-v2/native-dynamic work. Source-linked
 admission remains specific to each adapter and executable profile.
 
@@ -98,8 +98,8 @@ manifests using the platform `IrSpec`; SDK packages and native docs consume
 
 ## Evidence and detailed boundaries
 
-- [Current progress](SDK-PROGRESS.md), [generation plan](SDK-GENERATION-PLAN.md)
-  and [full-plan exit gate](SDK-FULL-EXIT.md).
+- [Current progress](internal/SDK-PROGRESS.md), [generation plan](internal/SDK-GENERATION-PLAN.md)
+  and [full-plan exit gate](internal/SDK-FULL-EXIT.md).
 - Native HTTP: [Python](SDK-PYTHON-HTTP.md), [Go](SDK-GO-HTTP.md),
   [Swift](SDK-SWIFT.md), [Rust](SDK-RUST-HTTP.md),
   [TypeScript/JavaScript](SDK-TYPESCRIPT-HTTP.md).
@@ -114,6 +114,6 @@ manifests using the platform `IrSpec`; SDK packages and native docs consume
 - [Editor preview](SDK-EDITOR-PREVIEW.md) and
   [session performance](SDK-SESSION-PERFORMANCE.md). The completed Mac baseline
   remains observational after timing-noise qualification failed.
-- [Historical M0–M2 evidence](SDK-M0-M2-EXIT.md) and
+- [Historical M0–M2 evidence](internal/SDK-M0-M2-EXIT.md) and
   OpenRouter acceptance. Archived counts describe
   their pinned binaries and inputs, not current acceptance.

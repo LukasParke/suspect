@@ -864,7 +864,7 @@ The acquisition/native archive fixtures also pin `/usr/bin/curl`, the selected
 The full runner resolves its default from the **caller's** TMPDIR before child
 environments receive private scratch paths. It uses the restored payload recorded
 in [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md#retained-development-validation-2026-09-10)
-and [SDK-SWIFT-PROTOCOL.md](SDK-SWIFT-PROTOCOL.md#verification-and-retained-evidence):
+and [SDK-SWIFT-PROTOCOL.md](../SDK-SWIFT-PROTOCOL.md#verification-and-retained-evidence):
 
 ```sh
 export SUSPECT_SWIFT_FLOOR_ROOT="${TMPDIR%/}/opencode/swift-6.0.3-protocol-reexpanded/swift-6.0.3-RELEASE-osx-package.pkg/Payload"
@@ -1085,7 +1085,7 @@ The full-runner plan intentionally has only this schema:
 The evidence file is the existing
 `suspect-sdk-session-acceptance-inputs-v1` pin manifest containing exactly
 `baseline`, `candidate`, `comparison`, `policy` and `runner` pins, as documented in
-[SDK-SESSION-PERFORMANCE.md](SDK-SESSION-PERFORMANCE.md#original-workspace-evidence-bridge-for-final-acceptance).
+[SDK-SESSION-PERFORMANCE.md](../SDK-SESSION-PERFORMANCE.md#original-workspace-evidence-bridge-for-final-acceptance).
 Supply it with `--performance-plan /absolute/full-plan.json`.
 
 The runner fixes all four import commands and semantic assertions. Plans cannot

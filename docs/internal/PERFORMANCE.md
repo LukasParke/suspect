@@ -7,7 +7,7 @@ Ryzen 9 7950X3D (32 HW threads).
 These measurements and optimization estimates describe that earlier platform
 checkpoint. They do not measure the current Contract-backed SDK pipeline.
 Current session measurement boundaries and functional checks are documented in
-[SDK-SESSION-PERFORMANCE.md](SDK-SESSION-PERFORMANCE.md).
+[SDK-SESSION-PERFORMANCE.md](../SDK-SESSION-PERFORMANCE.md).
 
 ---
 

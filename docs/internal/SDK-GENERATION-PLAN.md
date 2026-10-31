@@ -3,7 +3,7 @@
 Authorized 2026-09-08; full-plan implementation resumed 2026-09-10.
 OpenRouter's tracked `openrouter-web` specifications
 are the primary acceptance workload. [SDK-PROGRESS.md](SDK-PROGRESS.md) records
-current verification; [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md) defines the
+current verification; [SDK-CAPABILITIES.md](../SDK-CAPABILITIES.md) defines the
 implemented profile boundaries.
 
 ## Goal and current scope
@@ -19,7 +19,7 @@ M6 iteration-tool baseline. The user's resumed instruction covers all remaining
 original-plan work end to end; protocol, schema, acquisition, compatibility and
 maintenance gates are tracked in
 [SDK-FULL-PLAN-WORK.md](SDK-FULL-PLAN-WORK.md). Approved native interfaces remain in
-[SDK-REMAINING-DX.md](SDK-REMAINING-DX.md).
+[SDK-REMAINING-DX.md](../SDK-REMAINING-DX.md).
 
 M0–M2 completion is a historical checkpoint, recorded in
 [SDK-M0-M2-EXIT.md](SDK-M0-M2-EXIT.md). The sealed post-cleanup native run verifies
@@ -81,7 +81,7 @@ the lossless source/reference sidecar.
 
 Reference acquisition is separate from compilation. Local split specs are
 supported; remote acquisition/offline-cache policy is designed in
-[SDK-PINNED-CLOSURE-DESIGN.md](SDK-PINNED-CLOSURE-DESIGN.md). An HTTP URI used as an
+[SDK-PINNED-CLOSURE-DESIGN.md](../SDK-PINNED-CLOSURE-DESIGN.md). An HTTP URI used as an
 identifier is not a command to download a document.
 
 ### Native planning and emission
@@ -102,7 +102,7 @@ The writer receives the complete desired artifact set. Preflight validates
 paths, ownership and conflicts before publication. Unchanged files keep their
 metadata; only unchanged obsolete owned files can be removed. `--check` is
 read-only. Atomic replacement is per file, not a whole-batch transaction or
-cross-process lock. See [SDK-ARTIFACT-OWNERSHIP.md](SDK-ARTIFACT-OWNERSHIP.md).
+cross-process lock. See [SDK-ARTIFACT-OWNERSHIP.md](../SDK-ARTIFACT-OWNERSHIP.md).
 
 `suspect-gen` provides `docs-md` and custom manifest/template rendering over the
 platform `IrSpec`. Native SDK packaging and documentation belong to the typed
@@ -124,10 +124,10 @@ Package name and exact version are required. Repeat `--operation-id NAME` to
 select exact outgoing operations; omission attempts all of them. Add
 `--check --format json` for read-only ownership/drift results.
 
-[`codegen-session`](SDK-INCREMENTAL-GENERATION.md) selects multiple profiles in
+[`codegen-session`](../SDK-INCREMENTAL-GENERATION.md) selects multiple profiles in
 one JSON configuration and shares a Contract across them. It supports finite
 generation, check, preview and persistent watch. The editor uses the same CLI
-and protocol. [`codegen-compare`](SDK-COMPATIBILITY-REPORTS.md) compares two
+and protocol. [`codegen-compare`](../SDK-COMPATIBILITY-REPORTS.md) compares two
 source/configuration snapshots and emits JSON or Markdown migration notes.
 
 Generation is independent of installed native toolchains. Native build/install,
@@ -156,8 +156,8 @@ The shared protocol now represents parameter/security encodings, status
 ranges/defaults, no-content and binary responses, forms/multipart, typed headers,
 and item streaming. Native completion and broader applicator/resource execution
 follow the source-backed contracts in
-[SDK-PROTOCOL-NEXT.md](SDK-PROTOCOL-NEXT.md) and
-[SDK-NATIVE-DX.md](SDK-NATIVE-DX.md) require their own native gates before admission.
+[SDK-PROTOCOL-NEXT.md](../SDK-PROTOCOL-NEXT.md) and
+[SDK-NATIVE-DX.md](../SDK-NATIVE-DX.md) require their own native gates before admission.
 Expanding a shared shape must not silently expand every backend's support claim.
 
 ## Verification gates
@@ -208,7 +208,7 @@ the candidate policy. No candidate run followed. The user chose generation and
 output SDKs as the hackathon deliverable, so these timings remain observational.
 Future numerical p95 acceptance requires prospectively agreed controls/policy
 and fresh qualifying evidence; the preserved baseline is not relabeled passing.
-See [SDK-SESSION-PERFORMANCE.md](SDK-SESSION-PERFORMANCE.md).
+See [SDK-SESSION-PERFORMANCE.md](../SDK-SESSION-PERFORMANCE.md).
 
 ## Delivery sequence
 
@@ -219,7 +219,7 @@ See [SDK-SESSION-PERFORMANCE.md](SDK-SESSION-PERFORMANCE.md).
 | M6 sessions/editor/compatibility/performance | Iteration tools delivered for the hackathon; timing observational, original strict numerical exit deferred |
 | Java/C#/Kotlin/Ruby/PHP/Dart/C++ | Native base profiles verified and registered; final twelve-target integrated acceptance pending |
 | Protocol/dialect expansion | Native protocol witnesses recorded per language; scoped v2/resource execution advances through explicit native gates |
-| Terraform Provider generation | User-added stretch goal (2026-09-10), after core SDK work; [scope and acceptance](SDK-TERRAFORM-STRETCH.md) |
+| Terraform Provider generation | User-added stretch goal (2026-09-10), after core SDK work; [scope and acceptance](../SDK-TERRAFORM-STRETCH.md) |
 
 The initial review and old milestone reports remain under `target/sdk-m0-m2*`
 and the earlier acceptance archives. They describe their pinned historical

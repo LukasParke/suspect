@@ -6,12 +6,12 @@ Research date: 2026-09-08. This note distinguishes specification facts from prop
 
 Initial read-only evaluation, 2026-09-08. It recommended an owned validation
 program compiled from the resolved contract registry. That bounded
-[owned validation boundary](SDK-OWNED-VALIDATION.md) now supplies the SDK codecs;
+[owned validation boundary](../SDK-OWNED-VALIDATION.md) now supplies the SDK codecs;
 the source-bound compiler remains a separate API. The assessment below records
 the pre-repair implementation.
 
 **Implementation update:** the subsequent bounded
-[exact numbers and equality repair](SDK-SCHEMA-NUMERICS.md) resolves the numeric
+[exact numbers and equality repair](../SDK-SCHEMA-NUMERICS.md) resolves the numeric
 failures listed below through the public API, with explicit evaluation limits,
 official conformance cases, actual OpenRouter acceptance and local benchmarks.
 The examples in this assessment remain a record of the pre-repair baseline;
@@ -21,8 +21,8 @@ The evaluation exercised the real public `Compiler::compile` and
 `Schema::validate` interfaces, using the pinned tracked OpenRouter input and
 independent normative vectors. No `suspect-schema` code was changed during that
 initial evaluation. The archived
-reproducer is [the evaluation project](../target/schema-sdk-evaluation/src/main.rs),
-with [results](../target/schema-sdk-evaluation/results.json). Current behavior is
+reproducer is [the evaluation project](../../target/schema-sdk-evaluation/src/main.rs),
+with [results](../../target/schema-sdk-evaluation/results.json). Current behavior is
 verified by the maintained schema, owned-program and native codec suites.
 
 Three blocker families were reproduced:
@@ -38,10 +38,10 @@ Three blocker families were reproduced:
    The compiler's keyword dispatch omits `minItems` and other cardinality
    checks; numbers materialize as `i64`/`f64`, wide integer instances can skip
    numeric checks, enum equality uses `f64`, and `multipleOf` uses an epsilon.
-   See [compilation](../crates/suspect-schema/src/compile.rs),
-   [execution](../crates/suspect-schema/src/exec.rs),
-   [numeric checks](../crates/suspect-schema/src/keywords/numeric.rs), and
-   [equality](../crates/suspect-schema/src/keywords/types.rs).
+   See [compilation](../../crates/suspect-schema/src/compile.rs),
+   [execution](../../crates/suspect-schema/src/exec.rs),
+   [numeric checks](../../crates/suspect-schema/src/keywords/numeric.rs), and
+   [equality](../../crates/suspect-schema/src/keywords/types.rs).
 2. **Annotation scope.** For `{"a":1}`, the schema
    `{"anyOf":[{"properties":{"a":true},"required":["missing"]},true],"unevaluatedProperties":false}`
    incorrectly succeeds: a failed branch leaves annotations visible.
@@ -49,7 +49,7 @@ Three blocker families were reproduced:
    also incorrectly succeeds because a sibling branch sees its cousin's
    annotations. The valid outer-`unevaluatedProperties` control and a simple
    overlapping `oneOf` rejection behave correctly. The shared instance masks
-   and error-only branch diversion in [execution](../crates/suspect-schema/src/exec.rs)
+   and error-only branch diversion in [execution](../../crates/suspect-schema/src/exec.rs)
    need evaluation-scope isolation, not just additional union type syntax.
 3. **Resolution and dialect context.** Compiling the tracked
    `AnthropicImageBlockParam` subtree rejects its valid URL-image input because
@@ -58,9 +58,9 @@ Three blocker families were reproduced:
    External references report “external schema resolution not configured,”
    and the public configuration has no resolver or dialect selector.
    `$schema` is explicitly treated as an annotation; 3.0 nullable behavior is
-   not selectable. See [compiler entrypoint](../crates/suspect-schema/src/compile.rs),
-   [references](../crates/suspect-schema/src/keywords/refs.rs), and
-   [configuration](../crates/suspect-schema/src/config.rs).
+   not selectable. See [compiler entrypoint](../../crates/suspect-schema/src/compile.rs),
+   [references](../../crates/suspect-schema/src/keywords/refs.rs), and
+   [configuration](../../crates/suspect-schema/src/config.rs).
 
 The proposed seam accepts a resolved schema registry, root schema identities,
 and explicit dialect/validation policy, returning an immutable, owned program

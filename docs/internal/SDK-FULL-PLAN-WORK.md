@@ -61,7 +61,7 @@ Shared protocol/resource and native scoped-schema implementations have advanced
 through their independent witnesses. The remaining checkboxes include final
 integrated acceptance and the last located findings; they are not a claim that
 the already verified individual matrices need restarting. Current receipts are
-indexed in [SDK-SCHEMA-NATIVE-ADOPTION.md](SDK-SCHEMA-NATIVE-ADOPTION.md) and the
+indexed in [SDK-SCHEMA-NATIVE-ADOPTION.md](../SDK-SCHEMA-NATIVE-ADOPTION.md) and the
 live Main checkpoint.
 
 Use ordinary specifications plus independent normative/adversarial vectors. The
@@ -75,7 +75,7 @@ from names. XML and opaque payloads require faithful source-backed representatio
   error/helper exports and complete native-construction quickstarts. The user's
   quality question and actual package inspection are captured in
   [SDK-DX-ASSESSMENT.md](SDK-DX-ASSESSMENT.md); passing native gates alone does not
-  establish this usability bar. [DEMO-README.md](../DEMO-README.md) now provides
+  establish this usability bar. [DEMO-README.md](../../DEMO-README.md) now provides
   detailed, native-checked usage/DX for all twelve SDKs, an independent JavaScript
   consumer, a 5–10 minute offline run order, typed errors, absence/null handling
   and a source-edit/compatibility walkthrough. The prepared candidate's thirteen
@@ -119,10 +119,10 @@ The bounded lifecycle-v1 implementation has its original native lifecycle and
 supplemental receipts, focused fixes on both Go tiers, and clean independent
 Standards/Spec rechecks at
 `target/sdk-main-final-integration-20260910-01/review-terraform-01/fixes-01/`.
-The [reviewed local walkthrough](../examples/sdk-demo-all/terraform-reviewed/README.md)
+The [reviewed local walkthrough](../../examples/sdk-demo-all/terraform-reviewed/README.md)
 uses a newly built provider from that fixed output and passes ten actual local
 Terraform steps. These implementation/native milestones do not close the
 remaining original-plan integrated SDK/editor/cost/performance gates.
 
-See [the stretch-goal scope](SDK-TERRAFORM-STRETCH.md). The core SDK acceptance
+See [the stretch-goal scope](../SDK-TERRAFORM-STRETCH.md). The core SDK acceptance
 inventory continues to describe the SDK deliverables independently.

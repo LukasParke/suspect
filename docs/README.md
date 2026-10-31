@@ -10,7 +10,6 @@ the [command reference](CLI.md). Every command shares one settings file,
 
 - [suspect command reference](CLI.md)
 - [LSP Feature Matrix — Full LSP 3.17 Specification Coverage](LSP_FEATURES.md)
-- [LSP Competitive Analysis: suspect vs vacuum vs Telescope](LSP_COMPARISON.md)
 - [TS/JS Custom Rules on a Bun Sidecar — Design](TS-RULE-RUNTIME.md)
 
 ### Testing and load
@@ -20,7 +19,6 @@ the [command reference](CLI.md). Every command shares one settings file,
 
 ### SDK and application generation
 
-- [Hackathon demo: OpenAPI to native SDKs](SDK-DEMO.md)
 - [SDK generation capabilities](SDK-CAPABILITIES.md)
 - [Generated-SDK feature matrix](SDK-FEATURES.md)
 - [Golden SDK defaults — user guide](SDK-GOLDEN-DEFAULTS.md)
@@ -39,9 +37,7 @@ the [command reference](CLI.md). Every command shares one settings file,
 
 ### Performance
 
-- [Historical performance profiling report](PERFORMANCE.md)
 - [SDK Session performance](SDK-SESSION-PERFORMANCE.md)
-- [Native SDK cost observations](SDK-NATIVE-COSTS.md)
 
 ## SDK backends by language
 
@@ -66,11 +62,9 @@ Architecture and contract design for the shared SDK pipeline.
 
 - [SDK Contract Readers (M1 parity seam)](SDK-CONTRACT-READERS.md)
 - [Contract resources and dynamic-reference metadata](SDK-CONTRACT-RESOURCES.md)
-- [SDK quality and developer experience](SDK-DX-ASSESSMENT.md)
 - [Shared HTTP protocol plan](SDK-HTTP-PROTOCOL.md)
 - [Native TypeScript/JavaScript and Rust SDK interfaces](SDK-NATIVE-DX.md)
 - [OpenAPI 3.2 HTTP Contract indexing](SDK-OAS32-CONTRACT.md)
-- [OpenAPI requirements for faithful SDK generation](SDK-OPENAPI-RESEARCH.md)
 - [Owned validation boundary](SDK-OWNED-VALIDATION.md)
 - [Pinned remote acquisition and offline closure compilation](SDK-PINNED-CLOSURE-DESIGN.md)
 - [TypeScript protocol slice: next source-backed expansion](SDK-PROTOCOL-NEXT.md)
@@ -81,39 +75,46 @@ Architecture and contract design for the shared SDK pipeline.
 - [Exact schema numbers and equality](SDK-SCHEMA-NUMERICS.md)
 - [Owned resources and dynamic references: v3 contract](SDK-SCHEMA-RESOURCES.md)
 - [Standalone schema URI references](SDK-SCHEMA-URIS.md)
+- [SDK elimination audit](SDK-ELIMINATION-AUDIT.md)
 
-## Plans, reviews and history
+## Internal: plans, reviews and history
 
-Internal planning, milestone exit evidence and dated reviews. Kept for
-context; not user documentation. The current alignment plan is the
+Plans, milestone exit evidence, dated reviews and research, under
+[`internal/`](internal/README.md). Kept for context; not user
+documentation and not link-checked. The current alignment plan is the
 [toolchain unification proposal](proposals/README.md).
 
-- [Folding Arbiter into suspect — Architecture Plan](ARBITER-FOLD-PLAN.md)
-- [Folding charte.rs into suspect — Architecture Plan](CODE-FOLD-PLAN.md)
-- [Depth analysis — where suspect is deep, where it is shallow, and what the next iteration should be](DEPTH-ANALYSIS.md)
-- [Feature Roadmap — the next ten platform features](FEATURE-ROADMAP.md)
-- [Arazzo-driven load testing — Architecture Plan](LOAD-TESTING-PLAN.md)
-- [Depth enrichment plan — the thin and at-risk surface](LSP-DEPTH-ENRICHMENT.md)
-- [Ten Revolutionary Features for the Suspect Platform](REVOLUTIONARY-FEATURES.md)
-- [SDK Compatibility Diff — Python: published openrouter 1.1.153 vs generated suspect SDK](SDK-COMPAT-DIFF-PYTHON.md)
-- [SDK Compatibility Diff — TypeScript (Published @openrouter/sdk 1.2.133 vs generated @openrouter/sdk-compat)](SDK-COMPAT-DIFF-TYPESCRIPT.md)
-- [Drop-in replacement review: suspect SDKs vs the published OpenRouter SDKs](SDK-COMPAT-DROPIN-PLAN.md)
-- [Our generated SDKs versus OpenRouter’s current TypeScript, Go and Python SDKs](SDK-CURRENT-SDK-COMPARISON-20260911.md)
-- [Generated SDK DX review — 11 September 2026](SDK-DX-REVIEW-20260911.md)
-- [SDK elimination audit](SDK-ELIMINATION-AUDIT.md)
-- [Full SDK plan acceptance](SDK-FULL-EXIT.md)
-- [Full SDK plan — live integration checkpoint](SDK-FULL-PLAN-STATUS.md)
-- [Remaining original SDK plan — active work map](SDK-FULL-PLAN-WORK.md)
-- [OpenAPI-driven SDK generation plan](SDK-GENERATION-PLAN.md)
-- [Golden Native SDK Defaults and Complete OpenAPI Support](SDK-GOLDEN-DEFAULTS-PLAN.md)
-- [Historical M0 failure baseline](SDK-M0-KNOWN-FAILURES.md)
-- [M0–M2 native interface approval](SDK-M0-M2-DX-APPROVAL.md)
-- [Historical M0–M2 exit checkpoint](SDK-M0-M2-EXIT.md)
-- [Historical M0–M2 workflow measurements](SDK-M0-WORKFLOW.md)
-- [M2 native slice call sites](SDK-M2-CALLSITES.md)
-- [M3 / M6 exit evidence](SDK-M3-M6-EXIT.md)
-- [SDK generation progress](SDK-PROGRESS.md)
-- [SDK session handoff — hackathon demo](SDK-SESSION-HANDOFF.md)
-- [Speakeasy / OpenRouter SDK research](SDK-SPEAKEASY-RESEARCH.md)
-- [Hackathon scope: generation and output SDKs](SDK-TODAY-M3-M6.md)
-- [Speakeasy openapi-generation review — patterns for the suspect engine](SPEAKEASY-OPENAPI-GENERATION-REVIEW.md)
+- [Folding Arbiter into suspect — Architecture Plan](internal/ARBITER-FOLD-PLAN.md)
+- [Folding charte.rs into suspect — Architecture Plan](internal/CODE-FOLD-PLAN.md)
+- [Depth analysis — where suspect is deep, where it is shallow, and what the next iteration should be](internal/DEPTH-ANALYSIS.md)
+- [Feature Roadmap — the next ten platform features](internal/FEATURE-ROADMAP.md)
+- [Arazzo-driven load testing — Architecture Plan](internal/LOAD-TESTING-PLAN.md)
+- [Depth enrichment plan — the thin and at-risk surface](internal/LSP-DEPTH-ENRICHMENT.md)
+- [LSP Competitive Analysis: suspect vs vacuum vs Telescope](internal/LSP_COMPARISON.md)
+- [Historical performance profiling report](internal/PERFORMANCE.md)
+- [Ten Revolutionary Features for the Suspect Platform](internal/REVOLUTIONARY-FEATURES.md)
+- [SDK Compatibility Diff — Python: published openrouter 1.1.153 vs generated suspect SDK](internal/SDK-COMPAT-DIFF-PYTHON.md)
+- [SDK Compatibility Diff — TypeScript (Published @openrouter/sdk 1.2.133 vs generated @openrouter/sdk-compat)](internal/SDK-COMPAT-DIFF-TYPESCRIPT.md)
+- [Drop-in replacement review: suspect SDKs vs the published OpenRouter SDKs](internal/SDK-COMPAT-DROPIN-PLAN.md)
+- [Our generated SDKs versus OpenRouter’s current TypeScript, Go and Python SDKs](internal/SDK-CURRENT-SDK-COMPARISON-20260911.md)
+- [Hackathon demo: OpenAPI to native SDKs](internal/SDK-DEMO.md)
+- [SDK quality and developer experience](internal/SDK-DX-ASSESSMENT.md)
+- [Generated SDK DX review — 11 September 2026](internal/SDK-DX-REVIEW-20260911.md)
+- [Full SDK plan acceptance](internal/SDK-FULL-EXIT.md)
+- [Full SDK plan — live integration checkpoint](internal/SDK-FULL-PLAN-STATUS.md)
+- [Remaining original SDK plan — active work map](internal/SDK-FULL-PLAN-WORK.md)
+- [OpenAPI-driven SDK generation plan](internal/SDK-GENERATION-PLAN.md)
+- [Golden Native SDK Defaults and Complete OpenAPI Support](internal/SDK-GOLDEN-DEFAULTS-PLAN.md)
+- [Historical M0 failure baseline](internal/SDK-M0-KNOWN-FAILURES.md)
+- [M0–M2 native interface approval](internal/SDK-M0-M2-DX-APPROVAL.md)
+- [Historical M0–M2 exit checkpoint](internal/SDK-M0-M2-EXIT.md)
+- [Historical M0–M2 workflow measurements](internal/SDK-M0-WORKFLOW.md)
+- [M2 native slice call sites](internal/SDK-M2-CALLSITES.md)
+- [M3 / M6 exit evidence](internal/SDK-M3-M6-EXIT.md)
+- [Native SDK cost observations](internal/SDK-NATIVE-COSTS.md)
+- [OpenAPI requirements for faithful SDK generation](internal/SDK-OPENAPI-RESEARCH.md)
+- [SDK generation progress](internal/SDK-PROGRESS.md)
+- [SDK session handoff — hackathon demo](internal/SDK-SESSION-HANDOFF.md)
+- [Speakeasy / OpenRouter SDK research](internal/SDK-SPEAKEASY-RESEARCH.md)
+- [Hackathon scope: generation and output SDKs](internal/SDK-TODAY-M3-M6.md)
+- [Speakeasy openapi-generation review — patterns for the suspect engine](internal/SPEAKEASY-OPENAPI-GENERATION-REVIEW.md)

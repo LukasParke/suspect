@@ -14,9 +14,9 @@ backends — **TypeScript/JavaScript, Python, Go, Rust, Swift, Java, Kotlin, C#,
 Ruby, PHP, Dart and C++** — producing native models, checked codecs, HTTP
 operations, packages, golden-defaults behavior (attribution, pagination,
 OAuth, env-credential defaults) and documentation.
-The [hackathon demo](docs/SDK-DEMO.md) generates SDKs from the real
+The [hackathon demo](docs/internal/SDK-DEMO.md) generates SDKs from the real
 OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
-[verified demo scope](docs/SDK-PROGRESS.md).
+[verified demo scope](docs/internal/SDK-PROGRESS.md).
 
 ## Install
 
@@ -65,7 +65,7 @@ selection ranges, rename with workspace-wide `$ref` rewriting
 
 A detailed feature-by-feature comparison against **vacuum** (pb33f/daveshanley)
 and **Telescope** (sailpoint-oss) is in
-[docs/LSP_COMPARISON.md](docs/LSP_COMPARISON.md).
+[docs/LSP_COMPARISON.md](docs/internal/LSP_COMPARISON.md).
 
 ### In action (VS Code + the bundled extension)
 
@@ -233,7 +233,7 @@ offline tests, and drift checks.
 ## Roadmap
 
 The next platform features are tracked in
-[docs/FEATURE-ROADMAP.md](docs/FEATURE-ROADMAP.md); the toolchain alignment
+[docs/FEATURE-ROADMAP.md](docs/internal/FEATURE-ROADMAP.md); the toolchain alignment
 plan is [docs/proposals/](docs/proposals/README.md).
 
 ## Notable engineering

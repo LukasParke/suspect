@@ -300,4 +300,4 @@ emitted code or compare the implementation to itself.
 cargo test -p suspect-codegen --test sdk_compatibility --locked
 ```
 
-Current integrated verification is recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md).
+Current integrated verification is recorded in [SDK-PROGRESS.md](internal/SDK-PROGRESS.md).

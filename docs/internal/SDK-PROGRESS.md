@@ -39,7 +39,7 @@ documentation and generic custom manifests. Legacy SDK implementations are remov
 The complete native matrix covers Python 3.11/3.14, Go 1.23/1.27, Swift 6.0.3 with
 SDK 15.4 and Swift 6.3.3 with SDK 26.5, Rust 1.88/current, TS 5.5/5.9 and Node
 22/24/browser consumers. Declared feature bounds remain in
-[SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
+[SDK-CAPABILITIES.md](../SDK-CAPABILITIES.md).
 
 ## Evidence
 
@@ -68,7 +68,7 @@ User decision: keep these timings observational for the hackathon. No calibratio
 job remains running. Original numerical M6 qualification requires prospectively
 improved controls or an agreed policy tested on fresh held-out measurements.
 See `target/sdk-calibration-restart01/analysis-diagnosis.md` and
-[performance tooling](SDK-SESSION-PERFORMANCE.md).
+[performance tooling](../SDK-SESSION-PERFORMANCE.md).
 
 ## Remaining full-plan work
 

@@ -2,7 +2,7 @@
 
 The M6 session, CLI watch/preview and native compatibility commands share the
 owned `Contract` and canonical language backends. Current scope and milestone
-acceptance are recorded in [today's goal](SDK-TODAY-M3-M6.md).
+acceptance are recorded in [today's goal](internal/SDK-TODAY-M3-M6.md).
 
 ## Generate, check or preview
 

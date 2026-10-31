@@ -87,4 +87,4 @@ cargo test --locked -p suspect-codegen --test typescript_contract --test typescr
   -- --include-ignored
 ```
 
-Current integrated status is in [SDK-PROGRESS.md](SDK-PROGRESS.md).
+Current integrated status is in [SDK-PROGRESS.md](internal/SDK-PROGRESS.md).

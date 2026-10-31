@@ -223,7 +223,7 @@ milestone, not an architecture problem.
 
 ## Platform budgets (historical)
 
-See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the full profiling report,
+See [docs/PERFORMANCE.md](docs/internal/PERFORMANCE.md) for the full profiling report,
 phase-by-phase cost attribution, and the ranked plan of attack.
 These measurements are fixture-specific; they do not establish OpenRouter
 end-to-end SDK generation or emitted-SDK performance.

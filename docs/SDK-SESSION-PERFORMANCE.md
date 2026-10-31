@@ -55,7 +55,7 @@ separate collector/qualifier verifies repeated execution, pinned runner identity
 sample counts, quantile confidence, stationarity and repeatability.
 
 This implements the measurement/regression seam from
-[the generation plan](SDK-GENERATION-PLAN.md#speed-measure-the-complete-workflow).
+[the generation plan](internal/SDK-GENERATION-PLAN.md#speed-measure-the-complete-workflow).
 The shipped policy is the plan's **candidate** “investigate >10% beyond measured
 noise” policy. It is not an approved absolute interactive-latency budget or an M6
 completion claim.

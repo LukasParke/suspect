@@ -466,6 +466,17 @@ would have to be deleted when P1 lands.
    `suspect-gateway/src/lib.rs:1104`. Regroups `docs/README.md` "Plans,
    reviews and history" to point into `internal/`. Tests: lychee job, guard
    tests, `cargo run -p xtask -- sdk-full --check-syntax`. 0.5 day.
+   **Done.** The table still covered every file (no new flat docs since it
+   was written). The script rewrote 421 links (342 in `docs/internal/`, 34
+   in `docs/README.md`, 4 in `README.md`, 1 each in `BENCHMARKS.md` and
+   `tools/sdk-demo/README.md`, the rest in user docs that cite records);
+   lychee reports 0 errors before and after. Entries that pointed at
+   internal records from other `docs/README.md` sections (LSP comparison,
+   SDK demo, performance report, native costs, DX assessment, OpenAPI
+   research) moved into the "Internal" section, and the elimination audit
+   moved from it to "Design notes". The prose path in `TS-RULE-RUNTIME.md:3`
+   became a link. The guard's syntax-check test stands in for the manual
+   `verify-sdk --check-syntax` run.
 4. **Move `sdk/`, `design/`, `reference/`, `guide/`, `proposals/` (85
    files).** Runs the script for the rest. Applies the code-path table above
    and adds the four `sdk/<lang>/README.md` index pages (typescript, python,

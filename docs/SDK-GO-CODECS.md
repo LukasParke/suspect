@@ -55,4 +55,4 @@ SUSPECT_GO_TOOLCHAIN=go1.23.12 \
 
 General unproved intersections, unsupported applicators/representations and HTTP
 directional projections remain explicit diagnostics. See [model planning](SDK-GO-MODEL-PLAN.md),
-[HTTP](SDK-GO-HTTP.md), and [current acceptance](SDK-PROGRESS.md).
+[HTTP](SDK-GO-HTTP.md), and [current acceptance](internal/SDK-PROGRESS.md).

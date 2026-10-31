@@ -11,7 +11,7 @@ reports, and captures.
 
 This guide describes what is generated **today**. Where a behavior is still
 planned, the text says so explicitly. The implementation plan is
-[SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md); the credential
+[SDK-GOLDEN-DEFAULTS-PLAN.md](internal/SDK-GOLDEN-DEFAULTS-PLAN.md); the credential
 runtime semantics are specified in
 [SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md); the normative OpenAPI support
 matrix is [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md).
@@ -380,7 +380,7 @@ The plan's target runtime — not yet emitted by generated packages — is:
 Until that runtime lands, applications implement acquisition/refresh in their
 own credential hooks; the descriptors above are the contract those hooks
 consume. Status and milestone tracking are in
-[SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md).
+[SDK-GOLDEN-DEFAULTS-PLAN.md](internal/SDK-GOLDEN-DEFAULTS-PLAN.md).
 
 ## 6. Migrating from pre-1.0 generated SDKs
 
@@ -414,13 +414,13 @@ with the relevant section removed) to keep the previous behavior.
 
 ## References
 
-- [SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) — the program plan
+- [SDK-GOLDEN-DEFAULTS-PLAN.md](internal/SDK-GOLDEN-DEFAULTS-PLAN.md) — the program plan
   and milestone status.
 - [SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md) — environment-credential
   runtime semantics and per-language constructor forms.
 - [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md) — the normative OpenAPI
   feature matrix with honest per-row status.
-- [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md) — the `repeated-v1` native cost
+- [SDK-NATIVE-COSTS.md](internal/SDK-NATIVE-COSTS.md) — the `repeated-v1` native cost
   methodology.
 - [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md) — the twelve-backend capability
   matrix and per-profile evidence.
