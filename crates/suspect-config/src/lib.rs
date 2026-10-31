@@ -39,7 +39,7 @@ pub use layer::{Layer, Notice, Origin, Raw};
 pub use resolve::{
     ConfigError, Env, ExplainRow, Inputs, Resolved, resolve, resolve_found, resolve_with,
 };
-pub use severity::{SeverityName, parse_severity};
+pub use severity::{Level, SeverityName, parse_level, parse_severity};
 
 /// The toolchain's settings.
 #[derive(Debug, Clone, Default, PartialEq)]

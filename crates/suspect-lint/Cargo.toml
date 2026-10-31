@@ -10,6 +10,7 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+suspect-diag.workspace = true
 suspect-low.workspace = true
 suspect-source.workspace = true
 suspect-jsonpath.workspace = true

@@ -2074,6 +2074,7 @@ dependencies = [
  "criterion",
  "rustc-hash",
  "serde_json",
+ "suspect-diag",
  "suspect-jsonpath",
  "suspect-low",
  "suspect-overlay",
@@ -2096,6 +2097,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "suspect-check"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "suspect-arazzo",
+ "suspect-codegen",
+ "suspect-diag",
+ "suspect-lint",
+ "suspect-low",
+ "suspect-oas",
+ "suspect-overlay",
+ "suspect-ref",
+ "suspect-source",
+ "suspect-test",
+ "suspect-validate",
+]
+
+[[package]]
 name = "suspect-cli"
 version = "0.1.0"
 dependencies = [
@@ -2115,6 +2134,7 @@ dependencies = [
  "suspect-arazzo",
  "suspect-codegen",
  "suspect-config",
+ "suspect-diag",
  "suspect-gateway",
  "suspect-gen",
  "suspect-ir",
@@ -2151,6 +2171,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "suspect-artifact",
+ "suspect-diag",
  "suspect-gen",
  "suspect-ir",
  "suspect-low",
@@ -2167,9 +2188,19 @@ name = "suspect-config"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "suspect-diag",
  "suspect-low",
  "suspect-source",
  "tempfile",
+]
+
+[[package]]
+name = "suspect-diag"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "suspect-source",
 ]
 
 [[package]]
@@ -2261,6 +2292,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
+ "suspect-diag",
  "suspect-ir",
  "suspect-jsonpath",
  "suspect-low",
@@ -2297,6 +2329,7 @@ dependencies = [
  "suspect-arazzo",
  "suspect-codegen",
  "suspect-config",
+ "suspect-diag",
  "suspect-gen",
  "suspect-ir",
  "suspect-lint",
@@ -2454,6 +2487,7 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-arazzo",
+ "suspect-diag",
  "suspect-ir",
  "suspect-journal",
  "suspect-low",
@@ -2474,6 +2508,7 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "serde_json",
+ "suspect-diag",
  "suspect-low",
  "suspect-oas",
  "suspect-overlay",

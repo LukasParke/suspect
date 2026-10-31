@@ -13,6 +13,7 @@ publish = false
 pulldown-cmark = "0.13"
 suspect-low.workspace = true
 suspect-config.workspace = true
+suspect-diag.workspace = true
 suspect-ref.workspace = true
 suspect-oas.workspace = true
 suspect-validate.workspace = true

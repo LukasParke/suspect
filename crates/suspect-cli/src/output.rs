@@ -1,6 +1,8 @@
 //! Shared output types: the CLI's unified severity/finding model, text
 //! rendering, and JSON emission. Upstream severities (validate, lint) are
-//! mapped into [`Severity`] here; their crates stay untouched.
+//! mapped into [`Severity`] here. Text and SARIF output render through
+//! `suspect_diag::render`: [`Finding`] converts to and from
+//! [`suspect_diag::Finding`] without changing a byte of either format.
 
 use serde::Serialize;
 
@@ -94,11 +96,116 @@ impl Finding {
     }
 }
 
+impl From<Severity> for suspect_diag::Severity {
+    fn from(severity: Severity) -> Self {
+        match severity {
+            Severity::Hint => Self::Hint,
+            Severity::Info => Self::Info,
+            Severity::Warning => Self::Warning,
+            Severity::Error => Self::Error,
+        }
+    }
+}
+
+impl From<suspect_diag::Severity> for Severity {
+    fn from(severity: suspect_diag::Severity) -> Self {
+        match severity {
+            suspect_diag::Severity::Hint => Self::Hint,
+            suspect_diag::Severity::Info => Self::Info,
+            suspect_diag::Severity::Warning => Self::Warning,
+            suspect_diag::Severity::Error => Self::Error,
+        }
+    }
+}
+
+impl Finding {
+    /// Converts to the shared finding model. The document is the path as
+    /// shown (not a canonical URI), the 1-based line/column become the
+    /// finding's [`suspect_diag::Position`], and the check is
+    /// [`suspect_diag::CheckId::Command`]. Render the result with
+    /// [`ShownPaths`] to reproduce [`Finding::to_line`] exactly.
+    #[must_use]
+    pub fn to_diag(&self) -> suspect_diag::Finding {
+        suspect_diag::Finding {
+            code: self.code.clone().into(),
+            severity: self.severity.into(),
+            message: self.message.clone(),
+            document: shown_uri(&self.file),
+            range: self.range.clone(),
+            position: Some(suspect_diag::Position {
+                line: self.line.saturating_sub(1),
+                col: self.col.saturating_sub(1),
+            }),
+            pointer: None,
+            check: suspect_diag::CheckId::Command,
+            related: Vec::new(),
+        }
+    }
+
+    /// Converts from the shared finding model, resolving the display path
+    /// and 1-based position through `src`.
+    #[must_use]
+    pub fn from_diag(
+        finding: &suspect_diag::Finding,
+        src: &dyn suspect_diag::render::Sources,
+    ) -> Self {
+        let (line, col) = suspect_diag::render::start(finding, src);
+        Self {
+            file: src.display_path(&finding.document),
+            severity: finding.severity.into(),
+            code: finding.code.to_string(),
+            message: finding.message.clone(),
+            line,
+            col,
+            range: finding.range.clone(),
+        }
+    }
+}
+
+/// The document identity [`Finding::to_diag`] uses: the shown path taken
+/// verbatim, so distinct spellings never merge.
+fn shown_uri(file: &str) -> suspect_source::Uri {
+    match suspect_source::Uri::try_from(file.as_bytes()) {
+        Ok(uri) => uri,
+        // `file` is a `String`, so it is always UTF-8.
+        Err(_) => suspect_source::Uri::from(file),
+    }
+}
+
+/// [`suspect_diag::render::Sources`] for findings made by
+/// [`Finding::to_diag`]: the document is the shown path, and positions are
+/// carried on each finding, so no offset lookup is needed.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShownPaths;
+
+impl suspect_diag::render::Sources for ShownPaths {
+    fn line_col(&self, _doc: &suspect_source::Uri, _offset: usize) -> Option<(u32, u32)> {
+        None
+    }
+    fn display_path(&self, doc: &suspect_source::Uri) -> String {
+        doc.as_str().to_owned()
+    }
+}
+
+/// Converts every finding with [`Finding::to_diag`].
+#[must_use]
+pub fn to_diag(findings: &[Finding]) -> Vec<suspect_diag::Finding> {
+    findings.iter().map(Finding::to_diag).collect()
+}
+
+/// The canonical `file:line:col [SEVERITY] code: message` lines, one per
+/// finding, rendered by `suspect_diag::render::text`.
+#[must_use]
+pub fn render_text(findings: &[Finding]) -> String {
+    let mut out = Vec::new();
+    // Writing into a Vec cannot fail.
+    let _ = suspect_diag::render::text(&to_diag(findings), &ShownPaths, &mut out);
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Prints findings one per line in the canonical `file:line:col` shape.
 pub fn print_findings(findings: &[Finding]) {
-    for f in findings {
-        println!("{}", f.to_line());
-    }
+    print!("{}", render_text(findings));
 }
 
 /// Pretty-prints any serializable report as JSON on stdout.

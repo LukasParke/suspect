@@ -99,7 +99,7 @@ impl LintOverrides {
     ) -> anyhow::Result<Self> {
         let mut bad: Vec<String> = Vec::new();
         let parse = |name: &str, bad: &mut Vec<String>| {
-            let severity = suspect_lint::Severity::from_policy(name);
+            let severity = suspect_diag::parse_level(name).map(suspect_lint::Severity::from);
             if severity.is_none() {
                 bad.push(name.to_owned());
             }

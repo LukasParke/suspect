@@ -17,6 +17,7 @@ libc = "0.2"
 # internal crates
 suspect-source = { path = "crates/suspect-source", version = "0.1.0" }
 suspect-syntax = { path = "crates/suspect-syntax", version = "0.1.0" }
+suspect-diag = { path = "crates/suspect-diag", version = "0.1.0" }
 suspect-config = { path = "crates/suspect-config", version = "0.1.0" }
 suspect-runtime = { path = "crates/suspect-runtime", version = "0.1.0" }
 suspect-low = { path = "crates/suspect-low", version = "0.1.0" }

@@ -813,12 +813,54 @@ releasable on its own.
    so command output is byte-identical. Tests: the severity tests move, the
    SARIF 2.1.0 test moves, and a golden text test runs on petstore.
    Estimate: 1 day.
+   **Done.** Deviations: `Finding` has an extra `position: Option<Position>`
+   for producers that know a line but no byte offset (`breaking`, CLI
+   findings converted from `output::Finding`), and `CheckId` has a
+   `Command` variant for command-local findings outside the check pass.
+   CLI JSON output keeps its own serializer (`"severity": "Warning"`), because
+   `render::json` uses the lowercase names and would change the bytes; it
+   switches in step 5. SARIF `endLine`/`endColumn` and
+   `partialFingerprints` are not added yet (they change output; step 8).
+   `SeverityName`/`parse_severity` are kept as wrappers over `parse_level`
+   but not yet `#[deprecated]`, since the LSP's `editor_config.rs` (being
+   rewritten by P2) still calls them. Goldens:
+   `crates/suspect-cli/tests/finding_output.rs` covers text, JSON and SARIF
+   for `validate` and `lint`.
 2. **Rule tables and the registry.** `rules()` in validate (from
    `guidance.rs` plus default severities), lint (from packs, plus
    `Rule::builtin`), arazzo, overlay, load profile, admission.
    `suspect_check::Registry` gets no aliases yet. Delete `from_policy`.
    Tests: every code a fixture corpus emits is registered, no code is
    registered twice, every `RuleInfo` has a summary. Estimate: 1 day.
+   **Done.** The `suspect-check` crate is created here with only
+   `registry.rs` (`Registry::builtin`, `from_tables`, `canonical`, `info`,
+   `rules`; it implements `render::RuleLookup`). Tables:
+   `suspect_validate::rules()` (74 codes; `swagger-*` are
+   `CheckId::Swagger`, `sdk-*` are `RuleClass::Sdk`),
+   `suspect_lint::builtin_rules()`, `suspect_arazzo::rules()`,
+   `suspect_test::load::rules()`, `suspect_codegen::admission::rules()`.
+   Deviations: the Overlay table lives in `suspect-check`, because
+   `suspect-overlay` is a publishable foundation crate (P5) and cannot
+   depend on the unpublished `suspect-diag`; it moves when `suspect-diag`
+   joins the public set. `canonical` returns `Option<&str>` (no
+   multi-target aliases until step 4). `no-$ref-siblings` is defined twice
+   in the OAS pack (error on 3.0, warning on 3.1+) and is registered once
+   from its first definition. Admission lists only the 18 codes with
+   guidance in `admission.rs`; the ~200 open-ended `http-*` codes of the
+   HTTP admission layer and the contract compiler's codes need a table
+   before step 9, so the corpus test does not run admission. Every ruleset
+   rule clears `Rule::builtin` (a ruleset rule always has its own `then`,
+   so a severity-only override cannot be written yet). Three validate
+   codes had no guidance (`oas-schema-instance-invalid`,
+   `oas-tag-parent-cycle`, `oas-tag-parent-unknown`); they now have a
+   summary and how-to-fix, so `validate` appends a `how to fix:` line for
+   them. The corpus test adds five broken fixtures under
+   `crates/suspect-check/tests/fixtures/`, because the repository had no
+   Swagger, Overlay or failing Arazzo/load-profile fixture files. The
+   crate-graph test (`tests/graph.rs`) lands here too. The
+   `overlay-action-missing-description` (overlay) /
+   `overlay-action-description` (lint) pair is an alias candidate once
+   step 3 wires `validate_overlay`.
 3. **`suspect-check` with the LSP battery, LSP switched.** Move
    `markdown.rs` to `suspect-lint`, `config_schema::problems` to
    `suspect-config`, the extension check to `suspect-check`, and `node_at`

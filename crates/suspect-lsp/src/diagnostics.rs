@@ -171,12 +171,12 @@ pub fn lint_diagnostics(
         let per_rule = lint
             .rules
             .get(code)
-            .and_then(|name| suspect_lint::Severity::from_policy(name));
+            .and_then(|name| suspect_diag::parse_level(name).map(suspect_lint::Severity::from));
         let class = (linter.category_of(code) == suspect_lint::Category::Design)
             .then(|| {
-                lint.design
-                    .as_deref()
-                    .and_then(suspect_lint::Severity::from_policy)
+                lint.design.as_deref().and_then(|name| {
+                    suspect_diag::parse_level(name).map(suspect_lint::Severity::from)
+                })
             })
             .flatten();
         per_rule.or(class).unwrap_or(default)

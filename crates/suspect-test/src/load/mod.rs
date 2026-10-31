@@ -21,6 +21,7 @@ pub mod ensure;
 pub mod metrics;
 pub mod profile;
 pub mod report;
+mod rules;
 pub mod schedule;
 pub mod vu;
 
@@ -58,6 +59,7 @@ pub use profile::{
     LoadProfile, Phase, PhaseKind, ProfileDiagnostic, ProfileError, Scenario, read_profile,
     read_profile_lenient,
 };
+pub use rules::rules;
 pub use schedule::{Arrivals, Jitter};
 pub use vu::HttpFactory;
 

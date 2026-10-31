@@ -56,6 +56,77 @@ fn summary(code: &str) -> &'static str {
     }
 }
 
+/// Codes with registered guidance, and their default severity: naming
+/// collisions are advice (info), the rest refuse generation (error).
+const GUIDED: &[(&str, suspect_diag::Severity)] = &[
+    ("naming-method-collision", suspect_diag::Severity::Info),
+    ("naming-model-collision", suspect_diag::Severity::Info),
+    ("http-operation-id", suspect_diag::Severity::Error),
+    ("http-operation-id-duplicate", suspect_diag::Severity::Error),
+    ("http-operation-not-found", suspect_diag::Severity::Error),
+    ("http-operation-object", suspect_diag::Severity::Error),
+    ("http-method-unsupported", suspect_diag::Severity::Error),
+    ("http-method-token", suspect_diag::Severity::Error),
+    (
+        "http-parameters-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+    (
+        "http-parameter-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+    ("http-body-metadata-invalid", suspect_diag::Severity::Error),
+    ("http-body-schema-invalid", suspect_diag::Severity::Error),
+    (
+        "http-response-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+    (
+        "http-responses-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+    (
+        "http-content-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+    (
+        "http-schema-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+    (
+        "http-security-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+    (
+        "http-server-metadata-invalid",
+        suspect_diag::Severity::Error,
+    ),
+];
+
+/// Rule metadata for the admission codes that carry guidance
+/// ([`suspect_diag::RuleClass::Sdk`]). Admission also passes through the
+/// open-ended `http-*` codes of the shared HTTP admission layer and the
+/// contract compiler's codes; those are not listed yet.
+#[must_use]
+pub fn rules() -> &'static [suspect_diag::RuleInfo] {
+    static RULES: std::sync::OnceLock<Vec<suspect_diag::RuleInfo>> = std::sync::OnceLock::new();
+    RULES.get_or_init(|| {
+        GUIDED
+            .iter()
+            .map(|&(code, default)| suspect_diag::RuleInfo {
+                class: suspect_diag::RuleClass::Sdk,
+                how_to_fix: how_to_fix(code),
+                ..suspect_diag::RuleInfo::new(
+                    code,
+                    suspect_diag::CheckId::Admission,
+                    default,
+                    summary(code),
+                )
+            })
+            .collect()
+    })
+}
+
 /// Actionable fix guidance for an admission code; empty when the located
 /// message already carries the specifics.
 fn how_to_fix(code: &str) -> &'static str {

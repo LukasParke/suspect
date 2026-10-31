@@ -10,6 +10,7 @@ pub mod asyncapi;
 mod expr;
 mod model;
 pub mod rex;
+mod rules;
 mod validate;
 
 pub use asyncapi::{
@@ -20,6 +21,7 @@ pub use model::{
     ActionView, ArazzoDoc, CriterionView, ParameterView, SourceDescriptionView, SourceType,
     StepDependency, StepView, WorkflowView,
 };
+pub use rules::rules;
 pub use validate::{ArazzoDiagnostic, validate_arazzo};
 
 use suspect_low::NodeRef;
