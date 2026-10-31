@@ -102,6 +102,17 @@ pub fn json(findings: &[Finding], src: &dyn Sources) -> Value {
         .collect()
 }
 
+/// The JSON findings report: `findings` as [`json`] renders them, and the
+/// findings inline or extension suppressions hid under `suppressed`, so a
+/// reviewer can audit them.
+#[must_use]
+pub fn json_report(findings: &[Finding], suppressed: &[Finding], src: &dyn Sources) -> Value {
+    json!({
+        "findings": json(findings, src),
+        "suppressed": json(suppressed, src),
+    })
+}
+
 /// Maps a severity to a SARIF level (`note`, `warning`, `error`).
 #[must_use]
 pub fn sarif_level(severity: Severity) -> &'static str {
@@ -379,6 +390,16 @@ mod tests {
                 "pointer": "/info",
             }])
         );
+    }
+
+    #[test]
+    fn the_report_lists_suppressed_findings_apart() {
+        let shown = Finding::new(CheckId::Lint, "a", Severity::Warning, uri(), "shown");
+        let hidden = Finding::new(CheckId::Lint, "b", Severity::Warning, uri(), "hidden");
+        let report = json_report(&[shown], &[hidden], &sources());
+        assert_eq!(report["findings"][0]["code"], "a");
+        assert_eq!(report["suppressed"][0]["code"], "b");
+        assert_eq!(report["suppressed"].as_array().unwrap().len(), 1);
     }
 
     #[test]

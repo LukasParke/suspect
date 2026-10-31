@@ -82,6 +82,12 @@ pub const BUILTIN: &[BuiltinSchema] = &[
         contexts: &[],
         schema: r#"{"type":"boolean"}"#,
     },
+    // Suppression (`crate::suppress`): a list of codes.
+    BuiltinSchema {
+        key: crate::suppress::EXTENSION_KEY,
+        contexts: &[],
+        schema: r#"{"type":"array","items":{"type":"string","minLength":1}}"#,
+    },
 ];
 
 /// One configured extension schema.

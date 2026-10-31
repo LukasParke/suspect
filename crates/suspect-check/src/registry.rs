@@ -69,6 +69,24 @@ const PASS_RULES: &[RuleInfo] = &[
         Severity::Error,
         "TypeScript rule id reuses a builtin code or alias",
     ),
+    RuleInfo {
+        how_to_fix: "Name a code or alias the checks report; `syntax-error` cannot be suppressed.",
+        ..RuleInfo::new(
+            crate::suppress::UNKNOWN_CODE,
+            CheckId::Suppression,
+            Severity::Warning,
+            "Suppression names an unknown or unsuppressible code",
+        )
+    },
+    RuleInfo {
+        how_to_fix: "Remove the suppression, or the code it no longer needs.",
+        ..RuleInfo::new(
+            crate::suppress::UNUSED,
+            CheckId::Suppression,
+            Severity::Hint,
+            "Suppression matched no finding (off unless `lint.rules` turns it on)",
+        )
+    },
 ];
 
 /// Alias table v1: canonical code, then the codes that report the same

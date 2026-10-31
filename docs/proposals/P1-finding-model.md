@@ -991,6 +991,33 @@ releasable on its own.
    findings, and JSON `suppressed`. Tests: YAML comment on a pair, on a
    sequence item, file-level, in JSON via the extension; alias names in
    suppressions; `syntax-error` is not suppressible. Estimate: 1 day.
+   **Done.** `suspect_check::suppress` (`collect`, `apply`, `problems`,
+   `Directive`, `Form`) runs as step 5 of `apply_policy`, so the editor
+   honours suppressions with no LSP change. `apply_policy_report` returns
+   a `PolicyOutcome { findings, suppressed }` (the floor applies to both);
+   `apply_policy` returns its `findings`. `suspect_diag::render::json_report`
+   renders `{"findings": [...], "suppressed": [...]}` for step 5's
+   `--format json`. `CheckId` gains `Suppression` for
+   `suppression-unknown-code` (warning) and `suppression-unused` (hint,
+   emitted only when `lint.rules.suppression-unused` sets a severity).
+   The extension check has a builtin `x-suspect-disable` schema (array of
+   non-empty strings). Codes resolve through the registry, so aliases
+   work; codes of a custom ruleset and dynamic TS ids count as known.
+   Deviations: the comment is spelled `# suspect-disable-next-line`, with
+   `# suspect-disable` accepted as the short form; both apply to the next
+   node (pair or sequence item) and its subtree, not to a line. A
+   trailing comment (`get: # suspect-disable ...`) applies to the node its
+   own line starts. `# suspect-disable-file` is honoured anywhere in the
+   document, not only in the first comment block. `x-suspect-disable`
+   covers its mapping and the pair or sequence item the mapping is the
+   value of, so a finding anchored on the key is covered too; a bare
+   string value is not honoured (and fails the schema). Naming
+   `syntax-error` (or `syntax`) gives `suppression-unknown-code` with
+   "cannot be suppressed"; a directive with no codes gives it too. A
+   document without the text `suspect-disable` costs one byte scan.
+   Tests: `crates/suspect-check/tests/suppress.rs` and an LSP unit test in
+   `diagnostics.rs`. The VS Code host smoke assertion is not added here
+   (`editors/` belongs to the P4 work).
 8. **Baseline.** `--write-baseline`, `--baseline`, `check.baseline`, SARIF
    `partialFingerprints`/`baselineState`. Tests: write then check exits 0;
    adding one finding exits 1 and shows only that one; moving an operation to

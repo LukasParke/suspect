@@ -13,8 +13,9 @@ pub mod checks;
 mod policy;
 pub mod registry;
 pub mod rules;
+pub mod suppress;
 
 pub use checks::{Context, check_document};
-pub use policy::{CheckSet, Policy, apply_policy};
+pub use policy::{CheckSet, Policy, PolicyOutcome, apply_policy, apply_policy_report};
 pub use registry::{Registry, RegistryError};
 pub use rules::{RulesError, check_rules};

@@ -225,13 +225,32 @@ fn cached_ruleset(path: &Path) -> Option<Arc<suspect_lint::Linter>> {
 ///    else the finding's own severity; `off` drops the finding.
 /// 4. **Category gates**: SDK-readiness findings only with `policy.sdk`;
 ///    lint and markdown findings only when lint is enabled.
-/// 5. *(P1 step 7: suppressions.)*
-/// 6. **Floor**: findings below `policy.floor` are dropped.
+/// 5. **Suppressions**: findings an inline `# suspect-disable…` comment
+///    or an `x-suspect-disable` extension covers are set aside (see
+///    [`crate::suppress`]); problems with the suppressions themselves are
+///    added, subject to overrides.
+/// 6. **Floor**: findings below `policy.floor` are dropped, from the
+///    suppressed list too.
 #[must_use]
 pub fn apply_policy(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> Vec<Finding> {
-    let _ = doc;
+    apply_policy_report(findings, doc, policy).findings
+}
+
+/// What [`apply_policy_report`] keeps and what suppressions hid.
+#[derive(Debug, Clone, Default)]
+pub struct PolicyOutcome {
+    /// Findings to report.
+    pub findings: Vec<Finding>,
+    /// Findings an inline or extension suppression hid (`--format json`
+    /// lists them under `suppressed`).
+    pub suppressed: Vec<Finding>,
+}
+
+/// [`apply_policy`], also returning the suppressed findings.
+#[must_use]
+pub fn apply_policy_report(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> PolicyOutcome {
     let canonical = canonicalize(findings, policy);
-    dedupe(canonical, &policy.registry)
+    let gated: Vec<Finding> = dedupe(canonical, &policy.registry)
         .into_iter()
         .filter_map(|mut finding| {
             // 3. Overrides.
@@ -255,10 +274,33 @@ pub fn apply_policy(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> Ve
             {
                 return None;
             }
-            // 6. Floor.
-            (finding.severity >= policy.floor).then_some(finding)
+            Some(finding)
         })
-        .collect()
+        .collect();
+    // 5. Suppressions.
+    let custom =
+        |code: &str| policy.custom_ruleset && policy.linter.rule_codes().any(|c| c == code);
+    let mut directives = crate::suppress::collect(doc, &policy.registry, &custom);
+    let (mut kept, suppressed) = crate::suppress::apply(gated, doc, &mut directives);
+    // `suppression-unused` is off unless configured.
+    let unused = match policy.override_for(crate::suppress::UNUSED) {
+        Some(Level::On(severity)) => Some(severity),
+        _ => None,
+    };
+    for mut problem in crate::suppress::problems(doc, &directives, unused) {
+        match policy.override_for(&problem.code) {
+            Some(Level::Off) => continue,
+            Some(Level::On(severity)) => problem.severity = severity,
+            None => {}
+        }
+        kept.push(problem);
+    }
+    // 6. Floor.
+    let floor = |f: &Finding| f.severity >= policy.floor;
+    PolicyOutcome {
+        findings: kept.into_iter().filter(floor).collect(),
+        suppressed: suppressed.into_iter().filter(floor).collect(),
+    }
 }
 
 /// A finding and the code it was emitted with, when canonicalization

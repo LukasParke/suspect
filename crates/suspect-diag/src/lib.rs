@@ -49,6 +49,8 @@ pub enum CheckId {
     Rules,
     /// SDK generation admission.
     Admission,
+    /// Problems with inline or extension suppressions themselves.
+    Suppression,
     /// A command-local finding outside the check pass (I/O errors,
     /// `breaking`, `drift` and other report commands).
     Command,
@@ -72,6 +74,7 @@ impl CheckId {
             Self::Config => "config",
             Self::Rules => "rules",
             Self::Admission => "admission",
+            Self::Suppression => "suppression",
             Self::Command => "command",
         }
     }

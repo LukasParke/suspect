@@ -197,6 +197,24 @@ mod tests {
     }
 
     #[test]
+    fn suppressions_apply_in_the_editor() {
+        let text = "openapi: 3.1.0\ninfo:\n  title: T\n  version: '1'\npaths: {}\n";
+        let has = |text: &str| {
+            compute_diagnostics(None, &low("api.yaml", text), &Default::default())
+                .iter()
+                .any(|d| d.code == Some(NumberOrString::String("info-contact".to_owned())))
+        };
+        assert!(has(text));
+        assert!(!has(&format!(
+            "# suspect-disable-file info-contact\n{text}"
+        )));
+        assert!(!has(&text.replace(
+            "info:\n",
+            "# suspect-disable-next-line info-contact\ninfo:\n"
+        )));
+    }
+
+    #[test]
     fn fix_guidance_rides_in_data() {
         let finding = Finding::new(
             CheckId::Validate,
