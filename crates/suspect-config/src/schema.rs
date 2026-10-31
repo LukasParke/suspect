@@ -100,8 +100,11 @@ pub struct Setting {
     pub doc: &'static str,
     /// Environment variable that sets it.
     pub env: Option<&'static str>,
-    /// Client settings key under `suspect.` (today's spelling).
+    /// Client settings key under `suspect.`: the path with each segment in
+    /// camelCase (`lint.minSeverity`). Rows with one become editor settings.
     pub editor: Option<&'static str>,
+    /// Older client keys still accepted, with a warning naming [`Self::editor`].
+    pub editor_aliases: &'static [&'static str],
     /// Flags that set it, for `--explain` and the CLI reference.
     pub flags: &'static [&'static str],
     /// Older spellings still accepted, with a warning naming this path.
@@ -116,6 +119,7 @@ const fn row(path: &'static str, kind: Kind, doc: &'static str) -> Setting {
         doc,
         env: None,
         editor: None,
+        editor_aliases: &[],
         flags: &[],
         aliases: &[],
     }
@@ -136,6 +140,10 @@ impl Setting {
     }
     const fn editor(mut self, key: &'static str) -> Self {
         self.editor = Some(key);
+        self
+    }
+    const fn editor_aliases(mut self, keys: &'static [&'static str]) -> Self {
+        self.editor_aliases = keys;
         self
     }
     const fn flags(mut self, flags: &'static [&'static str]) -> Self {
@@ -254,7 +262,8 @@ pub static SETTINGS: &[Setting] = &[
          Defaults to `true` when a `format` section exists, else `false`.",
     )
     .default("false")
-    .editor("formatting.sortKeys")
+    .editor("format.sortKeys")
+    .editor_aliases(&["formatting.sortKeys"])
     .aliases(&["formatting.sort_keys", "formatting.sortKeys"]),
     section("docs", "Reference documentation generation."),
     row(
@@ -301,7 +310,8 @@ pub static SETTINGS: &[Setting] = &[
         "Show resolved `$ref` target inlay hints.",
     )
     .default("true")
-    .editor("inlayHints.refs")
+    .editor("editor.inlayHints.refs")
+    .editor_aliases(&["inlayHints.refs"])
     .aliases(&[
         "inlay_hints.refs",
         "inlay_hints.ref_targets",
@@ -313,13 +323,15 @@ pub static SETTINGS: &[Setting] = &[
         "Show property type-annotation inlay hints.",
     )
     .default("true")
-    .editor("inlayHints.properties")
+    .editor("editor.inlayHints.properties")
+    .editor_aliases(&["inlayHints.properties"])
     .aliases(&["inlay_hints.properties"]),
     section("test", "Contract tests, fuzzing and load runs."),
     row("test.base_url", Kind::Url, "Base URL requests are sent to.")
         .default("http://localhost:8080")
         .env("SUSPECT_BASE_URL")
-        .editor("testBaseUrl")
+        .editor("test.baseUrl")
+        .editor_aliases(&["testBaseUrl"])
         .flags(&[
             "test --base-url",
             "fuzz --base-url",
@@ -345,7 +357,8 @@ pub static SETTINGS: &[Setting] = &[
     section("gateway", "The mock/proxy gateway."),
     row("gateway.port", Kind::Port, "Port the gateway listens on.")
         .default("8080")
-        .editor("gatewayPort")
+        .editor("gateway.port")
+        .editor_aliases(&["gatewayPort"])
         .flags(&["gateway --port"]),
     row("gateway.mode", Kind::Enum(GATEWAY_MODES), "Operating mode.")
         .default("mock")
@@ -364,7 +377,8 @@ pub static SETTINGS: &[Setting] = &[
          breaking-changes command; the editor falls back to `HEAD~1`).",
     )
     .env("SUSPECT_GIT_BASE")
-    .editor("ci.baseline")
+    .editor("diff.baseline")
+    .editor_aliases(&["ci.baseline"])
     .flags(&["ci --baseline"]),
     section("rules", "TypeScript rule plugins."),
     row(
@@ -755,7 +769,8 @@ pub fn lookup(path: &str) -> Option<Found> {
 }
 
 /// The [`SETTINGS`] row a client settings key names: the `editor` column
-/// first (`lint.minSeverity`), then the path with each camelCase segment
+/// first (`lint.minSeverity`), then an older client key (`testBaseUrl`,
+/// reported as the alias), then the path with each camelCase segment
 /// converted to snake_case, then aliases.
 #[must_use]
 pub fn lookup_editor(key: &str) -> Option<Found> {
@@ -765,8 +780,36 @@ pub fn lookup_editor(key: &str) -> Option<Found> {
             alias: None,
         });
     }
+    let old = SETTINGS.iter().find_map(|setting| {
+        let alias = setting.editor_aliases.iter().find(|a| **a == key)?;
+        Some(Found {
+            setting,
+            alias: Some(alias),
+        })
+    });
+    if old.is_some() {
+        return old;
+    }
     let snake: Vec<String> = key.split('.').map(snake_case).collect();
     lookup(&snake.join(".")).or_else(|| lookup(key))
+}
+
+/// `max_docs` -> `maxDocs`: the client spelling of one path segment.
+#[must_use]
+pub fn camel_case(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    let mut upper = false;
+    for c in segment.chars() {
+        if c == '_' {
+            upper = true;
+        } else if upper {
+            out.push(c.to_ascii_uppercase());
+            upper = false;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// `maxDocs` -> `max_docs`; already-snake keys are unchanged.
@@ -840,11 +883,30 @@ mod tests {
             lookup_editor("inlayHints.refTargets").unwrap().setting.path,
             "editor.inlay_hints.refs"
         );
-        assert_eq!(
-            lookup_editor("testBaseUrl").unwrap().setting.path,
-            "test.base_url"
-        );
+        let old = lookup_editor("testBaseUrl").unwrap();
+        assert_eq!(old.setting.path, "test.base_url");
+        assert_eq!(old.alias, Some("testBaseUrl"));
+        assert!(lookup_editor("test.baseUrl").unwrap().alias.is_none());
+        assert!(lookup_editor("test.base_url").unwrap().alias.is_none());
         assert!(lookup_editor("basePath").is_none());
+    }
+
+    #[test]
+    fn editor_keys_are_the_camel_case_path() {
+        for setting in SETTINGS {
+            let Some(key) = setting.editor else {
+                assert!(setting.editor_aliases.is_empty(), "{}", setting.path);
+                continue;
+            };
+            let camel: Vec<String> = setting.path.split('.').map(camel_case).collect();
+            assert_eq!(key, camel.join("."), "{}", setting.path);
+            for alias in setting.editor_aliases {
+                assert!(
+                    SETTINGS.iter().all(|s| s.editor != Some(alias)),
+                    "{alias} names another setting"
+                );
+            }
+        }
     }
 
     #[test]

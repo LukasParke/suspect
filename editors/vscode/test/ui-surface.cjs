@@ -161,23 +161,84 @@ test('CI stage results are read from suspect ci --format json', () => {
 	assert.deepEqual(parseCiStages('{"projects":[{"stages":"nope"}]}'), []);
 });
 
-test('the severity floor resolves by precedence and names its source', () => {
+// A `suspect/explainConfig` report, as the server sends it.
+function report(floor, extra = {}) {
+	return {
+		root: '/w', config: '/w/.suspect.yaml', source: '.suspect.yaml', error: null, files: ['/w/.suspect.yaml'],
+		values: [
+			{ key: 'lint.min_severity', value: floor.value, origin: floor.origin, layer: floor.layer, trace: floor.trace ?? [] },
+			{ key: 'gateway.port', value: 8080, origin: 'default', layer: 'default', trace: [] },
+		],
+		warnings: [], errors: [], ...extra,
+	};
+}
+
+test('the severity floor comes from the server report and names its layer', () => {
 	const { resolveFloor } = loadModule('config', {});
+	// Without a report (no server, or one older than explainConfig): the
+	// setting, then the manifest, then the default. No file parsing.
 	assert.deepEqual(resolveFloor({}), { value: 'hint', source: 'default' });
 	assert.deepEqual(resolveFloor({ manifest: 'warning' }), { value: 'warning', source: 'suspect.project.json' });
-	assert.deepEqual(
-		resolveFloor({ manifest: 'warning', workspaceYaml: '# policy\nlint:\n  # floor\n  min_severity: error\n' }),
-		{ value: 'error', source: '.suspect.yaml' },
-	);
-	assert.deepEqual(
-		resolveFloor({ setting: 'info', manifest: 'warning', workspaceYaml: 'lint:\n  min_severity: error\n' }),
-		{ value: 'info', source: 'editor setting' },
-	);
-	assert.deepEqual(
-		resolveFloor({ setting: null, workspaceYaml: 'lint:\n  min_severity: error\n' }),
-		{ value: 'error', source: '.suspect.yaml' },
-	);
-	assert.deepEqual(resolveFloor({ setting: '', workspaceYaml: 'lint: {}\n' }), { value: 'hint', source: 'default' });
+	assert.deepEqual(resolveFloor({ setting: 'info', manifest: 'warning' }), { value: 'info', source: 'editor setting' });
+	// With one, the report is the answer, whatever the setting says.
+	const fromFile = report({ value: 'error', origin: '/w/api/.suspect.yaml:3', layer: 'file' });
+	assert.deepEqual(resolveFloor({ setting: null, report: fromFile, manifest: 'warning' }), { value: 'error', source: '.suspect.yaml' });
+	const fromEditor = report({ value: 'warning', origin: 'editor suspect.lint.minSeverity', layer: 'editor' });
+	assert.deepEqual(resolveFloor({ setting: 'warning', report: fromEditor }), { value: 'warning', source: 'editor setting' });
+	const fromEnv = report({ value: 'info', origin: 'env SUSPECT_LINT_MIN_SEVERITY', layer: 'env' });
+	assert.deepEqual(resolveFloor({ report: fromEnv }), { value: 'info', source: 'SUSPECT_LINT_MIN_SEVERITY' });
+	assert.deepEqual(resolveFloor({ report: report({ value: 'hint', origin: 'default', layer: 'default' }) }), { value: 'hint', source: 'default' });
+	// The regex over .suspect.yaml is gone.
+	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'config.ts'), 'utf8');
+	assert.ok(!source.includes('min_severity:'), 'config.ts must not parse .suspect.yaml itself');
+});
+
+test('the configuration status names the settings file and opens the explain report', async () => {
+	const { statusText, renderReport, explainConfig, EXPLAIN_CONFIG_REQUEST } = loadModule('explainConfig', {});
+	const floor = { value: 'warning', origin: 'editor suspect.lint.minSeverity', layer: 'editor', trace: [['/w/.suspect.yaml:2', 'error'], ['editor suspect.lint.minSeverity', 'warning']] };
+	assert.equal(statusText(report(floor)).text, 'suspect: .suspect.yaml');
+	assert.equal(statusText(report(floor, { config: null, source: null, files: [] })).text, 'suspect: defaults');
+	const broken = statusText(report(floor, { error: '/w/.suspect.yaml:2: `lint.min_severity`: unrecognized severity `fatal`' }));
+	assert.match(broken.text, /^\$\(warning\) suspect: \.suspect\.yaml$/);
+	assert.match(broken.tooltip, /fatal/);
+	const text = renderReport(report(floor, { errors: ['bad'] }));
+	assert.match(text, /\| `lint\.min_severity` \| warning \| editor setting \| \/w\/\.suspect\.yaml:2 = error; editor suspect\.lint\.minSeverity = warning \|/);
+	assert.match(text, /## Rejected values\n\n- bad/);
+
+	// Asked only of a server that advertises the request.
+	const sent = [];
+	const client = (requests, answer) => ({
+		initializeResult: { capabilities: { experimental: { suspect: { protocol: 1, requests, commands: {} } } } },
+		sendRequest: async (method, params) => { sent.push([method, params]); return answer; },
+	});
+	const file = { scheme: 'file', toString: () => 'file:///w/openapi.yaml' };
+	assert.equal((await explainConfig(client({ [EXPLAIN_CONFIG_REQUEST]: 1 }, report(floor)), file)).source, '.suspect.yaml');
+	assert.deepEqual(sent, [['suspect/explainConfig', { uri: 'file:///w/openapi.yaml' }]]);
+	assert.equal(await explainConfig(client({}, report(floor)), file), undefined);
+	await explainConfig(client({ [EXPLAIN_CONFIG_REQUEST]: 1 }, report(floor)), { scheme: 'untitled' });
+	assert.deepEqual(sent.at(-1), ['suspect/explainConfig', {}], 'an untitled document asks for the workspace');
+	assert.equal(await explainConfig(undefined, file), undefined);
+});
+
+test('renamed settings move once, at the level they are set, without overwriting a new value', () => {
+	const { pendingMoves, TARGETS } = loadModule('migrateSettings', {});
+	const values = {
+		'suspect.testBaseUrl': { globalValue: 'http://user:1', workspaceValue: 'http://ws:2' },
+		'suspect.test.baseUrl': { workspaceValue: 'http://new:3' },
+		'suspect.gatewayPort': { workspaceFolderValue: 9000 },
+		'suspect.ci.baseline': { workspaceValue: '' },
+	};
+	const inspect = (key) => values[key];
+	assert.deepEqual(pendingMoves(inspect, false), [
+		{ from: 'suspect.testBaseUrl', to: 'suspect.test.baseUrl', target: TARGETS.global, value: 'http://user:1' },
+	]);
+	assert.deepEqual(pendingMoves(inspect, true).map((m) => [m.from, m.target]), [
+		['suspect.gatewayPort', TARGETS.workspaceFolder],
+		['suspect.testBaseUrl', TARGETS.global],
+	]);
+	assert.deepEqual(pendingMoves(() => undefined, true), []);
+	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'extension.ts'), 'utf8');
+	assert.match(source, /offerSettingsMigration\(context\)/);
 });
 
 test('the extension manifest contributes one view, one controller, and commands that exist', () => {
@@ -223,17 +284,21 @@ test('the extension manifest contributes one view, one controller, and commands 
 	// The activation events cover projects without a single *.arazzo.yaml.
 	assert.ok(packageManifest.activationEvents.includes('workspaceContains:**/suspect.project.json'));
 
-	// The settings the Testing view reads exist in the shape the code expects.
+	// The settings the Testing view reads exist in the shape the code expects,
+	// which is the configuration schema's (test/settings.cjs pins the rest).
 	const props = contributes.configuration.properties;
+	const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schemas', 'suspect.schema.json'), 'utf8'));
+	const lint = schema.properties.lint.properties;
 	// One severity spelling across settings: minSeverity matches the rule
 	// severity enum (`info`), and unset (null) defers to .suspect.yaml.
-	assert.deepEqual(props['suspect.lint.minSeverity'].enum, ['error', 'warning', 'info', 'hint', null]);
+	assert.deepEqual(props['suspect.lint.minSeverity'].enum, [...lint.min_severity.enum, null]);
 	assert.equal(props['suspect.lint.minSeverity'].default, null);
-	for (const severity of ['error', 'warning', 'info', 'hint']) assert.ok(props['suspect.lint.rules'].additionalProperties.enum.includes(severity));
+	assert.deepEqual(props['suspect.lint.rules'].additionalProperties.enum, lint.rules.additionalProperties.enum);
 	// The legacy extension's binary setting survives as a deprecated alias.
 	assert.equal(props['suspect.server.path'].type, 'string');
 	assert.ok(props['suspect.server.path'].deprecationMessage.includes('suspect.basePath'));
-	assert.equal(props['suspect.ci.baseline'].type, 'string');
+	assert.deepEqual(props['suspect.diff.baseline'].type, [schema.properties.diff.properties.baseline.type, 'null']);
+	assert.ok(props['suspect.ci.baseline'].deprecationMessage.includes('suspect.diff.baseline'));
 });
 
 test('only one test controller is created', () => {
@@ -269,16 +334,21 @@ test('the server-side commands have editor entry points and the server settings 
 	// The settings the server parses are declared in the Settings UI, in
 	// the shapes its configuration schema accepts.
 	const props = contributes.configuration.properties;
-	assert.equal(props['suspect.lint.recommended'].type, 'boolean');
-	assert.equal(props['suspect.lint.rules'].type, 'object');
-	assert.equal(props['suspect.lint.design'].type, 'string');
+	for (const [key, type] of [
+		['suspect.lint.recommended', 'boolean'],
+		['suspect.lint.rules', 'object'],
+		['suspect.lint.design', 'string'],
+		['suspect.lint.ruleset', 'string'],
+		['suspect.validate.strictFormat', 'boolean'],
+		['suspect.ref.maxDocs', 'integer'],
+		['suspect.editor.inlayHints.refs', 'boolean'],
+		['suspect.editor.inlayHints.properties', 'boolean'],
+		['suspect.format.sortKeys', 'boolean'],
+	]) {
+		assert.deepEqual(props[key].type, [type, 'null'], key);
+		assert.equal(props[key].default, null, key);
+	}
 	assert.equal(props['suspect.lint.design'].enum.includes('off'), true);
-	assert.equal(props['suspect.lint.ruleset'].type, 'string');
-	assert.equal(props['suspect.validate.strictFormat'].type, 'boolean');
-	assert.equal(props['suspect.ref.maxDocs'].type, 'number');
-	assert.equal(props['suspect.inlayHints.refs'].type, 'boolean');
-	assert.equal(props['suspect.inlayHints.properties'].type, 'boolean');
-	assert.equal(props['suspect.formatting.sortKeys'].type, 'boolean');
 });
 
 test('server commands travel over executeCommand and the admission review over its custom request', () => {
@@ -377,7 +447,7 @@ test('the document kind comes from the server, and only when it offers the reque
 
 test('the CLI binary honors the deprecated suspect.server.path only while suspect.basePath is default', () => {
 	const settings = new Map();
-	const stub = { workspace: { getConfiguration: () => ({ get: (key) => settings.get(key) }) } };
+	const stub = { workspace: { getConfiguration: () => ({ get: (key, fallback) => (settings.has(key) ? settings.get(key) : fallback) }) } };
 	const { suspectBinary } = loadModule('runner', stub);
 	assert.equal(suspectBinary(), 'suspect');
 	settings.set('server.path', '/opt/legacy/suspect');
@@ -386,4 +456,49 @@ test('the CLI binary honors the deprecated suspect.server.path only while suspec
 	assert.equal(suspectBinary(), '/opt/legacy/suspect');
 	settings.set('basePath', '/opt/current/suspect');
 	assert.equal(suspectBinary(), '/opt/current/suspect');
+});
+
+test('the CLI resolves from the setting, then the binary in this VSIX, then PATH', () => {
+	const settings = new Map();
+	const stub = { workspace: { getConfiguration: () => ({ get: (key, fallback) => (settings.has(key) ? settings.get(key) : fallback) }) } };
+	const { binaryChoice, useExtensionRoot, EXECUTABLE } = loadModule('runner', stub);
+	const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'suspect-ext-'));
+	try {
+		// A universal VSIX (no bin/): PATH.
+		useExtensionRoot(root);
+		assert.deepEqual(binaryChoice(), { binary: 'suspect', source: 'path' });
+		// A platform VSIX: its own copy beats PATH.
+		fs.mkdirSync(path.join(root, 'bin'));
+		fs.writeFileSync(path.join(root, 'bin', EXECUTABLE), '');
+		assert.deepEqual(binaryChoice(), { binary: path.join(root, 'bin', EXECUTABLE), source: 'bundled' });
+		// An explicit setting beats both.
+		settings.set('basePath', '/opt/pinned/suspect');
+		assert.deepEqual(binaryChoice(), { binary: '/opt/pinned/suspect', source: 'setting' });
+		settings.set('basePath', 'suspect');
+		assert.equal(binaryChoice().source, 'bundled', 'the default value is not an explicit choice');
+	} finally {
+		useExtensionRoot(undefined);
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('the VSIX ships the bundle and leaves node_modules and sources out', () => {
+	const ignore = fs.readFileSync(path.join(__dirname, '..', '.vscodeignore'), 'utf8').split('\n').map((l) => l.trim());
+	for (const left of ['node_modules/**', 'src/**', 'test/**', 'scripts/**', 'dist/**']) assert.ok(ignore.includes(left), `${left} is shipped`);
+	assert.ok(ignore.includes('!dist/extension.js'), 'the bundle must ship');
+	assert.ok(!ignore.some((l) => l.startsWith('bin')), 'a platform VSIX ships bin/suspect');
+	assert.match(packageManifest.scripts['vscode:prepublish'], /bundle/);
+	assert.match(packageManifest.scripts.package, /--no-dependencies/);
+	assert.ok(packageManifest.contributes.commands.some((c) => c.command === 'suspect.locateBinary'));
+	const { TARGETS } = require('../scripts/package-target.cjs');
+	assert.deepEqual(Object.keys(TARGETS).sort(), ['alpine-arm64', 'alpine-x64', 'darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']);
+	// The release workflows package and publish the same targets.
+	const workflows = path.join(__dirname, '..', '..', '..', '.github', 'workflows');
+	const packaging = fs.readFileSync(path.join(workflows, 'package-editors.yml'), 'utf8');
+	const publishing = fs.readFileSync(path.join(workflows, 'publish-editors.yml'), 'utf8');
+	const published = publishing.match(/^\s+TARGETS: (.+)$/m)[1].trim().split(/\s+/);
+	assert.deepEqual(published.sort(), Object.keys(TARGETS).sort(), 'publish-editors.yml TARGETS');
+	for (const [target, triple] of Object.entries(TARGETS)) {
+		assert.ok(packaging.includes(`{ target: ${target}, triple: ${triple},`), `package-editors.yml packages ${target} from ${triple}`);
+	}
 });

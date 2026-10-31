@@ -216,21 +216,36 @@ impl Layer {
     /// workspace/configuration), camelCase or snake_case keys. Blank
     /// strings and `null` are "not set": VS Code reports an untouched
     /// string setting as `""`. Relative paths resolve against `base`.
+    ///
+    /// An older client spelling (`testBaseUrl`, `inlayHints.refs`) still
+    /// applies, with a warning naming the current key, unless the current
+    /// key is set in the same section: VS Code sends both while the old
+    /// one is still contributed.
     #[must_use]
     pub fn from_editor(section: &serde_json::Value, base: &Path) -> Self {
         let section = section.get("suspect").unwrap_or(section);
         let mut layer = Self::default();
         if let Some(object) = section.as_object() {
-            layer.editor_object(object, "", base);
+            layer.editor_object(object, "", base, false);
+            let mut old = Self::default();
+            old.editor_object(object, "", base, true);
+            layer.warnings.append(&mut old.warnings);
+            layer.errors.append(&mut old.errors);
+            for (path, entry) in old.entries {
+                layer.entries.entry(path).or_insert(entry);
+            }
         }
         layer
     }
 
+    /// One pass over a client section: current spellings (`old == false`)
+    /// or older ones (`old == true`).
     fn editor_object(
         &mut self,
         object: &serde_json::Map<String, serde_json::Value>,
         prefix: &str,
         base: &Path,
+        old: bool,
     ) {
         // An unknown client key is skipped silently: clients send their own
         // settings (`basePath`, `server.path`) in the same section.
@@ -240,6 +255,23 @@ impl Layer {
                 key: format!("suspect.{raw_key}"),
             };
             let found = schema::lookup_editor(&raw_key);
+            // Sections are walked in both passes; values only in theirs.
+            if let Some(found) = found
+                && found.setting.kind != Kind::Section
+            {
+                if found.alias.is_some() != old {
+                    continue;
+                }
+                if found.alias.is_some() && !is_unset(value) {
+                    self.warnings.push(Notice {
+                        origin: origin.clone(),
+                        message: format!(
+                            "deprecated setting; use `suspect.{}`",
+                            editor_key(found.setting)
+                        ),
+                    });
+                }
+            }
             match (found, value) {
                 (Some(found), serde_json::Value::Object(map))
                     if matches!(found.setting.kind, Kind::Map(_)) =>
@@ -266,7 +298,7 @@ impl Layer {
                 (found, serde_json::Value::Object(map))
                     if found.is_none_or(|f| f.setting.kind == Kind::Section) =>
                 {
-                    self.editor_object(map, &raw_key, base);
+                    self.editor_object(map, &raw_key, base, old);
                 }
                 (Some(found), value) => {
                     if let Some(raw) = json_scalar(value) {
@@ -415,6 +447,28 @@ impl Layer {
             Err(message) => self.errors.push(Notice { origin, message }),
         }
     }
+}
+
+/// `null`, a blank string, or an empty map: a client value that sets nothing.
+fn is_unset(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => true,
+        serde_json::Value::String(s) => s.trim().is_empty(),
+        serde_json::Value::Object(map) => map.is_empty(),
+        _ => false,
+    }
+}
+
+/// The current client key of a row: its `editor` column, else the
+/// camelCase path.
+fn editor_key(setting: &Setting) -> String {
+    setting.editor.map_or_else(
+        || {
+            let parts: Vec<String> = setting.path.split('.').map(schema::camel_case).collect();
+            parts.join(".")
+        },
+        str::to_owned,
+    )
 }
 
 fn join(scope: &str, key: &str) -> String {
@@ -639,7 +693,55 @@ mod tests {
             layer.get("editor.inlay_hints.refs"),
             Some(&Raw::Bool(false))
         );
-        assert!(layer.warnings.is_empty(), "{:?}", layer.warnings);
+        // `inlayHints.refTargets` is an old spelling; the rest are current.
+        assert_eq!(layer.warnings.len(), 1, "{:?}", layer.warnings);
+        assert_eq!(
+            layer.warnings[0].to_string(),
+            "editor suspect.inlayHints.refTargets: deprecated setting; use \
+             `suspect.editor.inlayHints.refs`"
+        );
+    }
+
+    #[test]
+    fn old_client_keys_apply_with_a_warning_unless_the_new_key_is_set() {
+        let base = Path::new("/w");
+        let layer = Layer::from_editor(
+            &serde_json::json!({
+                "testBaseUrl": "http://old:1",
+                "gatewayPort": 9000,
+                "gateway": {"port": null},
+                "ci": {"baseline": ""},
+                "inlayHints": {"refs": null}
+            }),
+            base,
+        );
+        assert_eq!(
+            layer.get("test.base_url"),
+            Some(&Raw::Str("http://old:1".into()))
+        );
+        assert_eq!(layer.get("gateway.port"), Some(&Raw::Int(9000)));
+        let warned: Vec<String> = layer.warnings.iter().map(ToString::to_string).collect();
+        assert_eq!(
+            warned,
+            [
+                "editor suspect.gatewayPort: deprecated setting; use `suspect.gateway.port`",
+                "editor suspect.testBaseUrl: deprecated setting; use `suspect.test.baseUrl`",
+            ],
+            "unset old keys (VS Code sends every contributed key) say nothing"
+        );
+
+        // Both spellings set: the current one wins, whatever the order.
+        for section in [
+            serde_json::json!({"testBaseUrl": "http://old:1", "test": {"baseUrl": "http://new:2"}}),
+            serde_json::json!({"test": {"baseUrl": "http://new:2"}, "testBaseUrl": "http://old:1"}),
+        ] {
+            let layer = Layer::from_editor(&section, base);
+            assert_eq!(
+                layer.get("test.base_url"),
+                Some(&Raw::Str("http://new:2".into()))
+            );
+            assert_eq!(layer.warnings.len(), 1);
+        }
     }
 
     #[test]

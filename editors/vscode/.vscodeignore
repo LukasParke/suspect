@@ -1,11 +1,17 @@
-# Not shipped in the .vsix. vsce already leaves out devDependencies; the
-# production node_modules (vscode-languageclient) stays because the extension
-# has no bundler.
+# Not shipped in the .vsix. dist/extension.js is the esbuild bundle
+# (`vscode:prepublish`), so neither node_modules nor tsc's per-module output
+# is needed; a platform VSIX also carries bin/suspect (scripts/package-target.cjs).
 src/**
 test/**
 tsconfig.json
-dist/**/*.map
+node_modules/**
+dist/**
+!dist/extension.js
 *.vsix
 *.vsix.sha256
 .vscode/**
 .vscode-test/**
+# Settings generator inputs and packaging helpers (scripts/settings.cjs);
+# the generated output ships.
+scripts/**
+settings.editor.json

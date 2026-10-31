@@ -746,28 +746,151 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    `package.json`; replace `config.get` calls with the typed getters.
    Tests: the drift test, plus the existing `ui-surface.cjs` settings
    assertions rewritten against the schema. 1 day.
+   **Done.** The setting table's `editor` column is now the camelCase path
+   (`test.baseUrl`), and a new `editor_aliases` column holds the old client
+   keys (`testBaseUrl`, `gatewayPort`, `ci.baseline`, `formatting.sortKeys`,
+   `inlayHints.refs`, `inlayHints.properties`); `x-suspect-editor` is
+   `{key, scope, aliases?}` and sits on canonical properties only.
+   `scripts/settings.cjs` emits each alias as a deprecated setting with
+   default `null` (so an untouched old key no longer overrides the files, as
+   `testBaseUrl`'s `http://localhost:8080` default used to), plus
+   `RENAMED_SETTINGS` and `CONFIG_KEYS` in `settings.generated.ts`; getters
+   read the new key, then the old ones. `npm run settings:write` rewrites
+   both outputs; `test/settings.cjs` also fails when a source file reads a
+   `suspect.*` setting by string. With `suspect.test.baseUrl` unset the
+   Testing view leaves `--base-url` off, so `suspect test` applies
+   `test.base_url` from `.suspect.yaml`. Deviation: P2 did not add
+   `codegen.package_name`, `import_names`, `operation_ids` or
+   `compatibility_profiles`, and `codegen.out` means something else than
+   `sdk.sessionOutput` (an output root for `codegen`, not the session
+   preview's prompt default), so all `suspect.sdk.*` settings stay
+   editor-only in `settings.editor.json` for now; the `sdk.*` to `codegen.*`
+   renames wait for those keys.
 5. **Server reads the editor layer through `resolve_with`** (after P2.1).
    Delete `editor_config::apply_client`, the client half of
    `parse_config`, and the manifest `editor` unwrapping. Migrate the
    `editor_config.rs` unit tests to `suspect-config`. Old-spelling
    aliases and log lines. 1 day.
+   **Done.** P2 step 4 had already deleted `editor_config.rs` and the
+   client half of `parse_config` and moved the pulled section into
+   `resolve_found` (editor above env, as open question 1 recommends); the
+   manifest `editor` section is P2's deprecated manifest layer, read for
+   one more release, so it stays until P2's removal. What this step adds:
+   `Layer::from_editor` reads current spellings first and an old client
+   key (`editor_aliases`, or a deprecated file spelling reached through
+   the snake_case fallback) only when the current key is unset in the same
+   section, with a warning `editor suspect.testBaseUrl: deprecated setting;
+   use suspect.test.baseUrl`; a `null`/blank old key (VS Code sends every
+   contributed key) warns about nothing. The server logs these
+   (`window/logMessage`) whenever the files or the client's settings
+   change, not only when the effective values change. Tests: the alias
+   read in `layer.rs`; `crates/suspect-cli/tests/lsp_editor_settings.rs`
+   for the log line. The Zed README documents the new spellings.
 6. **Renamed settings migration and `suspect/explainConfig`** with the
    status-bar item; delete `config.ts`'s regex. Tests: a host-smoke case
    (the floor picker shows the layer), a unit test for the alias read.
    0.5-1 day.
+   **Done.** `suspect/explainConfig` (`protocol::ExplainConfigRequest`, in
+   `REQUESTS` at version 1) takes `{uri?}` and returns
+   `Resolved::explain_json()` for that document's configuration (the
+   workspace's without one) plus `source` (the settings file's name, else
+   the manifest's, else `null`) and `error` (the first rejected value).
+   VS Code: `src/explainConfig.ts` (status-bar item `suspect: .suspect.yaml`,
+   `suspect: defaults`, or a warning icon with the error in the tooltip;
+   refreshed on client start, editor switches, `suspect.*` changes and
+   config-file events) and a new `suspect.explainConfig` command ("Explain
+   Configuration") that opens the report as Markdown; the floor picker and
+   the Project view read `lint.min_severity` and its layer from the report,
+   and without a server that offers it fall back to the setting, the
+   manifest, then `hint` (no file parsing). The gateway uses the report's
+   `gateway.port` for the spec. `src/migrateSettings.ts` offers once per
+   workspace to move set old values to their new keys at the same level
+   (user, workspace, folder), skipping a level where the new key is
+   already set. Tests: `lsp_editor_settings.rs` (editor over
+   `.suspect.yaml` with the trace, a rejected value as `error`, camelCase
+   and snake_case payloads alike); `ui-surface.cjs` (floor from the
+   report, status text, rendering, gating, move planning); the host smoke
+   now writes a `.suspect.yaml` and asserts the report row
+   `| error | editor setting | .suspect.yaml:2 = hint; editor
+   suspect.lint.minSeverity = error |` (run locally, green). The P4 sample
+   result shape (`values[].layer`, `trace`) is P2's `explain_json`, which
+   also carries `origin`, `root`, `config`, `files`, `warnings`, `errors`.
 7. **VS Code bundled binary** (after P5 artifacts). `runner.ts`
    resolution order, "Locate binary…", terminal `PATH`, esbuild bundle,
    `.vscodeignore`, `package.json` publishing fields. Test: host smoke with
    a VSIX built for the runner's platform and no `basePath`. 1 day.
+   **Done.** Size first: the release `suspect` for `aarch64-apple-darwin` is
+   40.7 MB (35.6 MB stripped); its platform VSIX is 15.1 MB, so bundling
+   stays. `runner.ts` `resolveBinary`: a non-default `suspect.basePath` (or
+   `suspect.server.path`), then `<extension>/bin/suspect[.exe]`, then
+   `suspect` on `PATH`; the bundled copy's `bin/` is prepended to `PATH` in
+   integrated terminals (`environmentVariableCollection`), and its mode bit
+   is restored if an installer dropped it. A start failure offers "Locate
+   binary…" (file picker, writes `suspect.basePath` in user settings; also
+   the `suspect.locateBinary` command) and names the P5 installer command.
+   `scripts/bundle.cjs` (esbuild 0.28.2, run by `vscode:prepublish` after
+   `tsc`) writes `dist/extension.js`; `.vscodeignore` ships only that file
+   of `dist/` and no `node_modules`, and packaging passes
+   `--no-dependencies` (universal VSIX 518 KB -> 159 KB). tsc's per-module
+   `dist/*.js` stay for the headless tests. `scripts/package-target.cjs
+   --target <t> --binary <path>` builds `suspect-vscode-<t>-<V>.vsix` with
+   the binary at `bin/`; `package-editors.yml` gains a `vscode-platform`
+   matrix (the seven targets of the table above, alpine sharing the musl
+   builds) that verifies each `suspect-cli-<triple>` archive against its
+   `.sha256`, packages, and runs `bin/suspect --version` for `linux-x64`;
+   `asset-names` checks the 14 new names. The universal VSIX stays (open
+   question 5). Host smoke: `SUSPECT_SMOKE_VSIX=<vsix> node
+   test/host-smoke/run.cjs` unpacks the VSIX, runs it with no `basePath` and
+   every `PATH` entry holding a `suspect` removed; green locally with a
+   `darwin-arm64` VSIX of both the debug and the stripped release build.
+   Not in CI (needs a desktop VS Code, as before). The `package.json`
+   publishing fields were P5 step 5.
 8. **Zed managed download** (after P5 artifacts). `editors/zed/src/lib.rs`,
    new deps `sha2`, `flate2`, `tar`; licence file; `extension.toml`
    `repository`. Tests: unit tests for `triple()`, `verify_sha256` and
    unpacking (host `cargo test`); the `zed-extension` CI job keeps
    building for `wasm32-wasip1`; `zed_smoke.sh` gains a no-`PATH` run.
    1 day.
+   **Done, not run against a real release** (none exists yet). The licence
+   files and `repository` were P5 step 5. New `editors/zed/src/download.rs`
+   holds the pure helpers: `triple(os, arch)` (the table above; others
+   fall through to `PATH`), `asset_name` (`suspect-cli-<triple>.tar.gz`,
+   `.zip` for Windows per P5's asset contract, so the extension also reads
+   zip: a minimal central-directory reader for stored and deflated members
+   instead of the `zip` crate), `parse_sha256` (first token, 64 hex
+   digits), `verify_sha256` (`sha2`), and `extract_binary` (`flate2` with
+   the Rust backend + `tar`, no default features), which takes only the
+   `suspect[.exe]` member at depth 1 or 2 and writes nothing else.
+   `lib.rs` `managed_binary`: reuse `suspect-<V>/suspect` when present,
+   else `github_release_by_tag_name("LukasParke/suspect", "v<V>")`, fetch
+   the `.sha256` and the archive with `http_client` (`RedirectPolicy::FollowAll`
+   for GitHub's asset redirect), verify, unpack into `suspect-<V>.partial/`
+   and rename it into place, `make_file_executable`, delete other
+   `suspect-*` directories; installation status is `Downloading`, then
+   `None`, or `Failed(<reason and the options>)` when the download and
+   `PATH` both fail. The order is `binary.path`, managed, `PATH`. Tests: six
+   host unit tests (triples and names, checksums, tar.gz at the root, one
+   directory down and too deep, zip stored and deflated); the
+   `zed-extension` CI job (`cargo xtask ci zed-extension`) now runs them
+   before the `wasm32-wasip1` build. The work-directory `std::fs` access is
+   the pattern other Zed extensions use, but has not been exercised in a
+   running Zed here. `zed_smoke.sh` gains `ZED_SMOKE_MANAGED=1` (no
+   `binary.path`, `suspect` must be absent from `PATH`, expects the process
+   from the extension's work directory); it skips while release `v<V>`
+   does not exist, so it is a documented manual check.
 9. **Publishing jobs** in P5's release workflow: VSIX matrix, `vsce` and
    `ovsx` publishing, Zed registry PR. Account setup (publisher, Open VSX
    namespace, tokens) is outside the estimate. 0.5 day.
+   **Done, not run** (no tag, no accounts). The VSIX matrix is step 7's
+   `vscode-platform` job in `package-editors.yml`; `publish-editors.yml`'s
+   `vscode` job now downloads the universal VSIX and the seven platform
+   VSIXs from the release, checks each `.sha256`, and publishes all eight
+   with `vsce publish --packagePath` and `ovsx publish`, each registry
+   gated on its secret as before. It is one job with a loop rather than a
+   matrix, so the `release` environment asks for one approval. The Zed
+   registry PR was P5 step 8 (`zed-registry-pr.sh`). A headless test keeps
+   the target lists of `package-target.cjs`, `package-editors.yml` and
+   `publish-editors.yml` equal.
 
 Total: about 7-8 days. The suggested-order table in the source document
 gives 2-3 days for P4. The difference is mostly steps 3, 7 and 8, which

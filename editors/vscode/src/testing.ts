@@ -25,6 +25,7 @@ import { affectsProject, findArazzoDocuments, findProjects } from './discover';
 import { parseArazzo } from './parse';
 import { testId, undeclaredDocuments } from './project';
 import { errorMessage, SuspectEvent, spawnSuspectRunWith, testBaseUrl } from './runner';
+import { diffBaseline } from './settings.generated';
 
 /** One stage result from `suspect ci --format json`. Pure: testable. */
 export interface StageResult {
@@ -69,7 +70,7 @@ export function parseCiStages(text: string): StageResult[] {
 export interface DocumentJob {
 	file: string;
 	cwd: string;
-	baseUrl: string;
+	baseUrl?: string;
 	cassette?: string;
 	/** `undefined` runs the whole document; otherwise one `--filter` per id. */
 	workflows: string[] | undefined;
@@ -78,7 +79,7 @@ export interface DocumentJob {
 export interface Selection {
 	file: string;
 	cwd: string;
-	baseUrl: string;
+	baseUrl?: string;
 	cassette?: string;
 	workflowId?: string;
 }
@@ -110,9 +111,9 @@ type Node =
 	| { kind: 'gate'; dir: string }
 	| { kind: 'stage'; dir: string; stage: string }
 	| { kind: 'group'; file?: undefined }
-	| { kind: 'document'; file: string; cwd: string; baseUrl: string; cassette?: string }
-	| { kind: 'workflow'; file: string; cwd: string; baseUrl: string; cassette?: string; workflowId: string }
-	| { kind: 'step'; file: string; cwd: string; baseUrl: string; cassette?: string; workflowId: string; stepId: string };
+	| { kind: 'document'; file: string; cwd: string; baseUrl?: string; cassette?: string }
+	| { kind: 'workflow'; file: string; cwd: string; baseUrl?: string; cassette?: string; workflowId: string }
+	| { kind: 'step'; file: string; cwd: string; baseUrl?: string; cassette?: string; workflowId: string; stepId: string };
 
 const nodeDataByItem = new WeakMap<vscode.TestItem, Node>();
 const nodeData = (item: vscode.TestItem): Node | undefined => nodeDataByItem.get(item);
@@ -132,8 +133,12 @@ interface Counts {
 	steps: number;
 }
 
+/** Shown where no editor setting or manifest names the base URL. */
+const CONFIGURED_BASE_URL = 'test.base_url from .suspect.yaml';
+
+/** `suspect.diff.baseline` (or the old `suspect.ci.baseline`); empty leaves the CLI's `diff.baseline`. */
 function ciBaseline(): string {
-	return vscode.workspace.getConfiguration('suspect').get<string>('ci.baseline', '').trim();
+	return (diffBaseline() ?? '').trim();
 }
 
 /** Runs one CI stage and returns its result. */
@@ -197,7 +202,7 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 		label: string,
 		uri: vscode.Uri,
 		cwd: string,
-		baseUrl: string,
+		baseUrl: string | undefined,
 		cassette: string | undefined,
 		counts: Counts,
 	): Promise<void> {
@@ -206,7 +211,7 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 				counts.documents += 1;
 				const docItem = controller.createTestItem(testId(idPrefix, uri.fsPath), label, uri);
 				nodeDataByItem.set(docItem, { kind: 'document', file: uri.fsPath, cwd, baseUrl, cassette });
-				docItem.description = cassette !== undefined ? 'offline · cassette' : baseUrl;
+				docItem.description = cassette !== undefined ? 'offline · cassette' : baseUrl ?? CONFIGURED_BASE_URL;
 				for (const wf of parseArazzo(text)) {
 					counts.workflows += 1;
 					const wfItem = controller.createTestItem(testId(idPrefix, uri.fsPath, wf.workflowId), wf.workflowId, uri);
@@ -279,7 +284,7 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 		if (others.length > 0) {
 			const group = controller.createTestItem(UNDECLARED_ID, projects.length > 0 ? 'Other workflows' : 'Workflows');
 			nodeDataByItem.set(group, { kind: 'group' });
-			group.description = projects.length > 0 ? 'not declared by a manifest' : testBaseUrl();
+			group.description = projects.length > 0 ? 'not declared by a manifest' : testBaseUrl() ?? CONFIGURED_BASE_URL;
 			group.sortText = 'z';
 			for (const file of others) {
 				const uri = vscode.Uri.file(file);

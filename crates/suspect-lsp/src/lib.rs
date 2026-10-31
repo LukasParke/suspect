@@ -170,8 +170,10 @@ impl Backend {
         }
         let problems = fresh.problems();
         let warnings = fresh.warnings();
+        let client_changed;
         {
             let mut st = self.state.write().await;
+            client_changed = st.client_settings != client;
             st.client_settings = client;
             if changed {
                 st.policy_epoch = st.policy_epoch.wrapping_add(1);
@@ -186,8 +188,12 @@ impl Backend {
                     .show_message(MessageType::WARNING, format!("suspect: {problem}"))
                     .await;
             }
-            // Deprecations go to the log; the manifest itself carries a
-            // diagnostic on each deprecated key.
+        }
+        // Deprecations go to the log, once per change of the files or of the
+        // client's settings (an old client key such as `testBaseUrl` logs a
+        // line naming its replacement); the manifest itself carries a
+        // diagnostic on each deprecated key.
+        if changed || client_changed {
             for warning in warnings {
                 self.client
                     .log_message(MessageType::WARNING, format!("suspect: {warning}"))
@@ -2454,7 +2460,7 @@ impl LanguageServer for Backend {
         };
         // Formatting options are ignored: the canonical form uses a
         // two-space indent regardless of editor configuration. Key
-        // reordering follows `suspect.formatting.sortKeys`.
+        // reordering follows `format.sort_keys` (`suspect.format.sortKeys`).
         let _ = &params.options;
         let Some(url) = to_url(&uri) else {
             return Ok(None);
@@ -2743,7 +2749,7 @@ impl Backend {
                 self.progress_begin("suspect.breaking", "Detecting breaking changes")
                     .await;
                 let ws = self.any_workspace().await?;
-                // `diff.baseline` (editor `suspect.ci.baseline`,
+                // `diff.baseline` (editor `suspect.diff.baseline`,
                 // `SUSPECT_GIT_BASE`, `.suspect.yaml`), else the last commit.
                 let base = self
                     .state
@@ -2964,6 +2970,29 @@ impl Backend {
     /// Handler for the `suspect/runWorkflow` custom request.
     /// `suspect/documentKind`. An open document is a lookup; a closed one
     /// is parsed from disk, as `did_open` would.
+    /// `suspect/explainConfig`: where each effective setting of `uri`'s
+    /// configuration (the workspace's without one) came from, the editor
+    /// layer included.
+    async fn explain_config_request(
+        &self,
+        params: protocol::ExplainConfigParams,
+    ) -> JsonRpcResult<serde_json::Value> {
+        let invalid = |message: String| tower_lsp::jsonrpc::Error::invalid_params(message);
+        let uri = params
+            .uri
+            .as_deref()
+            .map(|text| Uri::parse(text).map_err(|e| invalid(format!("{text}: {e}"))))
+            .transpose()?;
+        let resolved = {
+            let st = self.state.read().await;
+            match &uri {
+                Some(uri) => st.resolved.for_uri(uri),
+                None => st.resolved.workspace(),
+            }
+        };
+        Ok(protocol::explain_config(&resolved))
+    }
+
     async fn document_kind_request(
         &self,
         params: protocol::DocumentKindParams,
@@ -3217,7 +3246,7 @@ impl Backend {
         #[cfg(feature = "live-run")]
         {
             // `test.base_url` for this document: the editor's
-            // `suspect.testBaseUrl` (or `run.baseUrl`), `SUSPECT_BASE_URL`,
+            // `suspect.test.baseUrl` (or `run.baseUrl`), `SUSPECT_BASE_URL`,
             // the manifest, then `.suspect.yaml` — what `suspect test` uses.
             let base = self
                 .state
@@ -3386,6 +3415,10 @@ async fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
         .custom_method(
             <protocol::DocumentKindRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::document_kind_request,
+        )
+        .custom_method(
+            <protocol::ExplainConfigRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::explain_config_request,
         )
         .finish()
 }

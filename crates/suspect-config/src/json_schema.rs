@@ -4,9 +4,11 @@
 //! The checked-in copies under `editors/vscode/schemas/` are kept current
 //! by `tests/json_schema.rs` (`SUSPECT_BLESS=1` rewrites them). Each
 //! property carries `description` and `default` from the table, `enum`
-//! from its kind, `x-suspect-editor` (the client setting and its scope)
-//! and `x-suspect-env` where the table names them. Deprecated spellings
-//! are listed with `deprecated: true` so existing files still validate.
+//! from its kind, `x-suspect-editor` (the client setting, its scope and
+//! its older client keys; the VS Code settings are generated from it) and
+//! `x-suspect-env` where the table names them. Deprecated spellings are
+//! listed with `deprecated: true` so existing files still validate; they
+//! carry no `x-suspect-editor`.
 
 use serde_json::{Value, json};
 
@@ -101,6 +103,8 @@ fn aliases(root: &mut Value, table: &'static [Setting]) {
         } else {
             property(setting)
         };
+        // The editor setting belongs to the canonical spelling only.
+        strip_editor(&mut property);
         property["deprecated"] = json!(true);
         property["description"] = json!(format!(
             "Deprecated spelling of `{}`. {}",
@@ -111,6 +115,15 @@ fn aliases(root: &mut Value, table: &'static [Setting]) {
             continue;
         };
         parent["properties"][name] = property;
+    }
+}
+
+fn strip_editor(node: &mut Value) {
+    if let Some(object) = node.as_object_mut() {
+        object.remove("x-suspect-editor");
+    }
+    if let Some(properties) = node.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.values_mut().for_each(strip_editor);
     }
 }
 
@@ -168,7 +181,16 @@ fn property(setting: &Setting) -> Value {
         out["default"] = default;
     }
     if let Some(key) = setting.editor {
-        out["x-suspect-editor"] = json!({"key": format!("suspect.{key}"), "scope": "resource"});
+        let mut editor = json!({"key": format!("suspect.{key}"), "scope": "resource"});
+        if !setting.editor_aliases.is_empty() {
+            let old: Vec<String> = setting
+                .editor_aliases
+                .iter()
+                .map(|alias| format!("suspect.{alias}"))
+                .collect();
+            editor["aliases"] = json!(old);
+        }
+        out["x-suspect-editor"] = editor;
     }
     if let Some(var) = setting.env {
         out["x-suspect-env"] = json!(var);
@@ -248,6 +270,16 @@ mod tests {
         assert_eq!(p["refs"]["properties"]["maxDocs"]["deprecated"], true);
         assert_eq!(p["ref"]["properties"]["maxDocs"]["deprecated"], true);
         assert_eq!(p["docs"]["properties"]["out"]["deprecated"], true);
+        assert!(
+            p["inlay_hints"]["properties"]["refs"]
+                .get("x-suspect-editor")
+                .is_none()
+        );
+        assert_eq!(
+            p["test"]["properties"]["base_url"]["x-suspect-editor"],
+            json!({"key": "suspect.test.baseUrl", "scope": "resource",
+                   "aliases": ["suspect.testBaseUrl"]})
+        );
         assert!(
             p["run"].is_null(),
             "an alias without its section is not invented"

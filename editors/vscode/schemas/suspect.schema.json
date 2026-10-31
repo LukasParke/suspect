@@ -30,7 +30,10 @@
           "description": "Git ref compared against for breaking changes (`suspect ci`, the editor's breaking-changes command; the editor falls back to `HEAD~1`).",
           "type": "string",
           "x-suspect-editor": {
-            "key": "suspect.ci.baseline",
+            "aliases": [
+              "suspect.ci.baseline"
+            ],
+            "key": "suspect.diff.baseline",
             "scope": "resource"
           },
           "x-suspect-env": "SUSPECT_GIT_BASE"
@@ -76,7 +79,10 @@
               "description": "Show property type-annotation inlay hints.",
               "type": "boolean",
               "x-suspect-editor": {
-                "key": "suspect.inlayHints.properties",
+                "aliases": [
+                  "suspect.inlayHints.properties"
+                ],
+                "key": "suspect.editor.inlayHints.properties",
                 "scope": "resource"
               }
             },
@@ -84,18 +90,17 @@
               "default": true,
               "deprecated": true,
               "description": "Deprecated spelling of `editor.inlay_hints.refs`. Show resolved `$ref` target inlay hints.",
-              "type": "boolean",
-              "x-suspect-editor": {
-                "key": "suspect.inlayHints.refs",
-                "scope": "resource"
-              }
+              "type": "boolean"
             },
             "refs": {
               "default": true,
               "description": "Show resolved `$ref` target inlay hints.",
               "type": "boolean",
               "x-suspect-editor": {
-                "key": "suspect.inlayHints.refs",
+                "aliases": [
+                  "suspect.inlayHints.refs"
+                ],
+                "key": "suspect.editor.inlayHints.refs",
                 "scope": "resource"
               }
             }
@@ -127,7 +132,10 @@
           "description": "Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`.",
           "type": "boolean",
           "x-suspect-editor": {
-            "key": "suspect.formatting.sortKeys",
+            "aliases": [
+              "suspect.formatting.sortKeys"
+            ],
+            "key": "suspect.format.sortKeys",
             "scope": "resource"
           }
         },
@@ -153,21 +161,13 @@
           "default": false,
           "deprecated": true,
           "description": "Deprecated spelling of `format.sort_keys`. Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`.",
-          "type": "boolean",
-          "x-suspect-editor": {
-            "key": "suspect.formatting.sortKeys",
-            "scope": "resource"
-          }
+          "type": "boolean"
         },
         "sort_keys": {
           "default": false,
           "deprecated": true,
           "description": "Deprecated spelling of `format.sort_keys`. Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`.",
-          "type": "boolean",
-          "x-suspect-editor": {
-            "key": "suspect.formatting.sortKeys",
-            "scope": "resource"
-          }
+          "type": "boolean"
         },
         "yaml": {
           "default": false,
@@ -201,7 +201,10 @@
           "minimum": 0,
           "type": "integer",
           "x-suspect-editor": {
-            "key": "suspect.gatewayPort",
+            "aliases": [
+              "suspect.gatewayPort"
+            ],
+            "key": "suspect.gateway.port",
             "scope": "resource"
           }
         },
@@ -222,31 +225,19 @@
           "default": true,
           "deprecated": true,
           "description": "Deprecated spelling of `editor.inlay_hints.properties`. Show property type-annotation inlay hints.",
-          "type": "boolean",
-          "x-suspect-editor": {
-            "key": "suspect.inlayHints.properties",
-            "scope": "resource"
-          }
+          "type": "boolean"
         },
         "ref_targets": {
           "default": true,
           "deprecated": true,
           "description": "Deprecated spelling of `editor.inlay_hints.refs`. Show resolved `$ref` target inlay hints.",
-          "type": "boolean",
-          "x-suspect-editor": {
-            "key": "suspect.inlayHints.refs",
-            "scope": "resource"
-          }
+          "type": "boolean"
         },
         "refs": {
           "default": true,
           "deprecated": true,
           "description": "Deprecated spelling of `editor.inlay_hints.refs`. Show resolved `$ref` target inlay hints.",
-          "type": "boolean",
-          "x-suspect-editor": {
-            "key": "suspect.inlayHints.refs",
-            "scope": "resource"
-          }
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -335,11 +326,7 @@
           "deprecated": true,
           "description": "Deprecated spelling of `ref.max_docs`. Maximum documents loaded in one ref workspace.",
           "minimum": 0,
-          "type": "integer",
-          "x-suspect-editor": {
-            "key": "suspect.ref.maxDocs",
-            "scope": "resource"
-          }
+          "type": "integer"
         },
         "max_docs": {
           "default": 500,
@@ -364,22 +351,14 @@
           "deprecated": true,
           "description": "Deprecated spelling of `ref.max_docs`. Maximum documents loaded in one ref workspace.",
           "minimum": 0,
-          "type": "integer",
-          "x-suspect-editor": {
-            "key": "suspect.ref.maxDocs",
-            "scope": "resource"
-          }
+          "type": "integer"
         },
         "max_docs": {
           "default": 500,
           "deprecated": true,
           "description": "Deprecated spelling of `ref.max_docs`. Maximum documents loaded in one ref workspace.",
           "minimum": 0,
-          "type": "integer",
-          "x-suspect-editor": {
-            "key": "suspect.ref.maxDocs",
-            "scope": "resource"
-          }
+          "type": "integer"
         }
       },
       "type": "object"
@@ -416,7 +395,10 @@
           "format": "uri",
           "type": "string",
           "x-suspect-editor": {
-            "key": "suspect.testBaseUrl",
+            "aliases": [
+              "suspect.testBaseUrl"
+            ],
+            "key": "suspect.test.baseUrl",
             "scope": "resource"
           },
           "x-suspect-env": "SUSPECT_BASE_URL"
