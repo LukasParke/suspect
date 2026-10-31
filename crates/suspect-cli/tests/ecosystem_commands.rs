@@ -1,5 +1,5 @@
-//! CLI contract tests: the upgrade, arazzo-diff, and overlay-dry-run
-//! commands behave as documented.
+//! CLI contract tests: `upgrade`, `diff breaking` on Arazzo, `overlay
+//! explain --check` and the other commands behave as documented.
 
 use std::path::Path;
 
@@ -58,9 +58,28 @@ definitions:
         String::from_utf8_lossy(&status.stderr)
     );
     let text = std::fs::read_to_string(&output).unwrap();
-    assert!(text.contains("\"openapi\": \"3.1.0\""));
+    // YAML in, YAML out.
+    assert!(text.contains("openapi: 3.1.0"), "{text}");
+    assert!(!text.trim_start().starts_with('{'), "{text}");
     assert!(text.contains("#/components/schemas/Pet"));
     assert!(text.contains("servers"));
+
+    // `--format json` overrides the extension.
+    let json_out = dir.path().join("upgraded.out");
+    let status = std::process::Command::new(binary())
+        .args([
+            "upgrade",
+            input.to_str().unwrap(),
+            "--output",
+            json_out.to_str().unwrap(),
+            "--to",
+            "json",
+        ])
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    let text = std::fs::read_to_string(&json_out).unwrap();
+    assert!(text.contains("\"openapi\": \"3.1.0\""), "{text}");
 }
 
 #[test]
@@ -128,7 +147,12 @@ fn arazzo_diff_reports_every_breaking_class() {
     let old = write(dir.path(), "old.arazzo.yaml", SUITE_OLD);
     let new = write(dir.path(), "new.arazzo.yaml", SUITE_NEW_BREAKING);
     let output = std::process::Command::new(binary())
-        .args(["arazzo-diff", old.to_str().unwrap(), new.to_str().unwrap()])
+        .args([
+            "diff",
+            "breaking",
+            old.to_str().unwrap(),
+            new.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(!output.status.success(), "breaking revisions must fail");
@@ -165,7 +189,12 @@ fn arazzo_diff_is_quiet_when_compatible() {
     let old = write(dir.path(), "old.arazzo.yaml", SUITE_OLD);
     let new = write(dir.path(), "new.arazzo.yaml", SUITE_OLD);
     let output = std::process::Command::new(binary())
-        .args(["arazzo-diff", old.to_str().unwrap(), new.to_str().unwrap()])
+        .args([
+            "diff",
+            "breaking",
+            old.to_str().unwrap(),
+            new.to_str().unwrap(),
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -176,10 +205,43 @@ fn arazzo_diff_is_quiet_when_compatible() {
     );
 }
 
-// ------------------------------------------------------------ overlay dry-run
+#[test]
+fn arazzo_diff_json_and_sarif_carry_the_rendered_findings() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = write(dir.path(), "old.arazzo.yaml", SUITE_OLD);
+    let new = write(dir.path(), "new.arazzo.yaml", SUITE_NEW_BREAKING);
+    let run = |format: &str| {
+        let output = std::process::Command::new(binary())
+            .args([
+                "diff",
+                "breaking",
+                old.to_str().unwrap(),
+                new.to_str().unwrap(),
+                "--format",
+                format,
+            ])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1), "breaks exit 1");
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    let json = run("json");
+    let first = &json.as_array().expect("finding array")[0];
+    // The shared Finding shape, not the upstream break records.
+    assert_eq!(first["code"], "arazzo-breaking-change");
+    assert_eq!(first["line"], 1);
+    let sarif = run("sarif");
+    assert_eq!(sarif["version"], "2.1.0");
+    assert_eq!(
+        sarif["runs"][0]["results"][0]["ruleId"],
+        "arazzo-breaking-change"
+    );
+}
+
+// ------------------------------------------------------- overlay explain --check
 
 #[test]
-fn overlay_dry_run_reports_matches_without_applying() {
+fn overlay_explain_check_reports_matches_without_applying() {
     let dir = tempfile::tempdir().unwrap();
     let target = write(
         dir.path(),
@@ -201,34 +263,49 @@ paths:
         r#"overlay: 1.0.0
 info: {title: Polish, version: '1'}
 actions:
-  - target: '$.paths./pets.get'
+  - target: "$.paths['/pets'].get"
     update:
       summary: Lists every pet
-  - target: '$.paths./missing'
+  - target: "$.paths['/missing']"
     update: {summary: never matches}
 "#,
     );
     let original = std::fs::read_to_string(&target).unwrap();
-    let output = std::process::Command::new(binary())
-        .args([
-            "overlay-dry-run",
-            overlay.to_str().unwrap(),
-            target.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    // One action has a zero-match target: the exit code flags it.
-    assert!(!output.status.success());
+    let dry_run = |overlay: &Path| {
+        std::process::Command::new(binary())
+            .args([
+                "overlay",
+                "explain",
+                "--check",
+                overlay.to_str().unwrap(),
+                target.to_str().unwrap(),
+            ])
+            .output()
+            .unwrap()
+    };
+    // One action has a zero-match target, so the exit code flags it.
+    let output = dry_run(&overlay);
+    assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("matches=1"), "{stderr}");
-    assert!(stderr.contains("matches=0"), "{stderr}");
-    assert!(stderr.contains("1 zero-match actions"), "{stderr}");
+    assert!(stderr.contains("matched nothing"), "{stderr}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("1 match(es)"), "{stdout}");
+    assert!(stdout.contains("0 match(es)"), "{stdout}");
     // Dry run: the target file must be untouched.
     assert_eq!(
         std::fs::read_to_string(&target).unwrap(),
         original,
-        "overlay-dry-run must not modify the target"
+        "overlay explain must not modify the target"
     );
+
+    // A bare-dot target is rejected, as `overlay apply` rejects it.
+    let bare = write(
+        dir.path(),
+        "bare.yaml",
+        "overlay: 1.0.0\ninfo: {title: Bare, version: '1'}\nactions:\n  - target: '$.paths./pets.get'\n    update: {summary: s}\n",
+    );
+    let output = dry_run(&bare);
+    assert_eq!(output.status.code(), Some(2));
 }
 
 // ---------------------------------------------------------- project build
@@ -335,7 +412,8 @@ paths:
 
     let output = std::process::Command::new(binary())
         .args([
-            "release-plan",
+            "release",
+            "plan",
             "--format",
             "json",
             root.join("old.yaml").to_str().unwrap(),
@@ -416,6 +494,7 @@ components:
 
     let output = std::process::Command::new(binary())
         .args([
+            "diff",
             "impact",
             "--format",
             "json",
@@ -442,6 +521,7 @@ components:
     // The same traffic against identical revisions is unaffected.
     let same = std::process::Command::new(binary())
         .args([
+            "diff",
             "impact",
             root.join("old.yaml").to_str().unwrap(),
             root.join("old.yaml").to_str().unwrap(),
@@ -562,7 +642,7 @@ fn config_supplies_defaults_and_explicit_flags_win() {
     let root = dir.path();
     std::fs::write(
         root.join(".suspect.yaml"),
-        "lint:\n  min_severity: warning\nvalidate:\n  strict_format: true\ndocs:\n  style: markdown\n  out: site/reference\nformat:\n  json: true\n",
+        "lint:\n  min_severity: warning\nvalidate:\n  strict_format: true\ndocs:\n  style: markdown\n  output: site/reference\nformat:\n  json: true\n",
     )
     .unwrap();
     let spec = write(
@@ -583,7 +663,7 @@ fn config_supplies_defaults_and_explicit_flags_win() {
 
     // Docs picks up the configured style and output with no flags.
     let docs = std::process::Command::new(binary())
-        .args(["docs", "api.yaml"])
+        .args(["gen", "docs", "api.yaml"])
         .current_dir(root)
         .output()
         .unwrap();
@@ -600,7 +680,7 @@ fn config_supplies_defaults_and_explicit_flags_win() {
     // An explicit flag overrides the configured output.
     let explicit = dir.path().join("elsewhere");
     let docs = std::process::Command::new(binary())
-        .args(["docs", "api.yaml", "--style", "html", "--output"])
+        .args(["gen", "docs", "api.yaml", "--style", "html", "--output"])
         .arg(&explicit)
         .current_dir(root)
         .output()
@@ -620,6 +700,73 @@ fn config_supplies_defaults_and_explicit_flags_win() {
             .starts_with('{'),
         "configured format.json applied"
     );
+}
+
+#[test]
+fn lint_severity_names_share_one_parser_and_unknown_names_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "api.yaml",
+        "openapi: 3.1.0\ninfo: {title: Lint API, version: '1'}\npaths: {}\n",
+    );
+    let lint = |config: &str| {
+        std::fs::write(root.join(".suspect.yaml"), config).unwrap();
+        std::process::Command::new(binary())
+            .args(["lint", "api.yaml"])
+            .env_remove("SUSPECT_LINT_MIN_SEVERITY")
+            .env_remove("SUSPECT_LINT_RULESET")
+            .current_dir(root)
+            .output()
+            .unwrap()
+    };
+    // `warn` is the ruleset spelling of `warning`.
+    let ok = lint("lint:\n  min_severity: warn\n");
+    assert_ne!(
+        ok.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    // An unknown name is a usage error naming the value, not a silent hint.
+    let bad = lint("lint:\n  min_severity: fatal\n");
+    assert_eq!(bad.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(stderr.contains("`fatal`"), "{stderr}");
+}
+
+#[test]
+fn lint_ruleset_resolves_flag_then_env_then_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "api.yaml",
+        "openapi: 3.1.0\ninfo: {title: Lint API, version: '1'}\npaths: {}\n",
+    );
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "lint:\n  ruleset: from-config.yaml\n",
+    )
+    .unwrap();
+    let lint = |env: Option<&str>, flag: Option<&str>| {
+        let mut cmd = std::process::Command::new(binary());
+        cmd.args(["lint", "api.yaml"]).current_dir(root);
+        if let Some(flag) = flag {
+            cmd.args(["--ruleset", flag]);
+        }
+        match env {
+            Some(env) => cmd.env("SUSPECT_LINT_RULESET", env),
+            None => cmd.env_remove("SUSPECT_LINT_RULESET"),
+        };
+        let output = cmd.output().unwrap();
+        String::from_utf8_lossy(&output.stderr).into_owned()
+    };
+    // None of the rulesets exist, so the error names the one that won.
+    assert!(lint(None, None).contains("from-config.yaml"));
+    assert!(lint(Some("from-env.yaml"), None).contains("from-env.yaml"));
+    assert!(lint(Some("from-env.yaml"), Some("from-flag.yaml")).contains("from-flag.yaml"));
 }
 
 #[test]
@@ -656,7 +803,7 @@ components:
     .unwrap();
 
     let output = std::process::Command::new(binary())
-        .args(["contract", "openapi.yaml", "--out", "pkg"])
+        .args(["gen", "contract", "openapi.yaml", "--output", "pkg"])
         .current_dir(root)
         .output()
         .unwrap();
@@ -695,7 +842,14 @@ components:
 
     // Fresh: --check passes.
     let check = std::process::Command::new(binary())
-        .args(["contract", "openapi.yaml", "--out", "pkg", "--check"])
+        .args([
+            "gen",
+            "contract",
+            "openapi.yaml",
+            "--output",
+            "pkg",
+            "--check",
+        ])
         .current_dir(root)
         .output()
         .unwrap();
@@ -712,7 +866,14 @@ components:
     )
     .unwrap();
     let stale = std::process::Command::new(binary())
-        .args(["contract", "openapi.yaml", "--out", "pkg", "--check"])
+        .args([
+            "gen",
+            "contract",
+            "openapi.yaml",
+            "--output",
+            "pkg",
+            "--check",
+        ])
         .current_dir(root)
         .output()
         .unwrap();
@@ -774,7 +935,7 @@ fn ci_gate_reports_every_project_and_isolates_failures() {
     service(root, "svc-b");
     init_git_repo(root);
 
-    // Nothing is published yet: every project fails the validate stage.
+    // Nothing is published yet: every project fails the check stage.
     let first = std::process::Command::new(binary())
         .args(["ci", "."])
         .current_dir(root)
@@ -880,7 +1041,9 @@ fn ci_reports_a_machine_readable_aggregate() {
         .iter()
         .map(|s| s["stage"].as_str().unwrap())
         .collect();
-    assert!(stages.contains(&"validate"), "{stages:?}");
+    // `validate` and `lint` are one `check` stage now.
+    assert!(stages.contains(&"check"), "{stages:?}");
+    assert!(!stages.contains(&"validate"), "{stages:?}");
     assert!(stages.contains(&"contract"), "{stages:?}");
     assert!(stages.contains(&"breaking"), "{stages:?}");
 }
@@ -911,12 +1074,13 @@ fn monorepo_service(root: &std::path::Path, name: &str, untagged: bool) {
   "entry": "openapi.yaml",
   "publish": {{"output": "build/spec.yaml"}},
   "contract": {{"output": "build/contract"}},
-  "lint": {{"min_severity": "error"}},
+  "config": ".suspect.yaml",
   "codegen": [{{"name": "ts", "profile": "typescript-http", "package_name": "@acme/{name}",
     "package_version": "1.0.0", "out": "../../generated/{name}", "operation_id": ["listThings"]}}]}}"#
         ),
     )
     .unwrap();
+    std::fs::write(dir.join(".suspect.yaml"), "lint:\n  min_severity: error\n").unwrap();
 }
 
 #[test]
@@ -960,7 +1124,7 @@ fn ci_runs_lint_with_the_project_policy() {
             stage["summary"]
                 .as_str()
                 .unwrap()
-                .contains("at or above Error"),
+                .contains("at or above error"),
             "the project's own lint policy applies: {stage}"
         );
     }
@@ -999,4 +1163,137 @@ fn ci_build_produces_artifacts_and_gates_them_in_one_command() {
         "the SDK lands in the configured folder: {:?}",
         std::fs::read_dir(root.join("generated")).unwrap().count()
     );
+}
+
+#[test]
+fn ci_lint_stage_fails_on_an_unrecognized_override_severity() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    service(root, "svc");
+    std::fs::write(
+        root.join("svc/.suspect.yaml"),
+        "lint:\n  rules:\n    info-contact: loud\n",
+    )
+    .unwrap();
+    init_git_repo(root);
+    let out = std::process::Command::new(binary())
+        .args(["ci", ".", "--stage", "lint"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(!out.status.success(), "a bad override must fail: {stdout}");
+    assert!(
+        stdout.contains("unrecognized severity `loud`"),
+        "the stage names the bad value: {stdout}"
+    );
+}
+
+// --------------------------------------------------------- release publish
+
+const RELEASE_TARGETS: &str = r#"[{"backend": "typescript", "directory": "sdk/ts", "package": "@acme/sdk", "registry": "npm", "publish": "npm publish"}]"#;
+
+fn release_publish(root: &Path, extra: &[&str]) -> std::process::Output {
+    std::process::Command::new(binary())
+        .current_dir(root)
+        .args(["release", "publish", "--format", "json"])
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn release_publish_reads_the_project_manifest_release_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("sdk/ts")).unwrap();
+    write(root, "sdk/ts/package.json", r#"{"version": "1.4.0"}"#);
+    write(
+        root,
+        "suspect.project.json",
+        &format!(
+            r#"{{"version": 1, "entry": "openapi.yaml", "release": {{"version": "1.4.0", "targets": {RELEASE_TARGETS}}}}}"#
+        ),
+    );
+    let out = release_publish(root, &[]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(!stderr.contains("deprecated"), "{stderr}");
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(plan["version"], "1.4.0");
+    assert_eq!(plan["ready"], 1);
+
+    // `project check` reads the same section and names a bad key.
+    write(
+        root,
+        "openapi.yaml",
+        "openapi: 3.1.0\ninfo: {title: t, version: '1'}\npaths: {}\n",
+    );
+    write(
+        root,
+        "suspect.project.json",
+        &format!(
+            r#"{{"version": 1, "entry": "openapi.yaml", "release": {{"version": "1.4.0", "targets": {RELEASE_TARGETS}, "tags": "v1"}}}}"#
+        ),
+    );
+    let check = std::process::Command::new(binary())
+        .current_dir(root)
+        .args(["project", "check"])
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(!check.status.success(), "{text}");
+    assert!(
+        text.contains("project-release") && text.contains("unknown key `tags`"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_standalone_release_manifest_is_refused_with_the_move_to_make() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("sdk/ts")).unwrap();
+    write(root, "sdk/ts/package.json", r#"{"version": "1.4.0"}"#);
+    write(
+        root,
+        "release.json",
+        &format!(r#"{{"version": "1.4.0", "targets": {RELEASE_TARGETS}}}"#),
+    );
+    // Not the default any more.
+    let out = release_publish(root, &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("no release manifest"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = release_publish(root, &["--manifest", "release.json"]);
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains(
+            "release.json: a standalone release manifest is not read; move its fields under `release` in suspect.project.json"
+        ),
+        "{stderr}"
+    );
+
+    // A YAML document with a `release` section reads like the project manifest.
+    write(
+        root,
+        "release.yaml",
+        "release:\n  version: 1.4.0\n  targets:\n    - backend: typescript\n      directory: sdk/ts\n      package: '@acme/sdk'\n      registry: npm\n      publish: npm publish\n",
+    );
+    let out = release_publish(root, &["--manifest", "release.yaml"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(plan["targets"][0]["package"], "@acme/sdk");
 }

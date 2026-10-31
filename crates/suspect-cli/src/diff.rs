@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::Serialize;
 use suspect_overlay::Value;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 use crate::output;
 
 /// One changed scalar: `from` -> `to` at `path`.
@@ -112,12 +112,12 @@ pub fn diff_values(path: &str, a: &Value, b: &Value, report: &mut DiffReport) {
     }
 }
 
-/// Diffs two documents and prints the report; exit code is always 0
-/// (differences are a result, not a failure).
+/// Diffs two documents and prints the report. Exits 0 (differences are a
+/// result, not a failure), or with `check` 1 when anything differs.
 ///
 /// # Errors
 /// IO or parse failures on either input.
-pub fn diff_files(a: &Path, b: &Path, format: OutputFormat) -> anyhow::Result<i32> {
+pub fn diff_files(a: &Path, b: &Path, format: ReportFormat, check: bool) -> anyhow::Result<i32> {
     let doc_a = crate::load_doc(a)?;
     let doc_b = crate::load_doc(b)?;
     let va = Value::from_node(doc_a.root());
@@ -125,7 +125,7 @@ pub fn diff_files(a: &Path, b: &Path, format: OutputFormat) -> anyhow::Result<i3
     let mut report = DiffReport::default();
     diff_values("", &va, &vb, &mut report);
     match format {
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for p in &report.added {
                 println!("+ {p}");
             }
@@ -136,7 +136,7 @@ pub fn diff_files(a: &Path, b: &Path, format: OutputFormat) -> anyhow::Result<i3
                 println!("~ {}: {} -> {}", c.path, c.from, c.to);
             }
         }
-        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&report)?,
+        ReportFormat::Json => output::print_json(&report)?,
     }
-    Ok(0)
+    Ok(i32::from(check && !report.is_empty()))
 }

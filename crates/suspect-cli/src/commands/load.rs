@@ -1,4 +1,4 @@
-//! `suspect load` — Artillery-style load generation with Arazzo workflows as
+//! `suspect test load` — Artillery-style load generation with Arazzo workflows as
 //! virtual-user scenarios.
 //!
 //! Accepts either a load profile (`*.load.yaml`, `suspectLoad: "1.0"`) or an
@@ -22,7 +22,7 @@ use suspect_test::{HttpClient, InputMap, RunAuth};
 
 use super::http::{HttpSettings, LiveTransport};
 
-/// Parsed `suspect load` arguments.
+/// Parsed `suspect test load` arguments.
 #[derive(Debug, clap::Args)]
 pub struct LoadArgs {
     /// Load profile (`*.load.yaml`) or an Arazzo document (with --workflow).
@@ -57,8 +57,8 @@ pub struct LoadArgs {
     /// Workflow input binding `key=value` applied to every scenario; repeatable.
     #[arg(long = "input", value_name = "KEY=VALUE")]
     pub input_pairs: Vec<String>,
-    /// JSON object file of workflow inputs applied to every scenario.
-    #[arg(long = "inputs", value_name = "FILE")]
+    /// JSON or YAML object file of workflow inputs applied to every scenario.
+    #[arg(long = "inputs-file", value_name = "FILE")]
     pub inputs_file: Option<PathBuf>,
     /// Credentials file for the security schemes the workflows exercise.
     /// Default: `.suspect/credentials.json` discovered by walking up from
@@ -79,8 +79,8 @@ pub struct LoadArgs {
     #[arg(long, value_enum, default_value = "none")]
     pub jitter: JitterArg,
     /// Progress output: human text blocks or one JSON record per line.
-    #[arg(long, value_enum, default_value = "text")]
-    pub report: crate::ReportFormat,
+    #[command(flatten)]
+    pub stream: crate::Stream,
     /// Seconds between progress snapshots; overrides the profile.
     #[arg(long, value_name = "DURATION")]
     pub report_interval: Option<String>,
@@ -96,12 +96,10 @@ pub struct LoadArgs {
     /// Accept invalid TLS certificates.
     #[arg(long)]
     pub insecure: bool,
-    /// Write the JSON report here; overrides the profile.
-    #[arg(long, value_name = "FILE")]
-    pub json: Option<PathBuf>,
-    /// Write a JUnit report (one testcase per ensure check) here.
-    #[arg(long, value_name = "FILE")]
-    pub junit: Option<PathBuf>,
+    /// JSON report and JUnit report (one testcase per ensure check) files;
+    /// override the profile's `report.json` and `report.junit`.
+    #[command(flatten)]
+    pub report_files: crate::ReportFiles,
     /// Resolve and print the plan (phases, scenarios, prerequisites) without sending anything.
     #[arg(long)]
     pub dry_run: bool,
@@ -116,7 +114,7 @@ pub enum JitterArg {
     Poisson,
 }
 
-/// Runs `suspect load`.
+/// Runs `suspect test load`.
 ///
 /// Exit codes: `0` every strict `ensure` check passed, `1` an ensure check
 /// failed, `2` configuration/compile error or a failed prerequisite
@@ -157,9 +155,23 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
             .map_err(|e| anyhow::anyhow!("{e}"))?;
     }
     apply_overrides(&mut profile, &args)?;
-    let target = args
-        .base_url
-        .clone()
+    // `test.base_url` set anywhere (flag, env, a settings file) beats the
+    // profile's `target`; its built-in default does not.
+    let flags = suspect_config::Layer::flags()
+        .set(
+            "test.base_url",
+            args.base_url.clone().map(suspect_config::Raw::Str),
+            "--base-url",
+        )
+        .set(
+            "test.credentials",
+            args.credentials.clone().map(suspect_config::Raw::Path),
+            "--credentials",
+        );
+    let resolved = crate::settings::resolve_one(&input, flags)?;
+    let configured = (*resolved.origin("test.base_url") != suspect_config::Origin::Default)
+        .then(|| resolved.settings.test.base_url.clone());
+    let target = configured
         .or_else(|| profile.target.clone())
         .ok_or_else(|| {
             anyhow::anyhow!("no target: set `target:` in the profile or pass --base-url")
@@ -198,7 +210,8 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
         return Ok(0);
     }
 
-    let auth = super::test::load_credentials(&arazzo_path, args.credentials.as_deref())?;
+    let auth =
+        super::test::load_credentials(&arazzo_path, resolved.settings.test.credentials.as_deref())?;
 
     let settings = HttpSettings {
         timeout: profile.http.timeout,
@@ -218,18 +231,17 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
         }) as load::HttpFactory
     });
 
-    let ndjson = matches!(args.report, crate::ReportFormat::Ndjson);
+    let ndjson = args.stream.format.is_ndjson();
     let sink: Arc<dyn LoadSink> = Arc::new(ConsoleSink { ndjson });
 
     let rt = tokio::runtime::Runtime::new()?;
-    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    // The first Ctrl-C stops arrivals and drains; the second aborts with
+    // 130 (`crate::interrupt`).
+    let cancel_rx = crate::interrupt::graceful();
+    let mut notice = cancel_rx.clone();
     rt.spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
+        if notice.wait_for(|interrupted| *interrupted).await.is_ok() {
             eprintln!("\ninterrupt: stopping arrivals and draining (Ctrl-C again to abort)");
-            let _ = cancel_tx.send(true);
-            if tokio::signal::ctrl_c().await.is_ok() {
-                std::process::exit(130);
-            }
         }
     });
     let cfg = LoadConfig {
@@ -250,7 +262,7 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
     };
     if !ndjson {
         println!(
-            "suspect load: {} scenario(s), {} phase(s) against {}  [seed {seed}]",
+            "suspect test load: {} scenario(s), {} phase(s) against {}  [seed {seed}]",
             profile.scenarios.len(),
             profile.phases.len(),
             target
@@ -279,7 +291,12 @@ fn finish(
         println!();
         print!("{}", report::console_final(summary));
     }
-    if let Some(path) = args.json.clone().or_else(|| profile.report.json.clone()) {
+    if let Some(path) = args
+        .report_files
+        .report_file
+        .clone()
+        .or_else(|| profile.report.json.clone())
+    {
         write_file(
             &path,
             &serde_json::to_string_pretty(&report::json(summary))?,
@@ -288,7 +305,12 @@ fn finish(
             println!("json report: {}", path.display());
         }
     }
-    if let Some(path) = args.junit.clone().or_else(|| profile.report.junit.clone()) {
+    if let Some(path) = args
+        .report_files
+        .junit
+        .clone()
+        .or_else(|| profile.report.junit.clone())
+    {
         write_file(&path, &report::junit(summary))?;
         if !ndjson {
             println!("junit report: {}", path.display());
@@ -439,7 +461,7 @@ fn dry_run_text(
 ) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
-    let _ = writeln!(out, "suspect load --dry-run");
+    let _ = writeln!(out, "suspect test load --dry-run");
     let _ = writeln!(out, "target: {target}");
     let _ = writeln!(out, "seed:   {seed}");
     let _ = writeln!(

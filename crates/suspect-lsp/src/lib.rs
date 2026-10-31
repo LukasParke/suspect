@@ -31,7 +31,6 @@ pub mod config_files;
 pub mod config_schema;
 pub mod diagnostics;
 pub mod docs_gen;
-mod editor_config;
 pub mod extensions_config;
 pub mod extensions_registry;
 pub mod format_order;
@@ -42,14 +41,15 @@ pub mod keys;
 pub mod keyword_docs;
 mod latency;
 pub mod links;
-pub mod markdown;
 mod meaning;
 pub mod navigation;
+pub mod protocol;
 pub mod pull;
 mod rank;
 mod refactor;
 pub mod rename;
 pub mod render_sdk;
+pub mod rule_host;
 pub mod run_lenses;
 pub mod semantic;
 pub mod state;
@@ -61,7 +61,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::generation_contract::GenerationContractResult;
-use state::{OpenDoc, State, lsp_range, offset_of_utf16};
+use state::{DocKind, FragmentIndex, OpenDoc, State, lsp_range, offset_of_utf16};
 use std::collections::HashMap;
 use suspect_source::Uri;
 use tower_lsp::Client;
@@ -96,7 +96,8 @@ use tower_lsp::{LanguageServer, LspService, Server};
 /// [`State::docs`] cache and bumps [`State::generation`] → a debounce task
 /// publishes diagnostics 150 ms later unless superseded →
 /// `did_change_watched_files` drops the cached ref workspace so the next
-/// navigation query rebuilds it from disk. There is no explicit teardown
+/// navigation query rebuilds it from disk (and, when a configuration file
+/// changed, reloads the configuration and republishes). There is no explicit teardown
 /// beyond what `LspService` drops on shutdown.
 struct Backend {
     /// Client handle used to publish diagnostics back to the editor.
@@ -110,6 +111,59 @@ struct Backend {
     index_build_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
+/// The TS rule findings for one document: empty unless its settings
+/// enable rules (`rules.enabled`). The host runs for the workspace root
+/// over the workspace's `rules.roots`. Start failures, worker errors and
+/// timeouts go to the log; rule ids that reuse a builtin code are shown as
+/// an error on their rule file.
+async fn ts_rules(
+    state: &Arc<tokio::sync::RwLock<State>>,
+    client: &Client,
+    doc: &OpenDoc,
+    resolved: &suspect_config::Resolved,
+) -> rule_host::RulesRun {
+    if !resolved.settings.rules.enabled {
+        return rule_host::RulesRun::default();
+    }
+    let (slot, root, roots) = {
+        let st = state.read().await;
+        (
+            Arc::clone(&st.rule_host),
+            st.workspace_root().or_else(|| st.root.clone()),
+            st.resolved.workspace().settings.rules.roots.clone(),
+        )
+    };
+    let run = rule_host::run(&slot, root.as_deref(), &roots, &resolved.settings, &doc.low).await;
+    if let Some(message) = &run.log {
+        client
+            .log_message(MessageType::WARNING, format!("suspect: {message}"))
+            .await;
+    }
+    // One publish per file replaces its set, so group first.
+    let mut by_file: std::collections::BTreeMap<&std::path::Path, Vec<Diagnostic>> =
+        std::collections::BTreeMap::new();
+    for collision in &run.collisions {
+        by_file
+            .entry(&collision.file)
+            .or_default()
+            .push(Diagnostic {
+                severity: Some(DiagnosticSeverity::ERROR),
+                code: Some(NumberOrString::String(
+                    suspect_check::rules::ID_COLLISION.to_owned(),
+                )),
+                source: Some(diagnostics::SOURCE.to_owned()),
+                message: collision.to_string(),
+                ..Diagnostic::default()
+            });
+    }
+    for (file, diagnostics) in by_file {
+        if let Ok(url) = Url::from_file_path(file) {
+            client.publish_diagnostics(url, diagnostics, None).await;
+        }
+    }
+    run
+}
+
 impl Backend {
     /// Creates a backend with empty [`State`]; called by `LspService::new`.
     fn new(client: Client) -> Self {
@@ -117,6 +171,119 @@ impl Backend {
             client,
             state: Arc::new(tokio::sync::RwLock::new(State::default())),
             index_build_lock: Arc::new(tokio::sync::Mutex::new(())),
+        }
+    }
+
+    /// The client's `suspect` settings section via `workspace/configuration`,
+    /// or `None` when the client cannot answer or answers `null`.
+    async fn pull_client_settings(&self) -> Option<serde_json::Value> {
+        self.client
+            .configuration(vec![ConfigurationItem {
+                scope_uri: None,
+                section: Some("suspect".to_owned()),
+            }])
+            .await
+            .ok()?
+            .into_iter()
+            .next()
+            .filter(|v| !v.is_null())
+    }
+
+    /// Replaces the configuration cache with one built under `client`
+    /// (the client's settings section) and reports whether the effective
+    /// configuration of the workspace or any open document changed. The
+    /// one rebuild path for `initialized`, `didChangeConfiguration` and a
+    /// configuration file changing on disk, so the three cannot drift
+    /// apart.
+    ///
+    /// Each document resolves through `suspect_config` from its own
+    /// directory, exactly as `suspect lint` does: `.suspect.yaml`,
+    /// `SUSPECT_*` variables, then the
+    /// initialization options and the client section on top, so an
+    /// explicit editor setting wins as a flag does on the command line.
+    async fn reload_config(&self, client: Option<serde_json::Value>) -> bool {
+        let (root, init_opts, uris, old) = {
+            let st = self.state.read().await;
+            // The declared root survives a dropped workspace (saves and
+            // watched-file events drop it); the workspace's own root is
+            // only there while it is cached.
+            (
+                st.workspace_root().or_else(|| st.root.clone()),
+                st.pending_init_options.clone(),
+                st.docs.keys().cloned().collect::<Vec<_>>(),
+                Arc::clone(&st.resolved),
+            )
+        };
+        let editor: Vec<serde_json::Value> = init_opts.into_iter().chain(client.clone()).collect();
+        let fresh = Arc::new(config_files::ResolvedCache::new(editor, root));
+        // Resolved eagerly for what is open, so the comparison (and the
+        // problems shown below) cover every document the user can see.
+        let mut changed = old.workspace() != fresh.workspace();
+        for uri in &uris {
+            changed |= old.for_uri(uri) != fresh.for_uri(uri);
+        }
+        let problems = fresh.problems();
+        let warnings = fresh.warnings();
+        let client_changed;
+        {
+            let mut st = self.state.write().await;
+            client_changed = st.client_settings != client;
+            st.client_settings = client;
+            if changed {
+                st.policy_epoch = st.policy_epoch.wrapping_add(1);
+            }
+            st.resolved = fresh;
+        }
+        // Said once per change, not on every pass: a setting the server
+        // cannot apply is visible instead of silently ignored.
+        if changed {
+            for problem in problems {
+                self.client
+                    .show_message(MessageType::WARNING, format!("suspect: {problem}"))
+                    .await;
+            }
+        }
+        // Warnings (an unknown settings-file key, an ignored manifest policy
+        // section) go to the log, once per change of the files or of the
+        // client's settings; the manifest itself carries a diagnostic on
+        // each ignored section.
+        if changed || client_changed {
+            for warning in warnings {
+                self.client
+                    .log_message(MessageType::WARNING, format!("suspect: {warning}"))
+                    .await;
+            }
+        }
+        changed
+    }
+
+    /// After a configuration change: anything computed under the old
+    /// policy is no longer the answer — including the per-document pull
+    /// cache, whose entries are pre-filtered by the floor — so drop the
+    /// caches, republish every open document, and ask the client to
+    /// re-pull diagnostics and inlay hints. Semantic tokens and lenses are
+    /// config-free.
+    async fn republish_after_config_change(&self) {
+        let uris: Vec<Uri> = {
+            let mut st = self.state.write().await;
+            st.ws_diag_cache = None;
+            st.diag_cache.clear();
+            // The per-document workspace reports are keyed on workspace
+            // identity and document version, neither of which a policy
+            // change moves, so they must go explicitly.
+            if let Ok(mut cache) = st.ws_doc_diag.lock() {
+                cache.clear();
+            }
+            st.docs.keys().cloned().collect()
+        };
+        let _ = self.client.workspace_diagnostic_refresh().await;
+        for uri in uris {
+            self.schedule_diagnostics(uri);
+        }
+        if self.client.inlay_hint_refresh().await.is_err() {
+            self.client
+                .log_message(MessageType::WARNING, "inlayHint refresh rejected")
+                .await;
         }
     }
 
@@ -138,7 +305,7 @@ impl Backend {
             tokio::time::sleep(Duration::from_millis(150)).await;
             // Compute WITHOUT holding the state lock: clone the cheap handles
             // (OpenDoc is small; LowDoc parse tree is Arc-shared internally).
-            let (doc, ws, cfg, ruleset, strict_format) = {
+            let (doc, ws, policy, epoch) = {
                 let st = state.read().await;
                 if st.generations.get(&uri) != Some(&generation) {
                     return; // a newer edit superseded this publish
@@ -147,9 +314,8 @@ impl Backend {
                     Some(doc) => (
                         doc.clone(),
                         st.workspace.clone(),
-                        st.config.clone(),
-                        st.editor_config.settings.lint.ruleset.clone(),
-                        st.editor_config.settings.validate.strict_format,
+                        st.resolved.for_uri(&uri),
+                        st.cache_epoch(),
                     ),
                     None => return,
                 }
@@ -160,18 +326,18 @@ impl Backend {
             // a hover sent during an open waited 4.7 seconds behind it. The
             // state lock is not held here, so this was never a lock
             // problem — it was a scheduler problem.
+            let ts = ts_rules(&state, &client, &doc, &policy).await;
             let diags = match tokio::task::spawn_blocking({
                 let ws = ws.clone();
-                let cfg = cfg.clone();
+                let policy = Arc::clone(&policy);
                 let doc = doc.clone();
-                let ruleset = ruleset.clone();
                 move || {
-                    diagnostics::compute_diagnostics(
+                    diagnostics::compute_diagnostics_with(
                         ws.as_ref(),
                         &doc.low,
-                        &cfg,
-                        ruleset.as_deref(),
-                        strict_format,
+                        &policy,
+                        ts.findings,
+                        ts.registry,
                     )
                 }
             })
@@ -180,15 +346,8 @@ impl Backend {
                 Ok(diags) => diags,
                 Err(_) => return,
             };
-            // The same severity floor the pull path applies. Publishing the
-            // unfiltered set was a pre-existing inconsistency — the editor's
-            // problem panel showed findings the configured floor suppressed —
-            // and caching the push's result made the pull serve it too.
-            let floor = {
-                let st = state.read().await;
-                st.editor_config.min_severity()
-            };
-            let diags = diagnostics::filter_at_least(diags, floor);
+            // Post-policy, floor included: the same set the pull paths
+            // serve, so caching the push's result answers the next pull.
             let id = pull::diagnostics_result_id(&diags);
             // Superseded while computing? Drop the stale result.
             let superseded = {
@@ -200,15 +359,21 @@ impl Backend {
             }
             // Keep the result so the pull that follows this push is a cache
             // hit rather than a second full lint pass.
-            {
+            let pulls = {
                 let mut st = state.write().await;
                 if st.generations.get(&uri) == Some(&generation) {
-                    let epoch = st.generation();
                     st.diag_cache
                         .insert(uri.clone(), (epoch, id, diags.clone()));
                 }
+                st.client_pulls_diagnostics()
+            };
+            // A client that pulls keeps pushed and pulled diagnostics in
+            // separate collections and shows both, so pushing as well
+            // listed every finding twice. It pulls on its own after each
+            // change, and the cache above answers that pull.
+            if !pulls {
+                client.publish_diagnostics(url, diags, None).await;
             }
-            client.publish_diagnostics(url, diags, None).await;
         });
     }
 
@@ -479,14 +644,26 @@ fn hover_meaning(
     Some(out)
 }
 
+/// The CLI the server belongs to: `suspect lsp` runs inside the `suspect`
+/// binary, so the same executable answers the shelled-out commands even
+/// when it is not on `PATH` (the copy bundled in the VS Code extension).
+fn suspect_cli() -> std::process::Command {
+    std::process::Command::new(
+        std::env::current_exe()
+            .ok()
+            .filter(|exe| exe.file_stem().is_some_and(|stem| stem == "suspect"))
+            .unwrap_or_else(|| "suspect".into()),
+    )
+}
+
 /// Verifies a contract package by invoking the CLI in check mode. The
 /// editor shells out rather than re-implementing: one implementation of
 /// "is the package current", used by both the editor and CI.
 fn suspect_cli_contract_check(spec: &std::path::Path, package: &std::path::Path) -> i32 {
-    let status = std::process::Command::new("suspect")
-        .arg("contract")
+    let status = suspect_cli()
+        .args(["gen", "contract"])
         .arg(spec)
-        .arg("--out")
+        .arg("--output")
         .arg(package)
         .arg("--check")
         .output();
@@ -500,7 +677,7 @@ fn suspect_cli_contract_check(spec: &std::path::Path, package: &std::path::Path)
 
 /// One service's gate, run by the CLI so the editor and CI share it.
 fn suspect_cli_service_gate(dir: &std::path::Path) -> GateReport {
-    let output = std::process::Command::new("suspect")
+    let output = suspect_cli()
         .arg("ci")
         .arg(dir)
         .arg("--format")
@@ -534,6 +711,15 @@ struct GateReport {
     summary: String,
     /// Structured data for the client.
     value: serde_json::Value,
+}
+
+/// The file names whose change on disk changes the effective
+/// configuration: every settings file name and the project manifest.
+fn config_file_names() -> impl Iterator<Item = &'static str> {
+    suspect_config::CONFIG_NAMES
+        .iter()
+        .copied()
+        .chain(std::iter::once(suspect_config::MANIFEST_NAME))
 }
 
 /// The workspace root directory, when the workspace has one on disk.
@@ -591,6 +777,7 @@ fn yaml_file_filter() -> Vec<FileOperationFilter> {
 #[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {
+        let client_commands = protocol::client_commands(&params.capabilities);
         {
             let mut st = self.state.write().await;
             st.root = params.root_uri.as_ref().and_then(|u| u.to_file_path().ok());
@@ -695,25 +882,11 @@ impl LanguageServer for Backend {
                         work_done_progress_options: WorkDoneProgressOptions::default(),
                     },
                 )),
+                // Server commands minus the ones the client declared as
+                // its own: a client registers every listed id, and one it
+                // already registered itself would collide.
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: [
-                        links::SHOW_REFS_COMMAND.to_owned(),
-                        links::OPEN_REF_COMMAND.to_owned(),
-                        links::ADD_OPERATION_ID_COMMAND.to_owned(),
-                        "suspect.generateExample".to_owned(),
-                        "suspect.showRefGraph".to_owned(),
-                        "suspect.breakingChanges".to_owned(),
-                        "suspect.contractCoverage".to_owned(),
-                        "suspect.changeImpact".to_owned(),
-                        "suspect.verifyContract".to_owned(),
-                        "suspect.runService".to_owned(),
-                        "suspect.extractSchema".to_owned(),
-                        "suspect.inlineSchema".to_owned(),
-                        "suspect.editorLatency".to_owned(),
-                        run_lenses::RUN_WORKFLOW_COMMAND.to_owned(),
-                        run_lenses::RENDER_PREVIEW_COMMAND.to_owned(),
-                    ]
-                    .to_vec(),
+                    commands: protocol::registered_commands(&client_commands),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
                 workspace: Some(WorkspaceServerCapabilities {
@@ -742,6 +915,7 @@ impl LanguageServer for Backend {
                         }),
                     }),
                 }),
+                experimental: Some(protocol::experimental()),
                 ..ServerCapabilities::default()
             },
             server_info: Some(ServerInfo {
@@ -817,10 +991,17 @@ impl LanguageServer for Backend {
         // Ref-target hints carry resolve `data`; type-annotation hints
         // have a `: ` label. Both are user-togglable; the `· required`
         // markers are not.
-        if !st.config.inlay_refs() {
+        let inlay = st
+            .resolved
+            .for_uri(&uri)
+            .settings
+            .editor
+            .inlay_hints
+            .clone();
+        if !inlay.refs {
             hints.retain(|h| h.data.is_none());
         }
-        if !st.config.inlay_properties() {
+        if !inlay.properties {
             hints.retain(|h| {
                 !matches!(&h.label, tower_lsp::lsp_types::InlayHintLabel::String(l) if l.starts_with(": "))
             });
@@ -988,10 +1169,56 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn did_change_watched_files(&self, _params: DidChangeWatchedFilesParams) {
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         // Drop the cached workspace so the next query reloads from disk.
-        let mut st = self.state.write().await;
-        st.drop_workspace();
+        self.state.write().await.drop_workspace();
+        // A configuration file edited, created or deleted on disk changes
+        // the effective policy: rebuild it under the last client settings
+        // and republish, exactly as a client settings change does.
+        let config_touched = params.changes.iter().any(|change| {
+            change
+                .uri
+                .to_file_path()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .is_some_and(|name| config_file_names().any(|c| c == name))
+        });
+        // A rule file added, edited or removed under a rules root changes
+        // what the TS rules report: stop the host (the next run starts it
+        // over the current files) and treat it as a policy change.
+        let rules_touched = {
+            let (slot, roots) = {
+                let st = self.state.read().await;
+                (
+                    Arc::clone(&st.rule_host),
+                    st.resolved.workspace().settings.rules.roots.clone(),
+                )
+            };
+            let mut slot = slot.lock().await;
+            let touched = params.changes.iter().any(|change| {
+                change
+                    .uri
+                    .to_file_path()
+                    .is_ok_and(|path| slot.watches(&path, &roots))
+            });
+            if touched {
+                slot.stop();
+            }
+            touched
+        };
+        let mut republish = false;
+        if config_touched {
+            let client = self.state.read().await.client_settings.clone();
+            republish = self.reload_config(client).await;
+        }
+        if rules_touched {
+            let mut st = self.state.write().await;
+            st.policy_epoch = st.policy_epoch.wrapping_add(1);
+            republish = true;
+        }
+        if republish {
+            self.republish_after_config_change().await;
+        }
     }
 
     async fn goto_definition(
@@ -1069,6 +1296,9 @@ impl LanguageServer for Backend {
         ) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let Some(ws) = self.workspace_for(&uri).await else {
             return Ok(None);
         };
@@ -1129,6 +1359,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         // Cached like its whole-document siblings (folds, links): the
         // outline is re-requested on focus changes, and a tab switch back
         // to an unchanged file should not re-walk the tree.
@@ -1288,7 +1521,7 @@ impl LanguageServer for Backend {
         let cached = {
             let st = self.state.read().await;
             match st.diag_cache.get(&uri) {
-                Some((epoch, id, items)) if *epoch == st.generation() => {
+                Some((epoch, id, items)) if *epoch == st.cache_epoch() => {
                     Some((id.clone(), items.clone()))
                 }
                 _ => None,
@@ -1301,59 +1534,41 @@ impl LanguageServer for Backend {
             return Ok(full_report(Some(id), items));
         }
 
-        let (doc, cfg, floor, ruleset, strict_format) = {
+        let (doc, policy, epoch) = {
             let st = self.state.read().await;
             let Some(doc) = st.docs.get(&uri) else {
                 return Ok(full_report(None, Vec::new()));
             };
-            // The shared severity floor, applied identically in the editor
-            // and on the command line.
-            (
-                doc.clone(),
-                st.config.clone(),
-                st.editor_config.min_severity(),
-                st.editor_config.settings.lint.ruleset.clone(),
-                st.editor_config.settings.validate.strict_format,
-            )
+            (doc.clone(), st.resolved.for_uri(&uri), st.cache_epoch())
         };
         // Off the runtime, for the same reason as the push: this is seconds
         // of synchronous work, and holding a worker for that long stalls
         // every other request the editor has in flight.
-        let previous = params.previous_result_id.clone();
-        let id_and_items = tokio::task::spawn_blocking({
+        let ts = ts_rules(&self.state, &self.client, &doc, &policy).await;
+        let items = tokio::task::spawn_blocking({
             let ws = ws.clone();
-            let cfg = cfg.clone();
+            let policy = Arc::clone(&policy);
             let doc = doc.clone();
-            let ruleset = ruleset.clone();
-            move || match &ws {
-                Some(ws) => pull::pull_diagnostics(
-                    ws,
+            move || {
+                diagnostics::compute_diagnostics_with(
+                    ws.as_ref(),
                     &doc.low,
-                    previous,
-                    &cfg,
-                    ruleset.as_deref(),
-                    strict_format,
-                ),
-                None => {
-                    let items = diagnostics::compute_diagnostics(
-                        ws.as_ref(),
-                        &doc.low,
-                        &cfg,
-                        ruleset.as_deref(),
-                        strict_format,
-                    );
-                    (pull::diagnostics_result_id(&items), items)
-                }
+                    &policy,
+                    ts.findings,
+                    ts.registry,
+                )
             }
         })
         .await;
-        let Ok((id, items)) = id_and_items else {
+        let Ok(items) = items else {
             return Ok(full_report(None, Vec::new()));
         };
-        let items = diagnostics::filter_at_least(items, floor);
+        // The id names what the client is shown: computed after policy
+        // (floor included), or a floor change alone would answer
+        // "unchanged" with the report the old floor produced.
+        let id = pull::diagnostics_result_id(&items);
         {
             let mut st = self.state.write().await;
-            let epoch = st.generation();
             st.diag_cache
                 .insert(uri, (epoch, id.clone(), items.clone()));
         }
@@ -1374,8 +1589,8 @@ impl LanguageServer for Backend {
             let st = self.state.read().await;
             st.ws_diag_cache
                 .as_ref()
-                .and_then(|(epoch, config, id, items)| {
-                    let fresh = *epoch == st.generation() && *config == st.config;
+                .and_then(|(epoch, policy, id, items)| {
+                    let fresh = *epoch == st.cache_epoch() && *policy == st.policy_epoch;
                     fresh.then(|| (id.clone(), items.clone()))
                 })
         };
@@ -1388,15 +1603,15 @@ impl LanguageServer for Backend {
         // Same discipline as `diagnostic`: nothing expensive runs while a state
         // guard is alive, because a queued writer behind it blocks every
         // later reader — including the hover that follows.
-        let (workspace, cfg, ruleset, strict_format, cache, doc_versions) = {
+        let (workspace, configs, policy_epoch, cache, doc_versions, epoch) = {
             let st = self.state.read().await;
             (
                 st.workspace.clone(),
-                st.config.clone(),
-                st.editor_config.settings.lint.ruleset.clone(),
-                st.editor_config.settings.validate.strict_format,
+                Arc::clone(&st.resolved),
+                st.policy_epoch,
                 Arc::clone(&st.ws_doc_diag),
                 (st.ws_identity, st.doc_epoch.clone()),
+                st.cache_epoch(),
             )
         };
         let mut items = Vec::new();
@@ -1406,19 +1621,17 @@ impl LanguageServer for Backend {
             .map(|p| (p.uri.to_string(), p.value.clone()))
             .collect();
         if let Some(ws) = &workspace {
-            let cfg = cfg.clone();
-            let ruleset = ruleset.clone();
             // Per-document cache: unchanged documents reuse their reports;
             // only the edited file pays its lint battery. Keyed on the
             // workspace identity (saves rebuild it) and each document's own
             // content version (its edits invalidate only its entry).
             let view = crate::state::WsDiagCacheView::new(cache, doc_versions.0, doc_versions.1);
-            for (uri, diags) in
-                pull::workspace_pull(ws, &cfg, ruleset.as_deref(), strict_format, &view)
-            {
+            for (uri, diags) in pull::workspace_pull(ws, &|uri| configs.for_uri(uri), &view) {
                 let Ok(url) = Url::parse(uri.as_str()) else {
                     continue;
                 };
+                // Post-policy per document, as the push and document-pull
+                // paths are.
                 let id = pull::diagnostics_result_id(&diags);
                 if previous.get(uri.as_str()) == Some(&id) {
                     items.push(WorkspaceDocumentDiagnosticReport::Unchanged(
@@ -1453,9 +1666,7 @@ impl LanguageServer for Backend {
         };
         {
             let mut st = self.state.write().await;
-            let epoch = st.generation();
-            let config = st.config.clone();
-            st.ws_diag_cache = Some((epoch, config, id.clone(), items.clone()));
+            st.ws_diag_cache = Some((epoch, policy_epoch, id.clone(), items.clone()));
         }
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
@@ -1819,6 +2030,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         // The document is taken and the guard released before the
         // workspace is asked for: holding one across the other is what
         // deadlocked this handler, and with it every request behind it.
@@ -1857,6 +2071,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let st = self.state.read().await;
         let Some(doc) = st.docs.get(&uri) else {
             return Ok(None);
@@ -1883,41 +2100,27 @@ impl LanguageServer for Backend {
 
     // ---------- workspace sync / configuration / folders ----------
     async fn initialized(&self, _params: InitializedParams) {
-        // Fetch merged config when the client supports workspace/configuration.
-        let cfg_json = match self
-            .client
-            .configuration(vec![ConfigurationItem {
-                scope_uri: None,
-                section: Some("suspect".to_owned()),
-            }])
-            .await
-        {
-            Ok(values) => values.into_iter().next(),
-            Err(_) => None,
-        };
-        // The shared schema: the workspace's `.suspect.yaml` is the base,
-        // and the client's settings layer on top (an explicit editor
-        // setting still wins — the same precedence the CLI enforces).
-        let file_config = {
+        // Every client gets the version check, including ones that cannot
+        // read `serverInfo`; `initialized` comes once, so it warns once.
+        let extension = {
             let st = self.state.read().await;
-            editor_config::for_workspace(st.workspace_root().as_deref(), cfg_json.as_ref())
+            protocol::extension_version(st.client_caps.as_ref(), st.pending_init_options.as_ref())
         };
-        let client_cfg = cfg_json.as_ref().and_then(config_files::parse_config);
+        if let Some(warning) = extension
+            .as_deref()
+            .and_then(|e| protocol::version_mismatch(env!("CARGO_PKG_VERSION"), e))
         {
-            let mut st = self.state.write().await;
-            let init_opts = std::mem::take(&mut st.pending_init_options);
-            // The base is the committed policy: the manifest's sections
-            // under the workspace `.suspect.yaml`, so `lint.rules`,
-            // `lint.recommended`, inlay toggles and formatting policy
-            // committed in either file reach the battery without any
-            // client configuration. Client settings still win per leaf.
-            let root = st.workspace_root();
-            st.config = config_files::merge(
-                init_opts,
-                client_cfg,
-                config_files::file_layers(root.as_deref()),
-            );
-            st.editor_config = file_config;
+            self.client
+                .show_message(MessageType::WARNING, warning)
+                .await;
+        }
+        // Fetch merged config when the client supports workspace/configuration.
+        let client = self.pull_client_settings().await;
+        // The client may already have pulled diagnostics under the
+        // file-only policy while this answer was in flight; when its
+        // settings change the policy, those reports are stale.
+        if self.reload_config(client).await {
+            self.republish_after_config_change().await;
         }
         // Dynamic registration: only clients advertising
         // `didChangeWatchedFiles.dynamicRegistration` need the watcher
@@ -1934,10 +2137,20 @@ impl LanguageServer for Backend {
             .unwrap_or(false);
         if wants_dynamic_watcher {
             let options = DidChangeWatchedFilesRegistrationOptions {
-                watchers: vec![FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.{yaml,yml,json}".to_owned()),
-                    kind: None,
-                }],
+                // The broad glob covers specifications; the configuration
+                // files are named explicitly so a client whose glob
+                // matcher skips dotfiles still reports `.suspect.yaml`.
+                watchers: std::iter::once("**/*.{yaml,yml,json}".to_owned())
+                    .chain(config_file_names().map(|name| format!("**/{name}")))
+                    // TS rule files under the default rules root.
+                    .chain(std::iter::once(
+                        "**/.suspect/rules/**/*.{ts,js,mts,mjs}".to_owned(),
+                    ))
+                    .map(|glob| FileSystemWatcher {
+                        glob_pattern: GlobPattern::String(glob),
+                        kind: None,
+                    })
+                    .collect(),
             };
             let registration = Registration {
                 id: "suspect-watched-yaml".to_owned(),
@@ -1956,70 +2169,15 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        // The new effective client layer over the committed file layers:
-        // a manifest or `.suspect.yaml` edited on disk is picked up here
-        // too (the files participate in the comparison, not just the
-        // client section, or a file-only change would look like no change).
-        let client_layers = {
-            let st = self.state.read().await;
-            let root = st.workspace_root();
-            config_files::merge(
-                Some(params.settings.clone()),
-                None,
-                config_files::file_layers(root.as_deref()),
-            )
+        // Re-pull rather than trust the payload: VS Code sends `null` (or a
+        // partial object) here and expects the server to ask. The payload
+        // is only the fallback for clients that cannot be asked.
+        let client = match self.pull_client_settings().await {
+            Some(pulled) => Some(pulled),
+            None => Some(params.settings).filter(|v| !v.is_null()),
         };
-        let parsed = Some(client_layers);
-        // The editor-side settings are re-derived too: `lint.min_severity`
-        // lives there, not in `SuspectConfig`, and this handler used to
-        // parse it into one object while the severity floor read the other
-        // — so changing the floor mid-session did nothing until a restart.
-        let file_config = {
-            let st = self.state.read().await;
-            editor_config::for_workspace(st.workspace_root().as_deref(), Some(&params.settings))
-        };
-        let changed = {
-            let mut st = self.state.write().await;
-            let config_changed = match parsed {
-                Some(c) if st.config != c => {
-                    st.config = c;
-                    true
-                }
-                Some(_) | None => false,
-            };
-            let editor_changed = st.editor_config != file_config;
-            if editor_changed {
-                st.editor_config = file_config;
-            }
-            config_changed || editor_changed
-        };
-        if !changed {
-            return;
-        }
-        // The lint floor moved, so anything computed under the old one is
-        // no longer the answer — including the per-document pull cache,
-        // whose entries are pre-filtered by the floor.
-        {
-            let mut st = self.state.write().await;
-            st.ws_diag_cache = None;
-            st.diag_cache.clear();
-        }
-        // The new config re-filters lint findings and inlay tooltips:
-        // republish diagnostics for every open document and ask the client
-        // to re-pull hints. Semantic tokens and lenses are config-free.
-        let uris: Vec<Uri> = {
-            let st = self.state.read().await;
-            st.docs.keys().cloned().collect()
-        };
-        // Pull-diagnostics results re-filter under the new config too.
-        let _ = self.client.workspace_diagnostic_refresh().await;
-        for uri in uris {
-            self.schedule_diagnostics(uri);
-        }
-        if self.client.inlay_hint_refresh().await.is_err() {
-            self.client
-                .log_message(MessageType::WARNING, "inlayHint refresh rejected")
-                .await;
+        if self.reload_config(client).await {
+            self.republish_after_config_change().await;
         }
     }
 
@@ -2142,6 +2300,9 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> JsonRpcResult<()> {
+        // Stops the TS rule worker, if one runs.
+        let slot = Arc::clone(&self.state.read().await.rule_host);
+        slot.lock().await.stop();
         Ok(())
     }
 
@@ -2153,6 +2314,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document_position.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let ws = self.workspace_for(&uri).await;
         // The document is cloned out and the guard released before the
         // match below: the `Refs` arm needs the semantic index, and taking
@@ -2307,6 +2471,9 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         // Resolve the workspace first: `workspace_for` may take the state
         // write lock, so it must not run under this handler's read guard.
         let ws = self.workspace_for(&uri).await;
@@ -2370,7 +2537,6 @@ impl LanguageServer for Backend {
             return Ok(action);
         };
         let ws = self.workspace_for(&uri).await;
-        let cfg = self.state.read().await.config.clone();
         let st = self.state.read().await;
         let Some(doc) = st.docs.get(&uri) else {
             return Ok(action);
@@ -2378,7 +2544,10 @@ impl LanguageServer for Backend {
         let Some(url) = to_url(&uri) else {
             return Ok(action);
         };
-        match actions::resolve_code_action(doc, &url, ws.as_ref(), &cfg) {
+        // The published diagnostics' policy, so "fix all" fixes what the
+        // editor shows.
+        let policy = suspect_check::Policy::from_resolved(&st.resolved.for_uri(&uri));
+        match actions::resolve_code_action_under(doc, &url, ws.as_ref(), &policy) {
             Some(resolved) => Ok(resolved),
             None => Ok(action),
         }
@@ -2391,19 +2560,23 @@ impl LanguageServer for Backend {
         let Ok(uri) = Uri::parse(params.text_document.uri.as_str()) else {
             return Ok(None);
         };
+        if !self.serves(&uri).await {
+            return Ok(None);
+        }
         let st = self.state.read().await;
         let Some(doc) = st.docs.get(&uri) else {
             return Ok(None);
         };
         // Formatting options are ignored: the canonical form uses a
         // two-space indent regardless of editor configuration. Key
-        // reordering follows `suspect.formatting.sortKeys`.
+        // reordering follows `format.sort_keys` (`suspect.format.sortKeys`).
         let _ = &params.options;
         let Some(url) = to_url(&uri) else {
             return Ok(None);
         };
-        let sort_keys = st.config.format_sort_keys();
-        let extensions = st.config.extensions.clone().unwrap_or_default();
+        let policy = st.resolved.for_uri(&uri);
+        let sort_keys = policy.settings.format.sort_keys;
+        let extensions = config_files::extensions(&policy.settings);
         Ok(actions::format_document_full(doc, &url, sort_keys, &extensions).map(|e| vec![e]))
     }
 }
@@ -2478,7 +2651,10 @@ impl Backend {
         // `suspect.ref.maxDocs` setting parses but never limits loading.
         let (root, max_docs) = {
             let st = self.state.read().await;
-            (st.root.clone(), st.config.max_docs())
+            (
+                st.root.clone(),
+                st.resolved.workspace().settings.refs.max_docs,
+            )
         };
         let root = root?;
         let ws = suspect_ref::WorkspaceBuilder::new()
@@ -2682,7 +2858,19 @@ impl Backend {
                 self.progress_begin("suspect.breaking", "Detecting breaking changes")
                     .await;
                 let ws = self.any_workspace().await?;
-                let base = std::env::var("SUSPECT_GIT_BASE").unwrap_or_else(|_| "HEAD~1".into());
+                // `diff.baseline` (editor `suspect.diff.baseline`,
+                // `SUSPECT_GIT_BASE`, `.suspect.yaml`), else the last commit.
+                let base = self
+                    .state
+                    .read()
+                    .await
+                    .resolved
+                    .workspace()
+                    .settings
+                    .diff
+                    .baseline
+                    .clone()
+                    .unwrap_or_else(|| "HEAD~1".into());
                 let mut old = HashMap::new();
                 for uri in ws.uris() {
                     let path = uri.as_str().strip_prefix("file://").unwrap_or(uri.as_str());
@@ -2710,7 +2898,7 @@ impl Backend {
                 }
                 self.progress_end("suspect.breaking", Some(format!("{n} breaking change(s)")))
                     .await;
-                Some(serde_json::json!({ "breaking_changes": n }))
+                Some(serde_json::json!({ "breaking_changes": n, "baseline": base }))
             }
             links::OPEN_REF_COMMAND => {
                 let uri_s = params.arguments.first()?.as_str()?.to_owned();
@@ -2810,7 +2998,7 @@ impl Backend {
                     Some(if exit == 0 {
                         "contract package is current".to_owned()
                     } else {
-                        "contract package is stale — run `suspect contract`".to_owned()
+                        "contract package is stale — run `suspect gen contract`".to_owned()
                     }),
                 )
                 .await;
@@ -2889,6 +3077,102 @@ impl Backend {
             .await;
     }
     /// Handler for the `suspect/runWorkflow` custom request.
+    /// `suspect/documentKind`. An open document is a lookup; a closed one
+    /// is parsed from disk, as `did_open` would.
+    /// `suspect/explainConfig`: where each effective setting of `uri`'s
+    /// configuration (the workspace's without one) came from, the editor
+    /// layer included.
+    async fn explain_config_request(
+        &self,
+        params: protocol::ExplainConfigParams,
+    ) -> JsonRpcResult<serde_json::Value> {
+        let invalid = |message: String| tower_lsp::jsonrpc::Error::invalid_params(message);
+        let uri = params
+            .uri
+            .as_deref()
+            .map(|text| Uri::parse(text).map_err(|e| invalid(format!("{text}: {e}"))))
+            .transpose()?;
+        let resolved = {
+            let st = self.state.read().await;
+            match &uri {
+                Some(uri) => st.resolved.for_uri(uri),
+                None => st.resolved.workspace(),
+            }
+        };
+        Ok(protocol::explain_config(&resolved))
+    }
+
+    async fn document_kind_request(
+        &self,
+        params: protocol::DocumentKindParams,
+    ) -> JsonRpcResult<protocol::DocumentKindResult> {
+        let invalid = |message: String| tower_lsp::jsonrpc::Error::invalid_params(message);
+        let uri = Uri::parse(&params.uri).map_err(|e| invalid(format!("{}: {e}", params.uri)))?;
+        let open = {
+            let st = self.state.read().await;
+            st.docs.get(&uri).map(|d| (d.kind, d.low.sniff_family()))
+        };
+        let (own, family) = match open {
+            Some(known) => known,
+            None => {
+                let path = uri
+                    .as_path()
+                    .ok_or_else(|| invalid(format!("not a file: {}", params.uri)))?;
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| invalid(format!("cannot read {}: {e}", path.display())))?;
+                let low = suspect_low::LowDoc::parse(
+                    uri.clone(),
+                    suspect_source::Source::from_vec(bytes),
+                );
+                (DocKind::of(&uri, &low), low.sniff_family())
+            }
+        };
+        let kind = self.doc_kind(&uri, Some(own)).await;
+        Ok(protocol::DocumentKindResult {
+            kind: kind.as_str().to_owned(),
+            version: state::family_version(family).map(str::to_owned),
+        })
+    }
+
+    /// What `uri` is: its own kind (an open document's, or `own` for one
+    /// that is not open), with a family-less document refined to
+    /// `Fragment` when it belongs to a loaded spec.
+    async fn doc_kind(&self, uri: &Uri, own: Option<DocKind>) -> DocKind {
+        let own = match own {
+            Some(kind) => kind,
+            None => match self.state.read().await.docs.get(uri) {
+                Some(doc) => doc.kind,
+                None => return DocKind::None,
+            },
+        };
+        if own != DocKind::None {
+            return own;
+        }
+        let Some(ws) = self.workspace_for(uri).await else {
+            return DocKind::None;
+        };
+        let cached = self.state.read().await.cached_fragments(&ws);
+        let index = match cached {
+            Some(index) => index,
+            None => {
+                // Built without the lock, like the reference index.
+                let root = self.state.read().await.root.clone();
+                let built = Arc::new(FragmentIndex::build(&ws, root.as_deref()));
+                self.state.write().await.store_fragments(&ws, built.clone());
+                built
+            }
+        };
+        index.kind_of(uri, own)
+    }
+
+    /// Whether the document features answer for `uri`. Diagnostics, lenses,
+    /// inlay hints and semantic tokens are already empty for a family-less
+    /// document; formatting, hover, completion, code actions, symbols and
+    /// links check this, so `docker-compose.yml` is left alone.
+    async fn serves(&self, uri: &Uri) -> bool {
+        self.doc_kind(uri, None).await.is_served()
+    }
+
     async fn run_workflow_request(
         &self,
         params: run_lenses::RunWorkflowParams,
@@ -3070,8 +3354,19 @@ impl Backend {
         }
         #[cfg(feature = "live-run")]
         {
-            let init_options = self.state.read().await.pending_init_options.clone();
-            let base = base_url(init_options.as_ref());
+            // `test.base_url` for this document: the editor's
+            // `suspect.test.baseUrl`, `SUSPECT_BASE_URL`,
+            // the manifest, then `.suspect.yaml` — what `suspect test` uses.
+            let base = self
+                .state
+                .read()
+                .await
+                .resolved
+                .for_uri(&uri)
+                .settings
+                .test
+                .base_url
+                .clone();
             let transport = run_lenses::ReqwestTransport::new();
 
             self.progress_begin(
@@ -3174,13 +3469,6 @@ impl Backend {
     }
 }
 
-/// Base URL for live runs: initialization options, then `SUSPECT_BASE_URL`,
-/// then the default local address.
-#[cfg(feature = "live-run")]
-fn base_url(init_options: Option<&serde_json::Value>) -> String {
-    run_lenses::base_url_from_options(init_options)
-}
-
 /// Runs the language server over stdio until the client disconnects.
 ///
 /// Builds an [`LspService`] wrapping the private `Backend` server
@@ -3232,6 +3520,14 @@ async fn service() -> (LspService<Backend>, tower_lsp::ClientSocket) {
         .custom_method(
             <render_sdk::RenderSdkRequest as tower_lsp::lsp_types::request::Request>::METHOD,
             Backend::render_sdk_request,
+        )
+        .custom_method(
+            <protocol::DocumentKindRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::document_kind_request,
+        )
+        .custom_method(
+            <protocol::ExplainConfigRequest as tower_lsp::lsp_types::request::Request>::METHOD,
+            Backend::explain_config_request,
         )
         .finish()
 }
@@ -4100,6 +4396,244 @@ components:
             .as_str()
             .expect("markdown string");
         assert!(value.contains("### `Pet`"), "card frame missing: {value}");
+
+        answering.abort();
+    }
+
+    /// Configuration reaches the server from three places, and all three
+    /// must re-derive the policy the same way: `initialized` (a pull),
+    /// `didChangeConfiguration` (whose payload VS Code sends as `null`, so
+    /// the server must re-pull), and a configuration file changing on disk
+    /// (`didChangeWatchedFiles`, which used to drop only the workspace).
+    /// `workspace/diagnostic` honours the severity floor like the push and
+    /// document-pull paths. VS Code merges the workspace report into the
+    /// Problems panel, so an unfiltered report re-added every warning a
+    /// `lint.min_severity: error` policy suppressed.
+    #[tokio::test]
+    async fn the_workspace_report_applies_the_severity_floor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join(".suspect.yaml"),
+            "lint:\n  min_severity: error\n",
+        )
+        .expect("write");
+        let spec = dir.path().join("openapi.yaml");
+        let text = spec_with_refs(2);
+        std::fs::write(&spec, &text).expect("write");
+        let uri = Url::from_file_path(&spec).expect("file url");
+
+        let (mut service, socket) = service().await;
+        let draining = tokio::spawn(async move {
+            use futures::{SinkExt, StreamExt};
+            let mut socket = socket;
+            while let Some(request) = socket.next().await {
+                if let Some(id) = request.id().cloned() {
+                    socket
+                        .send(tower_lsp::jsonrpc::Response::from_ok(
+                            id,
+                            serde_json::Value::Null,
+                        ))
+                        .await
+                        .ok();
+                }
+            }
+        });
+        in_flight(
+            &mut service,
+            1,
+            "initialize",
+            serde_json::json!({
+                "processId": null,
+                "rootUri": format!("file://{}", dir.path().display()),
+                "capabilities": {},
+            }),
+        )
+        .await
+        .expect("initialize answered");
+        let _ = in_flight(&mut service, 0, "initialized", serde_json::json!({})).await;
+        let _ = in_flight(
+            &mut service,
+            0,
+            "textDocument/didOpen",
+            serde_json::json!({"textDocument": {
+                "uri": uri.as_str(), "languageId": "yaml", "version": 1, "text": text,
+            }}),
+        )
+        .await;
+
+        let answer = in_flight(
+            &mut service,
+            2,
+            "workspace/diagnostic",
+            serde_json::json!({
+                "previousResultIds": [],
+            }),
+        )
+        .await
+        .expect("workspace/diagnostic answered");
+        let report = answer.result().expect("a report").clone();
+        let severities: Vec<u64> = report["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .flat_map(|item| item["items"].as_array().cloned().unwrap_or_default())
+            .filter_map(|diagnostic| diagnostic["severity"].as_u64())
+            .collect();
+        assert!(
+            severities.iter().all(|&severity| severity == 1),
+            "below-floor findings in the workspace report: {severities:?}"
+        );
+        draining.abort();
+    }
+
+    #[tokio::test]
+    async fn configuration_reloads_from_pulls_and_from_disk() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let conf = dir.path().join(".suspect.yaml");
+        std::fs::write(&conf, "lint:\n  min_severity: warning\n").expect("write");
+        std::fs::write(dir.path().join("openapi.yaml"), spec_with_refs(1)).expect("write");
+
+        let (mut service, socket) = service().await;
+        // What the client answers `workspace/configuration` with, changed
+        // as the test goes; and the watchers the server registers.
+        let answer = Arc::new(std::sync::Mutex::new(serde_json::Value::Null));
+        let watchers = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let answering = tokio::spawn({
+            let answer = Arc::clone(&answer);
+            let watchers = Arc::clone(&watchers);
+            async move {
+                use futures::{SinkExt, StreamExt};
+                let mut socket = socket;
+                while let Some(request) = socket.next().await {
+                    let result = match request.method() {
+                        "workspace/configuration" => {
+                            serde_json::json!([answer.lock().unwrap().clone()])
+                        }
+                        "client/registerCapability" => {
+                            let globs = request
+                                .params()
+                                .and_then(|p| {
+                                    p["registrations"][0]["registerOptions"]["watchers"]
+                                        .as_array()
+                                        .cloned()
+                                })
+                                .unwrap_or_default();
+                            watchers.lock().unwrap().extend(
+                                globs
+                                    .iter()
+                                    .filter_map(|w| w["globPattern"].as_str().map(str::to_owned)),
+                            );
+                            serde_json::Value::Null
+                        }
+                        _ => serde_json::Value::Null,
+                    };
+                    if let Some(id) = request.id().cloned() {
+                        socket
+                            .send(tower_lsp::jsonrpc::Response::from_ok(id, result))
+                            .await
+                            .ok();
+                    }
+                }
+            }
+        });
+
+        in_flight(
+            &mut service,
+            1,
+            "initialize",
+            serde_json::json!({
+                "processId": null,
+                "rootUri": format!("file://{}", dir.path().display()),
+                "capabilities": {"workspace": {
+                    "configuration": true,
+                    "didChangeWatchedFiles": {"dynamicRegistration": true},
+                }},
+            }),
+        )
+        .await
+        .expect("initialize answered");
+        let _ = in_flight(&mut service, 0, "initialized", serde_json::json!({})).await;
+
+        async fn floor(service: &LspService<Backend>) -> DiagnosticSeverity {
+            let settings = service
+                .inner()
+                .state
+                .read()
+                .await
+                .resolved
+                .workspace()
+                .settings
+                .clone();
+            config_files::floor(&settings)
+        }
+        assert_eq!(floor(&service).await, DiagnosticSeverity::WARNING);
+        {
+            let globs = watchers.lock().unwrap();
+            for name in config_file_names() {
+                assert!(
+                    globs.contains(&format!("**/{name}")),
+                    "no watcher for {name}: {globs:?}"
+                );
+            }
+        }
+
+        // The file changes on disk: the floor follows without a restart.
+        std::fs::write(&conf, "lint:\n  min_severity: error\n").expect("write");
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeWatchedFiles",
+            serde_json::json!({"changes": [
+                {"uri": format!("file://{}", conf.display()), "type": 2},
+            ]}),
+        )
+        .await;
+        assert_eq!(
+            floor(&service).await,
+            DiagnosticSeverity::ERROR,
+            "an edited .suspect.yaml must reload"
+        );
+
+        // The client's setting changes; VS Code's notification carries no
+        // settings, so the new value is only reachable by pulling.
+        *answer.lock().unwrap() = serde_json::json!({"lint": {"minSeverity": "information"}});
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeConfiguration",
+            serde_json::json!({"settings": null}),
+        )
+        .await;
+        assert_eq!(
+            floor(&service).await,
+            DiagnosticSeverity::INFORMATION,
+            "didChangeConfiguration must re-pull workspace/configuration"
+        );
+
+        // A disk reload keeps the client layer on top of the file.
+        std::fs::write(&conf, "lint:\n  min_severity: warning\n").expect("write");
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeWatchedFiles",
+            serde_json::json!({"changes": [
+                {"uri": format!("file://{}", conf.display()), "type": 2},
+            ]}),
+        )
+        .await;
+        assert_eq!(floor(&service).await, DiagnosticSeverity::INFORMATION);
+
+        // The setting is reset to VS Code's blank default: the committed
+        // file's floor applies again.
+        *answer.lock().unwrap() = serde_json::json!({"lint": {"minSeverity": ""}});
+        let _ = in_flight(
+            &mut service,
+            0,
+            "workspace/didChangeConfiguration",
+            serde_json::json!({"settings": null}),
+        )
+        .await;
+        assert_eq!(floor(&service).await, DiagnosticSeverity::WARNING);
 
         answering.abort();
     }

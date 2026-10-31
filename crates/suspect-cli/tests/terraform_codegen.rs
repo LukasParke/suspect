@@ -18,6 +18,83 @@ fn fixture(root: &Path) {
     }
 }
 
+/// Writes `from` (JSON) as block-style YAML at `to`.
+fn yaml_copy(root: &Path, from: &str, to: &str) {
+    let doc = suspect_low::LowDoc::parse(
+        Uri::parse("mem://fixture.json").unwrap(),
+        suspect_source::Source::from_vec(std::fs::read(root.join(from)).unwrap()),
+    );
+    let yaml = suspect_overlay::Value::from_node(doc.root()).to_yaml();
+    assert!(!yaml.trim_start().starts_with('{'), "{yaml}");
+    std::fs::write(root.join(to), yaml).unwrap();
+}
+
+#[test]
+fn yaml_mapping_and_target_config_generate_what_json_does() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    fixture(root);
+    yaml_copy(root, "mapping.json", "mapping.yaml");
+    yaml_copy(root, "target.json", "target.yml");
+    let from_json = generate(root, &[], 0);
+    let from_yaml = run(
+        root,
+        &[
+            "gen",
+            "terraform",
+            "openapi.json",
+            "--mapping",
+            "mapping.yaml",
+            "--target-config",
+            "target.yml",
+            "--output",
+            "generated-yaml",
+            "--format",
+            "json",
+        ],
+        0,
+    );
+    assert_eq!(from_yaml["status"], "generated");
+    assert_eq!(from_yaml["operations"], from_json["operations"]);
+    assert_eq!(from_yaml["sdkDependency"], from_json["sdkDependency"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join("generated-yaml/terraform/go.mod")).ok(),
+        std::fs::read_to_string(root.join("generated/terraform/go.mod")).ok()
+    );
+
+    // A schema error in YAML names the field, without a position in the
+    // converted JSON text.
+    std::fs::write(root.join("bad.yaml"), "unexpected_key: 1\n").unwrap();
+    let rejected = run(
+        root,
+        &[
+            "gen",
+            "terraform",
+            "openapi.json",
+            "--mapping",
+            "mapping.yaml",
+            "--target-config",
+            "bad.yaml",
+            "--output",
+            "generated-bad",
+            "--format",
+            "json",
+        ],
+        1,
+    );
+    let finding = rejected["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["code"] == "terraform-target-input")
+        .unwrap_or_else(|| panic!("{rejected:#?}"));
+    assert!(finding["file"].as_str().unwrap().ends_with("bad.yaml"));
+    assert_eq!(finding["line"], 1);
+    let message = finding["message"].as_str().unwrap();
+    assert!(message.contains("unexpected_key"), "{message}");
+    assert!(!message.contains(" at line "), "{message}");
+}
+
 fn run(root: &Path, args: &[&str], expected: i32) -> Value {
     let output = Command::new(env!("CARGO_BIN_EXE_suspect"))
         .current_dir(root)
@@ -36,13 +113,14 @@ fn run(root: &Path, args: &[&str], expected: i32) -> Value {
 
 fn generate(root: &Path, extra: &[&str], expected: i32) -> Value {
     let mut args = vec![
-        "codegen-terraform",
+        "gen",
+        "terraform",
         "openapi.json",
         "--mapping",
         "mapping.json",
         "--target-config",
         "target.json",
-        "--out",
+        "--output",
         "generated",
         "--format",
         "json",
@@ -56,7 +134,7 @@ fn explicit_lifecycle_cli_preserves_sdk_dependency_identity_and_owned_outputs() 
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     fixture(root);
-    let profiles = run(root, &["codegen-profiles", "--format", "json"], 0);
+    let profiles = run(root, &["gen", "profiles", "--format", "json"], 0);
     assert_eq!(profiles["profiles"].as_array().unwrap().len(), 12);
     assert!(
         profiles["profiles"]
@@ -201,7 +279,8 @@ fn cache_only_provider_generation_retains_physical_sources_after_entry_removal()
     std::fs::remove_file(root.join("openapi.json")).unwrap();
     std::fs::remove_file(root.join("schemas.json")).unwrap();
     let args = [
-        "codegen-terraform",
+        "gen",
+        "terraform",
         "--pins",
         "pins.json",
         "--cache-dir",
@@ -210,7 +289,7 @@ fn cache_only_provider_generation_retains_physical_sources_after_entry_removal()
         "mapping.json",
         "--target-config",
         "target.json",
-        "--out",
+        "--output",
         "generated",
         "--format",
         "json",

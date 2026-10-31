@@ -11,7 +11,7 @@ spec=importlib.util.spec_from_file_location("terraform_acceptance",Path(__file__
 
 def main():
     p=argparse.ArgumentParser();p.add_argument("--root",type=Path,required=True);p.add_argument("--evidence",type=Path,required=True);args=p.parse_args()
-    root=args.root.resolve();evidence=args.evidence.resolve();run=helpers.Runner(evidence)
+    root=args.root.resolve();evidence=args.evidence.resolve();helpers.require_terraform();run=helpers.Runner(evidence)
     report={"format":"suspect.terraform.module-boundaries.v1","passed":False,"native_root":str(root),"scope":"native package lookup through pinned generated SDK ZIPs; no go.mod edits, SDK replacements, publishing or API requests"}
     try:
         shared=helpers.APPROVED/"sdk-terraform-dependency-cache-20260910-01"

@@ -1,5 +1,5 @@
-//! Configuration plumbing (`workspace/configuration`, initialization
-//! options) plus pure-computation helpers for workspace file operations
+//! Configuration resolution for documents (client settings layered over
+//! the files `suspect_config` discovers) plus pure-computation helpers for workspace file operations
 //! (`workspace/willRenameFiles`, `didRenameFiles`, `willDeleteFiles`,
 //! `willCreateFiles`).
 //!
@@ -15,8 +15,9 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
-use std::sync::LazyLock;
+use suspect_config::{Resolved, Settings};
 
 use suspect_ref::{ParsedRef, Workspace};
 use suspect_source::Uri;
@@ -31,356 +32,140 @@ use crate::state::lsp_range;
 // Configuration
 // ---------------------------------------------------------------------------
 
-/// Lint section: ruleset selection and per-rule severity overrides.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct LintCfg {
-    /// Rule id → severity name (`error`, `warn`, `info`, `off`) overriding
-    /// the severity a rule would otherwise produce.
-    pub rules: HashMap<String, String>,
-    /// Severity for design-class rules — findings the document cannot
-    /// fix without misdocumenting the API (`error`..`hint`, or `off`).
-    /// A per-rule entry in `rules` wins over the class.
-    pub design: Option<String>,
-    /// Whether the recommended (spectral-default) ruleset is enabled.
-    /// `None` means "not configured"; [`SuspectConfig::lint_recommended`]
-    /// applies the default.
-    pub recommended: Option<bool>,
-}
-
-/// Ref-workspace section: loading limits mapped onto `WorkspaceBuilder`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct RefCfg {
-    /// Maximum number of documents the ref workspace loads before giving
-    /// up (`suspect.ref.maxDocs`). `None` means unconfigured.
-    pub max_docs: Option<usize>,
-}
-
-/// Inlay-hint section: which hints are shown.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct InlayCfg {
-    /// Whether `$ref` target inlay hints are shown
-    /// (`suspect.inlayHints.refTargets`, also accepted as
-    /// `suspect.inlayHints.refs` — the editor spelling). `None` means
-    /// unconfigured.
-    pub ref_targets: Option<bool>,
-    /// Whether property type-annotation inlay hints are shown
-    /// (`suspect.inlayHints.properties`). `None` means unconfigured.
-    pub properties: Option<bool>,
-}
-
-/// Formatting section: output style knobs.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct FmtCfg {
-    /// Reorder object keys into the canonical OpenAPI order
-    /// (`suspect.formatting.sortKeys`). Defaults to true when the
-    /// formatting section is present without the key and to false when no
-    /// formatting configuration exists at all (config-gated behavior).
-    pub sort_keys: Option<bool>,
-}
-
-/// The `suspect.*` configuration tree as sent by clients and accepted via
-/// initialization options.
+/// The client's settings layers and every configuration resolved under
+/// them, one per discovered settings file.
 ///
-/// Parsing is manual over `serde_json::Value` rather than derived so the
-/// crate needs no direct `serde` dependency; unknown keys and sections are
-/// ignored, making forward-compatible with future fields.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct SuspectConfig {
-    /// Lint configuration (`suspect.lint`).
-    pub lint: Option<LintCfg>,
-    /// Vendor-extension configuration (`suspect.extensions`).
-    pub extensions: Option<crate::extensions_config::ExtensionConfig>,
-    /// Ref-workspace configuration (`suspect.ref`, also accepted as
-    /// `suspect.refs`).
-    pub refs: Option<RefCfg>,
-    /// Inlay-hint configuration (`suspect.inlayHints`).
-    pub inlay_hints: Option<InlayCfg>,
-    /// Formatting configuration (`suspect.formatting`).
-    pub formatting: Option<FmtCfg>,
+/// Each document resolves from its own directory with
+/// [`suspect_config::resolve_found`], the rule `suspect lint` uses, so a
+/// monorepo with per-project `.suspect.yaml` files gets the same answer in
+/// the editor as on the command line. Results are cached per discovered
+/// file; the cache is replaced whenever client settings or a watched
+/// configuration file change.
+#[derive(Debug, Default)]
+pub struct ResolvedCache {
+    /// initializationOptions, then the pulled `suspect` section (wins).
+    editor: Vec<serde_json::Value>,
+    /// Documents without a file path resolve from the workspace root.
+    root: Option<PathBuf>,
+    /// Directory -> what discovery found there.
+    dirs: Mutex<HashMap<PathBuf, CacheKey>>,
+    /// Discovery result -> the resolution and its rejected values.
+    resolved: Mutex<HashMap<CacheKey, Arc<Resolved>>>,
 }
 
-impl SuspectConfig {
-    /// Effective maximum number of loaded documents (default 500).
+/// What discovery found, plus the start directory when nothing configures
+/// it (editor paths then resolve against that directory).
+type CacheKey = (suspect_config::Found, Option<PathBuf>);
+
+impl ResolvedCache {
+    /// A cache for these client layers, lowest first.
     #[must_use]
-    pub fn max_docs(&self) -> usize {
-        self.refs.and_then(|r| r.max_docs).unwrap_or(500)
+    pub fn new(editor: Vec<serde_json::Value>, root: Option<PathBuf>) -> Self {
+        Self {
+            editor,
+            root,
+            ..Self::default()
+        }
     }
 
-    /// Effective `$ref`-target inlay hint toggle (default on).
+    /// The configuration for a document: discovered from its directory,
+    /// else from the workspace root.
     #[must_use]
-    pub fn inlay_ref_targets(&self) -> bool {
-        self.inlay_refs()
+    pub fn for_uri(&self, uri: &Uri) -> Arc<Resolved> {
+        let dir = uri
+            .as_path()
+            .and_then(|p| p.parent().map(Path::to_path_buf));
+        self.for_dir(dir.as_deref().or(self.root.as_deref()))
     }
 
-    /// Effective `$ref`-target inlay hint toggle, reading both spellings
-    /// (`refs` first, then the legacy `refTargets`).
+    /// The configuration for the workspace root (workspace-wide limits).
     #[must_use]
-    pub fn inlay_refs(&self) -> bool {
-        self.inlay_hints.and_then(|i| i.ref_targets).unwrap_or(true)
+    pub fn workspace(&self) -> Arc<Resolved> {
+        self.for_dir(self.root.as_deref())
     }
 
-    /// Effective property type-annotation inlay hint toggle (default on).
+    /// The configuration discovered from `dir`; built-in defaults and the
+    /// client layers when there is no directory.
     #[must_use]
-    pub fn inlay_properties(&self) -> bool {
-        self.inlay_hints.and_then(|i| i.properties).unwrap_or(true)
-    }
-
-    /// Effective canonical key-reordering toggle. Defaults to true when a
-    /// `suspect.formatting` section exists (explicit opt-in to the
-    /// canonical formatter), false when the server is unconfigured —
-    /// format-on-save must never surprise an unconfigured workspace with a
-    /// whole-file reorder.
-    #[must_use]
-    pub fn format_sort_keys(&self) -> bool {
-        self.formatting
-            .map(|f| f.sort_keys.unwrap_or(true))
-            .unwrap_or(false)
-    }
-
-    /// Effective recommended-ruleset toggle (default on).
-    #[must_use]
-    pub fn lint_recommended(&self) -> bool {
-        self.lint
-            .as_ref()
-            .and_then(|l| l.recommended)
-            .unwrap_or(true)
-    }
-
-    /// Per-rule severity overrides; empty when unconfigured.
-    #[must_use]
-    pub fn lint_rules(&self) -> &HashMap<String, String> {
-        static EMPTY: LazyLock<HashMap<String, String>> = LazyLock::new(HashMap::new);
-        self.lint.as_ref().map(|l| &l.rules).unwrap_or(&EMPTY)
-    }
-
-    /// Field-wise merge of two partial configs: set fields of `overlay`
-    /// win, unset fields keep `base`'s values. Sections absent from both
-    /// stay absent.
-    #[must_use]
-    fn overlay(self, overlay: &SuspectConfig) -> SuspectConfig {
-        let lint = match (self.lint, &overlay.lint) {
-            (Some(mut base), Some(o)) => {
-                base.rules = if o.rules.is_empty() {
-                    base.rules
-                } else {
-                    o.rules.clone()
-                };
-                base.design = o.design.clone().or(base.design.take());
-                base.recommended = o.recommended.or(base.recommended);
-                Some(base)
-            }
-            (base, Some(o)) => base.or_else(|| Some(o.clone())),
-            (base, None) => base,
+    pub fn for_dir(&self, dir: Option<&Path>) -> Arc<Resolved> {
+        let start = dir.map_or_else(
+            || std::env::temp_dir().join("suspect-untitled"),
+            Path::to_path_buf,
+        );
+        let key = {
+            let mut dirs = self.dirs.lock().unwrap_or_else(|e| e.into_inner());
+            dirs.entry(start.clone())
+                .or_insert_with(|| {
+                    let found = match dir {
+                        Some(dir) => suspect_config::discover::discover(dir),
+                        None => suspect_config::Found::default(),
+                    };
+                    let unconfigured = found.config.is_none() && found.manifest.is_none();
+                    (found, unconfigured.then(|| start.clone()))
+                })
+                .clone()
         };
-        let refs = match (self.refs, overlay.refs) {
-            (Some(base), Some(o)) => Some(RefCfg {
-                max_docs: o.max_docs.or(base.max_docs),
-            }),
-            (base, Some(o)) => base.or(Some(o)),
-            (base, None) => base,
-        };
-        let inlay_hints = match (self.inlay_hints, overlay.inlay_hints) {
-            (Some(base), Some(o)) => Some(InlayCfg {
-                ref_targets: o.ref_targets.or(base.ref_targets),
-                properties: o.properties.or(base.properties),
-            }),
-            (base, Some(o)) => base.or(Some(o)),
-            (base, None) => base,
-        };
-        let formatting = match (self.formatting, overlay.formatting) {
-            (Some(base), Some(o)) => Some(FmtCfg {
-                sort_keys: o.sort_keys.or(base.sort_keys),
-            }),
-            (base, Some(o)) => base.or(Some(o)),
-            (base, None) => base,
-        };
-        SuspectConfig {
-            lint,
-            refs,
-            inlay_hints,
-            formatting,
-            extensions: self.extensions.clone().or(overlay.extensions.clone()),
-        }
+        let mut resolved = self.resolved.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(resolved.entry(key.clone()).or_insert_with(|| {
+            let editor: Vec<&serde_json::Value> = self.editor.iter().collect();
+            let inputs = suspect_config::Inputs {
+                editor: &editor,
+                ..suspect_config::Inputs::default()
+            };
+            let start = key.1.clone().unwrap_or(start);
+            Arc::new(
+                suspect_config::resolve_found(&start, key.0.clone(), inputs)
+                    .unwrap_or_else(|error| *error.resolved),
+            )
+        }))
+    }
+
+    /// Every rejected value in the resolutions made so far, one line each,
+    /// deduplicated.
+    #[must_use]
+    pub fn problems(&self) -> Vec<String> {
+        self.notices(|r| &r.errors)
+    }
+
+    /// Every deprecation and unknown key in the resolutions made so far.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        self.notices(|r| &r.warnings)
+    }
+
+    fn notices(&self, pick: impl Fn(&Resolved) -> &Vec<suspect_config::Notice>) -> Vec<String> {
+        let resolved = self.resolved.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<String> = resolved
+            .values()
+            .flat_map(|r| pick(r).iter())
+            .map(ToString::to_string)
+            .collect();
+        out.sort();
+        out.dedup();
+        out
     }
 }
 
-/// Parses a `suspect` config object out of a raw JSON value.
-///
-/// Accepts either the section itself or a wrapper object containing it
-/// under `suspect` (the shape `initialization_options` typically uses).
-/// Returns `None` when neither shape is present or the value is not an
-/// object.
+/// The severity floor a document's settings name, as an LSP severity.
 #[must_use]
-pub fn parse_config(value: &serde_json::Value) -> Option<SuspectConfig> {
-    let obj = value.get("suspect").unwrap_or(value).as_object()?;
-    let lint = obj.get("lint").map(|v| LintCfg {
-        rules: v
-            .get("rules")
-            .and_then(|r| r.as_object())
-            .map(|m| {
-                m.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_owned())))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        design: v
-            .get("design")
-            .and_then(serde_json::Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(str::to_owned),
-        recommended: v.get("recommended").and_then(serde_json::Value::as_bool),
-    });
-    // The spec spells the section `ref`; accept `refs` as an alias.
-    let refs_json = obj.get("ref").or_else(|| obj.get("refs"));
-    let refs = refs_json.map(|v| RefCfg {
-        max_docs: v
-            .get("maxDocs")
-            .or_else(|| v.get("max_docs"))
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|n| usize::try_from(n).ok()),
-    });
-    // The client section spells it `inlayHints`; the settings file and
-    // the manifest's editor section spell it `inlay_hints`.
-    let inlay_json = obj.get("inlayHints").or_else(|| obj.get("inlay_hints"));
-    let inlay_hints = inlay_json.map(|v| {
-        let refs = v
-            .get("refs")
-            .or_else(|| v.get("refTargets"))
-            .or_else(|| v.get("ref_targets"))
-            .and_then(serde_json::Value::as_bool);
-        InlayCfg {
-            ref_targets: refs,
-            properties: v.get("properties").and_then(serde_json::Value::as_bool),
-        }
-    });
-    let extensions = obj
-        .get("extensions")
-        .map(crate::extensions_config::ExtensionConfig::from_value);
-    let formatting = obj.get("formatting").map(|v| FmtCfg {
-        sort_keys: v
-            .get("sortKeys")
-            .or_else(|| v.get("sort_keys"))
-            .and_then(serde_json::Value::as_bool),
-    });
-    Some(SuspectConfig {
-        lint,
-        refs,
-        inlay_hints,
-        formatting,
-        extensions,
-    })
+pub fn floor(settings: &Settings) -> DiagnosticSeverity {
+    use suspect_config::SeverityName;
+    match settings.lint.floor() {
+        SeverityName::Error => DiagnosticSeverity::ERROR,
+        SeverityName::Warning => DiagnosticSeverity::WARNING,
+        SeverityName::Info => DiagnosticSeverity::INFORMATION,
+        SeverityName::Hint | SeverityName::Off => DiagnosticSeverity::HINT,
+    }
 }
 
-/// The committed policy layers under client settings: the project
-/// manifest's policy sections beneath the workspace `.suspect.yaml`.
-///
-/// One schema serves both files — the manifest's `editor` section is
-/// unwrapped to the same top-level keys the settings file uses — and
-/// `.suspect.yaml` wins wherever both carry a value. Client settings
-/// still win over both; this is the base they land on.
+/// The configured vendor extensions over the built-in registry.
 #[must_use]
-pub fn file_layers(root: Option<&std::path::Path>) -> SuspectConfig {
-    let manifest = root.map(read_manifest_policy).unwrap_or_default();
-    let settings = root.map(read_settings_value).unwrap_or_default();
-    // Layer: settings file over manifest (both as initialization-style
-    // documents, so `merge` applies the same precedence the client does).
-    merge(settings, None, parse_config(&manifest).unwrap_or_default())
-}
-
-/// The manifest's `lint`/`validate` policy plus its `editor` section
-/// unwrapped to top-level keys, as a `suspect`-shaped JSON document.
-#[must_use]
-fn read_manifest_policy(root: &std::path::Path) -> serde_json::Value {
-    let dir = if root.is_dir() {
-        root.to_path_buf()
-    } else {
-        root.parent().map_or_else(
-            || std::path::PathBuf::from("."),
-            std::path::Path::to_path_buf,
-        )
-    };
-    let text = std::fs::read_to_string(dir.join("suspect.project.json")).ok();
-    let value: Option<serde_json::Value> = text.and_then(|t| serde_json::from_str(&t).ok());
-    let Some(value) = value else {
-        return serde_json::Value::Null;
-    };
-    let mut out = serde_json::Map::new();
-    for key in ["lint", "validate"] {
-        if let Some(section) = value.get(key) {
-            out.insert(key.to_owned(), section.clone());
-        }
-    }
-    // The editor section is the manifest's home for the knobs the client
-    // settings carry under `suspect.*`: unwrap so both files use the
-    // same top-level spellings.
-    if let Some(editor) = value.get("editor").and_then(|e| e.as_object()) {
-        for (key, section) in editor {
-            if key == "inlay_hints"
-                || key == "inlayHints"
-                || key == "ref"
-                || key == "refs"
-                || key == "formatting"
-            {
-                out.insert(key.clone(), section.clone());
-            }
-        }
-    }
-    serde_json::Value::Object(out)
-}
-
-/// The workspace `.suspect.yaml` as a `suspect`-shaped JSON document.
-/// The file's keys are already the top-level spellings; the parse only
-/// strips YAML into JSON.
-#[must_use]
-fn read_settings_value(root: &std::path::Path) -> Option<serde_json::Value> {
-    let dir = if root.is_dir() {
-        root.to_path_buf()
-    } else {
-        root.parent().map_or_else(
-            || std::path::PathBuf::from("."),
-            std::path::Path::to_path_buf,
-        )
-    };
-    let mut current = Some(dir);
-    while let Some(dir) = current {
-        for name in suspect_config::CONFIG_NAMES {
-            let candidate = dir.join(name);
-            if let Ok(text) = std::fs::read_to_string(&candidate) {
-                let uri = suspect_source::Uri::from_path(&candidate).ok()?;
-                let doc = suspect_low::LowDoc::parse(
-                    uri,
-                    suspect_source::Source::from_vec(text.into_bytes()),
-                );
-                let json = suspect_overlay::Value::from_node(doc.root()).to_json();
-                return serde_json::from_str(&json).ok();
-            }
-        }
-        current = dir.parent().map(std::path::Path::to_path_buf);
-    }
-    None
-}
-
-/// Merges the three configuration sources into one effective config.
-///
-/// Precedence (highest wins): the client-provided `client_section`
-/// (from `workspace/configuration` / `didChangeConfiguration`), then
-/// `initialization_options` parsed via [`parse_config`], then `base`.
-/// Merging happens per leaf field, so a client that only sets
-/// `lint.rules` keeps every other configured value intact.
-#[must_use]
-pub fn merge(
-    initialization_options: Option<serde_json::Value>,
-    client_section: Option<SuspectConfig>,
-    base: SuspectConfig,
-) -> SuspectConfig {
-    let mut merged = base;
-    if let Some(init) = initialization_options.as_ref().and_then(parse_config) {
-        merged = merged.overlay(&init);
-    }
-    if let Some(client) = client_section.as_ref() {
-        merged = merged.overlay(client);
-    }
-    merged
+pub fn extensions(settings: &Settings) -> crate::extensions_config::ExtensionConfig {
+    settings
+        .extensions
+        .as_ref()
+        .map(crate::extensions_config::ExtensionConfig::from_value)
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -736,51 +521,6 @@ fn build_edit(
     })
 }
 
-/// Applies [`SuspectConfig`] to a computed diagnostic battery:
-///
-/// * `lint.recommended = false` drops every `suspect-lint` finding.
-/// * `lint.rules.<id> = severity` remaps the severity of diagnostics whose
-///   code matches `<id>`; `off` drops them. Markdown battery codes share
-///   the same namespace, so one per-rule entry covers both.
-///
-/// Lint findings from the spectral battery carry their committed policy
-/// already (a per-rule entry wins over `lint.design`); this pass is
-/// idempotent for them and is the only pass the markdown battery gets.
-#[must_use]
-pub fn apply_config(diags: Vec<Diagnostic>, cfg: &SuspectConfig) -> Vec<Diagnostic> {
-    let lint_on = cfg.lint_recommended();
-    let rules = cfg
-        .lint
-        .as_ref()
-        .map(|l| l.rules.clone())
-        .unwrap_or_default();
-    diags
-        .into_iter()
-        .filter(|d| lint_on || d.source.as_deref() != Some(crate::diagnostics::SOURCE_LINT))
-        .filter_map(|mut d| {
-            if let Some(NumberOrString::String(code)) = &d.code
-                && let Some(name) = rules.get(code)
-            {
-                match suspect_lint::Severity::from_policy(name) {
-                    Some(suspect_lint::Severity::Off) => return None,
-                    Some(severity) => {
-                        d.severity = match severity {
-                            suspect_lint::Severity::Error => Some(DiagnosticSeverity::ERROR),
-                            suspect_lint::Severity::Warn => Some(DiagnosticSeverity::WARNING),
-                            suspect_lint::Severity::Info => Some(DiagnosticSeverity::INFORMATION),
-                            suspect_lint::Severity::Hint | suspect_lint::Severity::Off => {
-                                Some(DiagnosticSeverity::HINT)
-                            }
-                        };
-                    }
-                    None => {}
-                }
-            }
-            Some(d)
-        })
-        .collect()
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -879,77 +619,51 @@ components:
     // ----- configuration -----
 
     #[test]
-    fn parse_reads_direct_and_wrapped_sections() {
-        let direct = serde_json::json!({
-            "lint": {"recommended": false, "rules": {"info-contact": "warn"}},
-            "ref": {"maxDocs": 50},
-            "inlayHints": {"refTargets": false, "properties": false},
-            "formatting": {"sortKeys": true}
-        });
-        let cfg = parse_config(&direct).unwrap();
-        assert_eq!(cfg.max_docs(), 50);
-        assert!(!cfg.inlay_refs());
-        assert!(!cfg.inlay_properties());
-        assert!(!cfg.lint_recommended());
-        assert_eq!(cfg.lint_rules()["info-contact"], "warn");
-
-        let wrapped = serde_json::json!({"suspect": {"refs": {"maxDocs": 7}}});
-        assert_eq!(parse_config(&wrapped).unwrap().max_docs(), 7);
-
-        assert!(parse_config(&serde_json::json!("nope")).is_none());
-        assert!(parse_config(&serde_json::Value::Null).is_none());
+    fn documents_resolve_from_their_own_directory() {
+        let dir = tempfile();
+        write(&dir, ".suspect.yaml", "lint:\n  min_severity: warning\n");
+        write(&dir, "api/.suspect.yaml", "lint:\n  min_severity: error\n");
+        let client = serde_json::json!({"suspect": {"ref": {"maxDocs": 7}}});
+        let cache = ResolvedCache::new(vec![client], Some(dir.clone()));
+        let uri =
+            |name: &str| Uri::parse(Url::from_file_path(dir.join(name)).unwrap().as_str()).unwrap();
+        let top = cache.for_uri(&uri("openapi.yaml"));
+        let api = cache.for_uri(&uri("api/openapi.yaml"));
+        assert_eq!(top.settings.lint.min_severity.as_deref(), Some("warning"));
+        assert_eq!(api.settings.lint.min_severity.as_deref(), Some("error"));
+        assert_eq!(floor(&api.settings), DiagnosticSeverity::ERROR);
+        assert_eq!(
+            api.settings.refs.max_docs, 7,
+            "client layers apply to every document"
+        );
+        assert!(
+            Arc::ptr_eq(&top, &cache.workspace()),
+            "cached per settings file"
+        );
     }
 
     #[test]
-    fn merge_precedence_client_over_init_over_base() {
-        let base = SuspectConfig {
-            refs: Some(RefCfg {
-                max_docs: Some(500),
-            }),
-            inlay_hints: Some(InlayCfg {
-                ref_targets: Some(true),
-                properties: Some(true),
-            }),
-            lint: Some(LintCfg {
-                rules: HashMap::from([("old-rule".into(), "off".into())]),
-                design: None,
-                recommended: Some(true),
-            }),
-            formatting: Some(FmtCfg {
-                sort_keys: Some(true),
-            }),
-            extensions: None,
-        };
-        let init = serde_json::json!({
-            "ref": {"maxDocs": 100},
-            "inlayHints": {"refTargets": false}
-        });
-        let client = parse_config(&serde_json::json!({
-            "lint": {"rules": {"new-rule": "warn"}}
-        }))
-        .unwrap();
-
-        let merged = merge(Some(init), Some(client), base);
-        // client wins over init and base
-        assert_eq!(merged.lint_rules()["new-rule"], "warn");
-        // init fills what client leaves unset
-        assert_eq!(merged.max_docs(), 100);
-        assert!(!merged.inlay_ref_targets());
-        // base survives where upper layers are silent
-        assert!(merged.format_sort_keys());
-        assert!(merged.lint_recommended());
-        // base rules kept when client adds others? No: leaf-level override
-        assert_eq!(merged.lint_rules().get("old-rule"), None);
-    }
-
-    #[test]
-    fn merge_with_nothing_set_keeps_base_defaults() {
-        let merged = merge(None, None, SuspectConfig::default());
-        assert_eq!(merged.max_docs(), 500);
-        assert!(merged.inlay_refs());
-        assert!(merged.inlay_properties());
-        assert!(merged.lint_recommended());
-        assert!(merged.lint_rules().is_empty());
+    fn rejected_values_are_problems_and_the_rest_applies() {
+        let dir = tempfile();
+        write(
+            &dir,
+            ".suspect.yaml",
+            "lint:\n  min_severity: fatal\n  rules:\n    info-contact: loud\n    info-license: warn\n",
+        );
+        let cache = ResolvedCache::new(Vec::new(), Some(dir.clone()));
+        let resolved = cache.workspace();
+        assert_eq!(floor(&resolved.settings), DiagnosticSeverity::HINT);
+        assert_eq!(resolved.settings.lint.rules["info-license"], "warning");
+        let problems = cache.problems();
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(
+            problems[0].contains("`lint.min_severity`: unrecognized severity `fatal`"),
+            "{problems:?}"
+        );
+        assert!(
+            problems[1].contains("`lint.rules.info-contact`: unrecognized severity `loud`"),
+            "{problems:?}"
+        );
     }
 
     // ----- will_rename_files -----

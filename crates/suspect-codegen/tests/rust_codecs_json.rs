@@ -1,6 +1,6 @@
 //! Standalone native checks for the generated, dependency-free Rust JSON runtime.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -183,10 +183,7 @@ fn prioritized_openrouter_payload_examples_roundtrip_exactly() {
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT; missing tracked inputs fail"]
 fn all_tracked_openrouter_documents_roundtrip_against_json_value_oracle() {
-    let root = PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT")
-            .expect("set OPENROUTER_WEB_ROOT to the tracked source checkout"),
-    );
+    let root = suspect_codegen::test_inputs::openrouter_root();
     for relative in [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",

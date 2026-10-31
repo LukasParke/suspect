@@ -9,10 +9,10 @@ use crate::transports::{CannedTransport, Match, ReplayTransport};
 use bytes::Bytes;
 use serde_json::Value;
 use std::sync::Arc;
+use suspect_arazzo::rex::Rex;
 use suspect_journal::{Body, CassetteEntry};
 use suspect_low::LowDoc;
 use suspect_ref::WorkspaceBuilder;
-use suspect_rex::Rex;
 use suspect_source::Source;
 
 use std::collections::BTreeMap;
@@ -2136,7 +2136,7 @@ fn transport_errors_classify_by_prefix_then_heuristics() {
 
 #[test]
 fn rex_parses_workflow_output_expressions() {
-    use suspect_rex::parse_rex;
+    use suspect_arazzo::rex::parse_rex;
     assert_eq!(
         parse_rex("$workflows.seed.outputs.token").unwrap(),
         Rex::Workflows {
@@ -2365,7 +2365,7 @@ async fn cross_workflow_step_depends_on_orders_the_workflows() {
 }
 
 /// When the prerequisite step fails, or its workflow is not part of the
-/// run (`suspect test --workflow use-pet`), the dependent step can never
+/// run (`suspect test run --workflow use-pet`), the dependent step can never
 /// become ready: it fails with a diagnosis naming the missing step instead
 /// of being skipped silently or hanging.
 #[tokio::test(flavor = "multi_thread")]

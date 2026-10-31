@@ -23,7 +23,7 @@ use suspect_codegen::{
 };
 use suspect_ir::contract::Contract;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// Ownership identity of one Go/Cobra API CLI application root.
 pub const CLI_OWNER: &str = "suspect-cli-app:lifecycle-v1";
@@ -42,12 +42,12 @@ pub enum Target {
 }
 
 impl Target {
-    /// Subcommand name, also the diagnostic-code and report discriminator.
+    /// Command path, also the report discriminator.
     #[must_use]
     pub const fn command(self) -> &'static str {
         match self {
-            Self::Cli => "codegen-cli",
-            Self::Mcp => "codegen-mcp",
+            Self::Cli => "gen cli",
+            Self::Mcp => "gen mcp",
         }
     }
 
@@ -127,22 +127,24 @@ pub struct ApplicationArgs {
     /// Numeric-loopback origin from an explicitly acquired test manifest.
     #[arg(long, requires = "pins")]
     pub insecure_test_origin: Vec<String>,
-    /// Closed, versioned application surface mapping JSON.
+    /// Closed, versioned application surface mapping (JSON, or YAML by
+    /// `.yaml`/`.yml` extension).
     #[arg(long)]
     pub mapping: PathBuf,
-    /// Package/toolchain identity, credential policy and runtime bounds JSON.
+    /// Package/toolchain identity, credential policy and runtime bounds
+    /// (JSON, or YAML by extension).
     #[arg(long)]
     pub target_config: PathBuf,
     /// Output root owning the application and its embedded generated SDK
-    /// [default: cli-out for codegen-cli, mcp-out for codegen-mcp].
-    #[arg(short, long)]
+    /// [default: cli-out for gen cli, mcp-out for gen mcp].
+    #[arg(short = 'o', long = "output", value_name = "DIR")]
     pub out: Option<PathBuf>,
     /// Read-only ownership/drift check.
     #[arg(long)]
     pub check: bool,
     /// Text output or one structured generation report.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
+    #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
+    pub format: ReportFormat,
 }
 
 impl ApplicationArgs {
@@ -184,10 +186,10 @@ impl Diagnostic {
         }
     }
 
-    fn json(path: &Path, code: String, error: serde_json::Error) -> Self {
+    fn json(path: &Path, code: String, error: super::structured::Located) -> Self {
         let mut finding = Self::file(path, code, &error);
-        finding.line = error.line();
-        finding.col = error.column();
+        finding.line = error.line;
+        finding.col = error.col;
         finding
     }
 
@@ -219,7 +221,7 @@ enum Mapping {
 }
 
 fn parse_inputs(target: Target, args: &ApplicationArgs) -> Result<Mapping, Vec<Diagnostic>> {
-    let mapping = std::fs::read_to_string(&args.mapping).map_err(|error| {
+    let mapping = std::fs::read(&args.mapping).map_err(|error| {
         vec![Diagnostic::file(
             &args.mapping,
             target.code("mapping-input"),
@@ -249,12 +251,14 @@ fn parse_inputs(target: Target, args: &ApplicationArgs) -> Result<Mapping, Vec<D
     };
     Ok(match target {
         Target::Cli => Mapping::Cli(Box::new((
-            api_cli::parse_mapping(&mapping).map_err(mapping_error)?,
-            serde_json::from_slice(&config).map_err(config_error)?,
+            super::structured::parse_with(&args.mapping, &mapping, api_cli::parse_mapping)
+                .map_err(mapping_error)?,
+            super::structured::parse(&args.target_config, &config).map_err(config_error)?,
         ))),
         Target::Mcp => Mapping::Mcp(Box::new((
-            mcp::parse_mapping(&mapping).map_err(mapping_error)?,
-            serde_json::from_slice(&config).map_err(config_error)?,
+            super::structured::parse_with(&args.mapping, &mapping, mcp::parse_mapping)
+                .map_err(mapping_error)?,
+            super::structured::parse(&args.target_config, &config).map_err(config_error)?,
         ))),
     })
 }
@@ -432,7 +436,7 @@ pub fn generate(target: Target, args: ApplicationArgs) -> anyhow::Result<i32> {
         ))
     });
     match args.format {
-        OutputFormat::Json | OutputFormat::Sarif => println!(
+        ReportFormat::Json => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "format":target.report_format(), "profile":target.profile(),
@@ -442,7 +446,7 @@ pub fn generate(target: Target, args: ApplicationArgs) -> anyhow::Result<i32> {
                 "operations":operations, "artifacts":artifacts, "diagnostics":diagnostics,
             }))?
         ),
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for diagnostic in &diagnostics {
                 println!(
                     "{}:{}:{} [{}] {} ({}; mapping {})",

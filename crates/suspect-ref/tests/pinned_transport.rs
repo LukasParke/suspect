@@ -766,7 +766,10 @@ fn environment_child() {
         AcquireOptions {
             cache_dir: cache.into(),
             insecure_test_origins: if tls { vec![] } else { vec![origin] },
-            timeout: Duration::from_secs(3),
+            // Generous: the handshake fails (or the fetch completes) in
+            // milliseconds; the limit only matters on a loaded machine,
+            // where a short one turned the expected `Tls` into `Timeout`.
+            timeout: Duration::from_secs(15),
             ..AcquireOptions::default()
         },
     );

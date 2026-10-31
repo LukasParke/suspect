@@ -1,4 +1,4 @@
-//! `suspect drift`: cross-reference recorded traffic against the spec and
+//! `suspect traffic drift`: cross-reference recorded traffic against the spec and
 //! report the gaps — endpoints the traffic exercised that the spec does
 //! not declare, undeclared query parameters on declared endpoints, and
 //! declared operations the traffic never touched.
@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::OutputFormat;
+use crate::FindingsFormat;
 use suspect_ir::{IrSpec, ParamIn};
 
 /// One observed exchange, normalized.
@@ -306,8 +306,54 @@ pub fn drift_report(spec: &IrSpec, exchanges: &[Exchange]) -> DriftReport {
     }
 }
 
-/// `suspect drift <SPEC> <TRAFFIC> [--format text|json] [--exit-on-gap]
-/// [--ignore-param NAME]`.
+/// The report's gaps as findings, for SARIF: each missing endpoint and
+/// query parameter gap is a warning located at the spec file (the traffic
+/// carries no spec position). Untested operations are coverage, not gaps,
+/// and are left out.
+#[must_use]
+pub fn gap_findings(report: &DriftReport, spec_path: &Path) -> Vec<crate::Finding> {
+    let file = spec_path.display().to_string();
+    let finding = |code: &str, message: String| crate::Finding {
+        file: file.clone(),
+        severity: crate::Severity::Warning,
+        code: code.to_owned(),
+        message,
+        line: 1,
+        col: 1,
+        range: None,
+    };
+    let mut findings = Vec::new();
+    for m in &report.missing_endpoints {
+        let params = if m.query_params_seen.is_empty() {
+            String::new()
+        } else {
+            format!(" (query: {})", m.query_params_seen.join(", "))
+        };
+        findings.push(finding(
+            "drift-missing-endpoint",
+            format!(
+                "traffic addressed undeclared endpoint {} {}{params}",
+                m.method, m.path
+            ),
+        ));
+    }
+    for g in &report.query_param_gaps {
+        findings.push(finding(
+            "drift-query-param-gap",
+            format!(
+                "{} {} received undeclared query parameter(s): {}",
+                g.method,
+                g.path,
+                g.missing_query_params.join(", ")
+            ),
+        ));
+    }
+    findings
+}
+
+/// `suspect traffic drift <SPEC> <TRAFFIC> [--format text|json|sarif|junit]
+/// [--check] [--ignore-param NAME]`. Exits 1 on gaps with
+/// `--check`, else 0.
 ///
 /// # Errors
 /// IO or parse failures on either file.
@@ -315,8 +361,8 @@ pub fn drift(
     spec_path: &Path,
     traffic_path: &Path,
     ignored_params: &[String],
-    exit_on_gap: bool,
-    format: OutputFormat,
+    check: bool,
+    format: FindingsFormat,
 ) -> anyhow::Result<i32> {
     let spec = IrSpec::from_file(spec_path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -339,20 +385,27 @@ pub fn drift(
     let report = drift_report(&spec, &exchanges);
 
     match format {
-        OutputFormat::Text => print_text(&report),
-        OutputFormat::Json => serde_json::to_writer_pretty(std::io::stdout(), &report)?,
-        _ => unimplemented!(),
+        FindingsFormat::Text => {
+            print_text(&report);
+            println!();
+        }
+        FindingsFormat::Json => {
+            serde_json::to_writer_pretty(std::io::stdout(), &report)?;
+            println!();
+        }
+        FindingsFormat::Sarif | FindingsFormat::Junit => {
+            crate::output::print_findings_as(&gap_findings(&report, spec_path), format)?;
+        }
     }
-    println!();
 
-    if exit_on_gap {
+    if check {
         let gaps = report.summary.missing_from_spec + report.summary.query_param_gaps;
         if gaps > 0 {
             eprintln!(
                 "[DRIFT] {gaps} gap(s): {} missing endpoint(s), {} query param gap(s)",
                 report.summary.missing_from_spec, report.summary.query_param_gaps
             );
-            return Ok(2);
+            return Ok(1);
         }
     }
     Ok(0)

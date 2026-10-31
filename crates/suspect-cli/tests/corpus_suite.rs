@@ -15,7 +15,10 @@
 //!   hint, not a failure; file-set drift is a failure.
 //!
 //! `corpus/` is gitignored and absent on clean checkouts: fetch it first with
-//! `cargo run -p xtask -- fetch-corpus`. Regenerate the snapshot with
+//! `cargo xtask fetch-corpus`. Without it the tests skip, unless
+//! `SUSPECT_REQUIRE_CORPUS=1` (set by `cargo xtask ci corpus-validation`),
+//! which turns a missing or incomplete corpus into a failure. Regenerate the
+//! snapshot with
 //! `SUSPECT_CORPUS_REPORT_WRITE=1 cargo test -p suspect-cli --test corpus_suite`.
 
 use std::path::{Path, PathBuf};
@@ -37,14 +40,24 @@ const OAI_OFFICIAL: &[&str] = &[
     "uspto.yaml",
 ];
 
+/// `SUSPECT_REQUIRE_CORPUS=1`: the corpus job, where skipping would pass a
+/// gate that never ran.
+fn corpus_required() -> bool {
+    std::env::var_os("SUSPECT_REQUIRE_CORPUS").is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Skips (or, when the corpus is required, fails) with `what`.
+fn skip_corpus(what: &str) {
+    assert!(!corpus_required(), "SUSPECT_REQUIRE_CORPUS is set: {what}");
+    eprintln!("skipped: {what}");
+}
+
 fn corpus_dir() -> Option<PathBuf> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus");
     if dir.join("petstore-expanded.yaml").exists() {
         Some(dir)
     } else {
-        eprintln!(
-            "skipping: corpus/ is gitignored and absent — run `cargo run -p xtask -- fetch-corpus`"
-        );
+        skip_corpus("corpus/ is gitignored and absent — run `cargo xtask fetch-corpus`");
         None
     }
 }
@@ -189,10 +202,10 @@ fn oai_official_examples_validate_without_errors() {
         .collect();
     if present.len() < OAI_OFFICIAL.len() - 1 {
         // Tolerate one upstream fetch failure; more means a stale corpus.
-        eprintln!(
-            "skipping: OAI example set incomplete ({}/6 present)",
+        skip_corpus(&format!(
+            "OAI example set incomplete ({}/6 present)",
             present.len()
-        );
+        ));
         return;
     }
     for name in present {

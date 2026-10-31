@@ -1,9 +1,6 @@
 [workspace]
 resolver = "3"
-members = [
-    "crates/suspect-config",
-    "crates/suspect-runtime",
-    "crates/suspect-config","crates/*", "xtask"]
+members = ["crates/*", "xtask"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +8,8 @@ edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 authors = ["Luke"]
+repository = "https://github.com/LukasParke/suspect"
+homepage = "https://github.com/LukasParke/suspect"
 
 [workspace.dependencies]
 sha2 = "0.10"
@@ -18,7 +17,8 @@ libc = "0.2"
 # internal crates
 suspect-source = { path = "crates/suspect-source", version = "0.1.0" }
 suspect-syntax = { path = "crates/suspect-syntax", version = "0.1.0" }
-suspect-config = { path = "crates/suspect-config" }
+suspect-diag = { path = "crates/suspect-diag", version = "0.1.0" }
+suspect-config = { path = "crates/suspect-config", version = "0.1.0" }
 suspect-runtime = { path = "crates/suspect-runtime", version = "0.1.0" }
 suspect-low = { path = "crates/suspect-low", version = "0.1.0" }
 suspect-ref = { path = "crates/suspect-ref", version = "0.1.0" }
@@ -29,18 +29,16 @@ suspect-arazzo = { path = "crates/suspect-arazzo", version = "0.1.0" }
 suspect-overlay = { path = "crates/suspect-overlay", version = "0.1.0" }
 suspect-validate = { path = "crates/suspect-validate", version = "0.1.0" }
 suspect-lint = { path = "crates/suspect-lint", version = "0.1.0" }
+suspect-check = { path = "crates/suspect-check", version = "0.1.0" }
 suspect-lsp = { path = "crates/suspect-lsp", version = "0.1.0" }
 suspect-ir = { path = "crates/suspect-ir", version = "0.1.0" }
 suspect-journal = { path = "crates/suspect-journal", version = "0.1.0" }
-suspect-reverse = { path = "crates/suspect-reverse", version = "0.1.0" }
 suspect-rules = { path = "crates/suspect-rules", version = "0.1.0" }
-suspect-rex = { path = "crates/suspect-rex", version = "0.1.0" }
 suspect-test = { path = "crates/suspect-test", version = "0.1.0" }
 suspect-gen = { path = "crates/suspect-gen", version = "0.1.0" }
 suspect-artifact = { path = "crates/suspect-artifact", version = "0.1.0" }
 suspect-codegen = { path = "crates/suspect-codegen", version = "0.1.0" }
 suspect-gateway = { path = "crates/suspect-gateway", version = "0.1.0" }
-suspect-watch = { path = "crates/suspect-watch", version = "0.1.0" }
 
 # external
 tree-sitter = "0.26"

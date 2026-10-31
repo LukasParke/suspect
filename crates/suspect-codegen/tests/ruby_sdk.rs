@@ -598,9 +598,7 @@ fn native_shared_branch_copy_equality_and_number_budgets() {
 #[test]
 #[ignore = "requires tracked OpenRouter source and native Ruby; five real operations with hand-authored HTTP responses"]
 fn native_openrouter_five_actual_operations() {
-    let web = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to the tracked repository");
+    let web = suspect_codegen::test_inputs::openrouter_root();
     let c = load(&web.join("projects/docs/openapi/openapi.yaml"));
     let wanted = [
         "getCredits",
@@ -896,8 +894,7 @@ fn native_expanded_protocol_wire_parts_streams_and_types() {
 #[test]
 #[ignore = "requires tracked OpenRouter source and native Ruby; explicit binary compatibility profile"]
 fn native_additional_openrouter_binary_and_delete_operations() {
-    let web =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"));
+    let web = suspect_codegen::test_inputs::openrouter_root();
     let c = load(&web.join("projects/docs/openapi/openapi.yaml"));
     let ids = [
         "downloadContainerFileContent",

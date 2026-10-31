@@ -1,6 +1,6 @@
 //! Public OpenAPI -> validated example plan regressions, with independent data.
 use serde_json::{Value, json};
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use suspect_codegen::examples::{
     ExampleConfig, ExampleOrigin, ExamplePlan, ExampleRole, plan_examples,
 };
@@ -281,8 +281,7 @@ fn directional_example_context_is_explicitly_unavailable() {
 #[ignore = "requires the tracked OpenRouter public snapshot"]
 fn tracked_examples_keep_the_real_patch_key_source_defect_visible() {
     let source =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(source.parent().unwrap())

@@ -10,7 +10,8 @@ fn run(root: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_suspect"))
         .current_dir(root)
         .args([
-            "codegen",
+            "gen",
+            "sdk",
             "api.json",
             "--profile",
             "typescript-http",
@@ -18,7 +19,7 @@ fn run(root: &Path, extra: &[&str]) -> Output {
             "@fixture/sdk",
             "--package-version",
             "0.0.0",
-            "--out",
+            "--output",
             "output",
             "--format",
             "json",
@@ -143,7 +144,7 @@ fn checked(command: &mut Command) -> Output {
 #[test]
 #[ignore = "requires all tracked OpenRouter inputs and the pinned native TS/npm/TypeDoc toolchain"]
 fn tracked_openrouter_cli_package_builds_installs_calls_and_documents() {
-    let source_root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let source_root = suspect_codegen::test_inputs::openrouter_root();
     let spec = Path::new(&source_root).join("projects/docs/openapi/openapi.yaml");
     assert!(
         spec.is_file(),
@@ -166,7 +167,7 @@ fn tracked_openrouter_cli_package_builds_installs_calls_and_documents() {
     let out = dir.path().join("generated");
     let mut command = Command::new(env!("CARGO_BIN_EXE_suspect"));
     command
-        .arg("codegen")
+        .args(["gen", "sdk"])
         .arg(&spec)
         .args([
             "--profile",
@@ -183,7 +184,7 @@ fn tracked_openrouter_cli_package_builds_installs_calls_and_documents() {
             "0.0.0",
             "--format",
             "json",
-            "--out",
+            "--output",
         ])
         .arg(&out);
     let generated = report(&command.output().unwrap(), 0);
@@ -292,16 +293,17 @@ fn incomplete_or_unknown_generation_options_fail_before_writes() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("api.json"), fixture().to_string()).unwrap();
     let invalid: &[&[&str]] = &[
-        &["codegen", "--targets", "ts"],
-        &["codegen", "--zod"],
+        &["gen", "sdk", "--targets", "ts"],
+        &["gen", "sdk", "--zod"],
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "--package-name",
             "@fixture/sdk",
             "--package-version",
             "0.0.0",
         ],
-        &["codegen", "--profile", "typescript-http"],
+        &["gen", "sdk", "--profile", "typescript-http"],
         &[
             "sdk",
             "--profile",
@@ -317,7 +319,7 @@ fn incomplete_or_unknown_generation_options_fail_before_writes() {
         let output = Command::new(env!("CARGO_BIN_EXE_suspect"))
             .current_dir(dir.path())
             .args(*args)
-            .args(["api.json", "--out", "output"])
+            .args(["api.json", "--output", "output"])
             .output()
             .unwrap();
         assert!(!output.status.success(), "unexpected success for {args:?}");

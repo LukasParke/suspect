@@ -66,7 +66,7 @@ exports.run = async function run() {
 	}
 	async function cliProcesses(label) {
 		const all = await children();
-		const sessions = all.filter((child) => child.command.startsWith(`${setup.binary} codegen-session `));
+		const sessions = all.filter((child) => child.command.startsWith(`${setup.binary} gen session `));
 		report.processObservations.push({ label, at: new Date().toISOString(), sessions, cliChildren: all.filter((child) => child.command.startsWith(setup.binary)) });
 		return sessions;
 	}
@@ -75,7 +75,7 @@ exports.run = async function run() {
 		assert.equal(sessions.length, 1, `Expected one canonical session during ${label}: ${JSON.stringify(sessions)}`);
 		const child = sessions[0];
 		assert.ok(child.command.includes(`--config ${setup.config}`));
-		assert.ok(child.command.includes(`--out ${setup.out}`));
+		assert.ok(child.command.includes(`--output ${setup.out}`));
 		assert.ok(child.command.includes('--watch') && child.command.includes('--preview') && child.command.includes('--format json'));
 		if (expectedPid !== undefined) assert.equal(child.pid, expectedPid, 'saved edits must reuse the same real CLI watch process');
 		const lsp = (await children()).filter((process) => process.command === `${setup.binary} lsp`);
@@ -225,9 +225,18 @@ exports.run = async function run() {
 		await check(CHECKS.lsp, async () => {
 			await waitFor(async () => (await children()).some((child) => child.command === `${setup.binary} lsp`), 'The real language client did not launch canonical suspect lsp');
 			await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(setup.source)));
-			await waitFor(async () => (await vscode.commands.getCommands(true)).includes('suspect.generateExample'), 'LSP initialization did not register its server commands');
+			// Wait on ids only the server advertises (the extension never registers
+			// them itself): they exist only once the language client has reached
+			// its running state and registered the server's commands. A duplicate
+			// of a locally registered id would abort that start, so waiting on a
+			// local id (generateExample, ...) could not detect the failure.
+			const serverOwned = ['suspect.showRefs', 'suspect.addOperationId', 'suspect.openRefTarget'];
+			await waitFor(async () => {
+				const commands = await vscode.commands.getCommands(true);
+				return serverOwned.every((command) => commands.includes(command));
+			}, 'The language client did not reach its running state and register the server-owned commands');
 			const registered = await vscode.commands.getCommands(true);
-			for (const command of ['suspect.runWorkflow', 'suspect.generateExample', 'suspect.showRefGraph', 'suspect.breakingChanges', 'suspect.contractCoverage', 'suspect.renderPreview']) assert.ok(registered.includes(command), `Missing local/server command: ${command}`);
+			for (const command of [...serverOwned, 'suspect.runWorkflow', 'suspect.generateExample', 'suspect.showRefGraph', 'suspect.breakingChanges', 'suspect.contractCoverage', 'suspect.renderPreview']) assert.ok(registered.includes(command), `Missing local/server command: ${command}`);
 			const servers = (await children()).filter((child) => child.command.startsWith(`${setup.binary} lsp`));
 			assert.equal(servers.length, 1);
 			assert.equal(servers[0].command, `${setup.binary} lsp`);

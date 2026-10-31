@@ -77,7 +77,7 @@ const LIBRARY_NATIVE: &[LibraryNative] = &[
     LibraryNative { id: "php-v3-controls", language: "php", name: "php_sdk::tests_v3::native_v3_scope_resource_controls", source: "crates/suspect-codegen/src/php_sdk/tests_v3.rs", tiers: &["floor", "current"] },
     LibraryNative { id: "php-v3-sdk", language: "php", name: "php_sdk::tests_v3::native_v3_sdk_packages_models_codecs", source: "crates/suspect-codegen/src/php_sdk/tests_v3.rs", tiers: &["floor", "current"] },
 ];
-const USAGE: &str = "usage: cargo run --locked -p xtask -- sdk-full --source OPENROUTER_ROOT --out NEW_REPORT [--editor-host-tools PINNED_TOOLS_JSON] [--functional-only | --performance-plan PINNED_PLAN_JSON]\n       cargo run --locked -p xtask -- sdk-full --list-stages [--functional-only]\n       cargo run --locked -p xtask -- sdk-full --check-syntax\nStrict by default. Functional-only success retains numerical-pending status, not whole-plan completion. Both real editor-host scenarios require explicit tool pins. See docs/SDK-FULL-EXIT.md.\n";
+const USAGE: &str = "usage: cargo xtask verify-sdk --source OPENROUTER_ROOT --out NEW_REPORT [--editor-host-tools PINNED_TOOLS_JSON] [--functional-only | --performance-plan PINNED_PLAN_JSON]\n       cargo xtask verify-sdk --list-stages [--functional-only]\n       cargo xtask verify-sdk --check-syntax\nStrict by default. Functional-only success retains numerical-pending status, not whole-plan completion. Both real editor-host scenarios require explicit tool pins. See docs/internal/SDK-FULL-EXIT.md.\n";
 
 #[derive(Clone, Copy, Serialize)]
 struct Target {
@@ -94,18 +94,18 @@ struct Target {
 // Java/Kotlin use Maven coordinates; PHP uses vendor/package; Dart/C++ identifiers.
 #[rustfmt::skip]
 const TARGETS: &[Target] = &[
-    Target { language: "typescript", backend: "typescript-http", package_name: "@suspect-fixtures/sdk-full", import_name: None, manifest: "package.json", docs: "docs/SDK-TYPESCRIPT-HTTP.md", toolchain_tiers: &["node22-ts55", "node24-ts59"] },
-    Target { language: "rust", backend: "rust-http", package_name: "sdk-full", import_name: None, manifest: "Cargo.toml", docs: "docs/SDK-RUST-HTTP.md", toolchain_tiers: &["1.88.0", "stable"] },
-    Target { language: "python", backend: "python-http", package_name: "sdk-full", import_name: Some("sdk_full"), manifest: "pyproject.toml", docs: "docs/SDK-PYTHON-HTTP.md", toolchain_tiers: &["3.11", "3.14"] },
-    Target { language: "go", backend: "go-http", package_name: "example.com/sdk-full", import_name: None, manifest: "go.mod", docs: "docs/SDK-GO-HTTP.md", toolchain_tiers: &["1.23.12", "1.27.1"] },
-    Target { language: "swift", backend: "swift-http", package_name: "SdkFull", import_name: Some("SdkFull"), manifest: "Package.swift", docs: "docs/SDK-SWIFT.md", toolchain_tiers: &["6.0.3-sdk15.4", "6.3.3-sdk26.5"] },
-    Target { language: "java", backend: "java-http", package_name: "com.example.generated:sdk-full", import_name: Some("com.example.generated"), manifest: "pom.xml", docs: "docs/SDK-JAVA.md", toolchain_tiers: &["21.0.12.1", "25.0.4.1"] },
-    Target { language: "csharp", backend: "csharp-http", package_name: "Suspect.SdkFull", import_name: Some("Suspect.SdkFull"), manifest: "Suspect.csproj", docs: "docs/SDK-CSHARP.md", toolchain_tiers: &["8.0.424-net8.0", "10.0.400-net10.0"] },
-    Target { language: "kotlin", backend: "kotlin-http", package_name: "com.example:sdk-full", import_name: Some("example.sdk"), manifest: "pom.xml", docs: "docs/SDK-KOTLIN.md", toolchain_tiers: &["2.4.20-jdk21", "2.4.20-jdk25"] },
-    Target { language: "ruby", backend: "ruby-http", package_name: "sdk-full", import_name: Some("SdkFull"), manifest: "sdk-full.gemspec", docs: "docs/SDK-RUBY.md", toolchain_tiers: &["3.3.12", "4.0.6"] },
-    Target { language: "php", backend: "php-http", package_name: "example/sdk-full", import_name: Some("Example\\SdkFull"), manifest: "composer.json", docs: "docs/SDK-PHP.md", toolchain_tiers: &["8.3.32", "8.5.8"] },
-    Target { language: "dart", backend: "dart-http", package_name: "sdk_full", import_name: None, manifest: "pubspec.yaml", docs: "docs/SDK-DART.md", toolchain_tiers: &["3.9.4", "3.13.3"] },
-    Target { language: "cpp", backend: "cpp-http", package_name: "sdk_full", import_name: Some("sdk_full"), manifest: "CMakeLists.txt", docs: "docs/SDK-CPP.md", toolchain_tiers: &["apple-clang21-cpp20-libcurl8.7.1"] },
+    Target { language: "typescript", backend: "typescript-http", package_name: "@suspect-fixtures/sdk-full", import_name: None, manifest: "package.json", docs: "docs/sdk/typescript/http.md", toolchain_tiers: &["node22-ts55", "node24-ts59"] },
+    Target { language: "rust", backend: "rust-http", package_name: "sdk-full", import_name: None, manifest: "Cargo.toml", docs: "docs/sdk/rust/http.md", toolchain_tiers: &["1.88.0", "stable"] },
+    Target { language: "python", backend: "python-http", package_name: "sdk-full", import_name: Some("sdk_full"), manifest: "pyproject.toml", docs: "docs/sdk/python/http.md", toolchain_tiers: &["3.11", "3.14"] },
+    Target { language: "go", backend: "go-http", package_name: "example.com/sdk-full", import_name: None, manifest: "go.mod", docs: "docs/sdk/go/http.md", toolchain_tiers: &["1.23.12", "1.27.1"] },
+    Target { language: "swift", backend: "swift-http", package_name: "SdkFull", import_name: Some("SdkFull"), manifest: "Package.swift", docs: "docs/sdk/swift/README.md", toolchain_tiers: &["6.0.3-sdk15.4", "6.3.3-sdk26.5"] },
+    Target { language: "java", backend: "java-http", package_name: "com.example.generated:sdk-full", import_name: Some("com.example.generated"), manifest: "pom.xml", docs: "docs/sdk/java/README.md", toolchain_tiers: &["21.0.12.1", "25.0.4.1"] },
+    Target { language: "csharp", backend: "csharp-http", package_name: "Suspect.SdkFull", import_name: Some("Suspect.SdkFull"), manifest: "Suspect.csproj", docs: "docs/sdk/csharp/README.md", toolchain_tiers: &["8.0.424-net8.0", "10.0.400-net10.0"] },
+    Target { language: "kotlin", backend: "kotlin-http", package_name: "com.example:sdk-full", import_name: Some("example.sdk"), manifest: "pom.xml", docs: "docs/sdk/kotlin/README.md", toolchain_tiers: &["2.4.20-jdk21", "2.4.20-jdk25"] },
+    Target { language: "ruby", backend: "ruby-http", package_name: "sdk-full", import_name: Some("SdkFull"), manifest: "sdk-full.gemspec", docs: "docs/sdk/ruby/README.md", toolchain_tiers: &["3.3.12", "4.0.6"] },
+    Target { language: "php", backend: "php-http", package_name: "example/sdk-full", import_name: Some("Example\\SdkFull"), manifest: "composer.json", docs: "docs/sdk/php/README.md", toolchain_tiers: &["8.3.32", "8.5.8"] },
+    Target { language: "dart", backend: "dart-http", package_name: "sdk_full", import_name: None, manifest: "pubspec.yaml", docs: "docs/sdk/dart/README.md", toolchain_tiers: &["3.9.4", "3.13.3"] },
+    Target { language: "cpp", backend: "cpp-http", package_name: "sdk_full", import_name: Some("sdk_full"), manifest: "CMakeLists.txt", docs: "docs/sdk/cpp/README.md", toolchain_tiers: &["apple-clang21-cpp20-libcurl8.7.1"] },
 ];
 
 #[derive(Debug)]
@@ -1178,7 +1178,6 @@ fn suites() -> Vec<Stage> {
                 "swift" => { env.insert("SUSPECT_SWIFT_CREDENTIAL_ENV_ROOT".into(), format!("{{work}}/native/swift/{tier}/credential-env")); }
                 "java" => {
                     env.insert("SUSPECT_MAVEN_BIN".into(), "{maven}".into());
-                    env.insert("SUSPECT_OPENROUTER_OPENAPI".into(), "{out}/inputs/projects/docs/openapi/openapi.yaml".into());
                 }
                 "kotlin" => {
                     env.insert("SUSPECT_KOTLIN_MAVEN".into(), "{maven}".into());
@@ -1401,7 +1400,7 @@ fn default_cli_stages() -> Vec<Stage> {
     let mut profiles = command(
         "default-cli-twelve-profiles",
         "{out}/bin/suspect-default",
-        &["codegen-profiles", "--format", "json"],
+        &["gen", "profiles", "--format", "json"],
         "{workspace}",
     );
     profiles.criterion = Criterion::Json {
@@ -1475,7 +1474,7 @@ fn profile_stages() -> Vec<Stage> {
     let mut discover = command(
         "cli-twelve-profiles",
         "{out}/bin/suspect",
-        &["codegen-profiles", "--format", "json"],
+        &["gen", "profiles", "--format", "json"],
         "{workspace}",
     );
     discover.criterion = Criterion::Json {
@@ -1486,10 +1485,9 @@ fn profile_stages() -> Vec<Stage> {
         "cli-twelve-compatibility",
         "{out}/bin/suspect",
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "{out}/configs/five-operations.json",
-            "--after",
             "{out}/configs/five-operations.json",
             "--format",
             "json",
@@ -2495,10 +2493,7 @@ fn configure_environment(run: &mut Run) -> Result<()> {
         ("npm_config_userconfig", "{work}/home/.npmrc"),
         ("PYTHONNOUSERSITE", "1"),
         ("MYPY_CACHE_DIR", "{work}/caches/mypy"),
-        (
-            "OPENROUTER_PUBLIC_SCHEMA",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
+        ("OPENROUTER_WEB_ROOT", "{out}/inputs"),
         ("MAVEN_ARGS", "--offline --no-transfer-progress"),
         ("MAVEN_USER_HOME", "{work}/home/.m2"),
         ("JAVA_HOME", "{jdk-current}"),
@@ -3773,10 +3768,11 @@ fn pinned_stages() -> Vec<Stage> {
         "twelve-pinned-session-watch",
         "{out}/bin/suspect",
         &[
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "{out}/configs/pinned-session.json",
-            "--out",
+            "--output",
             "{work}/pinned/packages",
             "--watch",
             "--max-iterations",
@@ -3784,7 +3780,7 @@ fn pinned_stages() -> Vec<Stage> {
             "--interval-ms",
             "25",
             "--format",
-            "json",
+            "ndjson",
         ],
         "{workspace}",
     );
@@ -3792,10 +3788,9 @@ fn pinned_stages() -> Vec<Stage> {
         "twelve-pinned-compatibility",
         "{out}/bin/suspect",
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "{out}/configs/pinned-session.json",
-            "--after",
             "{out}/configs/pinned-session.json",
             "--format",
             "json",
@@ -4856,7 +4851,7 @@ fn stage_inventory(functional_only: bool) -> Result<Value> {
     )
 }
 
-fn syntax_check(original: &Path) -> Result<Value> {
+pub(crate) fn syntax_check(original: &Path) -> Result<Value> {
     let inventory = stage_inventory(false)?;
     let runner_files = sealed::inventory(
         original,
@@ -5000,13 +4995,13 @@ fn syntax_check(original: &Path) -> Result<Value> {
         "crates/suspect-schema/tests/fixtures/resource-conformance/detached-dynamicref.json",
         "crates/suspect-schema/tests/conformance/draft2020-12/unevaluatedProperties.json",
         "crates/suspect-schema/tests/conformance/draft2020-12/unevaluatedItems.json",
-        "docs/SDK-RUST-RESOURCES.md",
-        "docs/SDK-SWIFT-RESOURCES.md",
-        "docs/SDK-GO-SCHEMA-V3.md",
-        "docs/SDK-HTTP-PROTOCOL.md",
-        "docs/SDK-TYPESCRIPT-PROTOCOL.md",
-        "docs/SDK-CREDENTIAL-ENV.md",
-        "docs/SDK-SCHEMA-NATIVE-ADOPTION.md",
+        "docs/sdk/rust/resources.md",
+        "docs/sdk/swift/resources.md",
+        "docs/sdk/go/schema-v3.md",
+        "docs/design/http-protocol.md",
+        "docs/sdk/typescript/protocol.md",
+        "docs/reference/credential-env.md",
+        "docs/design/schema-native-adoption.md",
     ] {
         if !original.join(name).is_file() {
             missing_support.push(name.to_owned());
@@ -6354,10 +6349,8 @@ mod tests {
                 .find(|item| item.id == format!("{tier}-java_credential_env"))
                 .unwrap();
             assert_eq!(java.environment["JAVA_HOME"], format!("{{jdk-{tier}}}"));
-            assert_eq!(
-                java.environment["SUSPECT_OPENROUTER_OPENAPI"],
-                "{out}/inputs/projects/docs/openapi/openapi.yaml"
-            );
+            assert_eq!(java.environment["OPENROUTER_WEB_ROOT"], "{out}/inputs");
+            assert!(!java.environment.contains_key("SUSPECT_OPENROUTER_OPENAPI"));
             assert!(
                 !java
                     .environment

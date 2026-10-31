@@ -85,6 +85,7 @@ pub const WORKER_FILES: [(&str, &str); 5] = [
 /// # Errors
 /// [`Error::Io`] on filesystem failures.
 pub fn stage_worker_files(cache_root: &Path) -> Result<PathBuf> {
+    let shim_manifest = sdk_shim_package_json();
     let mut hasher_input = String::new();
     for (name, content) in WORKER_FILES {
         hasher_input.push_str(name);
@@ -92,6 +93,9 @@ pub fn stage_worker_files(cache_root: &Path) -> Result<PathBuf> {
         hasher_input.push_str(content);
         hasher_input.push('\0');
     }
+    // The shim manifest carries the toolchain version, so a new version
+    // stages into a new directory instead of reusing a stale shim.
+    hasher_input.push_str(&shim_manifest);
     let hash = blake3_lite(&hasher_input);
     let dir = cache_root.join(&hash);
     if dir.join("worker.ts").is_file() {
@@ -105,12 +109,19 @@ pub fn stage_worker_files(cache_root: &Path) -> Result<PathBuf> {
     // NODE_PATH without any plugin API.
     let shim = dir.join("node_modules/@suspect/rules-sdk");
     fs::create_dir_all(&shim)?;
-    fs::write(
-        shim.join("package.json"),
-        r#"{"name":"@suspect/rules-sdk","version":"0.1.0","main":"index.ts"}"#,
-    )?;
+    fs::write(shim.join("package.json"), shim_manifest)?;
     fs::write(shim.join("index.ts"), "export * from \"../../sdk.ts\";\n")?;
     Ok(dir.join("worker.ts"))
+}
+
+/// `package.json` of the `@suspect/rules-sdk` shim; its version is the
+/// toolchain version (`cargo xtask bump` keeps the workspace in lockstep).
+#[must_use]
+pub fn sdk_shim_package_json() -> String {
+    format!(
+        r#"{{"name":"@suspect/rules-sdk","version":"{}","main":"index.ts"}}"#,
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 /// FNV-1a 64 — deterministic content hash for cache dir naming (not a

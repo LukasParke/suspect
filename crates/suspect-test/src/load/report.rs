@@ -40,7 +40,7 @@ pub fn console_interval(report: &IntervalReport) -> String {
 #[must_use]
 pub fn console_final(summary: &LoadSummary) -> String {
     let mut out = String::new();
-    let _ = writeln!(out, "suspect load report");
+    let _ = writeln!(out, "suspect test load report");
     let _ = writeln!(out, "===================");
     let _ = writeln!(out, "target:    {}", summary.target);
     let _ = writeln!(
@@ -347,7 +347,7 @@ fn trim_num(v: f64) -> String {
 pub fn json(summary: &LoadSummary) -> serde_json::Value {
     serde_json::json!({
         "version": JSON_VERSION,
-        "tool": "suspect load",
+        "tool": "suspect test load",
         "run": {
             "started_at_ms": summary.started_at_ms,
             "duration_s": summary.duration_s,

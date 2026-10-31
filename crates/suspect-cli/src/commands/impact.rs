@@ -1,4 +1,4 @@
-//! `suspect impact`: traffic-backed compatibility analysis.
+//! `suspect diff impact`: traffic-backed compatibility analysis.
 //!
 //! Replays a recorded cassette against two spec revisions and reports the
 //! recorded exchanges that pass the old contract but fail the new one,
@@ -15,7 +15,7 @@ use serde::Serialize;
 
 use suspect_ir::IrSpec;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// One impact review.
 #[derive(Debug, Args)]
@@ -31,7 +31,7 @@ pub struct ImpactArgs {
     pub cassette: PathBuf,
     /// Output format for the report.
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub report: crate::Report,
 }
 
 /// One evaluated recorded exchange.
@@ -76,10 +76,9 @@ pub struct ImpactReport {
 /// File IO, workspace, or cassette failures.
 pub fn impact(args: &ImpactArgs) -> anyhow::Result<i32> {
     let report = analyze(&args.old, &args.new, &args.cassette)?;
-    match args.text.format {
-        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
-        OutputFormat::Sarif => anyhow::bail!("SARIF output is not defined for impact reports"),
-        OutputFormat::Text => {
+    match args.report.format {
+        ReportFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+        ReportFormat::Text => {
             println!(
                 "evaluated {} recorded exchange(s): {} unaffected, {} broken by the new contract, {} already failing",
                 report.evaluated, report.unaffected, report.broken, report.already_failing

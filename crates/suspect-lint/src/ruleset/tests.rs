@@ -247,18 +247,44 @@ fn extends_security_and_override_inherits_category() {
 }
 
 #[test]
-fn policy_severity_accepts_both_vocabularies() {
+fn policy_levels_map_onto_engine_ranks() {
     use crate::rule::Severity;
-    assert_eq!(Severity::from_policy("error"), Some(Severity::Error));
-    assert_eq!(Severity::from_policy("warn"), Some(Severity::Warn));
-    assert_eq!(Severity::from_policy("warning"), Some(Severity::Warn));
-    assert_eq!(Severity::from_policy("info"), Some(Severity::Info));
-    assert_eq!(Severity::from_policy("information"), Some(Severity::Info));
-    assert_eq!(Severity::from_policy("hint"), Some(Severity::Hint));
-    assert_eq!(Severity::from_policy("off"), Some(Severity::Off));
-    assert_eq!(Severity::from_policy("loud"), None);
-    // Whitespace and casing are tolerated; the value is committed policy.
-    assert_eq!(Severity::from_policy(" Warning "), Some(Severity::Warn));
+    let parse = |name: &str| suspect_diag::parse_level(name).map(Severity::from);
+    assert_eq!(parse("error"), Some(Severity::Error));
+    assert_eq!(parse("warn"), Some(Severity::Warn));
+    assert_eq!(parse("warning"), Some(Severity::Warn));
+    assert_eq!(parse("info"), Some(Severity::Info));
+    assert_eq!(parse("information"), Some(Severity::Info));
+    assert_eq!(parse("hint"), Some(Severity::Hint));
+    assert_eq!(parse("off"), Some(Severity::Off));
+    assert_eq!(parse("loud"), None);
+    assert_eq!(parse(" Warning "), Some(Severity::Warn));
+    for severity in [
+        Severity::Error,
+        Severity::Warn,
+        Severity::Info,
+        Severity::Hint,
+        Severity::Off,
+    ] {
+        assert_eq!(
+            Severity::from(suspect_diag::Level::from(severity)),
+            severity
+        );
+    }
+}
+
+#[test]
+fn ruleset_rules_with_builtin_codes_are_not_builtin() {
+    let default = Linter::spectral_default();
+    assert!(default.is_builtin("operation-operationId"));
+    let custom = Linter::from_ruleset(&doc(
+        "extends: spectral:oas\nrules:\n  operation-operationId:\n    given: $.paths.*.*\n    then:\n      function: truthy\n",
+    ))
+    .expect("valid ruleset");
+    assert!(!custom.is_builtin("operation-operationId"));
+    // Extended builtins keep their flag.
+    assert!(custom.is_builtin("info-contact"));
+    assert!(!custom.is_builtin("not-a-rule"));
 }
 
 /// The builtin parameter rules match Parameter Objects — path-item,

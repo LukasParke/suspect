@@ -1,4 +1,4 @@
-//! `suspect evidence`: the SDK verification matrix as data.
+//! `suspect dev evidence`: the SDK verification matrix as data.
 //!
 //! The per-backend acceptance suites are opt-in (`#[ignore]`) because they
 //! need a native toolchain, which means "which backend is verified against
@@ -17,7 +17,7 @@ use clap::Args;
 use serde::Serialize;
 use suspect_codegen::features::{BACKENDS, FEATURES, claim_for, is_supported};
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// One backend/feature coverage row.
 #[derive(Debug, Clone, Serialize)]
@@ -63,8 +63,8 @@ pub struct EvidenceArgs {
     #[arg(long, default_value = "crates/suspect-codegen/tests/behavioral")]
     pub fragments: String,
     /// Output format for the matrix.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
+    #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
+    pub format: ReportFormat,
 }
 
 /// Builds the matrix from the feature manifest and the tree.
@@ -75,10 +75,10 @@ pub fn evidence(args: &EvidenceArgs) -> anyhow::Result<i32> {
     let matrix = build_matrix(Path::new(&args.fragments))?;
 
     match args.format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+        ReportFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&matrix)?);
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             println!(
                 "{}  ({} backends, {} claims, {} unclaimed pairs)",
                 matrix.format,

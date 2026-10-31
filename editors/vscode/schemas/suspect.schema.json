@@ -1,0 +1,424 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Workspace-wide settings. Every suspect command, the language server and CI read this file, so the editor, a shell and CI see identical findings.",
+  "properties": {
+    "check": {
+      "additionalProperties": false,
+      "description": "The `suspect check` gate.",
+      "properties": {
+        "baseline": {
+          "description": "Findings baseline file: findings recorded there do not fail `check`, `validate`, `lint` or the `ci` check stage. Write one with `suspect check --write-baseline`. The editor ignores it.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "codegen": {
+      "additionalProperties": false,
+      "description": "Defaults applied to SDK generation.",
+      "properties": {
+        "compatibility_profiles": {
+          "default": [],
+          "description": "Versioned source interpretations to opt into (`suspect gen sdk --compatibility-profile`). Empty keeps ordinary OpenAPI semantics.",
+          "items": {
+            "enum": [
+              "legacy-binary-string-v1",
+              "oas30-nullable-in-3.1-v1",
+              "colon-path-parameters-v1",
+              "schemaless-stream-events-v1",
+              "all-of-scoped-mode-v1"
+            ],
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true,
+          "x-suspect-editor": {
+            "key": "suspect.codegen.compatibilityProfiles",
+            "scope": "resource"
+          }
+        },
+        "import_names": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name.",
+          "type": "object",
+          "x-suspect-editor": {
+            "key": "suspect.codegen.importNames",
+            "scope": "resource"
+          }
+        },
+        "operation_ids": {
+          "default": [],
+          "description": "Exact `operationId`s to generate. Empty attempts every operation; an unsupported one fails rather than being dropped.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "x-suspect-editor": {
+            "key": "suspect.codegen.operationIds",
+            "scope": "resource"
+          }
+        },
+        "out": {
+          "description": "Default output root, relative to the file that sets it.",
+          "type": "string"
+        },
+        "package_name": {
+          "description": "Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it.",
+          "type": "string",
+          "x-suspect-editor": {
+            "key": "suspect.codegen.packageName",
+            "scope": "resource"
+          }
+        },
+        "package_version": {
+          "description": "Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata).",
+          "type": "string",
+          "x-suspect-editor": {
+            "key": "suspect.codegen.packageVersion",
+            "scope": "resource"
+          }
+        },
+        "profile": {
+          "description": "Default native profile id.",
+          "type": "string"
+        },
+        "session": {
+          "additionalProperties": false,
+          "description": "The editor's SDK preview/watch session (`suspect gen session`).",
+          "properties": {
+            "config": {
+              "description": "Session config (JSON) naming the spec and targets. Unset: the editor asks for one.",
+              "type": "string",
+              "x-suspect-editor": {
+                "key": "suspect.codegen.session.config",
+                "scope": "resource"
+              }
+            },
+            "out": {
+              "default": "sdk-out",
+              "description": "Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`).",
+              "type": "string",
+              "x-suspect-editor": {
+                "key": "suspect.codegen.session.out",
+                "scope": "resource"
+              }
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "diff": {
+      "additionalProperties": false,
+      "description": "Change detection against git history.",
+      "properties": {
+        "baseline": {
+          "description": "Git ref compared against for breaking changes (`suspect ci`, the editor's breaking-changes command; the editor falls back to `HEAD~1`).",
+          "type": "string",
+          "x-suspect-editor": {
+            "key": "suspect.diff.baseline",
+            "scope": "resource"
+          },
+          "x-suspect-env": "SUSPECT_GIT_BASE"
+        }
+      },
+      "type": "object"
+    },
+    "docs": {
+      "additionalProperties": false,
+      "description": "Reference documentation generation.",
+      "properties": {
+        "output": {
+          "description": "Output root for generated documentation.",
+          "type": "string"
+        },
+        "style": {
+          "description": "Output style for the reference site.",
+          "enum": [
+            "html",
+            "markdown",
+            "sveltekit"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "editor": {
+      "additionalProperties": false,
+      "description": "Editor-only behaviour.",
+      "properties": {
+        "inlay_hints": {
+          "additionalProperties": false,
+          "description": "Inlay hint toggles.",
+          "properties": {
+            "properties": {
+              "default": true,
+              "description": "Show property type-annotation inlay hints.",
+              "type": "boolean",
+              "x-suspect-editor": {
+                "key": "suspect.editor.inlayHints.properties",
+                "scope": "resource"
+              }
+            },
+            "refs": {
+              "default": true,
+              "description": "Show resolved `$ref` target inlay hints.",
+              "type": "boolean",
+              "x-suspect-editor": {
+                "key": "suspect.editor.inlayHints.refs",
+                "scope": "resource"
+              }
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "extends": {
+      "description": "A parent settings file, relative to this one. Its values apply under this file's; one level only.",
+      "type": "string"
+    },
+    "extensions": {
+      "description": "Vendor extensions: ordering anchors (`before`, `after`), `contexts` and a JSON Schema (`schema`, inline or a path) per `x-` key.",
+      "type": "object"
+    },
+    "format": {
+      "additionalProperties": false,
+      "description": "Formatter output.",
+      "properties": {
+        "json": {
+          "default": false,
+          "description": "Emit JSON regardless of the input extension.",
+          "type": "boolean"
+        },
+        "sort_keys": {
+          "default": false,
+          "description": "Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`.",
+          "type": "boolean",
+          "x-suspect-editor": {
+            "key": "suspect.format.sortKeys",
+            "scope": "resource"
+          }
+        },
+        "yaml": {
+          "default": false,
+          "description": "Emit YAML regardless of the input extension.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "gateway": {
+      "additionalProperties": false,
+      "description": "The mock/proxy gateway.",
+      "properties": {
+        "mode": {
+          "default": "mock",
+          "description": "Operating mode.",
+          "enum": [
+            "mock",
+            "proxy",
+            "validate",
+            "record",
+            "replay",
+            "scenario"
+          ],
+          "type": "string"
+        },
+        "port": {
+          "default": 8080,
+          "description": "Port the gateway listens on.",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer",
+          "x-suspect-editor": {
+            "key": "suspect.gateway.port",
+            "scope": "resource"
+          }
+        },
+        "upstream": {
+          "description": "Upstream base URL for proxy, validate and record modes.",
+          "format": "uri",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "lint": {
+      "additionalProperties": false,
+      "description": "Which findings are reported, and from where.",
+      "properties": {
+        "design": {
+          "description": "Severity for design-class rules: findings that flag the API's design rather than the document's accuracy. A project documenting an API it does not own sets `off` (or `info` to keep them as notes); `lint.rules` wins per rule.",
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "hint",
+            "off"
+          ],
+          "type": "string",
+          "x-suspect-editor": {
+            "key": "suspect.lint.design",
+            "scope": "resource"
+          }
+        },
+        "min_severity": {
+          "default": "hint",
+          "description": "Minimum severity to report. Findings below this floor are suppressed.",
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "hint"
+          ],
+          "type": "string",
+          "x-suspect-editor": {
+            "key": "suspect.lint.minSeverity",
+            "scope": "resource"
+          },
+          "x-suspect-env": "SUSPECT_LINT_MIN_SEVERITY"
+        },
+        "recommended": {
+          "default": true,
+          "description": "Apply the recommended (built-in) lint rule set. With `false` and no `lint.ruleset`, no lint rules run.",
+          "type": "boolean",
+          "x-suspect-editor": {
+            "key": "suspect.lint.recommended",
+            "scope": "resource"
+          }
+        },
+        "rules": {
+          "additionalProperties": {
+            "enum": [
+              "error",
+              "warning",
+              "info",
+              "hint",
+              "off"
+            ],
+            "type": "string"
+          },
+          "default": {},
+          "description": "Rule id to severity (`error`, `warning`, `info`, `hint`, `off`), overriding the severity a rule would otherwise produce. Merged per rule across files.",
+          "type": "object",
+          "x-suspect-editor": {
+            "key": "suspect.lint.rules",
+            "scope": "resource"
+          }
+        },
+        "ruleset": {
+          "description": "Custom ruleset document, relative to the file that sets it.",
+          "type": "string",
+          "x-suspect-editor": {
+            "key": "suspect.lint.ruleset",
+            "scope": "resource"
+          },
+          "x-suspect-env": "SUSPECT_LINT_RULESET"
+        }
+      },
+      "type": "object"
+    },
+    "ref": {
+      "additionalProperties": false,
+      "description": "Reference-workspace tuning.",
+      "properties": {
+        "max_docs": {
+          "default": 500,
+          "description": "Maximum documents loaded in one ref workspace.",
+          "minimum": 0,
+          "type": "integer",
+          "x-suspect-editor": {
+            "key": "suspect.ref.maxDocs",
+            "scope": "resource"
+          }
+        }
+      },
+      "type": "object"
+    },
+    "rules": {
+      "additionalProperties": false,
+      "description": "TypeScript rule plugins.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Run TypeScript rule plugins in the editor and `check`.",
+          "type": "boolean"
+        },
+        "roots": {
+          "default": [
+            ".suspect/rules"
+          ],
+          "description": "Directories searched for rule plugins, relative to the file that sets them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "test": {
+      "additionalProperties": false,
+      "description": "Contract tests, fuzzing and load runs.",
+      "properties": {
+        "base_url": {
+          "default": "http://localhost:8080",
+          "description": "Base URL requests are sent to.",
+          "format": "uri",
+          "type": "string",
+          "x-suspect-editor": {
+            "key": "suspect.test.baseUrl",
+            "scope": "resource"
+          },
+          "x-suspect-env": "SUSPECT_BASE_URL"
+        },
+        "credentials": {
+          "description": "Credentials file for the security schemes tests exercise. Default: `.suspect/credentials.json` discovered upward.",
+          "type": "string",
+          "x-suspect-env": "SUSPECT_CREDENTIALS"
+        },
+        "report": {
+          "default": "text",
+          "description": "Event stream format for `suspect test`.",
+          "enum": [
+            "text",
+            "ndjson"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "validate": {
+      "additionalProperties": false,
+      "description": "How strictly documents are validated.",
+      "properties": {
+        "reference_allowlist": {
+          "description": "File listing the documents `$ref`s may reach; others are reported.",
+          "type": "string"
+        },
+        "strict_format": {
+          "default": false,
+          "description": "Assert `format` keywords. The 2020-12 default is annotation-only, so this catches example drift that annotation-only mode would let through.",
+          "type": "boolean",
+          "x-suspect-editor": {
+            "key": "suspect.validate.strictFormat",
+            "scope": "resource"
+          },
+          "x-suspect-env": "SUSPECT_STRICT_FORMAT"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": ".suspect.yaml",
+  "type": "object"
+}

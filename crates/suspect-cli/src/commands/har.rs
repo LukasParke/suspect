@@ -1,7 +1,7 @@
-//! `suspect har`: export recorded traffic as an HTTP Archive (HAR 1.2),
+//! `suspect traffic har`: export recorded traffic as an HTTP Archive (HAR 1.2),
 //! the interchange format every profiling and debugging tool reads.
 //!
-//! Accepts the same traffic files `suspect drift` does — a Suspect
+//! Accepts the same traffic files `suspect traffic drift` does — a Suspect
 //! Cassette (gateway `--mode record` output, with bodies) or a Suspect
 //! Journal (gateway `--journal` / `suspect test` output, without bodies)
 //! — recognized line by line.
@@ -12,7 +12,7 @@ use suspect_journal::BodyEncoding;
 
 use super::traffic_file::{iso8601, read_traffic_lines};
 
-/// `suspect har <TRAFFIC> [--output FILE]`.
+/// `suspect traffic har <TRAFFIC> [--output FILE]`.
 ///
 /// # Errors
 /// IO or parse failures on the traffic file, or writing the archive.

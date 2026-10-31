@@ -1101,7 +1101,7 @@ pub fn load_workspace(spec: &Path) -> Result<Arc<suspect_ref::Workspace>, String
 }
 
 /// Loads the IR snapshot for `spec`. The fast path (a ~7–14 ms subset
-/// parse, benchmarked in `docs/PERFORMANCE.md` §2.4) is tried first and
+/// parse, benchmarked in `docs/internal/PERFORMANCE.md` §2.4) is tried first and
 /// the CST workspace path remains the built-in fallback — for YAML
 /// outside the fast subset, JSON entries, or anything the fast reader
 /// declines. The IR is identical on both paths; only the cost differs.

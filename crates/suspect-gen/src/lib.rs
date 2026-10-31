@@ -187,6 +187,6 @@ pub use filters::{
 };
 pub use orchestrate::{
     BEGIN_MARK, END_MARK, Manifest, OutputRule, RenderOutcome, WriteReason, load_manifest,
-    parse_manifest, parse_manifest_str, render_manifest, render_manifest_owned,
+    parse_manifest, parse_manifest_doc, parse_manifest_str, render_manifest, render_manifest_owned,
 };
 pub use suspect_artifact::Adoption;

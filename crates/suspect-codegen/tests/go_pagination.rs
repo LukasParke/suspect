@@ -441,24 +441,15 @@ func TestNextPageBuildsTheFollowingInput(t *testing.T) {
 "#;
 
 fn go_toolchain() -> Option<String> {
-    let output = Command::new("go").arg("version").output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    // "go version go1.27.1 darwin/arm64" — require at least the emitted go.mod
-    // language version so the module builds with the installed toolchain.
-    let version = text.split_whitespace().nth(2)?;
-    let minor = version
-        .strip_prefix("go1.")
-        .and_then(|rest| rest.split('.').next())
-        .and_then(|minor| minor.parse::<u32>().ok())?;
-    (minor >= 23).then_some(text)
+    // The manifest resolves the tool and gates the version (>= 1.23); a
+    // missing one prints the standard skip line, or fails when
+    // SUSPECT_REQUIRE_TOOLS lists `go`.
+    suspect_codegen::toolchain::optional("go").map(|path| path.to_string_lossy().into_owned())
 }
 
 #[test]
 fn native_walks_count_requests_and_preserve_input() {
     let Some(version) = go_toolchain() else {
-        eprintln!(
-            "go_pagination: Go toolchain (>= 1.23) not installed; degrading to static assertions"
-        );
         return;
     };
     eprintln!("go_pagination: {version}");
@@ -486,9 +477,6 @@ fn native_walks_count_requests_and_preserve_input() {
 #[test]
 fn native_module_builds_with_the_pagination_file() {
     let Some(_) = go_toolchain() else {
-        eprintln!(
-            "go_pagination: Go toolchain (>= 1.23) not installed; degrading to static assertions"
-        );
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -620,9 +608,6 @@ func TestExplicitLimitWinsOverThePageSizeFallback(t *testing.T) {
 #[test]
 fn page_size_fallback_supplies_the_first_page_limit_only() {
     let Some(_) = go_toolchain() else {
-        eprintln!(
-            "go_pagination: Go toolchain (>= 1.23) not installed; degrading to static assertions"
-        );
         return;
     };
     let root = tempfile::tempdir().unwrap();

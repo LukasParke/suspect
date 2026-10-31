@@ -91,6 +91,19 @@ impl Linter {
             .map_or(Category::Document, |r| r.category)
     }
 
+    /// The compiled rules, in definition order.
+    pub(crate) fn rules(&self) -> &[Rule] {
+        &self.rules
+    }
+
+    /// Whether the compiled rule for `code` comes from a builtin pack
+    /// unchanged. `false` for unknown codes and for ruleset rules that
+    /// reuse a builtin code with their own `given`/`then`.
+    #[must_use]
+    pub fn is_builtin(&self, code: &str) -> bool {
+        self.rules.iter().any(|r| &*r.code == code && r.builtin)
+    }
+
     /// Runs every enabled, family-matching rule over `doc`. Findings are
     /// returned deterministically ordered by `(range, code)`.
     #[must_use]

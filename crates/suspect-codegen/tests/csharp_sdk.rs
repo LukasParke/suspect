@@ -418,9 +418,7 @@ const TOOLCHAINS: &[(&str, &str)] = &[("8.0.424", "net8.0"), ("10.0.400", "net10
 #[test]
 #[ignore = "newly admitted real OpenRouter anonymous/undeclared-body operation; .NET 8/10 installed consumers"]
 fn native_openrouter_expanded_anonymous_operation() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Users/luke/github/openrouter-web"));
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let path = root.join("projects/docs/openapi/openapi.yaml");
     let before = fs::read(&path).unwrap();
     let contract = load(&path);
@@ -534,8 +532,8 @@ impl Native {
         fs::write(path, bytes).unwrap();
     }
     fn command(&self, directory: &str, args: &[&str]) -> Command {
-        let dotnet = std::env::var_os("SUSPECT_DOTNET_BIN")
-            .unwrap_or_else(|| "/Users/luke/.local/share/mise/dotnet-root/dotnet".into());
+        let dotnet = suspect_codegen::toolchain::resolve_path("dotnet")
+            .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("dotnet")));
         let mut command = Command::new(dotnet);
         command
             .args(args)
@@ -746,9 +744,7 @@ impl Native {
 #[test]
 #[ignore = "requires the read-only OpenRouter corpus and installed .NET SDKs"]
 fn native_actual_openrouter_five_operations() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Users/luke/github/openrouter-web"));
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let files = [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",

@@ -10,7 +10,8 @@ fn run(root: &Path, extra: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_suspect"))
         .current_dir(root)
         .args([
-            "codegen",
+            "gen",
+            "sdk",
             "api.json",
             "--profile",
             "rust-http",
@@ -18,7 +19,7 @@ fn run(root: &Path, extra: &[&str]) -> Output {
             "fixture-rust-sdk",
             "--package-version",
             "0.0.0",
-            "--out",
+            "--output",
             "output",
             "--format",
             "json",

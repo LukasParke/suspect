@@ -5,11 +5,15 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
 
 [dependencies]
-pulldown-cmark = "0.13"
 suspect-low.workspace = true
 suspect-config.workspace = true
+suspect-diag.workspace = true
+suspect-check.workspace = true
 suspect-ref.workspace = true
 suspect-oas.workspace = true
 suspect-validate.workspace = true
@@ -29,7 +33,6 @@ tempfile.workspace = true
 serde.workspace = true
 suspect-test.workspace = true
 suspect-gen.workspace = true
-suspect-rex.workspace = true
 bytes.workspace = true
 reqwest = { version = "0.12", optional = true, default-features = false, features = [
     "rustls-tls",
@@ -50,6 +53,7 @@ serde_json.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 criterion.workspace = true
+suspect-rules.workspace = true
 futures.workspace = true
 tower = { workspace = true, features = ["util"] }
 

@@ -263,7 +263,7 @@ fn test_injects_credentials_into_secured_operations() {
     );
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url, "--credentials"])
         .arg(&path)
@@ -296,7 +296,7 @@ fn credentials_interpolate_environment_variables() {
     );
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url, "--credentials"])
         .arg(&path)
@@ -330,7 +330,7 @@ fn missing_environment_references_are_named_in_errors() {
     );
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url, "--credentials"])
         .arg(&path)
@@ -368,7 +368,7 @@ fn credentials_are_discovered_without_a_flag() {
     // document and finds `.suspect/credentials.json` at the workspace root.
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url])
         .env_remove("SUSPECT_CREDENTIALS")
@@ -402,7 +402,7 @@ fn suspect_credentials_env_var_points_at_the_file() {
     );
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url])
         .env("SUSPECT_CREDENTIALS", &path)
@@ -470,7 +470,7 @@ fn injection_fills_a_credential_parameter_left_empty_by_a_missing_input() {
     );
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url, "--credentials"])
         .arg(&path)
@@ -512,7 +512,7 @@ fn env_file_supplies_the_env_values_the_credentials_reference() {
     .expect("env file");
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url])
         .env_remove("FILE_SUPPLIED_TOKEN")
@@ -545,7 +545,7 @@ fn repo_root_env_file_also_supplies_credentials() {
     std::fs::write(dir.path().join(".env"), "REPO_ENV_TOKEN=repo-root-secret\n").expect("env file");
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url])
         .env_remove("REPO_ENV_TOKEN")
@@ -583,7 +583,7 @@ fn suspect_env_file_is_more_specific_than_the_repo_root_one() {
     std::fs::write(dir.path().join(".env"), "LAYERED_TOKEN=repo-root\n").expect("repo-root");
     let output = suspect()
         .current_dir(dir.path())
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args(["--base-url", &url])
         .env_remove("LAYERED_TOKEN")

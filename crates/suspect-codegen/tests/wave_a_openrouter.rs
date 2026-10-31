@@ -1,9 +1,5 @@
 //! Primary-corpus Python/Go consumers use independent hand-authored HTTP bytes.
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, process::Command, sync::Arc};
 use suspect_ir::contract::{Contract, SourceId};
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
@@ -16,8 +12,7 @@ const WANTED: &[&str] = &[
 ];
 fn source() -> (Arc<Contract>, Vec<SourceId>) {
     let path =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())

@@ -1,36 +1,38 @@
 #![deny(missing_docs)]
 //! suspect-cli: the `suspect` binary. Thin `main.rs` delegates here so every
 //! command is a testable library function taking plain arguments and
-//! returning an exit code (0 clean, 1 findings at/above Error, 2 usage).
+//! returning an [`Exit`] (0 clean, 1 findings or failed checks, 2 usage, 130
+//! interrupted; [`exit::DOCUMENTED`] lists each command).
 
+pub mod args;
 /// Git-ref baselines for comparisons.
 pub mod baseline;
 pub mod bundle;
 pub mod commands;
 pub mod diff;
+pub mod exit;
+pub mod interrupt;
 pub mod output;
+pub mod reverse;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
 pub mod sarif;
+pub mod settings;
 /// FD-level output silencing for machine-readable runs.
 pub mod silence;
+pub mod upgrade;
+pub mod watch;
 
 use std::path::PathBuf;
 
+pub use args::{
+    Check, DocOut, Findings, FindingsFormat, Report, ReportFiles, ReportFormat, Stream,
+    StreamFormat,
+};
 use clap::{Parser, Subcommand, ValueEnum};
+pub use exit::Exit;
 pub use output::{Finding, Severity};
+use suspect_config::{Layer, Raw};
 use suspect_source::{Source, Uri};
-
-/// Serialization choice for commands that produce structured output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum OutputFormat {
-    /// Human-readable aligned text (the default).
-    Text,
-    /// One pretty-printed JSON document on stdout, machine-consumable.
-    Json,
-    /// SARIF 2.1.0 log for code-scanning integrations.
-    Sarif,
-}
 
 /// Document serialization for emitting materialized trees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -51,29 +53,15 @@ pub enum Strategy {
     /// Materialize the document with every `$ref` replaced by its resolved target.
     Inline,
 }
-
 /// Subcommands of the `suspect` binary; each variant is one subcommand and
 /// its doc comment becomes the one-line help text shown by `--help`.
+/// Related commands live in groups (`diff`, `gen`, `test`, `traffic`,
+/// `release`, `dev`).
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Acquire a hash-pinned document closure or verify its offline cache.
-    Acquire(commands::acquire_cmd::AcquireArgs),
-    /// Manage and verify credentials for the testing flows.
-    Auth {
-        /// The auth subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::auth::AuthCmd,
-    },
-    /// Parse documents and report family, syntax errors, `$ref` edges, cycles, and workspace stats.
-    Check {
-        /// Documents to check.
-        #[arg(required = true)]
-        paths: Vec<PathBuf>,
-        /// Output format for the per-file reports.
-        #[command(flatten)]
-        text: TextFormat,
-    },
-    /// Validate OpenAPI syntax and semantic requirements, reporting located findings.
+    /// Run every check the editor runs; exit 1 when an error-severity finding remains.
+    Check(commands::check::CheckArgs),
+    /// Validate document structure and semantics: `check` with the validation checks.
     Validate {
         /// OpenAPI documents to validate.
         #[arg(required = true)]
@@ -87,30 +75,9 @@ pub enum Command {
         strict_format: bool,
         /// Output format for the finding list.
         #[command(flatten)]
-        text: TextFormat,
+        findings: Findings,
     },
-    /// Run the generation admission layer over documents without generating.
-    Admission(commands::admission::AdmissionArgs),
-    /// Detect consumer-breaking changes between two spec revisions.
-    Breaking(commands::breaking::BreakingArgs),
-    /// Generate API reference docs (HTML, Markdown, or a SvelteKit site).
-    #[command(name = "docs", alias = "docs-gen")]
-    DocsGen(commands::docs_gen_cmd::DocsGenArgs),
-    /// Generate typed server stubs from an OpenAPI document.
-    Stubs(commands::stubs::StubsArgs),
-    /// Detect breaking changes between two Arazzo documents.
-    ArazzoDiff(commands::arazzo_diff::ArazzoDiffArgs),
-    /// Report overlay action target matches without applying.
-    OverlayDryRun(commands::overlay_dry_run::OverlayDryRunArgs),
-    /// Upgrade Swagger 2.0 documents to OpenAPI 3.1.
-    Upgrade(commands::upgrade::UpgradeArgs),
-    /// Run TS/JS custom rules (Bun sidecar) over documents.
-    Rules {
-        /// The rules subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::rules::RulesCmd,
-    },
-    /// Run spectral-style lint rules over documents.
+    /// Run spectral-style, markdown and TypeScript rules: `check` with the lint checks.
     Lint {
         /// Documents to lint.
         #[arg(required = true)]
@@ -124,103 +91,217 @@ pub enum Command {
         min_severity: Option<output::Severity>,
         /// Output format for the finding list.
         #[command(flatten)]
-        text: TextFormat,
-    },
-    /// Apply an Overlay 1.0 document to a target document.
-    Overlay {
-        /// The overlay subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::overlay::OverlayCmd,
+        findings: Findings,
     },
     /// Re-emit a document in canonical JSON/YAML form.
     Fmt {
         /// Input document.
         input: PathBuf,
-        /// Write to this file instead of stdout.
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-        /// Force JSON output.
-        #[arg(long, conflicts_with = "yaml")]
-        json: bool,
-        /// Force YAML output.
-        #[arg(long)]
-        yaml: bool,
-    },
-    /// Structural counts for a document.
-    Stats {
-        /// Input document.
-        path: PathBuf,
-        /// Output format for the counts table.
+        /// Output file and serialization.
         #[command(flatten)]
-        text: TextFormat,
+        out: DocOut,
     },
     /// Bundle a document and its `$ref` closure into one file.
     Bundle {
         /// Entry document.
         input: PathBuf,
-        /// Write to this file instead of stdout.
-        #[arg(short, long)]
-        output: Option<PathBuf>,
         /// Bundling strategy.
         #[arg(long, value_enum, default_value = "keep")]
         strategy: Strategy,
-        /// Output serialization (inline only; default: input extension).
-        #[arg(long = "format", value_enum, id = "bundle_format")]
-        out_format: Option<DocFormat>,
+        /// Output file and serialization (`--to` applies to inline only).
+        #[command(flatten)]
+        out: DocOut,
     },
+    /// Upgrade Swagger 2.0 documents to OpenAPI 3.1.
+    Upgrade(commands::upgrade::UpgradeArgs),
+    /// Structural counts and the `$ref` census for a document.
+    Stats {
+        /// Input document.
+        path: PathBuf,
+        /// Output format for the counts table.
+        #[command(flatten)]
+        report: Report,
+    },
+    /// Apply, explain, or synthesize (`diff`) Overlay 1.0/1.1 documents.
+    Overlay {
+        /// The overlay subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::overlay::OverlayCmd,
+    },
+    /// Compare two documents or revisions: structure, breaks, impact, SDKs, routes.
+    #[command(subcommand)]
+    Diff(DiffCmd),
+    /// Generate docs, SDKs, stubs, contracts, and applications from a spec.
+    #[command(subcommand)]
+    Gen(GenCmd),
+    /// Run workflows, stateful sequences, fuzzing, load, or replay against a server.
+    #[command(subcommand)]
+    Test(TestCmd),
+    /// Serve, record, and analyze HTTP traffic.
+    #[command(subcommand)]
+    Traffic(TrafficCmd),
+    /// Plan, publish, and automate SDK releases.
+    #[command(subcommand)]
+    Release(ReleaseCmd),
+    /// Build and check a suspect project from one manifest.
+    #[command(name = "project")]
+    Project {
+        /// The project subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::project::ProjectCmd,
+    },
+    /// Run validate, contract, breaking, codegen, and tests across every
+    /// project in a workspace as one gate.
+    Ci(commands::ci::CiArgs),
+    /// Trace a validation failure to its origin: source location, git
+    /// blame, and whether recorded traffic ever passed it.
+    Why {
+        /// Spec file the failure refers to.
+        spec: PathBuf,
+        /// The constraint that fired (e.g. `type` or the diagnostic text).
+        constraint: String,
+        /// Byte offset of the failing constraint in the spec, when known.
+        #[arg(long)]
+        offset: Option<usize>,
+        /// Line of the failing constraint (1-based), with `--why-col`.
+        #[arg(long)]
+        why_line: Option<usize>,
+        /// Column of the failing constraint (1-based), with `--why-line`.
+        #[arg(long)]
+        why_col: Option<usize>,
+        /// Directory of recorded cassettes searched for historical
+        /// traffic (`.jsonl`/`.ndjson`/`.json` files).
+        #[arg(long, value_name = "DIR")]
+        cassette_dir: Option<PathBuf>,
+        /// Human timeline or one JSON document.
+        #[command(flatten)]
+        report: Report,
+    },
+    /// Run TS/JS custom rules (Bun sidecar) over documents.
+    Rules {
+        /// The rules subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::rules::RulesCmd,
+    },
+    /// Show the configuration in effect, or with `--explain` every setting
+    /// and where its value came from.
+    Config(commands::config_cmd::ConfigArgs),
+    /// Manage and verify credentials for the testing flows.
+    Auth {
+        /// The auth subcommand to run.
+        #[command(subcommand)]
+        cmd: commands::auth::AuthCmd,
+    },
+    /// Acquire a hash-pinned document closure or verify its offline cache.
+    Acquire(commands::acquire_cmd::AcquireArgs),
+    /// Re-run a command whenever documents change under the given roots.
+    Watch {
+        /// Directories (or files) watched recursively for yaml/yml/json changes.
+        #[arg(required = true)]
+        roots: Vec<PathBuf>,
+        /// Command (with arguments) to run and re-run on each change burst.
+        #[arg(last = true, allow_hyphen_values = true)]
+        command: Vec<String>,
+    },
+    /// Run the language server over stdio.
+    Lsp,
+    /// Developer tools: pipeline benchmarks and the SDK evidence matrix.
+    #[command(subcommand)]
+    Dev(DevCmd),
+}
+
+/// `suspect diff`: compare two documents or revisions.
+#[derive(Debug, Subcommand)]
+pub enum DiffCmd {
     /// Semantic structural diff between two documents.
-    Diff {
+    Structural {
         /// Left-hand document.
         a: PathBuf,
         /// Right-hand document.
         b: PathBuf,
         /// Output format for the difference report.
         #[command(flatten)]
-        text: TextFormat,
+        report: Report,
+        /// `--check`: exit 1 when anything differs.
+        #[command(flatten)]
+        check: Check,
     },
-    /// Cross-reference recorded traffic against the spec: endpoints the
-    /// traffic exercised that the spec does not declare, undeclared query
-    /// parameters, and declared operations the traffic never touched.
-    Drift {
+    /// Detect consumer-breaking changes between two OpenAPI or Arazzo
+    /// revisions (the family of NEW picks the differ).
+    Breaking(commands::breaking::BreakingArgs),
+    /// Evaluate recorded traffic against a candidate contract revision.
+    Impact(commands::impact::ImpactArgs),
+    /// Compare wire contracts and native SDK interfaces with migration notes.
+    Sdk(commands::codegen_compare::CompareArgs),
+    /// Extract server framework routes and cross-reference them with the
+    /// spec: undocumented endpoints, spec-only endpoints, method drift.
+    Routes {
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// Traffic file: a Suspect Cassette (gateway `--mode record`) or a
-        /// Suspect Journal (gateway `--journal`); records are recognized
-        /// line by line.
-        traffic: PathBuf,
-        /// Query parameter names to ignore in gap analysis (repeatable);
-        /// the CI-passed auth token lives here, for instance.
-        #[arg(long = "ignore-param", value_name = "NAME")]
-        ignore_param: Vec<String>,
-        /// Exit with status 2 when the traffic addresses undeclared
-        /// endpoints or parameters.
+        /// Server source tree or single file with route registrations.
+        source: PathBuf,
+        /// `text` for a human report, `json` for a structured report.
+        #[command(flatten)]
+        report: Report,
+        /// `--check`: exit 1 on undocumented or spec-only routes.
+        #[command(flatten)]
+        check: Check,
+    },
+}
+
+/// `suspect gen`: generate artifacts from a spec.
+#[derive(Debug, Subcommand)]
+pub enum GenCmd {
+    /// Generate API reference docs (HTML, Markdown, or a SvelteKit site).
+    Docs(commands::docs_gen_cmd::DocsGenArgs),
+    /// Generate a source-selected native SDK package.
+    Sdk(commands::codegen_cmd::CodegenArgs),
+    /// Generate typed server stubs from an OpenAPI document.
+    Stubs(commands::stubs::StubsArgs),
+    /// Emit or verify a machine-readable contract package.
+    Contract(commands::contract::ContractArgs),
+    /// Generate a Terraform provider through explicit lifecycle mappings and the generated Go SDK.
+    Terraform(commands::terraform_cmd::TerraformArgs),
+    /// Generate a Go/Cobra API CLI application over its own embedded generated Go SDK.
+    Cli(commands::application_cmd::ApplicationArgs),
+    /// Generate a TypeScript stdio MCP server over its own embedded generated TypeScript SDK.
+    Mcp(commands::application_cmd::ApplicationArgs),
+    /// Render custom template manifests (or the `docs-md` starter preset)
+    /// from an OpenAPI document.
+    Template {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Shipped preset: `docs-md`, a starting point for custom
+        /// templates (reference docs: `suspect gen docs`).
+        #[arg(long, conflicts_with = "manifest", value_parser=["docs-md"])]
+        preset: Option<String>,
+        /// Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json`
+        /// (templates resolved relative to it).
+        #[arg(long, conflicts_with = "preset")]
+        manifest: Option<PathBuf>,
+        /// Output root directory.
+        #[arg(
+            short = 'o',
+            long = "output",
+            value_name = "DIR",
+            default_value = "gen-out"
+        )]
+        out: PathBuf,
+        /// Write nothing; exit 1 when output or ownership drifts.
+        #[command(flatten)]
+        check: Check,
+        /// With `--check`: also print unified diffs of drifted files.
+        #[arg(long, requires = "check")]
+        diff: bool,
+        /// Stable logical owner when sharing an output root across generation streams.
         #[arg(long)]
-        exit_on_gap: bool,
-        /// Output format for the drift report.
-        #[command(flatten)]
-        text: TextFormat,
+        owner: Option<String>,
+        /// Explicitly adopt only byte-identical unowned output.
+        #[arg(long)]
+        adopt_identical: bool,
     },
-    /// Export recorded traffic as an HTTP Archive (HAR 1.2) — the
-    /// interchange format profiling and debugging tools read. Accepts a
-    /// Suspect Cassette or a Suspect Journal.
-    Har {
-        /// Traffic file: a Suspect Cassette or Suspect Journal.
-        traffic: PathBuf,
-        /// Write the archive here instead of stdout.
-        #[arg(long, short = 'o', value_name = "FILE")]
-        output: Option<PathBuf>,
-    },
-    /// Wall-clock micro-benchmark of the pipeline stages on one fixture.
-    Bench {
-        /// Fixture document.
-        fixture: PathBuf,
-        /// Iterations per stage (mean reported).
-        #[arg(long, default_value_t = 3)]
-        iters: usize,
-        /// Output format for the stage table.
-        #[command(flatten)]
-        text: TextFormat,
-    },
+    /// Persistent canonical SDK generation with readonly preview and watch mode.
+    Session(commands::codegen_session::SessionArgs),
     /// Run the live contract bridge: watch the spec and emit regeneration
     /// plans, evolution proposals, and reconciliation conflicts.
     Bridge {
@@ -232,43 +313,36 @@ pub enum Command {
         /// Stop after this many ticks (for scripts; omit to watch).
         #[arg(long, hide = true)]
         max_ticks: Option<u64>,
-        /// Newline-delimited JSON tick records instead of human text.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-        format: OutputFormat,
+        /// `text` for human lines, `ndjson` (or `json`) for one JSON tick
+        /// record per line.
+        #[command(flatten)]
+        stream: Stream,
     },
-    /// Extract server framework routes and cross-reference them with the
-    /// spec: undocumented endpoints, spec-only endpoints, method drift.
-    Reverse {
-        /// Server source tree or single file with route registrations.
-        source: PathBuf,
-        /// Entry OpenAPI document.
-        spec: PathBuf,
-        /// Structured JSON report instead of human text.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-        format: OutputFormat,
+    /// List the native SDK or application profiles available in this CLI build.
+    Profiles {
+        /// Profile family: native SDK backends, or application targets.
+        #[arg(long, value_enum, default_value_t = commands::sdk_profiles::ProfileKind::Sdk)]
+        kind: commands::sdk_profiles::ProfileKind,
+        /// Human-readable inventory or versioned JSON for editor integration.
+        #[command(flatten)]
+        report: Report,
     },
-    /// Generate and run stateful dependency-graph test sequences against a
-    /// live server.
-    Stateful {
-        /// Entry OpenAPI document.
-        spec: PathBuf,
-        /// Base URL prepended to operation paths.
-        #[arg(long, default_value = "http://localhost:8080")]
-        base_url: String,
-        /// Run only sequences whose target operationId contains this.
-        #[arg(long)]
-        filter: Option<String>,
-        /// Print the generated sequences as JSON instead of running them.
-        #[arg(long)]
-        emit: bool,
-    },
+    /// Run the generation admission layer over documents without generating.
+    Admission(commands::admission::AdmissionArgs),
+}
+
+/// `suspect test`: exercise a live (or recorded) server.
+#[derive(Debug, Subcommand)]
+pub enum TestCmd {
     /// Compile an Arazzo document into an executable suite and run it.
-    Test {
+    Run {
         /// Arazzo document describing the workflows.
         arazzo: PathBuf,
-        /// Base URL prepended to operation paths.
-        #[arg(long, default_value = "http://localhost:8080")]
-        base_url: String,
+        /// Base URL prepended to operation paths (default: `test.base_url`
+        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
+        /// `http://localhost:8080`).
+        #[arg(long)]
+        base_url: Option<String>,
         /// Run only workflows whose id contains this substring.
         #[arg(long)]
         filter: Option<String>,
@@ -278,14 +352,12 @@ pub enum Command {
         #[arg(long = "input", value_name = "NAME=VALUE")]
         inputs: Vec<String>,
         /// Run offline against a recorded Suspect Cassette instead of live HTTP.
-        #[arg(long, requires = "offline")]
-        cassette: Option<PathBuf>,
-        /// Enables offline mode (requires --cassette).
         #[arg(long)]
-        offline: bool,
-        /// Event stream format: human text or one-JSON-per-line ndjson.
-        #[arg(long, value_enum, default_value = "text")]
-        report: ReportFormat,
+        cassette: Option<PathBuf>,
+        /// Event stream format: human text or one-JSON-per-line ndjson
+        /// (default: `test.report`, else `text`).
+        #[arg(long, value_enum)]
+        format: Option<StreamFormat>,
         /// Message broker directory for Arazzo 1.1 AsyncAPI steps:
         /// `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl`
         /// collects what the workflow published.
@@ -293,28 +365,50 @@ pub enum Command {
         message_broker: Option<PathBuf>,
         /// Credentials file for the security schemes the workflows
         /// exercise. Default: `.suspect/credentials.json` discovered by
-        /// walking up from the Arazzo document; `SUSPECT_CREDENTIALS`
-        /// overrides.
+        /// walking up from the Arazzo document; `test.credentials` and
+        /// `SUSPECT_CREDENTIALS` override it.
         #[arg(long, value_name = "FILE")]
         credentials: Option<PathBuf>,
         /// Write the journal to this file (append) instead of stdout.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
-        /// JSON object file of workflow inputs, applied before `--input`
+        /// JSON or YAML object file of workflow inputs, applied before `--input`
         /// pairs (which override it).
-        #[arg(long = "inputs", value_name = "FILE")]
+        #[arg(long = "inputs-file", value_name = "FILE")]
         inputs_file: Option<PathBuf>,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
     },
-    /// Run Arazzo workflows as weighted virtual-user scenarios under a phased
-    /// load profile, with latency/throughput metrics and SLO gates.
-    Load(Box<commands::load::LoadArgs>),
+    /// Generate and run stateful dependency-graph test sequences against a
+    /// live server.
+    Stateful {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Base URL prepended to operation paths (default: `test.base_url`
+        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
+        /// `http://localhost:8080`).
+        #[arg(long)]
+        base_url: Option<String>,
+        /// Run only sequences whose target operationId contains this.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Print the generated sequences as JSON instead of running them.
+        #[arg(long)]
+        emit: bool,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
+    },
     /// Fuzz operations with schema-mutating requests against a live server.
     Fuzz {
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// Base URL prepended to operation paths.
-        #[arg(long, default_value = "http://localhost:8080")]
-        base_url: String,
+        /// Base URL prepended to operation paths (default: `test.base_url`
+        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
+        /// `http://localhost:8080`).
+        #[arg(long)]
+        base_url: Option<String>,
         /// Mutant requests generated per operation.
         #[arg(long, default_value_t = 25)]
         runs: usize,
@@ -334,32 +428,13 @@ pub enum Command {
         /// Evolved fuzzing: requests per round.
         #[arg(long, default_value_t = 12)]
         per_round: u32,
-    },
-    /// Trace a validation failure to its origin: source location, git
-    /// blame, and whether recorded traffic ever passed it.
-    Why {
-        /// The constraint that fired (e.g. `type` or the diagnostic text).
-        constraint: String,
-        /// Spec file the failure refers to.
-        #[arg(long)]
-        spec: PathBuf,
-        /// Byte offset of the failing constraint in the spec, when known.
-        #[arg(long)]
-        offset: Option<usize>,
-        /// Line of the failing constraint (1-based), with `--why-col`.
-        #[arg(long)]
-        why_line: Option<usize>,
-        /// Column of the failing constraint (1-based), with `--why-line`.
-        #[arg(long)]
-        why_col: Option<usize>,
-        /// Directory of recorded cassettes searched for historical
-        /// traffic (`.jsonl`/`.ndjson`/`.json` files).
-        #[arg(long, value_name = "DIR")]
-        cassette_dir: Option<PathBuf>,
-        /// Human timeline or one JSON document.
+        /// JSON and JUnit report files.
         #[command(flatten)]
-        text: TextFormat,
+        report_files: ReportFiles,
     },
+    /// Run Arazzo workflows as weighted virtual-user scenarios under a phased
+    /// load profile, with latency/throughput metrics and SLO gates.
+    Load(Box<commands::load::LoadArgs>),
     /// Re-issue a recorded cassette against an upstream and report drift.
     Replay {
         /// Recorded Suspect Cassette to replay from.
@@ -373,39 +448,15 @@ pub enum Command {
         /// Write the journal to this file (append) instead of stdout.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
     },
-    /// Render documentation or custom template manifests from an OpenAPI document.
-    Gen {
-        /// Entry OpenAPI document.
-        spec: PathBuf,
-        /// Shipped documentation preset.
-        #[arg(long, conflicts_with = "manifest", value_parser=["docs-md"])]
-        preset: Option<String>,
-        /// Custom gen.toml manifest (templates resolved relative to it).
-        #[arg(long, conflicts_with = "preset")]
-        manifest: Option<PathBuf>,
-        /// Output root directory.
-        #[arg(short, long, default_value = "gen-out")]
-        out: PathBuf,
-        /// Print unified diffs without writing files; exit 1 when output or ownership drifts.
-        #[arg(long)]
-        diff: bool,
-        /// Stable logical owner when sharing an output root across generation streams.
-        #[arg(long)]
-        owner: Option<String>,
-        /// Explicitly adopt only byte-identical unowned output.
-        #[arg(long)]
-        adopt_identical: bool,
-    },
-    /// Re-run a command whenever documents change under the given roots.
-    Watch {
-        /// Directories (or files) watched recursively for yaml/yml/json changes.
-        #[arg(required = true)]
-        roots: Vec<PathBuf>,
-        /// Command (with arguments) to run and re-run on each change burst.
-        #[arg(last = true, allow_hyphen_values = true)]
-        command: Vec<String>,
-    },
+}
+
+/// `suspect traffic`: serve, record, and analyze HTTP traffic.
+#[derive(Debug, Subcommand)]
+pub enum TrafficCmd {
     /// Serve a spec as a mock, or proxy/validate/record against an upstream,
     /// or replay a recorded cassette.
     Gateway {
@@ -413,19 +464,20 @@ pub enum Command {
         spec: PathBuf,
         /// TCP port to bind on 127.0.0.1 (`0` picks a free port). The bound
         /// address is printed on stderr once the gateway can serve.
-        #[arg(long, short = 'p', default_value_t = 8080)]
-        port: u16,
-        /// Operating mode: mock | proxy | validate | record | replay |
-        /// scenario.
-        #[arg(long, default_value = "mock")]
-        mode: String,
+        /// Default: `gateway.port`, else 8080.
+        #[arg(long, short = 'p')]
+        port: Option<u16>,
+        /// Operating mode. Default: `gateway.mode`, else `mock`.
+        #[arg(long, value_enum)]
+        mode: Option<commands::gateway::GatewayMode>,
         /// Scenario mode: JSON file of scripted steps
         /// (`{"steps": [{"method", "path_suffix", "status", "body"}]}`).
         #[arg(long, value_name = "FILE")]
         scenario: Option<PathBuf>,
-        /// Upstream base URL for proxy/validate/record modes.
-        #[arg(long)]
-        upstream: Option<PathBuf>,
+        /// Upstream base URL for proxy/validate/record modes (default:
+        /// `gateway.upstream`).
+        #[arg(long, value_name = "URL")]
+        upstream: Option<String>,
         /// Cassette path for record output.
         #[arg(long)]
         cassette: Option<PathBuf>,
@@ -457,93 +509,88 @@ pub enum Command {
         #[arg(long = "redact-json-key", value_name = "KEY")]
         redact_json_keys: Vec<String>,
     },
-    /// Generate a source-selected native SDK package.
-    Codegen(commands::codegen_cmd::CodegenArgs),
-    /// Generate a Terraform provider through explicit lifecycle mappings and the generated Go SDK.
-    CodegenTerraform(commands::terraform_cmd::TerraformArgs),
-    /// Generate a Go/Cobra API CLI application over its own embedded generated Go SDK.
-    CodegenCli(commands::application_cmd::ApplicationArgs),
-    /// Generate a TypeScript stdio MCP server over its own embedded generated TypeScript SDK.
-    CodegenMcp(commands::application_cmd::ApplicationArgs),
-    /// List the native SDK or application profiles available in this CLI build.
-    CodegenProfiles {
-        /// Profile family: native SDK backends, or application targets.
-        #[arg(long, value_enum, default_value_t = commands::sdk_profiles::ProfileKind::Sdk)]
-        kind: commands::sdk_profiles::ProfileKind,
-        /// Human-readable inventory or versioned JSON for editor integration.
+    /// Cross-reference recorded traffic against the spec: endpoints the
+    /// traffic exercised that the spec does not declare, undeclared query
+    /// parameters, and declared operations the traffic never touched.
+    Drift {
+        /// Entry OpenAPI document.
+        spec: PathBuf,
+        /// Traffic file: a Suspect Cassette (gateway `--mode record`) or a
+        /// Suspect Journal (gateway `--journal`); records are recognized
+        /// line by line.
+        traffic: PathBuf,
+        /// Query parameter names to ignore in gap analysis (repeatable);
+        /// the CI-passed auth token lives here, for instance.
+        #[arg(long = "ignore-param", value_name = "NAME")]
+        ignore_param: Vec<String>,
+        /// Exit with status 1 when the traffic addresses undeclared
+        /// endpoints or parameters.
+        #[arg(long)]
+        check: bool,
+        /// Output format for the drift report.
         #[command(flatten)]
-        text: TextFormat,
+        findings: Findings,
     },
-    /// Persistent canonical SDK generation with readonly preview and watch mode.
-    CodegenSession(commands::codegen_session::SessionArgs),
-    /// Compare wire contracts and native SDK interfaces with migration notes.
-    CodegenCompare(commands::codegen_compare::CompareArgs),
-    /// Recommend a release version and changelog from two spec revisions.
-    #[command(name = "release-plan")]
-    ReleasePlan(commands::release::ReleasePlanArgs),
-    /// Evaluate recorded traffic against a candidate contract revision.
-    #[command(name = "impact")]
-    Impact(commands::impact::ImpactArgs),
-    /// Plan and execute SDK publishing across registries.
-    #[command(name = "release-publish")]
-    ReleasePublish(commands::publish::PublishArgs),
-    /// Render the release manifest as a tag-triggered CI workflow.
-    #[command(name = "release-workflow")]
-    ReleaseWorkflow(commands::publish::WorkflowArgs),
-    /// Print the SDK verification matrix: backend x feature -> evidence.
-    Evidence(commands::evidence::EvidenceArgs),
-    /// Run validate, contract, breaking, codegen, and tests across every
-    /// project in a workspace as one gate.
-    Ci(commands::ci::CiArgs),
-    /// Emit or verify a machine-readable contract package.
-    Contract(commands::contract::ContractArgs),
-    /// Show the project configuration in effect for this invocation.
-    Config {
-        /// Report the configuration that would apply to this input, instead
-        /// of the one above the working directory.
-        input: Option<PathBuf>,
+    /// Export recorded traffic as an HTTP Archive (HAR 1.2) — the
+    /// interchange format profiling and debugging tools read. Accepts a
+    /// Suspect Cassette or a Suspect Journal.
+    Har {
+        /// Traffic file: a Suspect Cassette or Suspect Journal.
+        traffic: PathBuf,
+        /// Write the archive here instead of stdout.
+        #[arg(long, short = 'o', value_name = "FILE")]
+        output: Option<PathBuf>,
     },
-    /// Build and check a suspect project from one manifest.
-    #[command(name = "project")]
-    Project {
-        /// The project subcommand to run.
-        #[command(subcommand)]
-        cmd: commands::project::ProjectCmd,
-    },
-    /// Run the language server over stdio.
-    Lsp,
 }
 
-/// Parses a severity name from a configuration file.
-fn parse_severity(name: &str) -> Option<output::Severity> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "error" => Some(output::Severity::Error),
-        "warning" => Some(output::Severity::Warning),
-        "info" => Some(output::Severity::Info),
-        "hint" => Some(output::Severity::Hint),
-        _ => None,
+/// `suspect release`: SDK release planning and publishing.
+#[derive(Debug, Subcommand)]
+pub enum ReleaseCmd {
+    /// Recommend a release version and changelog from two spec revisions.
+    Plan(commands::release::ReleasePlanArgs),
+    /// Plan and execute SDK publishing across registries.
+    Publish(commands::publish::PublishArgs),
+    /// Render the release manifest as a tag-triggered CI workflow.
+    Workflow(commands::publish::WorkflowArgs),
+}
+
+/// `suspect dev`: tools for developing suspect itself.
+#[derive(Debug, Subcommand)]
+pub enum DevCmd {
+    /// Wall-clock micro-benchmark of the pipeline stages on one fixture.
+    Bench {
+        /// Fixture document.
+        fixture: PathBuf,
+        /// Iterations per stage (mean reported).
+        #[arg(long, default_value_t = 3)]
+        iters: usize,
+        /// Output format for the stage table.
+        #[command(flatten)]
+        report: Report,
+    },
+    /// Print the SDK verification matrix: backend x feature -> evidence.
+    Evidence(commands::evidence::EvidenceArgs),
+}
+
+/// Parses a severity floor named in configuration or the environment
+/// (`error`, `warning`/`warn`, `info`/`information`, `hint`); `origin`
+/// names where it came from in the error.
+///
+/// # Errors
+/// An unrecognized name, or `off` (a floor cannot be switched off).
+pub fn parse_severity_floor(name: &str, origin: &str) -> anyhow::Result<output::Severity> {
+    match suspect_config::parse_severity(name) {
+        Some(parsed) => output::Severity::from_config(parsed).ok_or_else(|| {
+            anyhow::anyhow!("{origin}: severity `off` is not a valid minimum severity")
+        }),
+        None => Err(anyhow::anyhow!(
+            "{origin}: unrecognized severity `{name}` (expected error, warning, info, or hint)"
+        )),
     }
 }
 
-/// `--format json|text` for commands with structured output. Declared per
-/// subcommand (not global) so `bundle` can own `--format json|yaml`.
-#[derive(Debug, clap::Args)]
-pub struct TextFormat {
-    /// Output format for structured results.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
-}
-
-/// Output style for `suspect test` event streams.
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum ReportFormat {
-    /// Human-readable progress lines.
-    Text,
-    /// One JSON object per line (machine consumable).
-    Ndjson,
-}
-
-/// Top-level CLI shape (`suspect --format json <command> ...`).
+/// Top-level CLI shape (`suspect <command> ...`); output-format flags such
+/// as `--format` belong to each subcommand (`suspect lint --format json`).
 #[derive(Debug, Parser)]
 #[command(name = "suspect", version, about = "OpenAPI/Arazzo/Overlay toolkit")]
 pub struct Cli {
@@ -552,225 +599,113 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// Dispatches a parsed CLI invocation, returning the process exit code.
+/// Dispatches a parsed CLI invocation, returning the process status.
 ///
 /// # Errors
 /// Propagates unexpected IO/model failures; the binary prints them and exits 2.
-pub fn execute(cli: Cli) -> anyhow::Result<i32> {
+pub fn execute(cli: Cli) -> anyhow::Result<Exit> {
+    dispatch(cli).map(Exit::from_legacy)
+}
+
+fn dispatch(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
-        Command::Check { paths, text } => commands::check::check(&paths, text.format),
+        Command::Check(args) => commands::check::check(args),
         Command::Validate {
             paths,
             reference_allowlist,
             strict_format,
-            text,
+            findings,
         } => {
-            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let strict_format = suspect_config::resolve_bool(
-                strict_format,
-                "SUSPECT_STRICT_FORMAT",
-                loaded.settings.validate.strict_format,
-            );
-            commands::validate::validate(
-                &paths,
-                text.format,
-                reference_allowlist.as_deref(),
-                strict_format,
-            )
+            // A clap bool cannot say "explicitly false": only a passed flag
+            // enters the flag layer.
+            let flags = Layer::flags()
+                .set(
+                    "validate.strict_format",
+                    strict_format.then_some(Raw::Bool(true)),
+                    "--strict-format",
+                )
+                .set(
+                    "validate.reference_allowlist",
+                    reference_allowlist.map(Raw::Path),
+                    "--reference-allowlist",
+                );
+            commands::check::command(&commands::check::Request {
+                paths: &paths,
+                flags,
+                checks: Some(commands::check::VALIDATE.to_vec()),
+                rules: None,
+                sdk: None,
+                write_baseline: None,
+                format: findings.format,
+            })
         }
-        Command::Admission(args) => commands::admission::admission(&args),
-        Command::Breaking(args) => commands::breaking::breaking(&args),
-        Command::DocsGen(mut args) => {
-            let loaded = suspect_config::for_invocation(Some(&args.input))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let settings = &loaded.settings;
-            if args.style.is_none()
-                && let Some(style) = settings.docs.style.as_deref()
-            {
-                args.style = Some(match style {
-                    "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
-                    "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
-                    "html" => commands::docs_gen_cmd::DocsStyle::Html,
-                    other => {
-                        return Err(anyhow::anyhow!(
-                            "docs style `{other}` is not one of: markdown, sveltekit, html"
-                        ));
-                    }
-                });
-            }
-            if args.output.is_none()
-                && let Some(out) = &settings.docs.out
-            {
-                args.output = Some(out.clone());
-            }
-            commands::docs_gen_cmd::docs_gen(&args)
-        }
-        Command::Stubs(args) => commands::stubs::stubs(&args),
-        Command::ArazzoDiff(args) => commands::arazzo_diff::arazzo_diff(&args),
-        Command::OverlayDryRun(args) => commands::overlay_dry_run::overlay_dry_run(&args),
-        Command::Upgrade(args) => commands::upgrade::upgrade(&args),
-        Command::Rules { cmd } => cmd.run().map(|_| 0),
         Command::Lint {
             paths,
             ruleset,
             min_severity,
-            text,
+            findings,
         } => {
-            // Configuration supplies defaults; an explicit flag wins.
-            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let settings = &loaded.settings;
-            let ruleset = ruleset.or_else(|| settings.lint.ruleset.clone());
-            // flag > env > config > default, decided in one place.
-            let min_severity = suspect_config::resolve::Resolution::new(
-                min_severity,
-                std::env::var("SUSPECT_LINT_MIN_SEVERITY")
-                    .ok()
-                    .and_then(|v| parse_severity(&v)),
-                settings
-                    .lint
-                    .min_severity
-                    .as_deref()
-                    .and_then(parse_severity),
-                output::Severity::Hint,
-            )
-            .value;
-            // Committed policy: design-class severity and per-rule
-            // overrides reach the CLI the same way they reach the editor.
-            let overrides = commands::lint::LintOverrides::from_config(
-                settings.lint.design.as_deref(),
-                &settings.lint.rules,
-            )
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-            commands::lint::lint(
-                &paths,
-                ruleset.as_deref(),
-                min_severity,
-                &overrides,
-                text.format,
-            )
+            // flag > env > config > default, decided by `resolve`.
+            let flags = Layer::flags()
+                .set("lint.ruleset", ruleset.map(Raw::Path), "--ruleset")
+                .set(
+                    "lint.min_severity",
+                    min_severity.map(|s| Raw::Str(s.label().to_owned())),
+                    "--min-severity",
+                );
+            commands::check::command(&commands::check::Request {
+                paths: &paths,
+                flags,
+                checks: Some(commands::check::LINT.to_vec()),
+                rules: None,
+                sdk: None,
+                write_baseline: None,
+                format: findings.format,
+            })
         }
-        Command::Overlay { cmd } => commands::overlay::run(cmd),
-        Command::Fmt {
-            input,
-            output,
-            json,
-            yaml,
-        } => {
-            let loaded =
-                suspect_config::for_invocation(Some(&input)).map_err(|e| anyhow::anyhow!("{e}"))?;
-            // A typed --json/--yaml flag wins; otherwise the file decides.
+        Command::Fmt { input, out } => {
+            // A typed --to wins over both settings; otherwise the file decides.
+            let resolved = settings::resolve_one(&input, Layer::flags())?;
+            let json = out.to == Some(DocFormat::Json);
+            let yaml = out.to == Some(DocFormat::Yaml);
             let (json, yaml) = if json || yaml {
                 (json, yaml)
             } else {
-                (loaded.settings.format.json, loaded.settings.format.yaml)
+                (resolved.settings.format.json, resolved.settings.format.yaml)
             };
-            commands::fmt::fmt(&input, output.as_deref(), json, yaml)
+            commands::fmt::fmt(&input, out.output.as_deref(), json, yaml)
         }
-        Command::Stats { path, text } => commands::stats::stats(&path, text.format),
         Command::Bundle {
             input,
-            output,
             strategy,
-            out_format,
-        } => bundle::bundle(&input, output.as_deref(), strategy, out_format),
-        Command::Diff { a, b, text } => diff::diff_files(&a, &b, text.format),
-        Command::Drift {
-            spec,
-            traffic,
-            ignore_param,
-            exit_on_gap,
-            text,
-        } => commands::drift::drift(&spec, &traffic, &ignore_param, exit_on_gap, text.format),
-        Command::Har { traffic, output } => commands::har::har(&traffic, output.as_deref()),
-        Command::Bench {
-            fixture,
-            iters,
-            text,
-        } => commands::bench::bench(&fixture, iters, text.format),
-        Command::Load(args) => commands::load::load(*args),
-        Command::Fuzz {
-            spec,
-            base_url,
-            runs,
-            filter,
-            journal,
-            evolved,
-            rounds,
-            per_round,
-        } => commands::fuzz::fuzz(
-            &spec,
-            &base_url,
-            runs,
-            filter.as_deref(),
-            journal.as_deref(),
-            evolved,
-            rounds,
-            per_round,
-        ),
-        Command::Replay {
-            cassette,
-            upstream,
-            diff,
-            journal,
-        } => commands::replay::replay(&cassette, &upstream, diff, journal.as_deref()),
-        Command::Bridge {
-            spec,
-            interval_ms,
-            max_ticks,
-            format,
-        } => commands::bridge::bridge(
-            &spec,
-            interval_ms,
-            max_ticks,
-            matches!(format, OutputFormat::Json),
-        ),
-        Command::Reverse {
-            source,
-            spec,
-            format,
-        } => commands::reverse::reverse(&source, &spec, matches!(format, OutputFormat::Json)),
-        Command::Stateful {
-            spec,
-            base_url,
-            filter,
-            emit,
-        } => commands::stateful::stateful(&spec, &base_url, filter.as_deref(), emit),
-        Command::Auth {
-            cmd: commands::auth::AuthCmd::Check { credentials },
-        } => commands::auth::check(credentials.as_deref()),
-        Command::Test {
-            arazzo,
-            base_url,
-            filter,
-            inputs,
-            cassette,
-            offline: _,
-            report,
-            message_broker,
-            credentials,
-            journal,
-            inputs_file,
-        } => commands::test::test_with_messages(
-            &arazzo,
-            &base_url,
-            filter.as_deref(),
-            &commands::inputs::parse_inputs(inputs_file.as_deref(), &inputs)?,
-            cassette.as_deref(),
-            matches!(report, ReportFormat::Ndjson),
-            message_broker.as_deref(),
-            credentials.as_deref(),
-            journal.as_deref(),
-        ),
+            out,
+        } => bundle::bundle(&input, out.output.as_deref(), strategy, out.to),
+        Command::Upgrade(args) => commands::upgrade::upgrade(&args),
+        Command::Stats { path, report } => commands::stats::stats(&path, report.format),
+        Command::Overlay { cmd } => commands::overlay::run(cmd),
+        Command::Diff(cmd) => diff_cmd(cmd),
+        Command::Gen(cmd) => gen_cmd(cmd),
+        Command::Test(cmd) => test_cmd(cmd),
+        Command::Traffic(cmd) => traffic_cmd(cmd),
+        Command::Release(cmd) => match cmd {
+            ReleaseCmd::Plan(args) => commands::release::release_plan(&args),
+            ReleaseCmd::Publish(args) => commands::publish::publish(&args),
+            ReleaseCmd::Workflow(args) => commands::publish::workflow(&args),
+        },
+        Command::Project { cmd } => commands::project::run(cmd),
+        Command::Ci(args) => {
+            // The gate reports its own aggregate, so a failing stage is a
+            // reported verdict rather than a raised error.
+            commands::ci::ci(&args)
+        }
         Command::Why {
-            constraint,
             spec,
+            constraint,
             offset,
             why_line,
             why_col,
             cassette_dir,
-            text,
+            report,
         } => commands::why::why(
             &constraint,
             &spec,
@@ -778,13 +713,101 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             why_line,
             why_col,
             cassette_dir.as_deref(),
-            matches!(text.format, OutputFormat::Json),
+            report.format.is_json(),
         ),
-        Command::Gen {
+        Command::Rules { cmd } => cmd.run(),
+        Command::Config(args) => commands::config_cmd::config(&args),
+        Command::Auth {
+            cmd: commands::auth::AuthCmd::Check { credentials },
+        } => {
+            let flags = Layer::flags().set(
+                "test.credentials",
+                credentials.map(Raw::Path),
+                "--credentials",
+            );
+            let resolved = settings::resolve(&[], flags)?;
+            commands::auth::check(resolved.settings.test.credentials.as_deref())
+        }
+        Command::Acquire(args) => commands::acquire_cmd::acquire(args),
+        Command::Watch { roots, command } => {
+            interrupt::server();
+            commands::watch::watch(&roots, &command)
+        }
+        Command::Lsp => {
+            interrupt::server();
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(suspect_lsp::run_server());
+            Ok(0)
+        }
+        Command::Dev(cmd) => match cmd {
+            DevCmd::Bench {
+                fixture,
+                iters,
+                report,
+            } => commands::bench::bench(&fixture, iters, report.format),
+            DevCmd::Evidence(args) => commands::evidence::evidence(&args),
+        },
+    }
+}
+
+fn diff_cmd(cmd: DiffCmd) -> anyhow::Result<i32> {
+    match cmd {
+        DiffCmd::Structural {
+            a,
+            b,
+            report,
+            check,
+        } => diff::diff_files(&a, &b, report.format, check.check),
+        DiffCmd::Breaking(args) => commands::breaking::breaking(&args),
+        DiffCmd::Impact(args) => commands::impact::impact(&args),
+        DiffCmd::Sdk(args) => commands::codegen_compare::compare(args),
+        DiffCmd::Routes {
+            spec,
+            source,
+            report,
+            check,
+        } => commands::reverse::reverse(&source, &spec, report.format.is_json(), check.check),
+    }
+}
+
+fn gen_cmd(cmd: GenCmd) -> anyhow::Result<i32> {
+    match cmd {
+        GenCmd::Docs(mut args) => {
+            let style = args
+                .style
+                .and_then(|s| ValueEnum::to_possible_value(&s))
+                .map(|v| Raw::Str(v.get_name().to_owned()));
+            let flags = Layer::flags().set("docs.style", style, "--style").set(
+                "docs.output",
+                args.output.take().map(Raw::Path),
+                "--output",
+            );
+            let resolved = settings::resolve_one(&args.input, flags)?;
+            let docs = &resolved.settings.docs;
+            // The table restricts `docs.style` to the enum's names.
+            args.style = docs
+                .style
+                .as_deref()
+                .and_then(|style| commands::docs_gen_cmd::DocsStyle::from_str(style, false).ok());
+            args.output.clone_from(&docs.output);
+            commands::docs_gen_cmd::docs_gen(&args)
+        }
+        GenCmd::Sdk(args) => commands::codegen_cmd::codegen(args),
+        GenCmd::Stubs(args) => commands::stubs::stubs(&args),
+        GenCmd::Contract(args) => commands::contract::contract(&args),
+        GenCmd::Terraform(args) => commands::terraform_cmd::generate(args),
+        GenCmd::Cli(args) => {
+            commands::application_cmd::generate(commands::application_cmd::Target::Cli, args)
+        }
+        GenCmd::Mcp(args) => {
+            commands::application_cmd::generate(commands::application_cmd::Target::Mcp, args)
+        }
+        GenCmd::Template {
             spec,
             preset,
             manifest,
             out,
+            check,
             diff,
             owner,
             adopt_identical,
@@ -793,11 +816,121 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             preset.as_deref(),
             manifest.as_deref(),
             &out,
-            diff,
+            commands::generate::Gate {
+                check: check.check,
+                diff,
+            },
             owner.as_deref(),
             adopt_identical,
         ),
-        Command::Gateway {
+        GenCmd::Session(args) => {
+            if args.watch {
+                interrupt::server();
+            }
+            commands::codegen_session::generate(args)
+        }
+        GenCmd::Bridge {
+            spec,
+            interval_ms,
+            max_ticks,
+            stream,
+        } => {
+            interrupt::server();
+            commands::bridge::bridge(&spec, interval_ms, max_ticks, stream.format.is_ndjson())
+        }
+        GenCmd::Profiles { kind, report } => match kind {
+            commands::sdk_profiles::ProfileKind::Sdk => commands::sdk_profiles::list(report.format),
+            commands::sdk_profiles::ProfileKind::Applications => {
+                commands::sdk_profiles::list_applications(report.format)
+            }
+        },
+        GenCmd::Admission(args) => commands::admission::admission(&args),
+    }
+}
+
+fn test_cmd(cmd: TestCmd) -> anyhow::Result<i32> {
+    match cmd {
+        TestCmd::Run {
+            arazzo,
+            base_url,
+            filter,
+            inputs,
+            cassette,
+            format,
+            message_broker,
+            credentials,
+            journal,
+            inputs_file,
+            report_files,
+        } => {
+            let test = test_settings(&arazzo, base_url, credentials, format)?;
+            commands::test::test_with_reports(
+                &arazzo,
+                &test.base_url,
+                filter.as_deref(),
+                &commands::inputs::parse_inputs(inputs_file.as_deref(), &inputs)?,
+                cassette.as_deref(),
+                test.report == "ndjson",
+                message_broker.as_deref(),
+                test.credentials.as_deref(),
+                journal.as_deref(),
+                &report_files,
+            )
+        }
+        TestCmd::Stateful {
+            spec,
+            base_url,
+            filter,
+            emit,
+            report_files,
+        } => commands::stateful::stateful(
+            &spec,
+            &test_settings(&spec, base_url, None, None)?.base_url,
+            filter.as_deref(),
+            emit,
+            &report_files,
+        ),
+        TestCmd::Fuzz {
+            spec,
+            base_url,
+            runs,
+            filter,
+            journal,
+            evolved,
+            rounds,
+            per_round,
+            report_files,
+        } => commands::fuzz::fuzz(
+            &spec,
+            &test_settings(&spec, base_url, None, None)?.base_url,
+            runs,
+            filter.as_deref(),
+            journal.as_deref(),
+            evolved,
+            rounds,
+            per_round,
+            &report_files,
+        ),
+        TestCmd::Load(args) => commands::load::load(*args),
+        TestCmd::Replay {
+            cassette,
+            upstream,
+            diff,
+            journal,
+            report_files,
+        } => commands::replay::replay(
+            &cassette,
+            &upstream,
+            diff,
+            journal.as_deref(),
+            &report_files,
+        ),
+    }
+}
+
+fn traffic_cmd(cmd: TrafficCmd) -> anyhow::Result<i32> {
+    match cmd {
+        TrafficCmd::Gateway {
             spec,
             port,
             mode,
@@ -812,64 +945,66 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             journal,
             redact_headers,
             redact_json_keys,
-        } => commands::gateway::gateway(
-            &spec,
-            port,
-            &mode,
-            upstream.as_ref(),
-            cassette.as_ref(),
-            enforce,
-            delay_ms,
-            delay_pct,
-            error_status,
-            error_pct,
-            scenario.as_ref(),
-            journal.as_deref(),
-            &redact_headers,
-            &redact_json_keys,
-        ),
-        Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
-        Command::Acquire(args) => commands::acquire_cmd::acquire(args),
-        Command::Codegen(args) => commands::codegen_cmd::codegen(args),
-        Command::CodegenTerraform(args) => commands::terraform_cmd::generate(args),
-        Command::CodegenCli(args) => {
-            commands::application_cmd::generate(commands::application_cmd::Target::Cli, args)
+        } => {
+            let flags = Layer::flags()
+                .set(
+                    "gateway.port",
+                    port.map(|p| Raw::Int(u64::from(p))),
+                    "--port",
+                )
+                .set(
+                    "gateway.mode",
+                    mode.map(|m| Raw::Str(m.name().to_owned())),
+                    "--mode",
+                )
+                .set("gateway.upstream", upstream.map(Raw::Str), "--upstream");
+            let gateway = settings::resolve_one(&spec, flags)?.settings.gateway;
+            commands::gateway::gateway(
+                &spec,
+                gateway.port,
+                &gateway.mode,
+                gateway.upstream.as_deref(),
+                cassette.as_ref(),
+                enforce,
+                delay_ms,
+                delay_pct,
+                error_status,
+                error_pct,
+                scenario.as_ref(),
+                journal.as_deref(),
+                &redact_headers,
+                &redact_json_keys,
+            )
         }
-        Command::CodegenMcp(args) => {
-            commands::application_cmd::generate(commands::application_cmd::Target::Mcp, args)
-        }
-        Command::CodegenProfiles { kind, text } => match kind {
-            commands::sdk_profiles::ProfileKind::Sdk => commands::sdk_profiles::list(text.format),
-            commands::sdk_profiles::ProfileKind::Applications => {
-                commands::sdk_profiles::list_applications(text.format)
-            }
-        },
-        Command::CodegenSession(args) => commands::codegen_session::generate(args),
-        Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
-        Command::Config { input } => {
-            let loaded = suspect_config::for_invocation(input.as_deref())
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            println!("{}", loaded.describe());
-            Ok(0)
-        }
-        Command::Evidence(args) => commands::evidence::evidence(&args),
-        Command::Ci(args) => {
-            // The gate reports its own aggregate, so a failing stage is a
-            // reported verdict rather than a raised error.
-            commands::ci::ci(&args)
-        }
-        Command::Contract(args) => commands::contract::contract(&args),
-        Command::ReleasePlan(args) => commands::release::release_plan(&args),
-        Command::ReleasePublish(args) => commands::publish::publish(&args),
-        Command::ReleaseWorkflow(args) => commands::publish::workflow(&args),
-        Command::Impact(args) => commands::impact::impact(&args),
-        Command::Project { cmd } => commands::project::run(cmd),
-        Command::Lsp => {
-            let rt = tokio::runtime::Runtime::new()?;
-            rt.block_on(suspect_lsp::run_server());
-            Ok(0)
-        }
+        TrafficCmd::Drift {
+            spec,
+            traffic,
+            ignore_param,
+            check,
+            findings,
+        } => commands::drift::drift(&spec, &traffic, &ignore_param, check, findings.format),
+        TrafficCmd::Har { traffic, output } => commands::har::har(&traffic, output.as_deref()),
     }
+}
+
+/// The `test` settings for a run on `input`, with the flags that set
+/// them on top.
+fn test_settings(
+    input: &std::path::Path,
+    base_url: Option<String>,
+    credentials: Option<PathBuf>,
+    format: Option<StreamFormat>,
+) -> anyhow::Result<suspect_config::TestSettings> {
+    let format = format.map(|f| Raw::Str(f.name().to_owned()));
+    let flags = Layer::flags()
+        .set("test.base_url", base_url.map(Raw::Str), "--base-url")
+        .set(
+            "test.credentials",
+            credentials.map(Raw::Path),
+            "--credentials",
+        )
+        .set("test.report", format, "--format");
+    Ok(settings::resolve_one(input, flags)?.settings.test)
 }
 
 /// Loads and parses one document, pairing its canonical URI with the low model.

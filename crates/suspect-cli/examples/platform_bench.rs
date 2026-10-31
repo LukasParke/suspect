@@ -1,5 +1,5 @@
 //! End-to-end platform benchmark: measures every performance budget line
-//! from README.platform.md against the real Stripe corpus (6.4 MB OpenAPI)
+//! from BENCHMARKS.md ("Platform budgets") against the real Stripe corpus (6.4 MB OpenAPI)
 //! with **real socket I/O** for gateway/replay throughput.
 //!
 //! Run: `cargo run --release -p suspect-cli --example platform_bench`
@@ -659,7 +659,7 @@ fn bench_gen(ir: &IrSpec) -> anyhow::Result<()> {
 fn bench_watch() -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let (tx, rx) = std::sync::mpsc::channel();
-    let _handle = suspect_watch::watch(
+    let _handle = suspect_cli::watch::watch(
         vec![dir.path().to_path_buf()],
         Duration::from_millis(10),
         tx,

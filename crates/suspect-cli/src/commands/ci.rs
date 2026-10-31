@@ -2,8 +2,9 @@
 //!
 //! Discovers every `suspect.project.json` (or, absent any, every
 //! `suspect.project.json` parent spec) beneath a root and runs the stages
-//! that are configured: validation, lint, contract drift, breaking against
-//! a baseline, generated-artifact drift, and contract tests. Every stage
+//! that are configured: the check pass (`suspect check`), contract drift,
+//! breaking against a baseline, generated-artifact drift, and contract
+//! tests. Every stage
 //! runs for every project — one failing service does not hide the state of
 //! the other nine — and the aggregate is reported per project so a CI log
 //! reads as a service-by-service scorecard.
@@ -13,7 +14,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use serde::Serialize;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// One CI run.
 #[derive(Debug, Args)]
@@ -21,11 +22,13 @@ pub struct CiArgs {
     /// Root to search for projects.
     #[arg(default_value = ".")]
     root: PathBuf,
-    /// Git ref each project is compared against for breaking changes.
+    /// Git ref each project is compared against for breaking changes
+    /// (default: `diff.baseline` from `.suspect.yaml`, or `SUSPECT_GIT_BASE`).
     #[arg(long, value_name = "REF")]
     baseline: Option<String>,
-    /// Only run these stages (repeatable): validate, lint, contract,
-    /// breaking, codegen, test.
+    /// Only run these stages (repeatable): check, contract, breaking,
+    /// codegen, test. `validate` and `lint` run the check stage with the
+    /// `suspect validate` or `suspect lint` filter, under that name.
     #[arg(long = "stage", value_name = "NAME")]
     stages: Vec<String>,
     /// Skip contract tests (they may need a live server).
@@ -38,7 +41,7 @@ pub struct CiArgs {
     build: bool,
     /// Output format for the aggregate report.
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub report: crate::Report,
 }
 
 /// One stage's outcome for one project.
@@ -152,18 +155,16 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
         return Ok(2);
     }
     let wanted: Vec<&str> = if args.stages.is_empty() {
-        [
-            "validate", "lint", "contract", "breaking", "codegen", "test",
-        ]
-        .into_iter()
-        .collect()
+        ["check", "contract", "breaking", "codegen", "test"]
+            .into_iter()
+            .collect()
     } else {
         args.stages.iter().map(String::as_str).collect()
     };
 
     // A machine-readable run emits exactly one document: stage chatter is
     // redirected away so a CI consumer can parse stdout directly.
-    let machine_readable = !matches!(args.text.format, OutputFormat::Text);
+    let machine_readable = !matches!(args.report.format, ReportFormat::Text);
     let _silence = machine_readable.then(crate::silence::Silenced::start);
 
     let mut results = Vec::new();
@@ -174,17 +175,25 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
             build_project(manifest, args.skip_tests);
         }
         let mut stages = Vec::new();
-        if wanted.contains(&"validate") {
-            stages.push(validate_stage(manifest));
-        }
-        if wanted.contains(&"lint") {
-            stages.push(lint_stage(manifest));
+        // One resolution per project, from the manifest's directory: the
+        // same layers and precedence `suspect lint` and the editor use.
+        let config = project_config(manifest);
+        for name in ["check", "validate", "lint"] {
+            if wanted.contains(&name) {
+                stages.push(check_stage(name, manifest, &config));
+            }
         }
         if wanted.contains(&"contract") {
             stages.push(contract_stage(manifest));
         }
         if wanted.contains(&"breaking") {
-            stages.push(breaking_stage(manifest, args.baseline.as_deref()));
+            // `--baseline`, else the project's `diff.baseline` (or
+            // `SUSPECT_GIT_BASE`).
+            let baseline =
+                args.baseline
+                    .as_deref()
+                    .or(config.resolved.settings.diff.baseline.as_deref());
+            stages.push(breaking_stage(manifest, baseline));
         }
         if wanted.contains(&"codegen") {
             stages.push(codegen_stage(manifest));
@@ -212,11 +221,11 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
     // never redirected.
     let _ = &report;
     drop(_silence);
-    match args.text.format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+    match args.report.format {
+        ReportFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for project in &report.projects {
                 let verdict = if project.passed() { "PASS" } else { "FAIL" };
                 println!("{verdict}  {}", project.name);
@@ -311,118 +320,142 @@ fn stage(name: &str, exit: i32, errors: usize, warnings: usize, summary: String)
     }
 }
 
-/// Lints the published spec with the project's ruleset and severity floor.
+/// A project's configuration, resolved from its manifest's directory.
 ///
-/// A project may declare its own `lint:` section; otherwise the shared
-/// `.suspect.yaml` settings apply, exactly as they do for `suspect lint`
-/// run by hand — so CI and a developer see the same findings.
-fn lint_stage(manifest: &Path) -> StageResult {
-    let Some(spec) = spec_to_check(manifest) else {
-        return stage("lint", 0, 0, 0, "no entry or published spec".to_owned());
-    };
-    let (ruleset, floor) = lint_policy(manifest);
-    let overrides = lint_overrides(manifest);
-    let findings = match crate::commands::lint::lint_findings(
-        &[spec],
-        ruleset.as_deref(),
-        floor,
-        &overrides,
-    ) {
-        Ok(findings) => findings,
-        Err(error) => return stage("lint", 1, 1, 0, error.to_string()),
-    };
-    let errors = findings
-        .iter()
-        .filter(|f| f.severity >= crate::output::Severity::Error)
-        .count();
-    let warnings = findings.len() - errors;
-    stage(
-        "lint",
-        i32::from(errors > 0),
-        errors,
-        warnings,
-        match (&ruleset, floor == crate::output::Severity::Hint) {
-            (Some(ruleset), _) => format!("{} ruleset", ruleset.display()),
-            (None, true) => "built-in ruleset".to_owned(),
-            (None, false) => format!("built-in ruleset, at or above {floor:?}"),
-        },
-    )
+/// A rejected value does not stop the gate: the stage the key belongs to
+/// fails and names it, and the other stages run on what did apply.
+pub struct ProjectConfig {
+    /// The settings that applied.
+    pub resolved: suspect_config::Resolved,
+    /// Rejected values and unreadable files, each with `file:line`.
+    pub problems: Vec<suspect_config::Notice>,
 }
 
-/// A project's own lint policy, else the shared configuration file.
-fn lint_policy(manifest: &Path) -> (Option<PathBuf>, crate::output::Severity) {
+impl ProjectConfig {
+    /// The problems a stage owns: those naming one of its keys (messages
+    /// start with the quoted key), plus a broken file or `extends`, which
+    /// fail every stage that reads configuration.
+    fn problems_for(&self, section: &str) -> Vec<String> {
+        self.problems
+            .iter()
+            .filter(|p| {
+                let named = p
+                    .message
+                    .strip_prefix('`')
+                    .and_then(|m| m.split(['.', '`']).next());
+                matches!(named, None | Some("extends")) || named == Some(section)
+            })
+            .map(ToString::to_string)
+            .collect()
+    }
+}
+
+/// [`ProjectConfig`] for one manifest.
+#[must_use]
+pub fn project_config(manifest: &Path) -> ProjectConfig {
     let dir = manifest.parent().unwrap_or(Path::new("."));
-    let declared: Option<serde_json::Value> = std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok());
-    let ruleset = declared
-        .as_ref()
-        .and_then(|value| value.get("lint"))
-        .and_then(|lint| lint.get("ruleset"))
-        .and_then(|v| v.as_str())
-        .map(|rel| dir.join(rel))
-        .or_else(|| {
-            suspect_config::for_invocation(Some(manifest))
-                .ok()
-                .and_then(|loaded| loaded.settings.lint.ruleset)
-        });
-    let floor = declared
-        .as_ref()
-        .and_then(|value| value.get("lint"))
-        .and_then(|lint| lint.get("min_severity"))
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .or_else(|| {
-            suspect_config::for_invocation(Some(manifest))
-                .ok()
-                .and_then(|loaded| loaded.settings.lint.min_severity)
-        })
-        .and_then(|name| match name.to_ascii_lowercase().as_str() {
-            "error" => Some(crate::output::Severity::Error),
-            "warning" => Some(crate::output::Severity::Warning),
-            "info" => Some(crate::output::Severity::Info),
-            "hint" => Some(crate::output::Severity::Hint),
-            _ => None,
-        })
-        .unwrap_or(crate::output::Severity::Hint);
-    (ruleset, floor)
+    resolve_project(dir)
 }
 
-/// The project's lint policy beyond ruleset and floor: the design-class
-/// severity and per-rule overrides, from the manifest with the shared
-/// settings file as fallback — the same layering as the ruleset.
-///
-/// A committed policy naming an unknown severity should be loud; here the
-/// parse falls back to no overrides so the lint stage still reports the
-/// findings as-is (`suspect lint` names the bad value on direct runs).
-fn lint_overrides(manifest: &Path) -> crate::commands::lint::LintOverrides {
-    let declared: Option<serde_json::Value> = std::fs::read_to_string(manifest)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok());
-    let from_manifest = declared.as_ref().and_then(|value| value.get("lint"));
-    let (design, rules) = match from_manifest {
-        Some(lint) => (
-            lint.get("design")
-                .and_then(|v| v.as_str())
-                .map(str::to_owned),
-            lint.get("rules").and_then(|v| v.as_object()).map(|m| {
-                m.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_ascii_lowercase())))
-                    .collect::<std::collections::BTreeMap<String, String>>()
-            }),
-        ),
-        None => (None, None),
+fn resolve_project(dir: &Path) -> ProjectConfig {
+    match suspect_config::resolve(dir) {
+        Ok(resolved) => {
+            crate::settings::emit_warnings(&resolved);
+            ProjectConfig {
+                resolved,
+                problems: Vec::new(),
+            }
+        }
+        Err(error) => {
+            crate::settings::emit_warnings(&error.resolved);
+            ProjectConfig {
+                resolved: *error.resolved,
+                problems: error.problems,
+            }
+        }
+    }
+}
+
+/// The check pass over the published spec (else the entry spec), with
+/// the project's configuration and findings baseline: what `suspect
+/// check --no-sdk` reports for it by hand. `validate` and `lint` are the same
+/// stage with the `suspect validate` / `suspect lint` filter. A rejected
+/// value in a section the stage reads fails it and names the value.
+fn check_stage(name: &str, manifest: &Path, config: &ProjectConfig) -> StageResult {
+    use crate::commands::check;
+    let declared = published_spec(manifest);
+    // `check` and `validate` gate on the published artifact once one is
+    // declared; `lint` falls back to the entry spec.
+    if name != "lint"
+        && let Some(spec) = declared.as_ref().filter(|spec| !spec.exists())
+    {
+        return stage(
+            name,
+            1,
+            1,
+            0,
+            format!("{} was never published", spec.display()),
+        );
+    }
+    let Some(spec) = spec_to_check(manifest) else {
+        return stage(name, 0, 0, 0, "no entry or published spec".to_owned());
     };
-    let settings = suspect_config::for_invocation(Some(manifest))
-        .map(|loaded| loaded.settings.lint)
-        .ok();
-    let design = design.or_else(|| settings.as_ref().and_then(|s| s.design.clone()));
-    let rules = rules
-        .or_else(|| settings.map(|s| s.rules))
-        .unwrap_or_default();
-    // A committed policy that names an unknown severity must be loud, not
-    // silently absent — the stage failure names the bad value.
-    crate::commands::lint::LintOverrides::from_config(design.as_deref(), &rules).unwrap_or_default()
+    let sections: &[&str] = match name {
+        "validate" => &["validate", "check"],
+        "lint" => &["lint", "rules", "check"],
+        _ => &["lint", "validate", "rules", "check"],
+    };
+    let mut problems: Vec<String> = Vec::new();
+    for section in sections {
+        for problem in config.problems_for(section) {
+            if !problems.contains(&problem) {
+                problems.push(problem);
+            }
+        }
+    }
+    if !problems.is_empty() {
+        return stage(name, 1, problems.len(), 0, problems.join("; "));
+    }
+    let resolved = &config.resolved;
+    let checks = match name {
+        "validate" => Some(check::VALIDATE),
+        "lint" => Some(check::LINT),
+        _ => None,
+    };
+    // SDK readiness is the codegen stage's gate, which runs the generator
+    // itself; the check stage reports the document.
+    let options = check::Options::new(resolved, checks, None, Some(false));
+    let outcome = match check::run(std::slice::from_ref(&spec), resolved, &options) {
+        Ok(outcome) => outcome,
+        Err(error) => return stage(name, 1, 1, 0, error.to_string()),
+    };
+    let baseline = match resolved
+        .settings
+        .check
+        .baseline
+        .as_deref()
+        .map(check::baseline::Baseline::read)
+        .transpose()
+    {
+        Ok(baseline) => baseline,
+        Err(error) => return stage(name, 1, 1, 0, error.to_string()),
+    };
+    let shown = check::Shown::new(&outcome, baseline.as_ref());
+    let (errors, warnings) = shown.counts();
+    let mut summary = spec.display().to_string();
+    if let Some(ruleset) = &resolved.settings.lint.ruleset
+        && name != "validate"
+    {
+        summary.push_str(&format!(", {} ruleset", ruleset.display()));
+    }
+    let floor = resolved.settings.lint.floor();
+    if floor != suspect_config::SeverityName::Hint {
+        summary.push_str(&format!(", at or above {}", floor.label()));
+    }
+    if shown.baselined() > 0 {
+        summary.push_str(&format!(", {} baselined", shown.baselined()));
+    }
+    stage(name, i32::from(errors > 0), errors, warnings, summary)
 }
 
 /// Builds one project through the full pipeline, reporting as it goes.
@@ -436,35 +469,6 @@ fn build_project(manifest: &Path, skip_tests: bool) {
         Ok(_) => {}
         Err(error) => eprintln!("ci: build failed: {error}"),
     }
-}
-
-fn validate_stage(manifest: &Path) -> StageResult {
-    let Some(spec) = published_spec(manifest) else {
-        return stage("validate", 0, 0, 0, "no published spec declared".to_owned());
-    };
-    if !spec.exists() {
-        return stage(
-            "validate",
-            1,
-            1,
-            0,
-            format!("{} was never published", spec.display()),
-        );
-    }
-    let findings = crate::commands::validate::validate_file(&spec, None, false);
-    let errors = findings
-        .iter()
-        .filter(|f| f.severity >= crate::output::Severity::Error)
-        .count();
-    let warnings = findings.len() - errors;
-    let exit = i32::from(errors > 0);
-    stage(
-        "validate",
-        exit,
-        errors,
-        warnings,
-        format!("{}", spec.display()),
-    )
 }
 
 fn contract_stage(manifest: &Path) -> StageResult {
@@ -497,7 +501,7 @@ fn contract_stage(manifest: &Path) -> StageResult {
     let check = crate::commands::contract::contract(&crate::commands::contract::ContractArgs {
         input: spec,
         out,
-        json: false,
+        to: None,
         overlays: Vec::new(),
         check: true,
     });

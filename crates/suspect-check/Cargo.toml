@@ -1,0 +1,41 @@
+[package]
+name = "suspect-check"
+description = "One check pass and rule registry over every suspect spec check"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+publish = false
+
+[features]
+default = ["sdk"]
+# SDK admission codes (pulls in suspect-codegen).
+sdk = ["dep:suspect-codegen", "dep:suspect-ir"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+suspect-diag.workspace = true
+suspect-config.workspace = true
+suspect-source.workspace = true
+suspect-low.workspace = true
+suspect-syntax.workspace = true
+suspect-ref.workspace = true
+suspect-oas.workspace = true
+suspect-validate.workspace = true
+suspect-lint.workspace = true
+suspect-arazzo.workspace = true
+suspect-overlay.workspace = true
+suspect-schema.workspace = true
+suspect-test.workspace = true
+suspect-rules.workspace = true
+suspect-codegen = { workspace = true, optional = true }
+suspect-ir = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+suspect-codegen.workspace = true

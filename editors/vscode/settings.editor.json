@@ -1,0 +1,7 @@
+{
+	"suspect.basePath": {
+		"type": "string",
+		"default": "suspect",
+		"description": "Path to the suspect CLI: a directory containing the `suspect` executable, the executable itself, or bare `suspect` to resolve from $PATH."
+	}
+}

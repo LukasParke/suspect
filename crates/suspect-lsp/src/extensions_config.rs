@@ -1,5 +1,6 @@
-//! Workspace-configured vendor extensions: ordering anchors and JSON
-//! Schemas for value validation, layered over the built-in registry.
+//! Workspace-configured vendor extensions: ordering anchors, layered over
+//! the built-in registry. The `schema` half of the same entries is read by
+//! the extension check (`suspect_check::checks::extensions`).
 //!
 //! Configuration shape (under `suspect.extensions` in the workspace
 //! config or LSP settings):
@@ -15,8 +16,7 @@
 //! }
 //! ```
 //!
-//! `schema` accepts an inline JSON Schema or a workspace-relative path to
-//! one (JSON or YAML). Custom entries win over built-ins for the same key.
+//! Custom entries win over built-ins for the same key.
 
 use crate::keys::Context;
 use std::collections::BTreeMap;
@@ -32,8 +32,6 @@ pub struct CustomExtension {
     /// Context names are the snake_case variants (`root`, `operation`,
     /// `schema`, …).
     pub contexts: Vec<String>,
-    /// Inline JSON Schema text or a workspace-relative path.
-    pub schema: Option<String>,
 }
 
 /// The merged extension configuration: builtin + custom entries.
@@ -74,13 +72,6 @@ impl ExtensionConfig {
                     .filter_map(|c| c.as_str().map(str::to_owned))
                     .collect();
             }
-            if let Some(schema) = entry.get("schema") {
-                ext.schema = match schema {
-                    serde_json::Value::String(path) => Some(path.clone()),
-                    serde_json::Value::Object(_) => Some(schema.to_string()),
-                    _ => None,
-                };
-            }
             custom.insert(key.clone(), ext);
         }
         Self { custom }
@@ -109,39 +100,6 @@ impl ExtensionConfig {
             }
         }
         super::extensions_registry::rank(key, context, table)
-    }
-
-    /// Resolves the JSON Schema text for `key`: custom inline or
-    /// workspace-relative path first, then the builtin registry.
-    /// `workspace_root` anchors relative paths.
-    #[must_use]
-    pub fn schema_text(
-        &self,
-        key: &str,
-        context: Context,
-        workspace_root: Option<&std::path::Path>,
-    ) -> Option<String> {
-        if let Some(custom) = self.custom.get(key) {
-            let context_ok = custom.contexts.is_empty()
-                || custom
-                    .contexts
-                    .iter()
-                    .any(|c| context_name(context) == c.as_str());
-            if context_ok && let Some(schema) = &custom.schema {
-                // Inline JSON (object) vs path (string).
-                if schema.trim_start().starts_with('{') {
-                    return Some(schema.clone());
-                }
-                if let Some(root) = workspace_root {
-                    let path = root.join(schema);
-                    if let Ok(text) = std::fs::read_to_string(&path) {
-                        return Some(text);
-                    }
-                }
-                return None;
-            }
-        }
-        super::extensions_registry::schema_for(key, context).map(str::to_owned)
     }
 }
 

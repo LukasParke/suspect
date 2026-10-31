@@ -1,4 +1,4 @@
-//! `suspect bench`: wall-clock micro-report of the pipeline stages on one
+//! `suspect dev bench`: wall-clock micro-report of the pipeline stages on one
 //! fixture. Plain `std::time::Instant` timing (no criterion); each stage
 //! runs `--iters` times and the mean is reported.
 
@@ -13,7 +13,7 @@ use suspect_oas::Session;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::{Source, Uri};
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 use crate::output;
 
 /// Mean wall-clock milliseconds per pipeline stage.
@@ -220,14 +220,14 @@ pub fn bench_of(fixture: &Path, iters: usize) -> anyhow::Result<BenchReport> {
     })
 }
 
-/// `suspect bench <FIXTURE> [--iters N]`: prints the stage table or JSON.
+/// `suspect dev bench <FIXTURE> [--iters N]`: prints the stage table or JSON.
 ///
 /// # Errors
 /// See [`bench_of`]; JSON serialization failures.
-pub fn bench(fixture: &Path, iters: usize, format: OutputFormat) -> anyhow::Result<i32> {
+pub fn bench(fixture: &Path, iters: usize, format: ReportFormat) -> anyhow::Result<i32> {
     let report = bench_of(fixture, iters)?;
     match format {
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             println!("fixture: {} ({} iters/stage)", report.fixture, report.iters);
             println!("  parse     {:>10.2} ms", report.parse_ms);
             println!("  low model {:>10.2} ms", report.low_model_ms);
@@ -239,7 +239,7 @@ pub fn bench(fixture: &Path, iters: usize, format: OutputFormat) -> anyhow::Resu
             println!("  jsonpath  {:>10.2} ms", report.jsonpath_ms);
             println!("  overlay   {:>10.2} ms", report.overlay_ms);
         }
-        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&report)?,
+        ReportFormat::Json => output::print_json(&report)?,
     }
     Ok(0)
 }

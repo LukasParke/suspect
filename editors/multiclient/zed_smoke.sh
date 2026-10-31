@@ -6,13 +6,32 @@
 # script never touches global Zed settings (they hold user secrets); the
 # fixture carries its own project-local .zed/settings.json.
 #
+# Requires the dev extension in editors/zed to be installed (it registers the
+# `suspect-lsp` language server); the fixture points that server at the
+# binary below via `lsp.suspect-lsp.binary.path`.
+#
+#    SUSPECT_BIN=/path/to/suspect ./editors/multiclient/zed_smoke.sh
+#
+# SUSPECT_BIN defaults to <repo>/target/release/suspect.
+#
+#    ZED_SMOKE_MANAGED=1 ./editors/multiclient/zed_smoke.sh
+#
+# The no-PATH run: no `binary.path`, and `suspect` must not be on PATH, so
+# the extension can only start the release build it downloads and checks
+# (editors/zed/src/download.rs) into its work directory. This is a manual
+# check: it needs the GitHub release v<version of editors/zed/extension.toml>
+# to exist, and is skipped (exit 0) while it does not.
+#
 # Verifies: Zed spawns the server as a child; the process stays alive; and
 # Zed's log records no LSP error for suspect. Prints SMOKE| lines for each
 # check and exits non-zero on failure.
 
 set -u
 
-SUSPECT=/Users/luke/github/suspect-core-pr/target/release/suspect
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+MANAGED="${ZED_SMOKE_MANAGED:-}"
+SUSPECT="${SUSPECT_BIN:-$ROOT/target/release/suspect}"
 FIXTURE=$(mktemp -d /tmp/suspect-zed-smoke.XXXXXX)
 ZED_LOG="$HOME/Library/Application Support/Zed/log/Zed.log"
 
@@ -20,8 +39,23 @@ if ! command -v zed >/dev/null 2>&1; then
   echo "SMOKE|zed not on PATH — skipped"
   exit 0
 fi
-if [ ! -x "$SUSPECT" ]; then
-  echo "SMOKE|no suspect binary — build first"
+if [ -n "$MANAGED" ]; then
+  VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$ROOT/editors/zed/extension.toml" | head -1)
+  ASSET="suspect-cli-$(uname -m | sed 's/arm64/aarch64/')-apple-darwin.tar.gz"
+  URL="https://github.com/LukasParke/suspect/releases/download/v$VERSION/$ASSET.sha256"
+  if ! curl -fsIL "$URL" >/dev/null 2>&1; then
+    echo "SMOKE|SKIP — managed mode needs release v$VERSION ($URL); manual check until it is published"
+    exit 0
+  fi
+  if command -v suspect >/dev/null 2>&1; then
+    echo "SMOKE|FAIL — suspect is on PATH ($(command -v suspect)); managed mode must not find it there"
+    exit 1
+  fi
+  # What the extension unpacks into its work directory.
+  SUSPECT="$HOME/Library/Application Support/Zed/extensions/work/suspect/suspect-$VERSION/suspect"
+  echo "SMOKE|managed mode: expecting $SUSPECT"
+elif [ ! -x "$SUSPECT" ]; then
+  echo "SMOKE|no suspect binary at $SUSPECT — cargo build --release -p suspect-cli or set SUSPECT_BIN"
   exit 1
 fi
 
@@ -54,19 +88,19 @@ components:
 EOF
 
 mkdir -p "$FIXTURE/.zed"
+if [ -n "$MANAGED" ]; then
+  LSP='{}'
+else
+  LSP="{ \"binary\": { \"path\": \"$SUSPECT\", \"arguments\": [\"lsp\"] } }"
+fi
 cat > "$FIXTURE/.zed/settings.json" <<EOF
 {
   "lsp": {
-    "suspect": {
-      "binary": {
-        "path": "$SUSPECT",
-        "arguments": ["lsp"]
-      }
-    }
+    "suspect-lsp": $LSP
   },
   "languages": {
     "YAML": {
-      "language_servers": ["suspect"]
+      "language_servers": ["suspect-lsp", "..."]
     }
   }
 }

@@ -297,16 +297,15 @@ fn java_home() -> PathBuf {
     {
         return home.into();
     }
-    Path::new("/Users/luke/.local/share/mise/installs/java").join("temurin-21.0.12+101.0.LTS")
+    suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
 }
 
 fn maven() -> PathBuf {
     std::env::var_os("SUSPECT_KOTLIN_MAVEN")
         .or_else(|| std::env::var_os("SUSPECT_MAVEN_BIN"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-        })
+        .or_else(|| suspect_codegen::toolchain::resolve_path("maven"))
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")))
 }
 
 fn maven_repository() -> PathBuf {

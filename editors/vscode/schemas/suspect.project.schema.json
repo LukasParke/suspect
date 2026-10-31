@@ -1,0 +1,399 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Project manifest: the published spec, its profiles, SDK targets, documentation and contract tests.",
+  "properties": {
+    "codegen": {
+      "default": [],
+      "description": "SDK generation targets built from the published spec.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "default": false,
+            "description": "When true, only ownership/drift is checked; nothing is written.",
+            "type": "boolean"
+          },
+          "compatibility_profiles": {
+            "description": "Interpretation profiles applied to the source (`--compatibility-profile`).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "credential_env": {
+            "description": "Credential environment variable mapping (`gen sdk --defaults` schema).",
+            "type": "object"
+          },
+          "import_name": {
+            "description": "Explicit import/module/namespace identity where the profile needs one.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Target name, used in progress output.",
+            "type": "string"
+          },
+          "operation_id": {
+            "default": [],
+            "description": "Exact operationId selectors; empty selects all outgoing operations.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "options": {
+            "additionalProperties": false,
+            "description": "Generation options in the `gen sdk --defaults` schema (`compatibility_profiles`, `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both.",
+            "properties": {
+              "compatibility_profiles": {
+                "description": "Interpretation profiles applied to the source (`--compatibility-profile`).",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "credential_env": {
+                "description": "Credential environment variable mapping (`gen sdk --defaults` schema).",
+                "type": "object"
+              },
+              "sdk_defaults": {
+                "description": "SDK defaults: pagination, OAuth lifecycle (`gen sdk --defaults` schema).",
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "out": {
+            "default": "sdk",
+            "description": "Output root, relative to the manifest.",
+            "type": "string"
+          },
+          "package_name": {
+            "description": "Native package identity.",
+            "type": "string"
+          },
+          "package_version": {
+            "description": "Package SemVer.",
+            "type": "string"
+          },
+          "profile": {
+            "description": "The native profile id (`typescript-http`, `python-http`, ...).",
+            "type": "string"
+          },
+          "sdk_defaults": {
+            "description": "SDK defaults: pagination, OAuth lifecycle (`gen sdk --defaults` schema).",
+            "type": "object"
+          }
+        },
+        "required": [
+          "profile",
+          "package_name",
+          "package_version"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "config": {
+      "description": "The settings file for this project (`.suspect.yaml`), relative to the manifest. Lint, validate and editor settings live there.",
+      "type": "string"
+    },
+    "contract": {
+      "additionalProperties": false,
+      "description": "The contract package for this project.",
+      "properties": {
+        "output": {
+          "description": "Where the contract package is written.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "docs": {
+      "additionalProperties": false,
+      "description": "Documentation target.",
+      "properties": {
+        "output": {
+          "description": "Output root for generated documentation.",
+          "type": "string"
+        },
+        "style": {
+          "description": "Output style.",
+          "enum": [
+            "html",
+            "markdown",
+            "sveltekit"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "editor": {
+      "additionalProperties": false,
+      "deprecated": true,
+      "description": "Ignored: editor settings belong in `.suspect.yaml` (`editor`, `ref`, `format`).",
+      "properties": {
+        "formatting": {
+          "additionalProperties": false,
+          "description": "Ignored; see `format`.",
+          "properties": {
+            "sort_keys": {
+              "description": "Ignored; see `format.sort_keys`.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "inlay_hints": {
+          "additionalProperties": false,
+          "description": "Ignored; see `editor.inlay_hints`.",
+          "properties": {
+            "properties": {
+              "description": "Ignored; see `editor.inlay_hints.properties`.",
+              "type": "boolean"
+            },
+            "refs": {
+              "description": "Ignored; see `editor.inlay_hints.refs`.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "ref": {
+          "additionalProperties": false,
+          "description": "Ignored; see `ref`.",
+          "properties": {
+            "max_docs": {
+              "description": "Ignored; see `ref.max_docs`.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "entry": {
+      "description": "Entry OpenAPI document, relative to the manifest directory.",
+      "type": "string"
+    },
+    "lint": {
+      "additionalProperties": false,
+      "deprecated": true,
+      "description": "Ignored: lint policy belongs in `.suspect.yaml`; `suspect config migrate` moves it.",
+      "properties": {
+        "design": {
+          "description": "Ignored; see `lint.design` in `.suspect.yaml`.",
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "hint",
+            "off"
+          ],
+          "type": "string"
+        },
+        "min_severity": {
+          "description": "Ignored; see `lint.min_severity` in `.suspect.yaml`.",
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "hint"
+          ],
+          "type": "string"
+        },
+        "recommended": {
+          "description": "Ignored; see `lint.recommended` in `.suspect.yaml`.",
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": {
+            "enum": [
+              "error",
+              "warning",
+              "info",
+              "hint",
+              "off"
+            ],
+            "type": "string"
+          },
+          "description": "Ignored; see `lint.rules` in `.suspect.yaml`.",
+          "type": "object"
+        },
+        "ruleset": {
+          "description": "Ignored; see `lint.ruleset` in `.suspect.yaml`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": {
+      "description": "Project name.",
+      "type": "string"
+    },
+    "overlays": {
+      "default": [],
+      "description": "Overlay documents applied in order to produce the published spec.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "publish": {
+      "additionalProperties": false,
+      "description": "Where the published (post-overlay) spec is written.",
+      "properties": {
+        "output": {
+          "default": "build/spec.yaml",
+          "description": "Where the published spec is written, relative to the manifest.",
+          "type": "string"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Named publication profiles: each is an extra overlay list applied on top of the published spec (for example `public` strips internals).",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "release": {
+      "additionalProperties": false,
+      "description": "SDK release: the version every target carries and how each is published (`release publish`, `release workflow`).",
+      "properties": {
+        "tag": {
+          "description": "The tag that triggers the release workflow; `v` plus the version when unset.",
+          "type": "string"
+        },
+        "targets": {
+          "description": "SDK publish targets, in manifest order.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "backend": {
+                "description": "Backend id (`typescript`, `python`, ...).",
+                "type": "string"
+              },
+              "depends_on": {
+                "description": "Backends that must publish first.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "directory": {
+                "description": "Generated package directory, relative to the manifest.",
+                "type": "string"
+              },
+              "package": {
+                "description": "Native package identity.",
+                "type": "string"
+              },
+              "publish": {
+                "description": "Exact publish command, run in `directory`.",
+                "type": "string"
+              },
+              "registry": {
+                "description": "Registry id (`npm`, `pypi`, `maven-central`, ...).",
+                "type": "string"
+              },
+              "version": {
+                "description": "This target's version, when it differs from the release version.",
+                "type": "string"
+              },
+              "version_skew_reason": {
+                "description": "Why this target's version differs from the release version.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "backend",
+              "directory",
+              "package",
+              "registry",
+              "publish"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "version": {
+          "description": "The release version every target must carry.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "targets"
+      ],
+      "type": "object"
+    },
+    "tests": {
+      "additionalProperties": false,
+      "description": "Contract-test targets: Arazzo documents run against `base_url`, or offline from `cassette`.",
+      "properties": {
+        "arazzo": {
+          "default": [],
+          "description": "Arazzo documents to compile and run.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "base_url": {
+          "description": "Base URL for this project's suites. `SUSPECT_BASE_URL` overrides it; it overrides `test.base_url` in `.suspect.yaml`.",
+          "format": "uri",
+          "type": "string"
+        },
+        "cassette": {
+          "description": "Run offline against this cassette instead of live HTTP.",
+          "type": "string"
+        },
+        "credentials": {
+          "description": "Credentials file for the security schemes the suites exercise.",
+          "type": "string"
+        },
+        "inputs": {
+          "description": "Workflow inputs supplied to every declared suite: name to value.",
+          "type": "object"
+        },
+        "message_broker": {
+          "description": "Message broker directory for Arazzo 1.1 AsyncAPI steps.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "validate": {
+      "additionalProperties": false,
+      "deprecated": true,
+      "description": "Ignored: validation settings belong in `.suspect.yaml`.",
+      "properties": {
+        "strict_format": {
+          "description": "Ignored; see `validate.strict_format` in `.suspect.yaml`.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "version": {
+      "description": "Manifest schema version. Must be 1.",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "entry"
+  ],
+  "title": "suspect.project.json",
+  "type": "object"
+}

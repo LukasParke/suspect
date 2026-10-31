@@ -534,14 +534,9 @@ const missingNeutral: Input = { name:'value' };
 }
 
 #[test]
-#[ignore = "requires tsc and the pinned sibling OpenRouter checkout, or SUSPECT_OPENROUTER_YAML"]
+#[ignore = "requires tsc and OPENROUTER_WEB_ROOT (the pinned OpenRouter checkout)"]
 fn tracked_openrouter_nullable_caller_and_image_source_keep_their_branches() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let roots = roots(
         &contract,

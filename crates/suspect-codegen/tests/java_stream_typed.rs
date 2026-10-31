@@ -354,7 +354,7 @@ fn java_home() -> PathBuf {
         .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
         })
 }
 

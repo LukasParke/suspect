@@ -345,23 +345,15 @@ fn plan_carries_the_incoming_receipts_only_when_emission_happens() {
 }
 
 fn go_toolchain() -> Option<String> {
-    // The manifest resolves the tool (`SUSPECT_GO_BIN`-style overrides,
-    // then `PATH`) and gates the version (>= 1.23); the skip message
-    // below quotes its install guidance verbatim.
-    suspect_codegen::toolchain::gate("go").ok().map(|path| {
-        path.to_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| "go".to_owned())
-    })
+    // The manifest resolves the tool and gates the version (>= 1.23); a
+    // missing one prints the standard skip line, or fails when
+    // SUSPECT_REQUIRE_TOOLS lists `go`.
+    suspect_codegen::toolchain::optional("go").map(|path| path.to_string_lossy().into_owned())
 }
 
 #[test]
 fn native_module_builds_with_the_incoming_file() {
     let Some(_) = go_toolchain() else {
-        eprintln!(
-            "go_incoming: degrading to static assertions; {}",
-            suspect_codegen::toolchain::guidance("go")
-        );
         return;
     };
     let go = go_toolchain().unwrap();
@@ -387,9 +379,6 @@ fn native_module_builds_with_the_incoming_file() {
 #[test]
 fn fake_webhook_deliveries_drive_the_decoder_and_constructor() {
     let Some(go) = go_toolchain() else {
-        eprintln!(
-            "go_incoming: Go toolchain (>= 1.23) not installed; degrading to static assertions"
-        );
         return;
     };
     eprintln!("go_incoming: {go}");

@@ -683,8 +683,8 @@ fn native_package_metadata_agrees_with_snapshot_construction_and_accessors() {
     fs::write(root.join("NuGet.Config"),"<configuration><packageSources><clear/><add key=\"local\" value=\"feed\"/></packageSources></configuration>").unwrap();
     let run = |directory: &Path, label: &str, args: &[&str], success: bool| {
         let mut command = Command::new(
-            std::env::var_os("SUSPECT_DOTNET_BIN")
-                .unwrap_or_else(|| "/Users/luke/.local/share/mise/dotnet-root/dotnet".into()),
+            suspect_codegen::toolchain::resolve_path("dotnet")
+                .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("dotnet"))),
         );
         command
             .args(args)

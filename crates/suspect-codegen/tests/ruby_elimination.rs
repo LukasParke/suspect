@@ -293,10 +293,31 @@ fn generate(document: Value) -> Vec<OutFile> {
     .unwrap()
 }
 
+/// `SUSPECT_RUBY_HOME`, else the installation of the Ruby the toolchain
+/// manifest gates (`SUSPECT_RUBY_BIN`, then `PATH`), as reported by
+/// `RbConfig` so version-manager shims resolve to the real `bin/`.
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new("/Users/luke").join(".local/share/mise/installs/ruby/3.3.12"))
+    if let Some(home) = std::env::var_os("SUSPECT_RUBY_HOME") {
+        return home.into();
+    }
+    static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| {
+        let ruby = suspect_codegen::toolchain::gate("ruby").unwrap_or_else(|skip| panic!("{skip}"));
+        let output = Command::new(&ruby)
+            .args(["-e", "print RbConfig::CONFIG['bindir']"])
+            .output()
+            .unwrap_or_else(|error| panic!("{}: {error}", ruby.display()));
+        assert!(
+            output.status.success(),
+            "{} -e RbConfig failed",
+            ruby.display()
+        );
+        PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
+            .parent()
+            .expect("Ruby bindir has a parent")
+            .to_path_buf()
+    })
+    .clone()
 }
 
 fn ruby_command() -> Command {
@@ -481,7 +502,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
     assert!(
         extended_markers["listGizmos"].as_bool().unwrap()
             && extended_markers["zeta-quantum"].as_bool().unwrap(),
-        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; update docs/SDK-ELIMINATION-AUDIT.md"
+        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; update docs/design/elimination-audit.md"
     );
 
     // --- Codec-only consumer ------------------------------------------------
@@ -543,7 +564,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
         codec_extended["unrelated_markers_loaded"]["zeta-quantum"]
             .as_bool()
             .unwrap(),
-        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; update docs/SDK-ELIMINATION-AUDIT.md"
+        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; update docs/design/elimination-audit.md"
     );
     // The codec consumer works against the models/codecs table pair, which
     // grows by the unrelated schema's shape+codec data (measured, recorded).

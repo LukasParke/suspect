@@ -21,6 +21,7 @@ def main():
     args = parser.parse_args()
     root, evidence, fixtures = args.root.resolve(), args.evidence.resolve(), args.fixtures.resolve()
     assert root.is_relative_to(acceptance.APPROVED)
+    acceptance.require_terraform()
     run = acceptance.Runner(evidence)
     report = {"format": "suspect.terraform.native-variants.v1", "native_root": str(root), "local_acceptance_only": True, "passed": False}
     try:

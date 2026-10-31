@@ -277,7 +277,7 @@ def prepare_python(ctx: Context) -> None:
     floor = ctx.slot == "floor"
     python = ctx.tools.select(f"SUSPECT_PYTHON_{ctx.slot.upper()}_BIN", f"{{python-{ctx.slot}}}",
                              ctx.tools.home / ".local/share/uv/python/cpython-3.11-macos-aarch64-none/bin/python3.11" if floor
-                             else "/opt/homebrew/opt/python@3.14/bin/python3.14")
+                             else Path(shutil.which("python3.14") or "python3.14"))
     tools = ctx.tools.select("SUSPECT_PYTHON_TOOLS", "{python-tools}", WORKSPACE / "target/sdk-native-python-tools/bin/python")
     site = one(list((tools.parent.parent / "lib").glob("python*/site-packages")), "warm Python build-backend site")
     ctx.tools.probe([python, "--version"], ctx, "Python " + ctx.tier)

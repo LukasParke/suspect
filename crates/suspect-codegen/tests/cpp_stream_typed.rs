@@ -662,8 +662,7 @@ int main() {
 #[test]
 fn native_typed_events_drive_scripted_streams() {
     let Some((cmake, cxx)) = toolchain() else {
-        eprintln!("cpp_stream_typed: cmake/clang++ not available; degrading to static assertions");
-        return;
+        panic!("cpp_stream_typed: cmake/clang++ not available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(stream_document()), root.path()).unwrap();

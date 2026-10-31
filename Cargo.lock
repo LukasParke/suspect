@@ -74,7 +74,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -85,7 +85,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -240,7 +240,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "io-lifetimes 3.0.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -257,7 +257,7 @@ dependencies = [
  "maybe-owned",
  "rustix",
  "rustix-linux-procfs",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "winx",
 ]
 
@@ -620,7 +620,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1555,9 +1555,9 @@ dependencies = [
 
 [[package]]
 name = "pulldown-cmark"
-version = "0.13.4"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+checksum = "278e9268c93b9e498a2da46c34d90ba93a3255eb99009646398f34bc73ab36eb"
 dependencies = [
  "bitflags 2.13.1",
  "getopts",
@@ -1625,7 +1625,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1828,7 +1828,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1868,9 +1868,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.14"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0527518605e68109d875e248ea259b6758801cf165e4b2c2733ae3b51f12535a"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -2040,7 +2040,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2074,6 +2074,7 @@ dependencies = [
  "criterion",
  "rustc-hash",
  "serde_json",
+ "suspect-diag",
  "suspect-jsonpath",
  "suspect-low",
  "suspect-overlay",
@@ -2096,6 +2097,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "suspect-check"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "suspect-arazzo",
+ "suspect-codegen",
+ "suspect-config",
+ "suspect-diag",
+ "suspect-ir",
+ "suspect-lint",
+ "suspect-low",
+ "suspect-oas",
+ "suspect-overlay",
+ "suspect-ref",
+ "suspect-rules",
+ "suspect-schema",
+ "suspect-source",
+ "suspect-syntax",
+ "suspect-test",
+ "suspect-validate",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "suspect-cli"
 version = "0.1.0"
 dependencies = [
@@ -2105,14 +2132,18 @@ dependencies = [
  "bytes",
  "clap",
  "libc",
+ "notify",
  "rayon",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
  "suspect-arazzo",
+ "suspect-check",
  "suspect-codegen",
  "suspect-config",
+ "suspect-diag",
  "suspect-gateway",
  "suspect-gen",
  "suspect-ir",
@@ -2124,15 +2155,12 @@ dependencies = [
  "suspect-oas",
  "suspect-overlay",
  "suspect-ref",
- "suspect-reverse",
  "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",
  "suspect-test",
- "suspect-upgrade",
  "suspect-validate",
- "suspect-watch",
  "tempfile",
  "tokio",
  "tower-lsp",
@@ -2152,6 +2180,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "suspect-artifact",
+ "suspect-diag",
  "suspect-gen",
  "suspect-ir",
  "suspect-low",
@@ -2168,16 +2197,19 @@ name = "suspect-config"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "suspect-diag",
  "suspect-low",
  "suspect-source",
  "tempfile",
 ]
 
 [[package]]
-name = "suspect-faker"
+name = "suspect-diag"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
+ "suspect-source",
 ]
 
 [[package]]
@@ -2215,8 +2247,10 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-artifact",
- "suspect-faker",
  "suspect-ir",
+ "suspect-low",
+ "suspect-source",
+ "suspect-syntax",
  "tempfile",
  "unicode-ident",
 ]
@@ -2265,11 +2299,13 @@ name = "suspect-lint"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "pulldown-cmark",
  "rayon",
  "regex",
  "rustc-hash",
  "serde",
  "serde_json",
+ "suspect-diag",
  "suspect-ir",
  "suspect-jsonpath",
  "suspect-low",
@@ -2299,13 +2335,14 @@ dependencies = [
  "bytes",
  "criterion",
  "futures",
- "pulldown-cmark",
  "reqwest",
  "serde",
  "serde_json",
  "suspect-arazzo",
+ "suspect-check",
  "suspect-codegen",
  "suspect-config",
+ "suspect-diag",
  "suspect-gen",
  "suspect-ir",
  "suspect-lint",
@@ -2313,7 +2350,7 @@ dependencies = [
  "suspect-oas",
  "suspect-overlay",
  "suspect-ref",
- "suspect-rex",
+ "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",
@@ -2371,24 +2408,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "url",
-]
-
-[[package]]
-name = "suspect-reverse"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "suspect-ir",
-]
-
-[[package]]
-name = "suspect-rex"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "suspect-low",
 ]
 
 [[package]]
@@ -2482,28 +2501,17 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-arazzo",
- "suspect-faker",
+ "suspect-diag",
  "suspect-ir",
  "suspect-journal",
  "suspect-low",
  "suspect-overlay",
  "suspect-ref",
- "suspect-rex",
  "suspect-runtime",
  "suspect-schema",
  "suspect-source",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "suspect-upgrade"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "suspect-low",
- "suspect-overlay",
- "suspect-source",
 ]
 
 [[package]]
@@ -2514,6 +2522,7 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "serde_json",
+ "suspect-diag",
  "suspect-low",
  "suspect-oas",
  "suspect-overlay",
@@ -2521,14 +2530,6 @@ dependencies = [
  "suspect-schema",
  "suspect-source",
  "thiserror",
-]
-
-[[package]]
-name = "suspect-watch"
-version = "0.1.0"
-dependencies = [
- "notify",
- "tempfile",
 ]
 
 [[package]]
@@ -2583,7 +2584,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2673,9 +2674,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.53.1"
+version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
+checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
 dependencies = [
  "bytes",
  "libc",
@@ -3087,9 +3088,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -3116,7 +3117,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

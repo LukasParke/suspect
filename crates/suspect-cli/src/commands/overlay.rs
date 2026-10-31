@@ -18,9 +18,9 @@ pub enum OverlayCmd {
         overlay: PathBuf,
         /// Document the overlay acts on.
         target: PathBuf,
-        /// Write the result here instead of stdout.
-        #[arg(short, long)]
-        output: Option<PathBuf>,
+        /// Result file and serialization (default: the target's).
+        #[command(flatten)]
+        out: crate::DocOut,
     },
     /// Explain what each action selects and changes, in sequence.
     Explain {
@@ -28,6 +28,12 @@ pub enum OverlayCmd {
         overlay: PathBuf,
         /// Document the overlay acts on.
         target: PathBuf,
+        /// `text` for numbered steps, `json` for the step list.
+        #[command(flatten)]
+        report: crate::Report,
+        /// `--check`: exit 1 when any action matches nothing.
+        #[command(flatten)]
+        check: crate::Check,
     },
     /// Synthesize an Overlay 1.1 document from two document revisions.
     Diff {
@@ -35,9 +41,9 @@ pub enum OverlayCmd {
         old: PathBuf,
         /// The revised document.
         new: PathBuf,
-        /// Write the overlay here instead of stdout.
-        #[arg(short, long)]
-        output: Option<PathBuf>,
+        /// Overlay file and serialization (default: the new revision's).
+        #[command(flatten)]
+        out: crate::DocOut,
     },
 }
 
@@ -73,16 +79,18 @@ pub fn run(cmd: OverlayCmd) -> anyhow::Result<i32> {
         OverlayCmd::Apply {
             overlay,
             target,
-            output,
+            out,
         } => {
             let applied = apply_docs(&overlay, &target)?;
 
-            let fmt = output::pick_doc_format(output.as_deref(), &target);
+            let fmt = out
+                .to
+                .unwrap_or_else(|| output::pick_doc_format(out.output.as_deref(), &target));
             let text = match fmt {
                 DocFormat::Json => applied.output.to_json_pretty(),
                 DocFormat::Yaml => applied.output.to_yaml(),
             };
-            output::write_or_stdout(&text, output.as_deref())?;
+            output::write_or_stdout(&text, out.output.as_deref())?;
 
             eprintln!(
                 "applied {} action(s), {} unmatched target(s)",
@@ -94,7 +102,12 @@ pub fn run(cmd: OverlayCmd) -> anyhow::Result<i32> {
             }
             Ok(0)
         }
-        OverlayCmd::Explain { overlay, target } => {
+        OverlayCmd::Explain {
+            overlay,
+            target,
+            report,
+            check,
+        } => {
             let (parsed, target_doc) = {
                 let ov_doc = crate::load_doc(&overlay)?;
                 let target_doc = crate::load_doc(&target)?;
@@ -102,38 +115,64 @@ pub fn run(cmd: OverlayCmd) -> anyhow::Result<i32> {
                 (OverlayDoc::parse(ov_doc)?, target_doc)
             };
             let steps = suspect_overlay::explain(&parsed, target_doc.root())?;
-            let width = steps.len().checked_ilog10().unwrap_or(0) as usize + 1;
-            for step in &steps {
-                println!(
-                    "{:>width$}. [{}] {} — {} match(es)",
-                    step.index + 1,
-                    step.kind,
-                    step.target,
-                    step.matches,
-                    width = width
-                );
-                if let Some(before) = &step.before {
-                    println!("     before: {before}");
-                }
-                if let Some(after) = &step.after {
-                    println!("     after:  {after}");
+            if report.format.is_json() {
+                let json: Vec<serde_json::Value> = steps
+                    .iter()
+                    .map(|step| {
+                        serde_json::json!({
+                            "index": step.index,
+                            "kind": step.kind,
+                            "target": step.target,
+                            "matches": step.matches,
+                            "before": step.before,
+                            "after": step.after,
+                        })
+                    })
+                    .collect();
+                output::print_json(&json)?;
+            } else {
+                let width = steps.len().checked_ilog10().unwrap_or(0) as usize + 1;
+                for step in &steps {
+                    println!(
+                        "{:>width$}. [{}] {} — {} match(es)",
+                        step.index + 1,
+                        step.kind,
+                        step.target,
+                        step.matches,
+                        width = width
+                    );
+                    if let Some(before) = &step.before {
+                        println!("     before: {before}");
+                    }
+                    if let Some(after) = &step.after {
+                        println!("     after:  {after}");
+                    }
                 }
             }
             eprintln!("{} action(s) explained", steps.len());
+            let unmatched: Vec<_> = steps.iter().filter(|s| s.matches == 0).collect();
+            if check.check && !unmatched.is_empty() {
+                for step in &unmatched {
+                    eprintln!("  action #{} matched nothing: {}", step.index, step.target);
+                }
+                return Ok(1);
+            }
             Ok(0)
         }
-        OverlayCmd::Diff { old, new, output } => {
+        OverlayCmd::Diff { old, new, out } => {
             let old_doc = crate::load_doc(&old)?;
             let new_doc = crate::load_doc(&new)?;
             let title = format!("Changes from {} to {}", old.display(), new.display());
             let overlay: Value =
                 suspect_overlay::synthesize_overlay(old_doc.root(), new_doc.root(), &title);
-            let fmt = output::pick_doc_format(output.as_deref(), &new);
+            let fmt = out
+                .to
+                .unwrap_or_else(|| output::pick_doc_format(out.output.as_deref(), &new));
             let text = match fmt {
                 DocFormat::Json => overlay.to_json_pretty(),
                 DocFormat::Yaml => overlay.to_yaml(),
             };
-            output::write_or_stdout(&text, output.as_deref())?;
+            output::write_or_stdout(&text, out.output.as_deref())?;
             eprintln!(
                 "synthesized overlay from {} → {}",
                 old.display(),

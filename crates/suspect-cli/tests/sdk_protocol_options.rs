@@ -31,7 +31,8 @@ fn fixture() -> Value {
 
 fn generate(root: &Path, extra: &[&str], exit: i32) -> Value {
     let mut args = vec![
-        "codegen",
+        "gen",
+        "sdk",
         "api.json",
         "--profile",
         "go-http",
@@ -39,7 +40,7 @@ fn generate(root: &Path, extra: &[&str], exit: i32) -> Value {
         "example.test/options-sdk",
         "--package-version",
         "1.2.3",
-        "--out",
+        "--output",
         "generated",
         "--format",
         "json",
@@ -99,7 +100,8 @@ fn public_codegen_keeps_standard_bytes_and_explicit_profile_configuration_distin
     let invalid = Command::new(env!("CARGO_BIN_EXE_suspect"))
         .current_dir(root.path())
         .args([
-            "codegen",
+            "gen",
+            "sdk",
             "api.json",
             "--profile",
             "go-http",
@@ -107,7 +109,7 @@ fn public_codegen_keeps_standard_bytes_and_explicit_profile_configuration_distin
             "example.test/options-sdk",
             "--package-version",
             "1.2.3",
-            "--out",
+            "--output",
             "invalid-output",
             "--compatibility-profile",
             "legacy-binary-string-v2",
@@ -130,7 +132,8 @@ fn anonymous_unnamed_operations_use_the_canonical_expanded_typescript_pipeline()
     let report = command(
         root.path(),
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.json",
             "--profile",
             "typescript-http",
@@ -138,7 +141,7 @@ fn anonymous_unnamed_operations_use_the_canonical_expanded_typescript_pipeline()
             "@fixture/health",
             "--package-version",
             "0.1.0",
-            "--out",
+            "--output",
             "generated",
             "--format",
             "json",
@@ -203,14 +206,15 @@ fn session_preview_and_comparison_retain_and_compare_explicit_interpretation() {
         command(
             root.path(),
             &[
-                "codegen-session",
+                "gen",
+                "session",
                 "--config",
                 config,
-                "--out",
+                "--output",
                 "preview",
                 "--preview",
                 "--format",
-                "json",
+                "ndjson",
             ],
             1,
         )
@@ -227,10 +231,9 @@ fn session_preview_and_comparison_retain_and_compare_explicit_interpretation() {
     let changed = command(
         root.path(),
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "before.json",
-            "--after",
             "after.json",
             "--format",
             "json",
@@ -251,10 +254,9 @@ fn session_preview_and_comparison_retain_and_compare_explicit_interpretation() {
     let stable = command(
         root.path(),
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "after.json",
-            "--after",
             "after.json",
             "--format",
             "json",
@@ -268,7 +270,7 @@ fn session_preview_and_comparison_retain_and_compare_explicit_interpretation() {
     config["compatibility_profiles"] = json!(["unversioned-binary"]);
     std::fs::write(root.path().join("bad.json"), config.to_string()).unwrap();
     assert_eq!(preview("bad.json")["status"], "planning-error");
-    let discovery = command(root.path(), &["codegen-profiles", "--format", "json"], 0);
+    let discovery = command(root.path(), &["gen", "profiles", "--format", "json"], 0);
     assert_eq!(
         discovery["compatibilityProfiles"],
         json!([

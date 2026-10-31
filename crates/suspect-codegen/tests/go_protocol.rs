@@ -750,8 +750,7 @@ func TestFiniteRequestStreams(t *testing.T){{calls:=0;client:=must(sdk.NewClient
 #[ignore = "requires OPENROUTER_WEB_ROOT and native Go 1.23.12/1.27.1"]
 fn native_actual_openrouter_five_plus_crud_and_binary_operations() {
     let path =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let contract = load(&path);
     let wanted = [
         "getCredits",

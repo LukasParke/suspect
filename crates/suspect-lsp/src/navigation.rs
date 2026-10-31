@@ -15,37 +15,11 @@ pub struct Definition {
     pub range: std::ops::Range<usize>,
 }
 
-/// Smallest meaningful node whose byte range contains `offset`.
+/// Smallest meaningful node whose byte range contains `offset`
+/// ([`suspect_low::LowDoc::node_at`]).
 #[must_use]
-pub fn node_at<'d>(low: &'d suspect_low::LowDoc, offset: usize) -> Option<SNode<'d>> {
-    let inner = low.inner();
-    let root = inner.root();
-    // Two O(log n) probes bracket the cursor: `[offset, offset+1]` reaches
-    // nodes extending past it, `[offset-1, offset]` reaches nodes ending at
-    // it. Every node whose inclusive range contains `offset` spans one of
-    // the two, so the smaller meaningful survivor equals the result of a
-    // smallest-containing-node scan — without walking the whole tree.
-    fn probe<'d>(
-        inner: &'d suspect_syntax::SourceDoc,
-        root: &SNode<'d>,
-        start: usize,
-        end: usize,
-    ) -> Option<SNode<'d>> {
-        let mut cur = SNode::new(inner, root.raw().descendant_for_byte_range(start, end)?);
-        while matches!(cur.kind(), SyntaxKind::Comment | SyntaxKind::Directive) || cur.is_error() {
-            cur = cur.parent()?;
-        }
-        Some(cur)
-    }
-    let past = probe(inner, &root, offset, offset.saturating_add(1));
-    let ending = probe(inner, &root, offset.saturating_sub(1), offset);
-    match (past, ending) {
-        (Some(a), Some(b)) => {
-            let (a_len, b_len) = (a.byte_range().len(), b.byte_range().len());
-            Some(if a_len <= b_len { a } else { b })
-        }
-        (a, b) => a.or(b),
-    }
+pub fn node_at(low: &suspect_low::LowDoc, offset: usize) -> Option<SNode<'_>> {
+    low.node_at(offset)
 }
 
 /// If the node at `offset` sits inside a `$ref` mapping entry — on the

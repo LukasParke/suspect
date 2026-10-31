@@ -1,4 +1,4 @@
-//! `suspect replay` — re-issues a recorded cassette's requests against a
+//! `suspect test replay` — re-issues a recorded cassette's requests against a
 //! live upstream and reports drift.
 //!
 //! For every `CassetteEntry` the recorded request (method, URL retargeted
@@ -29,7 +29,7 @@ fn replayable(header: &str) -> bool {
     )
 }
 
-/// Runs `suspect replay` against one cassette.
+/// Runs `suspect test replay` against one cassette.
 ///
 /// # Errors
 /// Propagates cassette IO/parse failures and transport setup errors; drift
@@ -39,6 +39,7 @@ pub fn replay(
     upstream: &str,
     diff: bool,
     journal_file: Option<&Path>,
+    report_files: &crate::ReportFiles,
 ) -> anyhow::Result<i32> {
     let file = std::fs::File::open(cassette)?;
     let (header, entries) = suspect_journal::read_cassette(file)?;
@@ -95,6 +96,7 @@ pub fn replay(
     let mut journal = Journal::new(super::sink(journal_file)?);
     journal.run_summary("replay", matched, drifted, 0, elapsed_ms);
     journal.flush()?;
+    report_files.write_counts("replay", matched as usize, drifted as usize, started)?;
     Ok(i32::from(drifted > 0))
 }
 

@@ -6,7 +6,7 @@ name: native-evidence
 # native toolchain, so "is backend X actually verified right now?" is
 # otherwise unknowable. This job answers it on a schedule without blocking
 # a pull request: it installs each toolchain, runs that backend's suites,
-# and publishes the declared coverage matrix (`suspect evidence`) beside
+# and publishes the declared coverage matrix (`suspect dev evidence`) beside
 # the run results as an artifact.
 #
 # It is deliberately non-blocking for PRs. The blocking correctness gate is
@@ -101,6 +101,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Builds suspect with the version in rust-toolchain.toml.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+
       - name: Build the toolchain
         run: ${{ matrix.install }}
 
@@ -128,31 +133,24 @@ jobs:
 
       - name: Run the backend's acceptance suites
         run: |
-          # `--ignored` runs the opt-in native suites; the filter keeps the
-          # job to this backend's tests. A missing toolchain makes the
-          # suite degrade to static assertions rather than fail, which is
-          # the existing contract for these gates.
+          # `--ignored` runs the opt-in native suites. The glob selects every
+          # test target whose file starts with this backend's prefix
+          # (`crates/suspect-codegen/tests/<prefix>*.rs`). A failure fails
+          # this matrix entry; the job's `continue-on-error` keeps it from
+          # blocking anything else.
           cargo test -p suspect-codegen --release \
-            --test "${{ matrix.name }}_integration" \
-            --test "${{ matrix.name }}_protocol" \
-            --test "${{ matrix.name }}_pagination" \
-            --test "${{ matrix.name }}_oauth" \
-            --test "${{ matrix.name }}_attribution" \
-            --test "${{ matrix.name }}_credential_env" \
-            --test "${{ matrix.name }}_incoming" \
-            --test "${{ matrix.name }}_stream_typed" \
-            --test "${{ matrix.name }}_elimination" \
-            -- --ignored --nocapture 2>&1 | tail -60 || true
+            --test "${{ matrix.test_filter }}*" \
+            -- --ignored --nocapture
 
       - name: Publish the declared coverage matrix
         run: |
-          ./target/release/suspect evidence --format json > evidence.json
+          ./target/release/suspect dev evidence --format json > evidence.json
           {
             echo "# SDK evidence ${{ matrix.name }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
             echo
             cat toolchain.txt
             echo
-            ./target/release/suspect evidence
+            ./target/release/suspect dev evidence
           } > evidence.md
 
       - name: Upload evidence

@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
 
 [dependencies]
 suspect-source.workspace = true
@@ -23,7 +26,8 @@ iri-string = { version = "0.7.14", default-features = false, features = ["alloc"
 
 [dev-dependencies]
 criterion.workspace = true
-suspect-ir.workspace = true
+# Path-only so `cargo package` strips it; suspect-ir is not published.
+suspect-ir = { path = "../suspect-ir" }
 tempfile.workspace = true
 
 [[bench]]

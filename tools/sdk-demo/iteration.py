@@ -33,8 +33,8 @@ def prepare(root: Path, label: str) -> Path:
         (directory / "openapi.yaml").write_text(source.replace(BEFORE, AFTER) if stage == "after" else source)
         config = dict(session, spec="openapi.yaml", owner=f"suspect-sdk:demo-iteration-{label}")
         write_json(directory / "session.json", config)
-    result = record(work, "baseline-generate", [str(root / "bin/suspect"), "codegen-session",
-        "--config", str(work / "live/session.json"), "--out", str(work / "packages"), "--format", "json"])
+    result = record(work, "baseline-generate", [str(root / "bin/suspect"), "gen", "session",
+        "--config", str(work / "live/session.json"), "--output", str(work / "packages"), "--format", "ndjson"])
     data = json.loads(result.stdout)
     if data["status"] != "written":
         raise SystemExit(f"Unexpected first generation: {data['status']}")
@@ -64,8 +64,8 @@ def compare(root: Path, work: Path) -> None:
     if sha(binary) != pin["binarySha256"]:
         raise SystemExit("Pinned comparison CLI changed.")
     output = fresh_directory(work / COMPARISON_DIR, "run")
-    argv = [str(binary), "codegen-compare", "--before", str(work / "before/session.json"),
-            "--after", str(work / "after/session.json")]
+    argv = [str(binary), "diff", "sdk", str(work / "before/session.json"),
+            str(work / "after/session.json")]
     result = record(output, "compare-json", [*argv, "--format", "json"], expected=(1,))
     report = json.loads(result.stdout)
     write_json(output / "compatibility.json", report)
@@ -82,8 +82,8 @@ def watch(root: Path, work: Path, check: bool) -> None:
         number += 1
     receipt = work / f"watch-{number:02}"
     receipt.mkdir()
-    argv = [str(root / "bin/suspect"), "codegen-session", "--config", str(work / "live/session.json"),
-            "--out", str(work / "packages"), "--watch", "--preview", "--interval-ms", "150", "--format", "json"]
+    argv = [str(root / "bin/suspect"), "gen", "session", "--config", str(work / "live/session.json"),
+            "--output", str(work / "packages"), "--watch", "--preview", "--interval-ms", "150", "--format", "ndjson"]
     before = {str(p.relative_to(work / "packages")): (sha(p), p.stat().st_mtime_ns, p.stat().st_ino)
               for p in (work / "packages").rglob("*") if p.is_file()}
     messages: queue.Queue[str | None] = queue.Queue()

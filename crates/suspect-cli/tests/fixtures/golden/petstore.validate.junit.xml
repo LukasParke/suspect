@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="suspect" tests="5" failures="3" errors="0">
+  <testsuite name="docs/demo/petstore.yaml" tests="5" failures="3" errors="0">
+    <testcase name="oas-operation-missing-operationId" classname="docs/demo/petstore.yaml:8:7">
+      <failure type="warning" message="get operation is missing an operationId"/>
+    </testcase>
+    <testcase name="oas-operation-no-error-response" classname="docs/demo/petstore.yaml:8:7">
+      <system-out>[INFO] operation `&lt;unnamed&gt;` (get) declares no `default` or 4XX/5XX response</system-out>
+    </testcase>
+    <testcase name="oas-path-param-not-declared" classname="docs/demo/petstore.yaml:17:5">
+      <failure type="error" message="path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it"/>
+    </testcase>
+    <testcase name="oas-operation-missing-operationId" classname="docs/demo/petstore.yaml:18:7">
+      <failure type="warning" message="get operation is missing an operationId"/>
+    </testcase>
+    <testcase name="oas-operation-no-error-response" classname="docs/demo/petstore.yaml:18:7">
+      <system-out>[INFO] operation `&lt;unnamed&gt;` (get) declares no `default` or 4XX/5XX response</system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

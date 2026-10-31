@@ -1,11 +1,11 @@
-//! `suspect load` end to end: the bundled Petstore example against an
+//! `suspect test load` end to end: the bundled Petstore example against an
 //! in-process mock gateway, clean and with fault injection.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use suspect_cli::ReportFormat;
 use suspect_cli::commands::load::{JitterArg, LoadArgs, load};
+use suspect_cli::{ReportFiles, Stream, StreamFormat};
 use suspect_gateway::{FaultConfig, GatewayConfig, Mode};
 use suspect_journal::{Journal, VecSink};
 
@@ -95,19 +95,23 @@ fn args(profile: PathBuf, port: u16, junit: PathBuf, json: PathBuf) -> LoadArgs 
         validate_responses: false,
         seed: Some(3),
         jitter: JitterArg::None,
-        report: ReportFormat::Ndjson,
+        stream: Stream {
+            format: StreamFormat::Ndjson,
+        },
         report_interval: None,
         grace: Some("10s".into()),
         timeout: None,
         http1: false,
         insecure: false,
-        json: Some(json),
-        junit: Some(junit),
+        report_files: ReportFiles {
+            report_file: Some(json),
+            junit: Some(junit),
+        },
         dry_run: false,
     }
 }
 
-/// `load` builds its own tokio runtime, so it runs on a plain thread while
+/// `test load` builds its own tokio runtime, so it runs on a plain thread while
 /// the gateway lives on the test runtime.
 fn run_cli(a: LoadArgs) -> i32 {
     std::thread::spawn(move || load(a).expect("load runs"))

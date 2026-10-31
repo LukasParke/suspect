@@ -1,7 +1,7 @@
 //! Canonical SDK generation through the shared native backend boundary.
 
 use super::sdk::{SdkArgs, SdkCompatibilityProfile, SdkProfile};
-use crate::{OutputFormat, TextFormat};
+use crate::{Report, ReportFormat};
 use clap::Args;
 use std::path::PathBuf;
 use suspect_codegen::generation_session::Input;
@@ -26,38 +26,43 @@ pub struct CodegenArgs {
     #[arg(long, value_enum)]
     pub profile: Option<SdkProfile>,
     /// Exact operationId selector (repeatable); omit to attempt all operations.
+    /// Defaults to `.suspect.yaml`'s `codegen.operation_ids` when omitted.
     #[arg(long, allow_hyphen_values = true)]
     pub operation_id: Vec<String>,
     /// Native package identity, independent of the API title.
+    /// Defaults to `.suspect.yaml`'s `codegen.package_name` when omitted.
     #[arg(long)]
-    pub package_name: String,
+    pub package_name: Option<String>,
     /// Exact native-compatible package SemVer, independent of API info.version.
     /// Defaults to `.suspect.yaml`'s `codegen.package_version` when omitted.
     #[arg(long)]
     pub package_version: Option<String>,
     /// Native import/module identity, independent of the source API semantics.
+    /// Defaults to `.suspect.yaml`'s `codegen.import_names.<profile>`.
     #[arg(long)]
     pub import_name: Option<String>,
     /// Explicit versioned source interpretation (repeatable); ordinary OpenAPI
     /// semantics remain the default, independently of native feature support.
+    /// Defaults to `.suspect.yaml`'s `codegen.compatibility_profiles` when
+    /// omitted.
     #[arg(long, value_enum)]
     pub compatibility_profile: Vec<SdkCompatibilityProfile>,
-    /// Generation options file: a JSON document holding
+    /// Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding
     /// `compatibility_profiles`, `credential_env` and `sdk_defaults`
-    /// (the same schema `codegen-session` accepts). Flag-declared
+    /// (the same schema `gen session` accepts). Flag-declared
     /// compatibility profiles are added on top.
     #[arg(long, value_name = "FILE")]
     pub defaults: Option<PathBuf>,
     /// Output root for generated artifacts. Defaults to `.suspect.yaml`'s
     /// `codegen.out`, then `codegen-out`.
-    #[arg(short, long)]
+    #[arg(short = 'o', long = "output", value_name = "DIR")]
     pub out: Option<PathBuf>,
     /// Check ownership and drift without writing.
     #[arg(long)]
     pub check: bool,
     /// Human-readable output or a structured report.
-    #[arg(long,value_enum,default_value_t=OutputFormat::Text)]
-    pub format: OutputFormat,
+    #[arg(long,value_enum,default_value_t=ReportFormat::Text)]
+    pub format: ReportFormat,
 }
 
 /// Generate a native SDK from the source-selected canonical contract.
@@ -66,34 +71,60 @@ pub struct CodegenArgs {
 /// Propagates invalid configuration, source loading and emission failures.
 pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     // The `.suspect.yaml` codegen section supplies flag defaults, the
-    // same precedence `suspect docs` uses for style and output: an
+    // same precedence `suspect gen docs` uses for style and output: an
     // explicit flag always wins, the file fills what the flag omitted,
     // and with neither the historical defaults apply.
-    let settings_source = match args.spec.as_deref().or(args.pins.as_deref()) {
-        Some(entry) => suspect_config::for_invocation(Some(entry))
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .ok(),
-        None => suspect_config::for_invocation(None).ok(),
-    };
-    if let Some(loaded) = settings_source {
-        let codegen = &loaded.settings.codegen;
-        if args.profile.is_none()
-            && let Some(profile) = &codegen.profile
-        {
-            let Some(resolved) = super::sdk::profile_by_name(profile) else {
-                return Err(anyhow::anyhow!(
-                    "codegen profile `{profile}` is not one of the native profiles"
-                ));
-            };
-            args.profile = Some(resolved);
-        }
-        if args.package_version.is_none() {
-            args.package_version = codegen.package_version.clone();
-        }
-        if args.out.is_none()
-            && let Some(out) = &codegen.out
-        {
-            args.out = Some(loaded.root.join(out));
+    let inputs: Vec<PathBuf> = args
+        .spec
+        .iter()
+        .chain(args.pins.iter())
+        .take(1)
+        .cloned()
+        .collect();
+    let flags = suspect_config::Layer::flags()
+        .set(
+            "codegen.package_version",
+            args.package_version.take().map(suspect_config::Raw::Str),
+            "--package-version",
+        )
+        .set(
+            "codegen.package_name",
+            args.package_name.take().map(suspect_config::Raw::Str),
+            "--package-name",
+        )
+        .set(
+            "codegen.out",
+            args.out.take().map(suspect_config::Raw::Path),
+            "--out",
+        );
+    let resolved = crate::settings::resolve(&inputs, flags)?;
+    let codegen = &resolved.settings.codegen;
+    if args.profile.is_none()
+        && let Some(profile) = &codegen.profile
+    {
+        let Some(resolved) = super::sdk::profile_by_name(profile) else {
+            return Err(anyhow::anyhow!(
+                "codegen profile `{profile}` is not one of the native profiles"
+            ));
+        };
+        args.profile = Some(resolved);
+    }
+    args.package_version.clone_from(&codegen.package_version);
+    args.package_name.clone_from(&codegen.package_name);
+    args.out.clone_from(&codegen.out);
+    // List flags replace the configured list rather than adding to it.
+    if args.operation_id.is_empty() {
+        args.operation_id.clone_from(&codegen.operation_ids);
+    }
+    if args.compatibility_profile.is_empty() {
+        for name in &codegen.compatibility_profiles {
+            let profile = <SdkCompatibilityProfile as clap::ValueEnum>::from_str(name, false)
+                .map_err(|_| {
+                    anyhow::anyhow!(
+                        "codegen.compatibility_profiles: `{name}` is not a compatibility profile"
+                    )
+                })?;
+            args.compatibility_profile.push(profile);
         }
     }
     let input = match (args.spec, args.pins) {
@@ -112,13 +143,10 @@ pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     // knobs (credential env mapping, SDK defaults incl. pagination and
     // OAuth lifecycle); the flags add interpretation choices on top.
     let mut generation = match &args.defaults {
-        Some(path) => {
-            let bytes =
-                std::fs::read(path).map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
-            serde_json::from_slice::<suspect_codegen::backend::GenerationOptions>(&bytes).map_err(
-                |e| anyhow::anyhow!("invalid generation options {}: {e}", path.display()),
-            )?
-        }
+        Some(path) => super::structured::read::<suspect_codegen::backend::GenerationOptions>(
+            path,
+            "generation options",
+        )?,
         None => suspect_codegen::backend::GenerationOptions::default(),
     };
     for profile in args.compatibility_profile {
@@ -126,22 +154,27 @@ pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     }
     // Everything the settings could not supply has a historical default;
     // the profile is the one selection with no default, so name it.
-    let profile = args.profile.unwrap_or_else(|| {
-        eprintln!("--profile is required (or set codegen.profile in .suspect.yaml)");
-        std::process::exit(2);
-    });
+    let Some(profile) = args.profile else {
+        anyhow::bail!("--profile is required (or set codegen.profile in .suspect.yaml)");
+    };
+    let Some(package_name) = args.package_name else {
+        anyhow::bail!("--package-name is required (or set codegen.package_name in .suspect.yaml)");
+    };
+    let import_name = args
+        .import_name
+        .or_else(|| codegen.import_names.get(profile.name()).cloned());
     super::sdk::generate(&SdkArgs {
         input,
         shared: None,
         profile,
         operation_id: args.operation_id,
-        package_name: args.package_name,
+        package_name,
         package_version: args.package_version.unwrap_or_else(|| "0.1.0".to_owned()),
-        import_name: args.import_name,
+        import_name,
         generation,
         out: args.out.unwrap_or_else(|| PathBuf::from("codegen-out")),
         check: args.check,
-        text: TextFormat {
+        report: Report {
             format: args.format,
         },
     })

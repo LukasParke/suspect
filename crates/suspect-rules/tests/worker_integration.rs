@@ -1,5 +1,6 @@
-//! Integration tests against a real bun worker. Skipped gracefully when
-//! bun is not on PATH (mirrors the corpus-test convention).
+//! Integration tests against a real bun worker. Skipped when bun is not on
+//! PATH, unless `SUSPECT_REQUIRE_TOOLS` lists `bun` (or `all`), as CI does;
+//! the same rule as `suspect_codegen::toolchain::optional`.
 
 use std::path::PathBuf;
 
@@ -8,7 +9,14 @@ use suspect_rules::{RuleHost, RulesConfig, StartOptions, discover_rule_files};
 use suspect_source::{Source, Uri};
 
 fn bun_available() -> bool {
-    suspect_rules::discover::find_bun().is_some()
+    let found = suspect_rules::discover::find_bun().is_some();
+    let required = std::env::var("SUSPECT_REQUIRE_TOOLS")
+        .is_ok_and(|list| list.split(',').any(|id| matches!(id.trim(), "bun" | "all")));
+    assert!(
+        found || !required,
+        "SUSPECT_REQUIRE_TOOLS requires `bun`: not on PATH; install from https://bun.sh"
+    );
+    found
 }
 
 fn workspace() -> PathBuf {
@@ -103,7 +111,7 @@ fn write_rules(dir: &std::path::Path, files: &[(&str, &str)]) -> PathBuf {
 #[tokio::test]
 async fn point_rule_finds_violations_with_spans() {
     if !bun_available() {
-        eprintln!("skipping: bun not on PATH");
+        eprintln!("skipped: bun not on PATH — install from https://bun.sh");
         return;
     }
     let ws = workspace();
@@ -142,7 +150,7 @@ async fn point_rule_finds_violations_with_spans() {
 #[tokio::test]
 async fn throwing_rule_is_disabled_not_fatal() {
     if !bun_available() {
-        eprintln!("skipping: bun not on PATH");
+        eprintln!("skipped: bun not on PATH — install from https://bun.sh");
         return;
     }
     let ws = workspace();
@@ -176,7 +184,7 @@ async fn throwing_rule_is_disabled_not_fatal() {
 #[tokio::test]
 async fn watchdog_kills_and_restarts_on_hang() {
     if !bun_available() {
-        eprintln!("skipping: bun not on PATH");
+        eprintln!("skipped: bun not on PATH — install from https://bun.sh");
         return;
     }
     let ws = workspace();
@@ -213,7 +221,7 @@ async fn watchdog_kills_and_restarts_on_hang() {
 #[tokio::test]
 async fn walk_rule_reports_duplicates() {
     if !bun_available() {
-        eprintln!("skipping: bun not on PATH");
+        eprintln!("skipped: bun not on PATH — install from https://bun.sh");
         return;
     }
     let ws = workspace();
@@ -240,7 +248,7 @@ async fn walk_rule_reports_duplicates() {
 #[tokio::test]
 async fn hot_reload_picks_up_new_rules() {
     if !bun_available() {
-        eprintln!("skipping: bun not on PATH");
+        eprintln!("skipped: bun not on PATH — install from https://bun.sh");
         return;
     }
     let ws = workspace();

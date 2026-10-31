@@ -1,6 +1,6 @@
 //! Exact JSON integration through the canonical Rust `ModelPlan` package.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -124,10 +124,7 @@ pub fn support_error_kind(error: &generated_models::JsonError) -> generated_mode
 #[test]
 #[ignore = "requires tracked OpenRouter checkout and native Cargo"]
 fn tracked_models_and_four_documents_pass_native_package_gates() {
-    let checkout = PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT")
-            .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into()),
-    );
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let primary = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(primary.is_file(), "missing tracked OpenRouter checkout");
     let primary_contract = contract(&primary);

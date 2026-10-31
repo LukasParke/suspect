@@ -1,15 +1,32 @@
 name: 'suspect'
 description: >
-  Build the suspect CLI in release mode and run one of its subcommands
-  (check | test | gen) with sensible defaults.
+  Install a released suspect CLI (checksum-verified, no Rust toolchain) and
+  optionally run one of its subcommands (check | test | gen; `test` runs
+  `suspect test run`, `gen` runs `suspect gen template`).
 inputs:
+  version:
+    description: >
+      Release to install: `0.2.0`, `v0.2.0` or `latest`. Defaults to the tag
+      the action is used at (`LukasParke/suspect/.github/actions/suspect@v0.2.0`
+      installs 0.2.0); required when the action is referenced by branch,
+      commit or local path.
+    required: false
+    default: ''
   command:
-    description: 'Subcommand to run: check | test | gen.'
-    required: true
+    description: 'Subcommand to run: check | test | gen. Empty: install only and put `suspect` on PATH.'
+    required: false
+    default: ''
   paths:
     description: 'check: documents to check (space/newline separated).'
     required: false
     default: ''
+  fail-on-findings:
+    description: >
+      check: fail the step when suspect exits 1 (findings). With `false`, only
+      exit 2 (usage or environment error) or a crash fails; the exit code is
+      in the `exit-code` output either way.
+    required: false
+    default: 'true'
   arazzo:
     description: 'test: path to the Arazzo suite document.'
     required: false
@@ -19,7 +36,7 @@ inputs:
     required: false
     default: 'http://127.0.0.1:8080'
   cassette:
-    description: 'test: record a Suspect Cassette to replay offline (implies --offline).'
+    description: 'test: a recorded Suspect Cassette to replay offline instead of live HTTP.'
     required: false
     default: ''
   report:
@@ -50,75 +67,156 @@ inputs:
     description: 'Additional raw arguments appended to the chosen subcommand.'
     required: false
     default: ''
+outputs:
+  version:
+    description: 'The installed suspect version (without the leading v).'
+    value: ${{ steps.install.outputs.version }}
+  path:
+    description: 'Absolute path of the installed suspect executable.'
+    value: ${{ steps.install.outputs.path }}
+  exit-code:
+    description: 'Exit code of the subcommand (empty when command is empty).'
+    value: ${{ steps.run.outputs.exit-code }}
 
 runs:
   using: composite
   steps:
-    - uses: dtolnay/rust-toolchain@stable
-
-    - uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: |
-          .
-
-    - name: Build suspect CLI (release)
-      shell: bash
-      run: cargo build --release -p suspect-cli
-
-    - name: Run suspect ${{ inputs.command }}
+    # Downloads suspect-cli-{TRIPLE}.{tar.gz|zip} and its .sha256 from the
+    # GitHub release (docs/proposals/P5-release.md, "Asset contract").
+    - name: Install suspect
+      id: install
       shell: bash
       env:
-        SUSPECT_COMMAND: ${{ inputs.command }}
-        SUSPECT_PATHS: ${{ inputs.paths }}
-        SUSPECT_ARAZZO: ${{ inputs.arazzo }}
-        SUSPECT_BASE_URL: ${{ inputs.base-url }}
-        SUSPECT_CASSETTE: ${{ inputs.cassette }}
-        SUSPECT_REPORT: ${{ inputs.report }}
-        SUSPECT_FILTER: ${{ inputs.filter }}
-        SUSPECT_PRESET: ${{ inputs.preset }}
-        SUSPECT_MANIFEST: ${{ inputs.manifest }}
-        SUSPECT_OUT_DIR: ${{ inputs.out-dir }}
-        SUSPECT_DIFF: ${{ inputs.diff }}
-        SUSPECT_EXTRA_ARGS: ${{ inputs.extra-args }}
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+        REPO: LukasParke/suspect
       run: |
-        BIN="./target/release/suspect"
-        EXTRA=()
-        if [ -n "$SUSPECT_EXTRA_ARGS" ]; then read -r -a EXTRA <<< "$SUSPECT_EXTRA_ARGS"; fi
-
-        case "$SUSPECT_COMMAND" in
-          check)
-            if [ -z "$SUSPECT_PATHS" ]; then
-              echo "input `paths` is required for the check command" >&2
+        set -euo pipefail
+        version="${INPUT_VERSION:-}"
+        if [ -z "$version" ]; then
+          case "$ACTION_REF" in
+            v[0-9]*) version="$ACTION_REF" ;;
+            *)
+              echo "::error::set the 'version' input: the action is used at '${ACTION_REF:-a local path}', not a release tag" >&2
               exit 2
-            fi
-            DOCS=$(echo "$SUSPECT_PATHS" | tr '\n' ' ')
-            # shellcheck disable=SC2086
-            "$BIN" check $DOCS --format json "${EXTRA[@]}"
-            ;;
-          test)
-            if [ -z "$SUSPECT_ARAZZO" ]; then
-              echo "input `arazzo` is required for the test command" >&2
-              exit 2
-            fi
-            ARGS=(test "$SUSPECT_ARAZZO" --base-url "$SUSPECT_BASE_URL" --report "$SUSPECT_REPORT")
-            if [ -n "$SUSPECT_FILTER" ]; then ARGS+=(--filter "$SUSPECT_FILTER"); fi
-            if [ -n "$SUSPECT_CASSETTE" ]; then ARGS+=(--offline --cassette "$SUSPECT_CASSETTE"); fi
-            "$BIN" "${ARGS[@]}" "${EXTRA[@]}"
-            ;;
-          gen)
-            if [ -z "$SUSPECT_PRESET" ] && [ -z "$SUSPECT_MANIFEST" ]; then
-              echo "one of inputs `preset` or `manifest` is required for the gen command" >&2
-              exit 2
-            fi
-            ARGS=(gen)
-            if [ -n "$SUSPECT_PRESET" ]; then ARGS+=(--preset "$SUSPECT_PRESET");
-            else ARGS+=(--manifest "$SUSPECT_MANIFEST"); fi
-            ARGS+=("--out" "$SUSPECT_OUT_DIR")
-            if [ "$SUSPECT_DIFF" = "true" ]; then ARGS+=(--diff); fi
-            "$BIN" "${ARGS[@]}" "${EXTRA[@]}"
-            ;;
+              ;;
+          esac
+        fi
+        case "$RUNNER_OS/$RUNNER_ARCH" in
+          Linux/X64) triple=x86_64-unknown-linux-musl; ext=tar.gz ;;
+          Linux/ARM64) triple=aarch64-unknown-linux-musl; ext=tar.gz ;;
+          macOS/ARM64) triple=aarch64-apple-darwin; ext=tar.gz ;;
+          macOS/X64) triple=x86_64-apple-darwin; ext=tar.gz ;;
+          Windows/X64) triple=x86_64-pc-windows-msvc; ext=zip ;;
           *)
-            echo "unknown command '$SUSPECT_COMMAND' (expected check | test | gen)" >&2
+            echo "::error::no suspect release for $RUNNER_OS/$RUNNER_ARCH" >&2
             exit 2
             ;;
         esac
+        asset="suspect-cli-$triple.$ext"
+        if [ "$version" = latest ]; then
+          base="https://github.com/$REPO/releases/latest/download"
+        else
+          version="v${version#v}"
+          base="https://github.com/$REPO/releases/download/$version"
+        fi
+        dir="$RUNNER_TEMP/suspect-${version#v}-$triple"
+        rm -rf "$dir" && mkdir -p "$dir/unpacked"
+        curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$dir/$asset" "$base/$asset"
+        curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$dir/$asset.sha256" "$base/$asset.sha256"
+        want=$(awk '{print tolower($1); exit}' "$dir/$asset.sha256")
+        if command -v sha256sum >/dev/null; then
+          got=$(sha256sum "$dir/$asset" | awk '{print $1}')
+        else
+          got=$(shasum -a 256 "$dir/$asset" | awk '{print $1}')
+        fi
+        if [ "$want" != "$got" ]; then
+          echo "::error::$asset: sha256 $got does not match the published $want" >&2
+          exit 1
+        fi
+        case "$ext" in
+          # Git Bash's tar cannot read zip; Windows runners ship 7-Zip.
+          zip) 7z x -y -o"$dir/unpacked" "$dir/$asset" >/dev/null ;;
+          *) tar -xzf "$dir/$asset" -C "$dir/unpacked" ;;
+        esac
+        # The binary is at the archive root or one directory down.
+        bin=$(find "$dir/unpacked" -maxdepth 2 -type f \( -name suspect -o -name suspect.exe \) | head -n1)
+        if [ -z "$bin" ]; then
+          echo "::error::$asset has no suspect executable at depth 1 or 2" >&2
+          exit 1
+        fi
+        chmod +x "$bin"
+        installed=$("$bin" --version | awk '{print $2}')
+        echo "installed suspect $installed ($asset)"
+        bindir=$(cd "$(dirname "$bin")" && pwd)
+        echo "$bindir" >> "$GITHUB_PATH"
+        echo "version=$installed" >> "$GITHUB_OUTPUT"
+        echo "path=$bindir/$(basename "$bin")" >> "$GITHUB_OUTPUT"
+
+    - name: Run suspect ${{ inputs.command }}
+      id: run
+      if: inputs.command != ''
+      shell: bash
+      env:
+        BIN: ${{ steps.install.outputs.path }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        INPUT_ARAZZO: ${{ inputs.arazzo }}
+        INPUT_BASE_URL: ${{ inputs.base-url }}
+        INPUT_CASSETTE: ${{ inputs.cassette }}
+        INPUT_REPORT: ${{ inputs.report }}
+        INPUT_FILTER: ${{ inputs.filter }}
+        INPUT_PRESET: ${{ inputs.preset }}
+        INPUT_MANIFEST: ${{ inputs.manifest }}
+        INPUT_OUT_DIR: ${{ inputs.out-dir }}
+        INPUT_DIFF: ${{ inputs.diff }}
+        INPUT_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        EXTRA=()
+        if [ -n "$INPUT_EXTRA_ARGS" ]; then read -r -a EXTRA <<< "$INPUT_EXTRA_ARGS"; fi
+
+        rc=0
+        case "$INPUT_COMMAND" in
+          check)
+            if [ -z "$INPUT_PATHS" ]; then
+              echo "input 'paths' is required for the check command" >&2
+              exit 2
+            fi
+            DOCS=$(echo "$INPUT_PATHS" | tr '\n' ' ')
+            # shellcheck disable=SC2086
+            "$BIN" check $DOCS --format json "${EXTRA[@]}" || rc=$?
+            ;;
+          test)
+            if [ -z "$INPUT_ARAZZO" ]; then
+              echo "input 'arazzo' is required for the test command" >&2
+              exit 2
+            fi
+            ARGS=(test run "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --format "$INPUT_REPORT")
+            if [ -n "$INPUT_FILTER" ]; then ARGS+=(--filter "$INPUT_FILTER"); fi
+            if [ -n "$INPUT_CASSETTE" ]; then ARGS+=(--cassette "$INPUT_CASSETTE"); fi
+            "$BIN" "${ARGS[@]}" "${EXTRA[@]}" || rc=$?
+            ;;
+          gen)
+            if [ -z "$INPUT_PRESET" ] && [ -z "$INPUT_MANIFEST" ]; then
+              echo "one of inputs 'preset' or 'manifest' is required for the gen command" >&2
+              exit 2
+            fi
+            ARGS=(gen template)
+            if [ -n "$INPUT_PRESET" ]; then ARGS+=(--preset "$INPUT_PRESET");
+            else ARGS+=(--manifest "$INPUT_MANIFEST"); fi
+            ARGS+=("--output" "$INPUT_OUT_DIR")
+            if [ "$INPUT_DIFF" = "true" ]; then ARGS+=(--check --diff); fi
+            "$BIN" "${ARGS[@]}" "${EXTRA[@]}" || rc=$?
+            ;;
+          *)
+            echo "unknown command '$INPUT_COMMAND' (expected check | test | gen, or empty to install only)" >&2
+            exit 2
+            ;;
+        esac
+        echo "exit-code=$rc" >> "$GITHUB_OUTPUT"
+        if [ "$rc" -eq 1 ] && [ "$INPUT_COMMAND" = check ] && [ "$INPUT_FAIL_ON_FINDINGS" = false ]; then
+          echo "::notice::suspect check reported findings (exit 1); fail-on-findings is false"
+          exit 0
+        fi
+        exit "$rc"

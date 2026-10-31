@@ -4,10 +4,14 @@
 //! gates are opt-in (`#[ignore]`) so CI stays hermetic. This manifest makes
 //! the requirements declarative: per tool, the command that reports its
 //! version, the regex that extracts it, the minimum acceptable version, and
-//! the installation guidance shown when the probe fails. Gates call
-//! [`probe_status`] instead of hand-rolled `Option` dances, so the skip
-//! message tells a contributor exactly what is missing, what was found,
-//! what is required, and how to install it.
+//! the installation guidance shown when the probe fails.
+//!
+//! The skip-vs-fail rule: a default-suite test may skip when a tool is
+//! missing ([`optional`], [`skip`]: one `skipped:` line, then return); an
+//! `#[ignore]` gate fails ([`require`]). No gate passes by skipping.
+//! `SUSPECT_REQUIRE_TOOLS` (comma-separated ids, or `all`) turns
+//! default-suite skips for the listed tools into failures; CI sets it for
+//! the tools it installs.
 
 /// One native tool the acceptance gates may require.
 pub struct Tool {
@@ -31,8 +35,11 @@ pub struct Tool {
     /// `SUSPECT_RUBY_HOME`). Empty when the tool has none.
     pub home_env: &'static str,
     /// Known version-manager install path used when the tool is not on
-    /// `PATH` (mise layouts on the primary dev machine). Empty when the
-    /// tool always lives on `PATH`.
+    /// `PATH` (mise layouts). A leading `~/` expands to `$HOME`. A file is
+    /// the executable itself; a directory is searched for `<command>`,
+    /// `bin/<command>`, then `*/bin/<command>` (one nested level, for
+    /// archives such as `maven/3/apache-maven-3.9.16/bin/mvn`). Empty when
+    /// the tool always lives on `PATH`.
     pub version_manager_path: &'static str,
 }
 
@@ -58,7 +65,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install JDK 21 or later from https://adoptium.net, or point JAVA_HOME at one",
         env_override: "SUSPECT_JAVA_BIN",
         home_env: "JAVA_HOME",
-        version_manager_path: "/Users/luke/.local/share/mise/installs/java/temurin-21",
+        version_manager_path: "~/.local/share/mise/installs/java/temurin-21",
     },
     Tool {
         id: "maven",
@@ -69,7 +76,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install Maven 3.8 or later from https://maven.apache.org/install.html",
         env_override: "SUSPECT_MAVEN_BIN",
         home_env: "",
-        version_manager_path: "/Users/luke/.local/share/mise/installs/maven/3",
+        version_manager_path: "~/.local/share/mise/installs/maven/3",
     },
     Tool {
         id: "dotnet",
@@ -80,7 +87,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install the .NET 8 SDK or later from https://dotnet.microsoft.com/download",
         env_override: "SUSPECT_DOTNET_BIN",
         home_env: "",
-        version_manager_path: "/Users/luke/.local/share/mise/dotnet-root/dotnet",
+        version_manager_path: "~/.local/share/mise/dotnet-root/dotnet",
     },
     Tool {
         id: "swift",
@@ -116,6 +123,18 @@ pub const TOOLS: &[Tool] = &[
         version_manager_path: "",
     },
     Tool {
+        id: "python",
+        description: "Python 3.11+ gates executing emitted Python SDKs and codecs",
+        version_command: &["python3", "--version"],
+        version_regex: r"Python (\d+\.\d+(?:\.\d+)?)",
+        // The emitted `pyproject.toml` declares `requires-python=">=3.11"`.
+        min_version: "3.11",
+        install_documentation: "Install Python 3.11 or later from https://www.python.org/downloads (or `uv python install 3.11`), then point SUSPECT_PYTHON_BIN at its interpreter",
+        env_override: "SUSPECT_PYTHON_BIN",
+        home_env: "",
+        version_manager_path: "",
+    },
+    Tool {
         id: "ruby",
         description: "Ruby acceptance gates (OAuth lifecycle, pagination, streams)",
         version_command: &["ruby", "--version"],
@@ -124,7 +143,7 @@ pub const TOOLS: &[Tool] = &[
         install_documentation: "Install Ruby 3.2 or later from https://www.ruby-lang.org/en/documentation/installation",
         env_override: "SUSPECT_RUBY_BIN",
         home_env: "SUSPECT_RUBY_HOME",
-        version_manager_path: "",
+        version_manager_path: "~/.local/share/mise/installs/ruby/3",
     },
     Tool {
         id: "php",
@@ -139,6 +158,18 @@ pub const TOOLS: &[Tool] = &[
             env!("CARGO_MANIFEST_DIR"),
             "/../../target/sdk-php-tools/php-8.3.32/php"
         ),
+    },
+    Tool {
+        id: "terraform",
+        description: "Terraform provider acceptance gates (plan/apply/import, addresses, modules)",
+        version_command: &["terraform", "version"],
+        version_regex: r"Terraform v(\d+\.\d+\.\d+)",
+        // Emitted examples declare `ephemeral` credential variables (1.10+).
+        min_version: "1.10",
+        install_documentation: "Install Terraform 1.10 or later from https://developer.hashicorp.com/terraform/install (or `mise use terraform@latest`), or point SUSPECT_TERRAFORM_BIN at one",
+        env_override: "SUSPECT_TERRAFORM_BIN",
+        home_env: "",
+        version_manager_path: "~/.local/share/mise/installs/terraform/latest/terraform",
     },
 ];
 
@@ -238,20 +269,71 @@ pub fn resolve_path(id: &str) -> Option<std::path::PathBuf> {
         }
     }
     if !tool.version_manager_path.is_empty() {
-        let managed = std::path::PathBuf::from(tool.version_manager_path);
+        let managed = expand_home(tool.version_manager_path);
         if managed.is_file() {
             return Some(managed);
         }
-        // Directory layouts (e.g. `…/installs/maven/3`) need the binary
-        // name appended.
-        if managed.is_dir() {
-            let candidate = managed.join(tool.version_command[0]);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+        // Directory layouts (`…/installs/java/temurin-21`,
+        // `…/installs/maven/3`) need the binary located inside them.
+        if managed.is_dir()
+            && let Some(candidate) = find_in_install_dir(&managed, tool.version_command[0])
+        {
+            return Some(candidate);
         }
     }
     find_on_path(tool.version_command[0])
+}
+
+/// Locates `name` in a version-manager install directory: directly, under
+/// `bin/`, or under exactly one nested directory's `bin/` (the first in
+/// sorted order, so resolution is deterministic).
+fn find_in_install_dir(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    for candidate in [dir.join(name), dir.join("bin").join(name)] {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    let mut nested = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    nested.sort();
+    nested
+        .into_iter()
+        .map(|path| path.join("bin").join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+/// The `JAVA_HOME` of the gated JDK (`gate("jdk")`), as reported by the JVM
+/// itself (`java.home`), so PATH shims, `/usr/bin/java` stubs and
+/// alternatives links all resolve to the real installation.
+///
+/// # Errors
+/// The `jdk` gate's skip message when no JDK 21+ is resolvable, or a
+/// description of why `java.home` could not be read.
+pub fn java_home() -> Result<std::path::PathBuf, String> {
+    let java = gate("jdk")?;
+    let output = std::process::Command::new(&java)
+        .args(["-XshowSettings:properties", "-version"])
+        .output()
+        .map_err(|error| format!("{}: {error}", java.display()))?;
+    let text = String::from_utf8_lossy(&output.stderr).into_owned()
+        + &String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix("java.home = "))
+        .map(|home| std::path::PathBuf::from(home.trim()))
+        .filter(|home| home.join("bin").is_dir())
+        .ok_or_else(|| format!("{} did not report java.home", java.display()))
+}
+
+/// Expands a leading `~/` against `$HOME`.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => std::path::PathBuf::from(home).join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
 }
 
 /// Walks `PATH` for an executable with the given name (the `which` dance
@@ -263,14 +345,15 @@ fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// The acceptance-gate entry point: the resolved executable when the tool
-/// is present and new enough, or the actionable skip message.
+/// The probe behind [`optional`] and [`require`]: the resolved executable
+/// when the tool is present and new enough, or the actionable message.
 ///
 /// ```
 /// let jdk = suspect_codegen::toolchain::gate("jdk");
 /// match jdk {
-///     Ok(java) => { /* run the gate with `java` */ }
-///     Err(skip) => eprintln!("skipping: {skip}"),
+///     Ok(java) => { /* run the test with `java` */ }
+///     // A default-suite test; an #[ignore] gate panics instead (`require`).
+///     Err(message) => suspect_codegen::toolchain::skip("jdk", &message),
 /// }
 /// ```
 ///
@@ -298,6 +381,78 @@ pub fn gate(id: &str) -> Result<std::path::PathBuf, String> {
                 .map_or(id, |t| t.description)
         )),
     }
+}
+
+/// The variable listing the tools whose default-suite skips are failures.
+pub const REQUIRE_TOOLS: &str = "SUSPECT_REQUIRE_TOOLS";
+
+/// Whether `id` is listed in `list` (a `SUSPECT_REQUIRE_TOOLS` value:
+/// comma-separated ids, or `all`).
+#[must_use]
+pub fn listed(list: &str, id: &str) -> bool {
+    list.split(',')
+        .map(str::trim)
+        .any(|entry| entry == "all" || entry == id)
+}
+
+/// Whether `SUSPECT_REQUIRE_TOOLS` requires `id`.
+#[must_use]
+pub fn is_required(id: &str) -> bool {
+    std::env::var(REQUIRE_TOOLS).is_ok_and(|list| listed(&list, id))
+}
+
+/// The standard default-suite skip: prints `skipped: {what}`, or panics
+/// when `SUSPECT_REQUIRE_TOOLS` requires `id`. `what` names the tool and
+/// how to install it. For requirements that are not one manifest tool (an
+/// interpreter with a package, a compiler outside the manifest), `id` is a
+/// descriptive name such as `python-httpx`, required only by `all`.
+///
+/// # Panics
+/// When `id` is required.
+pub fn skip(id: &str, what: &str) {
+    skip_with(std::env::var(REQUIRE_TOOLS).ok().as_deref(), id, what);
+}
+
+fn skip_with(required: Option<&str>, id: &str, what: &str) {
+    if required.is_some_and(|list| listed(list, id)) {
+        panic!("{REQUIRE_TOOLS} requires `{id}`: {what}");
+    }
+    eprintln!("skipped: {what}");
+}
+
+/// Default-suite tests: the executable, or `None` after printing the
+/// standard skip line. Panics instead of skipping when `id` is listed in
+/// `SUSPECT_REQUIRE_TOOLS` (or it is `all`).
+///
+/// ```
+/// let Some(go) = suspect_codegen::toolchain::optional("go") else {
+///     return;
+/// };
+/// # let _ = go;
+/// ```
+#[must_use]
+pub fn optional(id: &str) -> Option<std::path::PathBuf> {
+    optional_with(std::env::var(REQUIRE_TOOLS).ok().as_deref(), id)
+}
+
+fn optional_with(required: Option<&str>, id: &str) -> Option<std::path::PathBuf> {
+    match gate(id) {
+        Ok(path) => Some(path),
+        Err(message) => {
+            skip_with(required, id, &message);
+            None
+        }
+    }
+}
+
+/// `#[ignore]` gates: the executable, or a panic with the guidance text. A
+/// gate someone asked for never passes without running.
+///
+/// # Panics
+/// When the tool is missing or too old.
+#[must_use]
+pub fn require(id: &str) -> std::path::PathBuf {
+    gate(id).unwrap_or_else(|message| panic!("{message}"))
 }
 
 /// Extracts the first capture group of the compiled regex.
@@ -383,6 +538,8 @@ mod tests {
             ("node", "v20.19.0"),
             ("ruby", "ruby 3.4.5 (2025-07-16)"),
             ("php", "PHP 8.3.32 (cli)"),
+            ("python", "Python 3.11.13"),
+            ("terraform", "Terraform v1.15.8\non darwin_arm64"),
         ];
         for tool in TOOLS {
             assert!(
@@ -445,6 +602,65 @@ mod tests {
         }
         // Unknown ids resolve to nothing.
         assert!(resolve_path("definitely-not-a-tool").is_none());
+    }
+
+    #[test]
+    fn install_directories_resolve_direct_bin_and_one_nested_bin() {
+        let root = tempfile::tempdir().unwrap();
+        let touch = |relative: &str| {
+            let path = root.path().join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"").unwrap();
+            path
+        };
+        let nested = touch("maven/3/apache-maven-3.9.16/bin/mvn");
+        assert_eq!(
+            find_in_install_dir(&root.path().join("maven/3"), "mvn"),
+            Some(nested)
+        );
+        let bin = touch("java/temurin-21/bin/java");
+        assert_eq!(
+            find_in_install_dir(&root.path().join("java/temurin-21"), "java"),
+            Some(bin)
+        );
+        let direct = touch("dotnet-root/dotnet");
+        assert_eq!(
+            find_in_install_dir(&root.path().join("dotnet-root"), "dotnet"),
+            Some(direct)
+        );
+        assert_eq!(
+            find_in_install_dir(&root.path().join("maven"), "none"),
+            None
+        );
+    }
+
+    #[test]
+    fn require_tools_lists_ids_or_all() {
+        assert!(listed("bun, node,python", "node"));
+        assert!(listed("all", "dotnet"));
+        assert!(!listed("bun,node", "python"));
+        assert!(!listed("", "go"));
+    }
+
+    #[test]
+    #[should_panic(expected = "SUSPECT_REQUIRE_TOOLS requires `definitely-not-a-tool`")]
+    fn optional_panics_instead_of_skipping_when_all_tools_are_required() {
+        let _ = optional_with(Some("all"), "definitely-not-a-tool");
+    }
+
+    #[test]
+    fn optional_skips_when_the_tool_is_not_required() {
+        assert_eq!(
+            optional_with(Some("bun,node"), "definitely-not-a-tool"),
+            None
+        );
+        assert_eq!(optional_with(None, "definitely-not-a-tool"), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown tool id")]
+    fn require_panics_with_the_guidance_text() {
+        let _ = require("definitely-not-a-tool");
     }
 
     #[test]

@@ -1,5 +1,5 @@
-//! Workflow input binding shared by `suspect test` and `suspect load`:
-//! `--input key=value` pairs and `--inputs file.json` objects become the
+//! Workflow input binding shared by `suspect test run` and `suspect test load`:
+//! `--input key=value` pairs and `--inputs-file file.json` (or `.yaml`) objects become the
 //! caller-supplied [`InputMap`] that overrides Arazzo `parameters` values
 //! and schema defaults.
 
@@ -7,23 +7,29 @@ use std::path::Path;
 
 use suspect_test::InputMap;
 
-/// Builds an input map from a JSON file (an object) and `key=value` pairs.
+/// Builds an input map from a JSON or YAML file (an object) and `key=value` pairs.
 /// Pairs apply after the file, so they override it. Values that parse as
 /// JSON (`42`, `true`, `{"a":1}`) are kept typed; anything else is a string.
 ///
 /// # Errors
-/// Returns an error when the file is unreadable or not a JSON object, or a
+/// Returns an error when the file is unreadable or not an object, or a
 /// pair lacks `=` or a name.
 pub fn parse_inputs(file: Option<&Path>, pairs: &[String]) -> anyhow::Result<InputMap> {
     let mut inputs = InputMap::new();
     if let Some(path) = file {
-        let text = std::fs::read_to_string(path)
+        let bytes = std::fs::read(path)
             .map_err(|e| anyhow::anyhow!("cannot read inputs file {}: {e}", path.display()))?;
-        let value: serde_json::Value = serde_json::from_str(&text)
-            .map_err(|e| anyhow::anyhow!("inputs file {} is not JSON: {e}", path.display()))?;
+        let value: serde_json::Value = super::structured::parse(path, &bytes).map_err(|e| {
+            let kind = if super::structured::is_yaml(path) {
+                "YAML"
+            } else {
+                "JSON"
+            };
+            anyhow::anyhow!("inputs file {} is not {kind}: {e}", path.display())
+        })?;
         match value {
             serde_json::Value::Object(map) => inputs.extend(map),
-            _ => anyhow::bail!("inputs file {} must contain a JSON object", path.display()),
+            _ => anyhow::bail!("inputs file {} must contain an object", path.display()),
         }
     }
     for pair in pairs {
@@ -66,6 +72,19 @@ mod tests {
         assert_eq!(map["b"], serde_json::json!(2));
         assert_eq!(map["c"], serde_json::json!(true));
         assert_eq!(map["d"], serde_json::json!("hello world"));
+    }
+
+    #[test]
+    fn a_yaml_inputs_file_is_typed_like_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("in.yaml");
+        std::fs::write(&file, "a: 1\nb: x\nc:\n  nested: true\n").unwrap();
+        let map = parse_inputs(Some(&file), &["b=2".to_owned()]).unwrap();
+        assert_eq!(map["a"], serde_json::json!(1));
+        assert_eq!(map["b"], serde_json::json!(2));
+        assert_eq!(map["c"], serde_json::json!({"nested": true}));
+        std::fs::write(&file, "- 1\n- 2\n").unwrap();
+        assert!(parse_inputs(Some(&file), &[]).is_err());
     }
 
     #[test]

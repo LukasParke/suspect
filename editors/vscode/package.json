@@ -4,6 +4,30 @@
 	"description": "Run Arazzo workflows, drive the mock gateway, and generate canonical SDKs, documentation or custom templates from OpenAPI documents.",
 	"version": "0.1.0",
 	"publisher": "suspect",
+	"license": "MIT OR Apache-2.0",
+	"icon": "media/icon.png",
+	"homepage": "https://github.com/LukasParke/suspect/tree/main/editors/vscode",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/LukasParke/suspect.git",
+		"directory": "editors/vscode"
+	},
+	"bugs": {
+		"url": "https://github.com/LukasParke/suspect/issues"
+	},
+	"categories": [
+		"Programming Languages",
+		"Linters",
+		"Testing",
+		"Formatters"
+	],
+	"keywords": [
+		"openapi",
+		"swagger",
+		"arazzo",
+		"overlay",
+		"lsp"
+	],
 	"private": true,
 	"engines": {
 		"vscode": "^1.85.0"
@@ -13,164 +37,244 @@
 		"onLanguage:json",
 		"workspaceContains:**/suspect.project.json",
 		"workspaceContains:**/.suspect.yaml",
-		"workspaceContains:**/*.arazzo.{yaml,yml}"
+		"workspaceContains:**/*.arazzo.{yaml,yml}",
+		"workspaceContains:**/*.openapi.{yaml,yml,json}",
+		"workspaceContains:**/*.overlay.{yaml,yml}"
 	],
 	"main": "./dist/extension.js",
 	"contributes": {
 		"configuration": {
 			"title": "Suspect",
 			"properties": {
-				"suspect.sdk.compatibilityProfiles": {
-					"type": "array",
+				"suspect.codegen.compatibilityProfiles": {
+					"type": [
+						"array",
+						"null"
+					],
 					"items": {
 						"type": "string",
 						"enum": [
-							"legacy-binary-string-v1"
+							"legacy-binary-string-v1",
+							"oas30-nullable-in-3.1-v1",
+							"colon-path-parameters-v1",
+							"schemaless-stream-events-v1",
+							"all-of-scoped-mode-v1"
 						]
 					},
 					"uniqueItems": true,
-					"default": [],
-					"description": "Explicit versioned source interpretation for single-package generation. Empty preserves ordinary OpenAPI semantics. legacy-binary-string-v1 opts into string/binary markers as bytes in binary contexts. Session actions use only compatibility_profiles from their saved JSON config."
+					"default": null,
+					"markdownDescription": "Versioned source interpretations to opt into (`suspect gen sdk --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. `codegen.compatibility_profiles` in `.suspect.yaml`; unset (`null`) uses the committed value (default `[]`).",
+					"scope": "resource"
 				},
-				"suspect.sdk.importNames": {
-					"type": "object",
-					"default": {},
+				"suspect.codegen.importNames": {
+					"type": [
+						"object",
+						"null"
+					],
 					"additionalProperties": {
 						"type": "string"
 					},
-					"description": "Explicit native import/module/namespace overrides by SDK profile, for example {\"python-http\":\"widgets_sdk\",\"ruby-http\":\"WidgetsSDK\"}."
+					"default": null,
+					"markdownDescription": "SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name. `codegen.import_names` in `.suspect.yaml`; unset (`null`) uses the committed value (default `{}`).",
+					"scope": "resource"
+				},
+				"suspect.codegen.operationIds": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"default": null,
+					"markdownDescription": "Exact `operationId`s to generate. Empty attempts every operation; an unsupported one fails rather than being dropped. `codegen.operation_ids` in `.suspect.yaml`; unset (`null`) uses the committed value (default `[]`).",
+					"scope": "resource"
+				},
+				"suspect.codegen.packageName": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it. `codegen.package_name` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.codegen.packageVersion": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata). `codegen.package_version` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.codegen.session.config": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Session config (JSON) naming the spec and targets. Unset: the editor asks for one. `codegen.session.config` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.codegen.session.out": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`). `codegen.session.out` in `.suspect.yaml`; unset (`null`) uses the committed value (default `sdk-out`).",
+					"scope": "resource"
+				},
+				"suspect.diff.baseline": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Git ref compared against for breaking changes (`suspect ci`, the editor's breaking-changes command; the editor falls back to `HEAD~1`). `diff.baseline` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.editor.inlayHints.properties": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Show property type-annotation inlay hints. `editor.inlay_hints.properties` in `.suspect.yaml`; unset (`null`) uses the committed value (default `true`).",
+					"scope": "resource"
+				},
+				"suspect.editor.inlayHints.refs": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Show resolved `$ref` target inlay hints. `editor.inlay_hints.refs` in `.suspect.yaml`; unset (`null`) uses the committed value (default `true`).",
+					"scope": "resource"
+				},
+				"suspect.format.sortKeys": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`. `format.sort_keys` in `.suspect.yaml`; unset (`null`) uses the committed value (default `false`).",
+					"scope": "resource"
+				},
+				"suspect.gateway.port": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"minimum": 0,
+					"maximum": 65535,
+					"default": null,
+					"markdownDescription": "Port the gateway listens on. `gateway.port` in `.suspect.yaml`; unset (`null`) uses the committed value (default `8080`).",
+					"scope": "resource"
+				},
+				"suspect.lint.design": {
+					"type": [
+						"string",
+						"null"
+					],
+					"enum": [
+						"error",
+						"warning",
+						"info",
+						"hint",
+						"off",
+						null
+					],
+					"default": null,
+					"markdownDescription": "Severity for design-class rules: findings that flag the API's design rather than the document's accuracy. A project documenting an API it does not own sets `off` (or `info` to keep them as notes); `lint.rules` wins per rule. `lint.design` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.lint.minSeverity": {
+					"type": [
+						"string",
+						"null"
+					],
+					"enum": [
+						"error",
+						"warning",
+						"info",
+						"hint",
+						null
+					],
+					"default": null,
+					"markdownDescription": "Minimum severity to report. Findings below this floor are suppressed. `lint.min_severity` in `.suspect.yaml`; unset (`null`) uses the committed value (default `hint`).",
+					"scope": "resource"
+				},
+				"suspect.lint.recommended": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Apply the recommended (built-in) lint rule set. With `false` and no `lint.ruleset`, no lint rules run. `lint.recommended` in `.suspect.yaml`; unset (`null`) uses the committed value (default `true`).",
+					"scope": "resource"
+				},
+				"suspect.lint.rules": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"type": "string",
+						"enum": [
+							"error",
+							"warning",
+							"info",
+							"hint",
+							"off"
+						]
+					},
+					"default": null,
+					"markdownDescription": "Rule id to severity (`error`, `warning`, `info`, `hint`, `off`), overriding the severity a rule would otherwise produce. Merged per rule across files. `lint.rules` in `.suspect.yaml`; unset (`null`) uses the committed value (default `{}`).",
+					"scope": "resource"
+				},
+				"suspect.lint.ruleset": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Custom ruleset document, relative to the file that sets it. `lint.ruleset` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.ref.maxDocs": {
+					"type": [
+						"integer",
+						"null"
+					],
+					"minimum": 0,
+					"default": null,
+					"markdownDescription": "Maximum documents loaded in one ref workspace. `ref.max_docs` in `.suspect.yaml`; unset (`null`) uses the committed value (default `500`).",
+					"scope": "resource"
+				},
+				"suspect.test.baseUrl": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Base URL requests are sent to. `test.base_url` in `.suspect.yaml`; unset (`null`) uses the committed value (default `http://localhost:8080`).",
+					"scope": "resource"
+				},
+				"suspect.validate.strictFormat": {
+					"type": [
+						"boolean",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Assert `format` keywords. The 2020-12 default is annotation-only, so this catches example drift that annotation-only mode would let through. `validate.strict_format` in `.suspect.yaml`; unset (`null`) uses the committed value (default `false`).",
+					"scope": "resource"
 				},
 				"suspect.basePath": {
 					"type": "string",
 					"default": "suspect",
 					"description": "Path to the suspect CLI: a directory containing the `suspect` executable, the executable itself, or bare `suspect` to resolve from $PATH."
-				},
-				"suspect.sdk.packageName": {
-					"type": "string",
-					"default": "",
-					"description": "Initial explicit native package identity for a canonical SDK profile advertised by the selected CLI. The command prompts with the selected ecosystem's naming requirements before generation."
-				},
-				"suspect.sdk.packageVersion": {
-					"type": "string",
-					"default": "",
-					"description": "Initial explicit package SemVer for canonical SDK generation, independent of OpenAPI info.version. Swift requires stable SemVer without prerelease or build metadata."
-				},
-				"suspect.sdk.operationIds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"default": [],
-					"description": "Exact operationId selectors for canonical SDK generation. Empty attempts every outgoing operation; unsupported operations fail rather than being dropped."
-				},
-				"suspect.sdk.sessionConfig": {
-					"type": "string",
-					"default": "",
-					"description": "JSON config for canonical SDK preview/watch using targets registered in the selected CLI. Absolute or relative to the selected workspace folder; empty opens a file picker. The config's spec is relative to its own directory; import_name sets a native import/module/namespace, and compatibility_profiles explicitly selects source interpretation."
-				},
-				"suspect.sdk.sessionOutput": {
-					"type": "string",
-					"default": "sdk-out",
-					"description": "Initial output root for SDK preview/watch/drift checks. Relative paths resolve from the session config directory. Each action prompts for this directory and reads saved files."
-				},
-				"suspect.testBaseUrl": {
-					"type": "string",
-					"default": "http://localhost:8080",
-					"description": "Base URL for Arazzo workflows no project manifest declares. Suites listed under a manifest's tests.arazzo run against that manifest's base_url instead."
-				},
-				"suspect.gatewayPort": {
-					"type": "number",
-					"default": 8080,
-					"minimum": 1,
-					"maximum": 65535,
-					"description": "TCP port bound by the mock gateway on 127.0.0.1."
-				},
-				"suspect.lint.minSeverity": {
-					"type": "string",
-					"enum": [
-						"error",
-						"warning",
-						"information",
-						"hint"
-					],
-					"default": "",
-					"description": "Minimum severity of findings reported. Empty defers to the committed .suspect.yaml; the committed floor still applies below what this allows."
-				},
-				"suspect.ci.baseline": {
-					"type": "string",
-					"default": "",
-					"description": "Git ref the Breaking gate stage compares the spec against (passed as `suspect ci --baseline`). Empty runs the stage without a baseline, which passes vacuously."
-				},
-				"suspect.lint.recommended": {
-					"type": "boolean",
-					"markdownDescription": "Apply the recommended lint rule set (`lint.recommended` in `.suspect.yaml`).",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.lint.rules": {
-					"type": "object",
-					"additionalProperties": {
-						"type": "string",
-						"enum": [
-							"off",
-							"hint",
-							"info",
-							"warning",
-							"error"
-						]
-					},
-					"markdownDescription": "Per-rule severities: rule id → `off` | `hint` | `info` | `warning` | `error` (`lint.rules` in `.suspect.yaml`).",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.lint.design": {
-					"type": "string",
-					"enum": [
-						"off",
-						"hint",
-						"info",
-						"warning",
-						"error"
-					],
-					"markdownDescription": "Severity for design-class rules — findings that flag the API's own design rather than the document's accuracy. Set `off` when documenting an API you do not own (`lint.design` in the manifest and `.suspect.yaml`).",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.lint.ruleset": {
-					"type": "string",
-					"markdownDescription": "Path to a custom lint ruleset (`lint.ruleset` in `.suspect.yaml`).",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.validate.strictFormat": {
-					"type": "boolean",
-					"markdownDescription": "Treat non-canonical YAML formatting (indentation, key order) as findings.",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.ref.maxDocs": {
-					"type": "number",
-					"markdownDescription": "Maximum documents loaded in one ref workspace (default 500).",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.inlayHints.refs": {
-					"type": "boolean",
-					"markdownDescription": "Show resolved `$ref` target inlay hints.",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.inlayHints.properties": {
-					"type": "boolean",
-					"markdownDescription": "Show property type-annotation inlay hints.",
-					"default": null,
-					"scope": "resource"
-				},
-				"suspect.formatting.sortKeys": {
-					"type": "boolean",
-					"markdownDescription": "Reorder object keys into the canonical OpenAPI order when formatting (`formatting.sortKeys` in `.suspect.yaml`).",
-					"default": null,
-					"scope": "resource"
 				}
 			}
 		},
@@ -226,6 +330,14 @@
 			{
 				"command": "suspect.openSuspectConfig",
 				"title": "Suspect: Open Configuration"
+			},
+			{
+				"command": "suspect.explainConfig",
+				"title": "Suspect: Explain Configuration"
+			},
+			{
+				"command": "suspect.locateBinary",
+				"title": "Suspect: Locate Binary…"
 			},
 			{
 				"command": "suspect.project.refresh",
@@ -347,17 +459,17 @@
 			"editor/context": [
 				{
 					"command": "suspect.generateExample",
-					"when": "editorTextFocus && resourceScheme == file",
+					"when": "editorTextFocus && resourceScheme == file && suspect.documentKind =~ /^(openapi|fragment)$/",
 					"group": "9_suspect"
 				},
 				{
 					"command": "suspect.extractSchema",
-					"when": "editorTextFocus && resourceScheme == file",
+					"when": "editorTextFocus && resourceScheme == file && suspect.documentKind =~ /^(openapi|fragment)$/",
 					"group": "9_suspect"
 				},
 				{
 					"command": "suspect.inlineSchema",
-					"when": "editorTextFocus && resourceScheme == file",
+					"when": "editorTextFocus && resourceScheme == file && suspect.documentKind =~ /^(openapi|fragment)$/",
 					"group": "9_suspect"
 				}
 			]
@@ -424,15 +536,39 @@
 				"contents": "No suspect.project.json in this workspace.\n\nA project manifest names the entry spec, publish profiles, SDK targets and contract-test suites; this view shows them and the Testing view runs them.\n\nArazzo workflows are still discovered by content and listed in the Testing view.\n[Open Testing](command:workbench.view.testing.focus)\n[Open Settings](command:workbench.action.openWorkspaceSettings?%22suspect%22)",
 				"when": "suspect.hasProject == false"
 			}
+		],
+		"jsonValidation": [
+			{
+				"fileMatch": "suspect.project.json",
+				"url": "./schemas/suspect.project.schema.json"
+			}
+		],
+		"yamlValidation": [
+			{
+				"fileMatch": [
+					".suspect.yaml",
+					".suspect.yml",
+					"suspect.yaml",
+					"suspect.yml"
+				],
+				"url": "./schemas/suspect.schema.json"
+			}
 		]
 	},
 	"scripts": {
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./",
+		"settings:write": "node scripts/settings.cjs --write",
+		"test:headless": "node --test test/settings.cjs test/manifest.cjs test/sdk-fixtures.cjs test/ui-surface.cjs test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs test/native-host/contract.test.cjs",
 		"test:generation": "node --test test/generation*.cjs",
 		"test:generation:protocol": "node --test test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs",
 		"test:generation:host": "node test/native-host/run.cjs",
-		"test:generation:host:inputs": "node --test test/native-host/contract.test.cjs"
+		"test:generation:host:inputs": "node --test test/native-host/contract.test.cjs",
+		"test:host:smoke": "node test/host-smoke/run.cjs",
+		"package": "vsce package --no-dependencies",
+		"bundle": "node scripts/bundle.cjs",
+		"vscode:prepublish": "npm run compile && npm run bundle",
+		"package:target": "node scripts/package-target.cjs"
 	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.0"
@@ -440,6 +576,9 @@
 	"devDependencies": {
 		"@types/node": "^20.11.0",
 		"@types/vscode": "^1.85.0",
+		"@vscode/vsce": "4.1.0",
+		"esbuild": "0.28.2",
+		"ovsx": "1.3.0",
 		"typescript": "^5.4.0"
 	}
 }

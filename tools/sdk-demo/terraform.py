@@ -19,9 +19,9 @@ def prepare(root: Path) -> None:
     work = root / "terraform-demo"
     work.mkdir(exist_ok=False)
     fixture = REPO / "crates/suspect-codegen/tests/fixtures/terraform-v1"
-    args = [str(root / "bin/suspect"), "codegen-terraform", str(fixture / "openapi.json"),
+    args = [str(root / "bin/suspect"), "gen", "terraform", str(fixture / "openapi.json"),
             "--mapping", str(fixture / "mapping.json"), "--target-config", str(fixture / "target.json"),
-            "--out", str(work / "generated"), "--format", "json"]
+            "--output", str(work / "generated"), "--format", "json"]
     record(work, "generate", args)
     record(work, "drift", [*args, "--check"])
     binary = EVIDENCE / "go1.23.12/terraform-provider-fixture_v0.1.0"

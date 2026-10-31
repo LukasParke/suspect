@@ -23,6 +23,7 @@ use suspect_source::Uri;
 pub mod common;
 pub mod contract;
 pub mod evolution;
+pub mod faker;
 pub mod fast;
 
 pub use fast::ir_from_fast;

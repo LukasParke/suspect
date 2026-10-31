@@ -285,12 +285,7 @@ fn installed_m2_and_edge_quickstarts_are_public_native_and_typechecked() {
 #[test]
 #[ignore = "requires tracked OpenRouter source plus native Python 3.11/3.14 build/docs tools"]
 fn installed_tracked_five_operation_quickstart_uses_real_constructors() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let wanted = [
         "getCredits",

@@ -5,19 +5,21 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
 authors.workspace = true
 
 [dependencies]
+suspect-diag.workspace = true
 percent-encoding.workspace = true
 suspect-overlay.workspace = true
 suspect-low.workspace = true
 suspect-ref.workspace = true
 suspect-source.workspace = true
 suspect-arazzo.workspace = true
-suspect-rex.path = "../suspect-rex"
 suspect-ir.path = "../suspect-ir"
 suspect-runtime.path = "../suspect-runtime"
-suspect-faker.path = "../suspect-faker"
 suspect-schema.workspace = true
 suspect-journal.path = "../suspect-journal"
 serde.workspace = true

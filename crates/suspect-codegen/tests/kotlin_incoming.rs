@@ -421,12 +421,10 @@ fn maven() -> Option<std::path::PathBuf> {
 #[test]
 fn generated_incoming_module_compiles_with_the_package() {
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_incoming: no JDK 21 found; degrading to static assertions");
-        return;
+        panic!("kotlin_incoming: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_incoming: no Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_incoming: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(incoming_document()), root.path()).unwrap();
@@ -571,12 +569,10 @@ fun main() {
 #[test]
 fn receipts_drive_the_decoder_and_constructor() {
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_incoming: no JDK 21 found; degrading to static assertions");
-        return;
+        panic!("kotlin_incoming: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_incoming: no Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_incoming: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(incoming_document()), root.path()).unwrap();

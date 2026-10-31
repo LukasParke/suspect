@@ -18,8 +18,10 @@ fn json_lint_findings_use_one_based_source_coordinates() {
         .output()
         .unwrap();
     assert_eq!(result.status.code(), Some(1));
-    let findings: Vec<serde_json::Value> = serde_json::from_slice(&result.stdout).unwrap();
-    let finding = findings
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    let finding = report["findings"]
+        .as_array()
+        .unwrap()
         .iter()
         .find(|finding| finding["code"] == "typed-enum")
         .expect("invalid enum member must be diagnosed");
