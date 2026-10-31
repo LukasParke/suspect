@@ -1,4 +1,4 @@
-//! TypeScript rules in the editor: one lazily started [`RuleHost`] per
+//! TypeScript rules in the editor: one lazily started `RuleHost` per
 //! server, opt-in through `rules.enabled`.
 //!
 //! The host starts on the first diagnostics run of a document whose
@@ -9,8 +9,6 @@
 //! logged); it never holds back the builtin findings. A change under a
 //! rules root stops the host, bumps the policy epoch and republishes; the
 //! next run starts it again over the current files.
-//!
-//! [`RuleHost`]: suspect_rules::RuleHost
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

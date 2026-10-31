@@ -102,7 +102,7 @@ pub fn json(findings: &[Finding], src: &dyn Sources) -> Value {
         .collect()
 }
 
-/// The JSON findings report: `findings` as [`json`] renders them, and the
+/// The JSON findings report: `findings` as [`json()`] renders them, and the
 /// findings inline or extension suppressions hid under `suppressed`, so a
 /// reviewer can audit them.
 #[must_use]
