@@ -230,12 +230,19 @@ mod tests {
     use suspect_diag::{CheckId, Severity};
     use suspect_source::Uri;
 
+    /// An absolute path on this platform (`/w/...`, or `C:\w\...` on
+    /// Windows, where `/w` has no drive and is not absolute).
+    fn abs(rel: &str) -> std::path::PathBuf {
+        let root = if cfg!(windows) { r"C:\" } else { "/" };
+        Path::new(root).join(rel)
+    }
+
     fn finding(code: &'static str, pointer: &str) -> Finding {
         let mut f = Finding::new(
             CheckId::Validate,
             code,
             Severity::Error,
-            Uri::from_path(Path::new("/w/specs/api.yaml")).unwrap(),
+            Uri::from_path(&abs("w/specs/api.yaml")).unwrap(),
             "m",
         );
         f.pointer = Some(pointer.into());
@@ -244,7 +251,8 @@ mod tests {
 
     #[test]
     fn keys_are_relative_and_counts_cover_the_first_findings() {
-        let base = Path::new("/w");
+        let base = abs("w");
+        let base = base.as_path();
         let key = Key::of(&finding("a", "/paths"), base);
         assert_eq!(key.document, "specs/api.yaml");
         assert_eq!(key.pointer, "/paths");
@@ -254,11 +262,11 @@ mod tests {
         };
         let other = Key::of(&finding("b", "/paths"), base);
         assert_eq!(
-            Key::of(&finding("a", ""), Path::new("/w/specs/.suspect")).document,
+            Key::of(&finding("a", ""), &abs("w/specs/.suspect")).document,
             "../api.yaml"
         );
         assert_eq!(
-            Key::of(&finding("a", ""), Path::new("/x/y")).document,
+            Key::of(&finding("a", ""), &abs("x/y")).document,
             "../../w/specs/api.yaml"
         );
         assert_eq!(
