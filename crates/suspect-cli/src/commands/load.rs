@@ -237,14 +237,13 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
     let sink: Arc<dyn LoadSink> = Arc::new(ConsoleSink { ndjson });
 
     let rt = tokio::runtime::Runtime::new()?;
-    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    // The first Ctrl-C stops arrivals and drains; the second aborts with
+    // 130 (`crate::interrupt`).
+    let cancel_rx = crate::interrupt::graceful();
+    let mut notice = cancel_rx.clone();
     rt.spawn(async move {
-        if tokio::signal::ctrl_c().await.is_ok() {
+        if notice.wait_for(|interrupted| *interrupted).await.is_ok() {
             eprintln!("\ninterrupt: stopping arrivals and draining (Ctrl-C again to abort)");
-            let _ = cancel_tx.send(true);
-            if tokio::signal::ctrl_c().await.is_ok() {
-                std::process::exit(130);
-            }
         }
     });
     let cfg = LoadConfig {

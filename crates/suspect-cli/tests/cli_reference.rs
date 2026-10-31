@@ -37,7 +37,7 @@ fn reference() -> String {
          <!-- Generated from the clap command tree by \
          crates/suspect-cli/tests/cli_reference.rs; do not edit by hand. \
          Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`. -->\n\n\
-         Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error.\n\n",
+         Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C).\n\n",
     );
     render(&mut cmd, "suspect", &mut out);
     out

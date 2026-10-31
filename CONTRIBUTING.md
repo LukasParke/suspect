@@ -140,7 +140,12 @@ release without them still produces the GitHub release.
 ## Conventions
 
 - Exit codes: `0` clean, `1` findings or failed checks, `2` usage or
-  environment error.
+  environment error, `130` interrupted. Long-running servers (`gateway`,
+  `lsp`, `watch`, `bridge`, `codegen-session --watch`) exit `0` on Ctrl-C.
+  Commands return `suspect_cli::Exit`; `std::process::exit` is banned by
+  `crates/suspect-cli/clippy.toml`, and `exit::abort` is the one immediate
+  exit. Ctrl-C goes through `suspect_cli::interrupt`: call
+  `interrupt::graceful()` to drain, never `tokio::signal::ctrl_c`.
 - Settings belong in `crates/suspect-config` so the CLI and the language
   server read them the same way.
 

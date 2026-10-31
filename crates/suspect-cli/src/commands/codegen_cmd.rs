@@ -131,10 +131,9 @@ pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     }
     // Everything the settings could not supply has a historical default;
     // the profile is the one selection with no default, so name it.
-    let profile = args.profile.unwrap_or_else(|| {
-        eprintln!("--profile is required (or set codegen.profile in .suspect.yaml)");
-        std::process::exit(2);
-    });
+    let Some(profile) = args.profile else {
+        anyhow::bail!("--profile is required (or set codegen.profile in .suspect.yaml)");
+    };
     super::sdk::generate(&SdkArgs {
         input,
         shared: None,

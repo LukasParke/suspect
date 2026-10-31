@@ -30,15 +30,14 @@ pub fn run(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    let mut interrupted = crate::interrupt::graceful();
     let result = runtime.block_on(async move {
         let mut work = tokio::task::spawn_blocking(move || acquire(&path, options));
         tokio::select! {
             result = &mut work => Ok::<_, anyhow::Error>(result?),
-            signal = tokio::signal::ctrl_c() => {
+            Ok(_) = interrupted.wait_for(|interrupted| *interrupted) => {
                 cancellation.cancel();
-                let result = work.await?;
-                signal?;
-                Ok(result)
+                Ok(work.await?)
             }
         }
     })?;
