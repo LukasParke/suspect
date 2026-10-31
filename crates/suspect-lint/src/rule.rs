@@ -43,15 +43,15 @@ impl Severity {
         }
     }
 
-    /// Parses a policy severity name: the ruleset vocabulary (`error`,
-    /// `warn`, `info`, `hint`, `off`) plus the editor's names
-    /// (`warning`, `information`) for the same ranks.
+    /// The shared severity, or `None` for [`Severity::Off`].
     #[must_use]
-    pub fn from_policy(text: &str) -> Option<Self> {
-        match text.trim().to_ascii_lowercase().as_str() {
-            "warning" => Some(Self::Warn),
-            "information" => Some(Self::Info),
-            other => Self::from_text(other),
+    pub const fn to_diag(self) -> Option<suspect_diag::Severity> {
+        match self {
+            Self::Error => Some(suspect_diag::Severity::Error),
+            Self::Warn => Some(suspect_diag::Severity::Warning),
+            Self::Info => Some(suspect_diag::Severity::Info),
+            Self::Hint => Some(suspect_diag::Severity::Hint),
+            Self::Off => None,
         }
     }
 
@@ -68,6 +68,26 @@ impl Severity {
 
     pub(crate) fn is_enabled(self) -> bool {
         self != Self::Off
+    }
+}
+
+/// Policy names are parsed once, by [`suspect_diag::parse_level`]; this
+/// maps the result onto the engine's ranks.
+impl From<suspect_diag::Level> for Severity {
+    fn from(level: suspect_diag::Level) -> Self {
+        match level {
+            suspect_diag::Level::Off => Self::Off,
+            suspect_diag::Level::On(suspect_diag::Severity::Error) => Self::Error,
+            suspect_diag::Level::On(suspect_diag::Severity::Warning) => Self::Warn,
+            suspect_diag::Level::On(suspect_diag::Severity::Info) => Self::Info,
+            suspect_diag::Level::On(suspect_diag::Severity::Hint) => Self::Hint,
+        }
+    }
+}
+
+impl From<Severity> for suspect_diag::Level {
+    fn from(severity: Severity) -> Self {
+        severity.to_diag().map_or(Self::Off, Self::On)
     }
 }
 
@@ -179,6 +199,9 @@ pub(crate) struct Rule {
     pub severity: Severity,
     pub formats: FamilySet,
     pub category: Category,
+    /// Defined by a builtin pack. A ruleset rule that reuses a builtin code
+    /// with its own `given`/`then` is a different check and clears this.
+    pub builtin: bool,
 }
 
 impl Rule {
@@ -208,6 +231,7 @@ impl Rule {
             severity,
             formats,
             category: Category::Document,
+            builtin: true,
         }
     }
 }

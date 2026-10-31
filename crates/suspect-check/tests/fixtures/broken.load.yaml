@@ -1,0 +1,18 @@
+# Load profile with deliberate problems, for the registry corpus.
+suspectLoad: "1.0"
+seed: many
+phases:
+  - name: warm
+    pause: 1s
+    rampTo: 5
+  - name: none
+  - name: zero
+    vus: 0
+    duration: 10s
+scenarios:
+  - name: browse
+    weight: -1
+  - name: nameless
+    workflow: flow
+data:
+  order: shuffled

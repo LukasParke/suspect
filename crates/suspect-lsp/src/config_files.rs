@@ -761,7 +761,7 @@ pub fn apply_config(diags: Vec<Diagnostic>, cfg: &SuspectConfig) -> Vec<Diagnost
             if let Some(NumberOrString::String(code)) = &d.code
                 && let Some(name) = rules.get(code)
             {
-                match suspect_lint::Severity::from_policy(name) {
+                match suspect_diag::parse_level(name).map(suspect_lint::Severity::from) {
                     Some(suspect_lint::Severity::Off) => return None,
                     Some(severity) => {
                         d.severity = match severity {

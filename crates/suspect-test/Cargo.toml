@@ -11,6 +11,7 @@ publish = false
 authors.workspace = true
 
 [dependencies]
+suspect-diag.workspace = true
 percent-encoding.workspace = true
 suspect-overlay.workspace = true
 suspect-low.workspace = true

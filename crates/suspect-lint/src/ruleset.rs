@@ -202,6 +202,9 @@ fn parse_rule(code: &str, node: Option<NodeRef<'_>>) -> Result<Rule, RulesetErro
         severity,
         formats,
         category: Category::Document,
+        // Every ruleset rule carries its own `then`, so it never counts as
+        // the builtin of the same name.
+        builtin: false,
     })
 }
 
