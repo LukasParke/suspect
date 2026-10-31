@@ -47,6 +47,9 @@ fn ignores_temp_and_foreign_files() {
 
     let (tx, rx) = mpsc::channel();
     let _handle = watch(vec![dir.path().to_path_buf()], DEBOUNCE, tx).unwrap();
+    // FSEvents (macOS) can deliver the setup write of doc.yaml after the
+    // watcher starts; drain it so only the writes below are under test.
+    while rx.recv_timeout(DEBOUNCE * 3).is_ok() {}
 
     std::fs::write(dir.path().join("doc.yaml.swp"), "swap\n").unwrap();
     std::fs::write(dir.path().join("#doc.yaml#"), "lock\n").unwrap();
