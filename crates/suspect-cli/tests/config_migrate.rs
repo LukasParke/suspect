@@ -30,6 +30,27 @@ fn run(cwd: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+fn low(path: &Path) -> suspect_low::LowDoc {
+    suspect_low::LowDoc::parse(
+        suspect_source::Uri::from_path(path).unwrap(),
+        suspect_source::Source::from_vec(std::fs::read(path).unwrap()),
+    )
+}
+
+/// `instance` checked against the JSON Schema at `schema`.
+fn validate(schema: &Path, instance: &Path) -> Vec<String> {
+    let schema_doc = low(schema);
+    let instance_doc = low(instance);
+    let compiled = suspect_schema::Compiler::new(suspect_schema::Config::default())
+        .compile(schema_doc.root())
+        .unwrap_or_else(|e| panic!("{}: {e:?}", schema.display()));
+    compiled
+        .validate(instance_doc.root())
+        .iter()
+        .map(|e| format!("{e:?}"))
+        .collect()
+}
+
 const SPEC: &str = "openapi: 3.1.0\ninfo: {title: t, version: '1'}\npaths: {}\n";
 
 /// `(key, value, layer)` rows of `suspect config --explain --format json`.
@@ -205,6 +226,26 @@ fn project_init_writes_the_settings_file_and_points_at_it() {
         ("hint".into(), "file".into())
     );
     assert_eq!(value(&rows, "ref.max_docs"), (500.into(), "file".into()));
+    // Both files validate against the checked-in schemas.
+    let schemas = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../editors/vscode/schemas");
+    for (file, schema) in [
+        ("suspect.project.json", "suspect.project.schema.json"),
+        (".suspect.yaml", "suspect.schema.json"),
+    ] {
+        let errors = validate(&schemas.join(schema), &root.join("api").join(file));
+        assert!(errors.is_empty(), "{file}: {errors:?}");
+    }
+    // ... and the check is not vacuous.
+    write(
+        root,
+        "bad/.suspect.yaml",
+        "lint:\n  min_severity: fatal\n  colour: red\n",
+    );
+    let errors = validate(
+        &schemas.join("suspect.schema.json"),
+        &root.join("bad/.suspect.yaml"),
+    );
+    assert!(errors.len() >= 2, "{errors:?}");
     // A fresh project is warning-free.
     write(&root.join("api"), "openapi.yaml", SPEC);
     let lint = run(&root.join("api"), &["lint", "openapi.yaml"]);

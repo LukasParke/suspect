@@ -920,6 +920,13 @@ Each step leaves `main` green and shippable.
    check that the two contribution entries point at existing files; one
    test validates `project init` output against the manifest schema. 0.5
    day.
+   **Done.** `x-suspect-editor` is `{key, scope: "resource"}` (the key is
+   today's client spelling, so P4's generator can map it); deprecated
+   spellings are emitted with `deprecated: true` (sections as copies) so
+   existing files keep validating; the manifest's `lint`/`validate`/`editor`
+   are marked deprecated. Prose defaults ("the directory name") are left
+   out of `default`. The `project init` check validates both generated
+   files with `suspect-schema` (`config_migrate.rs`).
 8. **Formats** (separate, deprecation-gated). Manifest `release:` section
    and `release.json` warning; `codegen[].options`; YAML for serde inputs;
    `gen.yaml`. Files: `commands/{publish,codegen_cmd,codegen_session,terraform_cmd,application_cmd,generate}.rs`,

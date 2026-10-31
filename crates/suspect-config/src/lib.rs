@@ -26,6 +26,7 @@ use std::path::PathBuf;
 
 pub mod discover;
 pub mod file;
+pub mod json_schema;
 pub mod layer;
 pub mod resolve;
 pub mod schema;
