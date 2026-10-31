@@ -574,7 +574,7 @@ the tools: those runs now fail instead of passing.
    `CONTRIBUTING.md` "Native SDK gates" text. Tests: the `toolchain.rs` unit
    test, and a CI run showing the `suspect-rules` worker tests executing.
    1 day.
-7. **Fix `native-evidence.yml`.** Filter-based selection, correct prefixes,
+7. **Done (cf67733).** **Fix `native-evidence.yml`.** Filter-based selection, correct prefixes,
    no `|| true`. Tests: one `workflow_dispatch` run per backend. 0.25 day.
 8. **`cargo xtask bless`.** **Done.** Runs `cli_reference` and
    `feature_manifest` (the latter also with `SUSPECT_REGEN_FEATURES=1`

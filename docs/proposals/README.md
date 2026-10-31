@@ -1,11 +1,29 @@
 # Toolchain unification proposals
 
-Status: **proposal**. Design and alignment changes that need a decision
-before implementation. Each proposal below has its own document with the
-evidence, the design, a PR-sized implementation plan, tests, alternatives,
-risks and open questions (each with a recommended answer, so a reviewer can
-approve by default). Concrete defects found while writing them were fixed
-directly and are listed in [Already fixed](#already-fixed).
+Status: **implemented** (2026-10-31) on branch `t3/unify-toolchain-review`,
+except the steps that by design belong to later releases or need accounts
+outside this repository (see [Implementation status](#implementation-status)).
+Each proposal below has its own document with the evidence, the design, the
+PR-sized implementation plan (each step marked **Done.** with its
+deviations), tests, alternatives, risks and open questions. Concrete defects
+found while writing them were fixed directly and are listed in
+[Already fixed](#already-fixed).
+
+## Implementation status
+
+| | Done | Not done, by design |
+|---|---|---|
+| [P1](P1-finding-model.md) | steps 1–9 | — |
+| [P2](P2-configuration.md) | steps 1–8 | N+1: manifest `lint`/`validate`/`editor` policy is ignored instead of warned about |
+| [P3](P3-command-grammar.md) | steps 1–5 | step 6 (N+1: editors switch to the new names, `--out` hidden) and step 7 (N+2: legacy names removed) |
+| [P4](P4-editors.md) | steps 0–9 | publisher and registry account setup (P5 step 6) |
+| [P5](P5-release.md) | steps 1–5, 7, 8; step 6 docs | step 6: create the Homebrew tap, Marketplace / Open VSX publishers, secrets, the first Zed submission, and tag `v0.1.0` (CONTRIBUTING "Releasing" lists them) |
+| [P6](P6-docs.md) | steps 1–7 | — |
+| [P7](P7-developer-workflow.md) | steps 1–8 | — |
+| [P8](P8-crate-consolidation.md) | steps 1–5 | — |
+
+Open questions were settled with their recommended answers; deviations from
+a design are written next to each step's **Done.** marker.
 
 ## Goal
 
