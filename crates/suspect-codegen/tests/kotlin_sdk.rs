@@ -414,7 +414,7 @@ fn native_package(plan: &Plan, name: &str, source: &str) -> PathBuf {
     std::fs::write(consumer.join(format!("src/main/kotlin/{name}.kt")), source).unwrap();
     if name == "NativeOpenRouter" {
         let docs = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/SDK-KOTLIN.md"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/sdk/kotlin/README.md"),
         )
         .unwrap();
         let snippets = docs

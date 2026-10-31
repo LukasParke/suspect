@@ -1,83 +1,94 @@
 # Documentation
 
-Start with the [project README](../README.md) for install and a tour, then
-the [command reference](CLI.md). Every command shares one settings file,
-`.suspect.yaml` (run `suspect config` to see what is in effect).
+Start with the [project README](../README.md) for install, a tour and the
+command map, then the [command reference](reference/cli.md). Every command
+shares one settings file, `.suspect.yaml` (run `suspect config --explain` to
+see what is in effect and where each value came from).
 
-## Using suspect
+Each directory holds one kind of page:
 
-### Command line and editors
+| Directory | Holds |
+|---|---|
+| [`guide/`](#guide) | task-oriented pages |
+| [`reference/`](#reference) | lookup pages; some are generated |
+| [`sdk/<lang>/`](#sdk-backends) | per-backend notes |
+| [`design/`](#design) | current architecture and contract notes |
+| [`proposals/`](#proposals) | the toolchain unification proposals |
+| [`internal/`](#internal) | plans, exit evidence, dated reviews and research (frozen) |
 
-- [suspect command reference](CLI.md)
-- [LSP Feature Matrix — Full LSP 3.17 Specification Coverage](LSP_FEATURES.md)
-- [TS/JS Custom Rules on a Bun Sidecar — Design](TS-RULE-RUNTIME.md)
+## Guide
 
-### Testing and load
+- [Golden SDK defaults — user guide](guide/sdk-generation.md)
+- [Canonical incremental SDK generation](guide/sdk-incremental-generation.md)
+- [SDK editor preview and watch](guide/sdk-editor-preview.md)
+- [Source-aware SDK compatibility reports](guide/sdk-compatibility-reports.md)
+- [Explicit SDK interpretation profiles](guide/sdk-interpretation-profiles.md)
+- [Large contract generation](guide/sdk-large-contracts.md)
+- [SDK release checklist](guide/sdk-release-checklist.md)
+- [Application targets — Go API CLI and TypeScript stdio MCP server](guide/application-targets.md)
+- [Load testing with suspect test load](guide/load-testing.md)
+- [Test credentials](guide/test-credentials.md)
 
-- [Load testing with suspect test load](LOAD-TESTING.md)
-- [Test credentials](TEST-CREDENTIALS.md)
+## Reference
 
-### SDK and application generation
+- [suspect command reference](reference/cli.md)
+- [LSP Feature Matrix — Full LSP 3.17 Specification Coverage](reference/lsp-features.md)
+- [SDK generation capabilities](reference/sdk-capabilities.md)
+- [Generated-SDK feature matrix](reference/sdk-features.md)
+- [OpenAPI support matrix for SDK generation](reference/openapi-matrix.md)
+- [Explicit runtime environment credentials — v1](reference/credential-env.md)
+- [Generated artifact ownership](reference/artifact-ownership.md)
 
-- [SDK generation capabilities](SDK-CAPABILITIES.md)
-- [Generated-SDK feature matrix](SDK-FEATURES.md)
-- [Golden SDK defaults — user guide](SDK-GOLDEN-DEFAULTS.md)
-- [Explicit runtime environment credentials — v1](SDK-CREDENTIAL-ENV.md)
-- [Canonical incremental SDK generation](SDK-INCREMENTAL-GENERATION.md)
-- [SDK editor preview and watch](SDK-EDITOR-PREVIEW.md)
-- [Source-aware SDK compatibility reports](SDK-COMPATIBILITY-REPORTS.md)
-- [Generated artifact ownership](SDK-ARTIFACT-OWNERSHIP.md)
-- [Explicit SDK interpretation profiles](SDK-INTERPRETATION-PROFILES.md)
-- [Large contract generation](SDK-LARGE-CONTRACTS.md)
-- [Validated SDK example planning](SDK-EXAMPLES.md)
-- [OpenAPI support matrix for SDK generation](SDK-OPENAPI-MATRIX.md)
-- [SDK release checklist](SDK-RELEASE-CHECKLIST.md)
-- [Stretch goal: Terraform Provider generation](SDK-TERRAFORM-STRETCH.md)
-- [Application targets — Go API CLI and TypeScript stdio MCP server](APPLICATION-TARGETS.md)
+## SDK backends
 
-### Performance
+Per-language notes: models, codecs, HTTP protocol, validation and
+credentials. Each directory's `README.md` is its overview.
 
-- [SDK Session performance](SDK-SESSION-PERFORMANCE.md)
+- [TypeScript / JavaScript](sdk/typescript/README.md)
+- [Python](sdk/python/README.md)
+- [Go](sdk/go/README.md)
+- [Rust](sdk/rust/README.md)
+- [Swift](sdk/swift/README.md)
+- [Java](sdk/java/README.md)
+- [Kotlin](sdk/kotlin/README.md)
+- [C#](sdk/csharp/README.md)
+- [Ruby](sdk/ruby/README.md)
+- [PHP](sdk/php/README.md)
+- [Dart](sdk/dart/README.md)
+- [C++](sdk/cpp/README.md)
+- [Terraform provider](sdk/terraform/README.md)
 
-## SDK backends by language
+## Design
 
-Per-language notes: models, codecs, HTTP protocol, validation and credentials.
+Architecture and contract design for the shared pipeline. Code comments and
+tests cite these pages, so they are kept current.
 
-- **TypeScript / JavaScript**: [codecs](SDK-TYPESCRIPT-CODECS.md), [credential-env](SDK-TYPESCRIPT-CREDENTIAL-ENV.md), [directional](SDK-TYPESCRIPT-DIRECTIONAL.md), [http](SDK-TYPESCRIPT-HTTP.md), [json](SDK-TYPESCRIPT-JSON.md), [model-plan](SDK-TYPESCRIPT-MODEL-PLAN.md), [protocol](SDK-TYPESCRIPT-PROTOCOL.md), [validation-v2](SDK-TYPESCRIPT-VALIDATION-V2.md), [validation-v3](SDK-TYPESCRIPT-VALIDATION-V3.md)
-- **Python**: [codecs](SDK-PYTHON-CODECS.md), [dx](SDK-PYTHON-DX.md), [http](SDK-PYTHON-HTTP.md), [json](SDK-PYTHON-JSON.md), [model-plan](SDK-PYTHON-MODEL-PLAN.md), [protocol](SDK-PYTHON-PROTOCOL.md), [resources](SDK-PYTHON-RESOURCES.md), [validation](SDK-PYTHON-VALIDATION.md)
-- **Go**: [codecs](SDK-GO-CODECS.md), [credential-env](SDK-GO-CREDENTIAL-ENV.md), [http](SDK-GO-HTTP.md), [json](SDK-GO-JSON.md), [model-plan](SDK-GO-MODEL-PLAN.md), [protocol](SDK-GO-PROTOCOL.md), [schema-v2](SDK-GO-SCHEMA-V2.md), [schema-v3](SDK-GO-SCHEMA-V3.md), [validation](SDK-GO-VALIDATION.md)
-- **Rust**: [credential-env](SDK-RUST-CREDENTIAL-ENV.md), [http](SDK-RUST-HTTP.md), [json](SDK-RUST-JSON.md), [model-plan](SDK-RUST-MODEL-PLAN.md), [protocol](SDK-RUST-PROTOCOL.md), [resources](SDK-RUST-RESOURCES.md), [serde](SDK-RUST-SERDE.md), [validation-v2](SDK-RUST-VALIDATION-V2.md)
-- **Swift**: [credential-env](SDK-SWIFT-CREDENTIAL-ENV.md), [protocol](SDK-SWIFT-PROTOCOL.md), [resources](SDK-SWIFT-RESOURCES.md), [validation-v2](SDK-SWIFT-VALIDATION-V2.md), [overview](SDK-SWIFT.md)
-- **Java**: [overview](SDK-JAVA.md)
-- **Kotlin**: [overview](SDK-KOTLIN.md)
-- **C#**: [overview](SDK-CSHARP.md)
-- **Ruby**: [overview](SDK-RUBY.md)
-- **PHP**: [overview](SDK-PHP.md)
-- **Dart**: [overview](SDK-DART.md)
-- **C++**: [overview](SDK-CPP.md)
+- [SDK Contract Readers (M1 parity seam)](design/contract-readers.md)
+- [Contract resources and dynamic-reference metadata](design/contract-resources.md)
+- [SDK elimination audit](design/elimination-audit.md)
+- [Shared HTTP protocol plan](design/http-protocol.md)
+- [Native TypeScript/JavaScript and Rust SDK interfaces](design/native-dx.md)
+- [OpenAPI 3.2 HTTP Contract indexing](design/oas32-contract.md)
+- [Owned validation boundary](design/owned-validation.md)
+- [Pinned remote acquisition and offline closure compilation](design/pinned-closure.md)
+- [Remaining native SDK interfaces](design/remaining-native-dx.md)
+- [Owned applicators: additive v2 executable contract](design/schema-applicators.md)
+- [Owned SDK schema dialect admission](design/schema-dialects.md)
+- [Native scoped-validation adoption](design/schema-native-adoption.md)
+- [Exact schema numbers and equality](design/schema-numerics.md)
+- [Owned resources and dynamic references: v3 contract](design/schema-resources.md)
+- [Standalone schema URI references](design/schema-uris.md)
+- [Validated SDK example planning](design/sdk-examples.md)
+- [SDK Session performance](design/sdk-session-performance.md)
+- [TS/JS Custom Rules on a Bun Sidecar — Design](design/ts-rule-runtime.md)
+- [TypeScript protocol slice: next source-backed expansion](design/typescript-protocol-next.md)
 
-## Design notes
+## Proposals
 
-Architecture and contract design for the shared SDK pipeline.
+- [Toolchain unification proposals](proposals/README.md): the index, the
+  contracts between proposals and the order; P1 to P8 are linked from it.
 
-- [SDK Contract Readers (M1 parity seam)](SDK-CONTRACT-READERS.md)
-- [Contract resources and dynamic-reference metadata](SDK-CONTRACT-RESOURCES.md)
-- [Shared HTTP protocol plan](SDK-HTTP-PROTOCOL.md)
-- [Native TypeScript/JavaScript and Rust SDK interfaces](SDK-NATIVE-DX.md)
-- [OpenAPI 3.2 HTTP Contract indexing](SDK-OAS32-CONTRACT.md)
-- [Owned validation boundary](SDK-OWNED-VALIDATION.md)
-- [Pinned remote acquisition and offline closure compilation](SDK-PINNED-CLOSURE-DESIGN.md)
-- [TypeScript protocol slice: next source-backed expansion](SDK-PROTOCOL-NEXT.md)
-- [Remaining native SDK interfaces](SDK-REMAINING-DX.md)
-- [Owned applicators: additive v2 executable contract](SDK-SCHEMA-APPLICATORS.md)
-- [Owned SDK schema dialect admission](SDK-SCHEMA-DIALECTS.md)
-- [Native scoped-validation adoption](SDK-SCHEMA-NATIVE-ADOPTION.md)
-- [Exact schema numbers and equality](SDK-SCHEMA-NUMERICS.md)
-- [Owned resources and dynamic references: v3 contract](SDK-SCHEMA-RESOURCES.md)
-- [Standalone schema URI references](SDK-SCHEMA-URIS.md)
-- [SDK elimination audit](SDK-ELIMINATION-AUDIT.md)
-
-## Internal: plans, reviews and history
+## Internal
 
 Plans, milestone exit evidence, dated reviews and research, under
 [`internal/`](internal/README.md). Kept for context; not user

@@ -14,9 +14,9 @@ backends — **TypeScript/JavaScript, Python, Go, Rust, Swift, Java, Kotlin, C#,
 Ruby, PHP, Dart and C++** — producing native models, checked codecs, HTTP
 operations, packages, golden-defaults behavior (attribution, pagination,
 OAuth, env-credential defaults) and documentation.
-The [hackathon demo](docs/internal/SDK-DEMO.md) generates SDKs from the real
-OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
-[verified demo scope](docs/internal/SDK-PROGRESS.md).
+Start with the [SDK generation guide](docs/guide/sdk-generation.md); the
+[SDK capabilities](docs/reference/sdk-capabilities.md) page compares the
+backends.
 
 ## Install
 
@@ -65,7 +65,7 @@ selection ranges, rename with workspace-wide `$ref` rewriting
 
 A detailed feature-by-feature comparison against **vacuum** (pb33f/daveshanley)
 and **Telescope** (sailpoint-oss) is in
-[docs/LSP_COMPARISON.md](docs/internal/LSP_COMPARISON.md).
+[docs/internal/LSP_COMPARISON.md](docs/internal/LSP_COMPARISON.md).
 
 ### In action (VS Code + the bundled extension)
 
@@ -169,7 +169,7 @@ $ suspect config                       # settings in effect, and where they came
 ```
 
 Every command is listed with its flags in the generated
-[command reference](docs/CLI.md); the [documentation index](docs/README.md)
+[command reference](docs/reference/cli.md); the [documentation index](docs/README.md)
 groups the guides. Related commands live in groups (`diff`, `gen`, `test`,
 `traffic`, `release`, `dev`); the old flat names (`breaking`, `codegen`,
 `gateway`, ...) still work with a deprecation warning, and the reference ends
@@ -196,8 +196,8 @@ all outgoing operations. Unsupported selected contracts produce source-linked
 diagnostics before output. Add `--check --format json` for read-only drift checks.
 
 For multi-target generation, watch and editor previews, use
-[`gen session`](docs/SDK-INCREMENTAL-GENERATION.md). Compare source snapshots
-and generated interfaces with [`diff sdk`](docs/SDK-COMPATIBILITY-REPORTS.md).
+[`gen session`](docs/guide/sdk-incremental-generation.md). Compare source snapshots
+and generated interfaces with [`diff sdk`](docs/guide/sdk-compatibility-reports.md).
 Markdown reference docs use `suspect gen docs api.yaml --style markdown`.
 Custom templates use `suspect gen template api.yaml --manifest FILE`; the
 `--preset docs-md` starter there is a base for writing your own templates.
@@ -212,7 +212,7 @@ arrival profile (`arrivalRate`/`rampTo`, `arrivalCount`, `pause`,
 closed-loop `vus`), with HDR-histogram latency percentiles, status and
 error breakdowns, contract-failure rate, SLO gates (`ensure`) and
 JSON/JUnit reports. Load profiles are `suspectLoad: "1.0"` YAML files
-with editor diagnostics. See [docs/LOAD-TESTING.md](docs/LOAD-TESTING.md)
+with editor diagnostics. See [docs/guide/load-testing.md](docs/guide/load-testing.md)
 and the runnable example in [`examples/load/`](examples/load/).
 
 ## Gateway, recording and replay
@@ -232,9 +232,10 @@ offline tests, and drift checks.
 
 ## Roadmap
 
-The next platform features are tracked in
-[docs/FEATURE-ROADMAP.md](docs/internal/FEATURE-ROADMAP.md); the toolchain alignment
-plan is [docs/proposals/](docs/proposals/README.md).
+Current plans are the [toolchain unification proposals](docs/proposals/README.md).
+Earlier plans, including the
+[feature roadmap](docs/internal/FEATURE-ROADMAP.md), are kept in
+[`docs/internal/`](docs/internal/README.md).
 
 ## Notable engineering
 

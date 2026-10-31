@@ -77,7 +77,7 @@ pub fn installed_quickstart(root: &Path, rich_guide: bool) {
         return;
     }
     let docs = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/SDK-KOTLIN.md"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/sdk/kotlin/README.md"),
     )
     .unwrap();
     let snippets = docs

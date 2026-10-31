@@ -4,7 +4,7 @@ The archived M0–M2 run measured TS/JS and Rust over one owned `Arc<Contract>`.
 Its `suspect-sdk-milestone-bench-v1` reports preserve source/executable/config
 identity, timing samples, file/byte counts, unchanged file stamps, change diffs
 and native tool logs. These are observational historical baselines. Current
-five-profile measurement and calibration use [SDK-SESSION-PERFORMANCE.md](../SDK-SESSION-PERFORMANCE.md).
+five-profile measurement and calibration use [SDK-SESSION-PERFORMANCE.md](../design/sdk-session-performance.md).
 
 The recorded run covered three fixture classes:
 

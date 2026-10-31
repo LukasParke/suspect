@@ -61,7 +61,7 @@ Shared protocol/resource and native scoped-schema implementations have advanced
 through their independent witnesses. The remaining checkboxes include final
 integrated acceptance and the last located findings; they are not a claim that
 the already verified individual matrices need restarting. Current receipts are
-indexed in [SDK-SCHEMA-NATIVE-ADOPTION.md](../SDK-SCHEMA-NATIVE-ADOPTION.md) and the
+indexed in [SDK-SCHEMA-NATIVE-ADOPTION.md](../design/schema-native-adoption.md) and the
 live Main checkpoint.
 
 Use ordinary specifications plus independent normative/adversarial vectors. The
@@ -124,5 +124,5 @@ uses a newly built provider from that fixed output and passes ten actual local
 Terraform steps. These implementation/native milestones do not close the
 remaining original-plan integrated SDK/editor/cost/performance gates.
 
-See [the stretch-goal scope](../SDK-TERRAFORM-STRETCH.md). The core SDK acceptance
+See [the stretch-goal scope](../sdk/terraform/README.md). The core SDK acceptance
 inventory continues to describe the SDK deliverables independently.

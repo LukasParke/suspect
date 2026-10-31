@@ -223,12 +223,12 @@ milestone, not an architecture problem.
 
 ## Platform budgets (historical)
 
-See [docs/PERFORMANCE.md](docs/internal/PERFORMANCE.md) for the full profiling report,
+See [docs/internal/PERFORMANCE.md](docs/internal/PERFORMANCE.md) for the full profiling report,
 phase-by-phase cost attribution, and the ranked plan of attack.
 These measurements are fixture-specific; they do not establish OpenRouter
 end-to-end SDK generation or emitted-SDK performance.
 Current session measurements and pending Mac calibration are documented in
-[SDK session performance](docs/SDK-SESSION-PERFORMANCE.md).
+[SDK session performance](docs/design/sdk-session-performance.md).
 
 | Path | Budget | Achieved |
 |---|---|---|

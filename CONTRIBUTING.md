@@ -32,11 +32,11 @@ cargo build -p suspect-cli && (cd editors/vscode && npm run test:host:smoke)
 
 ## Generated files
 
-- `docs/CLI.md` is rendered from the clap command tree. After changing a
+- `docs/reference/cli.md` is rendered from the clap command tree. After changing a
   command or flag, regenerate it:
   `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`.
-  `cargo xtask bless` regenerates every generated doc (`docs/CLI.md`,
-  `docs/SDK-FEATURES.md`) in one step.
+  `cargo xtask bless` regenerates every generated doc (`docs/reference/cli.md`,
+  `docs/reference/sdk-features.md`) in one step.
 - `editors/vscode/dist` and `node_modules` are build output and are not
   committed.
 

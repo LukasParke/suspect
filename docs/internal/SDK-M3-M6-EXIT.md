@@ -183,7 +183,7 @@ variable is needed for the default current tier.
 Each uses new external `{work}/swift/<tier>/` gate, tmp, module-cache and package-cache
 paths. Direct package builds pass `SWIFT_EXEC`, `--sdk`, and
 explicit scratch/cache paths. The floor frontend and SDK settings are hashed.
-The independently verified pairings are documented in [SDK-SWIFT.md](../SDK-SWIFT.md).
+The independently verified pairings are documented in [SDK-SWIFT.md](../sdk/swift/README.md).
 
 The Python tooling venv must already contain build 1.4.0, hatchling 1.29.0,
 httpx 0.28.1, mypy 1.19.1 and Sphinx 8.2.3. A compatibility link in the execution
@@ -272,7 +272,7 @@ separate required native compilation and consumer gates.
 ## Main-wired performance plan
 
 The five-backend v2 API is documented in
-[SDK-SESSION-PERFORMANCE.md](../SDK-SESSION-PERFORMANCE.md). `run.py` records observed
+[SDK-SESSION-PERFORMANCE.md](../design/sdk-session-performance.md). `run.py` records observed
 measurements; functional-only runs are `not-measured`. `calibrate.py` qualification
 requires a reserved, identity-pinned host, at least five baseline and three
 independent candidate suite processes, 200 measured cycles and five warmups per

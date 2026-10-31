@@ -54,7 +54,7 @@ impl From<Exit> for std::process::ExitCode {
 
 use Exit::{Clean, Findings, Interrupted, Usage};
 
-/// Statuses of every command, rendered into `docs/CLI.md`: command path,
+/// Statuses of every command, rendered into `docs/reference/cli.md`: command path,
 /// possible statuses, and what other than 0 means. Every non-server
 /// command also exits 130 on Ctrl-C; the rows list `Interrupted` only
 /// where the command drains and reports first. Servers exit 0 on Ctrl-C.

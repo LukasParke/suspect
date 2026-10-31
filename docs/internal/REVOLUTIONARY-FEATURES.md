@@ -4,7 +4,7 @@ These platform proposals build on source-aware parsing, validation, contract
 testing, gateway serving and traffic records. SDK-related work uses the single
 [Contract-backed pipeline](SDK-GENERATION-PLAN.md) for native models, codecs,
 HTTP, docs, sessions and compatibility reports. Proposal descriptions below are
-future integrations; current support is recorded in [SDK-CAPABILITIES.md](../SDK-CAPABILITIES.md).
+future integrations; current support is recorded in [SDK-CAPABILITIES.md](../reference/sdk-capabilities.md).
 
 ---
 
@@ -148,7 +148,7 @@ the spec eliminates hundreds of lines of manual test setup code.
 ## 5. Wire-Format-Aware Semantic Diffing
 
 Compare source-addressed Contract snapshots and the actual typed native plans.
-The current [compatibility API](../SDK-COMPATIBILITY-REPORTS.md) reports wire and
+The current [compatibility API](../guide/sdk-compatibility-reports.md) reports wire and
 native changes separately, with explicit proof limits. Traffic-derived impact
 estimation is a proposed addition.
 

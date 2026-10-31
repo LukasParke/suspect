@@ -94,18 +94,18 @@ struct Target {
 // Java/Kotlin use Maven coordinates; PHP uses vendor/package; Dart/C++ identifiers.
 #[rustfmt::skip]
 const TARGETS: &[Target] = &[
-    Target { language: "typescript", backend: "typescript-http", package_name: "@suspect-fixtures/sdk-full", import_name: None, manifest: "package.json", docs: "docs/SDK-TYPESCRIPT-HTTP.md", toolchain_tiers: &["node22-ts55", "node24-ts59"] },
-    Target { language: "rust", backend: "rust-http", package_name: "sdk-full", import_name: None, manifest: "Cargo.toml", docs: "docs/SDK-RUST-HTTP.md", toolchain_tiers: &["1.88.0", "stable"] },
-    Target { language: "python", backend: "python-http", package_name: "sdk-full", import_name: Some("sdk_full"), manifest: "pyproject.toml", docs: "docs/SDK-PYTHON-HTTP.md", toolchain_tiers: &["3.11", "3.14"] },
-    Target { language: "go", backend: "go-http", package_name: "example.com/sdk-full", import_name: None, manifest: "go.mod", docs: "docs/SDK-GO-HTTP.md", toolchain_tiers: &["1.23.12", "1.27.1"] },
-    Target { language: "swift", backend: "swift-http", package_name: "SdkFull", import_name: Some("SdkFull"), manifest: "Package.swift", docs: "docs/SDK-SWIFT.md", toolchain_tiers: &["6.0.3-sdk15.4", "6.3.3-sdk26.5"] },
-    Target { language: "java", backend: "java-http", package_name: "com.example.generated:sdk-full", import_name: Some("com.example.generated"), manifest: "pom.xml", docs: "docs/SDK-JAVA.md", toolchain_tiers: &["21.0.12.1", "25.0.4.1"] },
-    Target { language: "csharp", backend: "csharp-http", package_name: "Suspect.SdkFull", import_name: Some("Suspect.SdkFull"), manifest: "Suspect.csproj", docs: "docs/SDK-CSHARP.md", toolchain_tiers: &["8.0.424-net8.0", "10.0.400-net10.0"] },
-    Target { language: "kotlin", backend: "kotlin-http", package_name: "com.example:sdk-full", import_name: Some("example.sdk"), manifest: "pom.xml", docs: "docs/SDK-KOTLIN.md", toolchain_tiers: &["2.4.20-jdk21", "2.4.20-jdk25"] },
-    Target { language: "ruby", backend: "ruby-http", package_name: "sdk-full", import_name: Some("SdkFull"), manifest: "sdk-full.gemspec", docs: "docs/SDK-RUBY.md", toolchain_tiers: &["3.3.12", "4.0.6"] },
-    Target { language: "php", backend: "php-http", package_name: "example/sdk-full", import_name: Some("Example\\SdkFull"), manifest: "composer.json", docs: "docs/SDK-PHP.md", toolchain_tiers: &["8.3.32", "8.5.8"] },
-    Target { language: "dart", backend: "dart-http", package_name: "sdk_full", import_name: None, manifest: "pubspec.yaml", docs: "docs/SDK-DART.md", toolchain_tiers: &["3.9.4", "3.13.3"] },
-    Target { language: "cpp", backend: "cpp-http", package_name: "sdk_full", import_name: Some("sdk_full"), manifest: "CMakeLists.txt", docs: "docs/SDK-CPP.md", toolchain_tiers: &["apple-clang21-cpp20-libcurl8.7.1"] },
+    Target { language: "typescript", backend: "typescript-http", package_name: "@suspect-fixtures/sdk-full", import_name: None, manifest: "package.json", docs: "docs/sdk/typescript/http.md", toolchain_tiers: &["node22-ts55", "node24-ts59"] },
+    Target { language: "rust", backend: "rust-http", package_name: "sdk-full", import_name: None, manifest: "Cargo.toml", docs: "docs/sdk/rust/http.md", toolchain_tiers: &["1.88.0", "stable"] },
+    Target { language: "python", backend: "python-http", package_name: "sdk-full", import_name: Some("sdk_full"), manifest: "pyproject.toml", docs: "docs/sdk/python/http.md", toolchain_tiers: &["3.11", "3.14"] },
+    Target { language: "go", backend: "go-http", package_name: "example.com/sdk-full", import_name: None, manifest: "go.mod", docs: "docs/sdk/go/http.md", toolchain_tiers: &["1.23.12", "1.27.1"] },
+    Target { language: "swift", backend: "swift-http", package_name: "SdkFull", import_name: Some("SdkFull"), manifest: "Package.swift", docs: "docs/sdk/swift/README.md", toolchain_tiers: &["6.0.3-sdk15.4", "6.3.3-sdk26.5"] },
+    Target { language: "java", backend: "java-http", package_name: "com.example.generated:sdk-full", import_name: Some("com.example.generated"), manifest: "pom.xml", docs: "docs/sdk/java/README.md", toolchain_tiers: &["21.0.12.1", "25.0.4.1"] },
+    Target { language: "csharp", backend: "csharp-http", package_name: "Suspect.SdkFull", import_name: Some("Suspect.SdkFull"), manifest: "Suspect.csproj", docs: "docs/sdk/csharp/README.md", toolchain_tiers: &["8.0.424-net8.0", "10.0.400-net10.0"] },
+    Target { language: "kotlin", backend: "kotlin-http", package_name: "com.example:sdk-full", import_name: Some("example.sdk"), manifest: "pom.xml", docs: "docs/sdk/kotlin/README.md", toolchain_tiers: &["2.4.20-jdk21", "2.4.20-jdk25"] },
+    Target { language: "ruby", backend: "ruby-http", package_name: "sdk-full", import_name: Some("SdkFull"), manifest: "sdk-full.gemspec", docs: "docs/sdk/ruby/README.md", toolchain_tiers: &["3.3.12", "4.0.6"] },
+    Target { language: "php", backend: "php-http", package_name: "example/sdk-full", import_name: Some("Example\\SdkFull"), manifest: "composer.json", docs: "docs/sdk/php/README.md", toolchain_tiers: &["8.3.32", "8.5.8"] },
+    Target { language: "dart", backend: "dart-http", package_name: "sdk_full", import_name: None, manifest: "pubspec.yaml", docs: "docs/sdk/dart/README.md", toolchain_tiers: &["3.9.4", "3.13.3"] },
+    Target { language: "cpp", backend: "cpp-http", package_name: "sdk_full", import_name: Some("sdk_full"), manifest: "CMakeLists.txt", docs: "docs/sdk/cpp/README.md", toolchain_tiers: &["apple-clang21-cpp20-libcurl8.7.1"] },
 ];
 
 #[derive(Debug)]
@@ -4995,13 +4995,13 @@ pub(crate) fn syntax_check(original: &Path) -> Result<Value> {
         "crates/suspect-schema/tests/fixtures/resource-conformance/detached-dynamicref.json",
         "crates/suspect-schema/tests/conformance/draft2020-12/unevaluatedProperties.json",
         "crates/suspect-schema/tests/conformance/draft2020-12/unevaluatedItems.json",
-        "docs/SDK-RUST-RESOURCES.md",
-        "docs/SDK-SWIFT-RESOURCES.md",
-        "docs/SDK-GO-SCHEMA-V3.md",
-        "docs/SDK-HTTP-PROTOCOL.md",
-        "docs/SDK-TYPESCRIPT-PROTOCOL.md",
-        "docs/SDK-CREDENTIAL-ENV.md",
-        "docs/SDK-SCHEMA-NATIVE-ADOPTION.md",
+        "docs/sdk/rust/resources.md",
+        "docs/sdk/swift/resources.md",
+        "docs/sdk/go/schema-v3.md",
+        "docs/design/http-protocol.md",
+        "docs/sdk/typescript/protocol.md",
+        "docs/reference/credential-env.md",
+        "docs/design/schema-native-adoption.md",
     ] {
         if !original.join(name).is_file() {
             missing_support.push(name.to_owned());

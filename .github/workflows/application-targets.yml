@@ -5,7 +5,7 @@ name: application-targets
 # the portable application suites only — never the whole workspace and never
 # all corpus-dependent ignored tests. The two native jobs build and drive real
 # emitted artifacts against loopback HTTP fixtures; no upstream API is
-# contacted. See docs/APPLICATION-TARGETS.md.
+# contacted. See docs/guide/application-targets.md.
 
 on:
   push:

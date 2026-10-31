@@ -238,7 +238,7 @@ success is claimed. The original live entry and its seal remain intact.
 
 #### Explicit environment policy implementation
 
-The canonical contract is recorded in [SDK-CREDENTIAL-ENV.md](../SDK-CREDENTIAL-ENV.md):
+The canonical contract is recorded in [SDK-CREDENTIAL-ENV.md](../reference/credential-env.md):
 
 ```json
 "credential_env": {

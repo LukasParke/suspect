@@ -269,7 +269,7 @@ existing attempt. Completed observations were retained rather than re-collected.
 The first Swift-floor attempt remains an explicit failure: the original
 `swift-6.0.3-toolchain/expanded` payload lacks `SwiftShims`. Only that unfinished
 tier was subsequently run with the already-restored toolchain documented in
-[SDK-SWIFT-PROTOCOL.md](../SDK-SWIFT-PROTOCOL.md#verification-and-retained-evidence).
+[SDK-SWIFT-PROTOCOL.md](../sdk/swift/protocol.md#verification-and-retained-evidence).
 For this host, select its actual payload before the full runner starts:
 
 ```sh

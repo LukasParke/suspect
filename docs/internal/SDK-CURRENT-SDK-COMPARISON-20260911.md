@@ -611,7 +611,7 @@ The positive scope is deliberately concrete: installed package/type checks, cont
 [M-ts-ops]: ../../target/sdk-main-live-admission-20260911-01/packages/typescript/operations.ts
 [M-py-client]: ../../target/sdk-main-live-admission-20260911-01/packages/python/src/openrouter/_client.py
 [M-go-ops]: ../../target/sdk-main-live-admission-20260911-01/packages/go/operations.go
-[env-contract]: ../SDK-CREDENTIAL-ENV.md
+[env-contract]: ../reference/credential-env.md
 [L-evidence]: ../../target/sdk-current-comparison-20260911-01/current-live-evidence.json
 [L-readme]: ../../LIVE-DEMO-README.md
 [L-session]: ../../target/sdk-demo-live-20260911-01/candidate-02/session.json

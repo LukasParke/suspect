@@ -3,7 +3,7 @@
 //! Oracles: OAS 3.0.4 §§4.4, 4.7.23–26; Wright-00 Validation §§4–6;
 //! JSON Schema 2020-12 Core §§7–11 and Validation §§6–9;
 //! OAS 3.1.2 Schema Object and OAS 3.2.0 §§4.1, 4.24–26.
-//! Exact primary links and capability boundaries: docs/SDK-SCHEMA-DIALECTS.md.
+//! Exact primary links and capability boundaries: docs/design/schema-dialects.md.
 
 use std::sync::Arc;
 

@@ -1,4 +1,4 @@
-//! Keeps `docs/CLI.md` in lockstep with the clap command tree.
+//! Keeps `docs/reference/cli.md` in lockstep with the clap command tree.
 //!
 //! The reference is rendered from [`suspect_cli::Cli`] itself, so a new
 //! command or flag that is not reflected in the checked-in file fails this
@@ -119,7 +119,7 @@ fn renamed(out: &mut String) {
 
 #[test]
 fn the_cli_reference_matches_the_command_tree() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/CLI.md");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference/cli.md");
     let expected = reference();
     if std::env::var_os("SUSPECT_BLESS").is_some() {
         std::fs::write(&path, &expected).unwrap();
@@ -128,7 +128,7 @@ fn the_cli_reference_matches_the_command_tree() {
     let actual = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(
         actual == expected,
-        "docs/CLI.md is stale; regenerate with \
+        "docs/reference/cli.md is stale; regenerate with \
          `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`"
     );
 }

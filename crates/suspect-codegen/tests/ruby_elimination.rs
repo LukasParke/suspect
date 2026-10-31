@@ -502,7 +502,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
     assert!(
         extended_markers["listGizmos"].as_bool().unwrap()
             && extended_markers["zeta-quantum"].as_bool().unwrap(),
-        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; update docs/SDK-ELIMINATION-AUDIT.md"
+        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; update docs/design/elimination-audit.md"
     );
 
     // --- Codec-only consumer ------------------------------------------------
@@ -564,7 +564,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
         codec_extended["unrelated_markers_loaded"]["zeta-quantum"]
             .as_bool()
             .unwrap(),
-        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; update docs/SDK-ELIMINATION-AUDIT.md"
+        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; update docs/design/elimination-audit.md"
     );
     // The codec consumer works against the models/codecs table pair, which
     // grows by the unrelated schema's shape+codec data (measured, recorded).

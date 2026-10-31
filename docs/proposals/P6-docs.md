@@ -485,6 +485,21 @@ would have to be deleted when P1 lands.
    and `reference/sdk-capabilities.md`, and the `:156` links follow the move.
    Tests: lychee job, guard tests, `cli_reference`, `feature_manifest`.
    1 day.
+   **Done.** `proposals/` was already in place, so 83 files moved. The
+   script rewrote 337 links (90 in `sdk/`, 84 in `docs/README.md`, 52 in
+   `internal/` pointing out of it, 39 in `reference/`, 35 in `guide/`, 31
+   in `design/`, 5 in `README.md`, 1 in `BENCHMARKS.md`); lychee reports 0
+   errors after. The review grep for `docs/[A-Z]` found 26 prose paths in
+   code spans outside `internal/` and `proposals/` (`CONTRIBUTING.md`,
+   `README.md`, `design/schema-native-adoption.md`, `reference/openapi-matrix.md`,
+   `guide/sdk-release-checklist.md`, `tools/sdk-demo/README.md`); they name
+   the new paths too. `internal/` and `proposals/` keep their prose paths
+   as recorded. The generated `reference/sdk-features.md` links its source
+   one level deeper, so `features.rs` renders `../../crates/...`. The
+   `README.md` SDK paragraph links `guide/sdk-generation.md` and
+   `reference/sdk-capabilities.md` (the demo and progress links are gone),
+   and "Roadmap" links `proposals/README.md` first (open question 3).
+   `docs/README.md` has a directory table and one section per directory.
 5. **New guide pages.** Adds `guide/editors.md`, `guide/linting.md`,
    `guide/gateway.md` and `guide/docs-generation.md`, written from
    `README.md` sections and `editors/*/README.md`. Shortens `README.md` to

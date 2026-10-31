@@ -6,12 +6,12 @@ Research date: 2026-09-08. This note distinguishes specification facts from prop
 
 Initial read-only evaluation, 2026-09-08. It recommended an owned validation
 program compiled from the resolved contract registry. That bounded
-[owned validation boundary](../SDK-OWNED-VALIDATION.md) now supplies the SDK codecs;
+[owned validation boundary](../design/owned-validation.md) now supplies the SDK codecs;
 the source-bound compiler remains a separate API. The assessment below records
 the pre-repair implementation.
 
 **Implementation update:** the subsequent bounded
-[exact numbers and equality repair](../SDK-SCHEMA-NUMERICS.md) resolves the numeric
+[exact numbers and equality repair](../design/schema-numerics.md) resolves the numeric
 failures listed below through the public API, with explicit evaluation limits,
 official conformance cases, actual OpenRouter acceptance and local benchmarks.
 The examples in this assessment remain a record of the pre-repair baseline;

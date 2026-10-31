@@ -12,6 +12,6 @@ exclude_path = [
   "docs/internal/",
 ]
 exclude = [
-  "^file:///ws/",   # example URI in LSP_FEATURES.md
+  "^file:///ws/",   # example URI in reference/lsp-features.md
   "/target/",       # links to local build evidence
 ]

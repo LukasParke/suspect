@@ -376,7 +376,7 @@ fn native_resource_sdk_operations() {
     )
     .unwrap();
     let guide = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/SDK-KOTLIN.md"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/sdk/kotlin/README.md"),
     )
     .unwrap();
     let blocks = guide

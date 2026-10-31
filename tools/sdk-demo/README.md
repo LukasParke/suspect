@@ -1,6 +1,6 @@
 # Local SDK demo helpers
 
-Start with [docs/SDK-DEMO.md](../../docs/internal/SDK-DEMO.md).
+Start with [docs/internal/SDK-DEMO.md](../../docs/internal/SDK-DEMO.md).
 
 All commands run from the repository root. Set `DEMO` to the prepared
 `target/sdk-demo-readme-20260911-01/candidate-02` absolute path.
