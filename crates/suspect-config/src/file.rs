@@ -146,5 +146,25 @@ pub(crate) fn manifest_layer(path: &Path) -> Option<Layer> {
     // Spelling notices belong to the settings file; `project check` and the
     // editor's schema check cover the manifest.
     layer.warnings.clear();
+    // Every section present is told once, even an empty one, so each
+    // project `project init` made before this release hears about it.
+    for entry in root.entries() {
+        if matches!(entry.key, "lint" | "validate" | "editor") {
+            layer.warnings.push(Notice {
+                origin: origin(entry.key_node.line_col().0 + 1),
+                message: manifest_policy_warning(entry.key),
+            });
+        }
+    }
     present.then_some(layer)
+}
+
+/// The deprecation text for a manifest policy section.
+#[must_use]
+pub fn manifest_policy_warning(section: &str) -> String {
+    format!(
+        "`{section}` in a project manifest is deprecated and is ignored from the next \
+         release; move it to .suspect.yaml and add \"config\": \".suspect.yaml\" to the \
+         manifest (`suspect config migrate` does both)"
+    )
 }

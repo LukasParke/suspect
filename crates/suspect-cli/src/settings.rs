@@ -72,6 +72,23 @@ pub fn resolve_one(input: &Path, flags: Layer) -> anyhow::Result<Resolved> {
     resolve(&[input.to_path_buf()], flags)
 }
 
+/// The nearest settings file at or above `dir`, by file name only.
+#[must_use]
+pub fn settings_file_above(dir: &Path) -> Option<PathBuf> {
+    let mut current = Some(suspect_config::discover::start_dir(dir));
+    while let Some(dir) = current {
+        if let Some(found) = suspect_config::CONFIG_NAMES
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|candidate| candidate.is_file())
+        {
+            return Some(found);
+        }
+        current = dir.parent().map(Path::to_path_buf);
+    }
+    None
+}
+
 fn shown(path: Option<&Path>) -> String {
     path.map_or_else(
         || "the built-in defaults".to_owned(),

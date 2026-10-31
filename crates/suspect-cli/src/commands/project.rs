@@ -382,24 +382,17 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                 "docs": {"style": "markdown", "output": "build/docs"},
                 "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"},
                 "codegen": [],
-                // Committed policy: the editor, a shell and CI read the
-                // same values; `.suspect.yaml` and client settings layer
-                // on top as local overrides. Projects documenting an API
-                // they do not own add "design": "off" here.
-                "lint": {
-                    "min_severity": "hint",
-                    "rules": {},
-                    "recommended": true
-                },
-                "validate": {"strict_format": false},
-                "editor": {
-                    "inlay_hints": {"refs": true, "properties": true},
-                    "ref": {"max_docs": 500},
-                    "formatting": {"sort_keys": true}
-                },
+                // Lint, validate and editor settings live in the settings
+                // file every tool reads; the manifest only points at it.
+                "config": SETTINGS_FILE,
                 "contract": {"output": "build/contract"}
             });
             std::fs::create_dir_all(&dir)?;
+            let settings = dir.join(SETTINGS_FILE);
+            if !settings.exists() {
+                std::fs::write(&settings, SETTINGS_TEMPLATE)?;
+                eprintln!("wrote {}", settings.display());
+            }
             std::fs::write(
                 &manifest,
                 format!("{}\n", serde_json::to_string_pretty(&template)?),
@@ -411,6 +404,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
             let project = parse_manifest(&manifest)?;
             let mut findings: Vec<Finding> = Vec::new();
             check_inputs(&project, &mut findings);
+            check_config(&manifest, &project, &mut findings);
             report(&format!("project {}", project.name), &findings)
         }
         ProjectCmd::Build {
@@ -419,6 +413,84 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
         } => {
             let project = parse_manifest(&manifest)?;
             build(&project, skip_tests)
+        }
+    }
+}
+
+/// The settings file `project init` writes beside the manifest.
+pub const SETTINGS_FILE: &str = ".suspect.yaml";
+
+/// Today's defaults, written out so a project sees what it can change.
+/// Projects documenting an API they do not own add `design: off`.
+const SETTINGS_TEMPLATE: &str = "\
+# suspect settings: read by every suspect command, CI and the editor.
+lint:
+  min_severity: hint
+  recommended: true
+  rules: {}
+validate:
+  strict_format: false
+format:
+  sort_keys: true
+ref:
+  max_docs: 500
+editor:
+  inlay_hints:
+    refs: true
+    properties: true
+";
+
+/// The manifest's settings: the referenced file exists and resolves, and
+/// deprecated policy sections are reported (a warning in this release).
+fn check_config(manifest: &Path, project: &ProjectManifest, findings: &mut Vec<Finding>) {
+    let finding = |file: String, severity, code: &str, message: String, line| Finding {
+        file,
+        severity,
+        code: code.into(),
+        message,
+        line,
+        col: 1,
+        range: None,
+    };
+    if let Some(config) = suspect_config::discover::manifest_config(manifest) {
+        let path = project.root.join(&config);
+        if !path.is_file() {
+            findings.push(finding(
+                path_label(manifest),
+                Severity::Error,
+                "project-missing-config",
+                format!("\"config\": {config} does not exist"),
+                1,
+            ));
+        }
+    }
+    match suspect_config::resolve(&project.root) {
+        Ok(resolved) => {
+            for notice in resolved.warnings {
+                if let suspect_config::Origin::Manifest { line, .. } = notice.origin {
+                    findings.push(finding(
+                        path_label(manifest),
+                        Severity::Warning,
+                        "project-manifest-policy",
+                        notice.message,
+                        line,
+                    ));
+                }
+            }
+        }
+        Err(error) => {
+            for notice in error.problems {
+                findings.push(finding(
+                    notice
+                        .origin
+                        .path()
+                        .map_or_else(|| path_label(manifest), path_label),
+                    Severity::Error,
+                    "project-config",
+                    notice.to_string(),
+                    1,
+                ));
+            }
         }
     }
 }

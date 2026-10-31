@@ -183,6 +183,24 @@ fn lint_recommended_false_runs_no_builtin_rules() {
     assert_eq!((errors, warnings), (0, 0));
 }
 
+#[test]
+fn ci_notes_values_the_new_order_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    fixture(root);
+    let out = command(root)
+        .args(["ci", ".", "--stage", "lint"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("lint.rules.info-contact is now error (")
+            && stderr.contains("earlier releases applied off from the manifest"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("info-license is now"), "{stderr}");
+}
+
 #[allow(dead_code)]
 mod support {
     pub mod editor;

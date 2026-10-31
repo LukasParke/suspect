@@ -9,7 +9,11 @@ use crate::OutputFormat;
 
 /// `suspect config` arguments.
 #[derive(Debug, clap::Args)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct ConfigArgs {
+    /// Change configuration files instead of reporting them.
+    #[command(subcommand)]
+    pub cmd: Option<ConfigCmd>,
     /// Report the configuration a command on this input would use: the
     /// nearest settings file above it, else the one above the working
     /// directory.
@@ -26,11 +30,26 @@ pub struct ConfigArgs {
     pub text: crate::TextFormat,
 }
 
+/// `suspect config` subcommands.
+#[derive(Debug, clap::Subcommand)]
+pub enum ConfigCmd {
+    /// Move a manifest's deprecated `lint`, `validate` and `editor`
+    /// sections into the settings file and point the manifest at it.
+    Migrate {
+        /// The manifest to migrate.
+        #[arg(default_value = "suspect.project.json")]
+        manifest: PathBuf,
+    },
+}
+
 /// Runs `suspect config`.
 ///
 /// # Errors
 /// `--format sarif`; with no `--explain`, a rejected configuration value.
 pub fn config(args: &ConfigArgs) -> anyhow::Result<i32> {
+    if let Some(ConfigCmd::Migrate { manifest }) = &args.cmd {
+        return super::config_migrate::migrate(manifest);
+    }
     crate::reject_sarif("config", args.text.format)?;
     let inputs: Vec<PathBuf> = args.input.iter().cloned().collect();
     let start = crate::settings::start(&inputs);

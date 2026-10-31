@@ -525,6 +525,25 @@ pub fn diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
     };
     let inner = low.inner();
     let (bytes, li) = (inner.bytes(), inner.line_index());
+    // Policy sections in the manifest are deprecated (option A): said on
+    // the key, with the same text the CLI prints.
+    let deprecated: Vec<Diagnostic> = match kind {
+        FileKind::Project => low
+            .root()
+            .entries()
+            .into_iter()
+            .filter(|e| matches!(e.key, "lint" | "validate" | "editor"))
+            .map(|e| Diagnostic {
+                range: crate::state::lsp_range(bytes, li, e.key_node.byte_range()),
+                severity: Some(DiagnosticSeverity::WARNING),
+                code: Some(NumberOrString::String("config-manifest-policy".to_owned())),
+                source: Some("suspect".to_owned()),
+                message: suspect_config::file::manifest_policy_warning(e.key),
+                ..Diagnostic::default()
+            })
+            .collect(),
+        FileKind::Settings => Vec::new(),
+    };
     problems(kind, low)
         .into_iter()
         .map(|problem| {
@@ -541,6 +560,7 @@ pub fn diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
                 ..Diagnostic::default()
             }
         })
+        .chain(deprecated)
         .collect()
 }
 
@@ -718,6 +738,24 @@ codegen:
         for expected in ["ruleset", "rules", "recommended"] {
             assert!(labels.contains(&expected), "missing {expected}: {labels:?}");
         }
+    }
+
+    #[test]
+    fn manifest_policy_sections_are_deprecated_on_the_key() {
+        let text = "{\"entry\": \"a.yaml\", \"lint\": {}, \"config\": \".suspect.yaml\"}";
+        let low = doc("suspect.project.json", text);
+        let found: Vec<_> = diagnostics(&low)
+            .into_iter()
+            .filter(|d| d.code == Some(NumberOrString::String("config-manifest-policy".into())))
+            .collect();
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0]
+                .message
+                .contains("`suspect config migrate` does both")
+        );
+        let settings = doc(".suspect.yaml", "lint: {}\n");
+        assert!(diagnostics(&settings).is_empty());
     }
 
     #[test]

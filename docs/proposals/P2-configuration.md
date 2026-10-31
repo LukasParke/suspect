@@ -875,6 +875,20 @@ Each step leaves `main` green and shippable.
    new `cli/src/commands/config_migrate.rs`, `lsp/src/config_schema.rs`.
    Tests: migrate fixtures (none / beside / above), warning text snapshot,
    `project init` output. 1 day.
+   **Done.** `extends` landed in step 1. The deprecation text is
+   `suspect_config::file::manifest_policy_warning`; `resolve` attaches it
+   to the manifest layer, so every command that resolves prints it once
+   (stderr), `project check` reports it as a `project-manifest-policy`
+   warning (and `project-missing-config` / `project-config` errors for a
+   missing or rejected settings file), and the editor shows it on the key
+   (`config-manifest-policy`) and logs it with `window/logMessage` on each
+   configuration change rather than once per session. The CI note is
+   printed per project on stderr (so `--format json` runs, which silence
+   stderr, do not show it). `config migrate` writes JSON by text: kept
+   entries keep their text and order and are joined with the separator
+   the file used between its first two keys; `"config"` becomes the first
+   key. Tests are in `crates/suspect-cli/tests/config_migrate.rs` (none /
+   beside / above, warning text, `project init`).
 6. **Schema extension and env registry**. Keys in the table above; `test`,
    `fuzz`, `stateful`, `load`, `auth`, `gateway`, `rules` read
    `resolve_with`; LSP run lenses and `breakingChanges` read

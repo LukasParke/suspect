@@ -348,6 +348,45 @@ impl ProjectConfig {
 #[must_use]
 pub fn project_config(manifest: &Path) -> ProjectConfig {
     let dir = manifest.parent().unwrap_or(Path::new("."));
+    let config = resolve_project(dir);
+    for note in order_notes(&config.resolved) {
+        eprintln!("note: {note}");
+    }
+    config
+}
+
+/// Earlier releases let a manifest's `lint` values beat `.suspect.yaml`
+/// in `ci`. Where that changes the effective value, say so: both layers
+/// are in the trace, so this is a comparison, not a second merge.
+fn order_notes(resolved: &suspect_config::Resolved) -> Vec<String> {
+    use suspect_config::Origin;
+    let mut notes = Vec::new();
+    for row in resolved.explain() {
+        if !row.key.starts_with("lint.") {
+            continue;
+        }
+        let Some((manifest_origin, manifest_value)) = row
+            .trace
+            .iter()
+            .find(|(origin, _)| matches!(origin, Origin::Manifest { .. }))
+        else {
+            continue;
+        };
+        if matches!(row.origin, Origin::File { .. })
+            && row.value.as_deref() != Some(manifest_value.to_string().as_str())
+        {
+            notes.push(format!(
+                "{manifest_origin}: {} is now {} ({}); earlier releases applied {manifest_value} from the manifest",
+                row.key,
+                row.value.as_deref().unwrap_or("unset"),
+                row.origin,
+            ));
+        }
+    }
+    notes
+}
+
+fn resolve_project(dir: &Path) -> ProjectConfig {
     match suspect_config::resolve(dir) {
         Ok(resolved) => {
             crate::settings::emit_warnings(&resolved);

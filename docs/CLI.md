@@ -1070,6 +1070,11 @@ Options:
 Show the configuration in effect, or with `--explain` every setting and where its value came from
 
 Usage: suspect config [OPTIONS] [INPUT]
+       suspect config <COMMAND>
+
+Commands:
+  migrate  Move a manifest's deprecated `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
+  help     Print this message or the help of the given subcommand(s)
 
 Arguments:
   [INPUT]  Report the configuration a command on this input would use: the nearest settings file above it, else the one above the working directory
@@ -1079,6 +1084,20 @@ Options:
       --set-only         With `--explain`: hide settings that hold their default
       --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
   -h, --help             Print help (see more with '--help')
+```
+
+## `suspect config migrate`
+
+```text
+Move a manifest's deprecated `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
+
+Usage: suspect config migrate [MANIFEST]
+
+Arguments:
+  [MANIFEST]  The manifest to migrate [default: suspect.project.json]
+
+Options:
+  -h, --help  Print help
 ```
 
 ## `suspect project`
