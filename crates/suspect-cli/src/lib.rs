@@ -1,13 +1,16 @@
 #![deny(missing_docs)]
 //! suspect-cli: the `suspect` binary. Thin `main.rs` delegates here so every
 //! command is a testable library function taking plain arguments and
-//! returning an exit code (0 clean, 1 findings at/above Error, 2 usage).
+//! returning an [`Exit`] (0 clean, 1 findings at/above Error, 2 usage, 130
+//! interrupted).
 
 /// Git-ref baselines for comparisons.
 pub mod baseline;
 pub mod bundle;
 pub mod commands;
 pub mod diff;
+pub mod exit;
+pub mod interrupt;
 pub mod output;
 pub mod reverse;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
@@ -21,6 +24,7 @@ pub mod watch;
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
+pub use exit::Exit;
 pub use output::{Finding, Severity};
 use suspect_config::{Layer, Raw};
 use suspect_source::{Source, Uri};
@@ -580,11 +584,15 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// Dispatches a parsed CLI invocation, returning the process exit code.
+/// Dispatches a parsed CLI invocation, returning the process status.
 ///
 /// # Errors
 /// Propagates unexpected IO/model failures; the binary prints them and exits 2.
-pub fn execute(cli: Cli) -> anyhow::Result<i32> {
+pub fn execute(cli: Cli) -> anyhow::Result<Exit> {
+    dispatch(cli).map(Exit::from_legacy)
+}
+
+fn dispatch(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
         Command::Check { paths, text } => commands::check::check(&paths, text.format),
         Command::Validate {
@@ -740,6 +748,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             format,
         } => {
             reject_sarif("bridge", format)?;
+            interrupt::server();
             commands::bridge::bridge(
                 &spec,
                 interval_ms,
@@ -884,7 +893,10 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
                 &redact_json_keys,
             )
         }
-        Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
+        Command::Watch { roots, command } => {
+            interrupt::server();
+            commands::watch::watch(&roots, &command)
+        }
         Command::Acquire(args) => commands::acquire_cmd::acquire(args),
         Command::Codegen(args) => commands::codegen_cmd::codegen(args),
         Command::CodegenTerraform(args) => commands::terraform_cmd::generate(args),
@@ -900,7 +912,12 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
                 commands::sdk_profiles::list_applications(text.format)
             }
         },
-        Command::CodegenSession(args) => commands::codegen_session::generate(args),
+        Command::CodegenSession(args) => {
+            if args.watch {
+                interrupt::server();
+            }
+            commands::codegen_session::generate(args)
+        }
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
         Command::Config(args) => commands::config_cmd::config(&args),
         Command::Evidence(args) => commands::evidence::evidence(&args),
@@ -916,6 +933,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         Command::Impact(args) => commands::impact::impact(&args),
         Command::Project { cmd } => commands::project::run(cmd),
         Command::Lsp => {
+            interrupt::server();
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(suspect_lsp::run_server());
             Ok(0)

@@ -2,7 +2,7 @@
 
 <!-- Generated from the clap command tree by crates/suspect-cli/tests/cli_reference.rs; do not edit by hand. Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`. -->
 
-Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error.
+Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C).
 
 ## `suspect`
 

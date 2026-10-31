@@ -64,10 +64,12 @@ pub fn gateway(
                 listener.local_addr()?,
                 steps.len()
             );
-            suspect_gateway::scenario::serve_scenario_on(listener, steps)
-                .await
-                .map(|()| 0)
-                .map_err(|e| anyhow::anyhow!("{e}"))
+            tokio::select! {
+                result = suspect_gateway::scenario::serve_scenario_on(listener, steps) => {
+                    result.map(|()| 0).map_err(|e| anyhow::anyhow!("{e}"))
+                }
+                () = shutdown_signal() => Ok(0),
+            }
         });
     }
     let gw_mode = match mode {
@@ -114,8 +116,7 @@ pub fn gateway(
     let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(super::sink(
         journal_file,
     )?)));
-    // Serve until Ctrl-C: the runtime blocks on serve(); process exit tears
-    // everything down.
+    // Serve until the first Ctrl-C, then return 0.
     rt.block_on(async move {
         let bound = suspect_gateway::bind(cfg, journal)
             .await
@@ -138,6 +139,11 @@ pub fn gateway(
     })
 }
 
+/// Resolves on the first Ctrl-C. Ctrl-C is how the gateway stops, so the
+/// command then returns 0 (`crate::interrupt`).
 async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
+    // The sender is a static, so `wait_for` only returns on Ctrl-C.
+    let _ = crate::interrupt::graceful()
+        .wait_for(|interrupted| *interrupted)
+        .await;
 }

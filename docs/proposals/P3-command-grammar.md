@@ -718,6 +718,15 @@ step that changes the tree.
    listener, sends SIGINT, and expects 130 (Unix only); missing `--profile` exits 2 through `main`. Files:
    `main.rs`, `lib.rs`, `commands/{codegen_cmd,load,acquire,gateway}.rs`.
    Estimate: 1 day.
+   **Done.** Deviations: `execute` wraps a private `dispatch` that still
+   returns `i32`, through `Exit::from_legacy`. `interrupt` has a third
+   mode, `interrupt::server()`: the first Ctrl-C exits 0 at once. `lsp`,
+   `watch`, `bridge` and `codegen-session --watch` call it at dispatch in
+   `lib.rs` (open question 2), since they have nothing to drain. `gateway`
+   uses `graceful()`, including scenario mode, which used to die by signal.
+   Missing `--profile` is now an `Err`, so its stderr line gains the
+   `error: ` prefix. Tests are in `tests/exit_status.rs`, plus a gateway
+   SIGINT test that expects 0.
 2. **Per-kind format enums.** Add `args.rs` with `Findings`, `Report` and
    `Stream`. Move the 27 commands. Delete `reject_sarif`, `TextFormat` and
    `OutputFormat`, and replace the `Json | Sarif` arms. Add
