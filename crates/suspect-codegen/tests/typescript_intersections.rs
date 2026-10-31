@@ -305,14 +305,9 @@ const wrong: Disjoint = { x:1n, y:2.5 };
 }
 
 #[test]
-#[ignore = "requires native tsc and the pinned sibling OpenRouter checkout, or SUSPECT_OPENROUTER_YAML"]
+#[ignore = "requires native tsc and OPENROUTER_WEB_ROOT (the pinned OpenRouter checkout)"]
 fn tracked_openrouter_compositions_keep_their_native_branches() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let selected = [
         root(&contract, "ORAnthropicNullableCaller"),

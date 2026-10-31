@@ -1,5 +1,9 @@
 //! One per-call work budget must survive trial branches and lazy references.
 
+#[allow(dead_code)]
+#[path = "../../suspect-codegen/src/test_inputs.rs"]
+mod test_inputs;
+
 use serde_json::{Value, json};
 use suspect_low::LowDoc;
 use suspect_schema::{Compiler, Config, SchemaErrorKind};
@@ -265,9 +269,7 @@ fn exhaustion_preserves_nested_instance_and_schema_locations() {
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT pointing at the tracked primary corpus"]
 fn tracked_openrouter_selected_reference_closures_keep_valid_and_invalid_outcomes() {
-    let root = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
-    );
+    let root = test_inputs::openrouter_root();
     let path = root.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&path).expect("read tracked OpenRouter YAML");
     for (name, cases) in [

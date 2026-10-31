@@ -801,13 +801,7 @@ fn native_protocol_package() {
 #[ignore = "new actual OpenRouter operations; requires JDK21/25 and Maven"]
 fn native_protocol_openrouter() {
     let root = root();
-    let source = std::env::var_os("SUSPECT_OPENROUTER_OPENAPI")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("OPENROUTER_WEB_ROOT")
-                .map(|root| PathBuf::from(root).join("projects/docs/openapi/openapi.yaml"))
-        })
-        .expect("set SUSPECT_OPENROUTER_OPENAPI to openrouter-web's openapi.yaml, or OPENROUTER_WEB_ROOT to the checkout");
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let contract = load(&source);
     let operations = contract
         .operations()

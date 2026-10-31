@@ -759,10 +759,8 @@ fn negative_types(root: &Path, cases: &[&str]) {
 }
 
 fn openrouter() -> (SdkPlan, PathBuf) {
-    let path = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout")
-        .join("projects/docs/openapi/openapi.yaml");
+    let path =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     assert!(
         path.is_file(),
         "actual OpenRouter source required: {}",

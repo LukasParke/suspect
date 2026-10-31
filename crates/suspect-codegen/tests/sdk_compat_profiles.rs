@@ -78,10 +78,6 @@ fn all_profiles() -> Vec<http_protocol::CompatibilityProfile> {
     ]
 }
 
-fn tool_available(name: &str) -> bool {
-    Command::new(name).arg("--version").output().is_ok()
-}
-
 // ---------------------------------------------------------------------------
 // Profile 2: colon-path-parameters-v1
 // ---------------------------------------------------------------------------
@@ -339,12 +335,8 @@ fn the_nullable_profile_decodes_null_in_the_emitted_python_codecs() {
     // The emitted codecs need the generated SDK's Python floor (3.11+);
     // `SUSPECT_PYTHON_BIN` overrides the interpreter, and an absent or
     // older one skips with the manifest's install guidance.
-    let interpreter = match suspect_codegen::toolchain::gate("python") {
-        Ok(python) => python,
-        Err(skip) => {
-            eprintln!("skipping the native codec check: {skip}");
-            return;
-        }
+    let Some(interpreter) = suspect_codegen::toolchain::optional("python") else {
+        return;
     };
     let contract = contract_with_document(nullable_document());
     for (policy, accepts_null) in [
@@ -698,8 +690,7 @@ fn the_emitted_typescript_sdk_normalizes_colon_paths_and_surfaces_null() {
 
 #[test]
 fn the_emitted_typescript_sdk_streams_schemaless_sse_as_untyped_frames() {
-    if !tool_available("node") {
-        eprintln!("node is not on PATH; skipping the emitted schemaless-stream check");
+    if suspect_codegen::toolchain::optional("node").is_none() {
         return;
     }
     let document = json!({

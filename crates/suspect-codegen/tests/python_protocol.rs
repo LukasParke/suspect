@@ -553,12 +553,7 @@ fn canonical_generation_options_match_python_compatibility_capture() {
 #[ignore = "requires tracked OpenRouter source and native wheel/type/docs tools"]
 fn installed_real_binary_and_extra_json_operations() {
     let root = root("openrouter");
-    let source = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let contract = load(&source);
     let wanted = [
         "downloadContainerFileContent",

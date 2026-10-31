@@ -667,12 +667,10 @@ fn manual_templates_emit_for_every_supported_shape_and_compile() {
 
     // The manual package typechecks: compile it with the same consumer gate.
     let Some(cmake) = tool("SUSPECT_CPP_CMAKE", "cmake") else {
-        eprintln!("cpp_pagination: cmake not available; emission assertions only");
-        return;
+        panic!("cpp_pagination: cmake not available");
     };
     let Some(cxx) = tool("SUSPECT_CPP_CXX", "clang++") else {
-        eprintln!("cpp_pagination: no C++20 compiler; emission assertions only");
-        return;
+        panic!("cpp_pagination: no C++20 compiler");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&files, root.path()).unwrap();
@@ -746,12 +744,10 @@ fn checked(command: &mut Command, retained: &std::path::Path) {
 #[test]
 fn native_walks_count_requests_and_preserve_input() {
     let Some(cmake) = tool("SUSPECT_CPP_CMAKE", "cmake") else {
-        eprintln!("cpp_pagination: cmake not available; degrading to static assertions");
-        return;
+        panic!("cpp_pagination: cmake not available");
     };
     let Some(cxx) = tool("SUSPECT_CPP_CXX", "clang++") else {
-        eprintln!("cpp_pagination: no C++20 compiler; degrading to static assertions");
-        return;
+        panic!("cpp_pagination: no C++20 compiler");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&configured_options()), root.path()).unwrap();

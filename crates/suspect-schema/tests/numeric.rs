@@ -1,5 +1,9 @@
 //! Numeric behavior through the public compiler/validator seam.
 
+#[allow(dead_code)]
+#[path = "../../suspect-codegen/src/test_inputs.rs"]
+mod test_inputs;
+
 use suspect_low::LowDoc;
 use suspect_schema::{CompileError, Compiler, Config, SchemaErrorKind};
 use suspect_source::{Source, Uri};
@@ -458,10 +462,9 @@ fn malformed_or_ambiguous_text_is_an_evaluation_failure() {
 }
 
 #[test]
-#[ignore = "requires OPENROUTER_PUBLIC_SCHEMA pointing to the pinned public OpenAPI snapshot"]
+#[ignore = "requires OPENROUTER_WEB_ROOT (the pinned public OpenAPI snapshot)"]
 fn openrouter_chat_choice_index_rejects_a_nonzero_fraction() {
-    let path = std::env::var("OPENROUTER_PUBLIC_SCHEMA")
-        .expect("set OPENROUTER_PUBLIC_SCHEMA; absence is not acceptance");
+    let path = test_inputs::openrouter_spec();
     let bytes = std::fs::read(&path).expect("read OpenRouter public OpenAPI snapshot");
     let api = LowDoc::with_format(
         Uri::from_path(std::path::Path::new(&path)).unwrap(),

@@ -143,7 +143,7 @@ fn checked(command: &mut Command) -> Output {
 #[test]
 #[ignore = "requires all tracked OpenRouter inputs and the pinned native TS/npm/TypeDoc toolchain"]
 fn tracked_openrouter_cli_package_builds_installs_calls_and_documents() {
-    let source_root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let source_root = suspect_codegen::test_inputs::openrouter_root();
     let spec = Path::new(&source_root).join("projects/docs/openapi/openapi.yaml");
     assert!(
         spec.is_file(),

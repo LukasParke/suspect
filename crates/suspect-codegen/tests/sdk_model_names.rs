@@ -61,12 +61,8 @@ fn native_python_constructor_has_an_operation_role_name_and_original_source_bind
     );
     // Executing the emitted models needs the generated SDK's Python floor
     // (3.11+); `SUSPECT_PYTHON_BIN` overrides the interpreter.
-    let python = match suspect_codegen::toolchain::gate("python") {
-        Ok(python) => python,
-        Err(skip) => {
-            eprintln!("skipping the native Python import check: {skip}");
-            return;
-        }
+    let Some(python) = suspect_codegen::toolchain::optional("python") else {
+        return;
     };
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&plan.render().unwrap(), directory.path()).unwrap();

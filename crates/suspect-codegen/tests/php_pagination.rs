@@ -235,8 +235,7 @@ fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
         "page and next-page walks must stop on a false has-more indicator; the item walk inherits it:\n{client}"
     );
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&files, root.path()).unwrap();
@@ -337,8 +336,7 @@ fn php() -> Option<PathBuf> {
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&configured()), root.path()).unwrap();
@@ -368,8 +366,7 @@ fn emitted_php_files_lint() {
 #[test]
 fn pagination_walks_drive_stubbed_pages_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&configured());

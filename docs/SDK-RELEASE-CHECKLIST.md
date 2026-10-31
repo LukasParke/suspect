@@ -152,7 +152,7 @@ CI toolchain. Every per-language gate writes its machine-readable record to
 - `cargo test --locked --offline -p suspect-codegen --test sdk_native_measurements`
   — the host/adversarial checks for the `repeated-v1` methodology. The
   actual native collection is the ignored entrypoint, run only with all six
-  `SUSPECT_SDK_FULL_*` variables exported by the `sdk-full` runner (see
+  `SUSPECT_SDK_FULL_*` variables exported by the `cargo xtask verify-sdk` runner (see
   [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md)); a release claim about cost
   numbers requires that fresh integrated run.
 

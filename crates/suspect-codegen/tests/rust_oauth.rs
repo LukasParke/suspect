@@ -643,12 +643,11 @@ fn emitted_oauth_runtime_drives_the_token_lifecycle_in_a_compiled_package() {
     std::fs::write(consumer.join("src/lib.rs"), CONSUMER).unwrap();
     let (ok, log) = cargo("test", &consumer.join("Cargo.toml"), &[]);
     if !ok && registry_unavailable(&log) {
-        // No registry access for the pinned `url` crate: degrade to the
-        // model-only compile check plus the static assertions above and say so.
-        eprintln!(
-            "skipping behavioral oauth execution: the pinned http-feature dependencies are not available offline\n{log}"
+        // No registry access for the pinned `url` crate: an explicit gate
+        // fails rather than passing on the static assertions alone.
+        panic!(
+            "behavioral oauth execution needs the pinned http-feature dependencies, which are not available offline\n{log}"
         );
-        return;
     }
     assert!(ok, "behavioral consumer tests failed:\n{log}");
     if std::env::var_os("SUSPECT_KEEP_OAUTH").is_none() {
@@ -683,10 +682,9 @@ fn discovery_oauth_runtime_drives_the_lifecycle_in_a_compiled_package() {
     std::fs::write(consumer.join("src/lib.rs"), DISCOVERY_CONSUMER).unwrap();
     let (ok, log) = cargo("test", &consumer.join("Cargo.toml"), &[]);
     if !ok && registry_unavailable(&log) {
-        eprintln!(
-            "skipping discovery behavioral execution: the pinned http-feature dependencies are not available offline\n{log}"
+        panic!(
+            "discovery behavioral execution needs the pinned http-feature dependencies, which are not available offline\n{log}"
         );
-        return;
     }
     assert!(ok, "discovery consumer tests failed:\n{log}");
     if std::env::var_os("SUSPECT_KEEP_OAUTH").is_none() {
@@ -2392,10 +2390,9 @@ fn replay_lifecycle_drives_the_wrapper_in_a_compiled_package() {
     std::fs::write(consumer.join("src/lib.rs"), REPLAY_CONSUMER).unwrap();
     let (ok, log) = cargo("test", &consumer.join("Cargo.toml"), &[]);
     if !ok && registry_unavailable(&log) {
-        eprintln!(
-            "skipping behavioral replay execution: the pinned http-feature dependencies are not available offline\n{log}"
+        panic!(
+            "behavioral replay execution needs the pinned http-feature dependencies, which are not available offline\n{log}"
         );
-        return;
     }
     assert!(ok, "behavioral consumer tests failed:\n{log}");
     if std::env::var_os("SUSPECT_KEEP_OAUTH").is_none() {

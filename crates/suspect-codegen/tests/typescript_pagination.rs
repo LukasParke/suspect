@@ -168,8 +168,7 @@ fn tool_available(name: &str) -> bool {
 #[test]
 fn generated_pagination_compiles_strictly_with_the_package() {
     if !tool_available("tsc") {
-        eprintln!("tsc is not on PATH; skipping the strict pagination compile check");
-        return;
+        panic!("tsc is not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -209,8 +208,7 @@ fn generated_pagination_compiles_strictly_with_the_package() {
 #[test]
 fn pagination_walkers_drive_stubbed_pages_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
-        eprintln!("tsc/node are not on PATH; skipping the behavioral pagination check");
-        return;
+        panic!("tsc/node are not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -446,8 +444,7 @@ fn page_size_fallback_supplies_the_first_page_limit_only() {
     );
 
     if !tool_available("tsc") || !tool_available("node") {
-        eprintln!("tsc/node are not on PATH; skipping the page_size behavioral check");
-        return;
+        panic!("tsc/node are not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&files, directory.path()).unwrap();

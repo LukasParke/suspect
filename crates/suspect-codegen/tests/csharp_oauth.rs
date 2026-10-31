@@ -971,11 +971,10 @@ fn discovery_run(
 #[test]
 fn native_discovery_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
-        eprintln!(
-            "csharp_oauth: skipping — {}",
+        panic!(
+            "csharp_oauth: {}",
             suspect_codegen::toolchain::guidance("dotnet")
         );
-        return;
     };
     eprintln!("csharp_oauth: {dotnet}");
     let parent =
@@ -1524,11 +1523,10 @@ sealed class ReplayStub : HttpMessageHandler
 #[test]
 fn replay_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
-        eprintln!(
-            "csharp_oauth: skipping — {}",
+        panic!(
+            "csharp_oauth: {}",
             suspect_codegen::toolchain::guidance("dotnet")
         );
-        return;
     };
     eprintln!("csharp_oauth: {dotnet}");
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-oauth-replay");
@@ -1654,11 +1652,10 @@ fn replay_lifecycle_drives_a_stubbed_http_handler() {
 #[test]
 fn native_oauth_lifecycle_drives_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
-        eprintln!(
-            "csharp_oauth: skipping — {}",
+        panic!(
+            "csharp_oauth: {}",
             suspect_codegen::toolchain::guidance("dotnet")
         );
-        return;
     };
     eprintln!("csharp_oauth: {dotnet}");
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-oauth");

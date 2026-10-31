@@ -290,8 +290,9 @@ fn fake_webhook_posts_drive_the_decoder_and_constructor_in_python() {
     }
 
     let Some(python) = interpreter_with_httpx() else {
-        eprintln!(
-            "no interpreter with httpx available; degraded to static emission and py_compile checks"
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
         );
         return;
     };

@@ -230,9 +230,7 @@ error('limit',()=>codec<unknown>('Bad',any).decode('null',{maxNodes:0}));
 #[test]
 #[ignore = "requires native TypeScript/Node.js and OPENROUTER_WEB_ROOT"]
 fn tracked_openrouter_caller_and_index_decode_and_encode_in_native_runtime() {
-    let root_dir = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
-    );
+    let root_dir = suspect_codegen::test_inputs::openrouter_root();
     let path = root_dir.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(WorkspaceBuilder::new().root(&root_dir).build().unwrap());
     let contract =

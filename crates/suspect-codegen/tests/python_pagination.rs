@@ -221,7 +221,10 @@ fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
     let root = tempfile::tempdir().unwrap();
     write_files(&files, root.path()).unwrap();
     let Some(python) = httpx_interpreter() else {
-        eprintln!("no interpreter with httpx available; emission assertions only");
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
+        );
         return;
     };
     let script = r#"import sys
@@ -497,8 +500,9 @@ fn native_pagination_walks_stops_and_stalls_over_a_stubbed_transport() {
     }
 
     let Some(python) = httpx_interpreter() else {
-        eprintln!(
-            "no interpreter with httpx available; degraded to static emission and py_compile checks"
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
         );
         return;
     };
@@ -531,7 +535,10 @@ fn page_size_fallback_supplies_the_first_page_limit_only() {
     let root = tempfile::tempdir().unwrap();
     write_files(&files, root.path()).unwrap();
     let Some(python) = httpx_interpreter() else {
-        eprintln!("no interpreter with httpx available; emission assertions only");
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
+        );
         return;
     };
     let script = r#"import sys

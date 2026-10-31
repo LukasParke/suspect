@@ -496,10 +496,9 @@ fn decoded_and_constructed_receipts_behave_in_a_compiled_package() {
     std::fs::write(consumer.join("src/lib.rs"), CONSUMER).unwrap();
     let (ok, log) = cargo("test", &consumer.join("Cargo.toml"), &[]);
     if !ok && registry_unavailable(&log) {
-        eprintln!(
-            "skipping behavioral incoming execution: the pinned http-feature dependencies are not available offline\n{log}"
+        panic!(
+            "behavioral incoming execution needs the pinned http-feature dependencies, which are not available offline\n{log}"
         );
-        return;
     }
     assert!(ok, "behavioral consumer tests failed:\n{log}");
     if std::env::var_os("SUSPECT_KEEP_INCOMING").is_none() {

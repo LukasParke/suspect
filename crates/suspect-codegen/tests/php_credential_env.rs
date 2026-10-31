@@ -622,11 +622,8 @@ echo 'unavailable getenv preserves anonymous and explicit-credential operations'
 #[test]
 #[ignore = "actual read-only OpenRouter source, installed branded SDK, controlled transport; PHP 8.3/8.5"]
 fn native_openrouter_current_key_factory_uses_source_https() {
-    let source = PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT")
-            .expect("OPENROUTER_WEB_ROOT must identify the read-only original source"),
-    )
-    .join("projects/docs/openapi/openapi.yaml");
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let before = fs::read(&source).unwrap();
     let contract = load(&source);
     let wanted = ["getCurrentKey", "getCredits"];

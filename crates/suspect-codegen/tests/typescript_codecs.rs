@@ -315,7 +315,7 @@ fn additional_property_admission_refuses_misleading_native_index_values() {
 #[test]
 #[ignore = "requires tracked OpenRouter YAML, native TypeScript and Node.js"]
 fn tracked_openrouter_chat_closure_and_typed_extras_have_native_codecs() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));
     let names = [
         "ChatRequest",
@@ -392,7 +392,7 @@ roundTrip(Trace, '{{"trace_id":"trace-abc","custom":true}}');
 #[test]
 #[ignore = "requires tracked OpenRouter checkout, native TypeScript and Node.js"]
 fn tracked_openrouter_models_decode_and_encode_through_generated_codecs() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));
     let roots = contract
         .schema_roots()
@@ -455,7 +455,7 @@ assert.throws(() => Image.decode('{{"type":"image","source":{{"type":"url"}}}}')
 #[test]
 #[ignore = "requires tracked OpenRouter checkout"]
 fn tracked_upstream_invalid_numeric_declaration_still_blocks_codec_artifacts() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));
     let source = contract
         .schema_roots()

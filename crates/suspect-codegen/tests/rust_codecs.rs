@@ -1,10 +1,6 @@
 //! Consumer behavior through Contract -> complete native Rust codec package.
 use serde_json::{Value, json};
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, process::Command, sync::Arc};
 use suspect_codegen::rust_codecs::{CodecConfig, CodecPlan, plan_codecs};
 use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::WorkspaceBuilder;
@@ -160,12 +156,7 @@ fn finite_conversion_and_evaluation_failures_are_not_schema_mismatches() {
     });
 }
 fn corpus() -> Arc<Contract> {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     contract(&path)
 }
 fn select(contract: &Contract, pointers: &[&str]) -> Vec<SchemaId> {

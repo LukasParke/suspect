@@ -186,12 +186,7 @@ fn native_typedoc_preserves_hostile_prose_and_escaped_symbol_names_as_text() {
 #[test]
 #[ignore = "requires pinned Node/TypeDoc and tracked OpenRouter public YAML"]
 fn native_typedoc_covers_tracked_openrouter_caller_and_image_closures() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let roots = contract
         .schema_roots()

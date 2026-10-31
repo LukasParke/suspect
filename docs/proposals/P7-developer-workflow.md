@@ -511,30 +511,64 @@ the tools: those runs now fail instead of passing.
 
 ## Implementation plan
 
-1. **Alias and `ci` skeleton.** Adds `.cargo/config.toml`, plus
+1. **Alias and `ci` skeleton.** **Done.** Deviation: rustfmt, clippy and
+   cargo-deny are probed with `cargo <sub> --version` (what the job runs)
+   rather than `rustup component list`, so a non-rustup install works; a
+   missing tool reports `MISSING` and exit 2 wins only when no job failed.
+   Adds `.cargo/config.toml`, plus
    `xtask/src/ci.rs` with the job table, probes, `--list`, `--skip-missing`,
    `--fail-fast` and the summary. Ports `fmt`, `clippy`, `docs`,
    `cargo-deny`, `test`, `bench-smoke`, `corpus-validation`,
    `vscode-extension`, `zed-extension` and `rules-runtime`. Workflows are not
    changed yet. Tests: unit tests for argument parsing and the summary exit
    code. 1 day.
-2. **`platform-smoke` in Rust.** Fixtures, gateway child process with a free
+2. **`platform-smoke` in Rust.** **Done.** The check looks for the
+   `run_done` record anywhere in stdout (the human report and the
+   `run_summary` line follow it), as the old `grep -q` did. Fixtures, gateway child process with a free
    port, readiness poll, live run, cassette writer and offline run. Tests:
    the job itself, run locally and once in a PR. 0.5 day.
-3. **Workflows call the xtask, and the drift test.** Rewrites the `run:`
+3. **Workflows call the xtask, and the drift test.** **Done.** Also adds
+   `rust-toolchain.toml` (open question 1: `1.99.1`, with rustfmt and
+   clippy). Workflows install it with `dtolnay/rust-toolchain@master`
+   and `toolchain: "1.99.1"`; a second drift test checks every
+   `dtolnay/rust-toolchain` step in `.github/workflows/` against the file
+   (`docs.yml`, `application-targets.yml` and `native-evidence.yml`
+   included; `sdk-session-performance.yml` keeps its own pinned
+   `RUSTUP_TOOLCHAIN`). The drift test also rejects job-level `defaults`.
+   Rewrites the `run:`
    lines in `ci.yml` and `platform.yml`. Adds toolchain/cache steps to
    `ci.yml`, moves `cargo-deny` to install-action, drops `RUSTFLAGS`, and
    adds `links` if P6 step 1 has landed. Adds the drift test. Updates the
    `CONTRIBUTING.md` "Checks" block. 0.5 day.
-4. **Rename milestone tasks.** `verify-sdk`, `verify-sdk-demo`, aliases with
+4. **Rename milestone tasks.** **Done.** `USAGE` strings now say
+   `cargo xtask verify-sdk` / `cargo xtask verify-sdk-demo` (the alias
+   carries `--locked`). `verify-sdk`, `verify-sdk-demo`, aliases with
    warnings, updated `USAGE`, and the user-facing references listed above.
    Tests: an xtask unit test that both old names dispatch and warn. 0.25 day.
-5. **`test_inputs` and the env-name migration.** Adds the helper, rewrites
+5. **`test_inputs` and the env-name migration.** **Done.** 72 files: every
+   lookup goes through `openrouter_root()` / `openrouter_spec()`; the
+   lookups are wrapped around a testable `resolve_root(get)`, so the unit
+   tests pass an environment closure instead of mutating the process
+   environment. `suspect-gen/tests/context_isolation.rs` named
+   `openrouter-openapi.json` but the xtask always pointed it at
+   `openapi.yaml`, so it now reads `openrouter_spec()`. `suspect-gen` (not in
+   the proposal's list) also uses the `#[path]` include. Adds the helper, rewrites
    the lookup sites, drops the sibling fallbacks, and makes the xtask set one
    variable. Tests: unit tests for root vs deprecated-file resolution with a
    temp dir; `cargo test --workspace` (sites are under `#[ignore]`, so this
    checks compilation); `verify-sdk --check-syntax`. 1 day.
-6. **Skip/fail rule.** Adds `toolchain::optional`/`require`, migrates the 71
+6. **Skip/fail rule.** **Done.** Deviations: 84 `#[ignore]` early
+   returns (the scan above missed the "emission assertions only" form) became
+   `panic!` with the original detection kept, because several tools are not
+   manifest tools (cmake, the C++ compiler, tsc, an offline cargo registry);
+   new manifest-tool code uses `require`. The default-suite sites use
+   `optional` (Go, Python, Node) or the new `toolchain::skip(id, what)` for
+   requirements that are not one manifest tool (`python-httpx`, required only
+   by `all`). `tool_available` stays in the four `typescript_*` gates (it
+   probes `tsc`); the corpus skips in `suspect-ir`, `-lint`, `-low` and
+   `-validate` are unchanged. `SUSPECT_REQUIRE_TOOLS` is not yet in the P2.4
+   env registry (P2 owns it). Bun in the `test` job came with cf67733; the
+   variable is set by `cargo xtask ci test --ci`. Adds `toolchain::optional`/`require`, migrates the 71
    + 28 skip sites and the 6 hand-rolled probes, adds `SUSPECT_REQUIRE_TOOLS` and `SUSPECT_REQUIRE_CORPUS`,
    updates the `ci.yml` `test` job (Bun + variable), and updates the
    `CONTRIBUTING.md` "Native SDK gates" text. Tests: the `toolchain.rs` unit
@@ -542,7 +576,11 @@ the tools: those runs now fail instead of passing.
    1 day.
 7. **Fix `native-evidence.yml`.** Filter-based selection, correct prefixes,
    no `|| true`. Tests: one `workflow_dispatch` run per backend. 0.25 day.
-8. **`cargo xtask bless`.** Runs the P6 bless tests with `SUSPECT_BLESS=1`.
+8. **`cargo xtask bless`.** **Done.** Runs `cli_reference` and
+   `feature_manifest` (the latter also with `SUSPECT_REGEN_FEATURES=1`
+   until P6 step 6 renames its variable); a unit test checks both targets
+   exist, so P6 step 6's `reference_docs.rs` rename must update
+   `BLESS_TESTS` in `xtask/src/main.rs`. Runs the P6 bless tests with `SUSPECT_BLESS=1`.
    0.1 day.
 
 Total about 4.5 days. Steps 4-8 do not depend on each other. Step 3 depends

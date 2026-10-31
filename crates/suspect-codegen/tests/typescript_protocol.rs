@@ -924,7 +924,7 @@ fn unverified_and_ambiguous_protocols_are_source_located_refusals() {
 #[test]
 #[ignore = "requires the tracked OpenRouter description"]
 fn real_extra_openrouter_operations_use_native_json_and_explicit_legacy_byte_profile() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let path = Path::new(&root).join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()

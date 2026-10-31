@@ -137,9 +137,7 @@ fn native_environment_credentials() {
 #[ignore = "actual OpenRouter getCurrentKey/getCredits schemas and source-default HTTPS through controlled .NET8/10 handlers"]
 fn native_openrouter_environment_client() {
     let root = directory("openrouter-");
-    let corpus = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let corpus = crate::test_inputs::openrouter_root();
     let path = corpus.join("projects/docs/openapi/openapi.yaml");
     let original = fs::read(&path).unwrap();
     let workspace = Arc::new(

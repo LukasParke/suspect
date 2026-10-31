@@ -1,5 +1,8 @@
 //! Workspace automation: corpus fetch, fixture generation, benches.
 
+mod ci;
+#[cfg(test)]
+mod docs_paths;
 mod sdk_full;
 mod sdk_m3_m6;
 mod versions;
@@ -11,8 +14,12 @@ use anyhow::{Context, Result, bail};
 
 const USAGE: &str = "\
 tasks:
-  sdk-full [options]              Verify the maintained twelve-language full SDK plan.
-  sdk-m3-m6 [options]             Verify the current native SDK and iteration milestones.
+  ci [JOB...] [flags]             Run the CI jobs locally (`cargo xtask ci --help`).
+  bless                           Regenerate the checked-in generated docs (bless tests).
+  verify-sdk [options]            Verify the maintained twelve-language SDK plan
+                                  (was sdk-full).
+  verify-sdk-demo [options]       Verify the frozen five-backend M3/M6 demo scope
+                                  (was sdk-m3-m6).
   bump <version>                  Set the one toolchain version in every manifest and lockfile.
   check-versions [--tag vX.Y.Z]   Fail when any version line (or the tag) differs.
   fetch-corpus [--force]          Download real-world OpenAPI specs into corpus/ (gitignored).
@@ -31,11 +38,17 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let task = args.first().map(String::as_str).unwrap_or_default();
     let rest = &args[1.min(args.len())..];
+    let (task, renamed) = canonical_task(task);
+    if let Some(warning) = renamed {
+        eprintln!("{warning}");
+    }
     match task {
+        "ci" => ci::run(rest),
+        "bless" => bless(rest),
         "fetch-corpus" => fetch_corpus(rest),
         "gen-fixtures" => gen_fixtures(rest),
-        "sdk-full" => sdk_full::run(rest),
-        "sdk-m3-m6" => sdk_m3_m6::run(rest),
+        "verify-sdk" => sdk_full::run(rest),
+        "verify-sdk-demo" => sdk_m3_m6::run(rest),
         "bump" => versions::run_bump(rest),
         "check-versions" => versions::run_check(rest),
         "-h" | "--help" | "help" => {
@@ -47,6 +60,95 @@ fn main() -> Result<()> {
             std::process::exit(2);
         }
     }
+}
+
+/// Old task names kept for one release; historical records under `docs/`
+/// still cite them.
+const RENAMED_TASKS: &[(&str, &str)] =
+    &[("sdk-full", "verify-sdk"), ("sdk-m3-m6", "verify-sdk-demo")];
+
+/// The current name for `task`, plus the warning to print when an old name
+/// was used.
+fn canonical_task(task: &str) -> (&str, Option<String>) {
+    match RENAMED_TASKS.iter().find(|(old, _)| *old == task) {
+        Some((old, new)) => (new, Some(format!("xtask: '{old}' is now '{new}'"))),
+        None => (task, None),
+    }
+}
+
+/// The tests that compare a checked-in generated file with its renderer and
+/// rewrite it when `SUSPECT_BLESS` is set: (package, test target, extra env).
+/// `feature_manifest` still reads `SUSPECT_REGEN_FEATURES` until P6 step 6
+/// moves it to `SUSPECT_BLESS`.
+type BlessTest = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+const BLESS_TESTS: &[BlessTest] = &[
+    ("suspect-cli", "cli_reference", &[]),
+    (
+        "suspect-codegen",
+        "feature_manifest",
+        &[("SUSPECT_REGEN_FEATURES", "1")],
+    ),
+];
+
+/// `cargo xtask bless`: runs every bless test with `SUSPECT_BLESS=1`.
+fn bless(args: &[String]) -> Result<()> {
+    if let Some(arg) = args.first() {
+        if arg == "-h" || arg == "--help" {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        bail!("bless: unknown argument {arg:?}");
+    }
+    let root = repo_root();
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    for (package, test, env) in BLESS_TESTS {
+        println!("$ SUSPECT_BLESS=1 cargo test -p {package} --test {test}");
+        let mut cmd = std::process::Command::new(&cargo);
+        cmd.args(["test", "-p", package, "--test", test])
+            .current_dir(&root)
+            .env("SUSPECT_BLESS", "1");
+        for (key, value) in *env {
+            cmd.env(key, value);
+        }
+        let status = cmd.status().context("spawn cargo test")?;
+        if !status.success() {
+            bail!("bless: cargo test -p {package} --test {test} exited with {status}");
+        }
+    }
+    Ok(())
+}
+
+/// The repository root (the parent of `xtask/`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask lives one level below the repository root")
+        .to_path_buf()
+}
+
+/// Tracked files (`git ls-files`, repository-relative, `/`-separated) that
+/// match `keep`.
+fn tracked_files(root: &Path, keep: impl Fn(&str) -> bool) -> Result<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(root)
+        .output()
+        .context("run git ls-files")?;
+    if !out.status.success() {
+        bail!(
+            "git ls-files failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|path| !path.is_empty() && keep(path))
+        .map(str::to_owned)
+        .collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -1024,6 +1126,35 @@ mod tests {
                 5
             );
         }
+    }
+
+    #[test]
+    fn every_bless_test_target_exists() {
+        let root = repo_root();
+        for (package, test, _) in BLESS_TESTS {
+            let path = root.join(format!("crates/{package}/tests/{test}.rs"));
+            assert!(path.is_file(), "bless test {} is missing", path.display());
+        }
+    }
+
+    #[test]
+    fn old_task_names_dispatch_to_the_new_ones_with_a_warning() {
+        assert_eq!(
+            canonical_task("sdk-full"),
+            (
+                "verify-sdk",
+                Some("xtask: 'sdk-full' is now 'verify-sdk'".into())
+            )
+        );
+        assert_eq!(
+            canonical_task("sdk-m3-m6"),
+            (
+                "verify-sdk-demo",
+                Some("xtask: 'sdk-m3-m6' is now 'verify-sdk-demo'".into())
+            )
+        );
+        assert_eq!(canonical_task("verify-sdk"), ("verify-sdk", None));
+        assert_eq!(canonical_task("ci"), ("ci", None));
     }
 
     #[test]

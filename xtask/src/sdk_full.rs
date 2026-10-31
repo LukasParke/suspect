@@ -77,7 +77,7 @@ const LIBRARY_NATIVE: &[LibraryNative] = &[
     LibraryNative { id: "php-v3-controls", language: "php", name: "php_sdk::tests_v3::native_v3_scope_resource_controls", source: "crates/suspect-codegen/src/php_sdk/tests_v3.rs", tiers: &["floor", "current"] },
     LibraryNative { id: "php-v3-sdk", language: "php", name: "php_sdk::tests_v3::native_v3_sdk_packages_models_codecs", source: "crates/suspect-codegen/src/php_sdk/tests_v3.rs", tiers: &["floor", "current"] },
 ];
-const USAGE: &str = "usage: cargo run --locked -p xtask -- sdk-full --source OPENROUTER_ROOT --out NEW_REPORT [--editor-host-tools PINNED_TOOLS_JSON] [--functional-only | --performance-plan PINNED_PLAN_JSON]\n       cargo run --locked -p xtask -- sdk-full --list-stages [--functional-only]\n       cargo run --locked -p xtask -- sdk-full --check-syntax\nStrict by default. Functional-only success retains numerical-pending status, not whole-plan completion. Both real editor-host scenarios require explicit tool pins. See docs/SDK-FULL-EXIT.md.\n";
+const USAGE: &str = "usage: cargo xtask verify-sdk --source OPENROUTER_ROOT --out NEW_REPORT [--editor-host-tools PINNED_TOOLS_JSON] [--functional-only | --performance-plan PINNED_PLAN_JSON]\n       cargo xtask verify-sdk --list-stages [--functional-only]\n       cargo xtask verify-sdk --check-syntax\nStrict by default. Functional-only success retains numerical-pending status, not whole-plan completion. Both real editor-host scenarios require explicit tool pins. See docs/SDK-FULL-EXIT.md.\n";
 
 #[derive(Clone, Copy, Serialize)]
 struct Target {
@@ -1178,7 +1178,6 @@ fn suites() -> Vec<Stage> {
                 "swift" => { env.insert("SUSPECT_SWIFT_CREDENTIAL_ENV_ROOT".into(), format!("{{work}}/native/swift/{tier}/credential-env")); }
                 "java" => {
                     env.insert("SUSPECT_MAVEN_BIN".into(), "{maven}".into());
-                    env.insert("SUSPECT_OPENROUTER_OPENAPI".into(), "{out}/inputs/projects/docs/openapi/openapi.yaml".into());
                 }
                 "kotlin" => {
                     env.insert("SUSPECT_KOTLIN_MAVEN".into(), "{maven}".into());
@@ -2495,10 +2494,7 @@ fn configure_environment(run: &mut Run) -> Result<()> {
         ("npm_config_userconfig", "{work}/home/.npmrc"),
         ("PYTHONNOUSERSITE", "1"),
         ("MYPY_CACHE_DIR", "{work}/caches/mypy"),
-        (
-            "OPENROUTER_PUBLIC_SCHEMA",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
+        ("OPENROUTER_WEB_ROOT", "{out}/inputs"),
         ("MAVEN_ARGS", "--offline --no-transfer-progress"),
         ("MAVEN_USER_HOME", "{work}/home/.m2"),
         ("JAVA_HOME", "{jdk-current}"),
@@ -4856,7 +4852,7 @@ fn stage_inventory(functional_only: bool) -> Result<Value> {
     )
 }
 
-fn syntax_check(original: &Path) -> Result<Value> {
+pub(crate) fn syntax_check(original: &Path) -> Result<Value> {
     let inventory = stage_inventory(false)?;
     let runner_files = sealed::inventory(
         original,
@@ -6354,10 +6350,8 @@ mod tests {
                 .find(|item| item.id == format!("{tier}-java_credential_env"))
                 .unwrap();
             assert_eq!(java.environment["JAVA_HOME"], format!("{{jdk-{tier}}}"));
-            assert_eq!(
-                java.environment["SUSPECT_OPENROUTER_OPENAPI"],
-                "{out}/inputs/projects/docs/openapi/openapi.yaml"
-            );
+            assert_eq!(java.environment["OPENROUTER_WEB_ROOT"], "{out}/inputs");
+            assert!(!java.environment.contains_key("SUSPECT_OPENROUTER_OPENAPI"));
             assert!(
                 !java
                     .environment

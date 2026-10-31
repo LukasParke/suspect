@@ -690,9 +690,7 @@ fn native_negative_types(root: &Path, cases: &[&str]) {
 #[ignore = "requires actual read-only OpenRouter corpus and native Maven/JDK toolchains"]
 fn native_actual_five_openrouter_operations() {
     use sha2::Digest;
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&path).expect("actual OpenRouter description is required");
     assert_eq!(

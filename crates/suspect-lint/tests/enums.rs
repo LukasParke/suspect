@@ -1,5 +1,9 @@
 //! Enum/type compatibility through the public default lint interface.
 
+#[allow(dead_code)]
+#[path = "../../suspect-codegen/src/test_inputs.rs"]
+mod test_inputs;
+
 use suspect_lint::{Finding, Linter};
 use suspect_low::LowDoc;
 use suspect_source::{Source, Uri};
@@ -113,9 +117,7 @@ fn mixed_enums_follow_declared_types_and_versioned_nullability() {
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT; run the dedicated acceptance gate"]
 fn tracked_openrouter_nullable_enums_pass_and_a_mutation_is_located() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(std::path::PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to the OpenRouter source checkout");
+    let root = test_inputs::openrouter_root();
     let text = std::fs::read_to_string(root.join("projects/docs/openapi/openapi.yaml"))
         .expect("read required tracked public OpenRouter spec");
     let original = document(&text);

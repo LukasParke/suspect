@@ -743,9 +743,7 @@ fn native_negative_types(root: &Path) {
 #[test]
 #[ignore = "requires the actual OpenRouter checkout, Swift 6 and DocC"]
 fn native_five_actual_openrouter_operations() {
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to an openrouter-web checkout");
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(
         path.is_file(),

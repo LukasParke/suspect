@@ -4,10 +4,14 @@
 //! gates are opt-in (`#[ignore]`) so CI stays hermetic. This manifest makes
 //! the requirements declarative: per tool, the command that reports its
 //! version, the regex that extracts it, the minimum acceptable version, and
-//! the installation guidance shown when the probe fails. Gates call
-//! [`probe_status`] instead of hand-rolled `Option` dances, so the skip
-//! message tells a contributor exactly what is missing, what was found,
-//! what is required, and how to install it.
+//! the installation guidance shown when the probe fails.
+//!
+//! The skip-vs-fail rule: a default-suite test may skip when a tool is
+//! missing ([`optional`], [`skip`]: one `skipped:` line, then return); an
+//! `#[ignore]` gate fails ([`require`]). No gate passes by skipping.
+//! `SUSPECT_REQUIRE_TOOLS` (comma-separated ids, or `all`) turns
+//! default-suite skips for the listed tools into failures; CI sets it for
+//! the tools it installs.
 
 /// One native tool the acceptance gates may require.
 pub struct Tool {
@@ -341,14 +345,15 @@ fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// The acceptance-gate entry point: the resolved executable when the tool
-/// is present and new enough, or the actionable skip message.
+/// The probe behind [`optional`] and [`require`]: the resolved executable
+/// when the tool is present and new enough, or the actionable message.
 ///
 /// ```
 /// let jdk = suspect_codegen::toolchain::gate("jdk");
 /// match jdk {
-///     Ok(java) => { /* run the gate with `java` */ }
-///     Err(skip) => eprintln!("skipping: {skip}"),
+///     Ok(java) => { /* run the test with `java` */ }
+///     // A default-suite test; an #[ignore] gate panics instead (`require`).
+///     Err(message) => suspect_codegen::toolchain::skip("jdk", &message),
 /// }
 /// ```
 ///
@@ -376,6 +381,78 @@ pub fn gate(id: &str) -> Result<std::path::PathBuf, String> {
                 .map_or(id, |t| t.description)
         )),
     }
+}
+
+/// The variable listing the tools whose default-suite skips are failures.
+pub const REQUIRE_TOOLS: &str = "SUSPECT_REQUIRE_TOOLS";
+
+/// Whether `id` is listed in `list` (a `SUSPECT_REQUIRE_TOOLS` value:
+/// comma-separated ids, or `all`).
+#[must_use]
+pub fn listed(list: &str, id: &str) -> bool {
+    list.split(',')
+        .map(str::trim)
+        .any(|entry| entry == "all" || entry == id)
+}
+
+/// Whether `SUSPECT_REQUIRE_TOOLS` requires `id`.
+#[must_use]
+pub fn is_required(id: &str) -> bool {
+    std::env::var(REQUIRE_TOOLS).is_ok_and(|list| listed(&list, id))
+}
+
+/// The standard default-suite skip: prints `skipped: {what}`, or panics
+/// when `SUSPECT_REQUIRE_TOOLS` requires `id`. `what` names the tool and
+/// how to install it. For requirements that are not one manifest tool (an
+/// interpreter with a package, a compiler outside the manifest), `id` is a
+/// descriptive name such as `python-httpx`, required only by `all`.
+///
+/// # Panics
+/// When `id` is required.
+pub fn skip(id: &str, what: &str) {
+    skip_with(std::env::var(REQUIRE_TOOLS).ok().as_deref(), id, what);
+}
+
+fn skip_with(required: Option<&str>, id: &str, what: &str) {
+    if required.is_some_and(|list| listed(list, id)) {
+        panic!("{REQUIRE_TOOLS} requires `{id}`: {what}");
+    }
+    eprintln!("skipped: {what}");
+}
+
+/// Default-suite tests: the executable, or `None` after printing the
+/// standard skip line. Panics instead of skipping when `id` is listed in
+/// `SUSPECT_REQUIRE_TOOLS` (or it is `all`).
+///
+/// ```
+/// let Some(go) = suspect_codegen::toolchain::optional("go") else {
+///     return;
+/// };
+/// # let _ = go;
+/// ```
+#[must_use]
+pub fn optional(id: &str) -> Option<std::path::PathBuf> {
+    optional_with(std::env::var(REQUIRE_TOOLS).ok().as_deref(), id)
+}
+
+fn optional_with(required: Option<&str>, id: &str) -> Option<std::path::PathBuf> {
+    match gate(id) {
+        Ok(path) => Some(path),
+        Err(message) => {
+            skip_with(required, id, &message);
+            None
+        }
+    }
+}
+
+/// `#[ignore]` gates: the executable, or a panic with the guidance text. A
+/// gate someone asked for never passes without running.
+///
+/// # Panics
+/// When the tool is missing or too old.
+#[must_use]
+pub fn require(id: &str) -> std::path::PathBuf {
+    gate(id).unwrap_or_else(|message| panic!("{message}"))
 }
 
 /// Extracts the first capture group of the compiled regex.
@@ -555,6 +632,35 @@ mod tests {
             find_in_install_dir(&root.path().join("maven"), "none"),
             None
         );
+    }
+
+    #[test]
+    fn require_tools_lists_ids_or_all() {
+        assert!(listed("bun, node,python", "node"));
+        assert!(listed("all", "dotnet"));
+        assert!(!listed("bun,node", "python"));
+        assert!(!listed("", "go"));
+    }
+
+    #[test]
+    #[should_panic(expected = "SUSPECT_REQUIRE_TOOLS requires `definitely-not-a-tool`")]
+    fn optional_panics_instead_of_skipping_when_all_tools_are_required() {
+        let _ = optional_with(Some("all"), "definitely-not-a-tool");
+    }
+
+    #[test]
+    fn optional_skips_when_the_tool_is_not_required() {
+        assert_eq!(
+            optional_with(Some("bun,node"), "definitely-not-a-tool"),
+            None
+        );
+        assert_eq!(optional_with(None, "definitely-not-a-tool"), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown tool id")]
+    fn require_panics_with_the_guidance_text() {
+        let _ = require("definitely-not-a-tool");
     }
 
     #[test]
