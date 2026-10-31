@@ -608,7 +608,7 @@ Options:
       --message-broker <DIR>  Message broker directory for Arazzo 1.1 AsyncAPI steps: `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl` collects what the workflow published
       --credentials <FILE>    Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `test.credentials` and `SUSPECT_CREDENTIALS` override it
       --journal <FILE>        Write the journal to this file (append) instead of stdout
-      --inputs <FILE>         JSON object file of workflow inputs, applied before `--input` pairs (which override it)
+      --inputs <FILE>         JSON or YAML object file of workflow inputs, applied before `--input` pairs (which override it)
   -h, --help                  Print help (see more with '--help')
 ```
 
@@ -633,7 +633,7 @@ Options:
       --duration <DURATION>         Profile-less run: phase length (`30s`, `2m`)
       --max-vus <MAX_VUS>           Cap on concurrently running users (arrivals beyond it are skipped)
       --input <KEY=VALUE>           Workflow input binding `key=value` applied to every scenario; repeatable
-      --inputs <FILE>               JSON object file of workflow inputs applied to every scenario
+      --inputs <FILE>               JSON or YAML object file of workflow inputs applied to every scenario
       --credentials <FILE>          Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `SUSPECT_CREDENTIALS` overrides. Every virtual user shares one token cache
       --validate-responses          Also validate every response body against the schema the operation declares for its status; a violation counts as a contract failure. Off by default: it costs a schema compile per response on the generator
       --seed <SEED>                 RNG seed for reproducible scenario selection, pools and jitter
@@ -720,7 +720,7 @@ Arguments:
 
 Options:
       --preset <PRESET>      Shipped documentation preset [possible values: docs-md]
-      --manifest <MANIFEST>  Custom gen.toml manifest (templates resolved relative to it)
+      --manifest <MANIFEST>  Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json` (templates resolved relative to it)
   -o, --out <OUT>            Output root directory [default: gen-out]
       --diff                 Print unified diffs without writing files; exit 1 when output or ownership drifts
       --owner <OWNER>        Stable logical owner when sharing an output root across generation streams
@@ -800,7 +800,7 @@ Options:
       --compatibility-profile <COMPATIBILITY_PROFILE>
           Explicit versioned source interpretation (repeatable); ordinary OpenAPI semantics remain the default, independently of native feature support [possible values: legacy-binary-string-v1, oas30-nullable-in-3.1-v1, colon-path-parameters-v1, schemaless-stream-events-v1, all-of-scoped-mode-v1]
       --defaults <FILE>
-          Generation options file: a JSON document holding `compatibility_profiles`, `credential_env` and `sdk_defaults` (the same schema `codegen-session` accepts). Flag-declared compatibility profiles are added on top
+          Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding `compatibility_profiles`, `credential_env` and `sdk_defaults` (the same schema `codegen-session` accepts). Flag-declared compatibility profiles are added on top
   -o, --out <OUT>
           Output root for generated artifacts. Defaults to `.suspect.yaml`'s `codegen.out`, then `codegen-out`
       --check
@@ -829,9 +829,9 @@ Options:
       --insecure-test-origin <INSECURE_TEST_ORIGIN>
           Numeric-loopback origin from an explicitly acquired test manifest
       --mapping <MAPPING>
-          Closed, versioned Terraform lifecycle/state mapping JSON
+          Closed, versioned Terraform lifecycle/state mapping (JSON, or YAML by `.yaml`/`.yml` extension)
       --target-config <TARGET_CONFIG>
-          Provider/toolchain identity and pinned generated-Go-SDK dependency JSON
+          Provider/toolchain identity and pinned generated-Go-SDK dependency (JSON, or YAML by extension)
   -o, --out <OUT>
           Output root containing go/ and the dependent terraform/ artifacts [default: terraform-out]
       --check
@@ -860,9 +860,9 @@ Options:
       --insecure-test-origin <INSECURE_TEST_ORIGIN>
           Numeric-loopback origin from an explicitly acquired test manifest
       --mapping <MAPPING>
-          Closed, versioned application surface mapping JSON
+          Closed, versioned application surface mapping (JSON, or YAML by `.yaml`/`.yml` extension)
       --target-config <TARGET_CONFIG>
-          Package/toolchain identity, credential policy and runtime bounds JSON
+          Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
   -o, --out <OUT>
           Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
       --check
@@ -891,9 +891,9 @@ Options:
       --insecure-test-origin <INSECURE_TEST_ORIGIN>
           Numeric-loopback origin from an explicitly acquired test manifest
       --mapping <MAPPING>
-          Closed, versioned application surface mapping JSON
+          Closed, versioned application surface mapping (JSON, or YAML by `.yaml`/`.yml` extension)
       --target-config <TARGET_CONFIG>
-          Package/toolchain identity, credential policy and runtime bounds JSON
+          Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
   -o, --out <OUT>
           Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
       --check
@@ -925,7 +925,7 @@ Persistent canonical SDK generation with readonly preview and watch mode
 Usage: suspect codegen-session [OPTIONS] --config <CONFIG>
 
 Options:
-      --config <CONFIG>            JSON configuration file; relative source paths resolve from its directory
+      --config <CONFIG>            JSON or YAML (`.yaml`/`.yml`) configuration file; relative source paths resolve from its directory
       --out <OUT>                  Owned output root [default: sdk-out]
       --watch                      Preserve a process/session across input and configuration changes
       --check                      Check disk drift and conflicts without writing
@@ -992,7 +992,7 @@ Plan and execute SDK publishing across registries
 Usage: suspect release-publish [OPTIONS]
 
 Options:
-      --manifest <MANIFEST>  Release manifest (`release.json`) [default: release.json]
+      --manifest <MANIFEST>  Release manifest: a `suspect.project.json` with a `release` section, or a standalone `release.json` (deprecated). Defaults to `suspect.project.json` when it has `release`, then `release.json`
       --dry-run              Print the plan only (the default)
       --execute              Actually run the publish commands. Publishing is destructive on the registry, so it never happens without this flag
       --resume               Resume: skip targets already recorded as published in the state file
@@ -1009,7 +1009,7 @@ Render the release manifest as a tag-triggered CI workflow
 Usage: suspect release-workflow [OPTIONS]
 
 Options:
-      --manifest <MANIFEST>  Release manifest (`release.json`) [default: release.json]
+      --manifest <MANIFEST>  Release manifest: a `suspect.project.json` with a `release` section, or a standalone `release.json` (deprecated). Defaults to `suspect.project.json` when it has `release`, then `release.json`
   -o, --output <OUTPUT>      Write the workflow here instead of stdout
   -h, --help                 Print help
 ```

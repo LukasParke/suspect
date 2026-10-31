@@ -34,10 +34,12 @@ pub struct TerraformArgs {
     /// Numeric-loopback origin from an explicitly acquired test manifest.
     #[arg(long, requires = "pins")]
     pub insecure_test_origin: Vec<String>,
-    /// Closed, versioned Terraform lifecycle/state mapping JSON.
+    /// Closed, versioned Terraform lifecycle/state mapping (JSON, or YAML by
+    /// `.yaml`/`.yml` extension).
     #[arg(long)]
     pub mapping: PathBuf,
-    /// Provider/toolchain identity and pinned generated-Go-SDK dependency JSON.
+    /// Provider/toolchain identity and pinned generated-Go-SDK dependency
+    /// (JSON, or YAML by extension).
     #[arg(long)]
     pub target_config: PathBuf,
     /// Output root containing go/ and the dependent terraform/ artifacts.
@@ -78,10 +80,10 @@ impl Diagnostic {
         }
     }
 
-    fn json(path: &Path, code: &str, error: serde_json::Error) -> Self {
+    fn json(path: &Path, code: &str, error: super::structured::Located) -> Self {
         let mut finding = Self::file(path, code, &error);
-        finding.line = error.line();
-        finding.col = error.column();
+        finding.line = error.line;
+        finding.col = error.col;
         finding
     }
 
@@ -112,20 +114,21 @@ struct Prepared {
 }
 
 fn prepare(args: &TerraformArgs) -> Result<Prepared, Vec<Diagnostic>> {
-    let mapping = std::fs::read_to_string(&args.mapping).map_err(|error| {
+    let mapping = std::fs::read(&args.mapping).map_err(|error| {
         vec![Diagnostic::file(
             &args.mapping,
             "terraform-mapping-input",
             error,
         )]
     })?;
-    let mapping = terraform::parse_mapping(&mapping).map_err(|error| {
-        vec![Diagnostic::json(
-            &args.mapping,
-            "terraform-mapping-input",
-            error,
-        )]
-    })?;
+    let mapping = super::structured::parse_with(&args.mapping, &mapping, terraform::parse_mapping)
+        .map_err(|error| {
+            vec![Diagnostic::json(
+                &args.mapping,
+                "terraform-mapping-input",
+                error,
+            )]
+        })?;
     let config = std::fs::read(&args.target_config).map_err(|error| {
         vec![Diagnostic::file(
             &args.target_config,
@@ -133,13 +136,14 @@ fn prepare(args: &TerraformArgs) -> Result<Prepared, Vec<Diagnostic>> {
             error,
         )]
     })?;
-    let config: terraform::TargetConfig = serde_json::from_slice(&config).map_err(|error| {
-        vec![Diagnostic::json(
-            &args.target_config,
-            "terraform-target-input",
-            error,
-        )]
-    })?;
+    let config: terraform::TargetConfig = super::structured::parse(&args.target_config, &config)
+        .map_err(|error| {
+            vec![Diagnostic::json(
+                &args.target_config,
+                "terraform-target-input",
+                error,
+            )]
+        })?;
     let input = match (&args.spec, &args.pins) {
         (Some(path), None) => Input::File { path: path.clone() },
         (None, Some(manifest)) => Input::Pinned {

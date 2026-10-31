@@ -2208,6 +2208,9 @@ dependencies = [
  "serde_json",
  "suspect-artifact",
  "suspect-ir",
+ "suspect-low",
+ "suspect-source",
+ "suspect-syntax",
  "tempfile",
  "unicode-ident",
 ]

@@ -127,10 +127,12 @@ pub struct ApplicationArgs {
     /// Numeric-loopback origin from an explicitly acquired test manifest.
     #[arg(long, requires = "pins")]
     pub insecure_test_origin: Vec<String>,
-    /// Closed, versioned application surface mapping JSON.
+    /// Closed, versioned application surface mapping (JSON, or YAML by
+    /// `.yaml`/`.yml` extension).
     #[arg(long)]
     pub mapping: PathBuf,
-    /// Package/toolchain identity, credential policy and runtime bounds JSON.
+    /// Package/toolchain identity, credential policy and runtime bounds
+    /// (JSON, or YAML by extension).
     #[arg(long)]
     pub target_config: PathBuf,
     /// Output root owning the application and its embedded generated SDK
@@ -184,10 +186,10 @@ impl Diagnostic {
         }
     }
 
-    fn json(path: &Path, code: String, error: serde_json::Error) -> Self {
+    fn json(path: &Path, code: String, error: super::structured::Located) -> Self {
         let mut finding = Self::file(path, code, &error);
-        finding.line = error.line();
-        finding.col = error.column();
+        finding.line = error.line;
+        finding.col = error.col;
         finding
     }
 
@@ -219,7 +221,7 @@ enum Mapping {
 }
 
 fn parse_inputs(target: Target, args: &ApplicationArgs) -> Result<Mapping, Vec<Diagnostic>> {
-    let mapping = std::fs::read_to_string(&args.mapping).map_err(|error| {
+    let mapping = std::fs::read(&args.mapping).map_err(|error| {
         vec![Diagnostic::file(
             &args.mapping,
             target.code("mapping-input"),
@@ -249,12 +251,14 @@ fn parse_inputs(target: Target, args: &ApplicationArgs) -> Result<Mapping, Vec<D
     };
     Ok(match target {
         Target::Cli => Mapping::Cli(Box::new((
-            api_cli::parse_mapping(&mapping).map_err(mapping_error)?,
-            serde_json::from_slice(&config).map_err(config_error)?,
+            super::structured::parse_with(&args.mapping, &mapping, api_cli::parse_mapping)
+                .map_err(mapping_error)?,
+            super::structured::parse(&args.target_config, &config).map_err(config_error)?,
         ))),
         Target::Mcp => Mapping::Mcp(Box::new((
-            mcp::parse_mapping(&mapping).map_err(mapping_error)?,
-            serde_json::from_slice(&config).map_err(config_error)?,
+            super::structured::parse_with(&args.mapping, &mapping, mcp::parse_mapping)
+                .map_err(mapping_error)?,
+            super::structured::parse(&args.target_config, &config).map_err(config_error)?,
         ))),
     })
 }

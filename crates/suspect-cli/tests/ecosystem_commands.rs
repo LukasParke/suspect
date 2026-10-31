@@ -1142,3 +1142,104 @@ fn ci_lint_stage_fails_on_an_unrecognized_override_severity() {
         "the stage names the bad value: {stdout}"
     );
 }
+
+// --------------------------------------------------------- release publish
+
+const RELEASE_TARGETS: &str = r#"[{"backend": "typescript", "directory": "sdk/ts", "package": "@acme/sdk", "registry": "npm", "publish": "npm publish"}]"#;
+
+fn release_publish(root: &Path, extra: &[&str]) -> std::process::Output {
+    std::process::Command::new(binary())
+        .current_dir(root)
+        .args(["release-publish", "--format", "json"])
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn release_publish_reads_the_project_manifest_release_section() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("sdk/ts")).unwrap();
+    write(root, "sdk/ts/package.json", r#"{"version": "1.4.0"}"#);
+    write(
+        root,
+        "suspect.project.json",
+        &format!(
+            r#"{{"version": 1, "entry": "openapi.yaml", "release": {{"version": "1.4.0", "targets": {RELEASE_TARGETS}}}}}"#
+        ),
+    );
+    let out = release_publish(root, &[]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(!stderr.contains("deprecated"), "{stderr}");
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(plan["version"], "1.4.0");
+    assert_eq!(plan["ready"], 1);
+
+    // `project check` reads the same section and names a bad key.
+    write(
+        root,
+        "openapi.yaml",
+        "openapi: 3.1.0\ninfo: {title: t, version: '1'}\npaths: {}\n",
+    );
+    write(
+        root,
+        "suspect.project.json",
+        &format!(
+            r#"{{"version": 1, "entry": "openapi.yaml", "release": {{"version": "1.4.0", "targets": {RELEASE_TARGETS}, "tags": "v1"}}}}"#
+        ),
+    );
+    let check = std::process::Command::new(binary())
+        .current_dir(root)
+        .args(["project", "check"])
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&check.stdout),
+        String::from_utf8_lossy(&check.stderr)
+    );
+    assert!(!check.status.success(), "{text}");
+    assert!(
+        text.contains("project-release") && text.contains("unknown key `tags`"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_standalone_release_manifest_still_works_with_a_deprecation_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("sdk/ts")).unwrap();
+    write(root, "sdk/ts/package.json", r#"{"version": "1.4.0"}"#);
+    write(
+        root,
+        "release.json",
+        &format!(r#"{{"version": "1.4.0", "targets": {RELEASE_TARGETS}}}"#),
+    );
+    let out = release_publish(root, &[]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{stderr}");
+    assert!(
+        stderr.contains(
+            "warning: release.json: a standalone release manifest is deprecated and is not read from the next release; move its fields under `release` in suspect.project.json"
+        ),
+        "{stderr}"
+    );
+
+    // The YAML spelling of the same file.
+    write(
+        root,
+        "release.yaml",
+        "version: 1.4.0\ntargets:\n  - backend: typescript\n    directory: sdk/ts\n    package: '@acme/sdk'\n    registry: npm\n    publish: npm publish\n",
+    );
+    let out = release_publish(root, &["--manifest", "release.yaml"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(plan["targets"][0]["package"], "@acme/sdk");
+}

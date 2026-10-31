@@ -41,6 +41,28 @@
             },
             "type": "array"
           },
+          "options": {
+            "additionalProperties": false,
+            "description": "Generation options in the `codegen --defaults` schema (`compatibility_profiles`, `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both.",
+            "properties": {
+              "compatibility_profiles": {
+                "description": "Interpretation profiles applied to the source (`--compatibility-profile`).",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "credential_env": {
+                "description": "Credential environment variable mapping (`codegen --defaults` schema).",
+                "type": "object"
+              },
+              "sdk_defaults": {
+                "description": "SDK defaults: pagination, OAuth lifecycle (`codegen --defaults` schema).",
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
           "out": {
             "default": "sdk",
             "description": "Output root, relative to the manifest.",
@@ -241,6 +263,77 @@
           "type": "object"
         }
       },
+      "type": "object"
+    },
+    "release": {
+      "additionalProperties": false,
+      "description": "SDK release: the version every target carries and how each is published (`release-publish`, `release-workflow`). Replaces a standalone `release.json`.",
+      "properties": {
+        "tag": {
+          "description": "The tag that triggers the release workflow; `v` plus the version when unset.",
+          "type": "string"
+        },
+        "targets": {
+          "description": "SDK publish targets, in manifest order.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "backend": {
+                "description": "Backend id (`typescript`, `python`, ...).",
+                "type": "string"
+              },
+              "depends_on": {
+                "description": "Backends that must publish first.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "directory": {
+                "description": "Generated package directory, relative to the manifest.",
+                "type": "string"
+              },
+              "package": {
+                "description": "Native package identity.",
+                "type": "string"
+              },
+              "publish": {
+                "description": "Exact publish command, run in `directory`.",
+                "type": "string"
+              },
+              "registry": {
+                "description": "Registry id (`npm`, `pypi`, `maven-central`, ...).",
+                "type": "string"
+              },
+              "version": {
+                "description": "This target's version, when it differs from the release version.",
+                "type": "string"
+              },
+              "version_skew_reason": {
+                "description": "Why this target's version differs from the release version.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "backend",
+              "directory",
+              "package",
+              "registry",
+              "publish"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "version": {
+          "description": "The release version every target must carry.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "targets"
+      ],
       "type": "object"
     },
     "tests": {

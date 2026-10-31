@@ -63,7 +63,9 @@ pub fn generate(
                 "suspect-gen:custom".into(),
             )
         }
-        (None, None) => anyhow::bail!("provide --preset <name> or --manifest <gen.toml>"),
+        (None, None) => {
+            anyhow::bail!("provide --preset <name> or --manifest <gen.toml|gen.yaml|gen.json>")
+        }
     };
 
     let outcomes = suspect_gen::render_manifest_owned(

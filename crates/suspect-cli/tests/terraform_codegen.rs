@@ -18,6 +18,81 @@ fn fixture(root: &Path) {
     }
 }
 
+/// Writes `from` (JSON) as block-style YAML at `to`.
+fn yaml_copy(root: &Path, from: &str, to: &str) {
+    let doc = suspect_low::LowDoc::parse(
+        Uri::parse("mem://fixture.json").unwrap(),
+        suspect_source::Source::from_vec(std::fs::read(root.join(from)).unwrap()),
+    );
+    let yaml = suspect_overlay::Value::from_node(doc.root()).to_yaml();
+    assert!(!yaml.trim_start().starts_with('{'), "{yaml}");
+    std::fs::write(root.join(to), yaml).unwrap();
+}
+
+#[test]
+fn yaml_mapping_and_target_config_generate_what_json_does() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    fixture(root);
+    yaml_copy(root, "mapping.json", "mapping.yaml");
+    yaml_copy(root, "target.json", "target.yml");
+    let from_json = generate(root, &[], 0);
+    let from_yaml = run(
+        root,
+        &[
+            "codegen-terraform",
+            "openapi.json",
+            "--mapping",
+            "mapping.yaml",
+            "--target-config",
+            "target.yml",
+            "--out",
+            "generated-yaml",
+            "--format",
+            "json",
+        ],
+        0,
+    );
+    assert_eq!(from_yaml["status"], "generated");
+    assert_eq!(from_yaml["operations"], from_json["operations"]);
+    assert_eq!(from_yaml["sdkDependency"], from_json["sdkDependency"]);
+    assert_eq!(
+        std::fs::read_to_string(root.join("generated-yaml/terraform/go.mod")).ok(),
+        std::fs::read_to_string(root.join("generated/terraform/go.mod")).ok()
+    );
+
+    // A schema error in YAML names the field, without a position in the
+    // converted JSON text.
+    std::fs::write(root.join("bad.yaml"), "unexpected_key: 1\n").unwrap();
+    let rejected = run(
+        root,
+        &[
+            "codegen-terraform",
+            "openapi.json",
+            "--mapping",
+            "mapping.yaml",
+            "--target-config",
+            "bad.yaml",
+            "--out",
+            "generated-bad",
+            "--format",
+            "json",
+        ],
+        1,
+    );
+    let finding = rejected["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|finding| finding["code"] == "terraform-target-input")
+        .unwrap_or_else(|| panic!("{rejected:#?}"));
+    assert!(finding["file"].as_str().unwrap().ends_with("bad.yaml"));
+    assert_eq!(finding["line"], 1);
+    let message = finding["message"].as_str().unwrap();
+    assert!(message.contains("unexpected_key"), "{message}");
+    assert!(!message.contains(" at line "), "{message}");
+}
+
 fn run(root: &Path, args: &[&str], expected: i32) -> Value {
     let output = Command::new(env!("CARGO_BIN_EXE_suspect"))
         .current_dir(root)

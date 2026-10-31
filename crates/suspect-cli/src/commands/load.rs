@@ -57,7 +57,7 @@ pub struct LoadArgs {
     /// Workflow input binding `key=value` applied to every scenario; repeatable.
     #[arg(long = "input", value_name = "KEY=VALUE")]
     pub input_pairs: Vec<String>,
-    /// JSON object file of workflow inputs applied to every scenario.
+    /// JSON or YAML object file of workflow inputs applied to every scenario.
     #[arg(long = "inputs", value_name = "FILE")]
     pub inputs_file: Option<PathBuf>,
     /// Credentials file for the security schemes the workflows exercise.

@@ -19,7 +19,8 @@ use suspect_codegen::{
 #[derive(Debug, Args)]
 /// Persistent multi-backend generation and readonly preview options.
 pub struct SessionArgs {
-    /// JSON configuration file; relative source paths resolve from its directory.
+    /// JSON or YAML (`.yaml`/`.yml`) configuration file; relative source
+    /// paths resolve from its directory.
     #[arg(long)]
     pub config: PathBuf,
     /// Owned output root.
@@ -86,7 +87,7 @@ pub(super) fn read_config(
         "configuration exceeds 4 MiB"
     );
     let config: Configuration =
-        serde_json::from_slice(&bytes).context("invalid SDK session configuration")?;
+        super::structured::parse(path, &bytes).context("invalid SDK session configuration")?;
     let relative = |value: PathBuf| {
         if value.is_absolute() {
             value

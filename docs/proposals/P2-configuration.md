@@ -932,6 +932,35 @@ Each step leaves `main` green and shippable.
    `gen.yaml`. Files: `commands/{publish,codegen_cmd,codegen_session,terraform_cmd,application_cmd,generate}.rs`,
    `suspect-gen/src/orchestrate.rs`. Tests: one YAML fixture per input in
    the existing `crates/suspect-cli/tests/*` suites. 1.5 days.
+   **Done.** The shared reader is `cli/src/commands/structured.rs`
+   (`.yaml`/`.yml` by extension, `LowDoc` -> `Value::to_json` -> the same
+   serde parser). It serves `codegen --defaults`, `codegen-session --config`,
+   `--mapping`/`--target-config` of `codegen-terraform`/`-cli`/`-mcp`,
+   `test`/`load --inputs`, and the release manifest. A YAML syntax error
+   carries the YAML position; a schema error in YAML is reported at 1:1
+   without serde's position, which would point into the converted text.
+   `release-publish`/`release-workflow --manifest` became optional: the
+   default is `suspect.project.json` when it has `release` (or no
+   `release.json` exists), then `release.json`. A document with `release`
+   or `entry` is read as a project manifest; anything else is a standalone
+   release manifest and prints `warning: <path>: a standalone release
+   manifest is deprecated and is not read from the next release; ...`.
+   The `release` section is closed (unknown keys are errors, from the
+   `RELEASE_FIELDS`/`RELEASE_TARGET_FIELDS` tables); a standalone file
+   still ignores unknown keys. `project check` reports a bad `release`
+   section as `project-release`. `codegen[].options` merges with the
+   flat `compatibility_profiles`/`credential_env`/`sdk_defaults` keys,
+   which stay undeprecated; a key set both ways is an error. `gen
+   --manifest` reads `.yaml`/`.yml`/`.json` as an `output:` list of
+   `{template, target}` (closed, errors start with the line); the TOML
+   reader now rejects any table other than `[[output]]`. Deviations:
+   `release` is one `Kind::Object` row in `MANIFEST` rather than a
+   section with rows, because `release.targets` is a list of objects and
+   `Kind::Targets` is tied to the codegen fields; the JSON Schema spells
+   it out from the two release tables, and the editor checks only that it
+   is an object. Not converted: `gateway --scenario` (left for the P3 exit
+   path work in the same file) and `.suspect/credentials.json` (discovered
+   by name in `suspect-test`; the Non-goals keep its format).
 
 Total: about 8.5 days (steps 1-7: 7 days). The short version's "1-2 days
 for resolve + deletion" covered steps 1, 3 and 4 only and did not count

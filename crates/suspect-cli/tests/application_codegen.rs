@@ -93,6 +93,60 @@ fn operations(report: &Value) -> BTreeSet<&str> {
         .collect()
 }
 
+/// Writes `from` (JSON) as block-style YAML at `to`.
+fn yaml_copy(root: &Path, from: &str, to: &str) {
+    let doc = suspect_low::LowDoc::parse(
+        Uri::parse("mem://fixture.json").unwrap(),
+        suspect_source::Source::from_vec(std::fs::read(root.join(from)).unwrap()),
+    );
+    let yaml = suspect_overlay::Value::from_node(doc.root()).to_yaml();
+    assert!(!yaml.trim_start().starts_with('{'), "{yaml}");
+    std::fs::write(root.join(to), yaml).unwrap();
+}
+
+#[test]
+fn yaml_mapping_and_target_config_generate_what_json_does() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    for (command, name) in [("codegen-cli", "api-cli-v1"), ("codegen-mcp", "mcp-v1")] {
+        fixture(root, name);
+        yaml_copy(
+            root,
+            &format!("{name}/mapping.json"),
+            &format!("{name}/mapping.yaml"),
+        );
+        yaml_copy(
+            root,
+            &format!("{name}/target.json"),
+            &format!("{name}/target.yaml"),
+        );
+        let json_out = format!("{name}-json");
+        let yaml_out = format!("{name}-yaml");
+        let from_json = generate(root, command, name, &json_out, &[], 0);
+        let spec = format!("{name}/openapi.json");
+        let mapping = format!("{name}/mapping.yaml");
+        let target = format!("{name}/target.yaml");
+        let from_yaml = run(
+            root,
+            &[
+                command,
+                spec.as_str(),
+                "--mapping",
+                mapping.as_str(),
+                "--target-config",
+                target.as_str(),
+                "--out",
+                yaml_out.as_str(),
+                "--format",
+                "json",
+            ],
+            0,
+        );
+        assert_eq!(operations(&from_yaml), operations(&from_json), "{command}");
+        assert_eq!(artifacts(&from_yaml), artifacts(&from_json), "{command}");
+    }
+}
+
 #[test]
 fn explicit_cli_mapping_generates_one_owned_go_application_root() {
     let directory = tempfile::tempdir().unwrap();

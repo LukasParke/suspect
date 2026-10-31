@@ -307,3 +307,128 @@ fn suspect_yaml_codegen_defaults_fill_omitted_flags() {
         "the settings version lands in the generated package: {version}"
     );
 }
+
+#[test]
+fn a_yaml_defaults_file_reaches_the_generated_artifacts() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    write_api(root);
+    std::fs::write(
+        root.join("defaults.yaml"),
+        "credential_env:\n  version: v1\n  schemes:\n    apiKey: OPENROUTER_API_KEY\n",
+    )
+    .expect("defaults");
+    let output = run(
+        root,
+        &[
+            "codegen",
+            "api.yaml",
+            "--profile",
+            "python-http",
+            "--package-name",
+            "openrouter",
+            "--package-version",
+            "0.1.0",
+            "--import-name",
+            "openrouter",
+            "--defaults",
+            "defaults.yaml",
+            "-o",
+            "sdk",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output_text(&root.join("sdk")).contains("OPENROUTER_API_KEY"));
+
+    // A typo is rejected with the key named, as for JSON.
+    std::fs::write(root.join("typo.yml"), "credential_envs: {}\n").expect("typo");
+    let output = run(
+        root,
+        &[
+            "codegen",
+            "api.yaml",
+            "--profile",
+            "python-http",
+            "--package-name",
+            "openrouter",
+            "--defaults",
+            "typo.yml",
+            "-o",
+            "sdk-typo",
+        ],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid generation options typo.yml")
+            && stderr.contains("credential_envs"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn manifest_codegen_options_reach_the_generated_artifacts() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    write_api(root);
+    let target = |options: Value| {
+        let mut target = json!({
+            "name": "sdk",
+            "profile": "python-http",
+            "package_name": "openrouter",
+            "package_version": "0.1.0",
+            "import_name": "openrouter",
+            "out": "build/sdk",
+            "options": options,
+        });
+        if let Some(extra) = target["options"].get("beside").cloned() {
+            target["options"].as_object_mut().unwrap().remove("beside");
+            target["credential_env"] = extra;
+        }
+        target
+    };
+    let manifest = |target: Value| {
+        json!({
+            "version": 1,
+            "name": "opts",
+            "entry": "api.yaml",
+            "publish": {"output": "build/spec.yaml"},
+            "codegen": [target]
+        })
+        .to_string()
+    };
+    let policy = serde_json::from_str::<Value>(POLICY).unwrap();
+    std::fs::write(
+        root.join("suspect.project.json"),
+        manifest(target(json!({"credential_env": policy}))),
+    )
+    .expect("manifest");
+    let output = run(root, &["project", "build", "--skip-tests"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output_text(&root.join("build/sdk")).contains("OPENROUTER_API_KEY"),
+        "`options.credential_env` lands in the generated SDK"
+    );
+
+    // The same key inside and beside `options` is ambiguous.
+    std::fs::write(
+        root.join("suspect.project.json"),
+        manifest(target(json!({"credential_env": policy, "beside": policy}))),
+    )
+    .expect("manifest");
+    let output = run(root, &["project", "check"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`credential_env` is set both in `options` and beside it"),
+        "{stderr}"
+    );
+}

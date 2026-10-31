@@ -73,21 +73,32 @@ pub struct CodegenTarget {
     pub generation: suspect_codegen::backend::GenerationOptions,
 }
 
-/// Lifts the `compatibility_profiles`/`credential_env`/`sdk_defaults`
-/// keys of one manifest codegen target into its
-/// [`GenerationOptions`](suspect_codegen::backend::GenerationOptions).
+/// Lifts the generation options of one manifest codegen target into its
+/// [`GenerationOptions`](suspect_codegen::backend::GenerationOptions): the
+/// `options` object (the `codegen --defaults` schema) plus the
+/// `compatibility_profiles`/`credential_env`/`sdk_defaults` keys beside it.
 ///
 /// # Errors
-/// Fails when a present key does not parse as generation options.
+/// Fails when `options` is not an object, a key is set both inside and
+/// beside it, or the keys do not parse as generation options.
 pub fn generation_options_from(
     entry: &serde_json::Value,
     index: usize,
 ) -> anyhow::Result<suspect_codegen::backend::GenerationOptions> {
-    // The three keys form one GenerationOptions document; lift whichever
-    // are present together.
-    let mut options_json = serde_json::Map::new();
+    // The keys form one GenerationOptions document; lift whichever are
+    // present together. Unknown keys inside `options` reach serde, which
+    // rejects them.
+    let mut options_json = match entry.get("options") {
+        None => serde_json::Map::new(),
+        Some(serde_json::Value::Object(map)) => map.clone(),
+        Some(_) => anyhow::bail!("codegen target #{index}: `options` must be an object"),
+    };
     for key in ["compatibility_profiles", "credential_env", "sdk_defaults"] {
         if let Some(value) = entry.get(key) {
+            anyhow::ensure!(
+                !options_json.contains_key(key),
+                "codegen target #{index}: `{key}` is set both in `options` and beside it"
+            );
             options_json.insert(key.to_owned(), value.clone());
         }
     }
@@ -231,6 +242,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
                         "compatibility_profiles",
                         "credential_env",
                         "sdk_defaults",
+                        "options",
                     ];
                     if let Some(map) = entry.as_object() {
                         for key in map.keys() {
@@ -405,6 +417,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
             let mut findings: Vec<Finding> = Vec::new();
             check_inputs(&project, &mut findings);
             check_config(&manifest, &project, &mut findings);
+            check_release(&manifest, &mut findings);
             report(&format!("project {}", project.name), &findings)
         }
         ProjectCmd::Build {
@@ -492,6 +505,28 @@ fn check_config(manifest: &Path, project: &ProjectManifest, findings: &mut Vec<F
                 ));
             }
         }
+    }
+}
+
+/// A `release` section parses as `release-publish` reads it.
+fn check_release(manifest: &Path, findings: &mut Vec<Finding>) {
+    let has_release = std::fs::read(manifest)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .is_some_and(|value| value.get("release").is_some());
+    if !has_release {
+        return;
+    }
+    if let Err(error) = crate::commands::publish::parse_manifest(manifest) {
+        findings.push(Finding {
+            file: path_label(manifest),
+            severity: Severity::Error,
+            code: "project-release".into(),
+            message: error.to_string(),
+            line: 1,
+            col: 1,
+            range: None,
+        });
     }
 }
 
