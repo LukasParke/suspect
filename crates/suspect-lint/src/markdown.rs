@@ -17,6 +17,45 @@ use suspect_low::{LowDoc, NodeRef, SpecFamily};
 use suspect_syntax::ScalarStyle;
 use suspect_syntax::{SNode, SyntaxKind};
 
+/// The markdown rule codes, at hint severity.
+#[must_use]
+pub fn rules() -> &'static [suspect_diag::RuleInfo] {
+    use suspect_diag::{CheckId, RuleInfo, Severity};
+    const RULES: &[RuleInfo] = &[
+        RuleInfo::new(
+            "md-heading-increment",
+            CheckId::Markdown,
+            Severity::Hint,
+            "MD001: heading levels increment by one",
+        ),
+        RuleInfo::new(
+            "md-single-h1",
+            CheckId::Markdown,
+            Severity::Hint,
+            "MD025: one top-level heading per description",
+        ),
+        RuleInfo::new(
+            "md-code-fence-language",
+            CheckId::Markdown,
+            Severity::Hint,
+            "MD040: fenced code blocks name a language",
+        ),
+        RuleInfo::new(
+            "md-bare-url",
+            CheckId::Markdown,
+            Severity::Hint,
+            "MD034: no bare URLs",
+        ),
+        RuleInfo::new(
+            "md-multiple-blank-lines",
+            CheckId::Markdown,
+            Severity::Hint,
+            "MD012: no multiple consecutive blank lines",
+        ),
+    ];
+    RULES
+}
+
 /// The fields the specifications define as CommonMark.
 pub const MARKDOWN_FIELDS: &[&str] = &["description", "summary"];
 

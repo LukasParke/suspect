@@ -83,9 +83,9 @@ pub fn tokens_result_id(tokens: &[SemanticToken]) -> String {
 
 /// Pulls the full diagnostic battery for one document.
 ///
-/// Runs exactly the push pipeline's battery (`diagnostics::compute_diagnostics`:
-/// syntax recovery errors, OAS semantic validation, lint, Arazzo checks) and
-/// stamps the result with a stable result id. Full-report mode: the items are
+/// Runs exactly the push pipeline's battery (`diagnostics::compute_diagnostics`,
+/// the `suspect_check` pass after policy) and stamps the result with a
+/// stable result id. Full-report mode: the items are
 /// always returned; the caller compares `previous_result_id` with the
 /// returned id to decide whether it may answer `unchanged` instead.
 #[must_use]

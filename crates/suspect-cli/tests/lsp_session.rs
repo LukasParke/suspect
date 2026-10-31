@@ -2121,10 +2121,12 @@ fn manifest_design_off_drops_api_design_findings_not_document_ones() {
             .any(|(code, _)| code == "security-server-https-only"),
         "a design-class finding must respect lint.design: off — got {findings:?}"
     );
+    // The lint rule `operation-operationId` is an alias; its finding is
+    // reported once, under the canonical code.
     assert!(
         findings
             .iter()
-            .any(|(code, _)| code == "operation-operationId"),
+            .any(|(code, _)| code == "oas-operation-missing-operationId"),
         "a document-class finding must survive lint.design: off — got {findings:?}"
     );
 }
@@ -2180,10 +2182,12 @@ fn manifest_rule_off_drops_that_rule_only() {
     editor.open(&path, &text);
     let findings = pull_findings(&editor, &url_of(&path));
 
+    // `operation-operationId` is an alias of the canonical
+    // missing-operationId code, so `off` drops that finding too.
     assert!(
-        !findings
-            .iter()
-            .any(|(code, _)| code == "operation-operationId"),
+        !findings.iter().any(|(code, _)| {
+            code == "operation-operationId" || code == "oas-operation-missing-operationId"
+        }),
         "lint.rules.<id>: off must drop the rule — got {findings:?}"
     );
     assert!(

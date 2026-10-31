@@ -41,7 +41,6 @@ pub mod keys;
 pub mod keyword_docs;
 mod latency;
 pub mod links;
-pub mod markdown;
 mod meaning;
 pub mod navigation;
 pub mod protocol;
@@ -278,12 +277,8 @@ impl Backend {
                 Ok(diags) => diags,
                 Err(_) => return,
             };
-            // The same severity floor the pull path applies. Publishing the
-            // unfiltered set was a pre-existing inconsistency — the editor's
-            // problem panel showed findings the configured floor suppressed —
-            // and caching the push's result made the pull serve it too.
-            let floor = config_files::floor(&policy.settings);
-            let diags = diagnostics::filter_at_least(diags, floor);
+            // Post-policy, floor included: the same set the pull paths
+            // serve, so caching the push's result answers the next pull.
             let id = pull::diagnostics_result_id(&diags);
             // Superseded while computing? Drop the stale result.
             let superseded = {
@@ -1435,9 +1430,6 @@ impl LanguageServer for Backend {
             };
             (doc.clone(), st.resolved.for_uri(&uri), st.cache_epoch())
         };
-        // The shared severity floor, applied identically in the editor and
-        // on the command line.
-        let floor = config_files::floor(&policy.settings);
         // Off the runtime, for the same reason as the push: this is seconds
         // of synchronous work, and holding a worker for that long stalls
         // every other request the editor has in flight.
@@ -1459,10 +1451,9 @@ impl LanguageServer for Backend {
         let Ok((_, items)) = id_and_items else {
             return Ok(full_report(None, Vec::new()));
         };
-        // The id names what the client is shown: computed after the floor,
-        // or a floor change alone would answer "unchanged" with the report
-        // the old floor produced.
-        let items = diagnostics::filter_at_least(items, floor);
+        // The id names what the client is shown: computed after policy
+        // (floor included), or a floor change alone would answer
+        // "unchanged" with the report the old floor produced.
         let id = pull::diagnostics_result_id(&items);
         {
             let mut st = self.state.write().await;
@@ -1527,11 +1518,8 @@ impl LanguageServer for Backend {
                 let Ok(url) = Url::parse(uri.as_str()) else {
                     continue;
                 };
-                // The same floor the push and document-pull paths apply;
-                // without it the workspace report re-adds every finding the
-                // configured `lint.min_severity` suppressed.
-                let floor = config_files::floor(&configs.for_uri(&uri).settings);
-                let diags = diagnostics::filter_at_least(diags, floor);
+                // Post-policy per document, as the push and document-pull
+                // paths are.
                 let id = pull::diagnostics_result_id(&diags);
                 if previous.get(uri.as_str()) == Some(&id) {
                     items.push(WorkspaceDocumentDiagnosticReport::Unchanged(

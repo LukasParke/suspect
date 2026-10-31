@@ -106,10 +106,7 @@ pub fn resolve_code_action(
     ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
     settings: &suspect_config::Settings,
 ) -> Option<CodeAction> {
-    let diags = crate::diagnostics::filter_at_least(
-        crate::diagnostics::compute_diagnostics(ws, &doc.low, settings),
-        crate::config_files::floor(settings),
-    );
+    let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, settings);
     let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), &diags);
     if edits.is_empty() {
         return None;
@@ -2169,7 +2166,11 @@ paths:
         let problems =
             crate::config_schema::problems(crate::config_schema::FileKind::Settings, &doc.low);
         assert_eq!(problems.len(), 2, "{problems:#?}");
-        let diagnostics = crate::config_schema::diagnostics(&doc.low);
+        let diagnostics: Vec<Diagnostic> =
+            crate::diagnostics::compute_diagnostics(None, &doc.low, &Default::default())
+                .into_iter()
+                .filter(|d| d.source.as_deref() == Some(crate::diagnostics::SOURCE))
+                .collect();
         assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
         assert!(
             diagnostics

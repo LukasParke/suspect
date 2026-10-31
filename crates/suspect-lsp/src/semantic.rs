@@ -223,11 +223,11 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                             // and VS Code gives the first token the win. A
                             // description with no constructs keeps the base
                             // token and its `documentation` modifier.
-                            let markdown = crate::markdown::MARKDOWN_FIELDS
+                            let markdown = suspect_lint::markdown::MARKDOWN_FIELDS
                                 .contains(&key_text.as_str())
                                 .then(|| {
-                                    crate::markdown::MarkdownField::new(vc).map(|field| {
-                                        let constructs = crate::markdown::constructs(&field);
+                                    suspect_lint::markdown::MarkdownField::new(vc).map(|field| {
+                                        let constructs = suspect_lint::markdown::constructs(&field);
                                         (field, constructs)
                                     })
                                 })
@@ -237,12 +237,12 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                             {
                                 for (range, construct) in constructs {
                                     let ty = match construct {
-                                        crate::markdown::Construct::Heading => MD_HEADING,
-                                        crate::markdown::Construct::Emphasis => MD_EMPHASIS,
-                                        crate::markdown::Construct::Strong => MD_STRONG,
-                                        crate::markdown::Construct::Link => MD_LINK,
-                                        crate::markdown::Construct::CodeSpan => MD_CODE,
-                                        crate::markdown::Construct::CodeBlock => MD_BLOCK,
+                                        suspect_lint::markdown::Construct::Heading => MD_HEADING,
+                                        suspect_lint::markdown::Construct::Emphasis => MD_EMPHASIS,
+                                        suspect_lint::markdown::Construct::Strong => MD_STRONG,
+                                        suspect_lint::markdown::Construct::Link => MD_LINK,
+                                        suspect_lint::markdown::Construct::CodeSpan => MD_CODE,
+                                        suspect_lint::markdown::Construct::CodeBlock => MD_BLOCK,
                                     };
                                     // These tokens live inside a documentation
                                     // field; they carry the modifier that
@@ -269,7 +269,7 @@ fn collect_tokens_in(doc: &OpenDoc, window: Option<std::ops::Range<usize>>) -> V
                                 // content tokenized as that language — the
                                 // ```json example in a description
                                 // highlights like the JSON it is.
-                                for block in crate::markdown::fenced_blocks(field) {
+                                for block in suspect_lint::markdown::fenced_blocks(field) {
                                     if !matches!(block.language.as_str(), "json" | "yaml" | "yml") {
                                         continue;
                                     }

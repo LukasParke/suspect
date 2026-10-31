@@ -75,7 +75,7 @@ fn measure(operations: usize) -> Vec<Sample> {
     if std::env::var_os("SUSPECT_LATENCY_FULL").is_some() {
         let started = Instant::now();
         let cfg = suspect_config::Settings::default();
-        let diagnostics = crate::diagnostics::compute_diagnostics_raw(None, &low, &cfg);
+        let diagnostics = crate::diagnostics::compute_diagnostics(None, &low, &cfg);
         samples.push(Sample {
             label: "diagnostics",
             millis: started.elapsed().as_secs_f64() * 1000.0,

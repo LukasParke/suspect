@@ -8,6 +8,12 @@
 //!
 //! The typed [`crate::Settings`] struct is kept in step with [`SETTINGS`]
 //! by a round-trip test (`tests/resolve.rs`), not by the compiler.
+//!
+//! [`problems()`] checks a configuration document against the tables.
+
+pub mod problems;
+
+pub use problems::{FileKind, Problem, document_problems, kind_for, kind_of, problems};
 
 /// What a key accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

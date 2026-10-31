@@ -1,0 +1,320 @@
+//! The builtin checks, one function per producer, each mapping its own
+//! finding type onto [`suspect_diag::Finding`].
+
+pub mod extensions;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use suspect_diag::{CheckId, Finding, Severity};
+use suspect_low::{LowDoc, SpecFamily};
+use suspect_ref::Workspace;
+
+use crate::Policy;
+
+/// The code a YAML/JSON syntax error carries, in the CLI and the editor
+/// (the editor's old `syntax` is an alias).
+pub const SYNTAX_CODE: &str = "syntax-error";
+
+/// What a check pass runs against.
+#[derive(Clone, Copy)]
+pub struct Context<'a> {
+    /// The loaded workspace; OAS 3.x validation and load-profile workflow
+    /// checks need it and are skipped without one.
+    pub workspace: Option<&'a Arc<Workspace>>,
+    /// The policy the findings will be filtered by; checks read only the
+    /// inputs that change what they detect (ruleset, strict format,
+    /// extension schemas, which checks run).
+    pub policy: &'a Policy,
+}
+
+/// Every builtin check for one document, before policy. Sync and CPU-only,
+/// so the editor can run it on a blocking thread.
+///
+/// Checks route by [`LowDoc::sniff_family`]. A document with syntax errors
+/// still gets every check, as the editor has always run them.
+#[must_use]
+pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
+    let policy = cx.policy;
+    let on = |check: CheckId| policy.checks.contains(check);
+    let mut out = Vec::new();
+    if on(CheckId::Syntax) {
+        out.extend(syntax(doc));
+    }
+    if on(CheckId::Config) {
+        out.extend(config(doc));
+    }
+    if let Some(ws) = cx.workspace
+        && (on(CheckId::Validate) || on(CheckId::Ref))
+    {
+        out.extend(validate(ws, doc, policy.strict_format));
+    }
+    if on(CheckId::Lint) && policy.lint_enabled() {
+        out.extend(lint(doc, &policy.linter));
+    }
+    if on(CheckId::Swagger) {
+        out.extend(swagger(doc));
+    }
+    if on(CheckId::Arazzo) {
+        out.extend(arazzo(doc));
+    }
+    if on(CheckId::Overlay) {
+        out.extend(overlay(doc));
+    }
+    if on(CheckId::Markdown) && policy.lint_enabled() {
+        out.extend(markdown(doc));
+    }
+    if on(CheckId::Extension) {
+        let root = cx.workspace.and_then(|ws| ws.root_path());
+        out.extend(extensions::check(doc, &policy.extensions, root));
+    }
+    if on(CheckId::LoadProfile) {
+        out.extend(load_profile(cx.workspace, doc));
+    }
+    out
+}
+
+/// Tree-sitter recovery errors from the parse.
+#[must_use]
+pub fn syntax(low: &LowDoc) -> Vec<Finding> {
+    low.syntax_errors()
+        .iter()
+        .map(|e| {
+            Finding::new(
+                CheckId::Syntax,
+                SYNTAX_CODE,
+                Severity::Error,
+                low.uri().clone(),
+                e.message.clone(),
+            )
+            .with_range(e.range.clone())
+        })
+        .collect()
+}
+
+/// `.suspect.yaml` and `suspect.project.json` against their schema; other
+/// documents yield nothing.
+#[must_use]
+pub fn config(low: &LowDoc) -> Vec<Finding> {
+    suspect_config::schema::document_problems(low)
+        .into_iter()
+        .map(|problem| {
+            let mut message = problem.message;
+            if let Some(suggestion) = &problem.suggestion {
+                message.push_str(&format!(" Did you mean `{suggestion}`?"));
+            }
+            Finding::new(
+                CheckId::Config,
+                problem.code,
+                Severity::Warning,
+                low.uri().clone(),
+                message,
+            )
+            .with_range(problem.range)
+        })
+        .collect()
+}
+
+const fn validate_severity(s: suspect_validate::Severity) -> Severity {
+    match s {
+        suspect_validate::Severity::Error => Severity::Error,
+        suspect_validate::Severity::Warning => Severity::Warning,
+        suspect_validate::Severity::Info => Severity::Info,
+    }
+}
+
+/// The check a validate code belongs to: `$ref` codes are [`CheckId::Ref`].
+fn validate_check(code: &str) -> CheckId {
+    crate::registry::builtin()
+        .info(code)
+        .map_or(CheckId::Validate, |info| info.check)
+}
+
+/// Semantic validation for OpenAPI 3.x documents (including `$ref`
+/// checks); other families yield nothing, and so does a document the
+/// typed model cannot open.
+#[must_use]
+pub fn validate(ws: &Arc<Workspace>, low: &LowDoc, strict_format: bool) -> Vec<Finding> {
+    if !matches!(
+        low.sniff_family(),
+        SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32
+    ) {
+        return Vec::new();
+    }
+    let session = suspect_oas::Session::new(Arc::clone(ws));
+    let Ok(api) = session.open(low.uri().as_str()) else {
+        return Vec::new();
+    };
+    let options = suspect_validate::ValidationOptions {
+        format_assertion: strict_format,
+    };
+    suspect_validate::validate_openapi_with(&api, &options)
+        .into_iter()
+        .map(|d| {
+            Finding::new(
+                validate_check(d.code),
+                d.code,
+                validate_severity(d.severity),
+                d.doc,
+                d.message,
+            )
+            .with_range(d.range)
+        })
+        .collect()
+}
+
+/// Spectral-style lint findings, at the severity the ruleset gives them.
+#[must_use]
+pub fn lint(low: &LowDoc, linter: &suspect_lint::Linter) -> Vec<Finding> {
+    linter
+        .run(low)
+        .into_iter()
+        .filter_map(|f| {
+            let severity = f.severity.to_diag()?;
+            let mut finding = Finding::new(
+                CheckId::Lint,
+                f.code.into_string(),
+                severity,
+                low.uri().clone(),
+                f.message,
+            )
+            .with_range(f.range);
+            finding.pointer = Some(f.path.to_string().into_boxed_str());
+            Some(finding)
+        })
+        .collect()
+}
+
+/// Swagger 2.0 semantic validation over the parse tree.
+#[must_use]
+pub fn swagger(low: &LowDoc) -> Vec<Finding> {
+    if low.sniff_family() != SpecFamily::Oas2 {
+        return Vec::new();
+    }
+    suspect_validate::validate_swagger_low(low)
+        .into_iter()
+        .map(|d| {
+            Finding::new(
+                CheckId::Swagger,
+                d.code,
+                validate_severity(d.severity),
+                low.uri().clone(),
+                d.message,
+            )
+            .with_range(d.range)
+        })
+        .collect()
+}
+
+/// Arazzo 1.0 structural and cross-reference validation.
+#[must_use]
+pub fn arazzo(low: &LowDoc) -> Vec<Finding> {
+    if low.sniff_family() != SpecFamily::Arazzo10 {
+        return Vec::new();
+    }
+    let doc = suspect_arazzo::ArazzoDoc::new(low);
+    suspect_arazzo::validate_arazzo(&doc)
+        .into_iter()
+        .map(|d| {
+            Finding::new(
+                CheckId::Arazzo,
+                d.code,
+                Severity::Error,
+                low.uri().clone(),
+                d.message,
+            )
+            .with_range(d.range)
+        })
+        .collect()
+}
+
+/// Overlay structure (`validate_overlay`). An overlay that does not parse
+/// as one (no `actions`, a bad target) yields nothing here; lint reports
+/// its shape.
+#[must_use]
+pub fn overlay(low: &LowDoc) -> Vec<Finding> {
+    if low.sniff_family() != SpecFamily::Overlay10 {
+        return Vec::new();
+    }
+    let Ok(doc) = suspect_overlay::OverlayDoc::parse(low) else {
+        return Vec::new();
+    };
+    let registry = crate::registry::builtin();
+    suspect_overlay::validate_overlay(&doc)
+        .into_iter()
+        .map(|d| {
+            let severity = registry
+                .info(d.code)
+                .map_or(Severity::Warning, |r| r.default);
+            Finding::new(
+                CheckId::Overlay,
+                d.code,
+                severity,
+                low.uri().clone(),
+                d.message,
+            )
+            .with_range(d.range)
+        })
+        .collect()
+}
+
+/// markdownlint-compatible rules over `description`/`summary` values, at
+/// hint severity.
+#[must_use]
+pub fn markdown(low: &LowDoc) -> Vec<Finding> {
+    suspect_lint::markdown::fields(low)
+        .into_iter()
+        .flat_map(|field| suspect_lint::markdown::lint_findings(&field))
+        .map(|f| {
+            Finding::new(
+                CheckId::Markdown,
+                f.code,
+                Severity::Hint,
+                low.uri().clone(),
+                f.message,
+            )
+            .with_range(f.range)
+        })
+        .collect()
+}
+
+/// Load profile (`suspectLoad: "1.0"`) structure; workflow ids are checked
+/// against the Arazzo document when the workspace has it loaded.
+#[must_use]
+pub fn load_profile(ws: Option<&Arc<Workspace>>, low: &LowDoc) -> Vec<Finding> {
+    if low.sniff_family() != SpecFamily::Load10 {
+        return Vec::new();
+    }
+    let path = low
+        .uri()
+        .as_path()
+        .unwrap_or_else(|| PathBuf::from("profile.load.yaml"));
+    let (profile, mut diags) = suspect_test::load::read_profile_lenient(low, &path);
+    if let (Some(ws), Some(arazzo)) = (ws, &profile.arazzo)
+        && let Ok(uri) = suspect_source::Uri::from_path(arazzo)
+        && let Some(handle) = ws.get(&uri)
+        && let Ok(plan) = suspect_test::compile_plan(handle.doc(), ws)
+    {
+        diags.extend(suspect_test::load::profile::check_against_plan(
+            &profile, &plan,
+        ));
+    }
+    diags
+        .into_iter()
+        .map(|d| {
+            let severity = if d.error {
+                Severity::Error
+            } else {
+                Severity::Warning
+            };
+            Finding::new(
+                CheckId::LoadProfile,
+                d.code,
+                severity,
+                low.uri().clone(),
+                d.message,
+            )
+            .with_range(d.range)
+        })
+        .collect()
+}

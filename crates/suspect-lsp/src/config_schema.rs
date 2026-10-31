@@ -5,291 +5,38 @@
 //! CLI, CI and the language server all read) and `suspect.project.json`
 //! (the project manifest). The tables are `suspect_config::schema`'s, the
 //! same rows the CLI parses with and the JSON Schemas are generated from,
-//! so hover, completion and validation here cannot disagree with them.
+//! so hover and completion here cannot disagree with them. Validation is
+//! `suspect_config::schema::problems`, run by the check pass.
 //!
 //! Everything keys off the document's *file name*, so a `.suspect.yaml`
 //! belonging to some unrelated tool never gets this treatment.
 
 use suspect_low::{LowDoc, NodeRef, ValueKind};
 use suspect_syntax::SyntaxKind;
-use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity, NumberOrString,
-};
+use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
 
 use crate::navigation::node_at;
 
-/// Which configuration file a document is, if it is one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileKind {
-    /// `.suspect.yaml`
-    Settings,
-    /// `suspect.project.json`
-    Project,
-}
-
-impl FileKind {
-    /// The document's own name, for titles and messages.
-    const fn display(self) -> &'static str {
-        match self {
-            Self::Settings => ".suspect.yaml",
-            Self::Project => "suspect.project.json",
-        }
-    }
-}
-
-/// Recognises suspect's configuration files by file name.
-///
-/// The settings names come from [`suspect_config::CONFIG_NAMES`] itself
-/// rather than a copy, so a new name in the loader cannot leave the editor
-/// validating a file the toolchain ignores — or skipping one it reads.
-#[must_use]
-pub fn kind_of(file_name: &str) -> Option<FileKind> {
-    if suspect_config::CONFIG_NAMES.contains(&file_name) {
-        return Some(FileKind::Settings);
-    }
-    match file_name {
-        "suspect.project.json" => Some(FileKind::Project),
-        _ => None,
-    }
-}
-
+pub use suspect_config::schema::problems::{
+    FileKind, Problem, TARGET_SCOPE, children, closest, kind_for, kind_of, problems,
+};
 pub use suspect_config::schema::{Kind, Setting as Field};
-use suspect_config::schema::{MANIFEST, SETTINGS, TARGET_FIELDS};
-
-/// The scope suffix used for a key inside a `codegen` target, so it cannot
-/// collide with the top-level `codegen` list.
-const TARGET_SCOPE: &str = "codegen[]";
-
-/// How many edits still count as a typo worth suggesting. Three covers
-/// `min_severty` → `min_severity` and `warn` → `warning` without offering a
-/// "did you mean" on every unknown key.
-const SUGGEST_EDITS: usize = 3;
-
-const fn table(kind: FileKind) -> &'static [Field] {
-    match kind {
-        FileKind::Settings => SETTINGS,
-        FileKind::Project => MANIFEST,
-    }
-}
 
 /// The field at a dot path, if the schema has one.
 #[must_use]
 pub fn lookup(kind: FileKind, path: &str) -> Option<&'static Field> {
-    if let Some(name) = path.strip_prefix(&format!("{TARGET_SCOPE}.")) {
-        return TARGET_FIELDS.iter().find(|f| f.path == name);
-    }
-    suspect_config::schema::lookup_in(table(kind), path).map(|found| found.setting)
-}
-
-/// The fields valid directly inside `scope` (`""` is the document root).
-#[must_use]
-pub fn children(kind: FileKind, scope: &str) -> Vec<&'static Field> {
-    if let Some(name) = scope.strip_prefix(TARGET_SCOPE) {
-        let _ = name;
-        return TARGET_FIELDS.iter().collect();
-    }
-    immediate(table(kind), scope)
+    suspect_config::schema::problems::field(kind, path)
 }
 
 /// The fields valid inside one `codegen` target, as paths from the root.
 #[must_use]
 pub fn target_children(scope: &str) -> Vec<&'static Field> {
-    let _ = scope;
-    TARGET_FIELDS.iter().collect()
-}
-
-fn immediate(table: &'static [Field], scope: &str) -> Vec<&'static Field> {
-    let prefix = if scope.is_empty() {
-        String::new()
-    } else {
-        format!("{scope}.")
-    };
-    table
-        .iter()
-        .filter(|f| {
-            f.path.len() > prefix.len()
-                && f.path.starts_with(&prefix)
-                && !f.path[prefix.len()..].contains('.')
-        })
-        .collect()
-}
-
-/// The closest known key name to `name` within `scope`, for "did you mean".
-#[must_use]
-pub fn closest(kind: FileKind, scope: &str, name: &str) -> Option<&'static str> {
-    let candidates = children(kind, scope);
-    candidates
-        .iter()
-        .filter_map(|f| f.path.rsplit('.').next())
-        .min_by_key(|candidate| distance(candidate, name))
-        .filter(|candidate| distance(candidate, name) <= SUGGEST_EDITS)
-}
-
-/// Plain Levenshtein distance; these are short configuration keys.
-fn distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut row: Vec<usize> = (0..=b.len()).collect();
-    for (i, ca) in a.iter().enumerate() {
-        let mut next = vec![i + 1];
-        for (j, cb) in b.iter().enumerate() {
-            let cost = usize::from(ca != cb);
-            next.push((row[j] + cost).min(row[j + 1] + 1).min(next[j] + 1));
-        }
-        row = next;
-    }
-    row[b.len()]
-}
-
-/// A configuration problem, in byte offsets so the caller converts them.
-#[derive(Debug, Clone)]
-pub struct Problem {
-    /// Byte range to underline.
-    pub range: std::ops::Range<usize>,
-    /// Human-readable message.
-    pub message: String,
-    /// A closer key to suggest, when the problem is a typo.
-    pub suggestion: Option<String>,
-}
-
-/// Checks a whole configuration document.
-///
-/// Reports only what the schema knows to be wrong: an unknown key, a value
-/// of the wrong kind, or a value outside an enumeration. It never reports a
-/// *missing* key — most keys are optional, and a report about an absent key
-/// is noise in an editor.
-#[must_use]
-pub fn problems(kind: FileKind, low: &LowDoc) -> Vec<Problem> {
-    let mut out = Vec::new();
-    check_mapping(kind, &low.root(), "", &mut out);
-    out
-}
-
-fn check_mapping(kind: FileKind, node: &NodeRef<'_>, scope: &str, out: &mut Vec<Problem>) {
-    if node.kind() != ValueKind::Object {
-        return;
-    }
-    let open_map = lookup(kind, scope).is_some_and(|f| matches!(f.kind, Kind::Map(_)));
-    for entry in node.entries() {
-        let path = join(scope, entry.key);
-        let Some(field) = lookup(kind, &path) else {
-            if open_map {
-                // A user-chosen map accepts any key.
-                continue;
-            }
-            out.push(Problem {
-                range: entry.key_node.byte_range(),
-                message: format!("`{}` is not a {} key.", entry.key, kind.display()),
-                suggestion: closest(kind, scope, entry.key).map(str::to_owned),
-            });
-            continue;
-        };
-        if let Some(found) = suspect_config::schema::lookup_in(table(kind), &path)
-            && let Some(alias) = found.alias
-        {
-            out.push(Problem {
-                range: entry.key_node.byte_range(),
-                message: format!("`{alias}` is deprecated; use `{}`.", field.path),
-                suggestion: None,
-            });
-        }
-        let Some(value) = entry.value else { continue };
-        if let Some(problem) = check_value(kind, &path, field, &value, entry.key_node.byte_range())
-        {
-            out.push(problem);
-        }
-        match field.kind {
-            Kind::Section => check_mapping(kind, &value, &path, out),
-            Kind::Targets => {
-                for target in value.items() {
-                    check_mapping(kind, &target, TARGET_SCOPE, out);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn check_value(
-    kind: FileKind,
-    path: &str,
-    field: &Field,
-    value: &NodeRef<'_>,
-    key_range: std::ops::Range<usize>,
-) -> Option<Problem> {
-    let value_kind = value.kind();
-    let shape_ok = match field.kind {
-        Kind::Bool => matches!(value_kind, ValueKind::Bool | ValueKind::Null),
-        Kind::Count | Kind::Port => matches!(value_kind, ValueKind::Int | ValueKind::Null),
-        Kind::Str
-        | Kind::Path
-        | Kind::Url
-        | Kind::Enum(_)
-        | Kind::Severity
-        | Kind::PolicySeverity => matches!(value_kind, ValueKind::Str | ValueKind::Null),
-        Kind::List | Kind::Targets => matches!(value_kind, ValueKind::Array | ValueKind::Null),
-        Kind::Section | Kind::Map(_) | Kind::Object => {
-            matches!(value_kind, ValueKind::Object | ValueKind::Null)
-        }
-    };
-    if !shape_ok {
-        return Some(Problem {
-            range: key_range,
-            message: format!(
-                "`{}` expects {} but found {found}.",
-                display_path(kind, path),
-                field.kind.type_name(),
-                found = describe(value_kind)
-            ),
-            suggestion: None,
-        });
-    }
-    if field.values().is_empty() {
-        return None;
-    }
-    // A non-string value already failed the shape check above, so there is
-    // nothing to compare against an enumeration.
-    let actual = value.as_str()?;
-    if field.values().contains(&actual) {
-        return None;
-    }
-    let suggestion = field
-        .values()
-        .iter()
-        .copied()
-        .min_by_key(|candidate| distance(candidate, actual))
-        .filter(|candidate| distance(candidate, actual) <= SUGGEST_EDITS)
-        .map(str::to_owned);
-    Some(Problem {
-        range: key_range,
-        message: format!(
-            "{actual} is not a valid {display} — expected one of: {allowed}.",
-            display = display_path(kind, path),
-            // Plain list, no inner backticks: nesting them inside the
-            // message's own quoting reads as one mangled word.
-            allowed = field.values().join(", "),
-        ),
-        suggestion,
-    })
-}
-
-const fn describe(kind: ValueKind) -> &'static str {
-    match kind {
-        ValueKind::Bool => "a boolean",
-        ValueKind::Int => "an integer",
-        ValueKind::Float => "a number",
-        ValueKind::Str => "a string",
-        ValueKind::Object => "a section",
-        ValueKind::Array => "a list",
-        ValueKind::Null => "nothing",
-    }
+    children(FileKind::Project, scope)
 }
 
 /// How a path reads in a message: `codegen[]` is noise in prose.
-fn display_path(kind: FileKind, path: &str) -> String {
-    let _ = kind;
-    path.strip_prefix(&format!("{TARGET_SCOPE}."))
-        .map_or_else(|| path.to_owned(), str::to_owned)
+fn display_path(path: &str) -> String {
+    suspect_config::schema::problems::display_path(path)
 }
 
 /// A mapping key's text, without the quotes a JSON document puts around it.
@@ -417,7 +164,7 @@ pub fn hover_markdown(kind: FileKind, field: &Field) -> String {
     };
     let mut out = format!("### `{name}`");
     if !field.path.is_empty() {
-        out.push_str(&format!("\n\n*`{}`*", display_path(kind, field.path)));
+        out.push_str(&format!("\n\n*`{}`*", display_path(field.path)));
     }
     out.push_str(&format!("\n\n{}", field.doc));
     out.push_str("\n\n| Field | Value |\n|---|---|");
@@ -444,7 +191,7 @@ pub fn hover_markdown(kind: FileKind, field: &Field) -> String {
 /// section header still says something useful.
 fn closest_field(kind: FileKind, path: &str) -> Option<&'static Field> {
     let mut best: Option<&'static Field> = None;
-    for field in table(kind) {
+    for field in kind.table() {
         if field.path.is_empty() {
             continue;
         }
@@ -472,7 +219,7 @@ pub fn completions(kind: FileKind, low: &LowDoc, offset: usize) -> Vec<Completio
             .iter()
             .map(|value| CompletionItem {
                 label: (*value).to_owned(),
-                detail: Some(format!("{} — {}", field.doc, display_path(kind, &path))),
+                detail: Some(format!("{} — {}", field.doc, display_path(&path))),
                 kind: Some(CompletionItemKind::VALUE),
                 sort_text: Some(format!("0{value}")),
                 ..CompletionItem::default()
@@ -516,61 +263,6 @@ pub fn completions(kind: FileKind, low: &LowDoc, offset: usize) -> Vec<Completio
         .collect()
 }
 
-/// The schema's problems as LSP diagnostics, ready to merge into a pull
-/// report.
-#[must_use]
-pub fn diagnostics(low: &LowDoc) -> Vec<Diagnostic> {
-    let Some(kind) = kind_for(low) else {
-        return Vec::new();
-    };
-    let inner = low.inner();
-    let (bytes, li) = (inner.bytes(), inner.line_index());
-    // Policy sections in the manifest are deprecated (option A): said on
-    // the key, with the same text the CLI prints.
-    let deprecated: Vec<Diagnostic> = match kind {
-        FileKind::Project => low
-            .root()
-            .entries()
-            .into_iter()
-            .filter(|e| matches!(e.key, "lint" | "validate" | "editor"))
-            .map(|e| Diagnostic {
-                range: crate::state::lsp_range(bytes, li, e.key_node.byte_range()),
-                severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String("config-manifest-policy".to_owned())),
-                source: Some("suspect".to_owned()),
-                message: suspect_config::file::manifest_policy_warning(e.key),
-                ..Diagnostic::default()
-            })
-            .collect(),
-        FileKind::Settings => Vec::new(),
-    };
-    problems(kind, low)
-        .into_iter()
-        .map(|problem| {
-            let mut message = problem.message;
-            if let Some(suggestion) = &problem.suggestion {
-                message.push_str(&format!(" Did you mean `{suggestion}`?"));
-            }
-            Diagnostic {
-                range: crate::state::lsp_range(bytes, li, problem.range),
-                severity: Some(DiagnosticSeverity::WARNING),
-                code: Some(NumberOrString::String("suspect.config".to_owned())),
-                source: Some("suspect".to_owned()),
-                message,
-                ..Diagnostic::default()
-            }
-        })
-        .chain(deprecated)
-        .collect()
-}
-
-/// Which configuration flavour a document is, if any.
-#[must_use]
-pub fn kind_for(low: &LowDoc) -> Option<FileKind> {
-    let path = low.uri().as_path()?;
-    kind_of(path.file_name()?.to_str()?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,80 +293,6 @@ docs:
 codegen:
   package_version: 1.1.1
 ";
-
-    #[test]
-    fn recognises_only_suspects_own_files() {
-        for name in suspect_config::CONFIG_NAMES {
-            assert_eq!(kind_of(name), Some(FileKind::Settings), "{name}");
-        }
-        assert_eq!(kind_of("suspect.project.json"), Some(FileKind::Project));
-        assert_eq!(kind_of("openapi.yaml"), None);
-        assert_eq!(kind_of(".github/workflows/ci.yaml"), None);
-    }
-
-    #[test]
-    fn every_key_in_the_real_settings_file_is_known() {
-        let low = doc(".suspect.yaml", SETTINGS_YAML);
-        let problems = problems(FileKind::Settings, &low);
-        assert!(problems.is_empty(), "{problems:#?}");
-    }
-
-    #[test]
-    fn every_key_in_the_real_manifest_is_known() {
-        // The manifest the Plex repository actually ships.
-        let text = r#"{
-  "version": 1,
-  "name": "plex-api-spec",
-  "entry": "plex-api-spec.yaml",
-  "publish": {"output": ".suspect/spec.yaml", "profiles": {"cloud": ["p.yaml"]}},
-  "contract": {"output": ".suspect/contract"},
-  "lint": {"min_severity": "warning"},
-  "docs": {"style": "sveltekit", "output": ".suspect/docs"},
-  "codegen": [{"name": "typescript", "profile": "typescript-http",
-    "package_name": "@p/p", "package_version": "1.1.1", "out": "out",
-    "operation_id": ["a", "b"]}],
-  "tests": {"arazzo": ["w.yaml"], "base_url": "http://localhost:32400"}
-}"#;
-        let low = doc("suspect.project.json", text);
-        let found = problems(FileKind::Project, &low);
-        assert!(found.is_empty(), "{found:#?}");
-    }
-
-    #[test]
-    fn an_unknown_key_is_reported_with_a_suggestion() {
-        let low = doc(
-            ".suspect.yaml",
-            "lint:\n  min_severity: warning\n  min_severty: error\n",
-        );
-        let found = problems(FileKind::Settings, &low);
-        assert_eq!(found.len(), 1, "{found:#?}");
-        assert!(found[0].message.contains("`min_severty`"), "{found:#?}");
-        assert_eq!(found[0].suggestion.as_deref(), Some("min_severity"));
-    }
-
-    #[test]
-    fn an_out_of_range_enumeration_is_reported() {
-        let low = doc(".suspect.yaml", "lint:\n  min_severity: warn\n");
-        let found = problems(FileKind::Settings, &low);
-        assert_eq!(found.len(), 1, "{found:#?}");
-        assert!(
-            found[0].message.contains("warn is not a valid"),
-            "{found:#?}"
-        );
-        assert!(
-            found[0].message.contains("expected one of: error, warning"),
-            "{found:#?}"
-        );
-        assert_eq!(found[0].suggestion.as_deref(), Some("warning"));
-    }
-
-    #[test]
-    fn a_value_of_the_wrong_type_is_reported() {
-        let low = doc(".suspect.yaml", "validate:\n  strict_format: sometimes\n");
-        let found = problems(FileKind::Settings, &low);
-        assert_eq!(found.len(), 1, "{found:#?}");
-        assert!(found[0].message.contains("expects boolean"), "{found:#?}");
-    }
 
     #[test]
     fn hover_describes_a_key() {
@@ -741,37 +359,6 @@ codegen:
     }
 
     #[test]
-    fn manifest_policy_sections_are_deprecated_on_the_key() {
-        let text = "{\"entry\": \"a.yaml\", \"lint\": {}, \"config\": \".suspect.yaml\"}";
-        let low = doc("suspect.project.json", text);
-        let found: Vec<_> = diagnostics(&low)
-            .into_iter()
-            .filter(|d| d.code == Some(NumberOrString::String("config-manifest-policy".into())))
-            .collect();
-        assert_eq!(found.len(), 1, "{found:?}");
-        assert!(
-            found[0]
-                .message
-                .contains("`suspect config migrate` does both")
-        );
-        let settings = doc(".suspect.yaml", "lint: {}\n");
-        assert!(diagnostics(&settings).is_empty());
-    }
-
-    #[test]
-    fn manifest_policy_mistakes_are_diagnosed() {
-        // A bad severity value in the manifest is flagged exactly like one
-        // in `.suspect.yaml` would be.
-        let text = "{\"lint\": {\"min_severity\": \"shout\"}}";
-        let low = doc("suspect.project.json", text);
-        let findings = diagnostics(&low);
-        assert!(
-            findings.iter().any(|f| f.message.contains("shout")),
-            "the bad value is named: {findings:?}"
-        );
-    }
-
-    #[test]
     fn completion_offers_the_keys_still_missing_from_a_section() {
         let low = doc(".suspect.yaml", "lint:\n  min_severity: warning\n");
         let items = completions(
@@ -828,12 +415,5 @@ codegen:
         let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(labels.contains(&"package_name"), "{labels:?}");
         assert!(!labels.contains(&"name"), "already present: {labels:?}");
-    }
-
-    #[test]
-    fn a_profile_name_is_not_reported_as_unknown() {
-        let text = "{\"publish\": {\"profiles\": {\"public\": [\"a.overlay.yaml\"]}}}";
-        let low = doc("suspect.project.json", text);
-        assert!(problems(FileKind::Project, &low).is_empty());
     }
 }

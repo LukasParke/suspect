@@ -1,4 +1,5 @@
-//! The rule registry: every builtin code, registered once.
+//! The rule registry: every builtin code, registered once, and the
+//! aliases that name the same problem under another code.
 
 use std::collections::HashMap;
 
@@ -29,6 +30,74 @@ const OVERLAY_RULES: &[RuleInfo] = &[
     ),
 ];
 
+/// Codes the check pass itself emits: syntax, the configuration-file
+/// schema and vendor-extension schemas.
+const PASS_RULES: &[RuleInfo] = &[
+    RuleInfo::new(
+        crate::checks::SYNTAX_CODE,
+        CheckId::Syntax,
+        Severity::Error,
+        "YAML or JSON syntax error",
+    ),
+    RuleInfo::new(
+        suspect_config::schema::problems::CODE,
+        CheckId::Config,
+        Severity::Warning,
+        "Unknown key, wrong type or deprecated spelling in a suspect configuration file",
+    ),
+    RuleInfo::new(
+        suspect_config::schema::problems::MANIFEST_POLICY_CODE,
+        CheckId::Config,
+        Severity::Warning,
+        "Policy section in a project manifest (deprecated; move it to .suspect.yaml)",
+    ),
+    RuleInfo::new(
+        crate::checks::extensions::CODE,
+        CheckId::Extension,
+        Severity::Error,
+        "Vendor extension value fails its registered schema",
+    ),
+];
+
+/// Alias table v1: canonical code, then the codes that report the same
+/// problem at the same position. The canonical code belongs to the check
+/// that resolves `$ref`s and carries fix guidance (validate, arazzo,
+/// overlay); the aliases are lint rules (and the editor's old `syntax`).
+/// An alias may name several canonical codes (`arazzo-step-operation`).
+pub const ALIASES: &[(&str, &[&str])] = &[
+    (
+        "oas-operation-missing-operationId",
+        &["operation-operationId"],
+    ),
+    (
+        "oas-duplicate-operation-id",
+        &["operation-operationId-unique"],
+    ),
+    ("oas-path-trailing-slash", &["path-keys-no-trailing-slash"]),
+    ("oas-license-missing-url", &["license-url"]),
+    ("oas-tag-undeclared", &["operation-tag-defined"]),
+    ("arazzo-step-missing-operation", &["arazzo-step-operation"]),
+    ("arazzo-step-multiple-targets", &["arazzo-step-operation"]),
+    (
+        "overlay-action-missing-description",
+        &["overlay-action-description"],
+    ),
+    (crate::checks::SYNTAX_CODE, &["syntax"]),
+];
+
+/// The process-wide [`Registry::builtin`].
+#[must_use]
+pub fn builtin() -> &'static Registry {
+    builtin_arc()
+}
+
+/// The process-wide [`Registry::builtin`], shareable.
+#[must_use]
+pub fn builtin_arc() -> &'static std::sync::Arc<Registry> {
+    static BUILTIN: std::sync::OnceLock<std::sync::Arc<Registry>> = std::sync::OnceLock::new();
+    BUILTIN.get_or_init(|| std::sync::Arc::new(Registry::builtin()))
+}
+
 /// The builtin rule tables, one per producer.
 #[must_use]
 pub fn builtin_tables() -> Vec<&'static [RuleInfo]> {
@@ -39,6 +108,8 @@ pub fn builtin_tables() -> Vec<&'static [RuleInfo]> {
         suspect_arazzo::rules(),
         OVERLAY_RULES,
         suspect_test::load::rules(),
+        suspect_lint::markdown::rules(),
+        PASS_RULES,
     ];
     #[cfg(feature = "sdk")]
     tables.push(suspect_codegen::admission::rules());
@@ -57,6 +128,11 @@ pub enum RegistryError {
         /// The check that registered it again.
         second: CheckId,
     },
+    /// An alias entry names a canonical code no table registers.
+    UnknownCanonical {
+        /// The code.
+        code: &'static str,
+    },
 }
 
 impl std::fmt::Display for RegistryError {
@@ -72,19 +148,27 @@ impl std::fmt::Display for RegistryError {
                 first.name(),
                 second.name()
             ),
+            Self::UnknownCanonical { code } => {
+                write!(f, "alias entry names unregistered code `{code}`")
+            }
         }
     }
 }
 
 impl std::error::Error for RegistryError {}
 
-/// Every known code with its metadata. Codes have no aliases yet, so each
-/// code is its own canonical code.
+/// Every known code with its metadata, and the alias map.
+///
+/// An alias may itself be a registered code (the lint rule
+/// `operation-operationId`, for instance, keeps its own entry, which a
+/// custom ruleset redefining the rule still uses).
 #[derive(Debug, Clone, Default)]
 pub struct Registry {
     by_code: HashMap<&'static str, RuleInfo>,
     /// Registration order, for deterministic iteration.
     order: Vec<&'static str>,
+    /// Alias -> canonical codes, in [`ALIASES`] order.
+    alias_to: HashMap<&'static str, Vec<&'static str>>,
 }
 
 impl Registry {
@@ -95,10 +179,32 @@ impl Registry {
     /// rule this out.
     #[must_use]
     pub fn builtin() -> Self {
-        match Self::from_tables(&builtin_tables()) {
+        match Self::from_tables(&builtin_tables()).and_then(|r| r.with_aliases(ALIASES)) {
             Ok(registry) => registry,
             Err(error) => panic!("builtin rule tables conflict: {error}"),
         }
+    }
+
+    /// Adds alias entries; each canonical code's [`RuleInfo::aliases`] is
+    /// set from them.
+    ///
+    /// # Errors
+    /// [`RegistryError::UnknownCanonical`] when an entry names a code no
+    /// table registered.
+    pub fn with_aliases(
+        mut self,
+        aliases: &'static [(&'static str, &'static [&'static str])],
+    ) -> Result<Self, RegistryError> {
+        for (canonical, names) in aliases {
+            let Some(rule) = self.by_code.get_mut(canonical) else {
+                return Err(RegistryError::UnknownCanonical { code: canonical });
+            };
+            rule.aliases = names;
+            for name in *names {
+                self.alias_to.entry(name).or_default().push(canonical);
+            }
+        }
+        Ok(self)
     }
 
     /// Merges `tables`.
@@ -121,10 +227,32 @@ impl Registry {
         Ok(registry)
     }
 
-    /// The canonical code for `code`, when registered.
+    /// The canonical code for a registered code that is not an alias;
+    /// `None` for an alias (see [`Registry::alias_targets`]) or an unknown
+    /// code.
     #[must_use]
     pub fn canonical(&self, code: &str) -> Option<&'static str> {
+        if self.alias_to.contains_key(code) {
+            return None;
+        }
         self.by_code.get(code).map(|rule| rule.code)
+    }
+
+    /// The canonical codes an alias names; empty when `code` is not an
+    /// alias.
+    #[must_use]
+    pub fn alias_targets(&self, code: &str) -> &[&'static str] {
+        self.alias_to.get(code).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every canonical code `code` resolves to: itself when registered and
+    /// not an alias, an alias's targets, else nothing.
+    #[must_use]
+    pub fn resolve(&self, code: &str) -> Vec<&'static str> {
+        match self.alias_to.get(code) {
+            Some(targets) => targets.clone(),
+            None => self.canonical(code).into_iter().collect(),
+        }
     }
 
     /// Metadata for a canonical code.
@@ -162,6 +290,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn every_alias_entry_names_registered_codes() {
+        let registry = Registry::builtin();
+        for (canonical, aliases) in ALIASES {
+            let info = registry.info(canonical).expect("canonical registered");
+            assert_ne!(info.check, CheckId::Lint, "{canonical} is a lint code");
+            for alias in *aliases {
+                // The lint rule keeps its entry; only the editor's old
+                // `syntax` code was never a rule.
+                assert!(
+                    registry.info(alias).is_some() || *alias == "syntax",
+                    "{alias} is not a registered code"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn duplicates_are_rejected() {
         const A: &[RuleInfo] = &[RuleInfo::new("x", CheckId::Lint, Severity::Hint, "x")];
         const B: &[RuleInfo] = &[RuleInfo::new("x", CheckId::Validate, Severity::Hint, "x")];
@@ -183,6 +328,25 @@ mod tests {
             Some("oas-duplicate-operation-id")
         );
         assert_eq!(registry.canonical("not-a-code"), None);
+        assert_eq!(registry.canonical("operation-operationId"), None);
+        assert_eq!(
+            registry.alias_targets("operation-operationId"),
+            ["oas-operation-missing-operationId"]
+        );
+        assert_eq!(
+            registry.resolve("arazzo-step-operation"),
+            [
+                "arazzo-step-missing-operation",
+                "arazzo-step-multiple-targets"
+            ]
+        );
+        assert_eq!(registry.resolve("syntax"), ["syntax-error"]);
+        assert_eq!(
+            registry
+                .info("oas-operation-missing-operationId")
+                .map(|r| r.aliases),
+            Some(&["operation-operationId"][..])
+        );
         let info = registry.info("arazzo-missing-version").unwrap();
         assert_eq!(info.check, CheckId::Arazzo);
         assert_eq!(registry.rules().count(), registry.len());

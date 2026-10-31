@@ -1,0 +1,267 @@
+openapi.yaml:1023:14-1023:17 warning suspect oas-tag-undeclared: tag `dvr` on patch operation is not declared in the root `tags`
+openapi.yaml:1053:14-1053:21 warning suspect oas-tag-undeclared: tag `history` on get operation is not declared in the root `tags`
+openapi.yaml:1083:14-1083:21 warning suspect oas-tag-undeclared: tag `history` on post operation is not declared in the root `tags`
+openapi.yaml:109:7-136:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:1112:14-1112:21 warning suspect oas-tag-undeclared: tag `history` on put operation is not declared in the root `tags`
+openapi.yaml:1139:7-1166:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:1141:14-1141:21 warning suspect oas-tag-undeclared: tag `history` on delete operation is not declared in the root `tags`
+openapi.yaml:1170:14-1170:21 warning suspect oas-tag-undeclared: tag `history` on patch operation is not declared in the root `tags`
+openapi.yaml:1200:14-1200:18 warning suspect oas-tag-undeclared: tag `home` on get operation is not declared in the root `tags`
+openapi.yaml:1230:14-1230:18 warning suspect oas-tag-undeclared: tag `home` on post operation is not declared in the root `tags`
+openapi.yaml:1259:14-1259:18 warning suspect oas-tag-undeclared: tag `home` on put operation is not declared in the root `tags`
+openapi.yaml:1286:7-1313:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:1288:14-1288:18 warning suspect oas-tag-undeclared: tag `home` on delete operation is not declared in the root `tags`
+openapi.yaml:1318:14-1318:22 warning suspect oas-tag-undeclared: tag `identity` on get operation is not declared in the root `tags`
+openapi.yaml:1348:14-1348:22 warning suspect oas-tag-undeclared: tag `identity` on post operation is not declared in the root `tags`
+openapi.yaml:1377:14-1377:22 warning suspect oas-tag-undeclared: tag `identity` on put operation is not declared in the root `tags`
+openapi.yaml:1406:14-1406:22 warning suspect oas-tag-undeclared: tag `identity` on patch operation is not declared in the root `tags`
+openapi.yaml:1493:7-1520:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:1554:14-1554:21 warning suspect oas-tag-undeclared: tag `machine` on get operation is not declared in the root `tags`
+openapi.yaml:1584:14-1584:21 warning suspect oas-tag-undeclared: tag `machine` on put operation is not declared in the root `tags`
+openapi.yaml:1611:7-1638:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:1613:14-1613:21 warning suspect oas-tag-undeclared: tag `machine` on delete operation is not declared in the root `tags`
+openapi.yaml:1642:14-1642:21 warning suspect oas-tag-undeclared: tag `machine` on patch operation is not declared in the root `tags`
+openapi.yaml:1672:14-1672:19 warning suspect oas-tag-undeclared: tag `media` on post operation is not declared in the root `tags`
+openapi.yaml:1701:14-1701:19 warning suspect oas-tag-undeclared: tag `media` on put operation is not declared in the root `tags`
+openapi.yaml:170:14-170:22 warning suspect oas-tag-undeclared: tag `activity` on get operation is not declared in the root `tags`
+openapi.yaml:1728:7-1755:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:1730:14-1730:19 warning suspect oas-tag-undeclared: tag `media` on delete operation is not declared in the root `tags`
+openapi.yaml:1759:14-1759:19 warning suspect oas-tag-undeclared: tag `media` on patch operation is not declared in the root `tags`
+openapi.yaml:1789:14-1789:22 warning suspect oas-tag-undeclared: tag `metadata` on get operation is not declared in the root `tags`
+openapi.yaml:1819:14-1819:22 warning suspect oas-tag-undeclared: tag `metadata` on post operation is not declared in the root `tags`
+openapi.yaml:1848:14-1848:22 warning suspect oas-tag-undeclared: tag `metadata` on put operation is not declared in the root `tags`
+openapi.yaml:1875:7-1902:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:1877:14-1877:22 warning suspect oas-tag-undeclared: tag `metadata` on delete operation is not declared in the root `tags`
+openapi.yaml:1906:14-1906:22 warning suspect oas-tag-undeclared: tag `metadata` on patch operation is not declared in the root `tags`
+openapi.yaml:1936:14-1936:22 warning suspect oas-tag-undeclared: tag `playback` on get operation is not declared in the root `tags`
+openapi.yaml:1966:14-1966:22 warning suspect oas-tag-undeclared: tag `playback` on post operation is not declared in the root `tags`
+openapi.yaml:1995:14-1995:22 warning suspect oas-tag-undeclared: tag `playback` on put operation is not declared in the root `tags`
+openapi.yaml:200:14-200:22 warning suspect oas-tag-undeclared: tag `activity` on post operation is not declared in the root `tags`
+openapi.yaml:2022:7-2049:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2024:14-2024:22 warning suspect oas-tag-undeclared: tag `playback` on delete operation is not declared in the root `tags`
+openapi.yaml:2053:14-2053:22 warning suspect oas-tag-undeclared: tag `playback` on patch operation is not declared in the root `tags`
+openapi.yaml:2083:14-2083:22 warning suspect oas-tag-undeclared: tag `playlist` on get operation is not declared in the root `tags`
+openapi.yaml:2113:14-2113:22 warning suspect oas-tag-undeclared: tag `playlist` on post operation is not declared in the root `tags`
+openapi.yaml:2142:14-2142:22 warning suspect oas-tag-undeclared: tag `playlist` on put operation is not declared in the root `tags`
+openapi.yaml:2169:7-2196:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2171:14-2171:22 warning suspect oas-tag-undeclared: tag `playlist` on delete operation is not declared in the root `tags`
+openapi.yaml:2201:14-2201:25 warning suspect oas-tag-undeclared: tag `preferences` on get operation is not declared in the root `tags`
+openapi.yaml:2231:14-2231:25 warning suspect oas-tag-undeclared: tag `preferences` on post operation is not declared in the root `tags`
+openapi.yaml:2260:14-2260:25 warning suspect oas-tag-undeclared: tag `preferences` on put operation is not declared in the root `tags`
+openapi.yaml:2289:14-2289:25 warning suspect oas-tag-undeclared: tag `preferences` on patch operation is not declared in the root `tags`
+openapi.yaml:229:14-229:22 warning suspect oas-tag-undeclared: tag `activity` on put operation is not declared in the root `tags`
+openapi.yaml:2319:14-2319:23 warning suspect oas-tag-undeclared: tag `providers` on get operation is not declared in the root `tags`
+openapi.yaml:2349:14-2349:23 warning suspect oas-tag-undeclared: tag `providers` on post operation is not declared in the root `tags`
+openapi.yaml:2376:7-2403:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2378:14-2378:23 warning suspect oas-tag-undeclared: tag `providers` on delete operation is not declared in the root `tags`
+openapi.yaml:2407:14-2407:23 warning suspect oas-tag-undeclared: tag `providers` on patch operation is not declared in the root `tags`
+openapi.yaml:2437:14-2437:20 warning suspect oas-tag-undeclared: tag `rating` on get operation is not declared in the root `tags`
+openapi.yaml:2467:14-2467:20 warning suspect oas-tag-undeclared: tag `rating` on put operation is not declared in the root `tags`
+openapi.yaml:2494:7-2521:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2496:14-2496:20 warning suspect oas-tag-undeclared: tag `rating` on delete operation is not declared in the root `tags`
+openapi.yaml:2525:14-2525:20 warning suspect oas-tag-undeclared: tag `rating` on patch operation is not declared in the root `tags`
+openapi.yaml:2555:14-2555:29 warning suspect oas-tag-undeclared: tag `recommendations` on post operation is not declared in the root `tags`
+openapi.yaml:256:7-283:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2584:14-2584:29 warning suspect oas-tag-undeclared: tag `recommendations` on put operation is not declared in the root `tags`
+openapi.yaml:258:14-258:22 warning suspect oas-tag-undeclared: tag `activity` on delete operation is not declared in the root `tags`
+openapi.yaml:2611:7-2638:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2613:14-2613:29 warning suspect oas-tag-undeclared: tag `recommendations` on delete operation is not declared in the root `tags`
+openapi.yaml:2642:14-2642:29 warning suspect oas-tag-undeclared: tag `recommendations` on patch operation is not declared in the root `tags`
+openapi.yaml:2672:14-2672:20 warning suspect oas-tag-undeclared: tag `search` on get operation is not declared in the root `tags`
+openapi.yaml:2702:14-2702:20 warning suspect oas-tag-undeclared: tag `search` on post operation is not declared in the root `tags`
+openapi.yaml:2731:14-2731:20 warning suspect oas-tag-undeclared: tag `search` on put operation is not declared in the root `tags`
+openapi.yaml:2758:7-2785:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2760:14-2760:20 warning suspect oas-tag-undeclared: tag `search` on delete operation is not declared in the root `tags`
+openapi.yaml:2789:14-2789:20 warning suspect oas-tag-undeclared: tag `search` on patch operation is not declared in the root `tags`
+openapi.yaml:2819:14-2819:22 warning suspect oas-tag-undeclared: tag `sessions` on get operation is not declared in the root `tags`
+openapi.yaml:2849:14-2849:22 warning suspect oas-tag-undeclared: tag `sessions` on post operation is not declared in the root `tags`
+openapi.yaml:2878:14-2878:22 warning suspect oas-tag-undeclared: tag `sessions` on put operation is not declared in the root `tags`
+openapi.yaml:287:14-287:22 warning suspect oas-tag-undeclared: tag `activity` on patch operation is not declared in the root `tags`
+openapi.yaml:2905:7-2932:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:2907:14-2907:22 warning suspect oas-tag-undeclared: tag `sessions` on delete operation is not declared in the root `tags`
+openapi.yaml:2936:14-2936:22 warning suspect oas-tag-undeclared: tag `sessions` on patch operation is not declared in the root `tags`
+openapi.yaml:2966:14-2966:22 warning suspect oas-tag-undeclared: tag `settings` on get operation is not declared in the root `tags`
+openapi.yaml:2996:14-2996:22 warning suspect oas-tag-undeclared: tag `settings` on post operation is not declared in the root `tags`
+openapi.yaml:3025:14-3025:22 warning suspect oas-tag-undeclared: tag `settings` on put operation is not declared in the root `tags`
+openapi.yaml:3052:7-3079:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:3054:14-3054:22 warning suspect oas-tag-undeclared: tag `settings` on delete operation is not declared in the root `tags`
+openapi.yaml:3084:14-3084:24 warning suspect oas-tag-undeclared: tag `statistics` on get operation is not declared in the root `tags`
+openapi.yaml:3114:14-3114:24 warning suspect oas-tag-undeclared: tag `statistics` on post operation is not declared in the root `tags`
+openapi.yaml:3143:14-3143:24 warning suspect oas-tag-undeclared: tag `statistics` on put operation is not declared in the root `tags`
+openapi.yaml:3172:14-3172:24 warning suspect oas-tag-undeclared: tag `statistics` on patch operation is not declared in the root `tags`
+openapi.yaml:317:14-317:23 warning suspect oas-tag-undeclared: tag `analytics` on get operation is not declared in the root `tags`
+openapi.yaml:3202:14-3202:20 warning suspect oas-tag-undeclared: tag `status` on get operation is not declared in the root `tags`
+openapi.yaml:3232:14-3232:20 warning suspect oas-tag-undeclared: tag `status` on post operation is not declared in the root `tags`
+openapi.yaml:3259:7-3286:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:3261:14-3261:20 warning suspect oas-tag-undeclared: tag `status` on delete operation is not declared in the root `tags`
+openapi.yaml:3290:14-3290:20 warning suspect oas-tag-undeclared: tag `status` on patch operation is not declared in the root `tags`
+openapi.yaml:3320:14-3320:18 warning suspect oas-tag-undeclared: tag `sync` on get operation is not declared in the root `tags`
+openapi.yaml:3350:14-3350:18 warning suspect oas-tag-undeclared: tag `sync` on put operation is not declared in the root `tags`
+openapi.yaml:3377:7-3404:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:3379:14-3379:18 warning suspect oas-tag-undeclared: tag `sync` on delete operation is not declared in the root `tags`
+openapi.yaml:3408:14-3408:18 warning suspect oas-tag-undeclared: tag `sync` on patch operation is not declared in the root `tags`
+openapi.yaml:3438:14-3438:23 warning suspect oas-tag-undeclared: tag `transcode` on post operation is not declared in the root `tags`
+openapi.yaml:3467:14-3467:23 warning suspect oas-tag-undeclared: tag `transcode` on put operation is not declared in the root `tags`
+openapi.yaml:347:14-347:23 warning suspect oas-tag-undeclared: tag `analytics` on post operation is not declared in the root `tags`
+openapi.yaml:3494:7-3521:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:3496:14-3496:23 warning suspect oas-tag-undeclared: tag `transcode` on delete operation is not declared in the root `tags`
+openapi.yaml:3525:14-3525:23 warning suspect oas-tag-undeclared: tag `transcode` on patch operation is not declared in the root `tags`
+openapi.yaml:3555:14-3555:22 warning suspect oas-tag-undeclared: tag `timeline` on get operation is not declared in the root `tags`
+openapi.yaml:3585:14-3585:22 warning suspect oas-tag-undeclared: tag `timeline` on post operation is not declared in the root `tags`
+openapi.yaml:3614:14-3614:22 warning suspect oas-tag-undeclared: tag `timeline` on put operation is not declared in the root `tags`
+openapi.yaml:3641:7-3668:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:3643:14-3643:22 warning suspect oas-tag-undeclared: tag `timeline` on delete operation is not declared in the root `tags`
+openapi.yaml:3672:14-3672:22 warning suspect oas-tag-undeclared: tag `timeline` on patch operation is not declared in the root `tags`
+openapi.yaml:3702:14-3702:19 warning suspect oas-tag-undeclared: tag `users` on get operation is not declared in the root `tags`
+openapi.yaml:3732:14-3732:19 warning suspect oas-tag-undeclared: tag `users` on post operation is not declared in the root `tags`
+openapi.yaml:3761:14-3761:19 warning suspect oas-tag-undeclared: tag `users` on put operation is not declared in the root `tags`
+openapi.yaml:376:14-376:23 warning suspect oas-tag-undeclared: tag `analytics` on put operation is not declared in the root `tags`
+openapi.yaml:3788:7-3815:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:3790:14-3790:19 warning suspect oas-tag-undeclared: tag `users` on delete operation is not declared in the root `tags`
+openapi.yaml:3819:14-3819:19 warning suspect oas-tag-undeclared: tag `users` on patch operation is not declared in the root `tags`
+openapi.yaml:3849:14-3849:17 warning suspect oas-tag-undeclared: tag `vpn` on get operation is not declared in the root `tags`
+openapi.yaml:3879:14-3879:17 warning suspect oas-tag-undeclared: tag `vpn` on post operation is not declared in the root `tags`
+openapi.yaml:3908:14-3908:17 warning suspect oas-tag-undeclared: tag `vpn` on put operation is not declared in the root `tags`
+openapi.yaml:3935:7-3962:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:3937:14-3937:17 warning suspect oas-tag-undeclared: tag `vpn` on delete operation is not declared in the root `tags`
+openapi.yaml:3967:14-3967:22 warning suspect oas-tag-undeclared: tag `webhooks` on get operation is not declared in the root `tags`
+openapi.yaml:3997:14-3997:22 warning suspect oas-tag-undeclared: tag `webhooks` on post operation is not declared in the root `tags`
+openapi.yaml:3:3-5:42 warning suspect-lint info-contact: Info object should contain a contact object.
+openapi.yaml:3:3-5:42 warning suspect-lint info-license: Info object should contain a license object.
+openapi.yaml:4026:14-4026:22 warning suspect oas-tag-undeclared: tag `webhooks` on put operation is not declared in the root `tags`
+openapi.yaml:403:7-430:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:4055:14-4055:22 warning suspect oas-tag-undeclared: tag `webhooks` on patch operation is not declared in the root `tags`
+openapi.yaml:405:14-405:23 warning suspect oas-tag-undeclared: tag `analytics` on delete operation is not declared in the root `tags`
+openapi.yaml:4093:5-4093:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+openapi.yaml:435:14-435:22 warning suspect oas-tag-undeclared: tag `channels` on get operation is not declared in the root `tags`
+openapi.yaml:465:14-465:22 warning suspect oas-tag-undeclared: tag `channels` on post operation is not declared in the root `tags`
+openapi.yaml:494:14-494:22 warning suspect oas-tag-undeclared: tag `channels` on put operation is not declared in the root `tags`
+openapi.yaml:523:14-523:22 warning suspect oas-tag-undeclared: tag `channels` on patch operation is not declared in the root `tags`
+openapi.yaml:553:14-553:21 warning suspect oas-tag-undeclared: tag `clients` on get operation is not declared in the root `tags`
+openapi.yaml:583:14-583:21 warning suspect oas-tag-undeclared: tag `clients` on post operation is not declared in the root `tags`
+openapi.yaml:610:7-637:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:612:14-612:21 warning suspect oas-tag-undeclared: tag `clients` on delete operation is not declared in the root `tags`
+openapi.yaml:641:14-641:21 warning suspect oas-tag-undeclared: tag `clients` on patch operation is not declared in the root `tags`
+openapi.yaml:671:14-671:21 warning suspect oas-tag-undeclared: tag `devices` on get operation is not declared in the root `tags`
+openapi.yaml:701:14-701:21 warning suspect oas-tag-undeclared: tag `devices` on put operation is not declared in the root `tags`
+openapi.yaml:728:7-755:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:730:14-730:21 warning suspect oas-tag-undeclared: tag `devices` on delete operation is not declared in the root `tags`
+openapi.yaml:759:14-759:21 warning suspect oas-tag-undeclared: tag `devices` on patch operation is not declared in the root `tags`
+openapi.yaml:789:14-789:22 warning suspect oas-tag-undeclared: tag `discover` on post operation is not declared in the root `tags`
+openapi.yaml:818:14-818:22 warning suspect oas-tag-undeclared: tag `discover` on put operation is not declared in the root `tags`
+openapi.yaml:845:7-872:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:847:14-847:22 warning suspect oas-tag-undeclared: tag `discover` on delete operation is not declared in the root `tags`
+openapi.yaml:876:14-876:22 warning suspect oas-tag-undeclared: tag `discover` on patch operation is not declared in the root `tags`
+openapi.yaml:906:14-906:17 warning suspect oas-tag-undeclared: tag `dvr` on get operation is not declared in the root `tags`
+openapi.yaml:936:14-936:17 warning suspect oas-tag-undeclared: tag `dvr` on post operation is not declared in the root `tags`
+openapi.yaml:965:14-965:17 warning suspect oas-tag-undeclared: tag `dvr` on put operation is not declared in the root `tags`
+openapi.yaml:992:7-1019:50 warning suspect-lint security-no-delete-without-id: DELETE operations must target a specific resource — collection-wide deletes are destructive and unauthenticated by scope.
+openapi.yaml:994:14-994:17 warning suspect oas-tag-undeclared: tag `dvr` on delete operation is not declared in the root `tags`
+openapi.yaml:9:10-9:32 error suspect-lint security-server-https-only: Server URLs must use HTTPS — plaintext transport exposes credentials and data.
+openapi.yaml:9:10-9:32 warning suspect-lint server-host-not-example: Server URLs should not use example hosts (localhost, 127.0.0.1, example.com).
+openapi.yaml:9:10-9:32 warning suspect-lint server-trailing-slash: Server URLs should not end in a trailing slash.
+schemas.yaml:1014:5-1014:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:1062:5-1062:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:1068:5-1068:17 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:118:5-118:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:150:5-150:12 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:15:5-15:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:182:5-182:12 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:214:5-214:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:22:5-22:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:246:5-246:8 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:278:5-278:12 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:310:5-310:9 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:342:5-342:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:374:5-374:12 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:3:3-4:19 warning suspect-lint info-contact: Info object should contain a contact object.
+schemas.yaml:3:3-4:19 warning suspect-lint info-license: Info object should contain a license object.
+schemas.yaml:406:5-406:12 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:438:5-438:10 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:470:5-470:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:502:5-502:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:534:5-534:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:54:5-54:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:566:5-566:16 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:598:5-598:14 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:630:5-630:11 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:662:5-662:20 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:694:5-694:11 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:726:5-726:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:758:5-758:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:790:5-790:15 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:822:5-822:11 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:854:5-854:9 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:86:5-86:14 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:886:5-886:14 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:8:5-8:15 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:918:5-918:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:950:5-950:10 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+schemas.yaml:982:5-982:8 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
+overlays/internal.overlay.yaml: (none)
+workflows/health.arazzo.yaml: (none)
+.suspect.yaml: (none)
+suspect.project.json:13:3-13:9 warning suspect config-manifest-policy: `lint` in a project manifest is deprecated and is ignored from the next release; move it to .suspect.yaml and add "config": ".suspect.yaml" to the manifest (`suspect config migrate` does both)
+petstore.yaml:17:5-25:49 error suspect oas-path-param-not-declared: path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it
+petstore.yaml:18:7-25:49 error suspect-lint path-params: Operation `get` of "/pets/{petId}" does not declare path parameter {petId}
+petstore.yaml:18:7-25:49 warning suspect oas-operation-missing-operationId: get operation is missing an operationId
+petstore.yaml:18:7-25:49 warning suspect-lint operation-4xx-response: Operation should have at least one 4XX response.
+petstore.yaml:18:7-25:49 warning suspect-lint operation-tags: Operation should have non-empty `tags` array.
+petstore.yaml:3:3-4:19 warning suspect-lint info-contact: Info object should contain a contact object.
+petstore.yaml:3:3-4:19 warning suspect-lint info-license: Info object should contain a license object.
+petstore.yaml:8:7-15:50 warning suspect oas-operation-missing-operationId: get operation is missing an operationId
+petstore.yaml:8:7-15:50 warning suspect-lint operation-4xx-response: Operation should have at least one 4XX response.
+petstore.yaml:8:7-15:50 warning suspect-lint operation-tags: Operation should have non-empty `tags` array.
+broken/actions.overlay.yaml:4:3-5:15 hint suspect-lint overlay-info-description: Overlay `info` object should have a `description`.
+broken/actions.overlay.yaml:7:5-11:1 hint suspect overlay-action-missing-description: action #0: `description` recommended
+broken/actions.overlay.yaml:7:5-11:1 warning suspect overlay-update-with-remove: action #0: `update` has no effect while `remove` is true
+broken/broken.arazzo.yaml:13:5-32:57 hint suspect-lint arazzo-workflow-description: Every Arazzo workflow should have a `description`.
+broken/broken.arazzo.yaml:15:9-25:27 error suspect arazzo-step-missing-operation: step `one` must set `operationId`, `operationPath`, or `channelPath`
+broken/broken.arazzo.yaml:17:13-17:33 error suspect arazzo-criterion-missing-condition: successCriteria entry missing `condition`
+broken/broken.arazzo.yaml:19:13-20:23 error suspect arazzo-goto-missing-target: `goto` action needs `workflowId` or `stepId`
+broken/broken.arazzo.yaml:21:13-23:32 error suspect arazzo-goto-unknown-workflow: `goto` references unknown workflow `nowhere`
+broken/broken.arazzo.yaml:24:13-25:27 error suspect arazzo-unknown-action-type: unknown action type `teleport`
+broken/broken.arazzo.yaml:26:9-30:24 error suspect arazzo-duplicate-step-id: duplicate stepId `one` in workflow `flow`
+broken/broken.arazzo.yaml:26:9-30:24 error suspect arazzo-invalid-operation-path: operationPath must start with `$`: "{$sourceDescriptions.api.url}#/paths"
+broken/broken.arazzo.yaml:26:9-30:24 error suspect arazzo-step-multiple-targets: step `one` sets multiple of operationId/operationPath/channelPath/workflowId
+broken/broken.arazzo.yaml:2:1-34:1 error suspect arazzo-missing-info-title: missing `info.title`
+broken/broken.arazzo.yaml:30:13-30:24 error suspect arazzo-parameter-incomplete: parameter needs `name`+`in` (or a `target` for step parameters)
+broken/broken.arazzo.yaml:32:14-32:57 error suspect arazzo-output-unknown-step: output references unknown step `flow.missing`
+broken/broken.arazzo.yaml:33:5-34:1 error suspect arazzo-missing-workflow-id: workflow missing `workflowId`
+broken/broken.arazzo.yaml:33:5-34:1 hint suspect-lint arazzo-workflow-description: Every Arazzo workflow should have a `description`.
+broken/broken.arazzo.yaml:9:5-11:18 error suspect arazzo-duplicate-source-name: duplicate sourceDescription name `api`
+broken/broken.load.yaml:13:5-14:15 error suspect load-scenario-workflow: scenario needs a `workflow` id
+broken/broken.load.yaml:3:7-3:11 error suspect load-type: `seed` must be an integer
+broken/broken.load.yaml:8:5-8:15 error suspect load-phase-kind: phase must set exactly one of `arrivalRate`, `arrivalCount`, `pause`, `vus`
+broken/broken.load.yaml:9:5-11:18 error suspect load-phase-vus: `vus` must be at least 1
+broken/broken.swagger.yaml:13:7-18:1 error suspect-lint path-params: Operation `post` of "/pets/{petId}" does not declare path parameter {petId}
+broken/broken.swagger.yaml:13:7-18:1 warning suspect-lint oas-operation-missing-operationId: Operation must have an `operationId`.
+broken/broken.swagger.yaml:13:7-18:1 warning suspect-lint operation-4xx-response: Operation should have at least one 4XX response.
+broken/broken.swagger.yaml:13:7-18:1 warning suspect-lint operation-tags: Operation should have non-empty `tags` array.
+broken/broken.swagger.yaml:14:11-15:19 error suspect swagger-body-param-schema: body parameter must declare `schema`
+broken/broken.swagger.yaml:14:11-15:19 info suspect-lint parameter-description: Parameter objects should have `description`.
+broken/broken.swagger.yaml:17:9-17:14 error suspect swagger-response-missing-description: response `200` must include `description`
+broken/broken.swagger.yaml:4:3-4:16 info suspect-lint info-description: OpenAPI object should have `description`.
+broken/broken.swagger.yaml:4:3-4:16 warning suspect swagger-info-field-required: `info.version` is required
+broken/broken.swagger.yaml:4:3-4:16 warning suspect-lint info-contact: Info object should contain a contact object.
+broken/broken.swagger.yaml:6:3-6:16 error suspect swagger-path-param-undeclared: path template variable `petId` is not declared as an `in: path` parameter
+broken/broken.swagger.yaml:8:7-11:22 error suspect swagger-operation-missing-responses: GET /pets/{petId} must define `responses`
+broken/broken.swagger.yaml:8:7-11:22 error suspect-lint operation-default-response: Operation must have a `default` or 2XX response.
+broken/broken.swagger.yaml:8:7-11:22 error suspect-lint operation-success-response: Operation must have at least one 2XX response.
+broken/broken.swagger.yaml:8:7-11:22 error suspect-lint path-params: Operation `get` of "/pets/{petId}" does not declare path parameter {petId}
+broken/broken.swagger.yaml:8:7-11:22 warning suspect-lint oas-operation-missing-operationId: Operation must have an `operationId`.
+broken/broken.swagger.yaml:8:7-11:22 warning suspect-lint operation-4xx-response: Operation should have at least one 4XX response.
+broken/broken.swagger.yaml:8:7-11:22 warning suspect-lint operation-tags: Operation should have non-empty `tags` array.
+broken/broken.swagger.yaml:9:11-9:20 info suspect-lint parameter-description: Parameter objects should have `description`.
+broken/empty.overlay.yaml:4:3-5:15 hint suspect-lint overlay-info-description: Overlay `info` object should have a `description`.
+broken/empty.overlay.yaml:6:10-6:12 error suspect overlay-empty-actions: `actions` must contain at least one value
+broken/.suspect.yaml: (none)
+broken/markdown.yaml:10:9-10:17 hint suspect-lint md-bare-url: MD034: bare URL — wrap it as <https://> or a [link](https://)
+broken/markdown.yaml:13:5-15:8 hint suspect-lint md-code-fence-language: MD040: fenced code block without a language — add one (```yaml, ```json) so renderers highlight it
+broken/markdown.yaml:3:3-15:8 info suspect-lint oas3-api-contact: OpenAPI 3.x API description must have a contact object.
+broken/markdown.yaml:3:3-15:8 warning suspect-lint info-contact: Info object should contain a contact object.
+broken/markdown.yaml:8:5-9:1 hint suspect-lint md-single-h1: MD025: a second top-level heading — one `#` per description; use `##` and below
+broken/syntax.yaml:3:10-3:19 error suspect syntax-error: syntax error near "\"unclosed"
+broken/syntax.yaml:3:3-4:15 info suspect-lint info-description: OpenAPI object should have `description`.
+broken/syntax.yaml:3:3-4:15 info suspect-lint oas3-api-contact: OpenAPI 3.x API description must have a contact object.
+broken/syntax.yaml:3:3-4:15 warning suspect-lint info-contact: Info object should contain a contact object.
