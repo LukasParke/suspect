@@ -112,7 +112,6 @@ pub const ALIASES: &[(&str, &[&str])] = &[
         "overlay-action-missing-description",
         &["overlay-action-description"],
     ),
-    (crate::checks::SYNTAX_CODE, &["syntax"]),
 ];
 
 /// The process-wide [`Registry::builtin`].
@@ -409,10 +408,8 @@ mod tests {
             let info = registry.info(canonical).expect("canonical registered");
             assert_ne!(info.check, CheckId::Lint, "{canonical} is a lint code");
             for alias in *aliases {
-                // The lint rule keeps its entry; only the editor's old
-                // `syntax` code was never a rule.
                 assert!(
-                    registry.info(alias).is_some() || *alias == "syntax",
+                    registry.info(alias).is_some(),
                     "{alias} is not a registered code"
                 );
             }
@@ -453,7 +450,10 @@ mod tests {
                 "arazzo-step-multiple-targets"
             ]
         );
-        assert_eq!(registry.resolve("syntax"), ["syntax-error"]);
+        assert!(
+            registry.resolve("syntax").is_empty(),
+            "the old LSP code is gone"
+        );
         assert_eq!(
             registry
                 .info("oas-operation-missing-operationId")

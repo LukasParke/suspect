@@ -179,16 +179,8 @@ fn validate_and_lint_are_filters_of_check() {
             .collect::<Vec<_>>();
         assert_eq!(missing, ["oas-operation-missing-operationId"; 2]);
     }
-    // The lint finding carries its old name for one release.
-    let renamed: Vec<&Value> = lint
-        .iter()
-        .filter(|f| f["code"] == "oas-operation-missing-operationId")
-        .collect();
-    assert!(
-        renamed
-            .iter()
-            .all(|f| f["alias_of"] == "operation-operationId")
-    );
+    // The canonical code only: no `alias_of` naming the old lint code.
+    assert!(lint.iter().all(|f| f.get("alias_of").is_none()));
     // No SDK category without codegen configured.
     assert!(!codes(&all).contains(&"sdk-operation-missing-id"));
 }

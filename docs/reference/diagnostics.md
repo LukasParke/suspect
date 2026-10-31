@@ -10,7 +10,7 @@ Checks: [`syntax`](#syntax), [`ref`](#ref), [`validate`](#validate), [`swagger`]
 
 | Code | Default | Class | Summary | How to fix | Aliases |
 |---|---|---|---|---|---|
-| `syntax-error` | error | document | YAML or JSON syntax error |  | `syntax` |
+| `syntax-error` | error | document | YAML or JSON syntax error |  |  |
 
 ## ref
 

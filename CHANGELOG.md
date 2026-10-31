@@ -46,7 +46,7 @@ entry is a summary rather than a generated list.
   and JUnit output. The parse census `check` used to print is in `stats`.
   Finding JSON is `{"findings": [...], "suppressed": [...]}` with
   lowercase severities, and lint rules that duplicate a validation code
-  report under that code (`alias_of` names the old one).
+  report under that code (the old lint code still configures it).
 - `suspect ci` as a workspace gate (one `check` stage) with text and JSON
   output (JUnit for load runs); Swagger 2.0 to 3.1 upgrade; semantic and
   breaking-change diff; Overlay apply, explain and synthesis.

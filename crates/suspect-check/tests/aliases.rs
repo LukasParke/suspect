@@ -156,7 +156,7 @@ fn the_overlay_description_pair_is_one_finding() {
 }
 
 #[test]
-fn syntax_errors_carry_one_code_and_the_old_name_still_configures_them() {
+fn syntax_errors_carry_one_code_configured_by_that_code() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bad.yaml");
     std::fs::write(&path, "a: \"unclosed\n").unwrap();
@@ -164,5 +164,10 @@ fn syntax_errors_carry_one_code_and_the_old_name_still_configures_them() {
     assert!(!with_code(&findings, "syntax-error").is_empty());
     let mut policy = Policy::default();
     policy.overrides.insert("syntax".into(), Level::Off);
+    assert!(
+        !with_code(&run(&path, &policy), "syntax-error").is_empty(),
+        "the old `syntax` name configures nothing"
+    );
+    policy.overrides.insert("syntax-error".into(), Level::Off);
     assert!(with_code(&run(&path, &policy), "syntax-error").is_empty());
 }

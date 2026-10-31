@@ -12,27 +12,11 @@ use std::path::PathBuf;
 pub const ROOT: &str = "OPENROUTER_WEB_ROOT";
 /// The public specification, relative to the root.
 pub const SPEC: &str = "projects/docs/openapi/openapi.yaml";
-/// Accepted for one release; each names the spec file, not the root.
-pub const DEPRECATED_FILE_VARS: &[&str] = &[
-    "SUSPECT_OPENROUTER_YAML",
-    "SUSPECT_OPENROUTER_OPENAPI",
-    "SUSPECT_OPENROUTER_SPEC",
-    "OPENROUTER_PUBLIC_SCHEMA",
-];
-
 /// The openrouter-web checkout root. Panics with the exact export line when
 /// unset.
 #[must_use]
 pub fn openrouter_root() -> PathBuf {
-    match resolve_root(|name| std::env::var_os(name)) {
-        Ok((root, warning)) => {
-            if let Some(warning) = warning {
-                eprintln!("{warning}");
-            }
-            root
-        }
-        Err(message) => panic!("{message}"),
-    }
+    resolve_root(|name| std::env::var_os(name)).unwrap_or_else(|message| panic!("{message}"))
 }
 
 /// `<root>/projects/docs/openapi/openapi.yaml`, checked to exist.
@@ -47,36 +31,15 @@ pub fn openrouter_spec() -> PathBuf {
     spec
 }
 
-/// The root from `get` (an environment lookup), with the deprecation note
-/// to print when a file variable supplied it.
+/// The root from `get` (an environment lookup).
 ///
 /// # Errors
 /// The `missing input` message naming the variable to export.
-pub fn resolve_root(
-    get: impl Fn(&str) -> Option<OsString>,
-) -> Result<(PathBuf, Option<String>), String> {
-    if let Some(root) = get(ROOT).filter(|v| !v.is_empty()) {
-        return Ok((PathBuf::from(root), None));
-    }
-    for var in DEPRECATED_FILE_VARS {
-        if let Some(file) = get(var).filter(|v| !v.is_empty()) {
-            let file = PathBuf::from(file);
-            // <root>/projects/docs/openapi/openapi.yaml -> <root>
-            let root = file
-                .ancestors()
-                .nth(4)
-                .map_or_else(|| file.clone(), PathBuf::from);
-            return Ok((
-                root,
-                Some(format!(
-                    "{var} is deprecated; set {ROOT} to the openrouter-web checkout"
-                )),
-            ));
-        }
-    }
-    Err(format!(
-        "missing input: set {ROOT}=/path/to/openrouter-web (needs {SPEC})"
-    ))
+pub fn resolve_root(get: impl Fn(&str) -> Option<OsString>) -> Result<PathBuf, String> {
+    get(ROOT)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("missing input: set {ROOT}=/path/to/openrouter-web (needs {SPEC})"))
 }
 
 #[cfg(test)]
@@ -97,38 +60,19 @@ mod tests {
     }
 
     #[test]
-    fn root_wins_over_deprecated_file_variables() {
-        let (root, warning) = resolve_root(env(&[
-            ("OPENROUTER_WEB_ROOT", "/w"),
-            (
+    fn the_root_variable_names_the_checkout() {
+        assert_eq!(
+            resolve_root(env(&[("OPENROUTER_WEB_ROOT", "/w")])).unwrap(),
+            PathBuf::from("/w")
+        );
+        // The old file variables are not read.
+        assert!(
+            resolve_root(env(&[(
                 "SUSPECT_OPENROUTER_YAML",
-                "/x/projects/docs/openapi/openapi.yaml",
-            ),
-        ]))
-        .unwrap();
-        assert_eq!(root, PathBuf::from("/w"));
-        assert_eq!(warning, None);
-    }
-
-    #[test]
-    fn deprecated_file_variable_maps_to_the_root_with_a_warning() {
-        let dir = std::env::temp_dir().join("suspect-test-inputs");
-        let spec = dir.join(SPEC);
-        for var in DEPRECATED_FILE_VARS {
-            let (root, warning) = resolve_root(env(&[
-                ("OPENROUTER_WEB_ROOT", ""),
-                (var, spec.to_str().unwrap()),
-            ]))
-            .unwrap();
-            assert_eq!(root, dir);
-            assert_eq!(
-                warning.as_deref(),
-                Some(
-                    format!("{var} is deprecated; set OPENROUTER_WEB_ROOT to the openrouter-web checkout")
-                        .as_str()
-                )
-            );
-        }
+                "/x/projects/docs/openapi/openapi.yaml"
+            )]))
+            .is_err()
+        );
     }
 
     #[test]

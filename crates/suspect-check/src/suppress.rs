@@ -36,7 +36,7 @@ pub const EXTENSION_KEY: &str = "x-suspect-disable";
 
 /// Codes that are never suppressed: the document did not parse, so every
 /// other finding is suspect.
-const UNSUPPRESSIBLE: &[&str] = &[crate::checks::SYNTAX_CODE, "syntax"];
+const UNSUPPRESSIBLE: &[&str] = &[crate::checks::SYNTAX_CODE];
 
 /// How a suppression is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

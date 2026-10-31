@@ -9,8 +9,7 @@
 //! - `docs/reference/sdk-features.md` must match the registry byte-for-byte.
 //!
 //! Regenerate the doc with `SUSPECT_BLESS=1` (or `cargo xtask bless`) after
-//! intentional registry changes. The old `SUSPECT_REGEN_FEATURES=1` still
-//! works for one release, with a deprecation line.
+//! intentional registry changes.
 
 use suspect_codegen::features::{BACKENDS, FEATURES, feature_matrix_markdown};
 
@@ -73,11 +72,7 @@ fn docs_table_matches_the_registry() {
     let rendered = feature_matrix_markdown();
     let doc_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../docs/reference/sdk-features.md");
-    let deprecated = std::env::var_os("SUSPECT_REGEN_FEATURES").is_some();
-    if deprecated {
-        eprintln!("SUSPECT_REGEN_FEATURES is deprecated; use SUSPECT_BLESS=1");
-    }
-    if deprecated || std::env::var_os("SUSPECT_BLESS").is_some() {
+    if std::env::var_os("SUSPECT_BLESS").is_some() {
         std::fs::write(&doc_path, &rendered).expect("write feature matrix");
         return;
     }

@@ -1171,6 +1171,17 @@ releasable on its own.
    markdown ~28 ms, extension schemas ~36 ms, LSP mapping < 0.2 ms) were
    not worth moving.
 
+10. **(N+1) One-release compatibility** (Compatibility and migration):
+    the `"alias_of"` field in finding JSON and the LSP's old `syntax` code.
+    **Done** (in release N: no release had been tagged). Finding JSON
+    carries the canonical code only; `syntax` is no longer an alias of
+    `syntax-error` (a `lint.rules.syntax` override or a `suspect-disable
+    syntax` comment now names an unknown code). The lint aliases of
+    validation codes (`operation-operationId`, ...) are not part of the
+    window and still configure their canonical code. Not done:
+    `suspect_config::{SeverityName, parse_severity}` were never marked
+    `#[deprecated]` (step 1's note) and remain the internal API.
+
 Total: about 9 days. The short version estimated 4-5 days. The difference is
 the LSP-only checks that have to move (step 3), the parity harness (step 5)
 and TS rules in the editor (step 6).

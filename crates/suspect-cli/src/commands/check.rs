@@ -719,13 +719,6 @@ pub fn print(outcome: &Outcome, shown: &Shown<'_>, format: FindingsFormat) -> an
         }
         FindingsFormat::Json => {
             let mut report = render::json_report(&fresh, &outcome.suppressed, docs);
-            if let Some(entries) = report["findings"].as_array_mut() {
-                for (entry, finding) in entries.iter_mut().zip(&fresh) {
-                    if let Some(alias) = alias_of(finding, &outcome.registry) {
-                        entry["alias_of"] = json!(alias);
-                    }
-                }
-            }
             if shown.with_baseline {
                 report["baselined"] = json!(shown.baselined());
             }
@@ -759,24 +752,6 @@ pub fn text(
         }
     }
     Ok(())
-}
-
-/// The lint code a canonical finding was reported under, for one release
-/// of JSON output (`alias_of`): a builtin lint rule whose code is an alias
-/// of a code another check owns.
-fn alias_of<'r>(finding: &Finding, registry: &'r Registry) -> Option<&'r str> {
-    if finding.check != CheckId::Lint {
-        return None;
-    }
-    let info = registry.info(&finding.code)?;
-    if info.check == CheckId::Lint {
-        return None;
-    }
-    info.aliases.iter().copied().find(|alias| {
-        suspect_lint::builtin_rules()
-            .iter()
-            .any(|r| r.code == *alias)
-    })
 }
 
 /// The SARIF log: every finding, with its baseline key as

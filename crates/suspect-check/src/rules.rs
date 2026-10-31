@@ -243,7 +243,7 @@ mod tests {
             meta("my-rule"),
             meta("oas-tag-undeclared"),
             meta("operation-operationId"),
-            meta("syntax"),
+            meta("syntax-error"),
         ];
         let ids: Vec<String> = collisions(&registry, &rules)
             .into_iter()
@@ -251,7 +251,11 @@ mod tests {
             .collect();
         assert_eq!(
             ids,
-            ["oas-tag-undeclared", "operation-operationId", "syntax"]
+            [
+                "oas-tag-undeclared",
+                "operation-operationId",
+                "syntax-error"
+            ]
         );
     }
 

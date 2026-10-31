@@ -16,10 +16,8 @@ const USAGE: &str = "\
 tasks:
   ci [JOB...] [flags]             Run the CI jobs locally (`cargo xtask ci --help`).
   bless                           Regenerate the checked-in generated docs (bless tests).
-  verify-sdk [options]            Verify the maintained twelve-language SDK plan
-                                  (was sdk-full).
-  verify-sdk-demo [options]       Verify the frozen five-backend M3/M6 demo scope
-                                  (was sdk-m3-m6).
+  verify-sdk [options]            Verify the maintained twelve-language SDK plan.
+  verify-sdk-demo [options]       Verify the frozen five-backend M3/M6 demo scope.
   bump <version>                  Set the one toolchain version in every manifest and lockfile,
                                   then prepend its CHANGELOG.md section (git-cliff, if installed).
   check-versions [--tag vX.Y.Z]   Fail when any version line (or the tag) differs.
@@ -39,10 +37,6 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let task = args.first().map(String::as_str).unwrap_or_default();
     let rest = &args[1.min(args.len())..];
-    let (task, renamed) = canonical_task(task);
-    if let Some(warning) = renamed {
-        eprintln!("{warning}");
-    }
     match task {
         "ci" => ci::run(rest),
         "bless" => bless(rest),
@@ -60,20 +54,6 @@ fn main() -> Result<()> {
             eprintln!("unknown task: {task:?}\n\n{USAGE}");
             std::process::exit(2);
         }
-    }
-}
-
-/// Old task names kept for one release; historical records under `docs/`
-/// still cite them.
-const RENAMED_TASKS: &[(&str, &str)] =
-    &[("sdk-full", "verify-sdk"), ("sdk-m3-m6", "verify-sdk-demo")];
-
-/// The current name for `task`, plus the warning to print when an old name
-/// was used.
-fn canonical_task(task: &str) -> (&str, Option<String>) {
-    match RENAMED_TASKS.iter().find(|(old, _)| *old == task) {
-        Some((old, new)) => (new, Some(format!("xtask: '{old}' is now '{new}'"))),
-        None => (task, None),
     }
 }
 
@@ -1133,26 +1113,6 @@ mod tests {
             let path = root.join(format!("crates/{package}/tests/{test}.rs"));
             assert!(path.is_file(), "bless test {} is missing", path.display());
         }
-    }
-
-    #[test]
-    fn old_task_names_dispatch_to_the_new_ones_with_a_warning() {
-        assert_eq!(
-            canonical_task("sdk-full"),
-            (
-                "verify-sdk",
-                Some("xtask: 'sdk-full' is now 'verify-sdk'".into())
-            )
-        );
-        assert_eq!(
-            canonical_task("sdk-m3-m6"),
-            (
-                "verify-sdk-demo",
-                Some("xtask: 'sdk-m3-m6' is now 'verify-sdk-demo'".into())
-            )
-        );
-        assert_eq!(canonical_task("verify-sdk"), ("verify-sdk", None));
-        assert_eq!(canonical_task("ci"), ("ci", None));
     }
 
     #[test]

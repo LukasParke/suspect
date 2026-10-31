@@ -583,6 +583,13 @@ the tools: those runs now fail instead of passing.
    `BLESS_TESTS` in `xtask/src/main.rs`. Runs the P6 bless tests with `SUSPECT_BLESS=1`.
    0.1 day.
 
+9. **(N+1) One-release names** (Compatibility): the `sdk-full` and
+   `sdk-m3-m6` task names and the four OpenRouter file variables.
+   **Done** (in release N: no release had been tagged). `xtask` knows only
+   `verify-sdk` and `verify-sdk-demo` (the historical records under
+   `docs/internal/` keep the old command text); `test_inputs::resolve_root`
+   reads only `OPENROUTER_WEB_ROOT`.
+
 Total about 4.5 days. Steps 4-8 do not depend on each other. Step 3 depends
 on 1-2.
 

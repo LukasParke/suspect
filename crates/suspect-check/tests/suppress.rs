@@ -194,7 +194,7 @@ fn syntax_errors_cannot_be_suppressed() {
         problems,
         [
             "`syntax-error` cannot be suppressed",
-            "`syntax` cannot be suppressed"
+            "suppression names unknown code `syntax`"
         ]
     );
 }

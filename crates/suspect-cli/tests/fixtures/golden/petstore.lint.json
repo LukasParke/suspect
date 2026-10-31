@@ -57,7 +57,6 @@
       "severity": "info"
     },
     {
-      "alias_of": "operation-operationId",
       "check": "lint",
       "code": "oas-operation-missing-operationId",
       "col": 7,
@@ -114,7 +113,6 @@
       "severity": "info"
     },
     {
-      "alias_of": "operation-operationId",
       "check": "lint",
       "code": "oas-operation-missing-operationId",
       "col": 7,

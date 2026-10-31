@@ -551,6 +551,10 @@ would have to be deleted when P1 lands.
    exists in the clap tree. A prose default ("the directory name") is not
    put in a code span.
 
+8. **(N+1) Bless variable** (Compatibility): `SUSPECT_REGEN_FEATURES`
+   stops working. **Done** (in release N: no release had been tagged).
+   `feature_manifest.rs` reads only `SUSPECT_BLESS`.
+
 Steps 1-4 total 2.5 days. Each step leaves CI green: after steps 3 and 4 the
 lychee job, the guard tests and the two bless tests all run on the new paths.
 
