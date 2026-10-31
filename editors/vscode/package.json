@@ -372,6 +372,10 @@
 				"title": "Suspect: Explain Configuration"
 			},
 			{
+				"command": "suspect.locateBinary",
+				"title": "Suspect: Locate Binary…"
+			},
+			{
 				"command": "suspect.project.refresh",
 				"title": "Suspect: Refresh Project View",
 				"icon": "$(refresh)"
@@ -597,7 +601,10 @@
 		"test:generation:host": "node test/native-host/run.cjs",
 		"test:generation:host:inputs": "node --test test/native-host/contract.test.cjs",
 		"test:host:smoke": "node test/host-smoke/run.cjs",
-		"package": "vsce package"
+		"package": "vsce package --no-dependencies",
+		"bundle": "node scripts/bundle.cjs",
+		"vscode:prepublish": "npm run compile && npm run bundle",
+		"package:target": "node scripts/package-target.cjs"
 	},
 	"dependencies": {
 		"vscode-languageclient": "^9.0.0"
@@ -606,6 +613,7 @@
 		"@types/node": "^20.11.0",
 		"@types/vscode": "^1.85.0",
 		"@vscode/vsce": "4.1.0",
+		"esbuild": "0.28.2",
 		"ovsx": "1.3.0",
 		"typescript": "^5.4.0"
 	}

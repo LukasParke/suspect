@@ -67,21 +67,65 @@ function configuredBase(): string {
 	return base || 'suspect';
 }
 
-/** Resolve the suspect CLI path from `suspect.basePath` (or its deprecated alias). */
-export function suspectBinary(): string {
-	const base = configuredBase();
-	if (!base || base === 'suspect') {
-		return 'suspect';
-	}
-	if (/[/\\]suspect$/.test(base)) {
-		return base;
-	}
+/** The executable's file name on this platform. */
+export const EXECUTABLE = process.platform === 'win32' ? 'suspect.exe' : 'suspect';
+
+/** Where the CLI came from: an explicit setting, the copy in this VSIX, or `PATH`. */
+export type BinarySource = 'setting' | 'bundled' | 'path';
+
+export interface BinaryChoice {
+	binary: string;
+	source: BinarySource;
+}
+
+/** The extension's install directory, set on activation; its `bin/` holds the bundled CLI. */
+let extensionRoot: string | undefined;
+
+export function useExtensionRoot(root: string | undefined): void {
+	extensionRoot = root;
+}
+
+/** `bin/suspect` of a platform VSIX, when this one ships it. */
+export function bundledBinary(root: string | undefined = extensionRoot): string | undefined {
+	if (root === undefined) return undefined;
+	const candidate = path.join(root, 'bin', EXECUTABLE);
 	try {
-		// Explicit executables may be versioned, renamed, or symlinks to a pinned
-		// build. The setting accepts the file itself as well as a CLI directory.
-		if (fs.statSync(base).isFile()) return base;
-	} catch { /* Let spawning diagnose an unavailable CLI using the directory form. */ }
-	return path.join(base, 'suspect');
+		return fs.statSync(candidate).isFile() ? candidate : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The resolution order: an explicit `suspect.basePath` (or the deprecated
+ * `suspect.server.path`), the binary bundled with this extension version,
+ * then `suspect` on `PATH`. The bundled copy comes before `PATH` so a stale
+ * `cargo install` does not win over the build this extension was made for.
+ * Pure apart from the file checks.
+ */
+export function resolveBinary(configured: string, bundled: string | undefined): BinaryChoice {
+	const base = configured.trim();
+	if (base && base !== 'suspect') {
+		if (/[/\\]suspect(\.exe)?$/.test(base)) return { binary: base, source: 'setting' };
+		try {
+			// Explicit executables may be versioned, renamed, or symlinks to a pinned
+			// build. The setting accepts the file itself as well as a CLI directory.
+			if (fs.statSync(base).isFile()) return { binary: base, source: 'setting' };
+		} catch { /* Let spawning diagnose an unavailable CLI using the directory form. */ }
+		return { binary: path.join(base, EXECUTABLE), source: 'setting' };
+	}
+	if (bundled !== undefined) return { binary: bundled, source: 'bundled' };
+	return { binary: 'suspect', source: 'path' };
+}
+
+/** The CLI every feature spawns, and where it came from. */
+export function binaryChoice(): BinaryChoice {
+	return resolveBinary(configuredBase(), bundledBinary());
+}
+
+/** The suspect CLI path (see {@link resolveBinary}). */
+export function suspectBinary(): string {
+	return binaryChoice().binary;
 }
 
 /**

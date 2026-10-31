@@ -4,6 +4,7 @@ corpus/
 /fixtures
 node_modules/
 editors/vscode/dist/
+editors/vscode/bin/
 *.vsix
 *.log
 __pycache__/

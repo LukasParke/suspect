@@ -5,7 +5,7 @@ import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 import { parseArazzo } from './parse';
 import { registerNotebook } from './notebook';
-import { BINARY_SETTINGS, errorMessage, gatewayPort, spawnSuspectRun, suspectBinary } from './runner';
+import { BINARY_SETTINGS, binaryChoice, bundledBinary, errorMessage, gatewayPort, spawnSuspectRun, suspectBinary, useExtensionRoot } from './runner';
 import {
 	Generation, generationArgs, isSdkProfile, SDK_PROFILE_DIRECTORIES, SdkProfile, availableSdkProfiles, runGeneration, readCurrentSdkArtifact, readSdkSessionIdentity,
 	SdkCompatibilityProfile, readSdkCompatibilityProfiles, SdkSessionHandle, SdkSessionIdentity, SdkSessionRecord, startSdkSession,
@@ -44,6 +44,20 @@ let configStatus: ConfigStatus | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
 	extensionVersion = (context.extension?.packageJSON as { version?: string } | undefined)?.version;
+	useExtensionRoot(context.extensionUri?.fsPath);
+	// Integrated terminals run the same build as the extension: the
+	// "Run Now" actions type `suspect ...` into one.
+	const bundled = bundledBinary();
+	if (bundled && process.platform !== 'win32') {
+		// An installer that dropped the mode bit would leave it unusable.
+		try { fs.accessSync(bundled, fs.constants.X_OK); } catch { try { fs.chmodSync(bundled, 0o755); } catch { /* spawning reports it */ } }
+	}
+	if (bundled) {
+		context.environmentVariableCollection.prepend('PATH', path.dirname(bundled) + path.delimiter);
+	} else {
+		context.environmentVariableCollection.clear();
+	}
+	context.subscriptions.push(vscode.commands.registerCommand('suspect.locateBinary', () => locateBinary()));
 	context.subscriptions.push(
 		vscode.commands.registerCommand(RUN_WORKFLOW_COMMAND, (uri?: vscode.Uri | string, workflow?: string) =>
 			runWorkflowCommand(uri, workflow),
@@ -103,7 +117,7 @@ export async function deactivate(): Promise<void> {
 }
 
 function startClient(): void {
-	const binary = suspectBinary();
+	const { binary, source } = binaryChoice();
 	const serverOptions: ServerOptions = {
 		command: binary,
 		args: ['lsp'],
@@ -138,16 +152,37 @@ function startClient(): void {
 		// the declared commands and advertises ids this extension owns.
 		const tooOld = /command '[^']+' already exists/.test(message);
 		const text = missing
-			? `Suspect CLI not found at \`${binary}\`. Install it or set suspect.basePath to the CLI (or its directory).`
+			? source === 'path'
+				? `Suspect CLI not found: this platform has no bundled binary and \`suspect\` is not on PATH. Install it (${INSTALL_COMMAND}) or locate the binary.`
+				: `Suspect CLI not found at \`${binary}\`. Install it (${INSTALL_COMMAND}) or locate the binary.`
 			: tooOld
 				? `The Suspect CLI at \`${binary}\` is older than this extension. Update it or set suspect.basePath to a newer build.`
 				: `Suspect language server failed to start: ${message}`;
-		void vscode.window.showWarningMessage(text, 'Open Settings').then((choice) => {
-			if (choice === 'Open Settings') {
+		void vscode.window.showWarningMessage(text, LOCATE_BINARY, 'Open Settings').then((choice) => {
+			if (choice === LOCATE_BINARY) {
+				void locateBinary();
+			} else if (choice === 'Open Settings') {
 				void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
 			}
 		});
 	});
+}
+
+const LOCATE_BINARY = 'Locate binary…';
+
+/** The P5 installer, for the platform the extension runs on. */
+const INSTALL_COMMAND = process.platform === 'win32'
+	? 'powershell -ExecutionPolicy Bypass -c "irm https://github.com/LukasParke/suspect/releases/latest/download/suspect-cli-installer.ps1 | iex"'
+	: 'curl --proto \'=https\' --tlsv1.2 -LsSf https://github.com/LukasParke/suspect/releases/latest/download/suspect-cli-installer.sh | sh';
+
+/** Picks the CLI executable and writes it to `suspect.basePath` (user settings); the client restarts on the change. */
+async function locateBinary(): Promise<void> {
+	const picked = await vscode.window.showOpenDialog({
+		canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+		openLabel: 'Use this suspect binary', title: 'Locate the suspect CLI',
+	});
+	if (!picked?.[0]) return;
+	await vscode.workspace.getConfiguration('suspect').update('basePath', picked[0].fsPath, vscode.ConfigurationTarget.Global);
 }
 
 async function restartClient(): Promise<void> {

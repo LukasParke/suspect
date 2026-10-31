@@ -819,6 +819,32 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    resolution order, "Locate binary…", terminal `PATH`, esbuild bundle,
    `.vscodeignore`, `package.json` publishing fields. Test: host smoke with
    a VSIX built for the runner's platform and no `basePath`. 1 day.
+   **Done.** Size first: the release `suspect` for `aarch64-apple-darwin` is
+   40.7 MB (35.6 MB stripped); its platform VSIX is 15.1 MB, so bundling
+   stays. `runner.ts` `resolveBinary`: a non-default `suspect.basePath` (or
+   `suspect.server.path`), then `<extension>/bin/suspect[.exe]`, then
+   `suspect` on `PATH`; the bundled copy's `bin/` is prepended to `PATH` in
+   integrated terminals (`environmentVariableCollection`), and its mode bit
+   is restored if an installer dropped it. A start failure offers "Locate
+   binary…" (file picker, writes `suspect.basePath` in user settings; also
+   the `suspect.locateBinary` command) and names the P5 installer command.
+   `scripts/bundle.cjs` (esbuild 0.28.2, run by `vscode:prepublish` after
+   `tsc`) writes `dist/extension.js`; `.vscodeignore` ships only that file
+   of `dist/` and no `node_modules`, and packaging passes
+   `--no-dependencies` (universal VSIX 518 KB -> 159 KB). tsc's per-module
+   `dist/*.js` stay for the headless tests. `scripts/package-target.cjs
+   --target <t> --binary <path>` builds `suspect-vscode-<t>-<V>.vsix` with
+   the binary at `bin/`; `package-editors.yml` gains a `vscode-platform`
+   matrix (the seven targets of the table above, alpine sharing the musl
+   builds) that verifies each `suspect-cli-<triple>` archive against its
+   `.sha256`, packages, and runs `bin/suspect --version` for `linux-x64`;
+   `asset-names` checks the 14 new names. The universal VSIX stays (open
+   question 5). Host smoke: `SUSPECT_SMOKE_VSIX=<vsix> node
+   test/host-smoke/run.cjs` unpacks the VSIX, runs it with no `basePath` and
+   every `PATH` entry holding a `suspect` removed; green locally with a
+   `darwin-arm64` VSIX of both the debug and the stripped release build.
+   Not in CI (needs a desktop VS Code, as before). The `package.json`
+   publishing fields were P5 step 5.
 8. **Zed managed download** (after P5 artifacts). `editors/zed/src/lib.rs`,
    new deps `sha2`, `flate2`, `tar`; licence file; `extension.toml`
    `repository`. Tests: unit tests for `triple()`, `verify_sha256` and

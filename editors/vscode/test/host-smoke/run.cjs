@@ -4,6 +4,12 @@
 //
 //   SUSPECT_TEST_BINARY=../../target/debug/suspect npm run test:host:smoke
 //
+// With SUSPECT_SMOKE_VSIX=<platform .vsix> (scripts/package-target.cjs) it
+// runs the packaged extension instead of this folder, with no
+// suspect.basePath and no `suspect` on PATH, so the language client can
+// only start from the binary inside the VSIX. SUSPECT_TEST_BINARY is then
+// only the CLI the expected finding count is taken from.
+//
 // SUSPECT_VSCODE_BIN overrides the VS Code executable (default: the macOS
 // application bundle). Needs a desktop session; CI runs the headless suites.
 const assert = require('node:assert/strict');
@@ -12,8 +18,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const extension = path.resolve(__dirname, '../..');
-const repo = path.resolve(extension, '../..');
+const source = path.resolve(__dirname, '../..');
+const repo = path.resolve(source, '../..');
+const vsix = process.env.SUSPECT_SMOKE_VSIX && path.resolve(process.env.SUSPECT_SMOKE_VSIX);
 const code = process.env.SUSPECT_VSCODE_BIN
 	?? '/Applications/Visual Studio Code.app/Contents/MacOS/Code';
 const binary = path.resolve(process.env.SUSPECT_TEST_BINARY ?? path.join(repo, 'target/debug/suspect'));
@@ -25,10 +32,20 @@ assert.ok(fs.existsSync(binary), `suspect not found at ${binary}; build it or se
 const base = process.platform === 'win32' ? os.tmpdir() : '/tmp';
 const root = fs.realpathSync(fs.mkdtempSync(path.join(base, 'sx-')));
 const workspace = path.join(root, 'workspace');
+// A VSIX is a zip with the extension under extension/.
+let extension = source;
+if (vsix) {
+	assert.ok(fs.existsSync(vsix), `no VSIX at ${vsix}`);
+	const unpacked = path.join(root, 'vsix');
+	cp.execFileSync('unzip', ['-q', vsix, '-d', unpacked]);
+	extension = path.join(unpacked, 'extension');
+	const exe = process.platform === 'win32' ? 'suspect.exe' : 'suspect';
+	assert.ok(fs.existsSync(path.join(extension, 'bin', exe)), `the VSIX has no bin/${exe}`);
+}
 fs.mkdirSync(path.join(workspace, '.vscode'), { recursive: true });
 const spec = path.join(workspace, 'petstore.yaml');
 fs.copyFileSync(path.join(repo, 'docs/demo/petstore.yaml'), spec);
-fs.writeFileSync(path.join(workspace, '.vscode/settings.json'), JSON.stringify({ 'suspect.basePath': binary }));
+fs.writeFileSync(path.join(workspace, '.vscode/settings.json'), JSON.stringify(vsix ? {} : { 'suspect.basePath': binary }));
 // A floor the editor setting later overrides; `hint` filters nothing, so the
 // CLI's finding count below is unchanged.
 fs.writeFileSync(path.join(workspace, '.suspect.yaml'), 'lint:\n  min_severity: hint\n');
@@ -38,6 +55,12 @@ const env = { ...process.env, SUSPECT_SMOKE_SPEC: spec, SUSPECT_SMOKE_REPORT: re
 // Launched from another Electron app (or VS Code's own terminal), these make
 // the binary behave as Node or attach to the running instance.
 for (const key of ['ELECTRON_RUN_AS_NODE', 'VSCODE_IPC_HOOK_CLI', 'VSCODE_PID']) delete env[key];
+if (vsix) {
+	// Nothing on PATH may answer to `suspect`.
+	env.PATH = (env.PATH ?? '').split(path.delimiter)
+		.filter((dir) => !['suspect', 'suspect.exe'].some((name) => fs.existsSync(path.join(dir, name))))
+		.join(path.delimiter);
+}
 const result = cp.spawnSync(code, [
 	`--extensionDevelopmentPath=${extension}`,
 	`--extensionTestsPath=${path.join(__dirname, 'suite.cjs')}`,

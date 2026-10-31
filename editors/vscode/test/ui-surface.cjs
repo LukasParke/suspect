@@ -457,3 +457,39 @@ test('the CLI binary honors the deprecated suspect.server.path only while suspec
 	settings.set('basePath', '/opt/current/suspect');
 	assert.equal(suspectBinary(), '/opt/current/suspect');
 });
+
+test('the CLI resolves from the setting, then the binary in this VSIX, then PATH', () => {
+	const settings = new Map();
+	const stub = { workspace: { getConfiguration: () => ({ get: (key, fallback) => (settings.has(key) ? settings.get(key) : fallback) }) } };
+	const { binaryChoice, useExtensionRoot, EXECUTABLE } = loadModule('runner', stub);
+	const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'suspect-ext-'));
+	try {
+		// A universal VSIX (no bin/): PATH.
+		useExtensionRoot(root);
+		assert.deepEqual(binaryChoice(), { binary: 'suspect', source: 'path' });
+		// A platform VSIX: its own copy beats PATH.
+		fs.mkdirSync(path.join(root, 'bin'));
+		fs.writeFileSync(path.join(root, 'bin', EXECUTABLE), '');
+		assert.deepEqual(binaryChoice(), { binary: path.join(root, 'bin', EXECUTABLE), source: 'bundled' });
+		// An explicit setting beats both.
+		settings.set('basePath', '/opt/pinned/suspect');
+		assert.deepEqual(binaryChoice(), { binary: '/opt/pinned/suspect', source: 'setting' });
+		settings.set('basePath', 'suspect');
+		assert.equal(binaryChoice().source, 'bundled', 'the default value is not an explicit choice');
+	} finally {
+		useExtensionRoot(undefined);
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('the VSIX ships the bundle and leaves node_modules and sources out', () => {
+	const ignore = fs.readFileSync(path.join(__dirname, '..', '.vscodeignore'), 'utf8').split('\n').map((l) => l.trim());
+	for (const left of ['node_modules/**', 'src/**', 'test/**', 'scripts/**', 'dist/**']) assert.ok(ignore.includes(left), `${left} is shipped`);
+	assert.ok(ignore.includes('!dist/extension.js'), 'the bundle must ship');
+	assert.ok(!ignore.some((l) => l.startsWith('bin')), 'a platform VSIX ships bin/suspect');
+	assert.match(packageManifest.scripts['vscode:prepublish'], /bundle/);
+	assert.match(packageManifest.scripts.package, /--no-dependencies/);
+	assert.ok(packageManifest.contributes.commands.some((c) => c.command === 'suspect.locateBinary'));
+	const { TARGETS } = require('../scripts/package-target.cjs');
+	assert.deepEqual(Object.keys(TARGETS).sort(), ['alpine-arm64', 'alpine-x64', 'darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-x64']);
+});
