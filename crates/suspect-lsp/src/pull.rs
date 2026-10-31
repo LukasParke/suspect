@@ -93,12 +93,9 @@ pub fn pull_diagnostics(
     ws: &Arc<Workspace>,
     doc: &LowDoc,
     previous_result_id: Option<String>,
-    cfg: &crate::config_files::SuspectConfig,
-    ruleset: Option<&std::path::Path>,
-    strict_format: bool,
+    settings: &suspect_config::Settings,
 ) -> (String, Vec<Diagnostic>) {
-    let diagnostics =
-        crate::diagnostics::compute_diagnostics(Some(ws), doc, cfg, ruleset, strict_format);
+    let diagnostics = crate::diagnostics::compute_diagnostics(Some(ws), doc, settings);
     let result_id = diagnostics_result_id(&diagnostics);
     // The previous id is consumed by the caller's unchanged check; this pure
     // function always produces the full report.
@@ -110,13 +107,13 @@ pub fn pull_diagnostics(
 ///
 /// Documents that only parse with tree-sitter recovery errors still appear —
 /// their syntax errors come back as ordinary diagnostics from the battery —
-/// so project-wide error trees cover unopened files too.
+/// so project-wide error trees cover unopened files too. Each document is
+/// checked under its own configuration (`settings_for`), as `suspect lint`
+/// would check it.
 #[must_use]
 pub fn workspace_pull(
     ws: &Arc<Workspace>,
-    cfg: &crate::config_files::SuspectConfig,
-    ruleset: Option<&std::path::Path>,
-    strict_format: bool,
+    settings_for: &dyn Fn(&Uri) -> Arc<suspect_config::Resolved>,
     cache: &crate::state::WsDiagCacheView,
 ) -> Vec<(Uri, Vec<Diagnostic>)> {
     ws.uris()
@@ -130,8 +127,9 @@ pub fn workspace_pull(
             if let Some(cached) = cache.get(&uri) {
                 return Some((uri.clone(), cached));
             }
+            let resolved = settings_for(&uri);
             let diagnostics =
-                crate::diagnostics::compute_diagnostics(Some(ws), low, cfg, ruleset, strict_format);
+                crate::diagnostics::compute_diagnostics(Some(ws), low, &resolved.settings);
             cache.store(uri.clone(), diagnostics.clone());
             Some((uri, diagnostics))
         })
@@ -683,15 +681,8 @@ components:
         );
         let low = low_at(&dir, "main.yaml", MAIN);
 
-        let (id1, d1) = pull_diagnostics(&ws, &low, None, &Default::default(), None, false);
-        let (id2, d2) = pull_diagnostics(
-            &ws,
-            &low,
-            Some(id1.clone()),
-            &Default::default(),
-            None,
-            false,
-        );
+        let (id1, d1) = pull_diagnostics(&ws, &low, None, &Default::default());
+        let (id2, d2) = pull_diagnostics(&ws, &low, Some(id1.clone()), &Default::default());
         assert_eq!(id1, id2, "same input must yield the same result id");
         assert_eq!(d1, d2, "full-report mode ignores the previous id");
     }
@@ -706,15 +697,14 @@ components:
         let clean = low_at(&dir, "main.yaml", MAIN);
         let broken = low_at(&dir, "broken.yaml", BROKEN);
 
-        let (_, broken_diags) =
-            pull_diagnostics(&ws, &broken, None, &Default::default(), None, false);
+        let (_, broken_diags) = pull_diagnostics(&ws, &broken, None, &Default::default());
         assert!(
             !broken_diags.is_empty(),
             "unresolved $ref must produce diagnostics"
         );
 
-        let (id_broken, _) = pull_diagnostics(&ws, &broken, None, &Default::default(), None, false);
-        let (id_clean, _) = pull_diagnostics(&ws, &clean, None, &Default::default(), None, false);
+        let (id_broken, _) = pull_diagnostics(&ws, &broken, None, &Default::default());
+        let (id_clean, _) = pull_diagnostics(&ws, &clean, None, &Default::default());
         assert_ne!(id_broken, id_clean);
     }
 
@@ -724,7 +714,7 @@ components:
         let garbage = ": : :\nfoo: [unclosed\n";
         let ws = workspace(&dir, garbage);
         let low = low_at(&dir, "comp.yaml", garbage);
-        let (_, diags) = pull_diagnostics(&ws, &low, None, &Default::default(), None, false);
+        let (_, diags) = pull_diagnostics(&ws, &low, None, &Default::default());
         assert!(!diags.is_empty(), "parse recovery errors must surface");
     }
 
@@ -736,11 +726,10 @@ components:
         let comp = "components:\n  schemas:\n    Comp:\n      type: object\n";
         let ws = workspace(&dir, comp);
 
+        let defaults = crate::config_files::ResolvedCache::default();
         let results = workspace_pull(
             &ws,
-            &Default::default(),
-            None,
-            false,
+            &|uri| defaults.for_uri(uri),
             &crate::state::WsDiagCacheView::new(
                 std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
                 0,
@@ -759,11 +748,10 @@ components:
         let dir = std::env::temp_dir().join("suspect-lsp-pull-ws-bad");
         let garbage = ": : :\nkey: [unclosed\n";
         let ws = workspace(&dir, garbage);
+        let defaults = crate::config_files::ResolvedCache::default();
         let results = workspace_pull(
             &ws,
-            &Default::default(),
-            None,
-            false,
+            &|uri| defaults.for_uri(uri),
             &crate::state::WsDiagCacheView::new(
                 std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
                 0,

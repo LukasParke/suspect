@@ -104,7 +104,10 @@ export function registerServerCommands(getClient: ClientGetter): vscode.Disposab
 			if (count === undefined) {
 				return;
 			}
-			const message = `Suspect: ${count} breaking change(s) vs ${process.env.SUSPECT_GIT_BASE ?? 'HEAD~1'}. Details in the Suspect output.`;
+			// The server resolves the baseline (`diff.baseline`, `suspect.ci.baseline`,
+			// `SUSPECT_GIT_BASE` in its own environment) and reports the one it used.
+			const baseline = (result?.baseline as string | undefined) ?? 'HEAD~1';
+			const message = `Suspect: ${count} breaking change(s) vs ${baseline}. Details in the Suspect output.`;
 			if ((count as number) > 0) {
 				void vscode.window.showWarningMessage(message);
 			} else {

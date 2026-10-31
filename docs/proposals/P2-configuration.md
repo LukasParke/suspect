@@ -805,10 +805,29 @@ Each step leaves `main` green and shippable.
    `crates/suspect-config/tests/resolve.rs` precedence matrix
    (default/manifest/file/env/editor/flag x scalar/bool/map), table vs
    struct round-trip. 1 day.
+   **Done.** Deviations: the legacy `for_invocation`/`discover`/`Loaded`
+   stayed as they were (not wrappers) until steps 3-4 moved their callers,
+   because `resolve` rejects bad values that the legacy callers reported
+   themselves; the old precedence enum `resolve::Layer` is now `LayerKind`
+   (the name `Layer` is the new layer struct). `Kind` also has `Section`,
+   `List`, `Object` (`extensions`) and `Targets` (manifest `codegen`); `Raw`
+   also has `List` and `Json`. `resolve_with` returns
+   `Err(ConfigError { problems, resolved })`, carrying the settings that did
+   apply, so the LSP can keep working; `resolve_found` takes a discovery the
+   caller already ran (the LSP cache key). `Settings` keeps canonical
+   strings for `lint.min_severity`/`design`/`rules` (validated and
+   normalized by `resolve`) with typed accessors (`floor()`,
+   `design_severity()`, `rule_severities()`). `docs.output` with the
+   `docs.out` alias (open question 8) landed here with the table.
 2. **`suspect config --explain`** (`--format json`, `--set-only`) and
    the fixed help text for `config [INPUT]`. Files: `cli/src/lib.rs`
    (`Command::Config`). Tests: `crates/suspect-cli/tests/config_explain.rs`
    with a tempdir fixture asserting origins incl. `file:line`. 0.5 day.
+   **Done.** `suspect config` itself discovers from INPUT (falling back to
+   the working directory when nothing configures it) from this step on;
+   with `--explain`, rejected values are listed as `error:` lines and the
+   exit code is 2. Rows also name their env variable. The JSON adds
+   `config`, `errors`, `layer` per value and a `debug` list.
 3. **CLI and CI on `resolve`**. `validate`, `lint`, `fmt`, `docs`,
    `codegen`, `ci`, `project build` call `resolve_with`; input-first
    discovery; multi-config warning; delete `lint_policy`/`lint_overrides`;
@@ -818,6 +837,15 @@ Each step leaves `main` green and shippable.
    `crates/suspect-cli/tests/config_agreement.rs` (the Problem 1 and 3
    reproductions as fixtures; `lint` and `ci` must report the same
    severities); existing `cli.rs` cases updated. 1 day.
+   **Done.** `for_invocation` is deleted; the CLI helpers live in
+   `cli/src/settings.rs` (`start`, `resolve`, `emit_warnings`). In `ci` a
+   rejected value fails only the stage that owns the key (`lint.*` the lint
+   stage, `validate.*` the validate stage; a broken file or `extends` both),
+   rather than exiting 2, as the Goals ask ("a failing CI stage that names
+   it"). `project build` resolves from the manifest directory and exits 2 on
+   a rejected value. `fmt` keeps the rule that a passed `--json`/`--yaml`
+   overrides both `format.json` and `format.yaml`. `codegen --profile` is
+   still applied after resolve (the flag is a typed profile, not a string).
 4. **LSP on `resolve`**. `ResolvedCache` in `state.rs`; delete
    `editor_config.rs`, the config half of `config_files.rs`, and
    `EditorConfig::min_severity`; `lint_diagnostics` takes `LintSettings`;
@@ -826,6 +854,20 @@ Each step leaves `main` green and shippable.
    `suspect-config`; add an LSP case to `config_agreement.rs` using
    `tests/support/editor.rs` (same fixture, same severities as `lint`);
    `npm run test:host:smoke` unchanged and green. 1.5 days.
+   **Done.** `ResolvedCache` lives in `config_files.rs` (state holds an
+   `Arc` of it), keyed on the discovery result (plus the start directory
+   when nothing configures it); `reload_config` builds a fresh cache and
+   compares the workspace's and every open document's `Resolved` with the
+   old one. `compute_diagnostics`, `pull_diagnostics`, `workspace_pull`
+   (per-document settings through a closure) and `resolve_code_action` take
+   `&suspect_config::Settings`; ruleset, strict format and floor come from
+   it. `lint.recommended: false` now drops lint findings only without a
+   `lint.ruleset`, as the CLI does. Rejected values are shown once per
+   change with `window/showMessage` (`file:line: key: ...`) and, when the
+   file is open, by the schema check, which now reads the shared table and
+   also flags deprecated spellings. Not done: the `lsp_bench.rs` case and
+   the host-smoke case (needs a VS Code host); the stdio agreement case is
+   in `config_agreement.rs`.
 5. **Option A**. Manifest `config` key in discovery and `project check`;
    deprecation warning (CLI, CI note, LSP diagnostic); `project init`
    writes `.suspect.yaml`; `extends`; `suspect config migrate`. Files:
@@ -833,18 +875,58 @@ Each step leaves `main` green and shippable.
    new `cli/src/commands/config_migrate.rs`, `lsp/src/config_schema.rs`.
    Tests: migrate fixtures (none / beside / above), warning text snapshot,
    `project init` output. 1 day.
+   **Done.** `extends` landed in step 1. The deprecation text is
+   `suspect_config::file::manifest_policy_warning`; `resolve` attaches it
+   to the manifest layer, so every command that resolves prints it once
+   (stderr), `project check` reports it as a `project-manifest-policy`
+   warning (and `project-missing-config` / `project-config` errors for a
+   missing or rejected settings file), and the editor shows it on the key
+   (`config-manifest-policy`) and logs it with `window/logMessage` on each
+   configuration change rather than once per session. The CI note is
+   printed per project on stderr (so `--format json` runs, which silence
+   stderr, do not show it). `config migrate` writes JSON by text: kept
+   entries keep their text and order and are joined with the separator
+   the file used between its first two keys; `"config"` becomes the first
+   key. Tests are in `crates/suspect-cli/tests/config_migrate.rs` (none /
+   beside / above, warning text, `project init`).
 6. **Schema extension and env registry**. Keys in the table above; `test`,
    `fuzz`, `stateful`, `load`, `auth`, `gateway`, `rules` read
    `resolve_with`; LSP run lenses and `breakingChanges` read
    `test.base_url`/`diff.baseline`; extension host stops reading
    `SUSPECT_GIT_BASE`; Action variables renamed. Tests: the registry test
    (Testing); per-command flag-beats-config cases in `cli.rs`. 1.5 days.
+   **Done.** The keys landed with the table in step 1; this step wires
+   them. `test`, `fuzz`, `stateful` (`--base-url`), `test --report`,
+   `test`/`auth check --credentials`, `gateway --port/--mode/--upstream`
+   lost their clap defaults and resolve; `load` uses `test.base_url` only
+   when something set it (its default does not beat the profile's
+   `target`); `ci --baseline` falls back to the project's `diff.baseline`;
+   `project build` applies env > manifest `tests.base_url` >
+   `test.base_url` > default (the manifest default `http://127.0.0.1:8080`
+   is gone); `rules check` scans `rules.roots` from the settings root
+   instead of the cwd. `gateway.port` accepts `0` (a free port), as the
+   flag does. `rules.enabled` is in the table and `Settings` for P1; nothing
+   reads it yet. The LSP run lenses read `test.base_url` per document (the
+   top-level `baseUrl` initialization option is no longer read;
+   `run.baseUrl` is an alias of `test.base_url`) and `suspect.breakingChanges`
+   reads `diff.baseline` and returns the baseline it used, which the
+   extension host now shows instead of reading `SUSPECT_GIT_BASE`. The
+   registry test is `crates/suspect-config/tests/env_registry.rs`; its
+   harness list names the toolchain-gate and generator files. The
+   flag-beats-config cases are in `config_explain.rs`.
 7. **JSON Schema**. `json_schema.rs`, bless test, `editors/vscode/schemas/`,
    `jsonValidation`/`yamlValidation` in `package.json`. Tests:
    `crates/suspect-config/tests/json_schema.rs`; a `test/manifest.cjs`
    check that the two contribution entries point at existing files; one
    test validates `project init` output against the manifest schema. 0.5
    day.
+   **Done.** `x-suspect-editor` is `{key, scope: "resource"}` (the key is
+   today's client spelling, so P4's generator can map it); deprecated
+   spellings are emitted with `deprecated: true` (sections as copies) so
+   existing files keep validating; the manifest's `lint`/`validate`/`editor`
+   are marked deprecated. Prose defaults ("the directory name") are left
+   out of `default`. The `project init` check validates both generated
+   files with `suspect-schema` (`config_migrate.rs`).
 8. **Formats** (separate, deprecation-gated). Manifest `release:` section
    and `release.json` warning; `codegen[].options`; YAML for serde inputs;
    `gen.yaml`. Files: `commands/{publish,codegen_cmd,codegen_session,terraform_cmd,application_cmd,generate}.rs`,

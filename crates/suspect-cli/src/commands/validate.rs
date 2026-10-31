@@ -12,16 +12,6 @@ use suspect_source::Uri;
 use crate::OutputFormat;
 use crate::output::{self, Finding, Severity};
 
-/// The `validate.strict_format` setting for runs with no `--strict-format`
-/// flag (`ci`, `project build`): the environment, then the settings file
-/// found for `input`, as `suspect validate` resolves it.
-#[must_use]
-pub fn configured_strict_format(input: &Path) -> bool {
-    let config = suspect_config::for_invocation(Some(input))
-        .is_ok_and(|loaded| loaded.settings.validate.strict_format);
-    suspect_config::resolve_bool(false, "SUSPECT_STRICT_FORMAT", config)
-}
-
 /// Validates one entry document. Input failures become findings so batch
 /// validation can still report problems in the other documents.
 /// An explicit document allowlist also applies to the entry itself.

@@ -58,7 +58,7 @@ Commands:
   evidence           Print the SDK verification matrix: backend x feature -> evidence
   ci                 Run validate, contract, breaking, codegen, and tests across every project in a workspace as one gate
   contract           Emit or verify a machine-readable contract package
-  config             Show the project configuration in effect for this invocation
+  config             Show the configuration in effect, or with `--explain` every setting and where its value came from
   project            Build and check a suspect project from one manifest
   lsp                Run the language server over stdio
   help               Print this message or the help of the given subcommand(s)
@@ -126,7 +126,7 @@ Verify every configured credential without running a workflow
 Usage: suspect auth check [OPTIONS]
 
 Options:
-      --credentials <FILE>  Credentials file (default: discovered `.suspect/credentials.json`, or `SUSPECT_CREDENTIALS`)
+      --credentials <FILE>  Credentials file (default: `test.credentials`, `SUSPECT_CREDENTIALS`, else a discovered `.suspect/credentials.json`)
   -h, --help                Print help
 ```
 
@@ -582,7 +582,7 @@ Arguments:
   <SPEC>  Entry OpenAPI document
 
 Options:
-      --base-url <BASE_URL>  Base URL prepended to operation paths [default: http://localhost:8080]
+      --base-url <BASE_URL>  Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
       --filter <FILTER>      Run only sequences whose target operationId contains this
       --emit                 Print the generated sequences as JSON instead of running them
   -h, --help                 Print help
@@ -599,14 +599,14 @@ Arguments:
   <ARAZZO>  Arazzo document describing the workflows
 
 Options:
-      --base-url <BASE_URL>   Base URL prepended to operation paths [default: http://localhost:8080]
+      --base-url <BASE_URL>   Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
       --filter <FILTER>       Run only workflows whose id contains this substring
       --input <NAME=VALUE>    Provide a workflow input: `--input name=value` (repeatable). The value is parsed as JSON when it parses, else taken as a string; applies to every workflow that declares the input
       --cassette <CASSETTE>   Run offline against a recorded Suspect Cassette instead of live HTTP
       --offline               Enables offline mode (requires --cassette)
-      --report <REPORT>       Event stream format: human text or one-JSON-per-line ndjson [default: text] [possible values: text, ndjson]
+      --report <REPORT>       Event stream format: human text or one-JSON-per-line ndjson (default: `test.report`, else `text`) [possible values: text, ndjson]
       --message-broker <DIR>  Message broker directory for Arazzo 1.1 AsyncAPI steps: `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl` collects what the workflow published
-      --credentials <FILE>    Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `SUSPECT_CREDENTIALS` overrides
+      --credentials <FILE>    Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `test.credentials` and `SUSPECT_CREDENTIALS` override it
       --journal <FILE>        Write the journal to this file (append) instead of stdout
       --inputs <FILE>         JSON object file of workflow inputs, applied before `--input` pairs (which override it)
   -h, --help                  Print help (see more with '--help')
@@ -661,7 +661,7 @@ Arguments:
   <SPEC>  Entry OpenAPI document
 
 Options:
-      --base-url <BASE_URL>    Base URL prepended to operation paths [default: http://localhost:8080]
+      --base-url <BASE_URL>    Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
       --runs <RUNS>            Mutant requests generated per operation [default: 25]
       --filter <FILTER>        Run only operations whose operationId contains this substring
       --journal <FILE>         Write the journal to this file (append) instead of stdout
@@ -754,10 +754,10 @@ Arguments:
   <SPEC>  Entry OpenAPI document (mock/validate/record) or ignored (replay)
 
 Options:
-  -p, --port <PORT>                  TCP port to bind on 127.0.0.1 (`0` picks a free port). The bound address is printed on stderr once the gateway can serve [default: 8080]
-      --mode <MODE>                  Operating mode: mock | proxy | validate | record | replay | scenario [default: mock]
+  -p, --port <PORT>                  TCP port to bind on 127.0.0.1 (`0` picks a free port). The bound address is printed on stderr once the gateway can serve. Default: `gateway.port`, else 8080
+      --mode <MODE>                  Operating mode: mock | proxy | validate | record | replay | scenario. Default: `gateway.mode`, else `mock`
       --scenario <FILE>              Scenario mode: JSON file of scripted steps (`{"steps": [{"method", "path_suffix", "status", "body"}]}`)
-      --upstream <UPSTREAM>          Upstream base URL for proxy/validate/record modes
+      --upstream <UPSTREAM>          Upstream base URL for proxy/validate/record modes (default: `gateway.upstream`)
       --cassette <CASSETTE>          Cassette path for record output
       --enforce                      Validate mode only: reject invalid requests with 400 instead of forwarding them
       --delay-ms <DELAY_MS>          Fault injection: delay in milliseconds [default: 0]
@@ -1038,7 +1038,7 @@ Arguments:
   [ROOT]  Root to search for projects [default: .]
 
 Options:
-      --baseline <REF>   Git ref each project is compared against for breaking changes
+      --baseline <REF>   Git ref each project is compared against for breaking changes (default: `diff.baseline` from `.suspect.yaml`, or `SUSPECT_GIT_BASE`)
       --stage <NAME>     Only run these stages (repeatable): validate, lint, contract, breaking, codegen, test
       --skip-tests       Skip contract tests (they may need a live server)
       --build            Build every project before gating it: overlays, publication, validation, contract, docs and SDK generation, then the gate. One command from a clean checkout to a verified workspace
@@ -1067,12 +1067,34 @@ Options:
 ## `suspect config`
 
 ```text
-Show the project configuration in effect for this invocation
+Show the configuration in effect, or with `--explain` every setting and where its value came from
 
-Usage: suspect config [INPUT]
+Usage: suspect config [OPTIONS] [INPUT]
+       suspect config <COMMAND>
+
+Commands:
+  migrate  Move a manifest's deprecated `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
+  help     Print this message or the help of the given subcommand(s)
 
 Arguments:
-  [INPUT]  Report the configuration a command on this input would use: a settings file above the working directory wins, and the input's own directory is searched only when there is none
+  [INPUT]  Report the configuration a command on this input would use: the nearest settings file above it, else the one above the working directory
+
+Options:
+      --explain          Print every setting with its value and origin (`flag`, `env SUSPECT_X`, `.suspect.yaml:12`, `default`), plus debug variables
+      --set-only         With `--explain`: hide settings that hold their default
+      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+  -h, --help             Print help (see more with '--help')
+```
+
+## `suspect config migrate`
+
+```text
+Move a manifest's deprecated `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
+
+Usage: suspect config migrate [MANIFEST]
+
+Arguments:
+  [MANIFEST]  The manifest to migrate [default: suspect.project.json]
 
 Options:
   -h, --help  Print help

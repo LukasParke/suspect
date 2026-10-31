@@ -56,9 +56,38 @@ pub struct LintOverrides {
     /// Per-rule severity overrides; [`suspect_lint::Severity::Off`] drops
     /// the rule. Wins over `design`.
     pub rules: std::collections::BTreeMap<String, suspect_lint::Severity>,
+    /// `lint.recommended: false`: without a ruleset, run no rules.
+    pub skip_builtin: bool,
+}
+
+/// The severity floor `lint` settings name.
+#[must_use]
+pub fn floor(lint: &suspect_config::LintSettings) -> Severity {
+    Severity::from_config(lint.floor()).unwrap_or(Severity::Hint)
 }
 
 impl LintOverrides {
+    /// The policy resolved settings carry. `resolve` already rejected
+    /// unknown names, so nothing is re-parsed here.
+    #[must_use]
+    pub fn from_settings(lint: &suspect_config::LintSettings) -> Self {
+        let to_lint = |name: suspect_config::SeverityName| match name {
+            suspect_config::SeverityName::Error => suspect_lint::Severity::Error,
+            suspect_config::SeverityName::Warning => suspect_lint::Severity::Warn,
+            suspect_config::SeverityName::Info => suspect_lint::Severity::Info,
+            suspect_config::SeverityName::Hint => suspect_lint::Severity::Hint,
+            suspect_config::SeverityName::Off => suspect_lint::Severity::Off,
+        };
+        Self {
+            design: lint.design_severity().map(to_lint),
+            rules: lint
+                .rule_severities()
+                .map(|(code, s)| (code.to_owned(), to_lint(s)))
+                .collect(),
+            skip_builtin: !lint.recommended,
+        }
+    }
+
     /// Parses policy names as they appear in committed configuration:
     /// `error`, `warn`/`warning`, `info`/`information`, `hint`, `off`.
     ///
@@ -91,7 +120,11 @@ impl LintOverrides {
                 bad.join(", ")
             ));
         }
-        Ok(Self { design, rules: map })
+        Ok(Self {
+            design,
+            rules: map,
+            skip_builtin: false,
+        })
     }
 }
 
@@ -129,11 +162,20 @@ pub fn lint_findings(
     min_severity: Severity,
     overrides: &LintOverrides,
 ) -> anyhow::Result<Vec<Finding>> {
-    let linter = build_linter(ruleset)?;
+    // `lint.recommended: false` and no ruleset: no rules run, but the
+    // documents are still read so a missing input is reported.
+    let linter = if ruleset.is_none() && overrides.skip_builtin {
+        None
+    } else {
+        Some(build_linter(ruleset)?)
+    };
     let mut findings: Vec<Finding> = paths
         .par_iter()
         .map(|p| match crate::load_doc(p) {
-            Ok(doc) => lint_doc(&linter, &doc, &p.display().to_string()),
+            Ok(doc) => linter
+                .as_ref()
+                .map(|linter| lint_doc(linter, &doc, &p.display().to_string()))
+                .unwrap_or_default(),
             Err(e) => vec![Finding {
                 file: p.display().to_string(),
                 severity: Severity::Error,
@@ -151,7 +193,9 @@ pub fn lint_findings(
     // The floor filters after, so a downgraded finding obeys the floor too.
     findings.retain_mut(|f| {
         let target = overrides.rules.get(&f.code).copied().or_else(|| {
-            (linter.category_of(&f.code) == suspect_lint::Category::Design)
+            linter
+                .as_ref()
+                .is_some_and(|l| l.category_of(&f.code) == suspect_lint::Category::Design)
                 .then_some(overrides.design)
                 .flatten()
         });

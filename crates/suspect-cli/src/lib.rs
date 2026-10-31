@@ -12,6 +12,7 @@ pub mod output;
 pub mod reverse;
 /// SARIF 2.1.0 serialization for CI code-scanning integration.
 pub mod sarif;
+pub mod settings;
 /// FD-level output silencing for machine-readable runs.
 pub mod silence;
 pub mod upgrade;
@@ -21,6 +22,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 pub use output::{Finding, Severity};
+use suspect_config::{Layer, Raw};
 use suspect_source::{Source, Uri};
 
 /// Serialization choice for commands that produce structured output.
@@ -257,9 +259,11 @@ pub enum Command {
     Stateful {
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// Base URL prepended to operation paths.
-        #[arg(long, default_value = "http://localhost:8080")]
-        base_url: String,
+        /// Base URL prepended to operation paths (default: `test.base_url`
+        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
+        /// `http://localhost:8080`).
+        #[arg(long)]
+        base_url: Option<String>,
         /// Run only sequences whose target operationId contains this.
         #[arg(long)]
         filter: Option<String>,
@@ -271,9 +275,11 @@ pub enum Command {
     Test {
         /// Arazzo document describing the workflows.
         arazzo: PathBuf,
-        /// Base URL prepended to operation paths.
-        #[arg(long, default_value = "http://localhost:8080")]
-        base_url: String,
+        /// Base URL prepended to operation paths (default: `test.base_url`
+        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
+        /// `http://localhost:8080`).
+        #[arg(long)]
+        base_url: Option<String>,
         /// Run only workflows whose id contains this substring.
         #[arg(long)]
         filter: Option<String>,
@@ -288,9 +294,10 @@ pub enum Command {
         /// Enables offline mode (requires --cassette).
         #[arg(long)]
         offline: bool,
-        /// Event stream format: human text or one-JSON-per-line ndjson.
-        #[arg(long, value_enum, default_value = "text")]
-        report: ReportFormat,
+        /// Event stream format: human text or one-JSON-per-line ndjson
+        /// (default: `test.report`, else `text`).
+        #[arg(long, value_enum)]
+        report: Option<ReportFormat>,
         /// Message broker directory for Arazzo 1.1 AsyncAPI steps:
         /// `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl`
         /// collects what the workflow published.
@@ -298,8 +305,8 @@ pub enum Command {
         message_broker: Option<PathBuf>,
         /// Credentials file for the security schemes the workflows
         /// exercise. Default: `.suspect/credentials.json` discovered by
-        /// walking up from the Arazzo document; `SUSPECT_CREDENTIALS`
-        /// overrides.
+        /// walking up from the Arazzo document; `test.credentials` and
+        /// `SUSPECT_CREDENTIALS` override it.
         #[arg(long, value_name = "FILE")]
         credentials: Option<PathBuf>,
         /// Write the journal to this file (append) instead of stdout.
@@ -317,9 +324,11 @@ pub enum Command {
     Fuzz {
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// Base URL prepended to operation paths.
-        #[arg(long, default_value = "http://localhost:8080")]
-        base_url: String,
+        /// Base URL prepended to operation paths (default: `test.base_url`
+        /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
+        /// `http://localhost:8080`).
+        #[arg(long)]
+        base_url: Option<String>,
         /// Mutant requests generated per operation.
         #[arg(long, default_value_t = 25)]
         runs: usize,
@@ -418,17 +427,19 @@ pub enum Command {
         spec: PathBuf,
         /// TCP port to bind on 127.0.0.1 (`0` picks a free port). The bound
         /// address is printed on stderr once the gateway can serve.
-        #[arg(long, short = 'p', default_value_t = 8080)]
-        port: u16,
+        /// Default: `gateway.port`, else 8080.
+        #[arg(long, short = 'p')]
+        port: Option<u16>,
         /// Operating mode: mock | proxy | validate | record | replay |
-        /// scenario.
-        #[arg(long, default_value = "mock")]
-        mode: String,
+        /// scenario. Default: `gateway.mode`, else `mock`.
+        #[arg(long)]
+        mode: Option<String>,
         /// Scenario mode: JSON file of scripted steps
         /// (`{"steps": [{"method", "path_suffix", "status", "body"}]}`).
         #[arg(long, value_name = "FILE")]
         scenario: Option<PathBuf>,
-        /// Upstream base URL for proxy/validate/record modes.
+        /// Upstream base URL for proxy/validate/record modes (default:
+        /// `gateway.upstream`).
         #[arg(long)]
         upstream: Option<PathBuf>,
         /// Cassette path for record output.
@@ -502,13 +513,9 @@ pub enum Command {
     Ci(commands::ci::CiArgs),
     /// Emit or verify a machine-readable contract package.
     Contract(commands::contract::ContractArgs),
-    /// Show the project configuration in effect for this invocation.
-    Config {
-        /// Report the configuration a command on this input would use: a
-        /// settings file above the working directory wins, and the input's
-        /// own directory is searched only when there is none.
-        input: Option<PathBuf>,
-    },
+    /// Show the configuration in effect, or with `--explain` every setting
+    /// and where its value came from.
+    Config(commands::config_cmd::ConfigArgs),
     /// Build and check a suspect project from one manifest.
     #[command(name = "project")]
     Project {
@@ -586,45 +593,48 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             strict_format,
             text,
         } => {
-            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let strict_format = suspect_config::resolve_bool(
-                strict_format,
-                "SUSPECT_STRICT_FORMAT",
-                loaded.settings.validate.strict_format,
-            );
+            // A clap bool cannot say "explicitly false": only a passed flag
+            // enters the flag layer.
+            let flags = Layer::flags()
+                .set(
+                    "validate.strict_format",
+                    strict_format.then_some(Raw::Bool(true)),
+                    "--strict-format",
+                )
+                .set(
+                    "validate.reference_allowlist",
+                    reference_allowlist.map(Raw::Path),
+                    "--reference-allowlist",
+                );
+            let resolved = settings::resolve(&paths, flags)?;
+            let validate = &resolved.settings.validate;
             commands::validate::validate(
                 &paths,
                 text.format,
-                reference_allowlist.as_deref(),
-                strict_format,
+                validate.reference_allowlist.as_deref(),
+                validate.strict_format,
             )
         }
         Command::Admission(args) => commands::admission::admission(&args),
         Command::Breaking(args) => commands::breaking::breaking(&args),
         Command::DocsGen(mut args) => {
-            let loaded = suspect_config::for_invocation(Some(&args.input))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let settings = &loaded.settings;
-            if args.style.is_none()
-                && let Some(style) = settings.docs.style.as_deref()
-            {
-                args.style = Some(match style {
-                    "markdown" => commands::docs_gen_cmd::DocsStyle::Markdown,
-                    "sveltekit" => commands::docs_gen_cmd::DocsStyle::Sveltekit,
-                    "html" => commands::docs_gen_cmd::DocsStyle::Html,
-                    other => {
-                        return Err(anyhow::anyhow!(
-                            "docs style `{other}` is not one of: markdown, sveltekit, html"
-                        ));
-                    }
-                });
-            }
-            if args.output.is_none()
-                && let Some(out) = &settings.docs.out
-            {
-                args.output = Some(out.clone());
-            }
+            let style = args
+                .style
+                .and_then(|s| ValueEnum::to_possible_value(&s))
+                .map(|v| Raw::Str(v.get_name().to_owned()));
+            let flags = Layer::flags().set("docs.style", style, "--style").set(
+                "docs.output",
+                args.output.take().map(Raw::Path),
+                "--output",
+            );
+            let resolved = settings::resolve_one(&args.input, flags)?;
+            let docs = &resolved.settings.docs;
+            // The table restricts `docs.style` to the enum's names.
+            args.style = docs
+                .style
+                .as_deref()
+                .and_then(|style| commands::docs_gen_cmd::DocsStyle::from_str(style, false).ok());
+            args.output.clone_from(&docs.output);
             commands::docs_gen_cmd::docs_gen(&args)
         }
         Command::Stubs(args) => commands::stubs::stubs(&args),
@@ -638,50 +648,23 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             min_severity,
             text,
         } => {
-            // Configuration supplies defaults; an explicit flag wins.
-            let loaded = suspect_config::for_invocation(paths.first().map(PathBuf::as_path))
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            let settings = &loaded.settings;
-            // flag > env > config > default, decided in one place.
-            let ruleset = suspect_config::resolve::Resolution::new(
-                ruleset.map(Some),
-                std::env::var_os("SUSPECT_LINT_RULESET")
-                    .filter(|v| !v.is_empty())
-                    .map(|v| Some(PathBuf::from(v))),
-                settings.lint.ruleset.clone().map(Some),
-                None,
-            )
-            .value;
-            let env_floor = match std::env::var("SUSPECT_LINT_MIN_SEVERITY") {
-                Ok(v) if !v.trim().is_empty() => {
-                    Some(parse_severity_floor(&v, "SUSPECT_LINT_MIN_SEVERITY")?)
-                }
-                _ => None,
-            };
-            let config_floor = settings
-                .lint
-                .min_severity
-                .as_deref()
-                .map(|v| parse_severity_floor(v, "lint.min_severity"))
-                .transpose()?;
-            let min_severity = suspect_config::resolve::Resolution::new(
-                min_severity,
-                env_floor,
-                config_floor,
-                output::Severity::Hint,
-            )
-            .value;
+            // flag > env > config > default, decided by `resolve`.
+            let flags = Layer::flags()
+                .set("lint.ruleset", ruleset.map(Raw::Path), "--ruleset")
+                .set(
+                    "lint.min_severity",
+                    min_severity.map(|s| Raw::Str(s.label().to_owned())),
+                    "--min-severity",
+                );
+            let resolved = settings::resolve(&paths, flags)?;
+            let lint = &resolved.settings.lint;
             // Committed policy: design-class severity and per-rule
             // overrides reach the CLI the same way they reach the editor.
-            let overrides = commands::lint::LintOverrides::from_config(
-                settings.lint.design.as_deref(),
-                &settings.lint.rules,
-            )
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let overrides = commands::lint::LintOverrides::from_settings(lint);
             commands::lint::lint(
                 &paths,
-                ruleset.as_deref(),
-                min_severity,
+                lint.ruleset.as_deref(),
+                commands::lint::floor(lint),
                 &overrides,
                 text.format,
             )
@@ -693,13 +676,13 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             json,
             yaml,
         } => {
-            let loaded =
-                suspect_config::for_invocation(Some(&input)).map_err(|e| anyhow::anyhow!("{e}"))?;
-            // A typed --json/--yaml flag wins; otherwise the file decides.
+            // A typed --json/--yaml flag wins over both settings; otherwise
+            // the file decides.
+            let resolved = settings::resolve_one(&input, Layer::flags())?;
             let (json, yaml) = if json || yaml {
                 (json, yaml)
             } else {
-                (loaded.settings.format.json, loaded.settings.format.yaml)
+                (resolved.settings.format.json, resolved.settings.format.yaml)
             };
             commands::fmt::fmt(&input, output.as_deref(), json, yaml)
         }
@@ -736,7 +719,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             per_round,
         } => commands::fuzz::fuzz(
             &spec,
-            &base_url,
+            &test_settings(&spec, base_url, None, None)?.base_url,
             runs,
             filter.as_deref(),
             journal.as_deref(),
@@ -777,10 +760,23 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             base_url,
             filter,
             emit,
-        } => commands::stateful::stateful(&spec, &base_url, filter.as_deref(), emit),
+        } => commands::stateful::stateful(
+            &spec,
+            &test_settings(&spec, base_url, None, None)?.base_url,
+            filter.as_deref(),
+            emit,
+        ),
         Command::Auth {
             cmd: commands::auth::AuthCmd::Check { credentials },
-        } => commands::auth::check(credentials.as_deref()),
+        } => {
+            let flags = Layer::flags().set(
+                "test.credentials",
+                credentials.map(Raw::Path),
+                "--credentials",
+            );
+            let resolved = settings::resolve(&[], flags)?;
+            commands::auth::check(resolved.settings.test.credentials.as_deref())
+        }
         Command::Test {
             arazzo,
             base_url,
@@ -793,17 +789,20 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             credentials,
             journal,
             inputs_file,
-        } => commands::test::test_with_messages(
-            &arazzo,
-            &base_url,
-            filter.as_deref(),
-            &commands::inputs::parse_inputs(inputs_file.as_deref(), &inputs)?,
-            cassette.as_deref(),
-            matches!(report, ReportFormat::Ndjson),
-            message_broker.as_deref(),
-            credentials.as_deref(),
-            journal.as_deref(),
-        ),
+        } => {
+            let test = test_settings(&arazzo, base_url, credentials, report)?;
+            commands::test::test_with_messages(
+                &arazzo,
+                &test.base_url,
+                filter.as_deref(),
+                &commands::inputs::parse_inputs(inputs_file.as_deref(), &inputs)?,
+                cassette.as_deref(),
+                test.report == "ndjson",
+                message_broker.as_deref(),
+                test.credentials.as_deref(),
+                journal.as_deref(),
+            )
+        }
         Command::Why {
             constraint,
             spec,
@@ -853,22 +852,38 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             journal,
             redact_headers,
             redact_json_keys,
-        } => commands::gateway::gateway(
-            &spec,
-            port,
-            &mode,
-            upstream.as_ref(),
-            cassette.as_ref(),
-            enforce,
-            delay_ms,
-            delay_pct,
-            error_status,
-            error_pct,
-            scenario.as_ref(),
-            journal.as_deref(),
-            &redact_headers,
-            &redact_json_keys,
-        ),
+        } => {
+            let flags = Layer::flags()
+                .set(
+                    "gateway.port",
+                    port.map(|p| Raw::Int(u64::from(p))),
+                    "--port",
+                )
+                .set("gateway.mode", mode.map(Raw::Str), "--mode")
+                .set(
+                    "gateway.upstream",
+                    upstream.map(|u| Raw::Str(u.display().to_string())),
+                    "--upstream",
+                );
+            let gateway = settings::resolve_one(&spec, flags)?.settings.gateway;
+            let upstream = gateway.upstream.map(PathBuf::from);
+            commands::gateway::gateway(
+                &spec,
+                gateway.port,
+                &gateway.mode,
+                upstream.as_ref(),
+                cassette.as_ref(),
+                enforce,
+                delay_ms,
+                delay_pct,
+                error_status,
+                error_pct,
+                scenario.as_ref(),
+                journal.as_deref(),
+                &redact_headers,
+                &redact_json_keys,
+            )
+        }
         Command::Watch { roots, command } => commands::watch::watch(&roots, &command),
         Command::Acquire(args) => commands::acquire_cmd::acquire(args),
         Command::Codegen(args) => commands::codegen_cmd::codegen(args),
@@ -887,12 +902,7 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
         },
         Command::CodegenSession(args) => commands::codegen_session::generate(args),
         Command::CodegenCompare(args) => commands::codegen_compare::compare(args),
-        Command::Config { input } => {
-            let loaded = suspect_config::for_invocation(input.as_deref())
-                .map_err(|e| anyhow::anyhow!("{e}"))?;
-            println!("{}", loaded.describe());
-            Ok(0)
-        }
+        Command::Config(args) => commands::config_cmd::config(&args),
         Command::Evidence(args) => commands::evidence::evidence(&args),
         Command::Ci(args) => {
             // The gate reports its own aggregate, so a failing stage is a
@@ -911,6 +921,34 @@ pub fn execute(cli: Cli) -> anyhow::Result<i32> {
             Ok(0)
         }
     }
+}
+
+/// The `test` settings for a run on `input`, with the flags that set
+/// them on top.
+fn test_settings(
+    input: &std::path::Path,
+    base_url: Option<String>,
+    credentials: Option<PathBuf>,
+    report: Option<ReportFormat>,
+) -> anyhow::Result<suspect_config::TestSettings> {
+    let report = report.map(|r| {
+        Raw::Str(
+            match r {
+                ReportFormat::Text => "text",
+                ReportFormat::Ndjson => "ndjson",
+            }
+            .to_owned(),
+        )
+    });
+    let flags = Layer::flags()
+        .set("test.base_url", base_url.map(Raw::Str), "--base-url")
+        .set(
+            "test.credentials",
+            credentials.map(Raw::Path),
+            "--credentials",
+        )
+        .set("test.report", report, "--report");
+    Ok(settings::resolve_one(input, flags)?.settings.test)
 }
 
 /// Loads and parses one document, pairing its canonical URI with the low model.

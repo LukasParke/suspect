@@ -69,33 +69,38 @@ pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     // same precedence `suspect docs` uses for style and output: an
     // explicit flag always wins, the file fills what the flag omitted,
     // and with neither the historical defaults apply.
-    let settings_source = match args.spec.as_deref().or(args.pins.as_deref()) {
-        Some(entry) => suspect_config::for_invocation(Some(entry))
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .ok(),
-        None => suspect_config::for_invocation(None).ok(),
-    };
-    if let Some(loaded) = settings_source {
-        let codegen = &loaded.settings.codegen;
-        if args.profile.is_none()
-            && let Some(profile) = &codegen.profile
-        {
-            let Some(resolved) = super::sdk::profile_by_name(profile) else {
-                return Err(anyhow::anyhow!(
-                    "codegen profile `{profile}` is not one of the native profiles"
-                ));
-            };
-            args.profile = Some(resolved);
-        }
-        if args.package_version.is_none() {
-            args.package_version = codegen.package_version.clone();
-        }
-        if args.out.is_none()
-            && let Some(out) = &codegen.out
-        {
-            args.out = Some(loaded.root.join(out));
-        }
+    let inputs: Vec<PathBuf> = args
+        .spec
+        .iter()
+        .chain(args.pins.iter())
+        .take(1)
+        .cloned()
+        .collect();
+    let flags = suspect_config::Layer::flags()
+        .set(
+            "codegen.package_version",
+            args.package_version.take().map(suspect_config::Raw::Str),
+            "--package-version",
+        )
+        .set(
+            "codegen.out",
+            args.out.take().map(suspect_config::Raw::Path),
+            "--out",
+        );
+    let resolved = crate::settings::resolve(&inputs, flags)?;
+    let codegen = &resolved.settings.codegen;
+    if args.profile.is_none()
+        && let Some(profile) = &codegen.profile
+    {
+        let Some(resolved) = super::sdk::profile_by_name(profile) else {
+            return Err(anyhow::anyhow!(
+                "codegen profile `{profile}` is not one of the native profiles"
+            ));
+        };
+        args.profile = Some(resolved);
     }
+    args.package_version.clone_from(&codegen.package_version);
+    args.out.clone_from(&codegen.out);
     let input = match (args.spec, args.pins) {
         (Some(path), None) => Input::File { path },
         (None, Some(manifest)) => Input::Pinned {

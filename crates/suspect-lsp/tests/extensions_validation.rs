@@ -44,8 +44,8 @@ x-internal: not-a-boolean
             .build()
             .unwrap(),
     );
-    let cfg = suspect_lsp::config_files::SuspectConfig::default();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
+    let cfg = suspect_config::Settings::default();
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
     let all = codes(&diags);
     assert!(all.iter().any(|c| c == "extension-schema"), "{all:?}");
 }
@@ -65,8 +65,8 @@ x-totally-custom:
 ";
     let low = low_at(&dir, "spec.yaml", text);
     let ws = std::sync::Arc::new(WorkspaceBuilder::new().root(&dir).build().unwrap());
-    let cfg = suspect_lsp::config_files::SuspectConfig::default();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
+    let cfg = suspect_config::Settings::default();
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
     assert!(
         !codes(&diags).iter().any(|c| c == "extension-schema"),
         "unknown extensions are legal: {:?}",
@@ -93,22 +93,22 @@ x-plex-token:
 ";
     let low = low_at(&dir, "spec.yaml", text);
     let ws = std::sync::Arc::new(WorkspaceBuilder::new().root(&dir).build().unwrap());
-    let cfg = suspect_lsp::config_files::parse_config(&serde_json::json!({
-        "extensions": {
+    let cfg = suspect_config::Settings {
+        extensions: Some(serde_json::json!({
             "x-plex-token": {
                 "schema": "x-plex-token.schema.json"
             }
-        }
-    }))
-    .expect("config parses");
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
+        })),
+        ..Default::default()
+    };
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
     let all = codes(&diags);
     assert!(all.iter().any(|c| c == "extension-schema"), "{all:?}");
 
     // A conforming value is silent.
     let good = text.replace("  wrong: shape", "  token: abc123");
     let low = low_at(&dir, "spec.yaml", &good);
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
     assert!(
         !codes(&diags).iter().any(|c| c == "extension-schema"),
         "{:?}",
@@ -133,12 +133,12 @@ x-retry-count: not-a-number
 ";
     let low = low_at(&dir, "spec.yaml", text);
     let ws = std::sync::Arc::new(WorkspaceBuilder::new().root(&dir).build().unwrap());
-    let cfg = suspect_lsp::config_files::parse_config(&serde_json::json!({
-        "extensions": {
+    let cfg = suspect_config::Settings {
+        extensions: Some(serde_json::json!({
             "x-retry-count": { "schema": {"type": "integer"} }
-        }
-    }))
-    .unwrap();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg, None, false);
+        })),
+        ..Default::default()
+    };
+    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
     assert!(codes(&diags).iter().any(|c| c == "extension-schema"));
 }

@@ -83,10 +83,35 @@ async fn check_async(
     min_severity: Severity,
     text: TextFormat,
 ) -> anyhow::Result<i32> {
-    let workspace_root = std::env::current_dir()?;
+    // `rules.roots` (default `.suspect/rules` beside the settings file)
+    // names the directories scanned for rules.
+    let resolved = crate::settings::resolve(paths, suspect_config::Layer::flags())?;
+    let workspace_root = resolved.root.clone();
+    let roots = &resolved.settings.rules.roots;
+    let mut rule_files = Vec::new();
+    for root in roots {
+        rule_files.extend(
+            suspect_rules::discover_rule_files(
+                &workspace_root,
+                &suspect_rules::RulesConfig {
+                    dir: Some(root.clone()),
+                    ..suspect_rules::RulesConfig::default()
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?,
+        );
+    }
+    if rule_files.is_empty() {
+        let looked: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
+        eprintln!(
+            "no TS rules found (looked in {}) — nothing to do",
+            looked.join(", ")
+        );
+        return Ok(0);
+    }
     let mut host = match RuleHost::start(StartOptions {
         workspace_root: workspace_root.clone(),
-        rule_files: Vec::new(),
+        rule_files,
         timeout_ms,
         bun: None,
         cache_dir: None,

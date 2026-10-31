@@ -159,7 +159,7 @@ fn load_ruleset(path: &std::path::Path) -> Option<suspect_lint::Linter> {
 pub fn lint_diagnostics(
     low: &LowDoc,
     ruleset: Option<&std::path::Path>,
-    lint: Option<&crate::config_files::LintCfg>,
+    lint: &suspect_config::LintSettings,
 ) -> Vec<Diagnostic> {
     let linter = match ruleset.and_then(load_ruleset) {
         Some(linter) => linter,
@@ -169,11 +169,13 @@ pub fn lint_diagnostics(
     // design-class severity; `off` drops the finding before mapping.
     let policy = |code: &str, default: suspect_lint::Severity| {
         let per_rule = lint
-            .and_then(|l| l.rules.get(code))
+            .rules
+            .get(code)
             .and_then(|name| suspect_lint::Severity::from_policy(name));
         let class = (linter.category_of(code) == suspect_lint::Category::Design)
             .then(|| {
-                lint.and_then(|l| l.design.as_deref())
+                lint.design
+                    .as_deref()
                     .and_then(suspect_lint::Severity::from_policy)
             })
             .flatten();
@@ -359,14 +361,9 @@ pub fn load_profile_diagnostics(ws: Option<&Arc<Workspace>>, low: &LowDoc) -> Ve
 pub fn compute_diagnostics(
     ws: Option<&Arc<Workspace>>,
     low: &LowDoc,
-    cfg: &crate::config_files::SuspectConfig,
-    ruleset: Option<&std::path::Path>,
-    strict_format: bool,
+    settings: &suspect_config::Settings,
 ) -> Vec<Diagnostic> {
-    crate::config_files::apply_config(
-        compute_diagnostics_raw(ws, low, cfg, ruleset, strict_format),
-        cfg,
-    )
+    crate::config_files::apply_config(compute_diagnostics_raw(ws, low, settings), settings)
 }
 
 /// Unfiltered battery; [`compute_diagnostics`] applies user config on top.
@@ -374,10 +371,10 @@ pub fn compute_diagnostics(
 pub fn compute_diagnostics_raw(
     ws: Option<&Arc<Workspace>>,
     low: &LowDoc,
-    cfg: &crate::config_files::SuspectConfig,
-    ruleset: Option<&std::path::Path>,
-    strict_format: bool,
+    settings: &suspect_config::Settings,
 ) -> Vec<Diagnostic> {
+    let ruleset = settings.lint.ruleset.as_deref();
+    let strict_format = settings.validate.strict_format;
     let mut out = syntax_diagnostics(low);
     // suspect's own configuration files are checked against their schema, so
     // a typo in `.suspect.yaml` is reported where it is written.
@@ -385,7 +382,7 @@ pub fn compute_diagnostics_raw(
     if let Some(ws) = ws {
         out.extend(validate_diagnostics(ws, low, strict_format));
     }
-    out.extend(lint_diagnostics(low, ruleset, cfg.lint.as_ref()));
+    out.extend(lint_diagnostics(low, ruleset, &settings.lint));
     out.extend(swagger_diagnostics(low));
     out.extend(arazzo_diagnostics(low));
     // The CommonMark fields get markdownlint-compatible rules, at their
@@ -395,7 +392,7 @@ pub fn compute_diagnostics_raw(
     let root = ws.and_then(super::workspace_root);
     out.extend(extension_diagnostics(
         low,
-        &cfg.extensions.clone().unwrap_or_default(),
+        &crate::config_files::extensions(settings),
         root.as_deref(),
     ));
     out.extend(load_profile_diagnostics(ws, low));
@@ -512,7 +509,7 @@ mod tests {
         let ws = WorkspaceBuilder::new().root(&dir).build().unwrap();
         ws.load_all("api.yaml").unwrap();
         let ws = Arc::new(ws);
-        let diags = compute_diagnostics(Some(&ws), &low, &Default::default(), None, false);
+        let diags = compute_diagnostics(Some(&ws), &low, &Default::default());
         // No syntax errors; everything else is well-formed.
         assert!(
             diags
@@ -525,7 +522,7 @@ mod tests {
                 .all(|d| matches!(d.source.as_deref(), Some(SOURCE) | Some(SOURCE_LINT)))
         );
         // Without a workspace only syntax + lint + arazzo run.
-        let bare = compute_diagnostics(None, &low, &Default::default(), None, false);
+        let bare = compute_diagnostics(None, &low, &Default::default());
         assert!(bare.len() <= diags.len());
     }
 
@@ -609,7 +606,7 @@ workflows:
         assert_eq!(pause.range.start.line, 4, "{pause:?}");
         assert_eq!(pause.severity, Some(DiagnosticSeverity::ERROR));
         // Full battery routes by family too.
-        assert!(!compute_diagnostics(Some(&ws), &low, &Default::default(), None, false).is_empty());
+        assert!(!compute_diagnostics(Some(&ws), &low, &Default::default()).is_empty());
     }
 }
 

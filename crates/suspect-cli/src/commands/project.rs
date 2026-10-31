@@ -17,6 +17,8 @@ use crate::output::{Finding, Severity};
 /// A `suspect.project.json` manifest.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectManifest {
+    /// Directory holding the manifest; configuration resolves from here.
+    pub root: PathBuf,
     /// Manifest schema version; must be `1`.
     pub version: u32,
     /// Project name (defaults to the directory name).
@@ -103,8 +105,9 @@ pub fn generation_options_from(
 pub struct ProjectTests {
     /// Arazzo documents to compile and run.
     pub arazzo: Vec<PathBuf>,
-    /// Base URL prepended to operation paths.
-    pub base_url: String,
+    /// Base URL prepended to operation paths, when the manifest sets one.
+    /// `SUSPECT_BASE_URL` beats it; it beats `test.base_url`.
+    pub base_url: Option<String>,
     /// When set, run offline against this cassette instead of live HTTP.
     pub cassette: Option<PathBuf>,
     /// Message broker directory for Arazzo 1.1 AsyncAPI steps.
@@ -299,8 +302,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
             base_url: t
                 .get("base_url")
                 .and_then(|v| v.as_str())
-                .unwrap_or("http://127.0.0.1:8080")
-                .to_owned(),
+                .map(str::to_owned),
             cassette: t.get("cassette").and_then(|v| v.as_str()).map(resolve),
             message_broker: t
                 .get("message_broker")
@@ -316,6 +318,7 @@ pub fn parse_manifest(path: &Path) -> anyhow::Result<ProjectManifest> {
     });
 
     Ok(ProjectManifest {
+        root: dir.clone(),
         version: 1,
         name: object
             .get("name")
@@ -379,24 +382,17 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
                 "docs": {"style": "markdown", "output": "build/docs"},
                 "tests": {"arazzo": [], "base_url": "http://127.0.0.1:8080"},
                 "codegen": [],
-                // Committed policy: the editor, a shell and CI read the
-                // same values; `.suspect.yaml` and client settings layer
-                // on top as local overrides. Projects documenting an API
-                // they do not own add "design": "off" here.
-                "lint": {
-                    "min_severity": "hint",
-                    "rules": {},
-                    "recommended": true
-                },
-                "validate": {"strict_format": false},
-                "editor": {
-                    "inlay_hints": {"refs": true, "properties": true},
-                    "ref": {"max_docs": 500},
-                    "formatting": {"sort_keys": true}
-                },
+                // Lint, validate and editor settings live in the settings
+                // file every tool reads; the manifest only points at it.
+                "config": SETTINGS_FILE,
                 "contract": {"output": "build/contract"}
             });
             std::fs::create_dir_all(&dir)?;
+            let settings = dir.join(SETTINGS_FILE);
+            if !settings.exists() {
+                std::fs::write(&settings, SETTINGS_TEMPLATE)?;
+                eprintln!("wrote {}", settings.display());
+            }
             std::fs::write(
                 &manifest,
                 format!("{}\n", serde_json::to_string_pretty(&template)?),
@@ -408,6 +404,7 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
             let project = parse_manifest(&manifest)?;
             let mut findings: Vec<Finding> = Vec::new();
             check_inputs(&project, &mut findings);
+            check_config(&manifest, &project, &mut findings);
             report(&format!("project {}", project.name), &findings)
         }
         ProjectCmd::Build {
@@ -416,6 +413,84 @@ pub fn run(cmd: ProjectCmd) -> anyhow::Result<i32> {
         } => {
             let project = parse_manifest(&manifest)?;
             build(&project, skip_tests)
+        }
+    }
+}
+
+/// The settings file `project init` writes beside the manifest.
+pub const SETTINGS_FILE: &str = ".suspect.yaml";
+
+/// Today's defaults, written out so a project sees what it can change.
+/// Projects documenting an API they do not own add `design: off`.
+const SETTINGS_TEMPLATE: &str = "\
+# suspect settings: read by every suspect command, CI and the editor.
+lint:
+  min_severity: hint
+  recommended: true
+  rules: {}
+validate:
+  strict_format: false
+format:
+  sort_keys: true
+ref:
+  max_docs: 500
+editor:
+  inlay_hints:
+    refs: true
+    properties: true
+";
+
+/// The manifest's settings: the referenced file exists and resolves, and
+/// deprecated policy sections are reported (a warning in this release).
+fn check_config(manifest: &Path, project: &ProjectManifest, findings: &mut Vec<Finding>) {
+    let finding = |file: String, severity, code: &str, message: String, line| Finding {
+        file,
+        severity,
+        code: code.into(),
+        message,
+        line,
+        col: 1,
+        range: None,
+    };
+    if let Some(config) = suspect_config::discover::manifest_config(manifest) {
+        let path = project.root.join(&config);
+        if !path.is_file() {
+            findings.push(finding(
+                path_label(manifest),
+                Severity::Error,
+                "project-missing-config",
+                format!("\"config\": {config} does not exist"),
+                1,
+            ));
+        }
+    }
+    match suspect_config::resolve(&project.root) {
+        Ok(resolved) => {
+            for notice in resolved.warnings {
+                if let suspect_config::Origin::Manifest { line, .. } = notice.origin {
+                    findings.push(finding(
+                        path_label(manifest),
+                        Severity::Warning,
+                        "project-manifest-policy",
+                        notice.message,
+                        line,
+                    ));
+                }
+            }
+        }
+        Err(error) => {
+            for notice in error.problems {
+                findings.push(finding(
+                    notice
+                        .origin
+                        .path()
+                        .map_or_else(|| path_label(manifest), path_label),
+                    Severity::Error,
+                    "project-config",
+                    notice.to_string(),
+                    1,
+                ));
+            }
         }
     }
 }
@@ -562,9 +637,12 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
                 .with_file_name(format!("spec.{name}.yaml")),
         );
     }
+    // The project's own configuration, as `suspect ci` and the editor
+    // resolve it; a rejected value is a usage error here.
+    let config = crate::settings::resolve_one(&project.root, suspect_config::Layer::flags())?;
+    let strict_format = config.settings.validate.strict_format;
     for spec in &specs {
         let ws = loader.load(spec)?;
-        let strict_format = crate::commands::validate::configured_strict_format(spec);
         let findings = crate::commands::validate::validate_workspace(&ws, spec, strict_format);
         let errors = findings
             .iter()
@@ -658,16 +736,31 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
         && let Some(tests) = &project.tests
         && !tests.arazzo.is_empty()
     {
+        // flag (none here) > env > manifest `tests.base_url` >
+        // `.suspect.yaml` `test.base_url` > default: one variable points
+        // every project at a preview deployment.
+        let from_env = matches!(
+            config.origin("test.base_url"),
+            suspect_config::Origin::Env { .. }
+        );
+        let base_url = match &tests.base_url {
+            Some(declared) if !from_env => declared.clone(),
+            _ => config.settings.test.base_url.clone(),
+        };
+        let credentials = tests
+            .credentials
+            .clone()
+            .or_else(|| config.settings.test.credentials.clone());
         for arazzo in &tests.arazzo {
             let exit = crate::commands::test::test_with_messages(
                 arazzo,
-                &tests.base_url,
+                &base_url,
                 None,
                 &tests.inputs,
                 tests.cassette.as_deref(),
                 false,
                 tests.message_broker.as_deref(),
-                tests.credentials.as_deref(),
+                credentials.as_deref(),
                 None,
             )?;
             if exit != 0 {

@@ -104,14 +104,11 @@ pub fn resolve_code_action(
     doc: &OpenDoc,
     uri: &Url,
     ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
-    cfg: &crate::config_files::SuspectConfig,
-    ruleset: Option<&std::path::Path>,
-    strict_format: bool,
-    floor: tower_lsp::lsp_types::DiagnosticSeverity,
+    settings: &suspect_config::Settings,
 ) -> Option<CodeAction> {
     let diags = crate::diagnostics::filter_at_least(
-        crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg, ruleset, strict_format),
-        floor,
+        crate::diagnostics::compute_diagnostics(ws, &doc.low, settings),
+        crate::config_files::floor(settings),
     );
     let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), &diags);
     if edits.is_empty() {
@@ -1449,10 +1446,13 @@ paths:
 ";
         let d = open(text);
         let uri = url("api.yaml");
-        let resolve = |ruleset: Option<&std::path::Path>, floor| {
-            resolve_code_action(&d, &uri, None, &Default::default(), ruleset, false, floor)
+        let resolve = |ruleset: Option<&std::path::Path>, floor: &str| {
+            let mut settings = suspect_config::Settings::default();
+            settings.lint.ruleset = ruleset.map(std::path::Path::to_path_buf);
+            settings.lint.min_severity = Some(floor.to_owned());
+            resolve_code_action(&d, &uri, None, &settings)
         };
-        let hint = tower_lsp::lsp_types::DiagnosticSeverity::HINT;
+        let hint = "hint";
         // The default ruleset flags the trailing slash, and fixes it.
         assert!(
             resolve(None, hint).is_some(),
@@ -1469,7 +1469,7 @@ paths:
         );
         // A floor above the finding hides it, so it is not fixed either.
         assert!(
-            resolve(None, tower_lsp::lsp_types::DiagnosticSeverity::ERROR).is_none(),
+            resolve(None, "error").is_none(),
             "fix all must not fix findings below the configured floor"
         );
     }
@@ -1507,16 +1507,8 @@ paths:
             .expect("fixAll action present");
         assert!(inline.edit.is_some());
         // Resolve recomputes from a fresh battery and produces an edit.
-        let resolved = resolve_code_action(
-            &d,
-            &uri,
-            None,
-            &Default::default(),
-            None,
-            false,
-            tower_lsp::lsp_types::DiagnosticSeverity::HINT,
-        )
-        .expect("resolvable fixes exist");
+        let resolved = resolve_code_action(&d, &uri, None, &Default::default())
+            .expect("resolvable fixes exist");
         let edit = resolved.edit.as_ref().and_then(|we| match we {
             tower_lsp::lsp_types::WorkspaceEdit {
                 changes: Some(changes),

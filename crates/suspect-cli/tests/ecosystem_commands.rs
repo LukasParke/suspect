@@ -1138,7 +1138,7 @@ fn ci_lint_stage_fails_on_an_unrecognized_override_severity() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!out.status.success(), "a bad override must fail: {stdout}");
     assert!(
-        stdout.contains("unrecognized lint severity: loud"),
+        stdout.contains("unrecognized severity `loud`"),
         "the stage names the bad value: {stdout}"
     );
 }

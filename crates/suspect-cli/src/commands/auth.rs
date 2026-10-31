@@ -25,8 +25,8 @@ pub struct AuthArgs {
 pub enum AuthCmd {
     /// Verify every configured credential without running a workflow.
     Check {
-        /// Credentials file (default: discovered `.suspect/credentials.json`,
-        /// or `SUSPECT_CREDENTIALS`).
+        /// Credentials file (default: `test.credentials`,
+        /// `SUSPECT_CREDENTIALS`, else a discovered `.suspect/credentials.json`).
         #[arg(long, value_name = "FILE")]
         credentials: Option<PathBuf>,
     },
@@ -34,13 +34,10 @@ pub enum AuthCmd {
 
 /// `suspect auth check`: returns 0 when every scheme resolves.
 pub fn check(credentials: Option<&Path>) -> anyhow::Result<i32> {
-    let path = credentials
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("SUSPECT_CREDENTIALS").map(PathBuf::from))
-        .or_else(|| {
-            // From the current directory, like a run from the project root.
-            suspect_test::auth::discover_credentials(Path::new("."))
-        });
+    let path = credentials.map(PathBuf::from).or_else(|| {
+        // From the current directory, like a run from the project root.
+        suspect_test::auth::discover_credentials(Path::new("."))
+    });
     let Some(path) = path else {
         eprintln!("no credentials file found (looked for .suspect/credentials.json upward)");
         return Ok(0);

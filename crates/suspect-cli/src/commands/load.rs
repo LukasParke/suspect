@@ -157,9 +157,23 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
             .map_err(|e| anyhow::anyhow!("{e}"))?;
     }
     apply_overrides(&mut profile, &args)?;
-    let target = args
-        .base_url
-        .clone()
+    // `test.base_url` set anywhere (flag, env, a settings file) beats the
+    // profile's `target`; its built-in default does not.
+    let flags = suspect_config::Layer::flags()
+        .set(
+            "test.base_url",
+            args.base_url.clone().map(suspect_config::Raw::Str),
+            "--base-url",
+        )
+        .set(
+            "test.credentials",
+            args.credentials.clone().map(suspect_config::Raw::Path),
+            "--credentials",
+        );
+    let resolved = crate::settings::resolve_one(&input, flags)?;
+    let configured = (*resolved.origin("test.base_url") != suspect_config::Origin::Default)
+        .then(|| resolved.settings.test.base_url.clone());
+    let target = configured
         .or_else(|| profile.target.clone())
         .ok_or_else(|| {
             anyhow::anyhow!("no target: set `target:` in the profile or pass --base-url")
@@ -198,7 +212,8 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
         return Ok(0);
     }
 
-    let auth = super::test::load_credentials(&arazzo_path, args.credentials.as_deref())?;
+    let auth =
+        super::test::load_credentials(&arazzo_path, resolved.settings.test.credentials.as_deref())?;
 
     let settings = HttpSettings {
         timeout: profile.http.timeout,

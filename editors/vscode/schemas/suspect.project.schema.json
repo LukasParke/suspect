@@ -1,0 +1,306 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Project manifest: the published spec, its profiles, SDK targets, documentation and contract tests.",
+  "properties": {
+    "codegen": {
+      "default": [],
+      "description": "SDK generation targets built from the published spec.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "default": false,
+            "description": "When true, only ownership/drift is checked; nothing is written.",
+            "type": "boolean"
+          },
+          "compatibility_profiles": {
+            "description": "Interpretation profiles applied to the source (`--compatibility-profile`).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "credential_env": {
+            "description": "Credential environment variable mapping (`codegen --defaults` schema).",
+            "type": "object"
+          },
+          "import_name": {
+            "description": "Explicit import/module/namespace identity where the profile needs one.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Target name, used in progress output.",
+            "type": "string"
+          },
+          "operation_id": {
+            "default": [],
+            "description": "Exact operationId selectors; empty selects all outgoing operations.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "out": {
+            "default": "sdk",
+            "description": "Output root, relative to the manifest.",
+            "type": "string"
+          },
+          "package_name": {
+            "description": "Native package identity.",
+            "type": "string"
+          },
+          "package_version": {
+            "description": "Package SemVer.",
+            "type": "string"
+          },
+          "profile": {
+            "description": "The native profile id (`typescript-http`, `python-http`, ...).",
+            "type": "string"
+          },
+          "sdk_defaults": {
+            "description": "SDK defaults: pagination, OAuth lifecycle (`codegen --defaults` schema).",
+            "type": "object"
+          }
+        },
+        "required": [
+          "profile",
+          "package_name",
+          "package_version"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "config": {
+      "description": "The settings file for this project (`.suspect.yaml`), relative to the manifest. Lint, validate and editor settings live there.",
+      "type": "string"
+    },
+    "contract": {
+      "additionalProperties": false,
+      "description": "The contract package for this project.",
+      "properties": {
+        "output": {
+          "description": "Where the contract package is written.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "docs": {
+      "additionalProperties": false,
+      "description": "Documentation target.",
+      "properties": {
+        "output": {
+          "description": "Output root for generated documentation.",
+          "type": "string"
+        },
+        "style": {
+          "description": "Output style.",
+          "enum": [
+            "html",
+            "markdown",
+            "sveltekit"
+          ],
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "editor": {
+      "additionalProperties": false,
+      "deprecated": true,
+      "description": "Deprecated: editor settings belong in `.suspect.yaml` (`editor`, `ref`, `format`).",
+      "properties": {
+        "formatting": {
+          "additionalProperties": false,
+          "description": "Deprecated; see `format`.",
+          "properties": {
+            "sort_keys": {
+              "description": "Deprecated; see `format.sort_keys`.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "inlay_hints": {
+          "additionalProperties": false,
+          "description": "Deprecated; see `editor.inlay_hints`.",
+          "properties": {
+            "properties": {
+              "description": "Deprecated; see `editor.inlay_hints.properties`.",
+              "type": "boolean"
+            },
+            "refs": {
+              "description": "Deprecated; see `editor.inlay_hints.refs`.",
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
+        "ref": {
+          "additionalProperties": false,
+          "description": "Deprecated; see `ref`.",
+          "properties": {
+            "max_docs": {
+              "description": "Deprecated; see `ref.max_docs`.",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "entry": {
+      "description": "Entry OpenAPI document, relative to the manifest directory.",
+      "type": "string"
+    },
+    "lint": {
+      "additionalProperties": false,
+      "deprecated": true,
+      "description": "Deprecated: lint policy belongs in `.suspect.yaml`. Still applied under that file for one release; `suspect config migrate` moves it.",
+      "properties": {
+        "design": {
+          "description": "Deprecated; see `lint.design` in `.suspect.yaml`.",
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "hint",
+            "off"
+          ],
+          "type": "string"
+        },
+        "min_severity": {
+          "description": "Deprecated; see `lint.min_severity` in `.suspect.yaml`.",
+          "enum": [
+            "error",
+            "warning",
+            "info",
+            "hint"
+          ],
+          "type": "string"
+        },
+        "recommended": {
+          "description": "Deprecated; see `lint.recommended` in `.suspect.yaml`.",
+          "type": "boolean"
+        },
+        "rules": {
+          "additionalProperties": {
+            "enum": [
+              "error",
+              "warning",
+              "info",
+              "hint",
+              "off"
+            ],
+            "type": "string"
+          },
+          "description": "Deprecated; see `lint.rules` in `.suspect.yaml`.",
+          "type": "object"
+        },
+        "ruleset": {
+          "description": "Deprecated; see `lint.ruleset` in `.suspect.yaml`.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "name": {
+      "description": "Project name.",
+      "type": "string"
+    },
+    "overlays": {
+      "default": [],
+      "description": "Overlay documents applied in order to produce the published spec.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "publish": {
+      "additionalProperties": false,
+      "description": "Where the published (post-overlay) spec is written.",
+      "properties": {
+        "output": {
+          "default": "build/spec.yaml",
+          "description": "Where the published spec is written, relative to the manifest.",
+          "type": "string"
+        },
+        "profiles": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "description": "Named publication profiles: each is an extra overlay list applied on top of the published spec (for example `public` strips internals).",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "tests": {
+      "additionalProperties": false,
+      "description": "Contract-test targets: Arazzo documents run against `base_url`, or offline from `cassette`.",
+      "properties": {
+        "arazzo": {
+          "default": [],
+          "description": "Arazzo documents to compile and run.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "base_url": {
+          "description": "Base URL for this project's suites. `SUSPECT_BASE_URL` overrides it; it overrides `test.base_url` in `.suspect.yaml`.",
+          "format": "uri",
+          "type": "string"
+        },
+        "cassette": {
+          "description": "Run offline against this cassette instead of live HTTP.",
+          "type": "string"
+        },
+        "credentials": {
+          "description": "Credentials file for the security schemes the suites exercise.",
+          "type": "string"
+        },
+        "inputs": {
+          "description": "Workflow inputs supplied to every declared suite: name to value.",
+          "type": "object"
+        },
+        "message_broker": {
+          "description": "Message broker directory for Arazzo 1.1 AsyncAPI steps.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "validate": {
+      "additionalProperties": false,
+      "deprecated": true,
+      "description": "Deprecated: validation settings belong in `.suspect.yaml`.",
+      "properties": {
+        "strict_format": {
+          "description": "Deprecated; see `validate.strict_format` in `.suspect.yaml`.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "version": {
+      "description": "Manifest schema version. Must be 1.",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "entry"
+  ],
+  "title": "suspect.project.json",
+  "type": "object"
+}
