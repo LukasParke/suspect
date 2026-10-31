@@ -101,70 +101,34 @@ pub(crate) fn extended_layer(child: &Path, parent: &Path) -> Result<Layer, Notic
     Ok(layer)
 }
 
-/// The deprecated policy sections of a manifest (`lint`, `validate`,
-/// `editor`) as the lowest file layer, with the settings file's key
-/// spellings. `None` when the manifest carries none of them or does not
-/// parse (`suspect project check` reports a broken manifest).
-pub(crate) fn manifest_layer(path: &Path) -> Option<Layer> {
+/// The warnings for a manifest's old policy sections (`lint`, `validate`,
+/// `editor`), which no tool reads any more: one per section present, even
+/// an empty one. Empty when the manifest has none or does not parse
+/// (`suspect project check` reports a broken manifest).
+pub(crate) fn manifest_policy_notices(path: &Path) -> Vec<Notice> {
     let origin = |line| Origin::Manifest {
         path: path.to_path_buf(),
         line,
     };
-    let doc = parse_doc(path, origin).ok()?;
-    let root = doc.root();
-    let base = path
-        .parent()
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let mut layer = Layer::default();
-    let mut present = false;
-    for entry in root.entries() {
-        let Some(value) = entry.value else { continue };
-        match entry.key {
-            "lint" | "validate" => {
-                present = true;
-                layer.read_node(&value, entry.key, &base, &origin);
-            }
-            "editor" => {
-                present = true;
-                for sub in value.entries() {
-                    let Some(node) = sub.value else { continue };
-                    let scope = match sub.key {
-                        "inlay_hints" | "inlayHints" => "editor.inlay_hints",
-                        "ref" | "refs" => "ref",
-                        "formatting" => {
-                            layer.sections.push("format");
-                            "format"
-                        }
-                        _ => continue,
-                    };
-                    layer.read_node(&node, scope, &base, &origin);
-                }
-            }
-            _ => {}
-        }
-    }
-    // Spelling notices belong to the settings file; `project check` and the
-    // editor's schema check cover the manifest.
-    layer.warnings.clear();
-    // Every section present is told once, even an empty one, so each
-    // project `project init` made before this release hears about it.
-    for entry in root.entries() {
-        if matches!(entry.key, "lint" | "validate" | "editor") {
-            layer.warnings.push(Notice {
-                origin: origin(entry.key_node.line_col().0 + 1),
-                message: manifest_policy_warning(entry.key),
-            });
-        }
-    }
-    present.then_some(layer)
+    let Ok(doc) = parse_doc(path, origin) else {
+        return Vec::new();
+    };
+    doc.root()
+        .entries()
+        .into_iter()
+        .filter(|entry| matches!(entry.key, "lint" | "validate" | "editor"))
+        .map(|entry| Notice {
+            origin: origin(entry.key_node.line_col().0 + 1),
+            message: manifest_policy_warning(entry.key),
+        })
+        .collect()
 }
 
-/// The deprecation text for a manifest policy section.
+/// The text for a manifest policy section, which is ignored.
 #[must_use]
 pub fn manifest_policy_warning(section: &str) -> String {
     format!(
-        "`{section}` in a project manifest is deprecated and is ignored from the next \
-         release; move it to .suspect.yaml and add \"config\": \".suspect.yaml\" to the \
-         manifest (`suspect config migrate` does both)"
+        "`{section}` in a project manifest is ignored; move it to .suspect.yaml and add \
+         \"config\": \".suspect.yaml\" to the manifest (`suspect config migrate` does both)"
     )
 }

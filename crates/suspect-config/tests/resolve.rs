@@ -50,7 +50,8 @@ fn every_layer_wins_over_the_ones_below() {
     fixture(dir.path());
     let spec = dir.path().join("openapi.yaml");
 
-    // Files only: the settings file beats the manifest per key.
+    // Files only: the manifest's policy sections are ignored, each with
+    // a warning on its line.
     let r = resolve_with(
         &spec,
         Inputs {
@@ -60,14 +61,11 @@ fn every_layer_wins_over_the_ones_below() {
     )
     .unwrap();
     assert_eq!(r.settings.lint.min_severity.as_deref(), Some("warning"));
-    assert!(
-        !r.settings.validate.strict_format,
-        "file false beats manifest true"
-    );
+    assert!(!r.settings.validate.strict_format);
     assert_eq!(r.settings.lint.rules["shared"], "error");
-    assert_eq!(
-        r.settings.lint.rules["from-manifest"], "off",
-        "manifest keys survive"
+    assert!(
+        !r.settings.lint.rules.contains_key("from-manifest"),
+        "manifest keys are ignored"
     );
     assert_eq!(r.settings.lint.rules["from-file"], "info");
     assert_eq!(
@@ -77,10 +75,10 @@ fn every_layer_wins_over_the_ones_below() {
             line: 2
         }
     );
-    assert!(matches!(
-        r.origin("lint.rules.from-manifest"),
-        Origin::Manifest { line: 5, .. }
-    ));
+    let ignored: Vec<String> = r.warnings.iter().map(ToString::to_string).collect();
+    assert_eq!(ignored.len(), 2, "{ignored:#?}");
+    assert!(ignored[0].contains("suspect.project.json:3: `lint` in a project manifest is ignored"));
+    assert!(ignored[1].contains("`validate` in a project manifest is ignored"));
 
     // Env beats the files.
     let r = resolve_with(
@@ -127,7 +125,6 @@ fn every_layer_wins_over_the_ones_below() {
     );
     assert_eq!(r.settings.lint.rules["shared"], "warning");
     assert_eq!(r.settings.lint.rules["from-init"], "off");
-    assert_eq!(r.settings.lint.rules["from-manifest"], "off");
     assert_eq!(
         r.origin("lint.min_severity"),
         &Origin::Editor {
@@ -140,7 +137,7 @@ fn every_layer_wins_over_the_ones_below() {
         .iter()
         .map(|(o, _)| o.layer())
         .collect();
-    assert_eq!(layers, ["manifest", "file", "env", "editor", "editor"]);
+    assert_eq!(layers, ["file", "env", "editor", "editor"]);
 
     // A flag beats everything.
     let flags = Layer::flags()
@@ -233,12 +230,12 @@ fn a_broken_file_is_an_error_with_its_line() {
 }
 
 #[test]
-fn aliases_apply_with_a_warning() {
+fn old_spellings_are_unknown_keys() {
     let dir = tempfile::tempdir().unwrap();
     write(
         dir.path(),
         ".suspect.yaml",
-        "formatting:\n  sort_keys: false\ninlay_hints:\n  ref_targets: false\nrefs:\n  maxDocs: 9\ndocs:\n  out: site\nlint:\n  min_severty: error\n",
+        "formatting:\n  sort_keys: true\ninlay_hints:\n  ref_targets: false\nrefs:\n  maxDocs: 9\ndocs:\n  out: site\n",
     );
     let r = resolve_with(
         dir.path(),
@@ -249,17 +246,15 @@ fn aliases_apply_with_a_warning() {
     )
     .unwrap();
     assert!(!r.settings.format.sort_keys);
-    assert!(!r.settings.editor.inlay_hints.refs);
-    assert_eq!(r.settings.refs.max_docs, 9);
-    assert_eq!(r.settings.docs.output, Some(dir.path().join("site")));
+    assert!(r.settings.editor.inlay_hints.refs);
+    assert_eq!(r.settings.refs.max_docs, 500);
+    assert_eq!(r.settings.docs.output, None);
     let warnings: Vec<String> = r.warnings.iter().map(ToString::to_string).collect();
     for expected in [
-        "`formatting` is deprecated; use `format`",
-        "`formatting.sort_keys` is deprecated; use `format.sort_keys`",
-        "`inlay_hints.ref_targets` is deprecated; use `editor.inlay_hints.refs`",
-        "`refs.maxDocs` is deprecated; use `ref.max_docs`",
-        "`docs.out` is deprecated; use `docs.output`",
-        "`lint.min_severty` is not a .suspect.yaml key",
+        "`formatting` is not a .suspect.yaml key",
+        "`inlay_hints` is not a .suspect.yaml key",
+        "`refs` is not a .suspect.yaml key",
+        "`docs.out` is not a .suspect.yaml key",
     ] {
         assert!(
             warnings.iter().any(|w| w.contains(expected)),
@@ -495,8 +490,8 @@ fn explain_lists_every_row_and_json_has_the_shape() {
         .unwrap();
     assert_eq!(value["value"], "error");
     assert_eq!(value["layer"], "file");
-    assert_eq!(value["trace"].as_array().unwrap().len(), 2);
-    assert_eq!(json["files"].as_array().unwrap().len(), 2);
+    assert_eq!(value["trace"].as_array().unwrap().len(), 1);
+    assert_eq!(json["files"].as_array().unwrap().len(), 1);
 }
 
 // Ported from the language server's former `editor_config` tests.

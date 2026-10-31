@@ -79,7 +79,7 @@ fn value(rows: &[(String, serde_json::Value, String)], key: &str) -> (serde_json
 }
 
 #[test]
-fn manifest_policy_is_warned_about_once_with_its_line() {
+fn manifest_policy_is_ignored_with_one_warning_and_fails_project_check() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     write(
@@ -93,18 +93,18 @@ fn manifest_policy_is_warned_about_once_with_its_line() {
         &["lint", "openapi.yaml", "openapi.yaml", "--format", "json"],
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
-    let expected = "warning: suspect.project.json:4: `lint` in a project manifest is deprecated \
-                    and is ignored from the next release; move it to .suspect.yaml and add \
-                    \"config\": \".suspect.yaml\" to the manifest (`suspect config migrate` does both)";
+    let expected = "warning: suspect.project.json:4: `lint` in a project manifest is ignored; \
+                    move it to .suspect.yaml and add \"config\": \".suspect.yaml\" to the \
+                    manifest (`suspect config migrate` does both)";
     assert_eq!(stderr.matches(expected).count(), 1, "{stderr}");
     // Never on stdout: the report keeps its shape.
     assert!(serde_json::from_slice::<serde_json::Value>(&out.stdout).is_ok());
 
-    // `project check` reports it as a warning finding, and still passes.
+    // `project check` reports it as an error finding and fails.
     let check = run(root, &["project", "check"]);
     let stderr = String::from_utf8_lossy(&check.stderr);
     assert!(stderr.contains("project-manifest-policy"), "{stderr}");
-    assert!(check.status.success(), "{stderr}");
+    assert_eq!(check.status.code(), Some(1), "{stderr}");
 }
 
 #[test]
@@ -116,7 +116,6 @@ fn migrate_creates_a_settings_file_when_none_exists() {
         "suspect.project.json",
         "{\n  \"version\": 1,\n  \"entry\": \"openapi.yaml\",\n  \"lint\": {\"min_severity\": \"warning\", \"rules\": {\"info-contact\": \"off\"}},\n  \"validate\": {\"strict_format\": true},\n  \"editor\": {\"ref\": {\"max_docs\": 9}, \"colors\": true}\n}\n",
     );
-    let before = explain(root);
     let out = run(root, &["config", "migrate"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{stdout}");
@@ -126,20 +125,19 @@ fn migrate_creates_a_settings_file_when_none_exists() {
         read(root, "suspect.project.json"),
         "{\n  \"config\": \".suspect.yaml\",\n  \"version\": 1,\n  \"entry\": \"openapi.yaml\"\n}\n"
     );
+    // The ignored manifest values now apply from the settings file.
     let after = explain(root);
-    for key in [
-        "lint.min_severity",
-        "lint.rules.info-contact",
-        "validate.strict_format",
-        "ref.max_docs",
+    for (key, expected) in [
+        ("lint.min_severity", serde_json::json!("warning")),
+        ("lint.rules.info-contact", serde_json::json!("off")),
+        ("validate.strict_format", serde_json::json!(true)),
+        ("ref.max_docs", serde_json::json!(9)),
     ] {
-        assert_eq!(value(&before, key).0, value(&after, key).0, "{key}");
-        assert_eq!(value(&before, key).1, "manifest", "{key}");
-        assert_eq!(value(&after, key).1, "file", "{key}");
+        assert_eq!(value(&after, key), (expected, "file".to_owned()), "{key}");
     }
     // Nothing left to warn about.
     let lint = run(root, &["config"]);
-    assert!(!String::from_utf8_lossy(&lint.stderr).contains("deprecated"));
+    assert!(!String::from_utf8_lossy(&lint.stderr).contains("ignored"));
 }
 
 #[test]
@@ -156,7 +154,6 @@ fn migrate_keeps_the_files_values_and_its_comments() {
         ".suspect.yaml",
         "# keep me\nlint:\n  # floor\n  min_severity: warning\n  rules:\n    info-contact: error\ndocs:\n  style: html\n",
     );
-    let before = explain(root);
     let out = run(root, &["config", "migrate"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -165,14 +162,15 @@ fn migrate_keeps_the_files_values_and_its_comments() {
         read(root, ".suspect.yaml"),
         "# keep me\nlint:\n  # floor\n  min_severity: warning\n  rules:\n    info-contact: error\n    info-license: error\n    operation-tags: \"off\"\n  design: \"off\"\ndocs:\n  style: html\n"
     );
+    // The file's values win where both had one.
     let after = explain(root);
-    for key in [
-        "lint.min_severity",
-        "lint.design",
-        "lint.rules.info-contact",
-        "lint.rules.info-license",
+    for (key, expected) in [
+        ("lint.min_severity", "warning"),
+        ("lint.design", "off"),
+        ("lint.rules.info-contact", "error"),
+        ("lint.rules.info-license", "error"),
     ] {
-        assert_eq!(value(&before, key).0, value(&after, key).0, "{key}");
+        assert_eq!(value(&after, key).0, expected, "{key}");
     }
 }
 

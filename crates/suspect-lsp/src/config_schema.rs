@@ -333,14 +333,14 @@ codegen:
 
     #[test]
     fn manifest_policy_keys_hover_and_complete() {
-        // The committed policy sections read like the rest of the manifest:
-        // hover names what the key does, completion offers what is missing.
+        // The old policy sections are ignored: hover says so and where the key
+        // belongs; completion still names the keys.
         let text = "{\"entry\": \"a.yaml\", \"lint\": {\"min_severity\": \"warning\"}, \
                     \"validate\": {\"strict_format\": true}, \"editor\": {\"inlay_hints\": {}}}";
         let low = doc("suspect.project.json", text);
         let md = hover(FileKind::Project, &low, offset(text, "min_severity")).expect("lint hover");
         assert!(
-            md.contains("Deprecated") && md.contains(".suspect.yaml"),
+            md.contains("Ignored") && md.contains(".suspect.yaml"),
             "{md}"
         );
         let md =
@@ -348,7 +348,7 @@ codegen:
         assert!(md.contains("format"), "{md}");
         let md =
             hover(FileKind::Project, &low, offset(text, "editor")).expect("editor section hover");
-        assert!(md.contains("Deprecated"), "{md}");
+        assert!(md.contains("Ignored"), "{md}");
 
         // Completion inside the lint section offers the policy keys.
         let items = completions(FileKind::Project, &low, offset(text, "min_severity"));

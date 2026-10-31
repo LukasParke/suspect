@@ -642,7 +642,7 @@ fn config_supplies_defaults_and_explicit_flags_win() {
     let root = dir.path();
     std::fs::write(
         root.join(".suspect.yaml"),
-        "lint:\n  min_severity: warning\nvalidate:\n  strict_format: true\ndocs:\n  style: markdown\n  out: site/reference\nformat:\n  json: true\n",
+        "lint:\n  min_severity: warning\nvalidate:\n  strict_format: true\ndocs:\n  style: markdown\n  output: site/reference\nformat:\n  json: true\n",
     )
     .unwrap();
     let spec = write(
@@ -1074,12 +1074,13 @@ fn monorepo_service(root: &std::path::Path, name: &str, untagged: bool) {
   "entry": "openapi.yaml",
   "publish": {{"output": "build/spec.yaml"}},
   "contract": {{"output": "build/contract"}},
-  "lint": {{"min_severity": "error"}},
+  "config": ".suspect.yaml",
   "codegen": [{{"name": "ts", "profile": "typescript-http", "package_name": "@acme/{name}",
     "package_version": "1.0.0", "out": "../../generated/{name}", "operation_id": ["listThings"]}}]}}"#
         ),
     )
     .unwrap();
+    std::fs::write(dir.join(".suspect.yaml"), "lint:\n  min_severity: error\n").unwrap();
 }
 
 #[test]
@@ -1253,7 +1254,7 @@ fn release_publish_reads_the_project_manifest_release_section() {
 }
 
 #[test]
-fn a_standalone_release_manifest_still_works_with_a_deprecation_warning() {
+fn a_standalone_release_manifest_is_refused_with_the_move_to_make() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     std::fs::create_dir_all(root.join("sdk/ts")).unwrap();
@@ -1263,21 +1264,29 @@ fn a_standalone_release_manifest_still_works_with_a_deprecation_warning() {
         "release.json",
         &format!(r#"{{"version": "1.4.0", "targets": {RELEASE_TARGETS}}}"#),
     );
+    // Not the default any more.
     let out = release_publish(root, &[]);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("no release manifest"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let out = release_publish(root, &["--manifest", "release.json"]);
+    assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(out.status.success(), "{stderr}");
     assert!(
         stderr.contains(
-            "warning: release.json: a standalone release manifest is deprecated and is not read from the next release; move its fields under `release` in suspect.project.json"
+            "release.json: a standalone release manifest is not read; move its fields under `release` in suspect.project.json"
         ),
         "{stderr}"
     );
 
-    // The YAML spelling of the same file.
+    // A YAML document with a `release` section reads like the project manifest.
     write(
         root,
         "release.yaml",
-        "version: 1.4.0\ntargets:\n  - backend: typescript\n    directory: sdk/ts\n    package: '@acme/sdk'\n    registry: npm\n    publish: npm publish\n",
+        "release:\n  version: 1.4.0\n  targets:\n    - backend: typescript\n      directory: sdk/ts\n      package: '@acme/sdk'\n      registry: npm\n      publish: npm publish\n",
     );
     let out = release_publish(root, &["--manifest", "release.yaml"]);
     assert!(

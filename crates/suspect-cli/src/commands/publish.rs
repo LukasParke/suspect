@@ -20,9 +20,10 @@
 //! `suspect release workflow` renders the same manifest as a tag-triggered
 //! GitHub Actions workflow.
 //!
-//! The manifest is the `release` section of `suspect.project.json`. A
-//! standalone `release.json` (the same fields at the top level) is still
-//! read, with a deprecation warning, for one release.
+//! The manifest is the `release` section of `suspect.project.json` (or of
+//! any JSON or YAML document passed with `--manifest`). A standalone
+//! `release.json` with the fields at the top level is refused with the
+//! move to make.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -35,9 +36,8 @@ use crate::ReportFormat;
 /// Arguments for the publish orchestration.
 #[derive(Debug, Args)]
 pub struct PublishArgs {
-    /// Release manifest: a `suspect.project.json` with a `release` section,
-    /// or a standalone `release.json` (deprecated). Defaults to
-    /// `suspect.project.json` when it has `release`, then `release.json`.
+    /// Release manifest: a document with a `release` section (default:
+    /// `suspect.project.json`).
     #[arg(long)]
     pub manifest: Option<PathBuf>,
     /// Print the plan only (the default).
@@ -61,9 +61,8 @@ pub struct PublishArgs {
 /// Arguments for workflow rendering.
 #[derive(Debug, Args)]
 pub struct WorkflowArgs {
-    /// Release manifest: a `suspect.project.json` with a `release` section,
-    /// or a standalone `release.json` (deprecated). Defaults to
-    /// `suspect.project.json` when it has `release`, then `release.json`.
+    /// Release manifest: a document with a `release` section (default:
+    /// `suspect.project.json`).
     #[arg(long)]
     pub manifest: Option<PathBuf>,
     /// Write the workflow here instead of stdout.
@@ -147,32 +146,17 @@ pub struct PublishPlan {
     pub ready: usize,
 }
 
-/// The deprecated standalone release manifest name.
-pub const STANDALONE_NAME: &str = "release.json";
-
-/// The manifest `--manifest` names, or the default: `suspect.project.json`
-/// when it has a `release` section (or no `release.json` exists), then
-/// `release.json`.
+/// The manifest `--manifest` names, or `suspect.project.json`.
 ///
 /// # Errors
-/// Neither file exists.
+/// No manifest was named and `suspect.project.json` does not exist.
 pub fn locate(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
     if let Some(path) = explicit {
         return Ok(path.to_path_buf());
     }
     let project = Path::new(suspect_config::MANIFEST_NAME);
-    let standalone = Path::new(STANDALONE_NAME);
-    let has_release = || {
-        std::fs::read(project)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .is_some_and(|value| value.get("release").is_some())
-    };
-    if project.is_file() && (!standalone.is_file() || has_release()) {
+    if project.is_file() {
         return Ok(project.to_path_buf());
-    }
-    if standalone.is_file() {
-        return Ok(standalone.to_path_buf());
     }
     anyhow::bail!(
         "no release manifest: add a `release` section to {} or pass --manifest",
@@ -180,39 +164,18 @@ pub fn locate(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
     )
 }
 
-/// The deprecation warning for a standalone release manifest.
-#[must_use]
-pub fn standalone_warning(path: &Path) -> String {
-    format!(
-        "warning: {}: a standalone release manifest is deprecated and is not read from the next \
-         release; move its fields under `release` in {} (paths stay relative to the manifest)",
-        path.display(),
-        suspect_config::MANIFEST_NAME
-    )
-}
-
-/// Reads the manifest at `path`, warning on stderr when it is a
-/// standalone release manifest.
+/// Reads the release manifest at `path`.
 fn load(path: &Path) -> anyhow::Result<ReleaseManifest> {
-    let (manifest, standalone) = read_manifest(path)?;
-    if standalone {
-        eprintln!("{}", standalone_warning(path));
-    }
-    Ok(manifest)
+    parse_manifest(path)
 }
 
-/// Parses a release manifest: a project manifest's `release` section, or
-/// a standalone release manifest (JSON, or YAML by extension).
+/// Parses the `release` section of the document at `path` (JSON, or YAML
+/// by extension). A document with the release fields at the top level
+/// (the old standalone `release.json`) is refused with the move to make.
 ///
 /// # Errors
 /// IO or schema failures with the offending field named.
 pub fn parse_manifest(path: &Path) -> anyhow::Result<ReleaseManifest> {
-    read_manifest(path).map(|(manifest, _)| manifest)
-}
-
-/// [`parse_manifest`], plus whether the file was a standalone release
-/// manifest. A document with `release` or `entry` is a project manifest.
-fn read_manifest(path: &Path) -> anyhow::Result<(ReleaseManifest, bool)> {
     let bytes = std::fs::read(path).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
     let value: serde_json::Value = super::structured::parse(path, &bytes).map_err(|e| {
         let kind = if super::structured::is_yaml(path) {
@@ -226,36 +189,33 @@ fn read_manifest(path: &Path) -> anyhow::Result<(ReleaseManifest, bool)> {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    if value.get("release").is_none() && value.get("entry").is_none() {
-        return Ok((release_from_value(&value, root, false)?, true));
-    }
-    let release = value.get("release").ok_or_else(|| {
-        anyhow::anyhow!(
+    let Some(release) = value.get("release") else {
+        if value.get("entry").is_none() && value.get("targets").is_some() {
+            anyhow::bail!(
+                "{}: a standalone release manifest is not read; move its fields under \
+                 `release` in {} (paths stay relative to the manifest)",
+                path.display(),
+                suspect_config::MANIFEST_NAME
+            );
+        }
+        anyhow::bail!(
             "{}: the project manifest has no `release` section",
             path.display()
-        )
-    })?;
-    let manifest = release_from_value(release, root, true)
-        .map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
-    Ok((manifest, false))
+        );
+    };
+    release_from_value(release, root).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))
 }
 
-/// Reads one release manifest document. `closed` (the project manifest's
-/// `release` section) rejects keys outside the schema table; a standalone
-/// manifest keeps ignoring them.
+/// Reads one `release` section; keys outside the schema table are errors.
 ///
 /// # Errors
-/// A missing required field, or an unknown key when `closed`.
+/// A missing required field, or an unknown key.
 pub fn release_from_value(
     value: &serde_json::Value,
     root: PathBuf,
-    closed: bool,
 ) -> anyhow::Result<ReleaseManifest> {
     use suspect_config::schema::{RELEASE_FIELDS, RELEASE_TARGET_FIELDS, Setting};
     let unknown = |object: &serde_json::Value, fields: &[Setting], at: &str| {
-        if !closed {
-            return Ok(());
-        }
         let Some(map) = object.as_object() else {
             anyhow::bail!("{at} must be an object");
         };
@@ -933,10 +893,10 @@ mod tests {
 
     fn manifest_with(entries: &str) -> ReleaseManifest {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("release.json");
+        let path = dir.path().join("suspect.project.json");
         std::fs::write(
             &path,
-            format!(r#"{{"version": "1.4.0", "targets": [{entries}]}}"#),
+            format!(r#"{{"release": {{"version": "1.4.0", "targets": [{entries}]}}}}"#),
         )
         .unwrap();
         parse_manifest(&path).unwrap()
@@ -1107,13 +1067,13 @@ mod tests {
     #[test]
     fn workflow_is_tag_triggered_and_covers_every_target() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest_path = dir.path().join("release.json");
+        let manifest_path = dir.path().join("suspect.project.json");
         std::fs::write(
             &manifest_path,
-            r#"{"version": "1.4.0", "targets": [
+            r#"{"release": {"version": "1.4.0", "targets": [
         {"backend": "typescript", "directory": "sdk/ts", "package": "@acme/sdk", "registry": "npm", "publish": "npm publish --access public"},
         {"backend": "python", "directory": "sdk/py", "package": "acme-sdk", "registry": "pypi", "publish": "twine upload dist/*"}
-    ]}"#,
+    ]}}"#,
         )
         .unwrap();
         let out = dir.path().join("release.yml");
@@ -1134,7 +1094,7 @@ mod tests {
     const TARGET: &str = r#"{"backend": "typescript", "directory": "sdk/ts", "package": "@acme/sdk", "registry": "npm", "publish": "npm publish"}"#;
 
     #[test]
-    fn the_project_manifest_release_section_reads_like_release_json() {
+    fn the_project_manifest_release_section_is_the_release_manifest() {
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("suspect.project.json");
         std::fs::write(
@@ -1144,24 +1104,28 @@ mod tests {
             ),
         )
         .unwrap();
+        let manifest = parse_manifest(&project).unwrap();
+        assert_eq!(manifest.version, "1.4.0");
+        assert_eq!(manifest.tag.as_deref(), Some("v1.4.0"));
+        assert_eq!(
+            manifest.targets[0].directory,
+            dir.path().join("sdk/ts"),
+            "paths resolve from the project directory"
+        );
+        // The old standalone form is refused with the move to make.
         let standalone = dir.path().join("release.json");
         std::fs::write(
             &standalone,
             format!(r#"{{"version": "1.4.0", "targets": [{TARGET}]}}"#),
         )
         .unwrap();
-        let (from_project, deprecated) = read_manifest(&project).unwrap();
-        assert!(!deprecated);
-        let (from_standalone, deprecated) = read_manifest(&standalone).unwrap();
-        assert!(deprecated, "a standalone file is the deprecated form");
-        assert_eq!(from_project.version, from_standalone.version);
-        assert_eq!(from_project.tag.as_deref(), Some("v1.4.0"));
-        assert_eq!(
-            from_project.targets[0].directory,
-            dir.path().join("sdk/ts"),
-            "paths resolve from the project directory"
+        let error = parse_manifest(&standalone).unwrap_err().to_string();
+        assert!(
+            error.contains(
+                "a standalone release manifest is not read; move its fields under `release`"
+            ),
+            "{error}"
         );
-        assert!(standalone_warning(&standalone).contains("deprecated"));
     }
 
     #[test]
@@ -1170,7 +1134,7 @@ mod tests {
         let path = dir.path().join("release.yaml");
         std::fs::write(
             &path,
-            "version: 1.4.0\ntargets:\n  - backend: python\n    directory: sdk/py\n    package: acme\n    registry: pypi\n    publish: twine upload dist/*\n",
+            "release:\n  version: 1.4.0\n  targets:\n    - backend: python\n      directory: sdk/py\n      package: acme\n      registry: pypi\n      publish: twine upload dist/*\n",
         )
         .unwrap();
         let manifest = parse_manifest(&path).unwrap();

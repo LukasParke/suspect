@@ -26,7 +26,7 @@ pub enum Origin {
         /// One-based line.
         line: u32,
     },
-    /// A project manifest's deprecated policy sections.
+    /// A project manifest (the location of an ignored policy section).
     Manifest {
         /// The manifest.
         path: PathBuf,
@@ -333,12 +333,6 @@ impl Layer {
                 });
                 continue;
             };
-            if let Some(alias) = found.alias {
-                self.warnings.push(Notice {
-                    origin: at.clone(),
-                    message: format!("`{alias}` is deprecated; use `{}`", found.setting.path),
-                });
-            }
             let Some(value) = entry.value.filter(|v| v.kind() != ValueKind::Null) else {
                 if found.setting.kind == Kind::Section {
                     self.sections.push(found.setting.path);
@@ -681,7 +675,8 @@ mod tests {
                 "lint": {"minSeverity": "error", "ruleset": "r.yaml", "design": "",
                          "rules": {"info-contact": "off"}},
                 "validate": {"strict_format": true},
-                "inlayHints": {"refTargets": false},
+                "editor": {"inlayHints": {"refs": false}},
+                "inlayHints": {"refTargets": true},
                 "basePath": "suspect"
             }}),
             base,
@@ -704,13 +699,8 @@ mod tests {
             layer.get("editor.inlay_hints.refs"),
             Some(&Raw::Bool(false))
         );
-        // `inlayHints.refTargets` is an old spelling; the rest are current.
-        assert_eq!(layer.warnings.len(), 1, "{:?}", layer.warnings);
-        assert_eq!(
-            layer.warnings[0].to_string(),
-            "editor suspect.inlayHints.refTargets: deprecated setting; use \
-             `suspect.editor.inlayHints.refs`"
-        );
+        // `inlayHints.refTargets` is no setting: skipped like any client key.
+        assert!(layer.warnings.is_empty(), "{:?}", layer.warnings);
     }
 
     #[test]

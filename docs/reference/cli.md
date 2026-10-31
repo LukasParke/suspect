@@ -910,7 +910,7 @@ Plan and execute SDK publishing across registries
 Usage: suspect release publish [OPTIONS]
 
 Options:
-      --manifest <MANIFEST>  Release manifest: a `suspect.project.json` with a `release` section, or a standalone `release.json` (deprecated). Defaults to `suspect.project.json` when it has `release`, then `release.json`
+      --manifest <MANIFEST>  Release manifest: a document with a `release` section (default: `suspect.project.json`)
       --dry-run              Print the plan only (the default)
       --execute              Actually run the publish commands. Publishing is destructive on the registry, so it never happens without this flag
       --resume               Resume: skip targets already recorded as published in the state file
@@ -927,7 +927,7 @@ Render the release manifest as a tag-triggered CI workflow
 Usage: suspect release workflow [OPTIONS]
 
 Options:
-      --manifest <MANIFEST>  Release manifest: a `suspect.project.json` with a `release` section, or a standalone `release.json` (deprecated). Defaults to `suspect.project.json` when it has `release`, then `release.json`
+      --manifest <MANIFEST>  Release manifest: a document with a `release` section (default: `suspect.project.json`)
   -o, --output <OUTPUT>      Write the workflow here instead of stdout
   -h, --help                 Print help
 ```
@@ -1101,7 +1101,7 @@ Usage: suspect config [OPTIONS] [INPUT]
        suspect config <COMMAND>
 
 Commands:
-  migrate  Move a manifest's deprecated `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
+  migrate  Move a manifest's ignored `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
   help     Print this message or the help of the given subcommand(s)
 
 Arguments:
@@ -1117,7 +1117,7 @@ Options:
 ## `suspect config migrate`
 
 ```text
-Move a manifest's deprecated `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
+Move a manifest's ignored `lint`, `validate` and `editor` sections into the settings file and point the manifest at it
 
 Usage: suspect config migrate [MANIFEST]
 

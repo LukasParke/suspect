@@ -274,14 +274,6 @@ fn settings_table(out: &mut String, table: &'static [suspect_config::schema::Set
             open = false;
             if setting.kind == Kind::Section {
                 writeln!(out, "{}\n", setting.doc).unwrap();
-                if !setting.aliases.is_empty() {
-                    writeln!(
-                        out,
-                        "Older spelling: {}.\n",
-                        codes(setting.aliases.iter().copied())
-                    )
-                    .unwrap();
-                }
                 continue;
             }
         }
@@ -291,8 +283,8 @@ fn settings_table(out: &mut String, table: &'static [suspect_config::schema::Set
         }
         if !open {
             out.push_str(
-                "| Key | Type | Default | Description | Env | Editor setting | Flags | Older spellings |\n\
-                 |---|---|---|---|---|---|---|---|\n",
+                "| Key | Type | Default | Description | Env | Editor setting | Flags |\n\
+                 |---|---|---|---|---|---|---|\n",
             );
             open = true;
         }
@@ -311,7 +303,7 @@ fn settings_table(out: &mut String, table: &'static [suspect_config::schema::Set
         let flags: Vec<String> = setting.flags.iter().map(|f| current_flag(f)).collect();
         writeln!(
             out,
-            "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
+            "| `{}` | {} | {} | {} | {} | {} | {} |",
             setting.path,
             cell(&kind_text(setting.kind)),
             default_text(setting),
@@ -319,7 +311,6 @@ fn settings_table(out: &mut String, table: &'static [suspect_config::schema::Set
             setting.env.map_or_else(String::new, |e| format!("`{e}`")),
             editor,
             codes(flags.iter().map(String::as_str)),
-            codes(setting.aliases.iter().copied())
         )
         .unwrap();
     }
@@ -359,14 +350,15 @@ fn config_page() -> String {
          and [`suspect.project.schema.json`](../../editors/vscode/schemas/suspect.project.schema.json). \
          Point an editor's YAML or JSON schema setting at them; the VS Code \
          extension does this already.\n\n\
-         Precedence, lowest first: the default, the project manifest \
-         (deprecated policy keys), `.suspect.yaml` (over its `extends` parent), \
+         Precedence, lowest first: the default, `.suspect.yaml` (over its \
+         `extends` parent), \
          the environment variable, then an editor setting or a command-line \
          flag. `lint.rules` merges per rule across layers. Paths are relative \
          to the file that sets them. `suspect config --explain` lists every key \
-         with its value and where it came from. Older spellings still work and \
-         print a warning naming the current key. Environment variables are also \
-         listed in the [environment reference](environment.md).\n\n",
+         with its value and where it came from. A project manifest's old \
+         `lint`, `validate` and `editor` sections are ignored with a warning \
+         (`suspect config migrate` moves them here). Environment variables are \
+         also listed in the [environment reference](environment.md).\n\n",
     );
     writeln!(out, "## `.suspect.yaml`\n\n{}\n", schema::SETTINGS[0].doc).unwrap();
     settings_table(&mut out, schema::SETTINGS);
@@ -378,8 +370,8 @@ fn config_page() -> String {
     .unwrap();
     out.push_str(
         "Settings that moved to `.suspect.yaml` (`lint`, `validate`, `editor`) are \
-         still read here for one release, with a warning; `suspect config migrate` \
-         moves them.\n\n",
+         ignored here, with a warning, and fail `suspect project check`; \
+         `suspect config migrate` moves them.\n\n",
     );
     fields_table(&mut out, &schema::MANIFEST[1..]);
     out.push_str("### `codegen` targets\n\nEach entry of the manifest's `codegen` list.\n\n");

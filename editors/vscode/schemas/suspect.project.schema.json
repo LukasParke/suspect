@@ -132,14 +132,14 @@
     "editor": {
       "additionalProperties": false,
       "deprecated": true,
-      "description": "Deprecated: editor settings belong in `.suspect.yaml` (`editor`, `ref`, `format`).",
+      "description": "Ignored: editor settings belong in `.suspect.yaml` (`editor`, `ref`, `format`).",
       "properties": {
         "formatting": {
           "additionalProperties": false,
-          "description": "Deprecated; see `format`.",
+          "description": "Ignored; see `format`.",
           "properties": {
             "sort_keys": {
-              "description": "Deprecated; see `format.sort_keys`.",
+              "description": "Ignored; see `format.sort_keys`.",
               "type": "boolean"
             }
           },
@@ -147,14 +147,14 @@
         },
         "inlay_hints": {
           "additionalProperties": false,
-          "description": "Deprecated; see `editor.inlay_hints`.",
+          "description": "Ignored; see `editor.inlay_hints`.",
           "properties": {
             "properties": {
-              "description": "Deprecated; see `editor.inlay_hints.properties`.",
+              "description": "Ignored; see `editor.inlay_hints.properties`.",
               "type": "boolean"
             },
             "refs": {
-              "description": "Deprecated; see `editor.inlay_hints.refs`.",
+              "description": "Ignored; see `editor.inlay_hints.refs`.",
               "type": "boolean"
             }
           },
@@ -162,10 +162,10 @@
         },
         "ref": {
           "additionalProperties": false,
-          "description": "Deprecated; see `ref`.",
+          "description": "Ignored; see `ref`.",
           "properties": {
             "max_docs": {
-              "description": "Deprecated; see `ref.max_docs`.",
+              "description": "Ignored; see `ref.max_docs`.",
               "minimum": 0,
               "type": "integer"
             }
@@ -182,10 +182,10 @@
     "lint": {
       "additionalProperties": false,
       "deprecated": true,
-      "description": "Deprecated: lint policy belongs in `.suspect.yaml`. Still applied under that file for one release; `suspect config migrate` moves it.",
+      "description": "Ignored: lint policy belongs in `.suspect.yaml`; `suspect config migrate` moves it.",
       "properties": {
         "design": {
-          "description": "Deprecated; see `lint.design` in `.suspect.yaml`.",
+          "description": "Ignored; see `lint.design` in `.suspect.yaml`.",
           "enum": [
             "error",
             "warning",
@@ -196,7 +196,7 @@
           "type": "string"
         },
         "min_severity": {
-          "description": "Deprecated; see `lint.min_severity` in `.suspect.yaml`.",
+          "description": "Ignored; see `lint.min_severity` in `.suspect.yaml`.",
           "enum": [
             "error",
             "warning",
@@ -206,7 +206,7 @@
           "type": "string"
         },
         "recommended": {
-          "description": "Deprecated; see `lint.recommended` in `.suspect.yaml`.",
+          "description": "Ignored; see `lint.recommended` in `.suspect.yaml`.",
           "type": "boolean"
         },
         "rules": {
@@ -220,11 +220,11 @@
             ],
             "type": "string"
           },
-          "description": "Deprecated; see `lint.rules` in `.suspect.yaml`.",
+          "description": "Ignored; see `lint.rules` in `.suspect.yaml`.",
           "type": "object"
         },
         "ruleset": {
-          "description": "Deprecated; see `lint.ruleset` in `.suspect.yaml`.",
+          "description": "Ignored; see `lint.ruleset` in `.suspect.yaml`.",
           "type": "string"
         }
       },
@@ -267,7 +267,7 @@
     },
     "release": {
       "additionalProperties": false,
-      "description": "SDK release: the version every target carries and how each is published (`release publish`, `release workflow`). Replaces a standalone `release.json`.",
+      "description": "SDK release: the version every target carries and how each is published (`release publish`, `release workflow`).",
       "properties": {
         "tag": {
           "description": "The tag that triggers the release workflow; `v` plus the version when unset.",
@@ -375,10 +375,10 @@
     "validate": {
       "additionalProperties": false,
       "deprecated": true,
-      "description": "Deprecated: validation settings belong in `.suspect.yaml`.",
+      "description": "Ignored: validation settings belong in `.suspect.yaml`.",
       "properties": {
         "strict_format": {
-          "description": "Deprecated; see `validate.strict_format` in `.suspect.yaml`.",
+          "description": "Ignored; see `validate.strict_format` in `.suspect.yaml`.",
           "type": "boolean"
         }
       },

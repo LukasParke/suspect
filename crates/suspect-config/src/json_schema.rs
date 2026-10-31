@@ -6,9 +6,8 @@
 //! property carries `description` and `default` from the table, `enum`
 //! from its kind, `x-suspect-editor` (the client setting, its scope and
 //! its older client keys; the VS Code settings are generated from it) and
-//! `x-suspect-env` where the table names them. Deprecated spellings are
-//! listed with `deprecated: true` so existing files still validate; they
-//! carry no `x-suspect-editor`.
+//! `x-suspect-env` where the table names them. The manifest's ignored
+//! policy sections are listed with `deprecated: true`.
 
 use serde_json::{Value, json};
 
@@ -25,7 +24,6 @@ pub fn settings() -> Value {
     root["$schema"] = json!(DRAFT);
     root["title"] = json!(".suspect.yaml");
     fill(&mut root, SETTINGS, "");
-    aliases(&mut root, SETTINGS);
     root
 }
 
@@ -84,63 +82,6 @@ fn fill(node: &mut Value, table: &'static [Setting], scope: &str) {
         }
         node["properties"][name] = property;
     }
-}
-
-/// Places each deprecated spelling where it is written: a section alias
-/// as a copy of the section, a key alias as a copy of its row. Shorter
-/// spellings first, so `inlay_hints` exists before `inlay_hints.refs`.
-fn aliases(root: &mut Value, table: &'static [Setting]) {
-    let mut all: Vec<(&'static str, &'static Setting)> = table
-        .iter()
-        .flat_map(|s| s.aliases.iter().map(move |a| (*a, s)))
-        .collect();
-    all.sort_by_key(|(alias, _)| alias.matches('.').count());
-    for (alias, setting) in all {
-        let mut property = if setting.kind == Kind::Section {
-            at(root, setting.path)
-                .cloned()
-                .unwrap_or_else(|| property(setting))
-        } else {
-            property(setting)
-        };
-        // The editor setting belongs to the canonical spelling only.
-        strip_editor(&mut property);
-        property["deprecated"] = json!(true);
-        property["description"] = json!(format!(
-            "Deprecated spelling of `{}`. {}",
-            setting.path, setting.doc
-        ));
-        let (parent, name) = alias.rsplit_once('.').unwrap_or(("", alias));
-        let Some(parent) = at_mut(root, parent) else {
-            continue;
-        };
-        parent["properties"][name] = property;
-    }
-}
-
-fn strip_editor(node: &mut Value) {
-    if let Some(object) = node.as_object_mut() {
-        object.remove("x-suspect-editor");
-    }
-    if let Some(properties) = node.get_mut("properties").and_then(Value::as_object_mut) {
-        properties.values_mut().for_each(strip_editor);
-    }
-}
-
-fn at<'v>(root: &'v Value, path: &str) -> Option<&'v Value> {
-    let mut node = root;
-    for part in path.split('.').filter(|p| !p.is_empty()) {
-        node = node.get("properties")?.get(part)?;
-    }
-    Some(node)
-}
-
-fn at_mut<'v>(root: &'v mut Value, path: &str) -> Option<&'v mut Value> {
-    let mut node = root;
-    for part in path.split('.').filter(|p| !p.is_empty()) {
-        node = node.get_mut("properties")?.get_mut(part)?;
-    }
-    Some(node)
 }
 
 fn object_schema(setting: &Setting) -> Value {
@@ -259,35 +200,18 @@ mod tests {
     }
 
     #[test]
-    fn deprecated_spellings_still_validate() {
+    fn old_spellings_are_not_in_the_schema() {
         let schema = settings();
         let p = &schema["properties"];
-        assert_eq!(p["formatting"]["deprecated"], true);
-        assert_eq!(
-            p["formatting"]["properties"]["sort_keys"]["deprecated"],
-            true
-        );
-        assert_eq!(
-            p["inlay_hints"]["properties"]["ref_targets"]["deprecated"],
-            true
-        );
-        assert_eq!(p["inlay_hints"]["properties"]["refs"]["deprecated"], true);
-        assert_eq!(p["refs"]["properties"]["maxDocs"]["deprecated"], true);
-        assert_eq!(p["ref"]["properties"]["maxDocs"]["deprecated"], true);
-        assert_eq!(p["docs"]["properties"]["out"]["deprecated"], true);
-        assert!(
-            p["inlay_hints"]["properties"]["refs"]
-                .get("x-suspect-editor")
-                .is_none()
-        );
+        for old in ["formatting", "inlay_hints", "refs", "run"] {
+            assert!(p[old].is_null(), "{old}");
+        }
+        assert!(p["ref"]["properties"]["maxDocs"].is_null());
+        assert!(p["docs"]["properties"]["out"].is_null());
         assert_eq!(
             p["test"]["properties"]["base_url"]["x-suspect-editor"],
             json!({"key": "suspect.test.baseUrl", "scope": "resource",
                    "aliases": ["suspect.testBaseUrl"]})
-        );
-        assert!(
-            p["run"].is_null(),
-            "an alias without its section is not invented"
         );
     }
 

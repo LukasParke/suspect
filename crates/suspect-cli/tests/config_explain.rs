@@ -14,8 +14,9 @@ fn write(dir: &Path, name: &str, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
-/// A project with policy in both files, and a sibling directory with its
-/// own settings file (the working directory in these tests).
+/// A project with policy in both files (the manifest's ignored), and a
+/// sibling directory with its own settings file (the working directory in
+/// these tests).
 fn fixture(root: &Path) {
     write(
         root,
@@ -76,13 +77,9 @@ fn explain_names_every_origin_with_its_line() {
     assert!(floor.contains("proj/.suspect.yaml:2"), "{floor}");
     let contact = line(&text, "lint.rules.info-contact");
     assert!(contact.contains("proj/.suspect.yaml:4"), "{contact}");
-    assert!(
-        contact.contains("over ") && contact.contains("suspect.project.json:5 = off"),
-        "{contact}"
-    );
-    let license = line(&text, "lint.rules.info-license");
-    assert!(license.contains("suspect.project.json:5"), "{license}");
-    assert!(license.contains("deprecated location"), "{license}");
+    assert!(!contact.contains("over "), "{contact}");
+    // The manifest's `lint` section is ignored.
+    assert!(!text.contains("lint.rules.info-license"), "{text}");
     assert!(line(&text, "test.base_url").contains("env SUSPECT_BASE_URL"));
     assert!(line(&text, "validate.strict_format").contains("default"));
     assert!(text.contains("debug variables (not settings)"), "{text}");
@@ -111,7 +108,7 @@ fn explain_json_has_values_with_origins_and_traces() {
     );
     assert_eq!(code, 0, "{text}");
     let json: serde_json::Value = serde_json::from_str(&text).expect("one JSON document");
-    assert_eq!(json["files"].as_array().unwrap().len(), 2);
+    assert_eq!(json["files"].as_array().unwrap().len(), 1);
     let value = |key: &str| {
         json["values"]
             .as_array()
@@ -130,7 +127,7 @@ fn explain_json_has_values_with_origins_and_traces() {
             .unwrap()
             .ends_with(".suspect.yaml:4")
     );
-    assert_eq!(contact["trace"].as_array().unwrap().len(), 2);
+    assert_eq!(contact["trace"].as_array().unwrap().len(), 1);
     assert_eq!(value("test.base_url")["layer"], "env");
     assert_eq!(value("ref.max_docs")["value"], 500);
     assert!(json["debug"].as_array().unwrap().len() >= 6);

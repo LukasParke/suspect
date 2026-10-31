@@ -120,8 +120,6 @@ pub struct Setting {
     pub editor_aliases: &'static [&'static str],
     /// Flags that set it, for `--explain` and the CLI reference.
     pub flags: &'static [&'static str],
-    /// Older spellings still accepted, with a warning naming this path.
-    pub aliases: &'static [&'static str],
 }
 
 const fn row(path: &'static str, kind: Kind, doc: &'static str) -> Setting {
@@ -134,7 +132,6 @@ const fn row(path: &'static str, kind: Kind, doc: &'static str) -> Setting {
         editor: None,
         editor_aliases: &[],
         flags: &[],
-        aliases: &[],
     }
 }
 
@@ -161,10 +158,6 @@ impl Setting {
     }
     const fn flags(mut self, flags: &'static [&'static str]) -> Self {
         self.flags = flags;
-        self
-    }
-    const fn aliases(mut self, aliases: &'static [&'static str]) -> Self {
-        self.aliases = aliases;
         self
     }
 
@@ -253,7 +246,7 @@ pub static SETTINGS: &[Setting] = &[
         "File listing the documents `$ref`s may reach; others are reported.",
     )
     .flags(&["validate --reference-allowlist"]),
-    section("format", "Formatter output.").aliases(&["formatting"]),
+    section("format", "Formatter output."),
     row(
         "format.json",
         Kind::Bool,
@@ -276,8 +269,7 @@ pub static SETTINGS: &[Setting] = &[
     )
     .default("false")
     .editor("format.sortKeys")
-    .editor_aliases(&["formatting.sortKeys"])
-    .aliases(&["formatting.sort_keys", "formatting.sortKeys"]),
+    .editor_aliases(&["formatting.sortKeys"]),
     section("docs", "Reference documentation generation."),
     row(
         "docs.style",
@@ -290,8 +282,7 @@ pub static SETTINGS: &[Setting] = &[
         Kind::Path,
         "Output root for generated documentation.",
     )
-    .flags(&["gen docs --output"])
-    .aliases(&["docs.out"]),
+    .flags(&["gen docs --output"]),
     section("codegen", "Defaults applied to SDK generation."),
     row(
         "codegen.out",
@@ -366,17 +357,16 @@ pub static SETTINGS: &[Setting] = &[
     .default("sdk-out")
     .editor("codegen.session.out")
     .editor_aliases(&["sdk.sessionOutput"]),
-    section("ref", "Reference-workspace tuning.").aliases(&["refs"]),
+    section("ref", "Reference-workspace tuning."),
     row(
         "ref.max_docs",
         Kind::Count,
         "Maximum documents loaded in one ref workspace.",
     )
     .default("500")
-    .editor("ref.maxDocs")
-    .aliases(&["ref.maxDocs", "refs.max_docs", "refs.maxDocs"]),
+    .editor("ref.maxDocs"),
     section("editor", "Editor-only behaviour."),
-    section("editor.inlay_hints", "Inlay hint toggles.").aliases(&["inlay_hints"]),
+    section("editor.inlay_hints", "Inlay hint toggles."),
     row(
         "editor.inlay_hints.refs",
         Kind::Bool,
@@ -384,12 +374,7 @@ pub static SETTINGS: &[Setting] = &[
     )
     .default("true")
     .editor("editor.inlayHints.refs")
-    .editor_aliases(&["inlayHints.refs"])
-    .aliases(&[
-        "inlay_hints.refs",
-        "inlay_hints.ref_targets",
-        "editor.inlay_hints.ref_targets",
-    ]),
+    .editor_aliases(&["inlayHints.refs"]),
     row(
         "editor.inlay_hints.properties",
         Kind::Bool,
@@ -397,8 +382,7 @@ pub static SETTINGS: &[Setting] = &[
     )
     .default("true")
     .editor("editor.inlayHints.properties")
-    .editor_aliases(&["inlayHints.properties"])
-    .aliases(&["inlay_hints.properties"]),
+    .editor_aliases(&["inlayHints.properties"]),
     section("test", "Contract tests, fuzzing and load runs."),
     row("test.base_url", Kind::Url, "Base URL requests are sent to.")
         .default("http://localhost:8080")
@@ -410,8 +394,7 @@ pub static SETTINGS: &[Setting] = &[
             "test fuzz --base-url",
             "test stateful --base-url",
             "test load --base-url",
-        ])
-        .aliases(&["run.base_url"]),
+        ]),
     row(
         "test.credentials",
         Kind::Path,
@@ -538,73 +521,70 @@ pub static MANIFEST: &[Setting] = &[
     ),
     section(
         "lint",
-        "Deprecated: lint policy belongs in `.suspect.yaml`. Still applied under \
-         that file for one release; `suspect config migrate` moves it.",
+        "Ignored: lint policy belongs in `.suspect.yaml`; `suspect config \
+         migrate` moves it.",
     ),
     row(
         "lint.min_severity",
         Kind::Severity,
-        "Deprecated; see `lint.min_severity` in `.suspect.yaml`.",
+        "Ignored; see `lint.min_severity` in `.suspect.yaml`.",
     ),
     row(
         "lint.rules",
         Kind::Map(&Kind::PolicySeverity),
-        "Deprecated; see `lint.rules` in `.suspect.yaml`.",
+        "Ignored; see `lint.rules` in `.suspect.yaml`.",
     ),
     row(
         "lint.design",
         Kind::PolicySeverity,
-        "Deprecated; see `lint.design` in `.suspect.yaml`.",
+        "Ignored; see `lint.design` in `.suspect.yaml`.",
     ),
     row(
         "lint.ruleset",
         Kind::Path,
-        "Deprecated; see `lint.ruleset` in `.suspect.yaml`.",
+        "Ignored; see `lint.ruleset` in `.suspect.yaml`.",
     ),
     row(
         "lint.recommended",
         Kind::Bool,
-        "Deprecated; see `lint.recommended` in `.suspect.yaml`.",
+        "Ignored; see `lint.recommended` in `.suspect.yaml`.",
     ),
     section(
         "validate",
-        "Deprecated: validation settings belong in `.suspect.yaml`.",
+        "Ignored: validation settings belong in `.suspect.yaml`.",
     ),
     row(
         "validate.strict_format",
         Kind::Bool,
-        "Deprecated; see `validate.strict_format` in `.suspect.yaml`.",
+        "Ignored; see `validate.strict_format` in `.suspect.yaml`.",
     ),
     section(
         "editor",
-        "Deprecated: editor settings belong in `.suspect.yaml` (`editor`, `ref`, \
+        "Ignored: editor settings belong in `.suspect.yaml` (`editor`, `ref`, \
          `format`).",
     ),
-    section(
-        "editor.inlay_hints",
-        "Deprecated; see `editor.inlay_hints`.",
-    ),
+    section("editor.inlay_hints", "Ignored; see `editor.inlay_hints`."),
     row(
         "editor.inlay_hints.refs",
         Kind::Bool,
-        "Deprecated; see `editor.inlay_hints.refs`.",
+        "Ignored; see `editor.inlay_hints.refs`.",
     ),
     row(
         "editor.inlay_hints.properties",
         Kind::Bool,
-        "Deprecated; see `editor.inlay_hints.properties`.",
+        "Ignored; see `editor.inlay_hints.properties`.",
     ),
-    section("editor.ref", "Deprecated; see `ref`."),
+    section("editor.ref", "Ignored; see `ref`."),
     row(
         "editor.ref.max_docs",
         Kind::Count,
-        "Deprecated; see `ref.max_docs`.",
+        "Ignored; see `ref.max_docs`.",
     ),
-    section("editor.formatting", "Deprecated; see `format`."),
+    section("editor.formatting", "Ignored; see `format`."),
     row(
         "editor.formatting.sort_keys",
         Kind::Bool,
-        "Deprecated; see `format.sort_keys`.",
+        "Ignored; see `format.sort_keys`.",
     ),
     section("docs", "Documentation target."),
     row("docs.style", Kind::Enum(DOC_STYLES), "Output style."),
@@ -623,7 +603,7 @@ pub static MANIFEST: &[Setting] = &[
         "release",
         Kind::Object,
         "SDK release: the version every target carries and how each is published \
-         (`release publish`, `release workflow`). Replaces a standalone `release.json`.",
+         (`release publish`, `release workflow`).",
     ),
     section(
         "tests",
@@ -823,28 +803,16 @@ pub struct Found {
     pub alias: Option<&'static str>,
 }
 
-/// The row for `path` in `table`, by canonical path or alias.
+/// The row for `path` in `table`.
 #[must_use]
 pub fn lookup_in(table: &'static [Setting], path: &str) -> Option<Found> {
-    if let Some(setting) = table.iter().find(|s| s.path == path) {
-        return Some(Found {
-            setting,
-            alias: None,
-        });
-    }
-    table.iter().find_map(|setting| {
-        setting
-            .aliases
-            .iter()
-            .find(|a| **a == path)
-            .map(|alias| Found {
-                setting,
-                alias: Some(alias),
-            })
+    table.iter().find(|s| s.path == path).map(|setting| Found {
+        setting,
+        alias: None,
     })
 }
 
-/// The [`SETTINGS`] row for `path`, by canonical path or alias.
+/// The [`SETTINGS`] row for `path`.
 #[must_use]
 pub fn lookup(path: &str) -> Option<Found> {
     lookup_in(SETTINGS, path)
@@ -853,7 +821,7 @@ pub fn lookup(path: &str) -> Option<Found> {
 /// The [`SETTINGS`] row a client settings key names: the `editor` column
 /// first (`lint.minSeverity`), then an older client key (`testBaseUrl`,
 /// reported as the alias), then the path with each camelCase segment
-/// converted to snake_case, then aliases.
+/// converted to snake_case.
 #[must_use]
 pub fn lookup_editor(key: &str) -> Option<Found> {
     if let Some(setting) = SETTINGS.iter().find(|s| s.editor == Some(key)) {
@@ -924,13 +892,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paths_and_aliases_are_unique() {
+    fn paths_are_unique() {
         let mut seen = std::collections::BTreeSet::new();
         for setting in SETTINGS {
             assert!(seen.insert(setting.path), "duplicate {}", setting.path);
-            for alias in setting.aliases {
-                assert!(seen.insert(alias), "duplicate alias {alias}");
-            }
         }
     }
 
@@ -961,10 +926,7 @@ mod tests {
             lookup_editor("lint.min_severity").unwrap().setting.path,
             "lint.min_severity"
         );
-        assert_eq!(
-            lookup_editor("inlayHints.refTargets").unwrap().setting.path,
-            "editor.inlay_hints.refs"
-        );
+        assert!(lookup_editor("inlayHints.refTargets").is_none());
         let old = lookup_editor("testBaseUrl").unwrap();
         assert_eq!(old.setting.path, "test.base_url");
         assert_eq!(old.alias, Some("testBaseUrl"));

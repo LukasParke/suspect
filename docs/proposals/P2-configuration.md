@@ -962,6 +962,33 @@ Each step leaves `main` green and shippable.
    path work in the same file) and `.suspect/credentials.json` (discovered
    by name in `suspect-test`; the Non-goals keep its format).
 
+9. **(N+1) Removals** (Compatibility; open question 5). Manifest
+   `lint`/`validate`/`editor` policy is ignored, `project check` fails on
+   it, the one-release file spellings go, and a standalone release
+   manifest is no longer read.
+   **Done** (in release N: no release had been tagged, so the windows
+   protected no published version). `resolve` no longer has a manifest
+   layer: `file::manifest_policy_notices` yields only the warnings, now
+   "`lint` in a project manifest is ignored; move it to .suspect.yaml and
+   add "config": ".suspect.yaml" to the manifest (`suspect config migrate`
+   does both)", from every command that resolves and on the key in the
+   editor (`config-manifest-policy`, still a warning there).
+   `project-manifest-policy` is an error, so `project check` exits 1. The
+   CI "earlier releases applied ..." note and `config --explain`'s
+   "deprecated location" label are gone with the layer; `config migrate`
+   stays as the fix. The table rows for the manifest sections remain so
+   the editor can hover them, documented as ignored. The `.suspect.yaml`
+   spellings `formatting.*`, `inlay_hints.*`, `editor.inlay_hints.ref_targets`,
+   `ref`/`refs` with `maxDocs`, `docs.out` and `run.base_url` are now
+   unknown keys (a "not a .suspect.yaml key" warning): the `aliases`
+   column, its JSON Schema copies and its reference column are deleted.
+   `release publish`/`release workflow` read only a `release` section
+   (default `suspect.project.json`; `--manifest` may name any JSON or YAML
+   document with one); a document with the fields at the top level fails
+   with "a standalone release manifest is not read; move its fields under
+   `release` in suspect.project.json". The editor-key aliases belong to
+   P4's two-release window and were removed with it (P4 step 10).
+
 Total: about 8.5 days (steps 1-7: 7 days). The short version's "1-2 days
 for resolve + deletion" covered steps 1, 3 and 4 only and did not count
 per-document LSP resolution or the CI behaviour note.

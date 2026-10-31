@@ -257,8 +257,8 @@ Checks: [`syntax`](#syntax), [`ref`](#ref), [`validate`](#validate), [`swagger`]
 
 | Code | Default | Class | Summary | How to fix | Aliases |
 |---|---|---|---|---|---|
-| `config-manifest-policy` | warning | document | Policy section in a project manifest (deprecated; move it to .suspect.yaml) |  |  |
-| `suspect.config` | warning | document | Unknown key, wrong type or deprecated spelling in a suspect configuration file |  |  |
+| `config-manifest-policy` | warning | document | Policy section in a project manifest (ignored; move it to .suspect.yaml) |  |  |
+| `suspect.config` | warning | document | Unknown key or wrong type in a suspect configuration file |  |  |
 
 ## rules
 

@@ -197,8 +197,8 @@ impl Backend {
     /// apart.
     ///
     /// Each document resolves through `suspect_config` from its own
-    /// directory, exactly as `suspect lint` does: the manifest's deprecated
-    /// policy, `.suspect.yaml`, `SUSPECT_*` variables, then the
+    /// directory, exactly as `suspect lint` does: `.suspect.yaml`,
+    /// `SUSPECT_*` variables, then the
     /// initialization options and the client section on top, so an
     /// explicit editor setting wins as a flag does on the command line.
     async fn reload_config(&self, client: Option<serde_json::Value>) -> bool {

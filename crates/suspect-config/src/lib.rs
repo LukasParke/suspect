@@ -12,13 +12,13 @@
 //! CLI and the language server alike:
 //!
 //! ```text
-//! default < manifest (deprecated) < .suspect.yaml < env < editor = flag
+//! default < .suspect.yaml < env < editor = flag
 //! ```
 //!
 //! A project manifest is deliberately *not* configuration: it describes
 //! what to build (entry document, overlays, targets, tests), not how the
-//! tools behave. Its old `lint`/`validate`/`editor` sections still apply
-//! for one release, with a deprecation warning.
+//! tools behave. Its old `lint`/`validate`/`editor` sections are ignored,
+//! with a warning naming each one (`suspect project check` fails on them).
 
 #![deny(missing_docs)]
 

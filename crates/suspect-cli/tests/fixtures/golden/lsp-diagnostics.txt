@@ -202,7 +202,7 @@ schemas.yaml:982:5-982:8 warning suspect-lint oas3-unused-component: Component s
 overlays/internal.overlay.yaml: (none)
 workflows/health.arazzo.yaml: (none)
 .suspect.yaml: (none)
-suspect.project.json:13:3-13:9 warning suspect config-manifest-policy: `lint` in a project manifest is deprecated and is ignored from the next release; move it to .suspect.yaml and add "config": ".suspect.yaml" to the manifest (`suspect config migrate` does both)
+suspect.project.json:13:3-13:9 warning suspect config-manifest-policy: `lint` in a project manifest is ignored; move it to .suspect.yaml and add "config": ".suspect.yaml" to the manifest (`suspect config migrate` does both)
 petstore.yaml:17:5-25:49 error suspect oas-path-param-not-declared: path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it
 petstore.yaml:18:7-25:49 error suspect http-operation-id: a non-empty operationId is required
 petstore.yaml:18:7-25:49 error suspect-lint path-params: Operation `get` of "/pets/{petId}" does not declare path parameter {petId}

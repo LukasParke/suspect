@@ -454,7 +454,7 @@ editor:
 ";
 
 /// The manifest's settings: the referenced file exists and resolves, and
-/// deprecated policy sections are reported (a warning in this release).
+/// ignored policy sections are errors.
 fn check_config(manifest: &Path, project: &ProjectManifest, findings: &mut Vec<Finding>) {
     let finding = |file: String, severity, code: &str, message: String, line| Finding {
         file,
@@ -477,21 +477,25 @@ fn check_config(manifest: &Path, project: &ProjectManifest, findings: &mut Vec<F
             ));
         }
     }
-    match suspect_config::resolve(&project.root) {
-        Ok(resolved) => {
-            for notice in resolved.warnings {
-                if let suspect_config::Origin::Manifest { line, .. } = notice.origin {
-                    findings.push(finding(
-                        path_label(manifest),
-                        Severity::Warning,
-                        "project-manifest-policy",
-                        notice.message,
-                        line,
-                    ));
-                }
+    // Policy sections in the manifest are ignored, so keeping one fails
+    // the check: the project would silently lose its settings.
+    let policy = |warnings: &[suspect_config::Notice], findings: &mut Vec<Finding>| {
+        for notice in warnings {
+            if let suspect_config::Origin::Manifest { line, .. } = notice.origin {
+                findings.push(finding(
+                    path_label(manifest),
+                    Severity::Error,
+                    "project-manifest-policy",
+                    notice.message.clone(),
+                    line,
+                ));
             }
         }
+    };
+    match suspect_config::resolve(&project.root) {
+        Ok(resolved) => policy(&resolved.warnings, findings),
         Err(error) => {
+            policy(&error.resolved.warnings, findings);
             for notice in error.problems {
                 findings.push(finding(
                     notice

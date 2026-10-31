@@ -33,7 +33,7 @@ pub struct ConfigArgs {
 /// `suspect config` subcommands.
 #[derive(Debug, clap::Subcommand)]
 pub enum ConfigCmd {
-    /// Move a manifest's deprecated `lint`, `validate` and `editor`
+    /// Move a manifest's ignored `lint`, `validate` and `editor`
     /// sections into the settings file and point the manifest at it.
     Migrate {
         /// The manifest to migrate.
@@ -112,9 +112,7 @@ pub fn explain_text(
         let _ = writeln!(out, "files    none (built-in defaults)");
     }
     for (i, file) in resolved.files.iter().enumerate() {
-        let label = if Some(file) == resolved.manifest.as_ref() {
-            " (manifest, deprecated policy)"
-        } else if Some(file) != resolved.config.as_ref() {
+        let label = if Some(file) != resolved.config.as_ref() {
             " (extends)"
         } else {
             ""
@@ -135,9 +133,6 @@ pub fn explain_text(
             && let Some((origin, raw)) = row.trace.get(row.trace.len() - 2)
         {
             notes.push(format!("over {origin} = {raw}"));
-        }
-        if matches!(row.origin, Origin::Manifest { .. }) {
-            notes.push("deprecated location".to_owned());
         }
         if let Some(var) = row.setting.env
             && !matches!(row.origin, Origin::Env { .. })

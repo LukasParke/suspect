@@ -1,7 +1,7 @@
 //! The precedence rule, stated once and enforced everywhere.
 //!
 //! ```text
-//! default < manifest policy (deprecated) < extends file < .suspect.yaml
+//! default < extends file < .suspect.yaml
 //!         < env < editor (initializationOptions < workspace/configuration) < flags
 //! ```
 //!
@@ -300,11 +300,13 @@ pub fn resolve_found(
     let mut files = Vec::new();
     let mut errors = Vec::new();
 
-    if let Some(manifest) = &found.manifest
-        && let Some(layer) = crate::file::manifest_layer(manifest)
-    {
-        files.push(manifest.clone());
-        layers.push(layer);
+    // A manifest's old policy sections are ignored; only their notices
+    // remain.
+    if let Some(manifest) = &found.manifest {
+        layers.push(Layer {
+            warnings: crate::file::manifest_policy_notices(manifest),
+            ..Layer::default()
+        });
     }
     if let Some(config) = &found.config {
         match crate::file::settings_layer(config) {

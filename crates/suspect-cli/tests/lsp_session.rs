@@ -2092,23 +2092,18 @@ fn pull_findings(editor: &Editor, uri: &str) -> Vec<(String, i64)> {
         .collect()
 }
 
+/// Replaces the workspace's settings file with `lint` policy only, before
+/// the editor starts.
+fn lint_policy(ws: &Workspace, lint: &str) {
+    std::fs::write(&ws.config, format!("lint:\n{lint}")).expect(".suspect.yaml");
+}
+
 #[test]
-fn manifest_design_off_drops_api_design_findings_not_document_ones() {
+fn design_off_drops_api_design_findings_not_document_ones() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ws = Workspace::build(dir.path());
-    // The settings file's floor would layer over the manifest; this test
-    // is about the manifest alone. Remove it BEFORE the editor starts —
-    // the editor loads configuration once at initialization.
-    std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
+    lint_policy(&ws, "  design: \"off\"\n");
     let editor = Editor::start(&ws.root, editor_capabilities());
-    std::fs::write(
-        ws.root.join("suspect.project.json"),
-        r#"{
-            "entry": "design.yaml",
-            "lint": {"design": "off"}
-        }"#,
-    )
-    .expect("manifest");
 
     let path = design_document(&ws.root);
     let text = std::fs::read_to_string(&path).expect("read");
@@ -2132,18 +2127,37 @@ fn manifest_design_off_drops_api_design_findings_not_document_ones() {
 }
 
 #[test]
-fn manifest_design_info_downgrades_instead_of_dropping() {
+fn manifest_policy_is_ignored_by_the_editor() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ws = Workspace::build(dir.path());
-    std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
+    lint_policy(&ws, "  min_severity: hint\n");
     std::fs::write(
         ws.root.join("suspect.project.json"),
         r#"{
             "entry": "design.yaml",
-            "lint": {"design": "info"}
+            "lint": {"design": "off"}
         }"#,
     )
     .expect("manifest");
+    let editor = Editor::start(&ws.root, editor_capabilities());
+
+    let path = design_document(&ws.root);
+    let text = std::fs::read_to_string(&path).expect("read");
+    editor.open(&path, &text);
+    let findings = pull_findings(&editor, &url_of(&path));
+    assert!(
+        findings
+            .iter()
+            .any(|(code, _)| code == "security-server-https-only"),
+        "the manifest's `lint.design: off` is ignored — got {findings:?}"
+    );
+}
+
+#[test]
+fn design_info_downgrades_instead_of_dropping() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    lint_policy(&ws, "  design: info\n");
     let editor = Editor::start(&ws.root, editor_capabilities());
 
     let path = design_document(&ws.root);
@@ -2163,18 +2177,10 @@ fn manifest_design_info_downgrades_instead_of_dropping() {
 }
 
 #[test]
-fn manifest_rule_off_drops_that_rule_only() {
+fn rule_off_drops_that_rule_only() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ws = Workspace::build(dir.path());
-    std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
-    std::fs::write(
-        ws.root.join("suspect.project.json"),
-        r#"{
-            "entry": "design.yaml",
-            "lint": {"rules": {"operation-operationId": "off"}}
-        }"#,
-    )
-    .expect("manifest");
+    lint_policy(&ws, "  rules:\n    operation-operationId: \"off\"\n");
     let editor = Editor::start(&ws.root, editor_capabilities());
 
     let path = design_document(&ws.root);

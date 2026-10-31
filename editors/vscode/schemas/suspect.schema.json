@@ -157,11 +157,6 @@
       "additionalProperties": false,
       "description": "Reference documentation generation.",
       "properties": {
-        "out": {
-          "deprecated": true,
-          "description": "Deprecated spelling of `docs.output`. Output root for generated documentation.",
-          "type": "string"
-        },
         "output": {
           "description": "Output root for generated documentation.",
           "type": "string"
@@ -197,12 +192,6 @@
                 "key": "suspect.editor.inlayHints.properties",
                 "scope": "resource"
               }
-            },
-            "ref_targets": {
-              "default": true,
-              "deprecated": true,
-              "description": "Deprecated spelling of `editor.inlay_hints.refs`. Show resolved `$ref` target inlay hints.",
-              "type": "boolean"
             },
             "refs": {
               "default": true,
@@ -259,36 +248,6 @@
       },
       "type": "object"
     },
-    "formatting": {
-      "additionalProperties": false,
-      "deprecated": true,
-      "description": "Deprecated spelling of `format`. Formatter output.",
-      "properties": {
-        "json": {
-          "default": false,
-          "description": "Emit JSON regardless of the input extension.",
-          "type": "boolean"
-        },
-        "sortKeys": {
-          "default": false,
-          "deprecated": true,
-          "description": "Deprecated spelling of `format.sort_keys`. Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`.",
-          "type": "boolean"
-        },
-        "sort_keys": {
-          "default": false,
-          "deprecated": true,
-          "description": "Deprecated spelling of `format.sort_keys`. Reorder object keys into the canonical OpenAPI order when formatting. Defaults to `true` when a `format` section exists, else `false`.",
-          "type": "boolean"
-        },
-        "yaml": {
-          "default": false,
-          "description": "Emit YAML regardless of the input extension.",
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "gateway": {
       "additionalProperties": false,
       "description": "The mock/proxy gateway.",
@@ -324,32 +283,6 @@
           "description": "Upstream base URL for proxy, validate and record modes.",
           "format": "uri",
           "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "inlay_hints": {
-      "additionalProperties": false,
-      "deprecated": true,
-      "description": "Deprecated spelling of `editor.inlay_hints`. Inlay hint toggles.",
-      "properties": {
-        "properties": {
-          "default": true,
-          "deprecated": true,
-          "description": "Deprecated spelling of `editor.inlay_hints.properties`. Show property type-annotation inlay hints.",
-          "type": "boolean"
-        },
-        "ref_targets": {
-          "default": true,
-          "deprecated": true,
-          "description": "Deprecated spelling of `editor.inlay_hints.refs`. Show resolved `$ref` target inlay hints.",
-          "type": "boolean"
-        },
-        "refs": {
-          "default": true,
-          "deprecated": true,
-          "description": "Deprecated spelling of `editor.inlay_hints.refs`. Show resolved `$ref` target inlay hints.",
-          "type": "boolean"
         }
       },
       "type": "object"
@@ -433,13 +366,6 @@
       "additionalProperties": false,
       "description": "Reference-workspace tuning.",
       "properties": {
-        "maxDocs": {
-          "default": 500,
-          "deprecated": true,
-          "description": "Deprecated spelling of `ref.max_docs`. Maximum documents loaded in one ref workspace.",
-          "minimum": 0,
-          "type": "integer"
-        },
         "max_docs": {
           "default": 500,
           "description": "Maximum documents loaded in one ref workspace.",
@@ -449,28 +375,6 @@
             "key": "suspect.ref.maxDocs",
             "scope": "resource"
           }
-        }
-      },
-      "type": "object"
-    },
-    "refs": {
-      "additionalProperties": false,
-      "deprecated": true,
-      "description": "Deprecated spelling of `ref`. Reference-workspace tuning.",
-      "properties": {
-        "maxDocs": {
-          "default": 500,
-          "deprecated": true,
-          "description": "Deprecated spelling of `ref.max_docs`. Maximum documents loaded in one ref workspace.",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "max_docs": {
-          "default": 500,
-          "deprecated": true,
-          "description": "Deprecated spelling of `ref.max_docs`. Maximum documents loaded in one ref workspace.",
-          "minimum": 0,
-          "type": "integer"
         }
       },
       "type": "object"

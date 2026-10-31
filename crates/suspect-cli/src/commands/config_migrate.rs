@@ -1,4 +1,4 @@
-//! `suspect config migrate [MANIFEST]`: move a manifest's deprecated
+//! `suspect config migrate [MANIFEST]`: move a manifest's ignored
 //! `lint`, `validate` and `editor` sections into `.suspect.yaml`.
 //!
 //! The settings file discovery finds from the manifest's directory gets
@@ -333,14 +333,12 @@ fn render(moved: &[Moved]) -> String {
     out
 }
 
-/// Whether `path` already has a value in the settings file, under its
-/// canonical spelling or an alias.
+/// Whether `path` already has a value in the settings file.
 fn present(root: &NodeRef<'_>, path: &[String]) -> bool {
     let key = path.join(".");
     let mut spellings = vec![key.clone()];
     if let Some(found) = suspect_config::schema::lookup(&key) {
         spellings.push(found.setting.path.to_owned());
-        spellings.extend(found.setting.aliases.iter().map(|a| (*a).to_owned()));
     }
     spellings.iter().any(|spelling| {
         let mut node = Some(*root);

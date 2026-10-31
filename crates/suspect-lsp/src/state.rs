@@ -371,8 +371,8 @@ pub struct State {
     /// the client cannot be asked). Kept so a configuration file changing
     /// on disk can be re-merged under it without another round trip.
     pub client_settings: Option<serde_json::Value>,
-    /// The effective configuration per document: `.suspect.yaml` (and the
-    /// deprecated manifest policy) discovered from each document's
+    /// The effective configuration per document: `.suspect.yaml`
+    /// discovered from each document's
     /// directory, the environment, then initialization options and the
     /// client section on top — the layers `suspect lint` reads, plus the
     /// editor's. Replaced whenever client settings or a config file change.

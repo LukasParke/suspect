@@ -1,6 +1,7 @@
 //! `suspect lint` and `suspect ci` apply the same settings to the same
 //! file: one discovery rule, one precedence, per-key merging of
-//! `lint.rules`, wherever they are run from.
+//! `lint.rules`, wherever they are run from. A manifest's old `lint`
+//! section is ignored by both.
 
 use std::path::Path;
 use std::process::Command;
@@ -15,8 +16,9 @@ fn write(dir: &Path, name: &str, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
-/// The Problem 1 reproduction: `lint.rules` in both files, a spec with no
-/// `contact` or `license`, and a sibling directory with its own floor.
+/// The Problem 1 reproduction: `lint.rules` in both files (the manifest's
+/// ignored), a spec with no `contact` or `license`, and a sibling directory
+/// with its own floor.
 fn fixture(root: &Path) {
     write(
         root,
@@ -108,14 +110,14 @@ fn severity_of<'a>(findings: &'a [(String, String)], code: &str) -> Option<&'a s
 }
 
 #[test]
-fn lint_and_ci_agree_on_policy_from_both_files() {
+fn lint_and_ci_agree_and_ignore_manifest_policy() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     fixture(root);
     let findings = lint(&root.join("proj"), "openapi.yaml");
-    // The settings file wins per key; the manifest fills the rest.
+    // The settings file applies; the manifest's `info-license: error` does not.
     assert_eq!(severity_of(&findings, "info-contact"), Some("error"));
-    assert_eq!(severity_of(&findings, "info-license"), Some("error"));
+    assert_ne!(severity_of(&findings, "info-license"), Some("error"));
 
     let errors = findings.iter().filter(|(_, s)| s == "error").count() as u64;
     let warnings = findings.len() as u64 - errors;
@@ -185,7 +187,7 @@ fn lint_recommended_false_runs_no_builtin_rules() {
 }
 
 #[test]
-fn ci_notes_values_the_new_order_changes() {
+fn ci_warns_that_manifest_policy_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     fixture(root);
@@ -195,11 +197,10 @@ fn ci_notes_values_the_new_order_changes() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("lint.rules.info-contact is now error (")
-            && stderr.contains("earlier releases applied off from the manifest"),
+        stderr.contains("suspect.project.json:5: `lint` in a project manifest is ignored"),
         "{stderr}"
     );
-    assert!(!stderr.contains("info-license is now"), "{stderr}");
+    assert!(!stderr.contains("earlier releases"), "{stderr}");
 }
 
 #[allow(dead_code)]

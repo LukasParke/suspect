@@ -43,13 +43,13 @@ const PASS_RULES: &[RuleInfo] = &[
         suspect_config::schema::problems::CODE,
         CheckId::Config,
         Severity::Warning,
-        "Unknown key, wrong type or deprecated spelling in a suspect configuration file",
+        "Unknown key or wrong type in a suspect configuration file",
     ),
     RuleInfo::new(
         suspect_config::schema::problems::MANIFEST_POLICY_CODE,
         CheckId::Config,
         Severity::Warning,
-        "Policy section in a project manifest (deprecated; move it to .suspect.yaml)",
+        "Policy section in a project manifest (ignored; move it to .suspect.yaml)",
     ),
     RuleInfo::new(
         crate::checks::extensions::CODE,

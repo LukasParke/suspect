@@ -14,7 +14,7 @@ use super::{Kind, MANIFEST, SETTINGS, Setting, TARGET_FIELDS, lookup_in};
 /// enumeration, deprecated spelling).
 pub const CODE: &str = "suspect.config";
 
-/// The code of a deprecated policy section in the manifest (option A).
+/// The code of an ignored policy section in the manifest (option A).
 pub const MANIFEST_POLICY_CODE: &str = "config-manifest-policy";
 
 /// Which configuration file a document is.
@@ -175,7 +175,7 @@ pub fn problems(kind: FileKind, low: &LowDoc) -> Vec<Problem> {
 }
 
 /// [`problems`] for a document recognised by [`kind_for`], plus a
-/// [`MANIFEST_POLICY_CODE`] problem on each deprecated policy section of a
+/// [`MANIFEST_POLICY_CODE`] problem on each ignored policy section of a
 /// manifest; other documents yield nothing.
 #[must_use]
 pub fn document_problems(low: &LowDoc) -> Vec<Problem> {
@@ -220,16 +220,6 @@ fn check_mapping(kind: FileKind, node: &NodeRef<'_>, scope: &str, out: &mut Vec<
             });
             continue;
         };
-        if let Some(found) = lookup_in(kind.table(), &path)
-            && let Some(alias) = found.alias
-        {
-            out.push(Problem {
-                code: CODE,
-                range: entry.key_node.byte_range(),
-                message: format!("`{alias}` is deprecated; use `{}`.", row.path),
-                suggestion: None,
-            });
-        }
         let Some(value) = entry.value else { continue };
         if let Some(problem) = check_value(&path, row, &value, entry.key_node.byte_range()) {
             out.push(problem);
