@@ -1149,6 +1149,27 @@ releasable on its own.
    readiness code and by admission (`http-operation-id`,
    `DUPLICATE_OPERATION_ID`); these differ in position and class, so they
    are v2 alias candidates rather than v1 aliases.
+   Bench gate (measured after this step, `BENCHMARKS.md`, "Editor check
+   pass on a 63k-line spec"): without codegen the editor pass is within
+   noise of the pre-step-3 battery (cold open 2278 ms vs 2272 ms,
+   edit-churn diagnostics 1869 ms vs 1863 ms), so the step-3 and step-7
+   gates hold; the earlier "no codegen" measurement that showed a
+   regression had removed `codegen:` from `.suspect.yaml` but left the
+   manifest's codegen targets, so admission still ran. Admission was the
+   regression: about 600 ms per pass on that spec, run after every other
+   check (cold open 2966 ms vs 2302 ms, edit-churn 2831 ms vs 1865 ms).
+   `check_document` now runs validation and admission on scoped threads
+   beside lint for an OpenAPI 3.x document in a workspace, with findings
+   in the same order, so the pass costs as long as its longest check:
+   cold open 2218 ms (no codegen) and 2262 ms (codegen), edit-churn
+   1458 ms both, mixed-load p95 1949/1928 ms, open-burst worst
+   4151/4404 ms, against 2272/2302, 1863/1865, 2166/2156 and 5269/5301
+   before step 3. Admission stays on the first-diagnostics path (no
+   follow-up publish, no pull-only mode), so what the editor shows did
+   not change; the other profiled suspects (policy build < 1 ms,
+   registry lookup, suppression scan, dedupe and floor ~3 ms together,
+   markdown ~28 ms, extension schemas ~36 ms, LSP mapping < 0.2 ms) were
+   not worth moving.
 
 Total: about 9 days. The short version estimated 4-5 days. The difference is
 the LSP-only checks that have to move (step 3), the parity harness (step 5)
@@ -1220,7 +1241,8 @@ and TS rules in the editor (step 6).
   one walk over comment nodes. The LSP bench (`suspect-cli/tests/lsp_bench.rs`)
   on the 63k-line spec must stay within 5% of today. The bench gates step 3
   and step 7. Compiling the ruleset once per policy removes per-run work, so
-  the net change should be small.
+  the net change should be small. Measured: it was (see step 9's notes);
+  the cost that did appear was admission, now run beside lint.
 - **New findings in the CLI** (Arazzo, markdown, extensions) may fail
   existing CI runs on Arazzo documents. These are errors the editor already
   shows. Mitigation: the baseline lands one step later; projects can write

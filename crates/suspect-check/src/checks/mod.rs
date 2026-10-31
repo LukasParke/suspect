@@ -35,10 +35,63 @@ pub struct Context<'a> {
 /// still gets every check, as the editor has always run them. Only
 /// findings of the checks in `policy.checks` are returned (validation
 /// runs for `ref` alone, but its non-`$ref` findings are dropped).
+///
+/// Validation, lint and admission are independent and each costs a large
+/// share of the pass on a big OpenAPI document, so they run side by side
+/// on their own threads; findings keep the check order below either way.
 #[must_use]
 pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
     let policy = cx.policy;
     let on = |check: CheckId| policy.checks.contains(check);
+    let validated = || match cx.workspace {
+        Some(ws) if on(CheckId::Validate) || on(CheckId::Ref) => {
+            validate(ws, doc, policy.strict_format)
+        }
+        _ => Vec::new(),
+    };
+    let linted = || {
+        if on(CheckId::Lint) && policy.lint_enabled() {
+            lint(doc, &policy.linter)
+        } else {
+            Vec::new()
+        }
+    };
+    let admitted = || {
+        #[cfg(feature = "sdk")]
+        if policy.sdk
+            && on(CheckId::Admission)
+            && let Some(ws) = cx.workspace
+        {
+            return admission(ws, doc);
+        }
+        Vec::new()
+    };
+    // Validation and admission only do work on an OpenAPI 3.x document in
+    // a workspace; elsewhere the threads would cost more than they save.
+    let parallel = cx.workspace.is_some()
+        && matches!(
+            doc.sniff_family(),
+            SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32
+        );
+    let (validated, linted, admitted) = if parallel {
+        // Plain threads, not `rayon::join`: a pool worker waiting on a
+        // join steals unrelated jobs (another document's pass), so one
+        // request's latency would include another's lint.
+        std::thread::scope(|scope| {
+            let validated = scope.spawn(validated);
+            let admitted = scope.spawn(admitted);
+            let linted = linted();
+            let join = |handle: std::thread::ScopedJoinHandle<'_, Vec<Finding>>| {
+                handle
+                    .join()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+            };
+            (join(validated), linted, join(admitted))
+        })
+    } else {
+        (validated(), linted(), admitted())
+    };
+
     let mut out = Vec::new();
     if on(CheckId::Syntax) {
         out.extend(syntax(doc));
@@ -46,14 +99,8 @@ pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
     if on(CheckId::Config) {
         out.extend(config(doc));
     }
-    if let Some(ws) = cx.workspace
-        && (on(CheckId::Validate) || on(CheckId::Ref))
-    {
-        out.extend(validate(ws, doc, policy.strict_format));
-    }
-    if on(CheckId::Lint) && policy.lint_enabled() {
-        out.extend(lint(doc, &policy.linter));
-    }
+    out.extend(validated);
+    out.extend(linted);
     if on(CheckId::Swagger) {
         out.extend(swagger(doc));
     }
@@ -73,13 +120,7 @@ pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
     if on(CheckId::LoadProfile) {
         out.extend(load_profile(cx.workspace, doc));
     }
-    #[cfg(feature = "sdk")]
-    if policy.sdk
-        && on(CheckId::Admission)
-        && let Some(ws) = cx.workspace
-    {
-        out.extend(admission(ws, doc));
-    }
+    out.extend(admitted);
     // Validate reports `$ref` codes too; `--only` keeps the checks it names.
     out.retain(|f| on(f.check));
     out
