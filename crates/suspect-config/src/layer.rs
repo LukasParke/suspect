@@ -4,7 +4,7 @@
 //!
 //! Values are checked against the setting table as they enter a layer, so
 //! a bad value is reported once with its origin and dropped, and the merge
-//! in [`crate::resolve`] is plain insertion. Map settings are flattened to
+//! in [`crate::resolve()`] is plain insertion. Map settings are flattened to
 //! `lint.rules.<id>`, so every merge is per key by construction.
 
 use std::collections::BTreeMap;

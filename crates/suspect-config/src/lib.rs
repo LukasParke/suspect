@@ -8,7 +8,7 @@
 //!
 //! This crate is the single schema. One table ([`schema::SETTINGS`])
 //! defines every key, its environment variable, editor setting and flags;
-//! [`resolve`] / [`resolve_with`] apply one precedence rule, used by the
+//! [`resolve()`] / [`resolve_with`] apply one precedence rule, used by the
 //! CLI and the language server alike:
 //!
 //! ```text
