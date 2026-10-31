@@ -125,7 +125,7 @@ async function run(environment = process.env, argv = []) {
 		} finally { await writeJson(path.join(attempt, 'commands.json'), report.commands); await saveReport(); }
 	}
 	report.phase = 'inventory';
-	const inventory = validateInventory(JSON.parse(await command('cli-inventory', binary, ['codegen-profiles', '--format', 'json'])), inputs.cli.expectedProfiles);
+	const inventory = validateInventory(JSON.parse(await command('cli-inventory', binary, ['gen', 'profiles', '--format', 'json'])), inputs.cli.expectedProfiles);
 	report.inventory = inventory;
 	report.claims.backendInventoryExact = true;
 	await writeJson(path.join(attempt, 'cli-inventory.json'), inventory);
@@ -210,7 +210,7 @@ async function run(environment = process.env, argv = []) {
 	let baseline = {};
 	if (invocation.mode === 'run') {
 		report.phase = 'baseline';
-		const written = JSON.parse(await command('owned-sdk-baseline', binary, ['codegen-session', '--config', config, '--out', out, '--format', 'json'], workspace));
+		const written = JSON.parse(await command('owned-sdk-baseline', binary, ['gen', 'session', '--config', config, '--output', out, '--format', 'ndjson'], workspace));
 		assert.equal(written.status, 'written');
 		baseline = await tree(out);
 		assert.ok(baseline['typescript/models.ts']);
@@ -274,11 +274,11 @@ async function run(environment = process.env, argv = []) {
 	if (invocation.mode === 'run' && invocation.scenario === 'lifecycle' && observed.status === 'passed') {
 		const pid = observed.shutdownWatchPid;
 		assert.ok(Number.isSafeInteger(pid) && pid > 0, 'A final observed watch PID is required');
-		assert.ok(observed.processObservations?.some((entry) => entry.sessions?.some((session) => session.pid === pid && session.command.startsWith(`${binary} codegen-session `) && session.command.includes(`--config ${config}`))), 'Shutdown PID must identify the observed canonical watch');
+		assert.ok(observed.processObservations?.some((entry) => entry.sessions?.some((session) => session.pid === pid && session.command.startsWith(`${binary} gen session `) && session.command.includes(`--config ${config}`))), 'Shutdown PID must identify the observed canonical watch');
 		const alive = async () => {
 			try {
 				const { stdout } = await execFile('/bin/ps', ['-p', String(pid), '-o', 'command=']);
-				return stdout.trim().startsWith(`${binary} codegen-session `) && stdout.includes(`--config ${config}`);
+				return stdout.trim().startsWith(`${binary} gen session `) && stdout.includes(`--config ${config}`);
 			} catch (error) { if (error.code === 1) return false; throw error; }
 		};
 		const deadline = Date.now() + 5000;

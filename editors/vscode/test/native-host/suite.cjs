@@ -66,7 +66,7 @@ exports.run = async function run() {
 	}
 	async function cliProcesses(label) {
 		const all = await children();
-		const sessions = all.filter((child) => child.command.startsWith(`${setup.binary} codegen-session `));
+		const sessions = all.filter((child) => child.command.startsWith(`${setup.binary} gen session `));
 		report.processObservations.push({ label, at: new Date().toISOString(), sessions, cliChildren: all.filter((child) => child.command.startsWith(setup.binary)) });
 		return sessions;
 	}
@@ -75,7 +75,7 @@ exports.run = async function run() {
 		assert.equal(sessions.length, 1, `Expected one canonical session during ${label}: ${JSON.stringify(sessions)}`);
 		const child = sessions[0];
 		assert.ok(child.command.includes(`--config ${setup.config}`));
-		assert.ok(child.command.includes(`--out ${setup.out}`));
+		assert.ok(child.command.includes(`--output ${setup.out}`));
 		assert.ok(child.command.includes('--watch') && child.command.includes('--preview') && child.command.includes('--format json'));
 		if (expectedPid !== undefined) assert.equal(child.pid, expectedPid, 'saved edits must reuse the same real CLI watch process');
 		const lsp = (await children()).filter((process) => process.command === `${setup.binary} lsp`);

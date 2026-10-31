@@ -1,13 +1,13 @@
 # SDK editor preview and watch
 
-The VS Code extension uses the canonical `suspect codegen-session` command for
+The VS Code extension uses the canonical `suspect gen session` command for
 SDK previews, saved-file watching, and disk drift checks. These actions use the
 same config and ownership checks as the CLI.
 
 ## Generate a single package
 
 **Suspect: Generate SDK, Docs or Custom Templates** first runs
-`suspect codegen-profiles --format json` against the selected CLI. Its validated
+`suspect gen profiles --format json` against the selected CLI. Its validated
 `suspect.sdk.profiles.v1` inventory supplies the SDK choices and descriptions;
 Markdown documentation and custom template manifests are also available. The
 editor recognizes these twelve profiles and displays those compiled into that
@@ -34,7 +34,7 @@ build. The action uses the same executable for discovery and generation, even
 if the binary setting changes while a picker is open.
 
 The picker prompts for package identity, exact package SemVer, and operation IDs
-as a JSON string array. It invokes `suspect codegen SPEC --profile PROFILE` with
+as a JSON string array. It invokes `suspect gen sdk SPEC --profile PROFILE` with
 `--package-name`, `--package-version`, repeated exact `--operation-id` arguments,
 and JSON diagnostics. Output is under `gen-out/PROFILE/LANGUAGE/` in the selected
 spec's workspace folder, and the action opens that package's `README.md`.
@@ -45,11 +45,11 @@ Every `suspect.codegen.*` setting is that `.suspect.yaml` key, and the old
 `suspect.sdk.*` spellings still apply with a deprecation warning (the extension
 offers to move them).
 
-The **Markdown documentation** choice invokes `suspect gen SPEC --preset docs-md`.
+The **Markdown documentation** choice invokes `suspect gen template SPEC --preset docs-md`.
 The **Custom template manifest** choice asks for a TOML manifest and invokes
-`suspect gen SPEC --manifest FILE`. Both write under `gen-out/CHOICE/` in the
+`suspect gen template SPEC --manifest FILE`. Both write under `gen-out/CHOICE/` in the
 selected spec's workspace and open a produced document. SDK choices use the
-required `codegen --profile` interface with explicit package identity.
+required `gen sdk --profile` interface with explicit package identity.
 
 `suspect.codegen.importNames` (`codegen.import_names`) supplies per-profile native import/module/namespace
 overrides through the single-package CLI's `--import-name` option. For example:
@@ -88,7 +88,7 @@ interpretation. To explicitly interpret legacy OAS 3.1+ `type: string, format:
 binary` markers as bytes in binary contexts, set it to
 `["legacy-binary-string-v1"]`. Each configured value becomes its own
 `--compatibility-profile VALUE` argument alongside any `--import-name` and exact
-operation selectors. It accepts the same names as `suspect codegen
+operation selectors. It accepts the same names as `suspect gen sdk
 --compatibility-profile`.
 
 The setting uses a closed enum validated by the editor. Unknown or malformed
@@ -188,21 +188,21 @@ Optional workspace settings:
 
 | Command palette action | Canonical CLI options | Behavior |
 | --- | --- | --- |
-| **Suspect: Preview SDK Changes** | `--preview --format json` | One read-only plan; choose an artifact to compare with its current disk bytes. |
-| **Suspect: Check SDK Drift** | `--check --format json` | One read-only ownership/drift check, with status and diagnostics in **Suspect SDK** output. |
-| **Suspect: Watch SDK Preview** | `--watch --preview --format json` | One persistent session watching saved config/source/reference inputs; opens the first artifact picker and updates the selected diff. |
+| **Suspect: Preview SDK Changes** | `--preview --format ndjson` | One read-only plan; choose an artifact to compare with its current disk bytes. |
+| **Suspect: Check SDK Drift** | `--check --format ndjson` | One read-only ownership/drift check, with status and diagnostics in **Suspect SDK** output. |
+| **Suspect: Watch SDK Preview** | `--watch --preview --format ndjson` | One persistent session watching saved config/source/reference inputs; opens the first artifact picker and updates the selected diff. |
 | **Suspect: Show Latest SDK Preview** | No subprocess | Select another artifact from the latest complete plan, or show the latest diagnostics. Also available by clicking the SDK status item. |
 | **Suspect: Stop SDK Watch** | Terminates the active session | Stops watch or an in-flight preview/check and invalidates its virtual documents. |
 
-All three CLI actions also pass `--config FILE --out DIR`. `--preview` implies
+All three CLI actions also pass `--config FILE --output DIR`. `--preview` implies
 read-only checking in the CLI. To write the plan explicitly outside the preview,
 use the same config and root without the read-only flags:
 
 ```sh
-suspect codegen-session --config configs/suspect-sdk.json --out generated --format json
+suspect gen session --config configs/suspect-sdk.json --output generated --format ndjson
 ```
 
-The CLI's relative `--out` follows the shell's working directory; the editor
+The CLI's relative `--output` follows the shell's working directory; the editor
 resolves its output prompt against the config directory before spawning it.
 
 ### Reading a preview
@@ -279,7 +279,7 @@ When supplied, `compatibilityProfiles` must be an array of known versioned
 choices, including the empty array for ordinary semantics. The editor retains
 and displays it. Session diagnostics use nested
 `source: {document, pointer}` and byte `range: {start, end}`; single-package
-`codegen` diagnostics also include `file`, `pointer`, `line`, and `col`. These
+`gen sdk` diagnostics also include `file`, `pointer`, `line`, and `col`. These
 canonical fields are retained without translating their locations. A
 single-package report for an unnamed operation retains `operationId: null`
 alongside its source method/path.

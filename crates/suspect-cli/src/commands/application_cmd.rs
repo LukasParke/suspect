@@ -137,12 +137,7 @@ pub struct ApplicationArgs {
     pub target_config: PathBuf,
     /// Output root owning the application and its embedded generated SDK
     /// [default: cli-out for codegen-cli, mcp-out for codegen-mcp].
-    #[arg(
-        short = 'o',
-        long = "output",
-        visible_alias = "out",
-        value_name = "DIR"
-    )]
+    #[arg(short = 'o', long = "output", alias = "out", value_name = "DIR")]
     pub out: Option<PathBuf>,
     /// Read-only ownership/drift check.
     #[arg(long)]

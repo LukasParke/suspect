@@ -32,7 +32,7 @@ test('one watch process receives byte-split/coalesced NDJSON, exact argv and the
 	assert.equal(received[0].artifacts[0].content, first.artifacts[0].content);
 	assert.equal(calls.length, 1);
 	assert.deepEqual(calls[0], ['/tools/CLI path/suspect', [
-		'codegen-session', '--config', identity.configPath, '--out', identity.outDirectory, '--watch', '--preview', '--format', 'json',
+		'gen', 'session', '--config', identity.configPath, '--output', identity.outDirectory, '--watch', '--preview', '--format', 'ndjson',
 	], { cwd: identity.configDirectory, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 	assert.deepEqual(child.signals, []);
 });
@@ -212,8 +212,8 @@ test('generation argv requires explicit closed compatibility profiles and preser
 	assert.deepEqual(generationArgs('/source dir/api.json', '/output dir', {
 		...generation, compatibilityProfiles: ['legacy-binary-string-v1', 'legacy-binary-string-v1'],
 	}), [
-		'codegen', '/source dir/api.json', '--profile', 'python-http', '--package-name', 'fixture-sdk', '--package-version', '1.2.3',
-		'--out', '/output dir', '--format', 'json', '--import-name', 'custom_sdk',
+		'gen', 'sdk', '/source dir/api.json', '--profile', 'python-http', '--package-name', 'fixture-sdk', '--package-version', '1.2.3',
+		'--output', '/output dir', '--format', 'json', '--import-name', 'custom_sdk',
 		'--compatibility-profile', 'legacy-binary-string-v1', '--compatibility-profile', 'legacy-binary-string-v1',
 		'--operation-id', ' --exact ID; $(prose)',
 	]);

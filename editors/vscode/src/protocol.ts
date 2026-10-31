@@ -57,3 +57,34 @@ export function serverProtocol(client: LanguageClient | undefined): ServerProtoc
 export function requestVersion(client: LanguageClient | undefined, method: string): number | undefined {
 	return serverProtocol(client)?.requests?.[method];
 }
+
+/**
+ * The oldest CLI that has the grouped command tree this extension spawns
+ * (`gen sdk`, `gen session`, `traffic gateway`, `test run`, ...).
+ */
+export const MIN_CLI_VERSION = '0.1.0';
+
+function parseVersion(version: string): number[] | undefined {
+	const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
+	return match ? match.slice(1, 4).map(Number) : undefined;
+}
+
+/**
+ * `true` when `version` parses and is older than `minimum`. A version that
+ * does not parse is not reported: the check exists to name a known-old build.
+ */
+export function olderThan(version: string | undefined, minimum: string = MIN_CLI_VERSION): boolean {
+	const have = version === undefined ? undefined : parseVersion(version);
+	const need = parseVersion(minimum);
+	if (!have || !need) return false;
+	for (let i = 0; i < 3; i++) {
+		if (have[i] !== need[i]) return have[i] < need[i];
+	}
+	return false;
+}
+
+/** The server's `serverInfo.version` when it is older than {@link MIN_CLI_VERSION}. */
+export function tooOldServer(client: LanguageClient | undefined): string | undefined {
+	const version = client?.initializeResult?.serverInfo?.version;
+	return olderThan(version) ? version : undefined;
+}

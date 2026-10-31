@@ -12,6 +12,9 @@ fn main() -> ExitCode {
     if let Some(note) = note {
         eprintln!("{note}");
     }
+    for note in suspect_cli::legacy::flag_notes(&argv) {
+        eprintln!("{note}");
+    }
     // clap exits 2 on usage errors and 0 on --help/--version.
     let cli = suspect_cli::Cli::parse_from(argv);
     suspect_cli::interrupt::install();

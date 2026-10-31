@@ -821,6 +821,20 @@ step that changes the tree.
 6. **(N+1) Editor switch.** VS Code moves to the new names and gets a
    minimum binary version check. `--out` becomes hidden, and flag-alias notes
    are turned on. Estimate: 0.5 day.
+   **Done** (in release N, with step 7: no release had been tagged, so
+   the alias window protected no published version). VS Code spawns `gen
+   sdk`, `gen profiles`, `gen session` (`--format ndjson`), `gen
+   template`, `traffic gateway` and `test run --format ndjson`, all with
+   `--output`; the stale-contract "Run Now" types `suspect gen contract
+   SPEC --output DIR` (it used to type `suspect contract` with no input).
+   The minimum binary check reads the server's `serverInfo.version`
+   after the language client starts: older than `MIN_CLI_VERSION`
+   (`0.1.0`, `src/protocol.ts`) shows a warning with "Locate binary…";
+   a version that does not parse is not reported. The host smoke runs
+   `--help` for every spawned path and asserts an empty stderr. Zed
+   spawns only `lsp`, so it is unchanged. `--out` became a hidden alias,
+   and `legacy::flag_notes` printed one note per old flag spelling or
+   stream `--format json`; step 7 removed both.
 7. **(N+2) Removal.** Delete `legacy.rs` rows, hidden aliases and
    `overlay_dry_run.rs`. Migrate the 22 test files to the new names.
    Estimate: 0.5 day.

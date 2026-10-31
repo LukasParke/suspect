@@ -428,7 +428,7 @@ Options:
       --defaults <FILE>
           Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding `compatibility_profiles`, `credential_env` and `sdk_defaults` (the same schema `codegen-session` accepts). Flag-declared compatibility profiles are added on top
   -o, --output <DIR>
-          Output root for generated artifacts. Defaults to `.suspect.yaml`'s `codegen.out`, then `codegen-out` [alias: --out]
+          Output root for generated artifacts. Defaults to `.suspect.yaml`'s `codegen.out`, then `codegen-out`
       --check
           Check ownership and drift without writing
       --format <FORMAT>
@@ -449,7 +449,7 @@ Arguments:
 
 Options:
       --backend <BACKEND>  Target framework: `rust-axum` or `ts-express` [possible values: rust-axum, ts-express]
-  -o, --output <DIR>       Output directory [alias: --out]
+  -o, --output <DIR>       Output directory
   -h, --help               Print help (see more with '--help')
 ```
 
@@ -464,7 +464,7 @@ Arguments:
   <INPUT>  Entry OpenAPI document
 
 Options:
-  -o, --output <DIR>    Output directory for the contract package [default: contract] [alias: --out]
+  -o, --output <DIR>    Output directory for the contract package [default: contract]
       --to <TO>         Description serialization [default: yaml] [possible values: json, yaml]
       --overlay <FILE>  Overlay documents applied in order before emission (repeatable)
       --check           Verify the existing package matches the current source instead of writing; exit 1 when it is stale or missing
@@ -493,7 +493,7 @@ Options:
       --target-config <TARGET_CONFIG>
           Provider/toolchain identity and pinned generated-Go-SDK dependency (JSON, or YAML by extension)
   -o, --output <DIR>
-          Output root containing go/ and the dependent terraform/ artifacts [default: terraform-out] [alias: --out]
+          Output root containing go/ and the dependent terraform/ artifacts [default: terraform-out]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -524,7 +524,7 @@ Options:
       --target-config <TARGET_CONFIG>
           Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
   -o, --output <DIR>
-          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp] [alias: --out]
+          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -555,7 +555,7 @@ Options:
       --target-config <TARGET_CONFIG>
           Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
   -o, --output <DIR>
-          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp] [alias: --out]
+          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -577,7 +577,7 @@ Arguments:
 Options:
       --preset <PRESET>      Shipped preset: `docs-md`, a starting point for custom templates (reference docs: `suspect gen docs`) [possible values: docs-md]
       --manifest <MANIFEST>  Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json` (templates resolved relative to it)
-  -o, --output <DIR>         Output root directory [default: gen-out] [alias: --out]
+  -o, --output <DIR>         Output root directory [default: gen-out]
       --check                Exit 1 when the result is not clean
       --diff                 Also print unified diffs of drifted files; implies `--check`
       --owner <OWNER>        Stable logical owner when sharing an output root across generation streams
@@ -594,7 +594,7 @@ Usage: suspect gen session [OPTIONS] --config <CONFIG>
 
 Options:
       --config <CONFIG>            JSON or YAML (`.yaml`/`.yml`) configuration file; relative source paths resolve from its directory
-  -o, --output <DIR>               Owned output root [default: sdk-out] [alias: --out]
+  -o, --output <DIR>               Owned output root [default: sdk-out]
       --watch                      Preserve a process/session across input and configuration changes
       --check                      Check disk drift and conflicts without writing
       --preview                    Return complete generated contents as readonly preview artifacts

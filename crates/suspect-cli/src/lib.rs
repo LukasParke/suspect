@@ -299,7 +299,7 @@ pub enum GenCmd {
         #[arg(
             short = 'o',
             long = "output",
-            visible_alias = "out",
+            alias = "out",
             value_name = "DIR",
             default_value = "gen-out"
         )]

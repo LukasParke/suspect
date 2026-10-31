@@ -85,5 +85,15 @@ assert.ok(observed.after.length > 0 && observed.after.every((severity) => severi
 assert.match(observed.settingsFile ?? '', /\.suspect\.yaml$/, 'the explain report names the settings file');
 assert.match(observed.floorRow ?? '', /\| error \| editor setting \| .*\.suspect\.yaml:2 = hint; editor suspect\.lint\.minSeverity = error \|/,
 	'the explain report shows the editor layer over .suspect.yaml');
+// Every command path the extension spawns exists in this binary and
+// prints no deprecation note.
+for (const words of [['lsp'], ['gen', 'sdk'], ['gen', 'session'], ['gen', 'profiles'], ['gen', 'template'], ['traffic', 'gateway'], ['test', 'run'], ['gen', 'contract']]) {
+	const help = cp.spawnSync(binary, [...words, '--help'], { encoding: 'utf8' });
+	assert.equal(help.status, 0, `suspect ${words.join(' ')} --help exited ${help.status}: ${help.stderr}`);
+	assert.equal(help.stderr, '', `suspect ${words.join(' ')} --help wrote to stderr`);
+}
+const profiles = cp.spawnSync(binary, ['gen', 'profiles', '--format', 'json'], { encoding: 'utf8' });
+assert.equal(JSON.parse(profiles.stdout).format, 'suspect.sdk.profiles.v1');
+assert.equal(profiles.stderr, '');
 fs.rmSync(root, { recursive: true, force: true });
 console.log('host smoke: ok');

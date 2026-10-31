@@ -21,12 +21,7 @@ pub struct StubsArgs {
     #[arg(long, value_enum)]
     pub backend: StubBackend,
     /// Output directory.
-    #[arg(
-        short = 'o',
-        long = "output",
-        visible_alias = "out",
-        value_name = "DIR"
-    )]
+    #[arg(short = 'o', long = "output", alias = "out", value_name = "DIR")]
     pub out: PathBuf,
 }
 

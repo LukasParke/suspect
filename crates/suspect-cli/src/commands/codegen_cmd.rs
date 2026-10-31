@@ -55,12 +55,7 @@ pub struct CodegenArgs {
     pub defaults: Option<PathBuf>,
     /// Output root for generated artifacts. Defaults to `.suspect.yaml`'s
     /// `codegen.out`, then `codegen-out`.
-    #[arg(
-        short = 'o',
-        long = "output",
-        visible_alias = "out",
-        value_name = "DIR"
-    )]
+    #[arg(short = 'o', long = "output", alias = "out", value_name = "DIR")]
     pub out: Option<PathBuf>,
     /// Check ownership and drift without writing.
     #[arg(long)]

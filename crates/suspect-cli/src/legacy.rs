@@ -165,6 +165,121 @@ pub fn rewrite(mut argv: Vec<OsString>) -> (Vec<OsString>, Option<String>) {
     (argv, None)
 }
 
+/// One old flag spelling: the commands it applies to (`*` for any), the
+/// old flag, and the replacement to name.
+const OLD_FLAGS: &[(&[&str], &str, &str)] = &[
+    (
+        &[
+            "gen template",
+            "gen sdk",
+            "gen stubs",
+            "gen contract",
+            "gen terraform",
+            "gen cli",
+            "gen mcp",
+            "gen session",
+        ],
+        "--out",
+        "--output",
+    ),
+    (&["test run", "test load"], "--report", "--format"),
+    (&["test run", "test load"], "--inputs", "--inputs-file"),
+    (
+        &[
+            "test run",
+            "test stateful",
+            "test fuzz",
+            "test load",
+            "test replay",
+        ],
+        "--json",
+        "--report-file",
+    ),
+    (&["fmt", "gen contract"], "--json", "--to json"),
+    (&["fmt"], "--yaml", "--to yaml"),
+    (&["bundle", "upgrade"], "--format", "--to"),
+    (&["traffic drift"], "--exit-on-gap", "--check"),
+    (
+        &["why"],
+        "--spec",
+        "the first positional (`why SPEC CONSTRAINT`)",
+    ),
+    (
+        &["diff sdk"],
+        "--before",
+        "the first positional (`diff sdk OLD NEW`)",
+    ),
+    (
+        &["diff sdk"],
+        "--after",
+        "the second positional (`diff sdk OLD NEW`)",
+    ),
+    (&["test run"], "--offline", "`--cassette` alone"),
+];
+
+/// One stderr note per old flag spelling (or old value) in an argv that
+/// already uses the new command tree. Arguments after `--` belong to
+/// another program and are not read.
+#[must_use]
+pub fn flag_notes(argv: &[OsString]) -> Vec<String> {
+    let words: Vec<String> = argv
+        .iter()
+        .skip(1)
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let Some(first) = words.first() else {
+        return Vec::new();
+    };
+    let path = match words.get(1) {
+        Some(second) if is_subcommand(first, second) => format!("{first} {second}"),
+        _ => first.clone(),
+    };
+    let mut notes = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    let args: Vec<&str> = words
+        .iter()
+        .map(String::as_str)
+        .take_while(|a| *a != "--")
+        .collect();
+    for (i, arg) in args.iter().enumerate() {
+        let (flag, value) = match arg.split_once('=') {
+            Some((flag, value)) => (flag, Some(value)),
+            None => (*arg, args.get(i + 1).copied()),
+        };
+        if let Some((_, old, new)) = OLD_FLAGS
+            .iter()
+            .find(|(paths, old, _)| *old == flag && paths.contains(&path.as_str()))
+            && seen.insert(*old)
+        {
+            notes.push(format!(
+                "warning: `{old}` on `suspect {path}` is deprecated; use {new} (removed in {})",
+                removed_in()
+            ));
+        }
+        let stream = matches!(
+            path.as_str(),
+            "test run" | "test load" | "gen bridge" | "gen session"
+        );
+        if stream && flag == "--format" && value == Some("json") && seen.insert("--format json") {
+            notes.push(format!(
+                "warning: `--format json` on `suspect {path}` is deprecated; use `--format ndjson` (removed in {})",
+                removed_in()
+            ));
+        }
+        if path == "gen template"
+            && flag == "--diff"
+            && !args.contains(&"--check")
+            && seen.insert("--diff")
+        {
+            notes.push(format!(
+                "warning: `--diff` without `--check` on `suspect gen template` is deprecated; use `--check --diff` (removed in {})",
+                removed_in()
+            ));
+        }
+    }
+    notes
+}
+
 /// Whether `name` is a subcommand (or alias) of `group`, read from the
 /// clap tree so the rewrite cannot drift from it.
 fn is_subcommand(group: &str, name: &str) -> bool {
@@ -273,6 +388,31 @@ mod tests {
         let (argv, note) = run(&["help", "codegen"]);
         assert_eq!(argv, ["help", "gen", "sdk"]);
         assert!(note.is_some());
+    }
+
+    #[test]
+    fn old_flag_spellings_get_one_note_each() {
+        let notes = |args: &[&str]| {
+            let argv: Vec<OsString> = std::iter::once("suspect")
+                .chain(args.iter().copied())
+                .map(OsString::from)
+                .collect();
+            flag_notes(&argv)
+        };
+        let out = notes(&["gen", "sdk", "s.yaml", "--out", "a", "--out=b"]);
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert!(
+            out[0].starts_with("warning: `--out` on `suspect gen sdk` is deprecated; use --output")
+        );
+        assert_eq!(notes(&["test", "run", "x", "--report", "ndjson"]).len(), 1);
+        assert_eq!(notes(&["test", "run", "x", "--format", "json"]).len(), 1);
+        assert_eq!(notes(&["gen", "template", "s", "--diff"]).len(), 1);
+        assert!(notes(&["gen", "template", "s", "--check", "--diff"]).is_empty());
+        assert!(notes(&["gen", "sdk", "s.yaml", "--output", "a"]).is_empty());
+        // `--json` is an old spelling only where the command had it.
+        assert!(notes(&["lint", "a.yaml", "--json"]).is_empty());
+        // After `--` the arguments belong to the watched command.
+        assert!(notes(&["watch", "src", "--", "suspect", "fmt", "--json"]).is_empty());
     }
 
     #[test]

@@ -444,6 +444,28 @@ test('features are checked against the server advertisement', () => {
 	assert.equal(requestVersion(undefined, 'suspect/renderSdk'), undefined);
 });
 
+test('a CLI older than the grouped command tree is named; unknown versions are not', () => {
+	const { MIN_CLI_VERSION, olderThan, tooOldServer } = loadModule('protocol', {});
+	assert.match(MIN_CLI_VERSION, /^\d+\.\d+\.\d+$/);
+	assert.equal(olderThan(packageManifest.version), false, 'this extension accepts its own release');
+	assert.equal(olderThan('0.0.9', '0.1.0'), true);
+	assert.equal(olderThan('0.1.0', '0.1.0'), false);
+	assert.equal(olderThan('0.2.0-dev', '0.1.0'), false);
+	assert.equal(olderThan('1.0.0', '0.9.9'), false);
+	assert.equal(olderThan('dev', '0.1.0'), false);
+	assert.equal(olderThan(undefined, '0.1.0'), false);
+	const server = (version) => ({ initializeResult: { capabilities: {}, serverInfo: { name: 'suspect-lsp', version } } });
+	assert.equal(tooOldServer(server('0.0.5')), '0.0.5');
+	assert.equal(tooOldServer(server(MIN_CLI_VERSION)), undefined);
+	assert.equal(tooOldServer(undefined), undefined);
+	const spawned = ['extension', 'generation', 'runner', 'serverCommands']
+		.map((name) => fs.readFileSync(path.join(__dirname, '..', 'src', `${name}.ts`), 'utf8'))
+		.join('\n');
+	for (const old of ["'codegen'", "'codegen-profiles'", "'codegen-session'", "['gateway'", "'--report'", "'--out'", "['test', arazzoPath]"]) {
+		assert.ok(!spawned.includes(old), `the extension still spawns the old spelling ${old}`);
+	}
+});
+
 test('spec-only editor entries follow the server document kind, and spec files activate the extension', () => {
 	const context = packageManifest.contributes.menus['editor/context'];
 	for (const name of ['suspect.generateExample', 'suspect.extractSchema', 'suspect.inlineSchema']) {

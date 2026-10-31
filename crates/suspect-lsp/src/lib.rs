@@ -2986,7 +2986,7 @@ impl Backend {
                     Some(if exit == 0 {
                         "contract package is current".to_owned()
                     } else {
-                        "contract package is stale — run `suspect contract`".to_owned()
+                        "contract package is stale — run `suspect gen contract`".to_owned()
                     }),
                 )
                 .await;

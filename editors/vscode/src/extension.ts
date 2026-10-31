@@ -17,7 +17,7 @@ import { codegenDefaults, SESSION_SETTINGS } from './codegenSettings';
 import { ConfigStatus, explainConfig, explainRow, registerConfigStatus } from './explainConfig';
 import { offerSettingsMigration } from './migrateSettings';
 import { generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
-import { suspectCapabilities } from './protocol';
+import { MIN_CLI_VERSION, suspectCapabilities, tooOldServer } from './protocol';
 import { DocumentKindTracker, trackDocumentKind } from './documentKind';
 import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
@@ -145,7 +145,21 @@ function startClient(): void {
 	// server leaves them out of executeCommandProvider and the client does
 	// not register them twice, and the extension version the server checks.
 	current.registerFeature(suspectCapabilities(extensionVersion));
-	void Promise.resolve(current.start()).then(() => Promise.all([documentKinds?.refresh(), configStatus?.refresh()]), (err: unknown) => {
+	void Promise.resolve(current.start()).then(() => {
+		// Every command the extension spawns uses the grouped tree; an older
+		// binary answers each with a usage error.
+		const old = tooOldServer(current);
+		if (old !== undefined) {
+			void vscode.window.showWarningMessage(
+				`The Suspect CLI at \`${binary}\` is version ${old}; this extension needs ${MIN_CLI_VERSION} or newer. Update it or set suspect.basePath to a newer build.`,
+				LOCATE_BINARY, 'Open Settings',
+			).then((choice) => {
+				if (choice === LOCATE_BINARY) void locateBinary();
+				else if (choice === 'Open Settings') void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
+			});
+		}
+		return Promise.all([documentKinds?.refresh(), configStatus?.refresh()]);
+	}, (err: unknown) => {
 		if (client === current) client = undefined;
 		const message = errorMessage(err);
 		const missing = /ENOENT|Launching server using command/.test(message);
@@ -337,11 +351,11 @@ async function startGateway(): Promise<void> {
 	const specLabel = vscode.workspace.asRelativePath(spec);
 	let child: cp.ChildProcess;
 	try {
-		child = cp.spawn(suspectBinary(), ['gateway', spec.fsPath, '--port', String(port), '--mode', 'mock'], {
+		child = cp.spawn(suspectBinary(), ['traffic', 'gateway', spec.fsPath, '--port', String(port), '--mode', 'mock'], {
 			stdio: 'ignore',
 		});
 	} catch (err) {
-		vscode.window.showErrorMessage(`Failed to launch suspect gateway: ${errorMessage(err)}`);
+		vscode.window.showErrorMessage(`Failed to launch suspect traffic gateway: ${errorMessage(err)}`);
 		return;
 	}
 	gateway = { child, port, specLabel };

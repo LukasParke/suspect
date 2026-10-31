@@ -144,11 +144,12 @@ export function registerServerCommands(getClient: ClientGetter): vscode.Disposab
 				void vscode.window.showInformationMessage('Suspect: contract package is current.');
 			} else {
 				void vscode.window
-					.showWarningMessage('Suspect: contract package is stale — run `suspect contract`.', 'Run Now')
+					.showWarningMessage('Suspect: contract package is stale — run `suspect gen contract`.', 'Run Now')
 					.then((choice) => {
 						if (choice === 'Run Now') {
-							const terminal = vscode.window.createTerminal('suspect contract');
-							terminal.sendText('suspect contract');
+							const terminal = vscode.window.createTerminal('suspect gen contract');
+							const out = typeof result.package === 'string' ? ` --output ${shellQuote(result.package)}` : '';
+							terminal.sendText(`suspect gen contract ${shellQuote(doc.uri.fsPath)}${out}`);
 							terminal.show();
 						}
 					});
@@ -265,4 +266,10 @@ export async function generationContract(
 		refusals: result.refusals ?? 0,
 		findings: result.findings ?? [],
 	};
+}
+
+/** Quotes one argument for the integrated terminal's shell. */
+export function shellQuote(arg: string): string {
+	if (/^[\w@%+=:,./-]+$/.test(arg)) return arg;
+	return process.platform === 'win32' ? `"${arg.replace(/"/g, '""')}"` : `'${arg.replace(/'/g, `'\\''`)}'`;
 }

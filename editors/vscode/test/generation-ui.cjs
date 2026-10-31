@@ -147,7 +147,7 @@ async function editor(t) {
 }
 
 function assertDiscovery(h) {
-	assert.deepEqual(h.discoveryCalls, [['/explicit CLI directory/suspect', ['codegen-profiles', '--format', 'json'], {
+	assert.deepEqual(h.discoveryCalls, [['/explicit CLI directory/suspect', ['gen', 'profiles', '--format', 'json'], {
 		cwd: undefined, encoding: 'utf8', timeout: 5000, maxBuffer: 256 * 1024, windowsHide: true, shell: false, killSignal: 'SIGKILL',
 	}]]);
 }
@@ -159,7 +159,7 @@ test('watch keeps one canonical process and updates read-only disk/generated dif
 	await h.run('suspect.watchSdk');
 	assert.equal(h.children.length, 1);
 	assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-		'codegen-session', '--config', h.config, '--out', h.out, '--watch', '--preview', '--format', 'json',
+		'gen', 'session', '--config', h.config, '--output', h.out, '--watch', '--preview', '--format', 'ndjson',
 	], { cwd: path.dirname(h.config), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 	assert.ok(h.prompts[0].prompt.includes(path.dirname(h.config)));
 	h.send({ newDocuments: [h.source] });
@@ -374,7 +374,7 @@ test('multi-root selection honors the selected folder config and resolves output
 	assert.equal(h.children.length, 1);
 	const [, args, options] = h.spawnCalls[0];
 	assert.equal(args[args.indexOf('--config') + 1], config);
-	assert.equal(args[args.indexOf('--out') + 1], path.join(chosen.uri.fsPath, 'generated'));
+	assert.equal(args[args.indexOf('--output') + 1], path.join(chosen.uri.fsPath, 'generated'));
 	assert.equal(options.cwd, path.dirname(config));
 	assert.ok(h.output.value.includes(path.join(chosen.uri.fsPath, 'source/api.json')));
 });
@@ -443,8 +443,8 @@ for (const [profile, name, directory, packagePrompt] of [
 		await until(() => h.children.length === 1, 'picker did not launch the canonical CLI');
 		const out = path.join(h.root, 'gen-out', profile);
 		assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-			'codegen', h.source, '--profile', profile, '--package-name', name, '--package-version', '1.2.3',
-			'--out', out, '--format', 'json', '--operation-id', operationId,
+			'gen', 'sdk', h.source, '--profile', profile, '--package-name', name, '--package-version', '1.2.3',
+			'--output', out, '--format', 'json', '--operation-id', operationId,
 		], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 		assert.match(h.prompts[0].prompt, packagePrompt);
 		if (python) {
@@ -490,7 +490,7 @@ for (const kind of ['docs-md', 'custom']) {
 		await until(() => h.children.length === 1);
 		const out = path.join(h.root, 'gen-out', kind);
 		assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-			'gen', h.source, '--out', out, ...(kind === 'custom' ? ['--manifest', manifest] : ['--preset', 'docs-md']),
+			'gen', 'template', h.source, '--output', out, ...(kind === 'custom' ? ['--manifest', manifest] : ['--preset', 'docs-md']),
 		], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 		assert.equal(h.prompts.length, 0, 'documentation generation does not prompt for SDK package identity');
 		const produced = path.join(out, 'docs/result.md');
@@ -593,8 +593,8 @@ test('picker sends configured native import/module/namespace overrides exactly a
 			assertDiscovery(h);
 			const out = path.join(h.root, 'gen-out', profile);
 			assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-				'codegen', h.source, '--profile', profile, '--package-name', packageName, '--package-version', '1.2.3',
-				'--out', out, '--format', 'json', '--import-name', importName, '--operation-id', 'getCredits',
+				'gen', 'sdk', h.source, '--profile', profile, '--package-name', packageName, '--package-version', '1.2.3',
+				'--output', out, '--format', 'json', '--import-name', importName, '--operation-id', 'getCredits',
 			], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 			const readme = path.join(out, directory, 'README.md');
 			await fs.mkdir(path.dirname(readme), { recursive: true });
@@ -642,8 +642,8 @@ test('picker enables compatibility only from explicit settings and passes it alo
 	assertDiscovery(h);
 	const out = path.join(h.root, 'gen-out/python-http');
 	assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-		'codegen', h.source, '--profile', 'python-http', '--package-name', 'fixture-editor-python', '--package-version', '1.2.3',
-		'--out', out, '--format', 'json', '--import-name', 'custom_editor_sdk',
+		'gen', 'sdk', h.source, '--profile', 'python-http', '--package-name', 'fixture-editor-python', '--package-version', '1.2.3',
+		'--output', out, '--format', 'json', '--import-name', 'custom_editor_sdk',
 		'--compatibility-profile', 'legacy-binary-string-v1', '--operation-id', ' --exact; $(prose)',
 	], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 	const readme = path.join(out, 'python/README.md');
@@ -685,7 +685,7 @@ test('session actions retain saved compatibility semantics and display the canon
 	const ordinary = JSON.stringify(config, null, 2);
 	await fs.writeFile(h.config, ordinary);
 	await h.run('suspect.watchSdk');
-	assert.deepEqual(h.spawnCalls[0][1], ['codegen-session', '--config', h.config, '--out', h.out, '--watch', '--preview', '--format', 'json']);
+	assert.deepEqual(h.spawnCalls[0][1], ['gen', 'session', '--config', h.config, '--output', h.out, '--watch', '--preview', '--format', 'ndjson']);
 	assert.deepEqual(h.discoveryCalls, []);
 	h.send({ compatibilityProfiles: [] });
 	await until(() => h.diffs.length === 1);
