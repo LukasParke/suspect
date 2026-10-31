@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use serde::Serialize;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// Arguments for the publish orchestration.
 #[derive(Debug, Args)]
@@ -55,7 +55,7 @@ pub struct PublishArgs {
     pub state: PathBuf,
     /// Output format for the plan report.
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub report: crate::Report,
 }
 
 /// Arguments for workflow rendering.
@@ -704,10 +704,9 @@ pub fn publish(args: &PublishArgs) -> anyhow::Result<i32> {
     };
     let plan = build_plan(&manifest, &published);
 
-    match args.text.format {
-        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&plan)?),
-        OutputFormat::Sarif => anyhow::bail!("SARIF output is not defined for publish plans"),
-        OutputFormat::Text => render_text(&plan),
+    match args.report.format {
+        ReportFormat::Json => println!("{}", serde_json::to_string_pretty(&plan)?),
+        ReportFormat::Text => render_text(&plan),
     }
 
     let blocked = plan.targets.iter().find(|t| !t.errors.is_empty());

@@ -98,7 +98,7 @@ Options:
       --insecure-test-origin <INSECURE_TEST_ORIGIN>
           Explicit HTTP origin for a numeric-loopback test fixture
       --format <FORMAT>
-          Human-readable status or a structured provenance/diagnostic report [default: text] [possible values: text, json, sarif]
+          Human-readable status or a structured provenance/diagnostic report [default: text] [possible values: text, json]
   -h, --help
           Print help (see more with '--help')
 ```
@@ -141,7 +141,7 @@ Arguments:
   <PATHS>...  Documents to check
 
 Options:
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -161,7 +161,7 @@ Options:
       --strict-format
           Assert JSON-Schema `format` keywords (RFC 2020-12 makes them annotations by default; this validates declared formats)
       --format <FORMAT>
-          Output format for structured results [default: text] [possible values: text, json, sarif]
+          Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help
           Print help (see more with '--help')
 ```
@@ -177,7 +177,7 @@ Arguments:
   <PATHS>...  OpenAPI documents to review
 
 Options:
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -195,7 +195,7 @@ Arguments:
 Options:
       --current <NEW>    The current spec revision in baseline mode; the previous revision comes from git, so only one file is named
       --baseline <REF>   Compare against this git ref (tag, branch, or commit) instead of the `old` file: the "what did we last publish" baseline
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -244,7 +244,7 @@ Arguments:
   <NEW>  The current Arazzo revision
 
 Options:
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -309,7 +309,7 @@ Arguments:
 Options:
       --timeout-ms <TIMEOUT_MS>      Per-evaluate deadline in milliseconds [default: 250]
       --min-severity <MIN_SEVERITY>  Report only findings at or above this severity [default: hint] [possible values: hint, info, warning, error]
-      --format <FORMAT>              Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>              Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help                         Print help (see more with '--help')
 ```
 
@@ -357,7 +357,7 @@ Arguments:
 Options:
       --ruleset <RULESET>            Ruleset document (default: built-in spectral ruleset)
       --min-severity <MIN_SEVERITY>  Report only findings at or above this severity (default: hint, or `lint.min_severity` from `.suspect.yaml`) [possible values: hint, info, warning, error]
-      --format <FORMAT>              Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>              Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help                         Print help (see more with '--help')
 ```
 
@@ -453,7 +453,7 @@ Arguments:
   <PATH>  Input document
 
 Options:
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -486,7 +486,7 @@ Arguments:
   <B>  Right-hand document
 
 Options:
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -504,7 +504,7 @@ Arguments:
 Options:
       --ignore-param <NAME>  Query parameter names to ignore in gap analysis (repeatable); the CI-passed auth token lives here, for instance
       --exit-on-gap          Exit with status 1 when the traffic addresses undeclared endpoints or parameters
-      --format <FORMAT>      Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>      Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help                 Print help (see more with '--help')
 ```
 
@@ -535,7 +535,7 @@ Arguments:
 
 Options:
       --iters <ITERS>    Iterations per stage (mean reported) [default: 3]
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -551,7 +551,7 @@ Arguments:
 
 Options:
       --interval-ms <INTERVAL_MS>  Polling interval in milliseconds [default: 250]
-      --format <FORMAT>            `text` for human lines, `json` for newline-delimited JSON tick records; `sarif` is not supported and is rejected [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>            Event stream format: human lines or one JSON object per line [default: text] [possible values: text, ndjson]
   -h, --help                       Print help (see more with '--help')
 ```
 
@@ -567,7 +567,7 @@ Arguments:
   <SPEC>    Entry OpenAPI document
 
 Options:
-      --format <FORMAT>  `text` for a human report, `json` for a structured report; `sarif` is not supported and is rejected [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -604,7 +604,7 @@ Options:
       --input <NAME=VALUE>    Provide a workflow input: `--input name=value` (repeatable). The value is parsed as JSON when it parses, else taken as a string; applies to every workflow that declares the input
       --cassette <CASSETTE>   Run offline against a recorded Suspect Cassette instead of live HTTP
       --offline               Enables offline mode (requires --cassette)
-      --report <REPORT>       Event stream format: human text or one-JSON-per-line ndjson (default: `test.report`, else `text`) [possible values: text, ndjson]
+      --format <FORMAT>       Event stream format: human text or one-JSON-per-line ndjson (default: `test.report`, else `text`) [possible values: text, ndjson]
       --message-broker <DIR>  Message broker directory for Arazzo 1.1 AsyncAPI steps: `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl` collects what the workflow published
       --credentials <FILE>    Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `test.credentials` and `SUSPECT_CREDENTIALS` override it
       --journal <FILE>        Write the journal to this file (append) instead of stdout
@@ -638,7 +638,7 @@ Options:
       --validate-responses          Also validate every response body against the schema the operation declares for its status; a violation counts as a contract failure. Off by default: it costs a schema compile per response on the generator
       --seed <SEED>                 RNG seed for reproducible scenario selection, pools and jitter
       --jitter <JITTER>             Inter-arrival jitter: deterministic spacing or a Poisson process [default: none] [possible values: none, poisson]
-      --report <REPORT>             Progress output: human text blocks or one JSON record per line [default: text] [possible values: text, ndjson]
+      --format <FORMAT>             Event stream format: human lines or one JSON object per line [default: text] [possible values: text, ndjson]
       --report-interval <DURATION>  Seconds between progress snapshots; overrides the profile
       --grace <DURATION>            How long to wait for in-flight users after the last phase
       --timeout <DURATION>          Per-request timeout; overrides the profile
@@ -687,7 +687,7 @@ Options:
       --why-line <WHY_LINE>  Line of the failing constraint (1-based), with `--why-col`
       --why-col <WHY_COL>    Column of the failing constraint (1-based), with `--why-line`
       --cassette-dir <DIR>   Directory of recorded cassettes searched for historical traffic (`.jsonl`/`.ndjson`/`.json` files)
-      --format <FORMAT>      Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>      Output format for the report [default: text] [possible values: text, json]
   -h, --help                 Print help (see more with '--help')
 ```
 
@@ -806,7 +806,7 @@ Options:
       --check
           Check ownership and drift without writing
       --format <FORMAT>
-          Human-readable output or a structured report [default: text] [possible values: text, json, sarif]
+          Human-readable output or a structured report [default: text] [possible values: text, json]
   -h, --help
           Print help (see more with '--help')
 ```
@@ -837,7 +837,7 @@ Options:
       --check
           Read-only ownership/drift check
       --format <FORMAT>
-          Text output or one structured generation report [default: text] [possible values: text, json, sarif]
+          Text output or one structured generation report [default: text] [possible values: text, json]
   -h, --help
           Print help (see more with '--help')
 ```
@@ -868,7 +868,7 @@ Options:
       --check
           Read-only ownership/drift check
       --format <FORMAT>
-          Text output or one structured generation report [default: text] [possible values: text, json, sarif]
+          Text output or one structured generation report [default: text] [possible values: text, json]
   -h, --help
           Print help (see more with '--help')
 ```
@@ -899,7 +899,7 @@ Options:
       --check
           Read-only ownership/drift check
       --format <FORMAT>
-          Text output or one structured generation report [default: text] [possible values: text, json, sarif]
+          Text output or one structured generation report [default: text] [possible values: text, json]
   -h, --help
           Print help (see more with '--help')
 ```
@@ -913,7 +913,7 @@ Usage: suspect codegen-profiles [OPTIONS]
 
 Options:
       --kind <KIND>      Profile family: native SDK backends, or application targets [default: sdk] [possible values: sdk, applications]
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -930,7 +930,7 @@ Options:
       --watch                      Preserve a process/session across input and configuration changes
       --check                      Check disk drift and conflicts without writing
       --preview                    Return complete generated contents as readonly preview artifacts
-      --format <FORMAT>            Human-readable status or versioned newline-delimited JSON records [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>            Human-readable status or versioned newline-delimited JSON records (`ndjson`; `json` is accepted) [default: text] [possible values: text, ndjson]
       --interval-ms <INTERVAL_MS>  Content-fingerprint polling interval, in milliseconds. 50ms keeps perceived refresh latency low; a poll hashes only the closure's bytes, so the cost is negligible next to any real change [default: 50]
   -h, --help                       Print help (see more with '--help')
 ```
@@ -945,7 +945,7 @@ Usage: suspect codegen-compare [OPTIONS] --before <BEFORE> --after <AFTER>
 Options:
       --before <BEFORE>  Baseline SDK session configuration; its source is relative to this file
       --after <AFTER>    Candidate SDK session configuration; its source is relative to this file
-      --format <FORMAT>  Versioned report JSON or human-readable Markdown migration notes [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Versioned report JSON or human-readable Markdown migration notes [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -963,7 +963,7 @@ Arguments:
 Options:
       --current <NEW>    The current spec revision in baseline mode; the previous revision comes from git, so only one file is named
       --baseline <REF>   Plan against this git ref (tag, branch, or commit) instead of the `old` file: the "what did we last release" baseline
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -980,7 +980,7 @@ Arguments:
   <CASSETTE>  Recorded Suspect Cassette of production-like traffic
 
 Options:
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -997,7 +997,7 @@ Options:
       --execute              Actually run the publish commands. Publishing is destructive on the registry, so it never happens without this flag
       --resume               Resume: skip targets already recorded as published in the state file
       --state <STATE>        State file recording completed targets [default: .release-state.json]
-      --format <FORMAT>      Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>      Output format for the report [default: text] [possible values: text, json]
   -h, --help                 Print help (see more with '--help')
 ```
 
@@ -1023,7 +1023,7 @@ Usage: suspect evidence [OPTIONS]
 
 Options:
       --fragments <FRAGMENTS>  Path to the behavioral fragment directory [default: crates/suspect-codegen/tests/behavioral]
-      --format <FORMAT>        Output format for the matrix [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>        Output format for the matrix [default: text] [possible values: text, json]
   -h, --help                   Print help (see more with '--help')
 ```
 
@@ -1042,7 +1042,7 @@ Options:
       --stage <NAME>     Only run these stages (repeatable): validate, lint, contract, breaking, codegen, test
       --skip-tests       Skip contract tests (they may need a live server)
       --build            Build every project before gating it: overlays, publication, validation, contract, docs and SDK generation, then the gate. One command from a clean checkout to a verified workspace
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -1082,7 +1082,7 @@ Arguments:
 Options:
       --explain          Print every setting with its value and origin (`flag`, `env SUSPECT_X`, `.suspect.yaml:12`, `default`), plus debug variables
       --set-only         With `--explain`: hide settings that hold their default
-      --format <FORMAT>  Output format for structured results [default: text] [possible values: text, json, sarif]
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
   -h, --help             Print help (see more with '--help')
 ```
 

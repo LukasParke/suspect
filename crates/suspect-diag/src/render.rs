@@ -1,4 +1,4 @@
-//! Text, JSON and SARIF 2.1.0 renderers over [`Finding`]s.
+//! Text, JSON, SARIF 2.1.0 and JUnit XML renderers over [`Finding`]s.
 //!
 //! Renderers never read files: a [`Sources`] maps documents to display
 //! paths and byte offsets to positions, and a [`RuleLookup`] supplies rule
@@ -174,6 +174,89 @@ pub fn sarif(findings: &[Finding], src: &dyn Sources, rules: &dyn RuleLookup) ->
             "results": results,
         }],
     })
+}
+
+/// A JUnit XML report: one `testsuite` per document (first-seen order),
+/// one `testcase` per finding, named by its code, with `file:line:col` as
+/// its `classname`. Error and warning findings carry a `failure` whose
+/// `type` is the severity; info and hint findings are passing cases with
+/// the message in `system-out`. No findings give an empty `testsuites`.
+#[must_use]
+pub fn junit(findings: &[Finding], src: &dyn Sources) -> String {
+    use std::fmt::Write as _;
+
+    let fails = |f: &Finding| matches!(f.severity, Severity::Error | Severity::Warning);
+    let mut suites: Vec<(String, Vec<&Finding>)> = Vec::new();
+    for f in findings {
+        let path = src.display_path(&f.document);
+        match suites.iter_mut().find(|(p, _)| *p == path) {
+            Some((_, list)) => list.push(f),
+            None => suites.push((path, vec![f])),
+        }
+    }
+    let failures = findings.iter().filter(|f| fails(f)).count();
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    // Writing into a String cannot fail.
+    let _ = writeln!(
+        out,
+        "<testsuites name=\"suspect\" tests=\"{}\" failures=\"{failures}\" errors=\"0\">",
+        findings.len()
+    );
+    for (path, list) in &suites {
+        let path = xml_escape(path);
+        let suite_failures = list.iter().filter(|f| fails(f)).count();
+        let _ = writeln!(
+            out,
+            "  <testsuite name=\"{path}\" tests=\"{}\" failures=\"{suite_failures}\" errors=\"0\">",
+            list.len()
+        );
+        for f in list {
+            let (line, col) = start(f, src);
+            let _ = writeln!(
+                out,
+                "    <testcase name=\"{}\" classname=\"{path}:{line}:{col}\">",
+                xml_escape(&f.code)
+            );
+            if fails(f) {
+                let _ = writeln!(
+                    out,
+                    "      <failure type=\"{}\" message=\"{}\"/>",
+                    f.severity.label(),
+                    xml_escape(&f.message)
+                );
+            } else {
+                let _ = writeln!(
+                    out,
+                    "      <system-out>[{}] {}</system-out>",
+                    f.severity.upper(),
+                    xml_escape(&f.message)
+                );
+            }
+            out.push_str("    </testcase>\n");
+        }
+        out.push_str("  </testsuite>\n");
+    }
+    out.push_str("</testsuites>\n");
+    out
+}
+
+/// Escapes the five XML special characters in text and attribute values,
+/// plus line breaks, which attribute normalization would turn into spaces.
+fn xml_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -358,6 +441,50 @@ mod tests {
             "Value violates its schema"
         );
         assert_eq!(rule["help"]["text"], "Fix the value.");
+    }
+
+    #[test]
+    fn junit_groups_by_document_and_fails_on_warnings() {
+        let other = Uri::parse("file:///work/other.yaml").unwrap();
+        let mut findings = sample();
+        findings.push(Finding {
+            position: Some(Position { line: 0, col: 0 }),
+            ..Finding::new(
+                CheckId::Lint,
+                "info-description",
+                Severity::Hint,
+                other,
+                "a <b> & \"c\"",
+            )
+        });
+        let expected = [
+            r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+            r#"<testsuites name="suspect" tests="3" failures="2" errors="0">"#,
+            r#"  <testsuite name="spec.yaml" tests="2" failures="2" errors="0">"#,
+            r#"    <testcase name="oas-schema-instance-invalid" classname="spec.yaml:12:3">"#,
+            r#"      <failure type="error" message="default violates the schema"/>"#,
+            r#"    </testcase>"#,
+            r#"    <testcase name="oas-schema-instance-invalid" classname="spec.yaml:20:5">"#,
+            r#"      <failure type="warning" message="example violates the schema"/>"#,
+            r#"    </testcase>"#,
+            r#"  </testsuite>"#,
+            r#"  <testsuite name="file:///work/other.yaml" tests="1" failures="0" errors="0">"#,
+            r#"    <testcase name="info-description" classname="file:///work/other.yaml:1:1">"#,
+            r#"      <system-out>[HINT] a &lt;b&gt; &amp; &quot;c&quot;</system-out>"#,
+            r#"    </testcase>"#,
+            r#"  </testsuite>"#,
+            r#"</testsuites>"#,
+            "",
+        ]
+        .join("\n");
+        assert_eq!(junit(&findings, &sources()), expected);
+        assert_eq!(xml_escape("a\nb\r\n'"), "a&#10;b&#13;&#10;&apos;");
+        assert_eq!(
+            junit(&[], &sources()),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <testsuites name=\"suspect\" tests=\"0\" failures=\"0\" errors=\"0\">\n\
+             </testsuites>\n"
+        );
     }
 
     #[test]

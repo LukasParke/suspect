@@ -68,3 +68,8 @@ fn lint_json() {
 fn lint_sarif() {
     check("lint", "sarif", "petstore.lint.sarif");
 }
+
+#[test]
+fn validate_junit() {
+    check("validate", "junit", "petstore.validate.junit.xml");
+}

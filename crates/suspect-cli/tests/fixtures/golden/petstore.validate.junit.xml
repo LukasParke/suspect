@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="suspect" tests="7" failures="3" errors="0">
+  <testsuite name="docs/demo/petstore.yaml" tests="7" failures="3" errors="0">
+    <testcase name="oas-operation-missing-operationId" classname="docs/demo/petstore.yaml:8:7">
+      <failure type="warning" message="get operation is missing an operationId&#10;how to fix: Add an `operationId` so generated SDK methods carry a stable name."/>
+    </testcase>
+    <testcase name="oas-operation-no-error-response" classname="docs/demo/petstore.yaml:8:7">
+      <system-out>[INFO] operation `&lt;unnamed&gt;` (get) declares no `default` or 4XX/5XX response&#10;how to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.</system-out>
+    </testcase>
+    <testcase name="sdk-operation-missing-id" classname="docs/demo/petstore.yaml:8:7">
+      <system-out>[INFO] GET operation has no `operationId`; SDK generation falls back to `GET /pets` selection&#10;how to fix: Add an `operationId` so generated SDK methods carry a stable name.</system-out>
+    </testcase>
+    <testcase name="oas-path-param-not-declared" classname="docs/demo/petstore.yaml:17:5">
+      <failure type="error" message="path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it&#10;how to fix: Declare every `{var}` in the path as an `in: path` parameter on the path item or operation."/>
+    </testcase>
+    <testcase name="oas-operation-missing-operationId" classname="docs/demo/petstore.yaml:18:7">
+      <failure type="warning" message="get operation is missing an operationId&#10;how to fix: Add an `operationId` so generated SDK methods carry a stable name."/>
+    </testcase>
+    <testcase name="oas-operation-no-error-response" classname="docs/demo/petstore.yaml:18:7">
+      <system-out>[INFO] operation `&lt;unnamed&gt;` (get) declares no `default` or 4XX/5XX response&#10;how to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.</system-out>
+    </testcase>
+    <testcase name="sdk-operation-missing-id" classname="docs/demo/petstore.yaml:18:7">
+      <system-out>[INFO] GET operation has no `operationId`; SDK generation falls back to `GET /pets/{petId}` selection&#10;how to fix: Add an `operationId` so generated SDK methods carry a stable name.</system-out>
+    </testcase>
+  </testsuite>
+</testsuites>

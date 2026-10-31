@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::OutputFormat;
+use crate::FindingsFormat;
 use suspect_ir::{IrSpec, ParamIn};
 
 /// One observed exchange, normalized.
@@ -362,7 +362,7 @@ pub fn drift(
     traffic_path: &Path,
     ignored_params: &[String],
     exit_on_gap: bool,
-    format: OutputFormat,
+    format: FindingsFormat,
 ) -> anyhow::Result<i32> {
     let spec = IrSpec::from_file(spec_path).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -385,15 +385,17 @@ pub fn drift(
     let report = drift_report(&spec, &exchanges);
 
     match format {
-        OutputFormat::Text => {
+        FindingsFormat::Text => {
             print_text(&report);
             println!();
         }
-        OutputFormat::Json => {
+        FindingsFormat::Json => {
             serde_json::to_writer_pretty(std::io::stdout(), &report)?;
             println!();
         }
-        OutputFormat::Sarif => crate::sarif::print_sarif(&gap_findings(&report, spec_path))?,
+        FindingsFormat::Sarif | FindingsFormat::Junit => {
+            crate::output::print_findings_as(&gap_findings(&report, spec_path), format)?;
+        }
     }
 
     if exit_on_gap {

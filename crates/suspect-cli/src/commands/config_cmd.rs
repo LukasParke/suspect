@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use suspect_config::{Origin, Resolved, schema};
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// `suspect config` arguments.
 #[derive(Debug, clap::Args)]
@@ -27,7 +27,7 @@ pub struct ConfigArgs {
     pub set_only: bool,
     /// Output format for `--explain` (`text` or `json`).
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub report: crate::Report,
 }
 
 /// `suspect config` subcommands.
@@ -45,12 +45,11 @@ pub enum ConfigCmd {
 /// Runs `suspect config`.
 ///
 /// # Errors
-/// `--format sarif`; with no `--explain`, a rejected configuration value.
+/// With no `--explain`, a rejected configuration value.
 pub fn config(args: &ConfigArgs) -> anyhow::Result<i32> {
     if let Some(ConfigCmd::Migrate { manifest }) = &args.cmd {
         return super::config_migrate::migrate(manifest);
     }
-    crate::reject_sarif("config", args.text.format)?;
     let inputs: Vec<PathBuf> = args.input.iter().cloned().collect();
     let start = crate::settings::start(&inputs);
     let (resolved, failed) = match suspect_config::resolve(&start) {
@@ -63,8 +62,8 @@ pub fn config(args: &ConfigArgs) -> anyhow::Result<i32> {
         println!("{}", resolved.describe());
         return Ok(0);
     }
-    match args.text.format {
-        OutputFormat::Json => {
+    match args.report.format {
+        ReportFormat::Json => {
             let mut json = resolved.explain_json();
             if args.set_only
                 && let Some(values) = json["values"].as_array_mut()
@@ -83,7 +82,7 @@ pub fn config(args: &ConfigArgs) -> anyhow::Result<i32> {
                 .collect();
             println!("{}", serde_json::to_string_pretty(&json)?);
         }
-        _ => print!(
+        ReportFormat::Text => print!(
             "{}",
             explain_text(&resolved, args.input.as_deref(), args.set_only)
         ),

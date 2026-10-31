@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use serde::Serialize;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// One CI run.
 #[derive(Debug, Args)]
@@ -39,7 +39,7 @@ pub struct CiArgs {
     build: bool,
     /// Output format for the aggregate report.
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub report: crate::Report,
 }
 
 /// One stage's outcome for one project.
@@ -164,7 +164,7 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
 
     // A machine-readable run emits exactly one document: stage chatter is
     // redirected away so a CI consumer can parse stdout directly.
-    let machine_readable = !matches!(args.text.format, OutputFormat::Text);
+    let machine_readable = !matches!(args.report.format, ReportFormat::Text);
     let _silence = machine_readable.then(crate::silence::Silenced::start);
 
     let mut results = Vec::new();
@@ -222,11 +222,11 @@ pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
     // never redirected.
     let _ = &report;
     drop(_silence);
-    match args.text.format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+    match args.report.format {
+        ReportFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for project in &report.projects {
                 let verdict = if project.passed() { "PASS" } else { "FAIL" };
                 println!("{verdict}  {}", project.name);

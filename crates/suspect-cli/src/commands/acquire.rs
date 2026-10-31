@@ -9,7 +9,7 @@ use suspect_ref::acquire::{
     redact_uri,
 };
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// Acquires or verifies one immutable manifest and prints a versioned report.
 /// Shared CLI argument parsing/registration supplies the complete options value.
@@ -21,7 +21,7 @@ use crate::OutputFormat;
 pub fn run(
     manifest_path: &Path,
     options: AcquireOptions,
-    format: OutputFormat,
+    format: ReportFormat,
 ) -> anyhow::Result<i32> {
     let offline = options.offline;
     let refresh = options.refresh;
@@ -54,11 +54,11 @@ pub fn run(
     };
     let mut output = io::stdout().lock();
     match format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+        ReportFormat::Json => {
             serde_json::to_writer_pretty(&mut output, &report)?;
             writeln!(output)?;
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             writeln!(
                 output,
                 "Pinned closure {}: {} documents, {} network requests",

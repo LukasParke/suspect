@@ -1,6 +1,6 @@
 [package]
 name = "suspect-diag"
-description = "One finding model, severity parser and text/JSON/SARIF renderers for the suspect toolchain"
+description = "One finding model, severity parser and text/JSON/SARIF/JUnit renderers for the suspect toolchain"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

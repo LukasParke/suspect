@@ -188,7 +188,7 @@ Counters with no entries (`http.codes.503` when none occurred) read as
 - **Text**: an Artillery-style block every `report.interval`, then a
   final report with scenario shares, phases, hooks, cumulative metrics,
   a per-step table and `ensure` verdicts.
-- **`--report ndjson`**: journal records — `meta` (phase starts),
+- **`--format ndjson`**: journal records — `meta` (phase starts),
   `load_snapshot` (interval + cumulative metrics), `log` notes, the full
   JSON report, and a `run_summary` whose `passed`/`failed` count ensure
   checks.

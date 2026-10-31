@@ -208,6 +208,30 @@ pub fn print_findings(findings: &[Finding]) {
     print!("{}", render_text(findings));
 }
 
+/// JUnit XML for findings, rendered by `suspect_diag::render::junit`.
+#[must_use]
+pub fn render_junit(findings: &[Finding]) -> String {
+    suspect_diag::render::junit(&to_diag(findings), &ShownPaths)
+}
+
+/// Prints findings in `format`: text lines, the JSON array, a SARIF log,
+/// or JUnit XML.
+///
+/// # Errors
+/// Serialization failures.
+pub fn print_findings_as(
+    findings: &[Finding],
+    format: crate::FindingsFormat,
+) -> anyhow::Result<()> {
+    match format {
+        crate::FindingsFormat::Text => print_findings(findings),
+        crate::FindingsFormat::Json => print_json(&findings)?,
+        crate::FindingsFormat::Sarif => crate::sarif::print_sarif(findings)?,
+        crate::FindingsFormat::Junit => print!("{}", render_junit(findings)),
+    }
+    Ok(())
+}
+
 /// Pretty-prints any serializable report as JSON on stdout.
 ///
 /// # Errors

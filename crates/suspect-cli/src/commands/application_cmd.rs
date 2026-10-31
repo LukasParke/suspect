@@ -23,7 +23,7 @@ use suspect_codegen::{
 };
 use suspect_ir::contract::Contract;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// Ownership identity of one Go/Cobra API CLI application root.
 pub const CLI_OWNER: &str = "suspect-cli-app:lifecycle-v1";
@@ -143,8 +143,8 @@ pub struct ApplicationArgs {
     #[arg(long)]
     pub check: bool,
     /// Text output or one structured generation report.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
+    #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
+    pub format: ReportFormat,
 }
 
 impl ApplicationArgs {
@@ -436,7 +436,7 @@ pub fn generate(target: Target, args: ApplicationArgs) -> anyhow::Result<i32> {
         ))
     });
     match args.format {
-        OutputFormat::Json | OutputFormat::Sarif => println!(
+        ReportFormat::Json => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "format":target.report_format(), "profile":target.profile(),
@@ -446,7 +446,7 @@ pub fn generate(target: Target, args: ApplicationArgs) -> anyhow::Result<i32> {
                 "operations":operations, "artifacts":artifacts, "diagnostics":diagnostics,
             }))?
         ),
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for diagnostic in &diagnostics {
                 println!(
                     "{}:{}:{} [{}] {} ({}; mapping {})",

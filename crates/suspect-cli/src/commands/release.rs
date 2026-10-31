@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Args;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// One release-plan review.
 #[derive(Debug, Args)]
@@ -30,7 +30,7 @@ pub struct ReleasePlanArgs {
     pub baseline: Option<String>,
     /// Output format for the plan.
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub report: crate::Report,
 }
 
 /// One semantic difference between revisions, classified for release.
@@ -188,7 +188,7 @@ pub fn release_plan(args: &ReleasePlanArgs) -> anyhow::Result<i32> {
             .ok_or_else(|| anyhow::anyhow!("--baseline requires --current <NEW>"))?;
         let staged =
             crate::baseline::materialize(git_ref, new).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let outcome = render_plan(&staged, new, args.text.format);
+        let outcome = render_plan(&staged, new, args.report.format);
         crate::baseline::cleanup(&staged);
         return outcome;
     }
@@ -197,23 +197,20 @@ pub fn release_plan(args: &ReleasePlanArgs) -> anyhow::Result<i32> {
             "usage: suspect release-plan <OLD> <NEW> | suspect release-plan --current <NEW> --baseline <REF>"
         );
     };
-    render_plan(old, new, args.text.format)
+    render_plan(old, new, args.report.format)
 }
 
 /// Renders a plan for two revisions.
 ///
 /// # Errors
 /// IO, contract, or serialization failures.
-pub fn render_plan(old: &Path, new: &Path, format: OutputFormat) -> anyhow::Result<i32> {
+pub fn render_plan(old: &Path, new: &Path, format: ReportFormat) -> anyhow::Result<i32> {
     let plan = plan(old, new)?;
     match format {
-        OutputFormat::Json => {
+        ReportFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&plan)?);
         }
-        OutputFormat::Sarif => {
-            anyhow::bail!("SARIF output is not defined for release plans");
-        }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             println!("Recommended bump: {}", plan.semver.to_uppercase());
             println!("Rationale: {}", plan.rationale);
             println!();

@@ -10,7 +10,7 @@ use suspect_cli::commands::lint::LintOverrides;
 use suspect_cli::commands::lint::lint_findings;
 use suspect_cli::commands::overlay::{OverlayCmd, apply_docs};
 use suspect_cli::commands::stats::stats_of;
-use suspect_cli::{DocFormat, OutputFormat, Severity, Strategy, bundle, diff};
+use suspect_cli::{DocFormat, FindingsFormat, Severity, Strategy, bundle, diff};
 
 fn ws_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -195,7 +195,7 @@ fn lint_exit_codes_clean_vs_findings() {
         None,
         Severity::Error,
         &LintOverrides::default(),
-        OutputFormat::Text,
+        FindingsFormat::Text,
     )
     .expect("lint runs");
     assert_eq!(code_clean, 0, "clean spec must exit 0");
@@ -204,7 +204,7 @@ fn lint_exit_codes_clean_vs_findings() {
         None,
         Severity::Error,
         &LintOverrides::default(),
-        OutputFormat::Text,
+        FindingsFormat::Text,
     )
     .expect("lint runs");
     assert_eq!(code_dirty, 1, "spec with Error findings must exit 1");

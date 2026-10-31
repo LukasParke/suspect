@@ -9,7 +9,7 @@ use serde::Serialize;
 use suspect_low::SpecFamily;
 use suspect_ref::{CycleKind, WorkspaceBuilder};
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 use crate::output::{self, Finding, Severity};
 
 /// Per-file check result.
@@ -140,12 +140,12 @@ pub fn check_file(path: &Path) -> FileReport {
 ///
 /// # Errors
 /// Only propagates JSON serialization failures; per-file problems become findings.
-pub fn check(paths: &[std::path::PathBuf], format: OutputFormat) -> anyhow::Result<i32> {
+pub fn check(paths: &[std::path::PathBuf], format: ReportFormat) -> anyhow::Result<i32> {
     let mut reports: Vec<FileReport> = paths.par_iter().map(|p| check_file(p)).collect::<Vec<_>>();
     reports.sort_by(|a, b| a.path.cmp(&b.path));
 
     match format {
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for r in &reports {
                 println!("{}", r.path);
                 println!("  family:           {}", r.family);
@@ -161,7 +161,7 @@ pub fn check(paths: &[std::path::PathBuf], format: OutputFormat) -> anyhow::Resu
                 );
             }
         }
-        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&reports)?,
+        ReportFormat::Json => output::print_json(&reports)?,
     }
 
     let has_error = reports

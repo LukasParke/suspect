@@ -191,7 +191,7 @@ runs:
               echo "input 'arazzo' is required for the test command" >&2
               exit 2
             fi
-            ARGS=(test "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --report "$INPUT_REPORT")
+            ARGS=(test "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --format "$INPUT_REPORT")
             if [ -n "$INPUT_FILTER" ]; then ARGS+=(--filter "$INPUT_FILTER"); fi
             if [ -n "$INPUT_CASSETTE" ]; then ARGS+=(--offline --cassette "$INPUT_CASSETTE"); fi
             "$BIN" "${ARGS[@]}" "${EXTRA[@]}" || rc=$?

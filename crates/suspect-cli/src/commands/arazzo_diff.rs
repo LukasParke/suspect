@@ -15,7 +15,7 @@ pub struct ArazzoDiffArgs {
     pub new: PathBuf,
     /// Output format for the report.
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub findings: crate::Findings,
 }
 
 /// One detected break.
@@ -251,10 +251,6 @@ pub fn arazzo_diff(args: &ArazzoDiffArgs) -> anyhow::Result<i32> {
             range: None,
         })
         .collect();
-    match args.text.format {
-        crate::OutputFormat::Text => output::print_findings(&rendered),
-        crate::OutputFormat::Json => output::print_json(&rendered)?,
-        crate::OutputFormat::Sarif => crate::sarif::print_sarif(&rendered)?,
-    }
+    output::print_findings_as(&rendered, args.findings.format)?;
     Ok(i32::from(!findings.is_empty()))
 }

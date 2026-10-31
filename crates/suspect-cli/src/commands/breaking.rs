@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 use suspect_ref::WorkspaceBuilder;
 
-use crate::OutputFormat;
+use crate::FindingsFormat;
 
 /// One breaking-change review.
 #[derive(Debug, clap::Args)]
@@ -29,7 +29,7 @@ pub struct BreakingArgs {
     pub baseline: Option<String>,
     /// Output format for the report.
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub findings: crate::Findings,
 }
 
 /// One rendered break: severity plus located message.
@@ -138,7 +138,7 @@ pub fn breaking(args: &BreakingArgs) -> anyhow::Result<i32> {
             .ok_or_else(|| anyhow::anyhow!("--baseline requires --current <NEW>"))?;
         let staged =
             crate::baseline::materialize(git_ref, new).map_err(|e| anyhow::anyhow!("{e}"))?;
-        let outcome = breaking_between(&staged, new, args.text.format);
+        let outcome = breaking_between(&staged, new, args.findings.format);
         crate::baseline::cleanup(&staged);
         return outcome;
     }
@@ -147,7 +147,7 @@ pub fn breaking(args: &BreakingArgs) -> anyhow::Result<i32> {
             "usage: suspect breaking <OLD> <NEW> | suspect breaking --current <NEW> --baseline <REF>"
         );
     };
-    breaking_between(old, new, args.text.format)
+    breaking_between(old, new, args.findings.format)
 }
 
 /// Compares two revisions and renders the report.
@@ -157,7 +157,7 @@ pub fn breaking(args: &BreakingArgs) -> anyhow::Result<i32> {
 pub fn breaking_between(
     old: &std::path::Path,
     new: &std::path::Path,
-    format: OutputFormat,
+    format: FindingsFormat,
 ) -> anyhow::Result<i32> {
     use crate::output;
     let findings = break_findings(old, new)?;
@@ -180,12 +180,9 @@ pub fn breaking_between(
         })
         .collect();
     match format {
-        OutputFormat::Text => output::print_findings(&rendered),
-        OutputFormat::Json => output::print_json(&findings)?,
-        OutputFormat::Sarif => {
-            let sarif = crate::sarif::sarif_log(&rendered);
-            output::print_json(&sarif)?;
-        }
+        // The JSON report keeps the break records, not the rendered lines.
+        FindingsFormat::Json => output::print_json(&findings)?,
+        _ => output::print_findings_as(&rendered, format)?,
     }
     Ok(i32::from(!findings.is_empty()))
 }

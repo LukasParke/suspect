@@ -79,8 +79,8 @@ pub struct LoadArgs {
     #[arg(long, value_enum, default_value = "none")]
     pub jitter: JitterArg,
     /// Progress output: human text blocks or one JSON record per line.
-    #[arg(long, value_enum, default_value = "text")]
-    pub report: crate::ReportFormat,
+    #[command(flatten)]
+    pub stream: crate::Stream,
     /// Seconds between progress snapshots; overrides the profile.
     #[arg(long, value_name = "DURATION")]
     pub report_interval: Option<String>,
@@ -233,7 +233,7 @@ pub fn load(args: LoadArgs) -> anyhow::Result<i32> {
         }) as load::HttpFactory
     });
 
-    let ndjson = matches!(args.report, crate::ReportFormat::Ndjson);
+    let ndjson = args.stream.format.is_ndjson();
     let sink: Arc<dyn LoadSink> = Arc::new(ConsoleSink { ndjson });
 
     let rt = tokio::runtime::Runtime::new()?;

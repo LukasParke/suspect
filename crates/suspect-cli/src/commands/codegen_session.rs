@@ -1,5 +1,5 @@
 //! Persistent canonical SDK generation, readonly preview and content-based watch.
-use crate::OutputFormat;
+use crate::StreamFormat;
 use anyhow::{Context, Result};
 use clap::Args;
 use serde::Deserialize;
@@ -35,9 +35,10 @@ pub struct SessionArgs {
     /// Return complete generated contents as readonly preview artifacts.
     #[arg(long)]
     pub preview: bool,
-    /// Human-readable status or versioned newline-delimited JSON records.
+    /// Human-readable status or versioned newline-delimited JSON records
+    /// (`ndjson`; `json` is accepted).
     #[arg(long, value_enum, default_value = "text")]
-    pub format: OutputFormat,
+    pub format: StreamFormat,
     /// Content-fingerprint polling interval, in milliseconds. 50ms keeps
     /// perceived refresh latency low; a poll hashes only the closure's
     /// bytes, so the cost is negligible next to any real change.
@@ -147,7 +148,7 @@ fn diagnostics(error: &anyhow::Error) -> Value {
 fn output(args: &SessionArgs, value: &Value) -> Result<()> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
-    if matches!(args.format, OutputFormat::Json) {
+    if args.format.is_ndjson() {
         serde_json::to_writer(&mut stdout, value)?;
         writeln!(stdout)?;
     } else {

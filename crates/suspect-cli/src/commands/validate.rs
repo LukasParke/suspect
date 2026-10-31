@@ -9,7 +9,7 @@ use suspect_oas::Session;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
-use crate::OutputFormat;
+use crate::FindingsFormat;
 use crate::output::{self, Finding, Severity};
 
 /// Validates one entry document. Input failures become findings so batch
@@ -210,7 +210,7 @@ fn syntax_findings(doc: &suspect_low::LowDoc, shown: &str) -> Vec<Finding> {
 /// source input failures are findings.
 pub fn validate(
     paths: &[PathBuf],
-    format: OutputFormat,
+    format: FindingsFormat,
     reference_allowlist: Option<&Path>,
     strict_format: bool,
 ) -> anyhow::Result<i32> {
@@ -225,11 +225,7 @@ pub fn validate(
         (&a.file, a.line, a.col, &a.code, &a.message)
             .cmp(&(&b.file, b.line, b.col, &b.code, &b.message))
     });
-    match format {
-        OutputFormat::Text => output::print_findings(&findings),
-        OutputFormat::Json => output::print_json(&findings)?,
-        OutputFormat::Sarif => crate::sarif::print_sarif(&findings)?,
-    }
+    output::print_findings_as(&findings, format)?;
     Ok(i32::from(
         findings.iter().any(|f| f.severity == Severity::Error),
     ))

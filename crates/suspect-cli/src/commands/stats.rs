@@ -8,7 +8,7 @@ use std::time::Instant;
 use serde::Serialize;
 use suspect_low::{NodeRef, SpecFamily};
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 use crate::commands::check::family_label;
 use crate::output;
 
@@ -129,10 +129,10 @@ pub fn stats_of(path: &Path) -> anyhow::Result<StatsReport> {
 ///
 /// # Errors
 /// IO or parse failures; JSON serialization failures.
-pub fn stats(path: &Path, format: OutputFormat) -> anyhow::Result<i32> {
+pub fn stats(path: &Path, format: ReportFormat) -> anyhow::Result<i32> {
     let report = stats_of(path)?;
     match format {
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             println!("{}", report.path);
             println!("  family:            {}", report.family);
             println!("  size bytes:        {}", report.size_bytes);
@@ -148,7 +148,7 @@ pub fn stats(path: &Path, format: OutputFormat) -> anyhow::Result<i32> {
             println!("  workflows:         {}", report.workflows);
             println!("  actions:           {}", report.actions);
         }
-        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&report)?,
+        ReportFormat::Json => output::print_json(&report)?,
     }
     Ok(0)
 }

@@ -1,7 +1,7 @@
 //! Canonical SDK generation through the shared native backend boundary.
 
 use super::sdk::{SdkArgs, SdkCompatibilityProfile, SdkProfile};
-use crate::{OutputFormat, TextFormat};
+use crate::{Report, ReportFormat};
 use clap::Args;
 use std::path::PathBuf;
 use suspect_codegen::generation_session::Input;
@@ -56,8 +56,8 @@ pub struct CodegenArgs {
     #[arg(long)]
     pub check: bool,
     /// Human-readable output or a structured report.
-    #[arg(long,value_enum,default_value_t=OutputFormat::Text)]
-    pub format: OutputFormat,
+    #[arg(long,value_enum,default_value_t=ReportFormat::Text)]
+    pub format: ReportFormat,
 }
 
 /// Generate a native SDK from the source-selected canonical contract.
@@ -142,7 +142,7 @@ pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
         generation,
         out: args.out.unwrap_or_else(|| PathBuf::from("codegen-out")),
         check: args.check,
-        text: TextFormat {
+        report: Report {
             format: args.format,
         },
     })

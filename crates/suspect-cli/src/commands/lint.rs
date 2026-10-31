@@ -10,7 +10,7 @@ use suspect_lint::Linter;
 use suspect_low::LowDoc;
 use suspect_source::{Source, Uri};
 
-use crate::OutputFormat;
+use crate::FindingsFormat;
 use crate::output::{self, Finding, Severity};
 
 /// Maps the lint crate's severity into the CLI's unified model.
@@ -227,15 +227,11 @@ pub fn lint(
     ruleset: Option<&Path>,
     min_severity: Severity,
     overrides: &LintOverrides,
-    format: OutputFormat,
+    format: FindingsFormat,
 ) -> anyhow::Result<i32> {
     let findings = lint_findings(paths, ruleset, min_severity, overrides)?;
 
-    match format {
-        OutputFormat::Text => output::print_findings(&findings),
-        OutputFormat::Json => output::print_json(&findings)?,
-        OutputFormat::Sarif => crate::sarif::print_sarif(&findings)?,
-    }
+    output::print_findings_as(&findings, format)?;
 
     let has_error = findings.iter().any(|f| f.severity == Severity::Error);
     Ok(i32::from(has_error))

@@ -15,7 +15,7 @@ use suspect_codegen::{
 };
 use suspect_ir::contract::Contract;
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 const OWNER: &str = "suspect-terraform:lifecycle-v1";
 
@@ -49,8 +49,8 @@ pub struct TerraformArgs {
     #[arg(long)]
     pub check: bool,
     /// Text output or one structured generation report.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
+    #[arg(long, value_enum, default_value_t = ReportFormat::Text)]
+    pub format: ReportFormat,
 }
 
 #[derive(Debug, Serialize)]
@@ -289,7 +289,7 @@ pub fn generate(args: TerraformArgs) -> anyhow::Result<i32> {
         ))
     });
     match args.format {
-        OutputFormat::Json | OutputFormat::Sarif => println!(
+        ReportFormat::Json => println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "format":"suspect.terraform.generation.v1", "profile":terraform::PROFILE,
@@ -298,7 +298,7 @@ pub fn generate(args: TerraformArgs) -> anyhow::Result<i32> {
                 "operations":operations, "artifacts":artifacts, "diagnostics":diagnostics,
             }))?
         ),
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for diagnostic in &diagnostics {
                 println!(
                     "{}:{}:{} [{}] {} ({}; mapping {})",

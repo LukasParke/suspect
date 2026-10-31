@@ -1,5 +1,5 @@
 //! Compare canonical wire contracts and actual native SDK interfaces.
-use crate::OutputFormat;
+use crate::ReportFormat;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
@@ -22,7 +22,7 @@ pub struct CompareArgs {
     pub after: PathBuf,
     /// Versioned report JSON or human-readable Markdown migration notes.
     #[arg(long, value_enum, default_value = "text")]
-    pub format: OutputFormat,
+    pub format: ReportFormat,
 }
 fn load(input: &suspect_codegen::generation_session::Input) -> Result<Arc<Contract>> {
     let (workspace, entry) = input.open()?;
@@ -68,7 +68,7 @@ pub fn compare(args: CompareArgs) -> Result<i32> {
     let exit = match result {
         Ok(report) => {
             let compatible = report.is_proven_compatible();
-            if matches!(args.format, OutputFormat::Json) {
+            if matches!(args.format, ReportFormat::Json) {
                 serde_json::to_writer(&mut stdout, &report)?;
                 writeln!(stdout)?;
             } else {
@@ -77,7 +77,7 @@ pub fn compare(args: CompareArgs) -> Result<i32> {
             i32::from(!compatible)
         }
         Err(error) => {
-            if matches!(args.format, OutputFormat::Json) {
+            if matches!(args.format, ReportFormat::Json) {
                 serde_json::to_writer(
                     &mut stdout,
                     &json!({"format":"suspect-sdk-compatibility-v1","success":false,"status":"comparison-error","diagnostics":[{"code":"sdk-compatibility","message":format!("{error:#}")}]}),

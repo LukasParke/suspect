@@ -4,6 +4,7 @@
 //! returning an [`Exit`] (0 clean, 1 findings at/above Error, 2 usage, 130
 //! interrupted).
 
+pub mod args;
 /// Git-ref baselines for comparisons.
 pub mod baseline;
 pub mod bundle;
@@ -23,23 +24,12 @@ pub mod watch;
 
 use std::path::PathBuf;
 
+pub use args::{Findings, FindingsFormat, Report, ReportFormat, Stream, StreamFormat};
 use clap::{Parser, Subcommand, ValueEnum};
 pub use exit::Exit;
 pub use output::{Finding, Severity};
 use suspect_config::{Layer, Raw};
 use suspect_source::{Source, Uri};
-
-/// Serialization choice for commands that produce structured output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum OutputFormat {
-    /// Human-readable aligned text (the default).
-    Text,
-    /// One pretty-printed JSON document on stdout, machine-consumable.
-    Json,
-    /// SARIF 2.1.0 log for code-scanning integrations.
-    Sarif,
-}
 
 /// Document serialization for emitting materialized trees.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -80,7 +70,7 @@ pub enum Command {
         paths: Vec<PathBuf>,
         /// Output format for the per-file reports.
         #[command(flatten)]
-        text: TextFormat,
+        report: Report,
     },
     /// Validate OpenAPI syntax and semantic requirements, reporting located findings.
     Validate {
@@ -96,7 +86,7 @@ pub enum Command {
         strict_format: bool,
         /// Output format for the finding list.
         #[command(flatten)]
-        text: TextFormat,
+        findings: Findings,
     },
     /// Run the generation admission layer over documents without generating.
     Admission(commands::admission::AdmissionArgs),
@@ -133,7 +123,7 @@ pub enum Command {
         min_severity: Option<output::Severity>,
         /// Output format for the finding list.
         #[command(flatten)]
-        text: TextFormat,
+        findings: Findings,
     },
     /// Apply, explain, or synthesize (`diff`) Overlay 1.0/1.1 documents.
     Overlay {
@@ -161,7 +151,7 @@ pub enum Command {
         path: PathBuf,
         /// Output format for the counts table.
         #[command(flatten)]
-        text: TextFormat,
+        report: Report,
     },
     /// Bundle a document and its `$ref` closure into one file.
     Bundle {
@@ -185,7 +175,7 @@ pub enum Command {
         b: PathBuf,
         /// Output format for the difference report.
         #[command(flatten)]
-        text: TextFormat,
+        report: Report,
     },
     /// Cross-reference recorded traffic against the spec: endpoints the
     /// traffic exercised that the spec does not declare, undeclared query
@@ -207,7 +197,7 @@ pub enum Command {
         exit_on_gap: bool,
         /// Output format for the drift report.
         #[command(flatten)]
-        text: TextFormat,
+        findings: Findings,
     },
     /// Export recorded traffic as an HTTP Archive (HAR 1.2) — the
     /// interchange format profiling and debugging tools read. Accepts a
@@ -228,7 +218,7 @@ pub enum Command {
         iters: usize,
         /// Output format for the stage table.
         #[command(flatten)]
-        text: TextFormat,
+        report: Report,
     },
     /// Run the live contract bridge: watch the spec and emit regeneration
     /// plans, evolution proposals, and reconciliation conflicts.
@@ -241,10 +231,10 @@ pub enum Command {
         /// Stop after this many ticks (for scripts; omit to watch).
         #[arg(long, hide = true)]
         max_ticks: Option<u64>,
-        /// `text` for human lines, `json` for newline-delimited JSON tick
-        /// records; `sarif` is not supported and is rejected.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-        format: OutputFormat,
+        /// `text` for human lines, `ndjson` (or `json`) for one JSON tick
+        /// record per line.
+        #[command(flatten)]
+        stream: Stream,
     },
     /// Extract server framework routes and cross-reference them with the
     /// spec: undocumented endpoints, spec-only endpoints, method drift.
@@ -253,10 +243,9 @@ pub enum Command {
         source: PathBuf,
         /// Entry OpenAPI document.
         spec: PathBuf,
-        /// `text` for a human report, `json` for a structured report;
-        /// `sarif` is not supported and is rejected.
-        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-        format: OutputFormat,
+        /// `text` for a human report, `json` for a structured report.
+        #[command(flatten)]
+        report: Report,
     },
     /// Generate and run stateful dependency-graph test sequences against a
     /// live server.
@@ -300,8 +289,8 @@ pub enum Command {
         offline: bool,
         /// Event stream format: human text or one-JSON-per-line ndjson
         /// (default: `test.report`, else `text`).
-        #[arg(long, value_enum)]
-        report: Option<ReportFormat>,
+        #[arg(long, value_enum, alias = "report")]
+        format: Option<StreamFormat>,
         /// Message broker directory for Arazzo 1.1 AsyncAPI steps:
         /// `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl`
         /// collects what the workflow published.
@@ -376,7 +365,7 @@ pub enum Command {
         cassette_dir: Option<PathBuf>,
         /// Human timeline or one JSON document.
         #[command(flatten)]
-        text: TextFormat,
+        report: Report,
     },
     /// Re-issue a recorded cassette against an upstream and report drift.
     Replay {
@@ -493,7 +482,7 @@ pub enum Command {
         kind: commands::sdk_profiles::ProfileKind,
         /// Human-readable inventory or versioned JSON for editor integration.
         #[command(flatten)]
-        text: TextFormat,
+        report: Report,
     },
     /// Persistent canonical SDK generation with readonly preview and watch mode.
     CodegenSession(commands::codegen_session::SessionArgs),
@@ -549,32 +538,6 @@ pub fn parse_severity_floor(name: &str, origin: &str) -> anyhow::Result<output::
     }
 }
 
-/// Usage error for commands whose report has no SARIF shape.
-fn reject_sarif(command: &str, format: OutputFormat) -> anyhow::Result<()> {
-    if format == OutputFormat::Sarif {
-        anyhow::bail!("`suspect {command}` does not support --format sarif (use text or json)");
-    }
-    Ok(())
-}
-
-/// `--format json|text` for commands with structured output. Declared per
-/// subcommand (not global) so `bundle` can own `--format json|yaml`.
-#[derive(Debug, clap::Args)]
-pub struct TextFormat {
-    /// Output format for structured results.
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
-    pub format: OutputFormat,
-}
-
-/// Output style for `suspect test` event streams.
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub enum ReportFormat {
-    /// Human-readable progress lines.
-    Text,
-    /// One JSON object per line (machine consumable).
-    Ndjson,
-}
-
 /// Top-level CLI shape (`suspect <command> ...`); output-format flags such
 /// as `--format` belong to each subcommand (`suspect lint --format json`).
 #[derive(Debug, Parser)]
@@ -595,12 +558,12 @@ pub fn execute(cli: Cli) -> anyhow::Result<Exit> {
 
 fn dispatch(cli: Cli) -> anyhow::Result<i32> {
     match cli.command {
-        Command::Check { paths, text } => commands::check::check(&paths, text.format),
+        Command::Check { paths, report } => commands::check::check(&paths, report.format),
         Command::Validate {
             paths,
             reference_allowlist,
             strict_format,
-            text,
+            findings,
         } => {
             // A clap bool cannot say "explicitly false": only a passed flag
             // enters the flag layer.
@@ -619,7 +582,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             let validate = &resolved.settings.validate;
             commands::validate::validate(
                 &paths,
-                text.format,
+                findings.format,
                 validate.reference_allowlist.as_deref(),
                 validate.strict_format,
             )
@@ -655,7 +618,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             paths,
             ruleset,
             min_severity,
-            text,
+            findings,
         } => {
             // flag > env > config > default, decided by `resolve`.
             let flags = Layer::flags()
@@ -675,7 +638,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 lint.ruleset.as_deref(),
                 commands::lint::floor(lint),
                 &overrides,
-                text.format,
+                findings.format,
             )
         }
         Command::Overlay { cmd } => commands::overlay::run(cmd),
@@ -695,27 +658,27 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             };
             commands::fmt::fmt(&input, output.as_deref(), json, yaml)
         }
-        Command::Stats { path, text } => commands::stats::stats(&path, text.format),
+        Command::Stats { path, report } => commands::stats::stats(&path, report.format),
         Command::Bundle {
             input,
             output,
             strategy,
             out_format,
         } => bundle::bundle(&input, output.as_deref(), strategy, out_format),
-        Command::Diff { a, b, text } => diff::diff_files(&a, &b, text.format),
+        Command::Diff { a, b, report } => diff::diff_files(&a, &b, report.format),
         Command::Drift {
             spec,
             traffic,
             ignore_param,
             exit_on_gap,
-            text,
-        } => commands::drift::drift(&spec, &traffic, &ignore_param, exit_on_gap, text.format),
+            findings,
+        } => commands::drift::drift(&spec, &traffic, &ignore_param, exit_on_gap, findings.format),
         Command::Har { traffic, output } => commands::har::har(&traffic, output.as_deref()),
         Command::Bench {
             fixture,
             iters,
-            text,
-        } => commands::bench::bench(&fixture, iters, text.format),
+            report,
+        } => commands::bench::bench(&fixture, iters, report.format),
         Command::Load(args) => commands::load::load(*args),
         Command::Fuzz {
             spec,
@@ -746,25 +709,16 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             spec,
             interval_ms,
             max_ticks,
-            format,
+            stream,
         } => {
-            reject_sarif("bridge", format)?;
             interrupt::server();
-            commands::bridge::bridge(
-                &spec,
-                interval_ms,
-                max_ticks,
-                matches!(format, OutputFormat::Json),
-            )
+            commands::bridge::bridge(&spec, interval_ms, max_ticks, stream.format.is_ndjson())
         }
         Command::Reverse {
             source,
             spec,
-            format,
-        } => {
-            reject_sarif("reverse", format)?;
-            commands::reverse::reverse(&source, &spec, matches!(format, OutputFormat::Json))
-        }
+            report,
+        } => commands::reverse::reverse(&source, &spec, report.format.is_json()),
         Command::Stateful {
             spec,
             base_url,
@@ -794,13 +748,13 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             inputs,
             cassette,
             offline: _,
-            report,
+            format,
             message_broker,
             credentials,
             journal,
             inputs_file,
         } => {
-            let test = test_settings(&arazzo, base_url, credentials, report)?;
+            let test = test_settings(&arazzo, base_url, credentials, format)?;
             commands::test::test_with_messages(
                 &arazzo,
                 &test.base_url,
@@ -820,7 +774,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             why_line,
             why_col,
             cassette_dir,
-            text,
+            report,
         } => commands::why::why(
             &constraint,
             &spec,
@@ -828,7 +782,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             why_line,
             why_col,
             cassette_dir.as_deref(),
-            matches!(text.format, OutputFormat::Json),
+            report.format.is_json(),
         ),
         Command::Gen {
             spec,
@@ -907,10 +861,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::CodegenMcp(args) => {
             commands::application_cmd::generate(commands::application_cmd::Target::Mcp, args)
         }
-        Command::CodegenProfiles { kind, text } => match kind {
-            commands::sdk_profiles::ProfileKind::Sdk => commands::sdk_profiles::list(text.format),
+        Command::CodegenProfiles { kind, report } => match kind {
+            commands::sdk_profiles::ProfileKind::Sdk => commands::sdk_profiles::list(report.format),
             commands::sdk_profiles::ProfileKind::Applications => {
-                commands::sdk_profiles::list_applications(text.format)
+                commands::sdk_profiles::list_applications(report.format)
             }
         },
         Command::CodegenSession(args) => {
@@ -948,17 +902,9 @@ fn test_settings(
     input: &std::path::Path,
     base_url: Option<String>,
     credentials: Option<PathBuf>,
-    report: Option<ReportFormat>,
+    format: Option<StreamFormat>,
 ) -> anyhow::Result<suspect_config::TestSettings> {
-    let report = report.map(|r| {
-        Raw::Str(
-            match r {
-                ReportFormat::Text => "text",
-                ReportFormat::Ndjson => "ndjson",
-            }
-            .to_owned(),
-        )
-    });
+    let format = format.map(|f| Raw::Str(f.name().to_owned()));
     let flags = Layer::flags()
         .set("test.base_url", base_url.map(Raw::Str), "--base-url")
         .set(
@@ -966,7 +912,7 @@ fn test_settings(
             credentials.map(Raw::Path),
             "--credentials",
         )
-        .set("test.report", report, "--report");
+        .set("test.report", format, "--format");
     Ok(settings::resolve_one(input, flags)?.settings.test)
 }
 

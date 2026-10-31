@@ -17,7 +17,7 @@ use suspect_codegen::{
 use suspect_ir::contract::{Contract, SourceId};
 use suspect_ref::Workspace;
 
-use crate::{OutputFormat, TextFormat};
+use crate::ReportFormat;
 
 /// An explicit experimental canonical generation capability.
 #[derive(Debug, Clone, Copy)]
@@ -224,7 +224,7 @@ pub(super) struct SdkArgs {
     /// Plan and check ownership/drift without writing; exit 1 for findings or drift.
     pub check: bool,
     /// Human-readable output or one structured experimental report.
-    pub text: TextFormat,
+    pub report: crate::args::Report,
 }
 
 #[derive(Serialize)]
@@ -615,8 +615,8 @@ fn target_args(
         generation: target.generation.clone(),
         out: target.out.clone(),
         check: target.check,
-        text: TextFormat {
-            format: OutputFormat::Text,
+        report: crate::args::Report {
+            format: ReportFormat::Text,
         },
     }
 }
@@ -700,11 +700,11 @@ fn commit(args: &SdkArgs, prepared: Result<Prepared, Vec<Diagnostic>>) -> anyhow
     report.diagnostics.dedup_by(|a, b| {
         a.file == b.file && a.pointer == b.pointer && a.code == b.code && a.message == b.message
     });
-    match args.text.format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+    match args.report.format {
+        ReportFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?)
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for diagnostic in &report.diagnostics {
                 println!(
                     "{}:{}:{} [{}] {} ({})",

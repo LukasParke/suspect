@@ -6,7 +6,7 @@ use serde_json::json;
 use suspect_codegen::backend::Backend;
 use suspect_codegen::http_protocol::CompatibilityProfile;
 
-use crate::{OutputFormat, commands::application_cmd::Target};
+use crate::{ReportFormat, commands::application_cmd::Target};
 
 /// Which profile family to list. Application targets are separate profiles
 /// with their own mappings, commands and output-root owners, so they are never
@@ -24,10 +24,10 @@ pub enum ProfileKind {
 ///
 /// # Errors
 /// Propagates output failures.
-pub fn list(format: OutputFormat) -> anyhow::Result<i32> {
+pub fn list(format: ReportFormat) -> anyhow::Result<i32> {
     let mut output = io::stdout().lock();
     match format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+        ReportFormat::Json => {
             serde_json::to_writer_pretty(
                 &mut output,
                 &json!({"format":"suspect.sdk.profiles.v1",
@@ -38,7 +38,7 @@ pub fn list(format: OutputFormat) -> anyhow::Result<i32> {
             )?;
             writeln!(output)?;
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for backend in Backend::ALL {
                 writeln!(
                     output,
@@ -61,11 +61,11 @@ pub fn list(format: OutputFormat) -> anyhow::Result<i32> {
 ///
 /// # Errors
 /// Propagates output failures.
-pub fn list_applications(format: OutputFormat) -> anyhow::Result<i32> {
+pub fn list_applications(format: ReportFormat) -> anyhow::Result<i32> {
     let mut output = io::stdout().lock();
     let targets = [Target::Cli, Target::Mcp];
     match format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+        ReportFormat::Json => {
             serde_json::to_writer_pretty(
                 &mut output,
                 &json!({"format":"suspect.application.profiles.v1",
@@ -76,7 +76,7 @@ pub fn list_applications(format: OutputFormat) -> anyhow::Result<i32> {
             )?;
             writeln!(output)?;
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             for target in targets {
                 writeln!(
                     output,

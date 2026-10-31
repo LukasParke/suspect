@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use suspect_cli::ReportFormat;
 use suspect_cli::commands::load::{JitterArg, LoadArgs, load};
+use suspect_cli::{Stream, StreamFormat};
 use suspect_gateway::{FaultConfig, GatewayConfig, Mode};
 use suspect_journal::{Journal, VecSink};
 
@@ -95,7 +95,9 @@ fn args(profile: PathBuf, port: u16, junit: PathBuf, json: PathBuf) -> LoadArgs 
         validate_responses: false,
         seed: Some(3),
         jitter: JitterArg::None,
-        report: ReportFormat::Ndjson,
+        stream: Stream {
+            format: StreamFormat::Ndjson,
+        },
         report_interval: None,
         grace: Some("10s".into()),
         timeout: None,

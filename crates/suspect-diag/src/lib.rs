@@ -3,7 +3,7 @@
 //!
 //! Holds [`Finding`], [`Severity`], [`Level`] and the severity-name parser
 //! ([`parse_level`]), static rule metadata ([`RuleInfo`]), and the text,
-//! JSON and SARIF renderers ([`render`]). This is a leaf crate: it depends
+//! JSON, SARIF and JUnit renderers ([`render`]). This is a leaf crate: it depends
 //! only on `suspect-source`, `serde` and `serde_json`, so configuration,
 //! check crates and front ends can all use it without a cycle.
 //!

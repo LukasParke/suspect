@@ -11,8 +11,8 @@ use suspect_low::LowDoc;
 use suspect_rules::{Error as RulesError, RuleHost, StartOptions};
 use suspect_source::{Source, Uri};
 
+use crate::Findings;
 use crate::output::{self, Finding, Severity};
-use crate::{OutputFormat, TextFormat};
 
 /// A rule's declared severity, with the shared config spellings
 /// (`warn`, `information`, ...). `off` drops the finding (`None`); absent
@@ -69,19 +69,19 @@ pub fn check(
     paths: &[PathBuf],
     timeout_ms: Option<u64>,
     min_severity: Severity,
-    text: TextFormat,
+    findings: Findings,
 ) -> anyhow::Result<i32> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(check_async(paths, timeout_ms, min_severity, text))
+    runtime.block_on(check_async(paths, timeout_ms, min_severity, findings))
 }
 
 async fn check_async(
     paths: &[PathBuf],
     timeout_ms: Option<u64>,
     min_severity: Severity,
-    text: TextFormat,
+    findings: Findings,
 ) -> anyhow::Result<i32> {
     // `rules.roots` (default `.suspect/rules` beside the settings file)
     // names the directories scanned for rules.
@@ -152,11 +152,7 @@ async fn check_async(
     }
 
     all.retain(|f| f.severity >= min_severity);
-    match text.format {
-        OutputFormat::Json => output::print_json(&all)?,
-        OutputFormat::Sarif => crate::sarif::print_sarif(&all)?,
-        OutputFormat::Text => output::print_findings(&all),
-    }
+    output::print_findings_as(&all, findings.format)?;
 
     let disabled = host.disabled();
     if !disabled.is_empty() {
@@ -262,7 +258,7 @@ pub enum RulesCmd {
         min_severity: Severity,
         /// Output format for the finding list.
         #[command(flatten)]
-        text: TextFormat,
+        findings: Findings,
     },
     /// Scaffold a new TS rule file.
     New {
@@ -297,8 +293,8 @@ impl RulesCmd {
                 paths,
                 timeout_ms,
                 min_severity,
-                text,
-            } => check(&paths, Some(timeout_ms), min_severity, text),
+                findings,
+            } => check(&paths, Some(timeout_ms), min_severity, findings),
             Self::New { name, dir } => new(&name, dir).map(|()| 0),
             Self::Bench {
                 path,
