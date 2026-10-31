@@ -106,7 +106,8 @@ const GUIDED: &[(&str, suspect_diag::Severity)] = &[
 /// Rule metadata for the admission codes that carry guidance
 /// ([`suspect_diag::RuleClass::Sdk`]). Admission also passes through the
 /// open-ended `http-*` codes of the shared HTTP admission layer and the
-/// contract compiler's codes; those are not listed yet.
+/// contract compiler's codes; those are registered by prefix
+/// ([`families`]).
 #[must_use]
 pub fn rules() -> &'static [suspect_diag::RuleInfo] {
     static RULES: std::sync::OnceLock<Vec<suspect_diag::RuleInfo>> = std::sync::OnceLock::new();
@@ -125,6 +126,100 @@ pub fn rules() -> &'static [suspect_diag::RuleInfo] {
             })
             .collect()
     })
+}
+
+/// Rule families for the admission codes [`rules`] does not list one by
+/// one: the shared HTTP admission layer's open-ended `http-*` codes
+/// (about 200, each named at its refusal site) and the contract
+/// compiler's limitation codes, grouped by the prefixes
+/// `contract_summary` already distinguishes. Every family is
+/// [`suspect_diag::RuleClass::Sdk`]; the severity of a finding comes from
+/// its [`FindingKind`], so the family default only names the usual case.
+#[must_use]
+pub fn families() -> &'static [suspect_diag::RuleFamily] {
+    use suspect_diag::{CheckId, RuleClass, RuleFamily, RuleInfo, Severity};
+    const fn family(
+        prefix: &'static str,
+        code: &'static str,
+        summary: &'static str,
+        how_to_fix: &'static str,
+    ) -> RuleFamily {
+        RuleFamily {
+            prefix,
+            rule: RuleInfo {
+                code,
+                check: CheckId::Admission,
+                default: Severity::Error,
+                class: RuleClass::Sdk,
+                summary,
+                how_to_fix,
+                aliases: &[],
+            },
+        }
+    }
+    const FAMILIES: &[RuleFamily] = &[
+        family(
+            "http-",
+            "http-*",
+            "The SDK HTTP layer cannot generate this operation or value",
+            "Restructure the construct the message names, or leave the operation out of the SDK profile.",
+        ),
+        family(
+            "DUPLICATE_",
+            "DUPLICATE_*",
+            "Duplicate declaration",
+            "Remove the duplicated declaration so every (name, location) pair is unique.",
+        ),
+        family(
+            "AMBIGUOUS_",
+            "AMBIGUOUS_*",
+            "Contract semantics the compiler cannot disambiguate",
+            "Give the operations unique `operationId`s or distinct method/path combinations.",
+        ),
+        family(
+            "INVALID_",
+            "INVALID_*",
+            "Contract semantics the compiler cannot interpret",
+            "Correct the value so the compiler can materialize it faithfully.",
+        ),
+        family(
+            "invalid-",
+            "invalid-*",
+            "Contract semantics the compiler cannot interpret",
+            "Correct the schema value so the compiler can materialize it faithfully.",
+        ),
+        family(
+            "HTTP_REFERENCE",
+            "HTTP_REFERENCE*",
+            "Reference does not resolve in the contract",
+            "Point the reference at a schema inside the loaded documents.",
+        ),
+        family(
+            "UNSUPPORTED_",
+            "UNSUPPORTED_*",
+            "Semantics not supported by this compiler version",
+            "Restructure the construct, or annotate it as an extension the compiler may ignore.",
+        ),
+        family(
+            "unsupported-",
+            "unsupported-*",
+            "Semantics not supported by this compiler version",
+            "Restructure the construct, or annotate it as an extension the compiler may ignore.",
+        ),
+        family(
+            "UNKNOWN_",
+            "UNKNOWN_*",
+            "Contract names something the document does not declare",
+            "Declare the referenced item, or correct the name.",
+        ),
+        family(
+            "RECURSIVE_",
+            "RECURSIVE_*",
+            "Recursive construct the compiler cannot lower",
+            "Break the recursion, or leave the construct out of the SDK profile.",
+        ),
+    ];
+    FAMILIES
 }
 
 /// Actionable fix guidance for an admission code; empty when the located

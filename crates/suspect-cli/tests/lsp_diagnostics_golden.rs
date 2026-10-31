@@ -159,10 +159,16 @@ fn the_editor_reports_the_recorded_findings() {
         lines.extend(found);
     }
     // The petstore has two operations without an `operationId`: one
-    // finding each, under the canonical code, whatever else changes.
+    // finding each, under the canonical code, whatever else changes. The
+    // workspace manifest configures codegen, so SDK admission also
+    // refuses both (`http-operation-id`), a separate category.
     let missing: Vec<&String> = lines
         .iter()
-        .filter(|l| l.starts_with("petstore.yaml:") && l.contains("operationId"))
+        .filter(|l| {
+            l.starts_with("petstore.yaml:")
+                && l.contains("operationId")
+                && !l.contains(" http-operation-id:")
+        })
         .collect();
     assert_eq!(missing.len(), 2, "{missing:#?}");
     assert!(

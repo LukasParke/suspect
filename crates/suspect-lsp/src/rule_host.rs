@@ -268,13 +268,10 @@ mod tests {
         let registry = run.registry.clone().expect("registry with rule ids");
         assert!(registry.is_known("team-summary"));
 
-        let diags = crate::diagnostics::compute_diagnostics_with(
-            None,
-            &low,
-            &enabled(),
-            run.findings.clone(),
-            run.registry.clone(),
-        );
+        let mut policy = suspect_check::Policy::from_settings(&enabled());
+        policy.registry = registry;
+        let diags =
+            crate::diagnostics::diagnostics_under(None, &low, &policy, run.findings.clone());
         let d = diags
             .iter()
             .find(|d| {
@@ -295,8 +292,8 @@ mod tests {
         off.lint
             .rules
             .insert("team-summary".to_owned(), "off".to_owned());
-        let diags =
-            crate::diagnostics::compute_diagnostics_with(None, &low, &off, run.findings, None);
+        let policy = suspect_check::Policy::from_settings(&off);
+        let diags = crate::diagnostics::diagnostics_under(None, &low, &policy, run.findings);
         assert!(diags.iter().all(|d| d.message != "stub finding"));
     }
 

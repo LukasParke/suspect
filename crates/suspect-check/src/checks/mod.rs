@@ -71,7 +71,57 @@ pub fn check_document(cx: &Context<'_>, doc: &LowDoc) -> Vec<Finding> {
     if on(CheckId::LoadProfile) {
         out.extend(load_profile(cx.workspace, doc));
     }
+    #[cfg(feature = "sdk")]
+    if policy.sdk
+        && on(CheckId::Admission)
+        && let Some(ws) = cx.workspace
+    {
+        out.extend(admission(ws, doc));
+    }
     out
+}
+
+/// SDK generation admission for an OpenAPI 3.x document: the refusals,
+/// advice and contract limitations `suspect admission` reports. Findings
+/// located in another document are reported at this document's level;
+/// a document the contract compiler cannot open yields nothing.
+#[cfg(feature = "sdk")]
+#[must_use]
+pub fn admission(ws: &Arc<Workspace>, low: &LowDoc) -> Vec<Finding> {
+    use suspect_codegen::admission::FindingKind;
+    if !matches!(
+        low.sniff_family(),
+        SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32
+    ) {
+        return Vec::new();
+    }
+    let uri = low.uri();
+    let Ok(contract) = suspect_ir::contract::Contract::from_workspace(ws, uri) else {
+        return Vec::new();
+    };
+    // Shared admission refuses once per operation; a refusal of a shared
+    // value (the servers list, for instance) repeats verbatim at one spot.
+    let mut seen = std::collections::HashSet::new();
+    suspect_codegen::admission::review(&contract)
+        .findings
+        .into_iter()
+        .filter(|f| seen.insert((f.code, f.at.clone(), f.message.clone())))
+        .map(|f| {
+            let severity = match f.kind {
+                FindingKind::Refusal => Severity::Error,
+                FindingKind::Contract => Severity::Warning,
+                FindingKind::Advice => Severity::Info,
+            };
+            let here = f.source.as_ref().is_none_or(|s| s.document() == uri);
+            let mut finding =
+                Finding::new(CheckId::Admission, f.code, severity, uri.clone(), f.message);
+            if here {
+                finding.range = Some(f.at);
+                finding.pointer = f.source.map(|s| s.pointer().to_string().into_boxed_str());
+            }
+            finding
+        })
+        .collect()
 }
 
 /// Tree-sitter recovery errors from the parse.

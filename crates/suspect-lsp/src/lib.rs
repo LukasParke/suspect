@@ -329,7 +329,7 @@ impl Backend {
                     diagnostics::compute_diagnostics_with(
                         ws.as_ref(),
                         &doc.low,
-                        &policy.settings,
+                        &policy,
                         ts.findings,
                         ts.registry,
                     )
@@ -1535,7 +1535,7 @@ impl LanguageServer for Backend {
                 diagnostics::compute_diagnostics_with(
                     ws.as_ref(),
                     &doc.low,
-                    &policy.settings,
+                    &policy,
                     ts.findings,
                     ts.registry,
                 )
@@ -2528,12 +2528,8 @@ impl LanguageServer for Backend {
         };
         // The published diagnostics' policy, so "fix all" fixes what the
         // editor shows.
-        match actions::resolve_code_action(
-            doc,
-            &url,
-            ws.as_ref(),
-            &st.resolved.for_uri(&uri).settings,
-        ) {
+        let policy = suspect_check::Policy::from_resolved(&st.resolved.for_uri(&uri));
+        match actions::resolve_code_action_under(doc, &url, ws.as_ref(), &policy) {
             Some(resolved) => Ok(resolved),
             None => Ok(action),
         }

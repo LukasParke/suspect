@@ -2105,6 +2105,7 @@ dependencies = [
  "suspect-codegen",
  "suspect-config",
  "suspect-diag",
+ "suspect-ir",
  "suspect-lint",
  "suspect-low",
  "suspect-oas",

@@ -1027,6 +1027,48 @@ releasable on its own.
    admission findings in `check_document` behind the `sdk` feature. Tests:
    `sdk-operation-missing-id` is absent without `codegen:` and present with
    it; refusals appear in the editor when configured. Estimate: 0.5 day.
+   **Done** (the non-CLI half; `--sdk`/`--no-sdk` are step 5's and set
+   `Policy::sdk`). `suspect_check::codegen_configured(&Resolved)` is true
+   when any `codegen.*` key is set or the manifest lists `codegen`
+   targets or `release.targets` (an empty `"codegen": []`, as
+   `project init` writes, does not count); the manifest answer is cached
+   by file stamp. `Policy::from_resolved` sets `sdk` from it;
+   `Policy::from_settings` sees only the `codegen:` section, and
+   `Policy::default()` now has `sdk: false`. `check_document` runs
+   `checks::admission` (behind the `sdk` feature, which now also pulls in
+   `suspect-ir`) when `policy.sdk`, `CheckId::Admission` is selected and
+   a workspace is loaded, for OpenAPI 3.x documents. Severity comes from
+   the finding kind: refusal error, contract limitation warning, advice
+   info. Findings located in another document are reported at document
+   level. Identical admission findings (same code, range and message;
+   shared admission repeats a servers-list refusal once per operation)
+   are reported once. The LSP golden gains three lines: the session
+   workspace's manifest configures codegen, so `http-server-unsupported`
+   on its servers and `http-operation-id` on the two petstore operations
+   appear; its missing-`operationId` assertion now excludes the
+   admission code. The remaining admission codes are registered by family,
+   because per-code tables are impractical (about 200 `http-*` codes are
+   named at their refusal sites in `http_contract.rs` and
+   `http_protocol/`, and the contract compiler passes codes through
+   variables): `suspect_diag::RuleFamily { prefix, rule }`,
+   `suspect_codegen::admission::families()` (`http-`, `DUPLICATE_`,
+   `AMBIGUOUS_`, `INVALID_`, `invalid-`, `HTTP_REFERENCE`,
+   `UNSUPPORTED_`, `unsupported-`, `UNKNOWN_`, `RECURSIVE_`), and
+   `Registry::{with_families, family, families}`. `Registry::info` falls
+   back to the longest matching family when no table lists the code
+   (exact entries win, so `invalid-ref` stays a validate code), and a TS
+   rule id in a family counts as a collision. The registry corpus test
+   now runs admission too. The editor builds its policy with
+   `Policy::from_resolved` on the push, both pulls and fix-all
+   (`diagnostics::compute_diagnostics_for`, `compute_diagnostics_with`
+   now taking `&Resolved`, `diagnostics_under`,
+   `actions::resolve_code_action_under`); `compute_diagnostics(settings)`
+   stays for callers without a resolved configuration. Admission compiles
+   the contract on every run while `sdk` is on. With `sdk` on, a missing
+   or duplicate `operationId` is reported by validate, by the `sdk-*`
+   readiness code and by admission (`http-operation-id`,
+   `DUPLICATE_OPERATION_ID`); these differ in position and class, so they
+   are v2 alias candidates rather than v1 aliases.
 
 Total: about 9 days. The short version estimated 4-5 days. The difference is
 the LSP-only checks that have to move (step 3), the parity harness (step 5)

@@ -106,7 +106,24 @@ pub fn resolve_code_action(
     ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
     settings: &suspect_config::Settings,
 ) -> Option<CodeAction> {
-    let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, settings);
+    resolve_code_action_under(
+        doc,
+        uri,
+        ws,
+        &suspect_check::Policy::from_settings(settings),
+    )
+}
+
+/// [`resolve_code_action`] under a built policy (the server's, from the
+/// document's resolved configuration).
+#[must_use]
+pub fn resolve_code_action_under(
+    doc: &OpenDoc,
+    uri: &Url,
+    ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
+    policy: &suspect_check::Policy,
+) -> Option<CodeAction> {
+    let diags = crate::diagnostics::diagnostics_under(ws, &doc.low, policy, Vec::new());
     let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), &diags);
     if edits.is_empty() {
         return None;
