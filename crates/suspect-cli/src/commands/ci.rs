@@ -412,7 +412,7 @@ fn resolve_project(dir: &Path) -> ProjectConfig {
 }
 
 /// The check pass over the published spec (else the entry spec), with
-/// the project's configuration: what `suspect
+/// the project's configuration and findings baseline: what `suspect
 /// check --no-sdk` reports for it by hand. `validate` and `lint` are the same
 /// stage with the `suspect validate` / `suspect lint` filter. A rejected
 /// value in a section the stage reads fails it and names the value.
@@ -436,9 +436,9 @@ fn check_stage(name: &str, manifest: &Path, config: &ProjectConfig) -> StageResu
         return stage(name, 0, 0, 0, "no entry or published spec".to_owned());
     };
     let sections: &[&str] = match name {
-        "validate" => &["validate"],
-        "lint" => &["lint", "rules"],
-        _ => &["lint", "validate", "rules"],
+        "validate" => &["validate", "check"],
+        "lint" => &["lint", "rules", "check"],
+        _ => &["lint", "validate", "rules", "check"],
     };
     let mut problems: Vec<String> = Vec::new();
     for section in sections {
@@ -464,12 +464,19 @@ fn check_stage(name: &str, manifest: &Path, config: &ProjectConfig) -> StageResu
         Ok(outcome) => outcome,
         Err(error) => return stage(name, 1, 1, 0, error.to_string()),
     };
-    let errors = outcome
-        .findings
-        .iter()
-        .filter(|f| f.severity == suspect_diag::Severity::Error)
-        .count();
-    let warnings = outcome.findings.len() - errors;
+    let baseline = match resolved
+        .settings
+        .check
+        .baseline
+        .as_deref()
+        .map(check::baseline::Baseline::read)
+        .transpose()
+    {
+        Ok(baseline) => baseline,
+        Err(error) => return stage(name, 1, 1, 0, error.to_string()),
+    };
+    let shown = check::Shown::new(&outcome, baseline.as_ref());
+    let (errors, warnings) = shown.counts();
     let mut summary = spec.display().to_string();
     if let Some(ruleset) = &resolved.settings.lint.ruleset
         && name != "validate"
@@ -479,6 +486,9 @@ fn check_stage(name: &str, manifest: &Path, config: &ProjectConfig) -> StageResu
     let floor = resolved.settings.lint.floor();
     if floor != suspect_config::SeverityName::Hint {
         summary.push_str(&format!(", at or above {}", floor.label()));
+    }
+    if shown.baselined() > 0 {
+        summary.push_str(&format!(", {} baselined", shown.baselined()));
     }
     stage(name, i32::from(errors > 0), errors, warnings, summary)
 }

@@ -656,6 +656,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 checks: Some(commands::check::VALIDATE.to_vec()),
                 rules: None,
                 sdk: None,
+                write_baseline: None,
                 format: findings.format,
             })
         }
@@ -679,6 +680,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 checks: Some(commands::check::LINT.to_vec()),
                 rules: None,
                 sdk: None,
+                write_baseline: None,
                 format: findings.format,
             })
         }

@@ -5,7 +5,10 @@
 //! functions the language server calls, so the terminal, CI and the
 //! editor agree on codes, severities and ranges. `validate` and `lint`
 //! run this pass with a check filter ([`VALIDATE`], [`LINT`]), and so do
-//! the `ci` check stages.
+//! the `ci` check stages. A findings baseline ([`baseline`]) then hides
+//! recorded findings before the exit status is computed.
+
+pub mod baseline;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -13,7 +16,7 @@ use std::sync::Arc;
 
 use clap::{Args, ValueEnum};
 use rayon::prelude::*;
-use serde_json::json;
+use serde_json::{Value, json};
 use suspect_check::{CheckSet, Context, Policy, Registry};
 use suspect_config::{Layer, Raw, Resolved};
 use suspect_diag::render::{self, Sources};
@@ -22,6 +25,7 @@ use suspect_ref::{Workspace, WorkspaceBuilder};
 use suspect_source::Uri;
 
 use crate::{Findings, FindingsFormat};
+use baseline::Baseline;
 
 /// What `suspect validate` runs: document structure and semantics.
 pub const VALIDATE: &[CheckId] = &[
@@ -114,6 +118,13 @@ pub struct CheckArgs {
     /// JSON array of absolute document paths; deny every unlisted reference load.
     #[arg(long)]
     pub reference_allowlist: Option<PathBuf>,
+    /// Findings baseline: findings recorded there are hidden and do not
+    /// fail the run (default: `check.baseline`).
+    #[arg(long, value_name = "FILE")]
+    pub baseline: Option<PathBuf>,
+    /// Write every current finding to this baseline file and exit 0.
+    #[arg(long, value_name = "FILE", conflicts_with = "baseline")]
+    pub write_baseline: Option<PathBuf>,
     /// Output format for the finding list.
     #[command(flatten)]
     pub findings: Findings,
@@ -122,7 +133,7 @@ pub struct CheckArgs {
 /// `suspect check`.
 ///
 /// # Errors
-/// Configuration, ruleset and TypeScript rule errors (exit 2).
+/// Configuration, ruleset, TypeScript rule and baseline errors (exit 2).
 pub fn check(args: CheckArgs) -> anyhow::Result<i32> {
     let only: Vec<CheckId> = if args.parse_only {
         PARSE.to_vec()
@@ -147,7 +158,8 @@ pub fn check(args: CheckArgs) -> anyhow::Result<i32> {
             "validate.reference_allowlist",
             args.reference_allowlist.map(Raw::Path),
             "--reference-allowlist",
-        );
+        )
+        .set("check.baseline", args.baseline.map(Raw::Path), "--baseline");
     let sdk = if args.sdk {
         Some(true)
     } else if args.no_sdk {
@@ -161,6 +173,7 @@ pub fn check(args: CheckArgs) -> anyhow::Result<i32> {
         rules: only.contains(&CheckId::Rules).then_some(true),
         checks: (!only.is_empty()).then_some(only),
         sdk,
+        write_baseline: args.write_baseline,
         format: args.findings.format,
     })
 }
@@ -177,15 +190,17 @@ pub struct Request<'a> {
     pub rules: Option<bool>,
     /// `--sdk` / `--no-sdk`; `None` follows the configuration.
     pub sdk: Option<bool>,
+    /// `--write-baseline`.
+    pub write_baseline: Option<PathBuf>,
     /// Output format.
     pub format: FindingsFormat,
 }
 
-/// Resolves the configuration, runs the pass and prints. Returns 1 when
-/// an error-severity finding remains.
+/// Resolves the configuration, runs the pass, applies the baseline and
+/// prints. Returns 1 when an error-severity finding remains.
 ///
 /// # Errors
-/// Configuration, ruleset and TypeScript rule errors (exit 2).
+/// Configuration, ruleset, TypeScript rule and baseline errors (exit 2).
 pub fn command(request: &Request<'_>) -> anyhow::Result<i32> {
     let resolved = crate::settings::resolve(request.paths, request.flags.clone())?;
     let options = Options::new(
@@ -195,8 +210,21 @@ pub fn command(request: &Request<'_>) -> anyhow::Result<i32> {
         request.sdk,
     );
     let outcome = run(request.paths, &resolved, &options)?;
-    print(&outcome, request.format)?;
-    Ok(i32::from(outcome.has_error()))
+    if let Some(path) = &request.write_baseline {
+        let count = baseline::write(path, &outcome.findings)?;
+        eprintln!("wrote {count} finding(s) to {}", path.display());
+        return Ok(0);
+    }
+    let baseline = resolved
+        .settings
+        .check
+        .baseline
+        .as_deref()
+        .map(Baseline::read)
+        .transpose()?;
+    let shown = Shown::new(&outcome, baseline.as_ref());
+    print(&outcome, &shown, request.format)?;
+    Ok(i32::from(shown.failed()))
 }
 
 /// What one run checks and how.
@@ -228,7 +256,7 @@ impl Options {
     }
 }
 
-/// The findings of one run, after policy.
+/// The findings of one run, after policy and before the baseline.
 pub struct Outcome {
     /// Findings to report, sorted by path, position and code.
     pub findings: Vec<Finding>,
@@ -612,36 +640,101 @@ fn shown_path(path: &Path) -> String {
         .to_string()
 }
 
-/// Prints the findings of `outcome` in `format`.
+/// The findings a run reports once the baseline is applied.
+pub struct Shown<'a> {
+    outcome: &'a Outcome,
+    /// Per finding: its baseline key, and whether the baseline covers it.
+    marks: Vec<(baseline::Key, bool)>,
+    with_baseline: bool,
+}
+
+impl<'a> Shown<'a> {
+    /// Marks the findings `baseline` covers.
+    #[must_use]
+    pub fn new(outcome: &'a Outcome, baseline: Option<&Baseline>) -> Self {
+        let base = baseline.map_or_else(baseline::default_base, Baseline::base);
+        let keys: Vec<baseline::Key> = outcome
+            .findings
+            .iter()
+            .map(|f| baseline::Key::of(f, &base))
+            .collect();
+        let covered = baseline.map_or_else(|| vec![false; keys.len()], |b| b.covers(&keys));
+        Self {
+            outcome,
+            marks: keys.into_iter().zip(covered).collect(),
+            with_baseline: baseline.is_some(),
+        }
+    }
+
+    /// Findings the baseline does not cover.
+    pub fn new_findings(&self) -> impl Iterator<Item = &'a Finding> + '_ {
+        self.outcome
+            .findings
+            .iter()
+            .zip(&self.marks)
+            .filter(|(_, (_, covered))| !covered)
+            .map(|(f, _)| f)
+    }
+
+    /// How many findings the baseline hides.
+    #[must_use]
+    pub fn baselined(&self) -> usize {
+        self.marks.iter().filter(|(_, covered)| *covered).count()
+    }
+
+    /// Whether a finding the baseline does not cover is an error.
+    #[must_use]
+    pub fn failed(&self) -> bool {
+        self.new_findings().any(|f| f.severity == Severity::Error)
+    }
+
+    /// Error and lower counts of the findings the baseline does not cover.
+    #[must_use]
+    pub fn counts(&self) -> (usize, usize) {
+        let errors = self
+            .new_findings()
+            .filter(|f| f.severity == Severity::Error)
+            .count();
+        (errors, self.new_findings().count() - errors)
+    }
+}
+
+/// Prints the findings `shown` reports in `format`.
 ///
 /// # Errors
 /// Serialization and write failures.
-pub fn print(outcome: &Outcome, format: FindingsFormat) -> anyhow::Result<()> {
+pub fn print(outcome: &Outcome, shown: &Shown<'_>, format: FindingsFormat) -> anyhow::Result<()> {
     let docs = &outcome.documents;
-    let findings = &outcome.findings;
+    let fresh: Vec<Finding> = shown.new_findings().cloned().collect();
     match format {
         FindingsFormat::Text => {
             let mut out = std::io::stdout().lock();
-            text(findings, docs, &outcome.registry, &mut out)?;
+            text(&fresh, docs, &outcome.registry, &mut out)?;
             if !outcome.suppressed.is_empty() {
                 eprintln!("{} suppressed finding(s) hidden", outcome.suppressed.len());
             }
+            if shown.baselined() > 0 {
+                eprintln!("{} baselined finding(s) hidden", shown.baselined());
+            }
         }
         FindingsFormat::Json => {
-            let mut report = render::json_report(findings, &outcome.suppressed, docs);
+            let mut report = render::json_report(&fresh, &outcome.suppressed, docs);
             if let Some(entries) = report["findings"].as_array_mut() {
-                for (entry, finding) in entries.iter_mut().zip(findings) {
+                for (entry, finding) in entries.iter_mut().zip(&fresh) {
                     if let Some(alias) = alias_of(finding, &outcome.registry) {
                         entry["alias_of"] = json!(alias);
                     }
                 }
             }
+            if shown.with_baseline {
+                report["baselined"] = json!(shown.baselined());
+            }
             crate::output::print_json(&report)?;
         }
         FindingsFormat::Sarif => {
-            crate::output::print_json(&render::sarif(findings, docs, &*outcome.registry))?;
+            crate::output::print_json(&sarif(outcome, shown))?;
         }
-        FindingsFormat::Junit => print!("{}", render::junit(findings, docs)),
+        FindingsFormat::Junit => print!("{}", render::junit(&fresh, docs)),
     }
     Ok(())
 }
@@ -684,4 +777,21 @@ fn alias_of<'r>(finding: &Finding, registry: &'r Registry) -> Option<&'r str> {
             .iter()
             .any(|r| r.code == *alias)
     })
+}
+
+/// The SARIF log: every finding, with its baseline key as
+/// `partialFingerprints["suspect/v1"]`, and with a baseline in use,
+/// `baselineState` `new` or `unchanged` (baselined findings stay in the
+/// log so code scanning keeps their alerts open).
+fn sarif(outcome: &Outcome, shown: &Shown<'_>) -> Value {
+    let mut log = render::sarif(&outcome.findings, &outcome.documents, &*outcome.registry);
+    if let Some(results) = log["runs"][0]["results"].as_array_mut() {
+        for (result, (key, covered)) in results.iter_mut().zip(&shown.marks) {
+            result["partialFingerprints"] = json!({ "suspect/v1": key.fingerprint() });
+            if shown.with_baseline {
+                result["baselineState"] = json!(if *covered { "unchanged" } else { "new" });
+            }
+        }
+    }
+    log
 }

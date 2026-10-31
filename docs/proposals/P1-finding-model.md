@@ -1086,6 +1086,23 @@ releasable on its own.
    adding one finding exits 1 and shows only that one; moving an operation to
    a different line keeps it baselined; renaming the path does not.
    Estimate: 0.5 day.
+   **Done.** `suspect_cli::commands::check::baseline` (`Key`, `Baseline`,
+   `write`). The key is `(document, pointer, code)` with the document
+   relative to the baseline file's directory (`..` allowed); the file is
+   the format above, sorted, newline-terminated, and an unknown version,
+   unreadable file or repeated key exits 2. A key's first `count`
+   findings (in output order) are baselined, the rest are new.
+   `--write-baseline FILE` writes every post-policy finding and exits 0
+   (it conflicts with `--baseline`). `--baseline` is the flag layer of
+   `check.baseline` (new setting row, `suspect_config::CheckSettings`),
+   which `validate`, `lint` and the `ci` check stages read too; a
+   filtered run only ever has fewer findings per key. Text prints `N
+   baselined finding(s) hidden` on stderr, JSON adds `"baselined": N`,
+   and SARIF keeps baselined findings with `baselineState: "unchanged"`
+   (others `"new"`) so code scanning keeps their alerts.
+   `partialFingerprints["suspect/v1"]` is the SHA-256 of the NUL-joined
+   key (hex), set with or without a baseline. Tests:
+   `tests/baseline.rs` and the module's unit tests.
 9. **SDK category and admission as diagnostics.** `policy.sdk` detection,
    admission findings in `check_document` behind the `sdk` feature. Tests:
    `sdk-operation-missing-id` is absent without `codegen:` and present with

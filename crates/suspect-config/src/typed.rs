@@ -108,6 +108,7 @@ pub(crate) fn build(
     s.gateway.upstream = string("gateway.upstream");
 
     s.diff.baseline = string("diff.baseline");
+    s.check.baseline = path("check.baseline");
 
     s.rules.enabled = boolean("rules.enabled").unwrap_or(false);
     s.rules.roots = match (list("rules.roots"), values.get("rules.roots")) {

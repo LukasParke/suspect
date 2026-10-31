@@ -315,6 +315,8 @@ fn sarif_and_junit_render_check_findings() {
     for result in results {
         let region = &result["locations"][0]["physicalLocation"]["region"];
         assert!(region["endLine"].is_u64(), "{result}");
+        assert!(result["partialFingerprints"]["suspect/v1"].is_string());
+        assert!(result.get("baselineState").is_none(), "no baseline in use");
     }
     let rule = log["runs"][0]["tool"]["driver"]["rules"]
         .as_array()

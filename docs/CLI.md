@@ -69,6 +69,10 @@ Options:
           Assert JSON-Schema `format` keywords (`validate.strict_format`)
       --reference-allowlist <REFERENCE_ALLOWLIST>
           JSON array of absolute document paths; deny every unlisted reference load
+      --baseline <FILE>
+          Findings baseline: findings recorded there are hidden and do not fail the run (default: `check.baseline`)
+      --write-baseline <FILE>
+          Write every current finding to this baseline file and exit 0
       --format <FORMAT>
           Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help
@@ -1263,9 +1267,9 @@ Options:
 
 | Command | Status | Meaning |
 |---|---|---|
-| `suspect check` | `0`, `1`, `2` | 1: an error-severity finding remains after policy; 2: a configuration or ruleset error, or a TypeScript rule id that reuses a builtin code |
-| `suspect validate` | `0`, `1`, `2` | 1: an error-severity finding from the validation checks; 2: a configuration error |
-| `suspect lint` | `0`, `1`, `2` | 1: an error-severity lint, markdown or TypeScript rule finding; 2: a configuration or ruleset error |
+| `suspect check` | `0`, `1`, `2` | 1: an error-severity finding remains after policy and the baseline; 2: a configuration, ruleset or baseline error, or a TypeScript rule id that reuses a builtin code |
+| `suspect validate` | `0`, `1`, `2` | 1: an error-severity finding from the validation checks; 2: a configuration or baseline error |
+| `suspect lint` | `0`, `1`, `2` | 1: an error-severity lint, markdown or TypeScript rule finding; 2: a configuration, ruleset or baseline error |
 | `suspect fmt` | `0`, `2` | 2: the input cannot be read or written |
 | `suspect bundle` | `0`, `1`, `2` | 1: an unresolved `$ref` or a load error |
 | `suspect upgrade` | `0`, `1`, `2` | 1: the upgraded document fails validation |

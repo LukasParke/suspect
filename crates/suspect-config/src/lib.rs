@@ -64,6 +64,8 @@ pub struct Settings {
     pub gateway: GatewaySettings,
     /// `diff:` section.
     pub diff: DiffSettings,
+    /// `check:` section.
+    pub check: CheckSettings,
     /// `rules:` section.
     pub rules: RulesSettings,
     /// `extensions:` section, opaque here; the language server's
@@ -283,6 +285,14 @@ impl Default for GatewaySettings {
 pub struct DiffSettings {
     /// Git ref compared against for breaking changes.
     pub baseline: Option<String>,
+}
+
+/// `check:` settings.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CheckSettings {
+    /// Findings baseline file (`suspect check --baseline`), already
+    /// resolved against the file that set it.
+    pub baseline: Option<PathBuf>,
 }
 
 /// `rules:` settings.

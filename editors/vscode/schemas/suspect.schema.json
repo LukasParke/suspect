@@ -3,6 +3,17 @@
   "additionalProperties": false,
   "description": "Workspace-wide settings. Every suspect command, the language server and CI read this file, so the editor, a shell and CI see identical findings.",
   "properties": {
+    "check": {
+      "additionalProperties": false,
+      "description": "The `suspect check` gate.",
+      "properties": {
+        "baseline": {
+          "description": "Findings baseline file: findings recorded there do not fail `check`, `validate`, `lint` or the `ci` check stage. Write one with `suspect check --write-baseline`. The editor ignores it.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "codegen": {
       "additionalProperties": false,
       "description": "Defaults applied to SDK generation.",

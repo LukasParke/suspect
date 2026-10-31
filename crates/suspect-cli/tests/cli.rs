@@ -191,6 +191,7 @@ fn lint_exit_codes_clean_vs_findings() {
             checks: Some(check::LINT.to_vec()),
             rules: None,
             sdk: None,
+            write_baseline: None,
             format: FindingsFormat::Text,
         })
         .expect("lint runs")

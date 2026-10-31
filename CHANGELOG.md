@@ -41,8 +41,8 @@ entry is a summary rather than a generated list.
   vendor extensions, configuration files, TypeScript rules, and SDK
   readiness when codegen is configured) under one policy, and exits 1 on
   an error-severity finding; `validate` and `lint` are filters of it
-  (`--only`). Inline suppression (`# suspect-disable`,
-  `x-suspect-disable`). Text, JSON, SARIF
+  (`--only`). Inline (`# suspect-disable`, `x-suspect-disable`) and
+  baseline (`--baseline`, `check.baseline`) suppression. Text, JSON, SARIF
   and JUnit output. The parse census `check` used to print is in `stats`.
   Finding JSON is `{"findings": [...], "suppressed": [...]}` with
   lowercase severities, and lint rules that duplicate a validation code

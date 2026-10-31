@@ -147,6 +147,7 @@ at it (guarded by `prepareRename`; cross-file edits land in one atomic
 
 ```console
 $ suspect check spec.yaml              # every check the editor runs; exit 1 on errors
+$ suspect check spec.yaml --format sarif --baseline .suspect-baseline.json
 $ suspect validate spec.yaml           # check, structure and semantics only
 $ suspect lint spec.yaml --format json # check, lint/markdown/TypeScript rules only
 $ suspect bundle api.yaml --strategy inline -o bundled.yaml

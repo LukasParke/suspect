@@ -23,6 +23,9 @@
           "message": {
             "text": "get operation is missing an operationId"
           },
+          "partialFingerprints": {
+            "suspect/v1": "90ce7c9487e19c6652ed90073c8d78a3f8a6c98934fd58f941be35f21571f147"
+          },
           "ruleId": "oas-operation-missing-operationId",
           "ruleIndex": 0
         },
@@ -45,6 +48,9 @@
           ],
           "message": {
             "text": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response"
+          },
+          "partialFingerprints": {
+            "suspect/v1": "3873a530a7dc75a4f652b96bb629a88f805dcdf80821e47dfb45c57c8b10f288"
           },
           "ruleId": "oas-operation-no-error-response",
           "ruleIndex": 1
@@ -69,6 +75,9 @@
           "message": {
             "text": "path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it"
           },
+          "partialFingerprints": {
+            "suspect/v1": "0f0b582043f47eb2c607a5ef0bdacb8f277d24efab4f33b1d6fd5d564fe1bd73"
+          },
           "ruleId": "oas-path-param-not-declared",
           "ruleIndex": 2
         },
@@ -92,6 +101,9 @@
           "message": {
             "text": "get operation is missing an operationId"
           },
+          "partialFingerprints": {
+            "suspect/v1": "a5f010ebf6497c4830ca370b5f2e0fe37e998a8a238604e30003a2aab05a8225"
+          },
           "ruleId": "oas-operation-missing-operationId",
           "ruleIndex": 0
         },
@@ -114,6 +126,9 @@
           ],
           "message": {
             "text": "operation `<unnamed>` (get) declares no `default` or 4XX/5XX response"
+          },
+          "partialFingerprints": {
+            "suspect/v1": "9669e1dfbf95a4cd74fbc2a75f3debfe0db1c9d0011e8c5c96a92c9c6973a8a9"
           },
           "ruleId": "oas-operation-no-error-response",
           "ruleIndex": 1
