@@ -1,6 +1,6 @@
 # `suspect` command reference
 
-<!-- Generated from the clap command tree by crates/suspect-cli/tests/cli_reference.rs; do not edit by hand. Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`. -->
+<!-- Generated from the clap command tree by crates/suspect-cli/tests/reference_docs.rs; do not edit by hand. Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test reference_docs`. -->
 
 Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C); per command: [Exit status](#exit-status).
 

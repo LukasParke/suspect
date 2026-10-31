@@ -518,6 +518,17 @@ would have to be deleted when P1 lands.
 6. **`reference_docs.rs` and `SUSPECT_BLESS` everywhere.** Folds
    `cli_reference.rs` into `reference_docs.rs` and renames the
    feature-manifest variable with the alias. 0.25 day.
+   **Done.** `reference_docs.rs` has one `bless(page, rendered)` helper and
+   one test per page; the generated header of `reference/cli.md` names the
+   new test. `feature_manifest` reads `SUSPECT_BLESS`, and
+   `SUSPECT_REGEN_FEATURES=1` still writes the page after printing
+   `SUSPECT_REGEN_FEATURES is deprecated; use SUSPECT_BLESS=1`. `BLESS_TESTS`
+   in `xtask/src/main.rs` now lists every test that rewrites a checked-in
+   file under `SUSPECT_BLESS`: `reference_docs`, `feature_manifest`,
+   `json_schema` (the VS Code schemas, P2.7), and the `finding_output` and
+   `lsp_diagnostics_golden` goldens (P1), so `cargo xtask bless` producing
+   no diff checks all of them. `CONTRIBUTING.md` "Generated files" lists
+   them.
 7. **Generated pages after P1/P2.** Adds `reference/diagnostics.md` (after
    P1), `reference/config.md` + `suspect.schema.json` (after P2.7) and
    `reference/environment.md` (after P2.4). Each is one render function plus

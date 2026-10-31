@@ -1,12 +1,17 @@
-//! Keeps `docs/reference/cli.md` in lockstep with the clap command tree.
+//! Keeps the generated pages under `docs/reference/` in lockstep with
+//! their sources. Each page has one render function and one test that
+//! compares it with the checked-in file:
 //!
-//! The reference is rendered from [`suspect_cli::Cli`] itself, so a new
-//! command or flag that is not reflected in the checked-in file fails this
-//! test. Regenerate with:
+//! - `cli.md` from the clap command tree ([`suspect_cli::Cli`]), so a new
+//!   command or flag that is not reflected in the file fails here.
+//!
+//! Regenerate every page with:
 //!
 //! ```text
-//! SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference
+//! SUSPECT_BLESS=1 cargo test -p suspect-cli --test reference_docs
 //! ```
+//!
+//! (`cargo xtask bless` runs this and the other bless tests.)
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -29,14 +34,14 @@ fn render(cmd: &mut clap::Command, path: &str, out: &mut String) {
     }
 }
 
-fn reference() -> String {
+fn cli_page() -> String {
     let mut cmd = suspect_cli::Cli::command().term_width(100);
     cmd.build();
     let mut out = String::from(
         "# `suspect` command reference\n\n\
          <!-- Generated from the clap command tree by \
-         crates/suspect-cli/tests/cli_reference.rs; do not edit by hand. \
-         Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`. -->\n\n\
+         crates/suspect-cli/tests/reference_docs.rs; do not edit by hand. \
+         Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test reference_docs`. -->\n\n\
          Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C); per command: [Exit status](#exit-status).\n\n",
     );
     render(&mut cmd, "suspect", &mut out);
@@ -117,18 +122,25 @@ fn renamed(out: &mut String) {
     .unwrap();
 }
 
-#[test]
-fn the_cli_reference_matches_the_command_tree() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference/cli.md");
-    let expected = reference();
+/// Compares `rendered` with `docs/reference/<page>`, or writes it when
+/// `SUSPECT_BLESS` is set.
+fn bless(page: &str, rendered: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../docs/reference")
+        .join(page);
     if std::env::var_os("SUSPECT_BLESS").is_some() {
-        std::fs::write(&path, &expected).unwrap();
+        std::fs::write(&path, rendered).unwrap();
         return;
     }
     let actual = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(
-        actual == expected,
-        "docs/reference/cli.md is stale; regenerate with \
-         `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`"
+        actual == rendered,
+        "docs/reference/{page} is stale; regenerate with \
+         `SUSPECT_BLESS=1 cargo test -p suspect-cli --test reference_docs`"
     );
+}
+
+#[test]
+fn the_cli_reference_matches_the_command_tree() {
+    bless("cli.md", &cli_page());
 }

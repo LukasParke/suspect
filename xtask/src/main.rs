@@ -79,20 +79,17 @@ fn canonical_task(task: &str) -> (&str, Option<String>) {
 
 /// The tests that compare a checked-in generated file with its renderer and
 /// rewrite it when `SUSPECT_BLESS` is set: (package, test target, extra env).
-/// `feature_manifest` still reads `SUSPECT_REGEN_FEATURES` until P6 step 6
-/// moves it to `SUSPECT_BLESS`.
 type BlessTest = (
     &'static str,
     &'static str,
     &'static [(&'static str, &'static str)],
 );
 const BLESS_TESTS: &[BlessTest] = &[
-    ("suspect-cli", "cli_reference", &[]),
-    (
-        "suspect-codegen",
-        "feature_manifest",
-        &[("SUSPECT_REGEN_FEATURES", "1")],
-    ),
+    ("suspect-cli", "reference_docs", &[]),
+    ("suspect-codegen", "feature_manifest", &[]),
+    ("suspect-config", "json_schema", &[]),
+    ("suspect-cli", "finding_output", &[]),
+    ("suspect-cli", "lsp_diagnostics_golden", &[]),
 ];
 
 /// `cargo xtask bless`: runs every bless test with `SUSPECT_BLESS=1`.

@@ -72,13 +72,23 @@ cargo build -p suspect-cli && (cd editors/vscode && npm run test:host:smoke)
 
 ## Generated files
 
-- `docs/reference/cli.md` is rendered from the clap command tree. After changing a
-  command or flag, regenerate it:
-  `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`.
-  `cargo xtask bless` regenerates every generated doc (`docs/reference/cli.md`,
-  `docs/reference/sdk-features.md`) in one step.
-- `editors/vscode/dist` and `node_modules` are build output and are not
-  committed.
+`cargo xtask bless` regenerates every checked-in generated file in one step;
+each is compared with its renderer by a test that rewrites it under
+`SUSPECT_BLESS=1`:
+
+- `docs/reference/cli.md`, from the clap command tree
+  (`cargo test -p suspect-cli --test reference_docs`). Regenerate it after
+  changing a command or flag.
+- `docs/reference/sdk-features.md`, from the codegen feature registry
+  (`cargo test -p suspect-codegen --test feature_manifest`).
+- `editors/vscode/schemas/*.schema.json`, from the `suspect-config` setting
+  tables (`cargo test -p suspect-config --test json_schema`).
+- The finding-output and editor-diagnostics goldens under
+  `crates/suspect-cli/tests/fixtures/golden/` (`finding_output`,
+  `lsp_diagnostics_golden`).
+
+`editors/vscode/dist` and `node_modules` are build output and are not
+committed.
 
 ## Native SDK gates
 
