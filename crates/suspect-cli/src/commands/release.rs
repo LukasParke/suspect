@@ -194,7 +194,7 @@ pub fn release_plan(args: &ReleasePlanArgs) -> anyhow::Result<i32> {
     }
     let (Some(old), Some(new)) = (args.old.as_deref(), args.new.as_deref()) else {
         anyhow::bail!(
-            "usage: suspect release-plan <OLD> <NEW> | suspect release-plan --current <NEW> --baseline <REF>"
+            "usage: suspect release plan <OLD> <NEW> | suspect release plan --current <NEW> --baseline <REF>"
         );
     };
     render_plan(old, new, args.report.format)

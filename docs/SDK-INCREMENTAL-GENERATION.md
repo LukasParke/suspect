@@ -31,10 +31,10 @@ appears once and owns its language subdirectory. Unknown configuration keys and
 unsupported operations produce diagnostics.
 
 ```sh
-suspect codegen-session --config sdk-session.json --out generated
-suspect codegen-session --config sdk-session.json --out generated --check --format json
-suspect codegen-session --config sdk-session.json --out generated --preview --format json
-suspect codegen-session --config sdk-session.json --out generated --watch --preview --format json
+suspect gen session --config sdk-session.json --out generated
+suspect gen session --config sdk-session.json --out generated --check --format json
+suspect gen session --config sdk-session.json --out generated --preview --format json
+suspect gen session --config sdk-session.json --out generated --watch --preview --format json
 ```
 
 The CLI resolves `--out` from the invocation directory. The editor deliberately
@@ -138,8 +138,8 @@ and invalidates obsolete/error previews. See [editor integration](SDK-EDITOR-PRE
 Compare two session configurations, each pointing at its own source snapshot:
 
 ```sh
-suspect codegen-compare --before baseline/sdk-session.json --after candidate/sdk-session.json --format json
-suspect codegen-compare --before baseline/sdk-session.json --after candidate/sdk-session.json
+suspect diff sdk baseline/sdk-session.json candidate/sdk-session.json --format json
+suspect diff sdk baseline/sdk-session.json candidate/sdk-session.json
 ```
 
 JSON preserves separate wire/native deltas, before/after symbols, original source

@@ -69,14 +69,14 @@ ownership-aware artifact writer with a stable Terraform-specific owner.
 Main's separately registered command uses the same parse/plan/emit boundary:
 
 ```sh
-suspect codegen-terraform \
+suspect gen terraform \
   crates/suspect-codegen/tests/fixtures/terraform-v1/openapi.json \
   --mapping crates/suspect-codegen/tests/fixtures/terraform-v1/mapping.json \
   --target-config crates/suspect-codegen/tests/fixtures/terraform-v1/target.json \
   --out generated-terraform --format json
 
 # Read-only ownership/drift check, including absent/current/user-edited outputs.
-suspect codegen-terraform \
+suspect gen terraform \
   crates/suspect-codegen/tests/fixtures/terraform-v1/openapi.json \
   --mapping crates/suspect-codegen/tests/fixtures/terraform-v1/mapping.json \
   --target-config crates/suspect-codegen/tests/fixtures/terraform-v1/target.json \

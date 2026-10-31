@@ -15,7 +15,7 @@ the [command reference](CLI.md). Every command shares one settings file,
 
 ### Testing and load
 
-- [Load testing with suspect load](LOAD-TESTING.md)
+- [Load testing with suspect test load](LOAD-TESTING.md)
 - [Test credentials](TEST-CREDENTIALS.md)
 
 ### SDK and application generation

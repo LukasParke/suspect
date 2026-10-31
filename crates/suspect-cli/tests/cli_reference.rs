@@ -37,10 +37,84 @@ fn reference() -> String {
          <!-- Generated from the clap command tree by \
          crates/suspect-cli/tests/cli_reference.rs; do not edit by hand. \
          Regenerate with `SUSPECT_BLESS=1 cargo test -p suspect-cli --test cli_reference`. -->\n\n\
-         Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C).\n\n",
+         Exit codes: `0` clean, `1` findings or failed checks, `2` usage or environment error, `130` interrupted (long-running servers exit `0` on Ctrl-C); per command: [Exit status](#exit-status).\n\n",
     );
     render(&mut cmd, "suspect", &mut out);
+    exit_statuses(&mut out);
+    renamed(&mut out);
     out
+}
+
+/// The per-command exit table from `exit::DOCUMENTED`.
+fn exit_statuses(out: &mut String) {
+    writeln!(out, "## Exit status\n").unwrap();
+    writeln!(
+        out,
+        "`0` clean, `1` findings or failed checks, `2` usage or environment \
+         error, `130` interrupted. Every command that is not a server also \
+         exits `130` on Ctrl-C; the table lists `130` only where the command \
+         stops gracefully and reports first. Servers exit `0` on Ctrl-C.\n"
+    )
+    .unwrap();
+    writeln!(out, "| Command | Status | Meaning |\n|---|---|---|").unwrap();
+    for (path, statuses, meaning) in suspect_cli::exit::DOCUMENTED {
+        let codes: Vec<String> = statuses
+            .iter()
+            .map(|status| format!("`{}`", status.code()))
+            .collect();
+        writeln!(
+            out,
+            "| `suspect {path}` | {} | {meaning} |",
+            codes.join(", ")
+        )
+        .unwrap();
+    }
+    out.push('\n');
+}
+
+/// The legacy rewrite table: old names keep working until they are removed.
+fn renamed(out: &mut String) {
+    use suspect_cli::legacy::{DEFAULT_SUB, RENAMED, removed_in};
+    writeln!(out, "## Renamed commands\n").unwrap();
+    writeln!(
+        out,
+        "The old names still run the new command and print one deprecation \
+         line on stderr; stdout and the exit status are unchanged. They are \
+         removed in {}. Under `diff`, `test` and `gen`, a first argument named \
+         like a subcommand (`suspect diff breaking other.yaml`) runs that \
+         subcommand; write `./breaking` for a file.\n",
+        removed_in()
+    )
+    .unwrap();
+    writeln!(out, "| Old | New | Note |\n|---|---|---|").unwrap();
+    for row in RENAMED {
+        let note = match row.old {
+            "arazzo-diff" => "the family of NEW picks the differ",
+            "reverse" => "positionals are `SPEC SOURCE`",
+            "codegen-compare" => "`--before`/`--after` are positionals `OLD NEW`",
+            "overlay-dry-run" => "targets `overlay apply` rejects are rejected",
+            _ => "",
+        };
+        writeln!(
+            out,
+            "| `suspect {}` | `suspect {}` | {note} |",
+            row.old,
+            row.replacement()
+        )
+        .unwrap();
+    }
+    for (group, sub) in DEFAULT_SUB {
+        writeln!(
+            out,
+            "| `suspect {group} <args>` | `suspect {group} {sub} <args>` | |"
+        )
+        .unwrap();
+    }
+    writeln!(
+        out,
+        "| `suspect why CONSTRAINT --spec SPEC` | `suspect why SPEC CONSTRAINT` | |"
+    )
+    .unwrap();
 }
 
 #[test]

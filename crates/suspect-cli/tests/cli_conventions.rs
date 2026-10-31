@@ -37,7 +37,7 @@ fn values(arg: &clap::Arg) -> Vec<String> {
 
 /// `(command, flag, reason)` triples exempt from the rules below.
 const ALLOWLIST: &[(&str, &str, &str)] = &[(
-    "suspect replay",
+    "suspect test replay",
     "diff",
     "prints response-body diffs of a live replay; there is nothing to --check",
 )];
@@ -189,15 +189,20 @@ fn sarif_is_rejected_by_clap_where_it_was_never_rendered() {
             "suspect", "why", "type", "--spec", "a.yaml", "--format", "sarif",
         ],
     ] {
-        let err = suspect_cli::Cli::try_parse_from(argv).expect_err("sarif must be rejected");
+        let argv = argv.iter().map(Into::into).collect();
+        let (argv, _) = suspect_cli::legacy::rewrite(argv);
+        let err = suspect_cli::Cli::try_parse_from(&argv).expect_err("sarif must be rejected");
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue, "{argv:?}");
     }
 }
 
+/// Parses like the binary does: old names go through the legacy rewrite.
 fn parse(argv: &[&str]) -> suspect_cli::Command {
-    let argv: Vec<&str> = std::iter::once("suspect")
+    let argv: Vec<std::ffi::OsString> = std::iter::once("suspect")
         .chain(argv.iter().copied())
+        .map(Into::into)
         .collect();
+    let (argv, _) = suspect_cli::legacy::rewrite(argv);
     match suspect_cli::Cli::try_parse_from(&argv) {
         Ok(cli) => cli.command,
         Err(err) => panic!("{argv:?}: {err}"),
@@ -295,7 +300,7 @@ fn renamed_flags_keep_their_old_spellings() {
 
 #[test]
 fn old_switches_map_onto_the_new_flags() {
-    use suspect_cli::{Command, DocFormat};
+    use suspect_cli::{Command, DocFormat, GenCmd, TestCmd};
     // fmt --json/--yaml are hidden and conflict with --to.
     let Command::Fmt { json, out, .. } = parse(&["fmt", "a.yaml", "--json"]) else {
         panic!("fmt")
@@ -314,16 +319,17 @@ fn old_switches_map_onto_the_new_flags() {
             .is_err()
     );
     // contract --json is the old --to json.
-    let Command::Contract(args) = parse(&["contract", "a.yaml", "--json"]) else {
+    let Command::Gen(GenCmd::Contract(args)) = parse(&["contract", "a.yaml", "--json"]) else {
         panic!("contract")
     };
     assert!(args.json);
-    let Command::Contract(args) = parse(&["contract", "a.yaml", "--to", "json"]) else {
+    let Command::Gen(GenCmd::Contract(args)) = parse(&["contract", "a.yaml", "--to", "json"])
+    else {
         panic!("contract")
     };
     assert_eq!(args.to, Some(DocFormat::Json));
     // gen --diff alone keeps working and implies --check.
-    let Command::Gen { diff, check, .. } =
+    let Command::Gen(GenCmd::Template { diff, check, .. }) =
         parse(&["gen", "a.yaml", "--preset", "docs-md", "--diff"])
     else {
         panic!("gen")
@@ -346,7 +352,8 @@ fn old_switches_map_onto_the_new_flags() {
             "--offline",
         ],
     );
-    let Command::Test { cassette, .. } = parse(&["test", "a.arazzo.yaml", "--cassette", "c.jsonl"])
+    let Command::Test(TestCmd::Run { cassette, .. }) =
+        parse(&["test", "a.arazzo.yaml", "--cassette", "c.jsonl"])
     else {
         panic!("test")
     };
@@ -356,42 +363,183 @@ fn old_switches_map_onto_the_new_flags() {
 #[test]
 fn gateway_mode_is_checked_by_clap() {
     use suspect_cli::commands::gateway::GatewayMode;
-    let suspect_cli::Command::Gateway { mode, upstream, .. } = parse(&[
-        "gateway",
-        "a.yaml",
-        "--mode",
-        "proxy",
-        "--upstream",
-        "http://localhost:9",
-    ]) else {
+    let suspect_cli::Command::Traffic(suspect_cli::TrafficCmd::Gateway { mode, upstream, .. }) =
+        parse(&[
+            "gateway",
+            "a.yaml",
+            "--mode",
+            "proxy",
+            "--upstream",
+            "http://localhost:9",
+        ])
+    else {
         panic!("gateway")
     };
     assert_eq!(mode, Some(GatewayMode::Proxy));
     assert_eq!(upstream.as_deref(), Some("http://localhost:9"));
-    let err =
-        suspect_cli::Cli::try_parse_from(["suspect", "gateway", "a.yaml", "--mode", "mirror"])
-            .expect_err("unknown mode");
+    let err = suspect_cli::Cli::try_parse_from([
+        "suspect", "traffic", "gateway", "a.yaml", "--mode", "mirror",
+    ])
+    .expect_err("unknown mode");
     assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
 }
 
 #[test]
 fn stream_commands_accept_the_old_spellings() {
-    use suspect_cli::{Command, StreamFormat};
+    use suspect_cli::{Command, GenCmd, StreamFormat, TestCmd};
     // `json` is the old `bridge`/`codegen-session` spelling of `ndjson`.
-    let cli = suspect_cli::Cli::parse_from(["suspect", "bridge", "a.yaml", "--format", "json"]);
-    let Command::Bridge { stream, .. } = cli.command else {
+    let Command::Gen(GenCmd::Bridge { stream, .. }) =
+        parse(&["bridge", "a.yaml", "--format", "json"])
+    else {
         panic!("bridge")
     };
     assert_eq!(stream.format, StreamFormat::Ndjson);
     // `--report` is the old `test`/`load` flag.
-    let cli = suspect_cli::Cli::parse_from(["suspect", "test", "a.yaml", "--report", "ndjson"]);
-    let Command::Test { format, .. } = cli.command else {
+    let Command::Test(TestCmd::Run { format, .. }) =
+        parse(&["test", "a.yaml", "--report", "ndjson"])
+    else {
         panic!("test")
     };
     assert_eq!(format, Some(StreamFormat::Ndjson));
-    let cli = suspect_cli::Cli::parse_from(["suspect", "load", "p.yaml", "--report", "ndjson"]);
-    let Command::Load(args) = cli.command else {
+    let Command::Test(TestCmd::Load(args)) = parse(&["load", "p.yaml", "--report", "ndjson"])
+    else {
         panic!("load")
     };
     assert_eq!(args.stream.format, StreamFormat::Ndjson);
+}
+
+/// The clap command at `path` (`["diff", "breaking"]`), if it exists.
+fn find<'c>(root: &'c clap::Command, path: &[&str]) -> Option<&'c clap::Command> {
+    path.iter()
+        .try_fold(root, |cmd, name| cmd.find_subcommand(name))
+}
+
+#[test]
+fn every_renamed_command_points_at_an_existing_path() {
+    let root = suspect_cli::Cli::command();
+    for row in suspect_cli::legacy::RENAMED {
+        let target = find(&root, row.new)
+            .unwrap_or_else(|| panic!("{} -> {:?} does not exist", row.old, row.new));
+        assert!(
+            target.get_subcommands().next().is_none(),
+            "{} -> {:?} is a group, not a leaf",
+            row.old,
+            row.new
+        );
+        for flag in row.extra {
+            let long = flag.trim_start_matches("--");
+            assert!(
+                target.get_arguments().any(|a| a.get_long() == Some(long)),
+                "{} -> {:?}: extra flag {flag} does not exist",
+                row.old,
+                row.new
+            );
+        }
+        // The old name is gone from the visible top level.
+        assert!(
+            root.get_subcommands()
+                .all(|sub| sub.get_name() != row.old || sub.is_hide_set()),
+            "{} is still a visible top-level command",
+            row.old
+        );
+    }
+    for (group, sub) in suspect_cli::legacy::DEFAULT_SUB {
+        assert!(find(&root, &[group, sub]).is_some(), "{group} {sub}");
+    }
+}
+
+#[test]
+fn old_positional_orders_parse_to_the_new_commands() {
+    use suspect_cli::{Command, DiffCmd};
+    // why CONSTRAINT --spec SPEC == why SPEC CONSTRAINT.
+    let Command::Why {
+        first,
+        constraint,
+        spec,
+        ..
+    } = parse(&["why", "type", "--spec", "a.yaml"])
+    else {
+        panic!("why")
+    };
+    assert_eq!(
+        (first.as_str(), constraint, spec),
+        ("type", None, Some("a.yaml".into()))
+    );
+    let Command::Why {
+        first, constraint, ..
+    } = parse(&["why", "a.yaml", "type"])
+    else {
+        panic!("why")
+    };
+    assert_eq!(
+        (first.as_str(), constraint.as_deref()),
+        ("a.yaml", Some("type"))
+    );
+    // reverse SOURCE SPEC keeps its order behind --source-first.
+    let Command::Diff(DiffCmd::Routes {
+        spec,
+        source,
+        source_first,
+        ..
+    }) = parse(&["reverse", "src", "a.yaml"])
+    else {
+        panic!("reverse")
+    };
+    assert!(source_first);
+    assert_eq!((spec, source), ("src".into(), "a.yaml".into()));
+    // codegen-compare --before/--after fill the OLD NEW positionals.
+    let Command::Diff(DiffCmd::Sdk(args)) =
+        parse(&["codegen-compare", "--before", "a.json", "--after", "b.json"])
+    else {
+        panic!("codegen-compare")
+    };
+    assert_eq!(
+        (args.before, args.after, args.old, args.new),
+        (Some("a.json".into()), Some("b.json".into()), None, None)
+    );
+    let Command::Diff(DiffCmd::Sdk(args)) = parse(&["diff", "sdk", "a.json", "b.json"]) else {
+        panic!("diff sdk")
+    };
+    assert_eq!(
+        (args.old, args.new),
+        (Some("a.json".into()), Some("b.json".into()))
+    );
+    assert!(
+        suspect_cli::Cli::try_parse_from(["suspect", "diff", "sdk", "a.json", "--before", "b"])
+            .is_err()
+    );
+}
+
+#[test]
+fn every_leaf_documents_its_exit_statuses() {
+    use suspect_cli::exit::DOCUMENTED;
+    let documented: Vec<String> = DOCUMENTED
+        .iter()
+        .map(|(path, _, _)| format!("suspect {path}"))
+        .collect();
+    let missing: Vec<String> = leaves()
+        .into_iter()
+        .map(|(path, _)| path)
+        .filter(|path| !documented.contains(path))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "no exit::DOCUMENTED entry for:\n{}",
+        missing.join("\n")
+    );
+    // No stale or duplicate rows; a row may name a runnable group (`config`).
+    let root = suspect_cli::Cli::command();
+    for (i, (path, statuses, _)) in DOCUMENTED.iter().enumerate() {
+        let words: Vec<&str> = path.split(' ').collect();
+        assert!(find(&root, &words).is_some(), "{path} does not exist");
+        assert!(
+            DOCUMENTED[..i].iter().all(|(p, _, _)| p != path),
+            "{path} is listed twice"
+        );
+        assert!(
+            statuses.contains(&suspect_cli::Exit::Clean)
+                && statuses.contains(&suspect_cli::Exit::Usage),
+            "{path}: every command can exit 0 and 2"
+        );
+    }
 }

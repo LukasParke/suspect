@@ -24,11 +24,11 @@ release.
   yet — see [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md)), loaded through
   the source-addressed `Contract` with its full reference closure.
 - The single-target CLI takes `--spec FILE` or a pinned-source `--pins`
-  manifest. A frozen-source release must pin (`suspect gen api.yaml
+  manifest. A frozen-source release must pin (`suspect gen template api.yaml
   --manifest FILE` captures pins) so regeneration reproduces the same
   contract bytes; `crates/suspect-codegen/tests/pinned_generation.rs` gates
   pin-driven sessions.
-- Session-based generation (`suspect codegen-session --config session.json`)
+- Session-based generation (`suspect gen session --config session.json`)
   takes a JSON configuration with `spec` **or** `pins`, plus `targets`,
   `operation_ids`, `credential_env`, and `sdk_defaults`
   (`crates/suspect-cli/src/commands/codegen_session.rs`).
@@ -36,7 +36,7 @@ release.
 ### `sdk_defaults` (the golden-defaults policy)
 
 - **Available through the session JSON `sdk_defaults` field and the library
-  `GenerationOptions.sdk_defaults` — not through `suspect codegen` flags.**
+  `GenerationOptions.sdk_defaults` — not through `suspect gen sdk` flags.**
   The single-target `codegen` command forwards only compatibility profiles
   today (`crates/suspect-cli/src/commands/codegen_cmd.rs`); a package with
   pagination helpers, the automatic `<ENV_PREFIX>_API_KEY` convention, or
@@ -50,13 +50,13 @@ release.
 
 | Field | Rules (verified per backend) |
 | --- | --- |
-| `backend` | One of the twelve registered profiles; list with `suspect codegen-profiles` (`Backend::ALL`). |
+| `backend` | One of the twelve registered profiles; list with `suspect gen profiles` (`Backend::ALL`). |
 | `package_name` | TypeScript/JavaScript: npm `@scope/name`. Python: distribution name (import name derived `_`-normalized). Go: **module path**; the Go package name is fixed `sdk`. Rust: crate name. Swift: module name. Java and Kotlin: Maven `group:artifact` (enforced — `backend.rs` refuses anything else). PHP: `vendor/package`. C#: namespace segments from dotted names. Dart and C++: package name. |
 | `package_version` | Exact package SemVer, independent of the OpenAPI `info.version`. It feeds the `ua/v1` identity slot, every package manifest, and the compatibility report. |
 | `import_name` | Optional native identity override for Python (import name), Swift (module), JVM (package), Ruby/C#/PHP/C++ (namespace). **Rejected** by TypeScript, Rust, Go and Dart — their identity is the package name. |
 
 Identity mistakes are the cheapest kind to catch: run
-`suspect codegen --check --format json` before writing, and review the
+`suspect gen sdk --check --format json` before writing, and review the
 resulting attribution identity (§2) before publishing, because it is visible
 on the wire in every request.
 
@@ -162,7 +162,7 @@ CI toolchain. Every per-language gate writes its machine-readable record to
   `--test pinned_generation` — output sets are deterministic and
   source-pin-driven.
 - Regenerate the candidate and run the same generation with
-  `suspect codegen --check --format json` (or `codegen-session --check`):
+  `suspect gen sdk --check --format json` (or `gen session --check`):
   ownership-aware drift must be empty before anything is published.
 
 ## 3. Package metadata the emitters already produce
@@ -246,8 +246,8 @@ The release gate: keep the **previously published** generation's session JSON
 produce the candidate's session JSON as `after`; run
 
 ```sh
-suspect codegen-compare --before published.session.json \
-                        --after candidate.session.json --format json
+suspect diff sdk published.session.json \
+                 candidate.session.json --format json
 ```
 
 Exit 0 = proved compatible within its recorded scope; 1 = any

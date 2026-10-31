@@ -561,10 +561,10 @@ fn platform_smoke(ctx: &Ctx) -> Result<()> {
 
     let log_path = dir.join("gateway.log");
     let log = std::fs::File::create(&log_path)?;
-    println!("$ suspect gateway petstore.yaml --port {port} --mode mock &");
+    println!("$ suspect traffic gateway petstore.yaml --port {port} --mode mock &");
     let gateway = Gateway(
         Command::new(&suspect)
-            .arg("gateway")
+            .args(["traffic", "gateway"])
             .arg(dir.join("petstore.yaml"))
             .args(["--port", &port.to_string(), "--mode", "mock"])
             .stdout(log.try_clone()?)
@@ -588,11 +588,11 @@ fn platform_smoke(ctx: &Ctx) -> Result<()> {
 fn smoke_against(suspect: &Path, dir: &Path, suite: &Path, base: &str) -> Result<()> {
     wait_ready(&format!("{base}/pets/1"))?;
 
-    println!("$ suspect test suite.arazzo.yaml --base-url {base} --report ndjson");
+    println!("$ suspect test run suite.arazzo.yaml --base-url {base} --format ndjson");
     let live = Command::new(suspect)
-        .arg("test")
+        .args(["test", "run"])
         .arg(suite)
-        .args(["--base-url", base, "--report", "ndjson"])
+        .args(["--base-url", base, "--format", "ndjson"])
         .output()
         .context("run suspect test (live)")?;
     check_run_done("live", &live)?;
@@ -600,14 +600,14 @@ fn smoke_against(suspect: &Path, dir: &Path, suite: &Path, base: &str) -> Result
     let cassette = dir.join("smoke.cassette");
     std::fs::write(&cassette, smoke_cassette(base))?;
     println!(
-        "$ suspect test suite.arazzo.yaml --base-url {base} --offline --cassette smoke.cassette --report ndjson"
+        "$ suspect test run suite.arazzo.yaml --base-url {base} --cassette smoke.cassette --format ndjson"
     );
     let offline = Command::new(suspect)
-        .arg("test")
+        .args(["test", "run"])
         .arg(suite)
-        .args(["--base-url", base, "--offline", "--cassette"])
+        .args(["--base-url", base, "--cassette"])
         .arg(&cassette)
-        .args(["--report", "ndjson"])
+        .args(["--format", "ndjson"])
         .output()
         .context("run suspect test (offline)")?;
     check_run_done("offline", &offline)

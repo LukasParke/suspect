@@ -781,8 +781,42 @@ step that changes the tree.
    spawn `breaking a b --format json` and assert JSON stdout, the
    deprecation line on stderr, and the old exit status; `diff A B` and `diff
    structural A B` give identical stdout. Estimate: 1.5 days.
+   **Done.** Deviations: groups are newtype variants
+   (`Command::Diff(DiffCmd)`, ...). `legacy::RENAMED` has the 30 rows
+   above; the old names are removed in two minor releases
+   (`legacy::removed_in()`, `0.3.0` from `0.1.0`), and `Renamed::replacement()`
+   names the new invocation without hidden compatibility flags (so the
+   `reverse` note says `diff routes`, not `--source-first`). The
+   `DEFAULT_SUB` note reads "`suspect diff <args>` is deprecated; use
+   `suspect diff structural <args>`". `why` takes `SPEC [CONSTRAINT]`:
+   the constraint is required unless the hidden `--spec` is given, in
+   which case the one positional is the constraint. `diff sdk` takes
+   optional `OLD NEW` positionals, each required unless its hidden
+   `--before`/`--after` is given. `overlay-dry-run` runs `overlay explain
+   --check` as designed, so its stdout now carries the explain steps and
+   a bare-dot target exits 2 (the note names it); this is the one rename
+   whose stdout and status differ, and `tests/ecosystem_commands.rs`
+   asserts the new behaviour. `ArazzoDiffArgs` and `overlay_dry_run()`
+   stay as library items until N+2. The `release publish` test helper uses
+   the new name, since it asserts that no deprecation reaches stderr.
+   xtask (`ci` gateway smoke, `sdk_full`, `sdk_m3_m6`), `README.md`, the
+   GitHub Action (`test run`, `gen template`) and the user guides under
+   `docs/` use the new names; `docs/SDK-EDITOR-PREVIEW.md` still shows
+   the names the extension spawns. Editors are unchanged: VS Code and Zed
+   read stderr only into error messages, so the note never reaches a
+   parsed stream. Tests: `tests/legacy_names.rs` (spawned `breaking ...
+   --format json`, `diff A B` vs `diff structural A B`, Arazzo dispatch,
+   group help) and two conventions tests (every row targets an existing
+   leaf and its extra flags exist; old positional orders parse).
 5. **Exit table.** `exit::DOCUMENTED`, rendered into `docs/CLI.md`. The
    conventions test requires an entry for every leaf. Estimate: 0.5 day.
+   **Done.** Deviations: paths omit the `suspect` prefix (`"diff
+   breaking"`), and `config` has a row although it is a group, because it
+   runs without a subcommand. Rows list `Interrupted` only for `test load`
+   and `acquire`, which drain and report; the rendered "Exit status"
+   section says every other non-server command exits 130 on Ctrl-C. The
+   conventions test also rejects stale or duplicate rows and rows without
+   `0` and `2`.
 6. **(N+1) Editor switch.** VS Code moves to the new names and gets a
    minimum binary version check. `--out` becomes hidden, and flag-alias notes
    are turned on. Estimate: 0.5 day.

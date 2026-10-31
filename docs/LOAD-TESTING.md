@@ -1,6 +1,6 @@
-# Load testing with `suspect load`
+# Load testing with `suspect test load`
 
-`suspect load` runs Arazzo workflows as weighted virtual-user scenarios
+`suspect test load` runs Arazzo workflows as weighted virtual-user scenarios
 under a phased arrival profile — the Artillery model — and reports
 request rate, latency percentiles, status codes, user lifecycle and
 error classes. Every response is still checked against the workflow's
@@ -11,17 +11,17 @@ code. Design and rationale: [LOAD-TESTING-PLAN.md](LOAD-TESTING-PLAN.md).
 ## Quick start
 
 ```console
-$ suspect gateway examples/load/petstore.openapi.yaml -p 8080 --mode mock
-$ suspect load examples/load/petstore.load.yaml --dry-run      # resolve, send nothing
-$ suspect load examples/load/petstore.load.yaml -e smoke       # 5s smoke environment
-$ suspect load examples/load/petstore.load.yaml --report-file out/report.json --junit out/load.xml
+$ suspect traffic gateway examples/load/petstore.openapi.yaml -p 8080 --mode mock
+$ suspect test load examples/load/petstore.load.yaml --dry-run      # resolve, send nothing
+$ suspect test load examples/load/petstore.load.yaml -e smoke       # 5s smoke environment
+$ suspect test load examples/load/petstore.load.yaml --report-file out/report.json --junit out/load.xml
 ```
 
 Profile-less, straight from an Arazzo document:
 
 ```console
-$ suspect load flows.arazzo.yaml --workflow browse --rate 50 --duration 2m --max-vus 300
-$ suspect load flows.arazzo.yaml --workflow checkout --vus 20 --iterations 500
+$ suspect test load flows.arazzo.yaml --workflow browse --rate 50 --duration 2m --max-vus 300
+$ suspect test load flows.arazzo.yaml --workflow checkout --vus 20 --iterations 500
 ```
 
 The bundled example (`examples/load/`) has a Petstore spec, three
@@ -132,7 +132,7 @@ the extension. `suspect test` ignores think time.
 
 ### Credentials and contract checks
 
-`suspect load` injects credentials exactly like `suspect test`: for every
+`suspect test load` injects credentials exactly like `suspect test`: for every
 security scheme an operation requires, the configured credential from
 `--credentials FILE`, else `SUSPECT_CREDENTIALS`, else
 `.suspect/credentials.json` found by walking up from the Arazzo
@@ -204,7 +204,7 @@ a second Ctrl-C aborts.
 
 ## Calibrating the generator
 
-Run the profile against `suspect gateway --mode mock` first. The mock
+Run the profile against `suspect traffic gateway --mode mock` first. The mock
 answers in microseconds, so anything the report attributes to latency
 there is generator or host overhead. Watch `metrics.dropped` and
 `errors.connect`: both mean the load generator or the host's socket

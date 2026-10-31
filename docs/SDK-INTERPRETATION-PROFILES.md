@@ -19,7 +19,7 @@ pagination or authentication behavior. It does not rewrite the input document.
 OAS 3.0's own binary rules remain dialect semantics.
 
 ```sh
-suspect codegen openapi.yaml \
+suspect gen sdk openapi.yaml \
   --profile go-http \
   --operation-id downloadContainerFileContent \
   --package-name example.com/openrouter-sdk --package-version 0.1.0 \

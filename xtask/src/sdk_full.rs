@@ -1400,7 +1400,7 @@ fn default_cli_stages() -> Vec<Stage> {
     let mut profiles = command(
         "default-cli-twelve-profiles",
         "{out}/bin/suspect-default",
-        &["codegen-profiles", "--format", "json"],
+        &["gen", "profiles", "--format", "json"],
         "{workspace}",
     );
     profiles.criterion = Criterion::Json {
@@ -1474,7 +1474,7 @@ fn profile_stages() -> Vec<Stage> {
     let mut discover = command(
         "cli-twelve-profiles",
         "{out}/bin/suspect",
-        &["codegen-profiles", "--format", "json"],
+        &["gen", "profiles", "--format", "json"],
         "{workspace}",
     );
     discover.criterion = Criterion::Json {
@@ -1485,10 +1485,9 @@ fn profile_stages() -> Vec<Stage> {
         "cli-twelve-compatibility",
         "{out}/bin/suspect",
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "{out}/configs/five-operations.json",
-            "--after",
             "{out}/configs/five-operations.json",
             "--format",
             "json",
@@ -3769,7 +3768,8 @@ fn pinned_stages() -> Vec<Stage> {
         "twelve-pinned-session-watch",
         "{out}/bin/suspect",
         &[
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "{out}/configs/pinned-session.json",
             "--out",
@@ -3788,10 +3788,9 @@ fn pinned_stages() -> Vec<Stage> {
         "twelve-pinned-compatibility",
         "{out}/bin/suspect",
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "{out}/configs/pinned-session.json",
-            "--after",
             "{out}/configs/pinned-session.json",
             "--format",
             "json",

@@ -1,8 +1,8 @@
 # Application targets — Go API CLI and TypeScript stdio MCP server
 
 Two generators in `suspect-codegen` emit *applications* rather than SDK
-languages: a Go/Cobra command-line program (`suspect codegen-cli`) and a
-TypeScript stdio Model Context Protocol server (`suspect codegen-mcp`). Each
+languages: a Go/Cobra command-line program (`suspect gen cli`) and a
+TypeScript stdio Model Context Protocol server (`suspect gen mcp`). Each
 sits on top of a canonical generated Suspect SDK, which it embeds.
 
 Every command line in this document was executed against the fixture contracts
@@ -67,8 +67,8 @@ the emitted program's first use.
 ## The two suspect commands
 
 ```
-suspect codegen-cli [SPEC] --mapping <FILE> --target-config <FILE> [OPTIONS]
-suspect codegen-mcp [SPEC] --mapping <FILE> --target-config <FILE> [OPTIONS]
+suspect gen cli [SPEC] --mapping <FILE> --target-config <FILE> [OPTIONS]
+suspect gen mcp [SPEC] --mapping <FILE> --target-config <FILE> [OPTIONS]
 ```
 
 | Argument / option | Meaning |
@@ -113,7 +113,7 @@ manifest documents through the same shared code:
 Application profiles are listed separately from SDK language profiles:
 
 ```console
-$ suspect codegen-profiles --kind applications
+$ suspect gen profiles --kind applications
 codegen-cli	suspect.application.cli.v1	suspect.application.cli.surface.v1	suspect-cli-app:lifecycle-v1
 codegen-mcp	suspect.application.mcp.v1	suspect.application.mcp.surface.v1	suspect-mcp-app:lifecycle-v1
 ```
@@ -193,7 +193,7 @@ plane with `getWidget`, `createWidget` and `purgeWidgets`.
 ### 3. Generate
 
 ```console
-$ suspect codegen-cli $WORK/widgets.openapi.json \
+$ suspect gen cli $WORK/widgets.openapi.json \
     --mapping $WORK/cli-mapping.json \
     --target-config $WORK/cli-target.json \
     --out $WORK/widgetctl --format json
@@ -339,7 +339,7 @@ GET /widgets/{id} (getWidget) failed: SDK transport failure
 A mapping that names operations no exact command surface can carry:
 
 ```console
-$ suspect codegen-cli $WORK/widgets.openapi.json --mapping $WORK/cli-mapping-refused.json …
+$ suspect gen cli $WORK/widgets.openapi.json --mapping $WORK/cli-mapping-refused.json …
 …/widgets.openapi.json:123:18 [cli-unsupported-media] response "200" needs either no content or exactly one concrete JSON media with a generated codec (/paths/~1blobs~1{id}/get/responses/200; mapping /commands/0)
 …/widgets.openapi.json:136:11 [cli-parameter-unrepresentable] source parameter "id" cannot be carried by one exact flag: a flag carries only a native string, boolean, integer or number scalar (/paths/~1matrices~1{id}/get/parameters/0; mapping /commands/1/parameters/id)
 codegen-cli failed: 0 mapped SDK operations, 0 planned artifacts (suspect.application.cli.v1)
@@ -454,7 +454,7 @@ unprojectable.
 ### 3. Generate
 
 ```console
-$ suspect codegen-mcp $WORK/widgets.openapi.json \
+$ suspect gen mcp $WORK/widgets.openapi.json \
     --mapping $WORK/mcp-mapping.json \
     --target-config $WORK/mcp-target.json \
     --out $WORK/widget-mcp
@@ -574,7 +574,7 @@ in the form `read_widget GET /widgets/{id} (getWidget) -> HTTP 200`.
 ### 6. Refusals, observed
 
 ```console
-$ suspect codegen-mcp $WORK/widgets.openapi.json --mapping $WORK/mcp-mapping-refused.json …
+$ suspect gen mcp $WORK/widgets.openapi.json --mapping $WORK/mcp-mapping-refused.json …
 …:57:20 [mcp-unsupported-schema] the declared request body has no exact tool input projection: model Node is recursive, and a recursive schema has no finite tool input projection (/components/schemas/Node/properties/child; mapping /tools/3/input/body)
 …:132:18 [mcp-unsupported-media] response "200" needs either no content or exactly one concrete JSON media with a generated codec (/paths/~1blobs~1{id}/get/responses/200; mapping /tools/0)
 …:176:45 [mcp-unsupported-schema] the declared request body has no exact tool input projection: arbitrary JSON has no tool input projection: its numbers would already be rounded by the client's own JSON parser before the server could preserve them (/paths/~1loose/post/requestBody/content/application~1json/schema/properties/anything; mapping /tools/2/input/body)
@@ -997,11 +997,11 @@ so a planning or ownership refusal leaves the output root exactly as it was.
 | `failed` | Input, mapping, planning or package refusals. Nothing is written. | 1 |
 
 ```console
-$ suspect codegen-cli … --out $WORK/widgetctl --check
+$ suspect gen cli … --out $WORK/widgetctl --check
 codegen-cli current: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
 # exit 0
 
-$ suspect codegen-cli … --target-config $WORK/cli-target-drift.json --out $WORK/widgetctl --check
+$ suspect gen cli … --target-config $WORK/cli-target-drift.json --out $WORK/widgetctl --check
 codegen-cli drift: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
 # exit 1, nothing written
 ```
@@ -1010,7 +1010,7 @@ A hand edit to an owned artifact is preserved, not overwritten:
 
 ```console
 $ printf '// hand edit\n' >> $WORK/widgetctl/cmd/widgetctl/main.go
-$ suspect codegen-cli … --out $WORK/widgetctl
+$ suspect gen cli … --out $WORK/widgetctl
 …/cmd/widgetctl/main.go:1:1 [application-cli-artifact-conflict] owned output was edited after its recorded generation; preserving user changes (; mapping )
 codegen-cli conflict: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
 # exit 1; the edit is still there afterwards
@@ -1019,7 +1019,7 @@ codegen-cli conflict: 3 mapped SDK operations, 42 planned artifacts (suspect.app
 The two owners never cross:
 
 ```console
-$ suspect codegen-mcp … --out $WORK/widgetctl
+$ suspect gen mcp … --out $WORK/widgetctl
 …/widgetctl/application-surface.json:1:1 [application-mcp-artifact-conflict] owned by `suspect-cli-app:lifecycle-v1`; owner `suspect-mcp-app:lifecycle-v1` cannot overwrite or adopt it (; mapping )
 codegen-mcp conflict: 3 mapped SDK operations, 34 planned artifacts (suspect.application.mcp.v1)
 # exit 1
@@ -1039,7 +1039,7 @@ $ suspect acquire $WORK/pins.json --cache-dir $WORK/cache --format json
 { …, "networkRequests": 0, "status": "acquired" }
 
 $ rm $WORK/widgets.openapi.json      # the entry document is gone
-$ suspect codegen-cli --pins $WORK/pins.json --cache-dir $WORK/cache \
+$ suspect gen cli --pins $WORK/pins.json --cache-dir $WORK/cache \
     --mapping $WORK/cli-mapping.json --target-config $WORK/cli-target.json \
     --out $WORK/pinned-out
 codegen-cli generated: 3 mapped SDK operations, 42 planned artifacts (suspect.application.cli.v1)
@@ -1195,10 +1195,10 @@ targets behave identically here. Observed on a `200` whose only member is
 `description`:
 
 ```console
-$ suspect codegen-cli $WORK/nomedia.openapi.json …
+$ suspect gen cli $WORK/nomedia.openapi.json …
 …/nomedia.openapi.json:12:18 [cli-unsupported-media] response "200" needs either no content or exactly one concrete JSON media with a generated codec (/paths/~1ping/get/responses/200; mapping /commands/0)
 
-$ suspect codegen-mcp $WORK/nomedia.openapi.json …
+$ suspect gen mcp $WORK/nomedia.openapi.json …
 …/nomedia.openapi.json:12:18 [mcp-unsupported-media] response "200" needs either no content or exactly one concrete JSON media with a generated codec (/paths/~1ping/get/responses/200; mapping /tools/0)
 ```
 
@@ -1245,7 +1245,7 @@ source, so `codegen-cli` cannot bind it and refuses at generation with
 directory):
 
 ```console
-$ suspect codegen-cli $FIXTURE/api/referenced-path.json \
+$ suspect gen cli $FIXTURE/api/referenced-path.json \
     --mapping $WORK/cli-mapping.json --target-config $WORK/cli-target-anon.json \
     --out $WORK/out
 file://$FIXTURE/api/nested/paths.json:4:12 [application-path-item-unplanned] selector "getThingByReference" resolves to the operation declared at file://$FIXTURE/api/nested/paths.json /things/get, which the canonical SDK plan does not carry at that source; a Path Item reached through a `$ref` is outside this application target's bounded profile - declare the operation in the entry document's own `paths` instead (/things/get; mapping /commands/0/selector)

@@ -1,4 +1,5 @@
-//! `suspect arazzo-diff` — breaking changes between two Arazzo documents.
+//! Breaking changes between two Arazzo documents (`suspect diff breaking`
+//! on Arazzo input; formerly `suspect arazzo-diff`).
 
 use std::path::PathBuf;
 
@@ -233,12 +234,25 @@ fn criteria_equal(old: Option<&serde_json::Value>, new: Option<&serde_json::Valu
 /// # Errors
 /// Propagates serialization failures.
 pub fn arazzo_diff(args: &ArazzoDiffArgs) -> anyhow::Result<i32> {
+    arazzo_diff_between(&args.old, &args.new, args.findings.format)
+}
+
+/// Compares two Arazzo revisions and renders the report; exits non-zero on
+/// breaks. `suspect diff breaking` calls this when NEW is an Arazzo document.
+///
+/// # Errors
+/// Propagates file IO and serialization failures.
+pub fn arazzo_diff_between(
+    old: &std::path::Path,
+    new: &std::path::Path,
+    format: crate::FindingsFormat,
+) -> anyhow::Result<i32> {
     use crate::output;
-    let findings = arazzo_break_findings(&args.old, &args.new)?;
+    let findings = arazzo_break_findings(&old.to_path_buf(), &new.to_path_buf())?;
     let rendered: Vec<output::Finding> = findings
         .iter()
         .map(|f| output::Finding {
-            file: format!("{} → {}", args.old.display(), args.new.display()),
+            file: format!("{} → {}", old.display(), new.display()),
             severity: if f.severity == "error" {
                 output::Severity::Error
             } else {
@@ -251,6 +265,6 @@ pub fn arazzo_diff(args: &ArazzoDiffArgs) -> anyhow::Result<i32> {
             range: None,
         })
         .collect();
-    output::print_findings_as(&rendered, args.findings.format)?;
+    output::print_findings_as(&rendered, format)?;
     Ok(i32::from(!findings.is_empty()))
 }
