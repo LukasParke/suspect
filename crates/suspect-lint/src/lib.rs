@@ -21,6 +21,7 @@
 mod engine;
 mod fast;
 mod functions;
+pub mod markdown;
 mod packs;
 pub mod quality;
 mod rule;

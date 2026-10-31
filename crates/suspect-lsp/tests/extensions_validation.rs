@@ -1,7 +1,7 @@
 //! Vendor-extension validation: registered extension keys (builtin or
 //! workspace-configured) validate their values against their JSON Schemas.
 
-use suspect_lsp::diagnostics::compute_diagnostics_raw;
+use suspect_lsp::diagnostics::compute_diagnostics;
 use suspect_lsp::state::OpenDoc;
 use suspect_ref::WorkspaceBuilder;
 
@@ -45,7 +45,7 @@ x-internal: not-a-boolean
             .unwrap(),
     );
     let cfg = suspect_config::Settings::default();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
+    let diags = compute_diagnostics(Some(&ws), &low, &cfg);
     let all = codes(&diags);
     assert!(all.iter().any(|c| c == "extension-schema"), "{all:?}");
 }
@@ -66,7 +66,7 @@ x-totally-custom:
     let low = low_at(&dir, "spec.yaml", text);
     let ws = std::sync::Arc::new(WorkspaceBuilder::new().root(&dir).build().unwrap());
     let cfg = suspect_config::Settings::default();
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
+    let diags = compute_diagnostics(Some(&ws), &low, &cfg);
     assert!(
         !codes(&diags).iter().any(|c| c == "extension-schema"),
         "unknown extensions are legal: {:?}",
@@ -101,14 +101,14 @@ x-plex-token:
         })),
         ..Default::default()
     };
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
+    let diags = compute_diagnostics(Some(&ws), &low, &cfg);
     let all = codes(&diags);
     assert!(all.iter().any(|c| c == "extension-schema"), "{all:?}");
 
     // A conforming value is silent.
     let good = text.replace("  wrong: shape", "  token: abc123");
     let low = low_at(&dir, "spec.yaml", &good);
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
+    let diags = compute_diagnostics(Some(&ws), &low, &cfg);
     assert!(
         !codes(&diags).iter().any(|c| c == "extension-schema"),
         "{:?}",
@@ -139,6 +139,6 @@ x-retry-count: not-a-number
         })),
         ..Default::default()
     };
-    let diags = compute_diagnostics_raw(Some(&ws), &low, &cfg);
+    let diags = compute_diagnostics(Some(&ws), &low, &cfg);
     assert!(codes(&diags).iter().any(|c| c == "extension-schema"));
 }

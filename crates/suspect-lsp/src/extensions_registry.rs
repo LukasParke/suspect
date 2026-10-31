@@ -1,4 +1,4 @@
-//! Vendor extension ordering and schema registry.
+//! Vendor extension ordering registry.
 //!
 //! Extensions (`x-*` keys) never mix into standard keys: known extensions
 //! are positioned relative to the context's standard keys via
@@ -16,8 +16,8 @@ pub enum Anchor {
     After(&'static str),
 }
 
-/// One registered extension: where it sits and (optionally) the JSON Schema
-/// its value must satisfy.
+/// One registered extension and where it sits. The JSON Schemas extension
+/// values must satisfy are `suspect_check::checks::extensions::BUILTIN`.
 #[derive(Debug, Clone)]
 pub struct ExtensionEntry {
     /// The extension key (`x-tagGroups`).
@@ -26,8 +26,6 @@ pub struct ExtensionEntry {
     pub contexts: &'static [crate::keys::Context],
     /// Where the extension sits in its context.
     pub anchor: Anchor,
-    /// Optional JSON Schema (as raw JSON text) validating the value.
-    pub schema: Option<&'static str>,
 }
 
 /// The built-in extension registry: the extension families an OpenAPI
@@ -38,23 +36,16 @@ pub const BUILTIN: &[ExtensionEntry] = &[
         key: "x-tagGroups",
         contexts: &[crate::keys::Context::Root],
         anchor: Anchor::After("tags"),
-        schema: None,
     },
     ExtensionEntry {
         key: "x-badges",
         contexts: &[crate::keys::Context::Operation],
         anchor: Anchor::After("tags"),
-        schema: None,
     },
     ExtensionEntry {
         key: "x-codeSamples",
         contexts: &[crate::keys::Context::Operation],
         anchor: Anchor::After("servers"),
-        schema: Some(
-            r#"{"type":"array","items":{"type":"object","required":["lang","source"],
-               "properties":{"lang":{"type":"string"},"label":{"type":"string"},
-               "source":{"type":"string"}}}}"#,
-        ),
     },
     ExtensionEntry {
         key: "x-displayName",
@@ -64,41 +55,32 @@ pub const BUILTIN: &[ExtensionEntry] = &[
             crate::keys::Context::Components,
         ],
         anchor: Anchor::Before("description"),
-        schema: Some(r#"{"type":"string"}"#),
     },
     ExtensionEntry {
         key: "x-order",
         contexts: &[],
         anchor: Anchor::Before("description"),
-        schema: None,
     },
     // -- Speakeasy generator family ---------------------------------------
     ExtensionEntry {
         key: "x-speakeasy-globals",
         contexts: &[crate::keys::Context::Root],
         anchor: Anchor::After("security"),
-        schema: None,
     },
     ExtensionEntry {
         key: "x-speakeasy-globals-hidden",
         contexts: &[crate::keys::Context::Root],
         anchor: Anchor::After("security"),
-        schema: None,
     },
     ExtensionEntry {
         key: "x-speakeasy-pagination",
         contexts: &[crate::keys::Context::Operation],
         anchor: Anchor::After("parameters"),
-        schema: Some(
-            r#"{"type":"object","required":["type","inputs","output"],
-               "properties":{"type":{"enum":["cursor","offset","page","url"]}}}"#,
-        ),
     },
     ExtensionEntry {
         key: "x-speakeasy-usage-example",
         contexts: &[crate::keys::Context::Operation],
         anchor: Anchor::After("deprecated"),
-        schema: None,
     },
     ExtensionEntry {
         key: "x-speakeasy-retries",
@@ -107,39 +89,33 @@ pub const BUILTIN: &[ExtensionEntry] = &[
             crate::keys::Context::Schema,
         ],
         anchor: Anchor::Before("parameters"),
-        schema: None,
     },
     ExtensionEntry {
         key: "x-speakeasy-name-override",
         contexts: &[crate::keys::Context::Operation],
         anchor: Anchor::Before("operationId"),
-        schema: Some(r#"{"type":"string"}"#),
     },
     ExtensionEntry {
         key: "x-speakeasy-group",
         contexts: &[crate::keys::Context::Operation],
         anchor: Anchor::Before("summary"),
-        schema: Some(r#"{"type":"string"}"#),
     },
     // -- SailPoint family ---------------------------------------------------
     ExtensionEntry {
         key: "x-sailpoint-userLevels",
         contexts: &[crate::keys::Context::Operation],
         anchor: Anchor::After("security"),
-        schema: None,
     },
     // -- OpenAPI utilities ---------------------------------------------------
     ExtensionEntry {
         key: "x-internal",
         contexts: &[],
         anchor: Anchor::After("description"),
-        schema: Some(r#"{"type":"boolean"}"#),
     },
     ExtensionEntry {
         key: "x-omitempty",
         contexts: &[],
         anchor: Anchor::After("description"),
-        schema: Some(r#"{"type":"boolean"}"#),
     },
 ];
 
@@ -173,8 +149,7 @@ pub fn rank(key: &str, context: crate::keys::Context, table: &[&str]) -> Option<
     best
 }
 
-/// Every built-in extension key visible for `context` (used by completion
-/// and validation wiring).
+/// Every built-in extension key visible for `context` (used by completion).
 #[must_use]
 pub fn keys_for(context: crate::keys::Context) -> Vec<&'static str> {
     BUILTIN
@@ -182,15 +157,6 @@ pub fn keys_for(context: crate::keys::Context) -> Vec<&'static str> {
         .filter(|e| e.contexts.is_empty() || e.contexts.contains(&context))
         .map(|e| e.key)
         .collect()
-}
-
-/// The JSON Schema text registered for `key` in `context`, if any.
-#[must_use]
-pub fn schema_for(key: &str, context: crate::keys::Context) -> Option<&'static str> {
-    BUILTIN
-        .iter()
-        .find(|e| e.key == key && (e.contexts.is_empty() || e.contexts.contains(&context)))
-        .and_then(|e| e.schema)
 }
 
 #[cfg(test)]
@@ -222,15 +188,5 @@ mod tests {
         assert!((override_rank - (op_idx - 0.5)).abs() < f64::EPSILON);
         // Context filtering: x-tagGroups is root-only.
         assert!(rank("x-tagGroups", Context::Operation, OPERATION).is_none());
-    }
-
-    #[test]
-    fn schemas_that_exist_are_valid_json() {
-        for entry in BUILTIN {
-            if let Some(schema) = entry.schema {
-                let parsed: Result<serde_json::Value, _> = serde_json::from_str(schema);
-                assert!(parsed.is_ok(), "{}: invalid schema JSON", entry.key);
-            }
-        }
     }
 }

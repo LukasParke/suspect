@@ -521,48 +521,6 @@ fn build_edit(
     })
 }
 
-/// Applies the settings to a computed diagnostic battery:
-///
-/// * `lint.recommended = false` with no `lint.ruleset` drops every
-///   `suspect-lint` finding, as `suspect lint` runs no rules then.
-/// * `lint.rules.<id> = severity` remaps the severity of diagnostics whose
-///   code matches `<id>`; `off` drops them. Markdown battery codes share
-///   the same namespace, so one per-rule entry covers both.
-///
-/// Lint findings from the spectral battery carry their committed policy
-/// already (a per-rule entry wins over `lint.design`); this pass is
-/// idempotent for them and is the only pass the markdown battery gets.
-#[must_use]
-pub fn apply_config(diags: Vec<Diagnostic>, settings: &Settings) -> Vec<Diagnostic> {
-    let lint_on = settings.lint.recommended || settings.lint.ruleset.is_some();
-    let rules = &settings.lint.rules;
-    diags
-        .into_iter()
-        .filter(|d| lint_on || d.source.as_deref() != Some(crate::diagnostics::SOURCE_LINT))
-        .filter_map(|mut d| {
-            if let Some(NumberOrString::String(code)) = &d.code
-                && let Some(name) = rules.get(code)
-            {
-                match suspect_diag::parse_level(name).map(suspect_lint::Severity::from) {
-                    Some(suspect_lint::Severity::Off) => return None,
-                    Some(severity) => {
-                        d.severity = match severity {
-                            suspect_lint::Severity::Error => Some(DiagnosticSeverity::ERROR),
-                            suspect_lint::Severity::Warn => Some(DiagnosticSeverity::WARNING),
-                            suspect_lint::Severity::Info => Some(DiagnosticSeverity::INFORMATION),
-                            suspect_lint::Severity::Hint | suspect_lint::Severity::Off => {
-                                Some(DiagnosticSeverity::HINT)
-                            }
-                        };
-                    }
-                    None => {}
-                }
-            }
-            Some(d)
-        })
-        .collect()
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -706,26 +664,6 @@ components:
             problems[1].contains("`lint.rules.info-contact`: unrecognized severity `loud`"),
             "{problems:?}"
         );
-    }
-
-    #[test]
-    fn recommended_off_without_a_ruleset_drops_lint_findings() {
-        let lint = Diagnostic {
-            source: Some(crate::diagnostics::SOURCE_LINT.to_owned()),
-            code: Some(NumberOrString::String("info-contact".to_owned())),
-            ..Diagnostic::default()
-        };
-        let mut settings = Settings::default();
-        assert_eq!(apply_config(vec![lint.clone()], &settings).len(), 1);
-        settings.lint.recommended = false;
-        assert!(apply_config(vec![lint.clone()], &settings).is_empty());
-        settings.lint.ruleset = Some(PathBuf::from("rules.yaml"));
-        assert_eq!(apply_config(vec![lint.clone()], &settings).len(), 1);
-        settings
-            .lint
-            .rules
-            .insert("info-contact".to_owned(), "off".to_owned());
-        assert!(apply_config(vec![lint], &settings).is_empty());
     }
 
     // ----- will_rename_files -----

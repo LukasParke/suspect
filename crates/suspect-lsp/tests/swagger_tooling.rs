@@ -91,11 +91,8 @@ fn swagger_inline_parameter_defaults_get_instance_checks() {
         .unwrap();
     ws.load_all("spec.yaml").unwrap();
     let cfg = suspect_config::Settings::default();
-    let diags = suspect_lsp::diagnostics::compute_diagnostics_raw(
-        Some(&std::sync::Arc::new(ws)),
-        &low,
-        &cfg,
-    );
+    let diags =
+        suspect_lsp::diagnostics::compute_diagnostics(Some(&std::sync::Arc::new(ws)), &low, &cfg);
     // default 0 violates minimum 1 on the inline parameter schema.
     let hit = diags.iter().any(|d| {
         matches!(

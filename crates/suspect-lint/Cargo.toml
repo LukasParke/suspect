@@ -10,6 +10,7 @@ homepage.workspace = true
 publish = false
 
 [dependencies]
+pulldown-cmark = "0.13"
 suspect-diag.workspace = true
 suspect-low.workspace = true
 suspect-source.workspace = true

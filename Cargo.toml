@@ -29,6 +29,7 @@ suspect-arazzo = { path = "crates/suspect-arazzo", version = "0.1.0" }
 suspect-overlay = { path = "crates/suspect-overlay", version = "0.1.0" }
 suspect-validate = { path = "crates/suspect-validate", version = "0.1.0" }
 suspect-lint = { path = "crates/suspect-lint", version = "0.1.0" }
+suspect-check = { path = "crates/suspect-check", version = "0.1.0" }
 suspect-lsp = { path = "crates/suspect-lsp", version = "0.1.0" }
 suspect-ir = { path = "crates/suspect-ir", version = "0.1.0" }
 suspect-journal = { path = "crates/suspect-journal", version = "0.1.0" }

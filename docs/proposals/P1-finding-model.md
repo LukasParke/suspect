@@ -870,6 +870,47 @@ releasable on its own.
    `suspect-cli/tests/lsp_session.rs` fixtures shows the same set as before,
    except for the new overlay findings; the `diagnostics.rs` unit tests move.
    Estimate: 1.5 days.
+   **Done.** `suspect_check::{check_document, apply_policy, Policy,
+   CheckSet, Context}`; the per-producer mappers are
+   `suspect_check::checks::*`. `suspect_lsp::diagnostics` is now
+   `compute_diagnostics` (builds `Policy::from_settings`, runs both, maps
+   with `to_lsp`), `findings` and `to_lsp`; `compute_diagnostics_raw`,
+   `filter_at_least`, the per-producer `*_diagnostics` functions and
+   `config_files::apply_config` are gone, and every caller (push, both
+   pulls, fix-all, latency probe, bench, showcase) goes through
+   `compute_diagnostics`. Golden:
+   `crates/suspect-cli/tests/lsp_diagnostics_golden.rs`
+   (`tests/fixtures/golden/lsp-diagnostics.txt`, the `lsp_session.rs`
+   workspace plus `docs/demo/petstore.yaml` and the registry's broken
+   fixtures under a hint floor); recorded before the switch, the only diff
+   after it is three Overlay lines (`overlay-empty-actions`,
+   `overlay-update-with-remove`, `overlay-action-missing-description`).
+   The `diagnostics.rs` tests moved to `suspect-check/tests/check_document.rs`
+   and `policy.rs`; the floor tests are `apply_policy` tests. `LowDoc::node_at`
+   is in `suspect-low` (`navigation::node_at` forwards to it).
+   `markdown.rs` is `suspect_lint::markdown` (with a `rules()` table; the
+   LSP no longer depends on pulldown-cmark). Configuration validation is
+   `suspect_config::schema::problems` (`FileKind`, `kind_of`, `kind_for`,
+   `field`, `children`, `closest`, `problems`, `document_problems`;
+   `Problem` gains `code`, and the manifest-policy warning is a problem
+   too); LSP hover and completion stay in `config_schema.rs`.
+   `OverlayDiagnostic` gains `range` and `ActionView` gains `node`.
+   Deviations: only the schema half of `extensions_config.rs` moved
+   (`suspect_check::checks::extensions`: the builtin schema table, the
+   `extensions.<key>.schema`/`contexts` parser, the check); `before`/`after`
+   ordering stays in the LSP with `keys::Context`, because the formatter
+   uses it. No syntax short-circuit yet: the editor has always run every
+   check on a broken file, and the golden requires the same set; the CLI's
+   short-circuit is step 5's (a `CheckSet` or policy flag). The LSP builds
+   a `Policy` per computation from the document's `Settings` rather than
+   storing an `Arc<Policy>` in `State`; `ResolvedCache`, `cache_epoch`
+   and `policy_epoch` are unchanged, and a compiled ruleset is cached per
+   process by path, modification time and length, so it is compiled once
+   and an edited ruleset still applies without a configuration reload.
+   `policy.sdk` defaults to on (today's editor behaviour) until step 9
+   detects codegen. Fix guidance now rides in `data` for every registered
+   code that has it, tagged with the check name. The syntax code stays
+   `syntax` until step 4.
 4. **Aliases, dedupe, canonical severity.** Alias table v1, step 1 and 2 of
    `apply_policy`, `syntax` to `syntax-error`. Tests: petstore produces
    exactly one finding per operation for missing `operationId` in the LSP

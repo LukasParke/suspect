@@ -29,6 +29,19 @@ const OVERLAY_RULES: &[RuleInfo] = &[
     ),
 ];
 
+/// The process-wide [`Registry::builtin`].
+#[must_use]
+pub fn builtin() -> &'static Registry {
+    builtin_arc()
+}
+
+/// The process-wide [`Registry::builtin`], shareable.
+#[must_use]
+pub fn builtin_arc() -> &'static std::sync::Arc<Registry> {
+    static BUILTIN: std::sync::OnceLock<std::sync::Arc<Registry>> = std::sync::OnceLock::new();
+    BUILTIN.get_or_init(|| std::sync::Arc::new(Registry::builtin()))
+}
+
 /// The builtin rule tables, one per producer.
 #[must_use]
 pub fn builtin_tables() -> Vec<&'static [RuleInfo]> {
