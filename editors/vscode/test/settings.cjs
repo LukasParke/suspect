@@ -61,6 +61,13 @@ test('renamed settings stay as deprecated aliases with a null default', () => {
 		['suspect.formatting.sortKeys', 'suspect.format.sortKeys'],
 		['suspect.inlayHints.refs', 'suspect.editor.inlayHints.refs'],
 		['suspect.inlayHints.properties', 'suspect.editor.inlayHints.properties'],
+		['suspect.sdk.packageName', 'suspect.codegen.packageName'],
+		['suspect.sdk.packageVersion', 'suspect.codegen.packageVersion'],
+		['suspect.sdk.importNames', 'suspect.codegen.importNames'],
+		['suspect.sdk.operationIds', 'suspect.codegen.operationIds'],
+		['suspect.sdk.compatibilityProfiles', 'suspect.codegen.compatibilityProfiles'],
+		['suspect.sdk.sessionConfig', 'suspect.codegen.session.config'],
+		['suspect.sdk.sessionOutput', 'suspect.codegen.session.out'],
 	]) {
 		assert.ok(props[to], `${to} is contributed`);
 		assert.ok(props[from], `${from} is still contributed`);
@@ -72,7 +79,7 @@ test('renamed settings stay as deprecated aliases with a null default', () => {
 
 test('editor-only settings come from settings.editor.json unchanged', () => {
 	const editorOnly = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'settings.editor.json'), 'utf8'));
-	for (const key of ['suspect.basePath', 'suspect.server.path', 'suspect.sdk.sessionConfig']) {
+	for (const key of ['suspect.basePath', 'suspect.server.path']) {
 		assert.deepEqual(props[key], editorOnly[key]);
 	}
 	assert.ok(props['suspect.server.path'].deprecationMessage.includes('suspect.basePath'));
@@ -83,8 +90,16 @@ test('every getter has a type: objects and lists are not read as strings', () =>
 	assert.match(ts, /export function lintMinSeverity\(scope\?: SettingScope\): "error" \| "warning" \| "info" \| "hint" \| null/);
 	assert.match(ts, /export function lintRules\(scope\?: SettingScope\): Readonly<Record<string, "error" \| "warning" \| "info" \| "hint" \| "off">> \| null/);
 	assert.match(ts, /export function testBaseUrl\(scope\?: SettingScope\): string \| null \{\n\treturn first<string>\(scope, \['test.baseUrl', 'testBaseUrl'\]\);/);
-	assert.match(ts, /export function sdkImportNames\(scope\?: SettingScope\): Readonly<Record<string, string>> \{/);
-	assert.match(ts, /export function sdkOperationIds\(scope\?: SettingScope\): readonly string\[\] \{/);
+	assert.match(ts, /export function codegenImportNames\(scope\?: SettingScope\): Readonly<Record<string, string>> \| null \{/);
+	assert.match(ts, /export function codegenOperationIds\(scope\?: SettingScope\): readonly string\[\] \| null \{/);
+});
+
+test('compatibility profiles offer every name suspect codegen accepts', () => {
+	const { SDK_COMPATIBILITY_PROFILES } = require('../dist/generation.js');
+	const row = schema.properties.codegen.properties.compatibility_profiles;
+	assert.deepEqual(row.items.enum, [...SDK_COMPATIBILITY_PROFILES]);
+	assert.deepEqual(props['suspect.codegen.compatibilityProfiles'].items.enum, row.items.enum);
+	assert.equal(props['suspect.codegen.compatibilityProfiles'].uniqueItems, true);
 });
 
 test('no source file reads a suspect setting by string', () => {

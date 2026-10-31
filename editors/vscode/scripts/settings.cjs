@@ -46,6 +46,7 @@ function shape(prop) {
 		if (prop[bound] !== undefined) out[bound] = prop[bound];
 	}
 	if (prop.items) out.items = valueShape(prop.items);
+	if (prop.uniqueItems) out.uniqueItems = true;
 	if (prop.additionalProperties && typeof prop.additionalProperties === 'object') {
 		out.additionalProperties = valueShape(prop.additionalProperties);
 	}

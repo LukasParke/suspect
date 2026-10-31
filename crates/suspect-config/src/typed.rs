@@ -35,19 +35,24 @@ pub(crate) fn build(
         Some(Raw::List(items)) => Some(items.clone()),
         _ => None,
     };
+    // `path.<key>` entries of a map row.
+    let map = |path: &str| -> BTreeMap<String, String> {
+        let prefix = format!("{path}.");
+        values
+            .range(prefix.clone()..)
+            .take_while(|(k, _)| k.starts_with(&prefix))
+            .filter_map(|(k, (raw, _))| match raw {
+                Raw::Str(name) => Some((k[prefix.len()..].to_owned(), name.clone())),
+                _ => None,
+            })
+            .collect()
+    };
 
     let mut s = Settings::default();
     s.lint.ruleset = path("lint.ruleset");
     s.lint.min_severity = string("lint.min_severity");
     s.lint.design = string("lint.design");
-    s.lint.rules = values
-        .range("lint.rules.".to_owned()..)
-        .take_while(|(k, _)| k.starts_with("lint.rules."))
-        .filter_map(|(k, (raw, _))| match raw {
-            Raw::Str(name) => Some((k["lint.rules.".len()..].to_owned(), name.clone())),
-            _ => None,
-        })
-        .collect();
+    s.lint.rules = map("lint.rules");
     s.lint.recommended = boolean("lint.recommended").unwrap_or(true);
 
     s.validate.strict_format = boolean("validate.strict_format").unwrap_or(false);
@@ -66,7 +71,15 @@ pub(crate) fn build(
 
     s.codegen.out = path("codegen.out");
     s.codegen.profile = string("codegen.profile");
+    s.codegen.package_name = string("codegen.package_name");
     s.codegen.package_version = string("codegen.package_version");
+    s.codegen.import_names = map("codegen.import_names");
+    s.codegen.operation_ids = list("codegen.operation_ids").unwrap_or_default();
+    s.codegen.compatibility_profiles = list("codegen.compatibility_profiles").unwrap_or_default();
+    s.codegen.session.config = path("codegen.session.config");
+    if let Some(out) = string("codegen.session.out") {
+        s.codegen.session.out = out;
+    }
 
     if let Some(n) = int("ref.max_docs") {
         s.refs.max_docs = usize::try_from(n).unwrap_or(usize::MAX);

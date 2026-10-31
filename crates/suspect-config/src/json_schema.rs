@@ -210,6 +210,11 @@ fn kind_schema(kind: Kind) -> Value {
         }
         Kind::Map(inner) => json!({"type": "object", "additionalProperties": kind_schema(*inner)}),
         Kind::List => json!({"type": "array", "items": {"type": "string"}}),
+        Kind::EnumList(values) => json!({
+            "type": "array",
+            "items": {"type": "string", "enum": values},
+            "uniqueItems": true
+        }),
         Kind::Object | Kind::Section | Kind::Targets => json!({"type": "object"}),
     }
 }

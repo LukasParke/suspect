@@ -262,7 +262,9 @@ fn check_value(
         | Kind::Enum(_)
         | Kind::Severity
         | Kind::PolicySeverity => matches!(value_kind, ValueKind::Str | ValueKind::Null),
-        Kind::List | Kind::Targets => matches!(value_kind, ValueKind::Array | ValueKind::Null),
+        Kind::List | Kind::EnumList(_) | Kind::Targets => {
+            matches!(value_kind, ValueKind::Array | ValueKind::Null)
+        }
         Kind::Section | Kind::Map(_) | Kind::Object => {
             matches!(value_kind, ValueKind::Object | ValueKind::Null)
         }
@@ -284,8 +286,16 @@ fn check_value(
         return None;
     }
     // A non-string value already failed the shape check above, so there is
-    // nothing to compare against an enumeration.
-    let actual = value.as_str()?;
+    // nothing to compare against an enumeration. A list of names checks
+    // its first unknown item.
+    let actual = match row.kind {
+        Kind::EnumList(values) => value
+            .items()
+            .iter()
+            .filter_map(NodeRef::as_str)
+            .find(|item| !values.contains(item))?,
+        _ => value.as_str()?,
+    };
     if row.values().contains(&actual) {
         return None;
     }
@@ -398,6 +408,21 @@ codegen:
         assert!(found[0].message.contains("`min_severty`"), "{found:#?}");
         assert_eq!(found[0].suggestion.as_deref(), Some("min_severity"));
         assert_eq!(found[0].code, CODE);
+    }
+
+    #[test]
+    fn an_unknown_name_in_a_name_list_is_reported() {
+        let low = doc(
+            ".suspect.yaml",
+            "codegen:\n  compatibility_profiles: [colon-path-parameters-v1, colon-path-parameter-v1]\n",
+        );
+        let found = problems(FileKind::Settings, &low);
+        assert_eq!(found.len(), 1, "{found:#?}");
+        assert!(found[0].message.contains("colon-path-parameter-v1 is not"));
+        assert_eq!(
+            found[0].suggestion.as_deref(),
+            Some("colon-path-parameters-v1")
+        );
     }
 
     #[test]

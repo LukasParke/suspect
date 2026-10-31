@@ -46,6 +46,173 @@
 		"configuration": {
 			"title": "Suspect",
 			"properties": {
+				"suspect.codegen.compatibilityProfiles": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string",
+						"enum": [
+							"legacy-binary-string-v1",
+							"oas30-nullable-in-3.1-v1",
+							"colon-path-parameters-v1",
+							"schemaless-stream-events-v1",
+							"all-of-scoped-mode-v1"
+						]
+					},
+					"uniqueItems": true,
+					"default": null,
+					"markdownDescription": "Versioned source interpretations to opt into (`suspect codegen --compatibility-profile`). Empty keeps ordinary OpenAPI semantics. `codegen.compatibility_profiles` in `.suspect.yaml`; unset (`null`) uses the committed value (default `[]`).",
+					"scope": "resource"
+				},
+				"suspect.sdk.compatibilityProfiles": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string",
+						"enum": [
+							"legacy-binary-string-v1",
+							"oas30-nullable-in-3.1-v1",
+							"colon-path-parameters-v1",
+							"schemaless-stream-events-v1",
+							"all-of-scoped-mode-v1"
+						]
+					},
+					"uniqueItems": true,
+					"default": null,
+					"markdownDescription": "Deprecated: use `suspect.codegen.compatibilityProfiles`.",
+					"deprecationMessage": "Use suspect.codegen.compatibilityProfiles instead.",
+					"scope": "resource"
+				},
+				"suspect.codegen.importNames": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"type": "string"
+					},
+					"default": null,
+					"markdownDescription": "SDK profile to native import/module/namespace name, for example `{python-http: widgets_sdk}`. A profile without an entry derives its name from the package name. `codegen.import_names` in `.suspect.yaml`; unset (`null`) uses the committed value (default `{}`).",
+					"scope": "resource"
+				},
+				"suspect.sdk.importNames": {
+					"type": [
+						"object",
+						"null"
+					],
+					"additionalProperties": {
+						"type": "string"
+					},
+					"default": null,
+					"markdownDescription": "Deprecated: use `suspect.codegen.importNames`.",
+					"deprecationMessage": "Use suspect.codegen.importNames instead.",
+					"scope": "resource"
+				},
+				"suspect.codegen.operationIds": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"default": null,
+					"markdownDescription": "Exact `operationId`s to generate. Empty attempts every operation; an unsupported one fails rather than being dropped. `codegen.operation_ids` in `.suspect.yaml`; unset (`null`) uses the committed value (default `[]`).",
+					"scope": "resource"
+				},
+				"suspect.sdk.operationIds": {
+					"type": [
+						"array",
+						"null"
+					],
+					"items": {
+						"type": "string"
+					},
+					"default": null,
+					"markdownDescription": "Deprecated: use `suspect.codegen.operationIds`.",
+					"deprecationMessage": "Use suspect.codegen.operationIds instead.",
+					"scope": "resource"
+				},
+				"suspect.codegen.packageName": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Native package identity, independent of the API title. The editor's SDK commands and Live SDK Preview start from it. `codegen.package_name` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.sdk.packageName": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Deprecated: use `suspect.codegen.packageName`.",
+					"deprecationMessage": "Use suspect.codegen.packageName instead.",
+					"scope": "resource"
+				},
+				"suspect.codegen.packageVersion": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Default package SemVer, independent of `info.version`. Swift requires a stable version (no prerelease or build metadata). `codegen.package_version` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.sdk.packageVersion": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Deprecated: use `suspect.codegen.packageVersion`.",
+					"deprecationMessage": "Use suspect.codegen.packageVersion instead.",
+					"scope": "resource"
+				},
+				"suspect.codegen.session.config": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Session config (JSON) naming the spec and targets. Unset: the editor asks for one. `codegen.session.config` in `.suspect.yaml`; unset (`null`) uses the committed value.",
+					"scope": "resource"
+				},
+				"suspect.sdk.sessionConfig": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Deprecated: use `suspect.codegen.session.config`.",
+					"deprecationMessage": "Use suspect.codegen.session.config instead.",
+					"scope": "resource"
+				},
+				"suspect.codegen.session.out": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Initial output root for session preview/watch/drift checks, relative to the session config's directory (not `codegen.out`). `codegen.session.out` in `.suspect.yaml`; unset (`null`) uses the committed value (default `sdk-out`).",
+					"scope": "resource"
+				},
+				"suspect.sdk.sessionOutput": {
+					"type": [
+						"string",
+						"null"
+					],
+					"default": null,
+					"markdownDescription": "Deprecated: use `suspect.codegen.session.out`.",
+					"deprecationMessage": "Use suspect.codegen.session.out instead.",
+					"scope": "resource"
+				},
 				"suspect.diff.baseline": {
 					"type": [
 						"string",
@@ -263,54 +430,6 @@
 					"default": "",
 					"description": "Deprecated alias of suspect.basePath, kept from the retired legacy extension. Used only while suspect.basePath is left at its default.",
 					"deprecationMessage": "Use suspect.basePath instead. suspect.server.path is only honored while suspect.basePath is left at its default."
-				},
-				"suspect.sdk.sessionConfig": {
-					"type": "string",
-					"default": "",
-					"description": "JSON config for canonical SDK preview/watch using targets registered in the selected CLI. Absolute or relative to the selected workspace folder; empty opens a file picker. The config's spec is relative to its own directory; import_name sets a native import/module/namespace, and compatibility_profiles explicitly selects source interpretation."
-				},
-				"suspect.sdk.sessionOutput": {
-					"type": "string",
-					"default": "sdk-out",
-					"description": "Initial output root for SDK preview/watch/drift checks. Relative paths resolve from the session config directory. Each action prompts for this directory and reads saved files."
-				},
-				"suspect.sdk.packageName": {
-					"type": "string",
-					"default": "",
-					"description": "Initial explicit native package identity for a canonical SDK profile advertised by the selected CLI. The command prompts with the selected ecosystem's naming requirements before generation."
-				},
-				"suspect.sdk.packageVersion": {
-					"type": "string",
-					"default": "",
-					"description": "Initial explicit package SemVer for canonical SDK generation, independent of OpenAPI info.version. Swift requires stable SemVer without prerelease or build metadata."
-				},
-				"suspect.sdk.importNames": {
-					"type": "object",
-					"default": {},
-					"additionalProperties": {
-						"type": "string"
-					},
-					"description": "Explicit native import/module/namespace overrides by SDK profile, for example {\"python-http\":\"widgets_sdk\",\"ruby-http\":\"WidgetsSDK\"}."
-				},
-				"suspect.sdk.operationIds": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					},
-					"default": [],
-					"description": "Exact operationId selectors for canonical SDK generation. Empty attempts every outgoing operation; unsupported operations fail rather than being dropped."
-				},
-				"suspect.sdk.compatibilityProfiles": {
-					"type": "array",
-					"items": {
-						"type": "string",
-						"enum": [
-							"legacy-binary-string-v1"
-						]
-					},
-					"uniqueItems": true,
-					"default": [],
-					"description": "Explicit versioned source interpretation for single-package generation. Empty preserves ordinary OpenAPI semantics. legacy-binary-string-v1 opts into string/binary markers as bytes in binary contexts. Session actions use only compatibility_profiles from their saved JSON config."
 				}
 			}
 		},

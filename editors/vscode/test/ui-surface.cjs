@@ -241,6 +241,38 @@ test('renamed settings move once, at the level they are set, without overwriting
 	assert.match(source, /offerSettingsMigration\(context\)/);
 });
 
+test('SDK defaults: the codegen setting, then the old sdk spelling, then .suspect.yaml, then the default', () => {
+	const values = new Map();
+	const stub = { workspace: { getConfiguration: () => ({ get: (key) => values.get(key) }) } };
+	const { codegenDefaultsFrom } = loadModule('codegenSettings', stub);
+	const report = { values: [
+		{ key: 'codegen.package_name', value: 'from-file' },
+		{ key: 'codegen.package_version', value: '2.0.0' },
+		{ key: 'codegen.import_names.python-http', value: 'file_sdk' },
+		{ key: 'codegen.operation_ids', value: ['getFile'] },
+		{ key: 'codegen.compatibility_profiles', value: ['colon-path-parameters-v1'] },
+		{ key: 'codegen.session.config', value: '/w/sdk.json' },
+	] };
+	assert.deepEqual({ ...codegenDefaultsFrom(undefined) }, {
+		packageName: '', packageVersion: '', importNames: {}, operationIds: [], compatibilityProfiles: [], sessionConfig: '', sessionOut: 'sdk-out',
+	});
+	const fromFile = codegenDefaultsFrom(report);
+	assert.equal(fromFile.packageName, 'from-file');
+	assert.deepEqual({ ...fromFile.importNames }, { 'python-http': 'file_sdk' });
+	assert.deepEqual(fromFile.operationIds, ['getFile']);
+	assert.deepEqual(fromFile.compatibilityProfiles, ['colon-path-parameters-v1']);
+	assert.equal(fromFile.sessionConfig, '/w/sdk.json');
+	values.set('sdk.packageName', 'old-key');
+	values.set('sdk.sessionOutput', '../old-out');
+	values.set('codegen.importNames', { 'ruby-http': 'Editor' });
+	const edited = codegenDefaultsFrom(report);
+	assert.equal(edited.packageName, 'old-key');
+	assert.equal(edited.sessionOut, '../old-out');
+	assert.deepEqual(edited.importNames, { 'ruby-http': 'Editor' });
+	values.set('codegen.packageName', 'new-key');
+	assert.equal(codegenDefaultsFrom(report).packageName, 'new-key');
+});
+
 test('the extension manifest contributes one view, one controller, and commands that exist', () => {
 	const { contributes } = packageManifest;
 	const commands = new Set(contributes.commands.map((c) => c.command));

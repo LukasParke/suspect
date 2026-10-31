@@ -191,12 +191,12 @@ with it today, and the config key it maps to:
 | `suspect.gatewayPort` (`8080`) | none | none | `gateway.port` (P2.3) |
 | `suspect.ci.baseline` (`""`) | none; `suspect.breakingChanges` reads `SUSPECT_GIT_BASE` | none | `ci.baseline` (new; P2 must add a `ci` section), env `SUSPECT_GIT_BASE` |
 | `suspect.sdk.packageVersion` (`""`) | none | `codegen.package_version` exists but is not wired to the setting | `codegen.package_version` |
-| `suspect.sdk.sessionOutput` (`sdk-out`) | none | `codegen.out` exists, default `codegen-out` | `codegen.out` |
+| `suspect.sdk.sessionOutput` (`sdk-out`) | none | `codegen.out` exists, default `codegen-out` | `codegen.session.out` (done; `codegen.out` is the CLI's output root) |
 | `suspect.sdk.packageName` (`""`) | none | none (CLI `--package-name`) | `codegen.package_name` |
 | `suspect.sdk.importNames` (`{}`) | none | none (CLI `--import-name`) | `codegen.import_names` (profile to name) |
 | `suspect.sdk.operationIds` (`[]`) | none | none (CLI `--operation-id`) | `codegen.operation_ids` |
 | `suspect.sdk.compatibilityProfiles` (`[]`) | none | none (CLI `--compatibility-profile`) | `codegen.compatibility_profiles` |
-| `suspect.sdk.sessionConfig` (`""`) | none | none (it points at a session config file) | none; editor-only (P2.6 may fold the file format) |
+| `suspect.sdk.sessionConfig` (`""`) | none | none (it points at a session config file) | `codegen.session.config` (done; P2.6 may fold the file format) |
 | `suspect.basePath` (`suspect`) | none | none | none; editor-only |
 | `suspect.server.path` (`""`, deprecated) | none | none | none; editor-only, removed after two releases |
 
@@ -763,9 +763,24 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    `codegen.package_name`, `import_names`, `operation_ids` or
    `compatibility_profiles`, and `codegen.out` means something else than
    `sdk.sessionOutput` (an output root for `codegen`, not the session
-   preview's prompt default), so all `suspect.sdk.*` settings stay
-   editor-only in `settings.editor.json` for now; the `sdk.*` to `codegen.*`
-   renames wait for those keys.
+   preview's prompt default), so all `suspect.sdk.*` settings first stayed
+   editor-only in `settings.editor.json`.
+   **Follow-up done.** The setting table now has `codegen.package_name`,
+   `codegen.import_names` (profile to name), `codegen.operation_ids`,
+   `codegen.compatibility_profiles` (a new `Kind::EnumList` of the five
+   `suspect codegen --compatibility-profile` names; a suspect-lsp test pins
+   it to `CompatibilityProfile::ALL`) and a `codegen.session` section with
+   `config` (path) and `out` (default `sdk-out`, relative to the session
+   config's directory, so not `codegen.out`); `codegen.package_version`
+   gained an editor key. They surface as `suspect.codegen.packageName`,
+   `packageVersion`, `importNames`, `operationIds`, `compatibilityProfiles`,
+   `session.config` and `session.out`, each with its `suspect.sdk.*` key as
+   an `editor_aliases` entry (deprecated, `null` default, in the migration
+   offer). `settings.editor.json` keeps only `basePath` and `server.path`.
+   The SDK commands and Live SDK Preview read `src/codegenSettings.ts`: the
+   typed getter, else the value `suspect/explainConfig` resolved from
+   `.suspect.yaml`, else the table default. The CLI's `codegen` flags do
+   not read the new keys yet (`--package-name` is still required).
 5. **Server reads the editor layer through `resolve_with`** (after P2.1).
    Delete `editor_config::apply_client`, the client half of
    `parse_config`, and the manifest `editor` unwrapping. Migrate the

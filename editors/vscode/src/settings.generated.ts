@@ -28,6 +28,13 @@ export interface RenamedSetting {
 
 /** Every renamed setting, full keys (`suspect.testBaseUrl` -> `suspect.test.baseUrl`). */
 export const RENAMED_SETTINGS: readonly RenamedSetting[] = [
+	{ from: 'suspect.sdk.compatibilityProfiles', to: 'suspect.codegen.compatibilityProfiles' },
+	{ from: 'suspect.sdk.importNames', to: 'suspect.codegen.importNames' },
+	{ from: 'suspect.sdk.operationIds', to: 'suspect.codegen.operationIds' },
+	{ from: 'suspect.sdk.packageName', to: 'suspect.codegen.packageName' },
+	{ from: 'suspect.sdk.packageVersion', to: 'suspect.codegen.packageVersion' },
+	{ from: 'suspect.sdk.sessionConfig', to: 'suspect.codegen.session.config' },
+	{ from: 'suspect.sdk.sessionOutput', to: 'suspect.codegen.session.out' },
 	{ from: 'suspect.ci.baseline', to: 'suspect.diff.baseline' },
 	{ from: 'suspect.inlayHints.properties', to: 'suspect.editor.inlayHints.properties' },
 	{ from: 'suspect.inlayHints.refs', to: 'suspect.editor.inlayHints.refs' },
@@ -38,6 +45,13 @@ export const RENAMED_SETTINGS: readonly RenamedSetting[] = [
 
 /** Editor setting -> the `.suspect.yaml` key it sets. */
 export const CONFIG_KEYS: Readonly<Record<string, string>> = {
+	'suspect.codegen.compatibilityProfiles': 'codegen.compatibility_profiles',
+	'suspect.codegen.importNames': 'codegen.import_names',
+	'suspect.codegen.operationIds': 'codegen.operation_ids',
+	'suspect.codegen.packageName': 'codegen.package_name',
+	'suspect.codegen.packageVersion': 'codegen.package_version',
+	'suspect.codegen.session.config': 'codegen.session.config',
+	'suspect.codegen.session.out': 'codegen.session.out',
 	'suspect.diff.baseline': 'diff.baseline',
 	'suspect.editor.inlayHints.properties': 'editor.inlay_hints.properties',
 	'suspect.editor.inlayHints.refs': 'editor.inlay_hints.refs',
@@ -52,6 +66,41 @@ export const CONFIG_KEYS: Readonly<Record<string, string>> = {
 	'suspect.test.baseUrl': 'test.base_url',
 	'suspect.validate.strictFormat': 'validate.strict_format',
 };
+
+/** `suspect.codegen.compatibilityProfiles`, then `suspect.sdk.compatibilityProfiles`; `codegen.compatibility_profiles` in .suspect.yaml. `null`: unset, the committed value applies. */
+export function codegenCompatibilityProfiles(scope?: SettingScope): readonly ("legacy-binary-string-v1" | "oas30-nullable-in-3.1-v1" | "colon-path-parameters-v1" | "schemaless-stream-events-v1" | "all-of-scoped-mode-v1")[] | null {
+	return first<readonly ("legacy-binary-string-v1" | "oas30-nullable-in-3.1-v1" | "colon-path-parameters-v1" | "schemaless-stream-events-v1" | "all-of-scoped-mode-v1")[]>(scope, ['codegen.compatibilityProfiles', 'sdk.compatibilityProfiles']);
+}
+
+/** `suspect.codegen.importNames`, then `suspect.sdk.importNames`; `codegen.import_names` in .suspect.yaml. `null`: unset, the committed value applies. */
+export function codegenImportNames(scope?: SettingScope): Readonly<Record<string, string>> | null {
+	return first<Readonly<Record<string, string>>>(scope, ['codegen.importNames', 'sdk.importNames']);
+}
+
+/** `suspect.codegen.operationIds`, then `suspect.sdk.operationIds`; `codegen.operation_ids` in .suspect.yaml. `null`: unset, the committed value applies. */
+export function codegenOperationIds(scope?: SettingScope): readonly string[] | null {
+	return first<readonly string[]>(scope, ['codegen.operationIds', 'sdk.operationIds']);
+}
+
+/** `suspect.codegen.packageName`, then `suspect.sdk.packageName`; `codegen.package_name` in .suspect.yaml. `null`: unset, the committed value applies. */
+export function codegenPackageName(scope?: SettingScope): string | null {
+	return first<string>(scope, ['codegen.packageName', 'sdk.packageName']);
+}
+
+/** `suspect.codegen.packageVersion`, then `suspect.sdk.packageVersion`; `codegen.package_version` in .suspect.yaml. `null`: unset, the committed value applies. */
+export function codegenPackageVersion(scope?: SettingScope): string | null {
+	return first<string>(scope, ['codegen.packageVersion', 'sdk.packageVersion']);
+}
+
+/** `suspect.codegen.session.config`, then `suspect.sdk.sessionConfig`; `codegen.session.config` in .suspect.yaml. `null`: unset, the committed value applies. */
+export function codegenSessionConfig(scope?: SettingScope): string | null {
+	return first<string>(scope, ['codegen.session.config', 'sdk.sessionConfig']);
+}
+
+/** `suspect.codegen.session.out`, then `suspect.sdk.sessionOutput`; `codegen.session.out` in .suspect.yaml. `null`: unset, the committed value applies. */
+export function codegenSessionOut(scope?: SettingScope): string | null {
+	return first<string>(scope, ['codegen.session.out', 'sdk.sessionOutput']);
+}
 
 /** `suspect.diff.baseline`, then `suspect.ci.baseline`; `diff.baseline` in .suspect.yaml. `null`: unset, the committed value applies. */
 export function diffBaseline(scope?: SettingScope): string | null {
@@ -126,39 +175,4 @@ export function basePath(scope?: SettingScope): string {
 /** `suspect.server.path` (editor-only). Deprecated. */
 export function serverPath(scope?: SettingScope): string {
 	return config(scope).get<string>('server.path', "");
-}
-
-/** `suspect.sdk.sessionConfig` (editor-only). */
-export function sdkSessionConfig(scope?: SettingScope): string {
-	return config(scope).get<string>('sdk.sessionConfig', "");
-}
-
-/** `suspect.sdk.sessionOutput` (editor-only). */
-export function sdkSessionOutput(scope?: SettingScope): string {
-	return config(scope).get<string>('sdk.sessionOutput', "sdk-out");
-}
-
-/** `suspect.sdk.packageName` (editor-only). */
-export function sdkPackageName(scope?: SettingScope): string {
-	return config(scope).get<string>('sdk.packageName', "");
-}
-
-/** `suspect.sdk.packageVersion` (editor-only). */
-export function sdkPackageVersion(scope?: SettingScope): string {
-	return config(scope).get<string>('sdk.packageVersion', "");
-}
-
-/** `suspect.sdk.importNames` (editor-only). */
-export function sdkImportNames(scope?: SettingScope): Readonly<Record<string, string>> {
-	return config(scope).get<Readonly<Record<string, string>>>('sdk.importNames', {});
-}
-
-/** `suspect.sdk.operationIds` (editor-only). */
-export function sdkOperationIds(scope?: SettingScope): readonly string[] {
-	return config(scope).get<readonly string[]>('sdk.operationIds', []);
-}
-
-/** `suspect.sdk.compatibilityProfiles` (editor-only). */
-export function sdkCompatibilityProfiles(scope?: SettingScope): readonly "legacy-binary-string-v1"[] {
-	return config(scope).get<readonly "legacy-binary-string-v1"[]>('sdk.compatibilityProfiles', []);
 }
