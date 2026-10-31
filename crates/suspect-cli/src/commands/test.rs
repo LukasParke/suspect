@@ -93,6 +93,38 @@ pub fn test_with_messages(
     credentials: Option<&Path>,
     journal: Option<&Path>,
 ) -> anyhow::Result<i32> {
+    test_with_reports(
+        arazzo,
+        base_url,
+        filter,
+        inputs,
+        offline_cassette,
+        ndjson,
+        message_broker,
+        credentials,
+        journal,
+        &crate::ReportFiles::default(),
+    )
+}
+
+/// [`test_with_messages`] that also writes the `--report-file` and
+/// `--junit` files.
+///
+/// # Errors
+/// As [`test_with_messages`], plus report file IO.
+#[allow(clippy::too_many_arguments)]
+pub fn test_with_reports(
+    arazzo: &Path,
+    base_url: &str,
+    filter: Option<&str>,
+    inputs: &serde_json::Map<String, serde_json::Value>,
+    offline_cassette: Option<&Path>,
+    ndjson: bool,
+    message_broker: Option<&Path>,
+    credentials: Option<&Path>,
+    journal: Option<&Path>,
+    report_files: &crate::ReportFiles,
+) -> anyhow::Result<i32> {
     let auth = load_credentials(arazzo, credentials)?;
     let ws = super::workspace_for_entry(arazzo)?;
     let uri = Uri::from_path(arazzo)?;
@@ -118,6 +150,7 @@ pub fn test_with_messages(
         message_broker,
         &auth,
         journal,
+        report_files,
     )
 }
 
@@ -131,6 +164,7 @@ fn rt_run(
     message_broker: Option<&Path>,
     auth: &suspect_test::auth::AuthConfig,
     journal: Option<&Path>,
+    report_files: &crate::ReportFiles,
 ) -> anyhow::Result<i32> {
     let rt = tokio::runtime::Runtime::new()?;
     let outcome = rt.block_on(async move {
@@ -199,5 +233,6 @@ fn rt_run(
         summary.duration_ms as f64,
     );
     journal.flush()?;
+    report_files.write("test", &summary)?;
     Ok(i32::from(summary.failed > 0))
 }

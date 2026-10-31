@@ -9,11 +9,12 @@ use std::path::Path;
 
 use suspect_ir::IrSpec;
 
-/// Runs `suspect reverse`.
+/// Runs `suspect reverse`. Exits 0, or with `check` 1 on undocumented or
+/// spec-only routes; 2 when no routes are extracted.
 ///
 /// # Errors
 /// Workspace loading, IR compilation, and report serialization failures.
-pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
+pub fn reverse(source: &Path, spec: &Path, json: bool, check: bool) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(spec)?;
     let uri = suspect_source::Uri::from_path(spec)?;
     ws.get(&uri)
@@ -29,12 +30,14 @@ pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
         return Ok(2);
     }
     let report = crate::reverse::cross_reference(&ir, &routes);
+    // `--check`: undocumented or spec-only routes fail the gate.
+    let gate = i32::from(check && !(report.undocumented.is_empty() && report.spec_only.is_empty()));
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&report).map_err(|e| anyhow::anyhow!("{e}"))?
         );
-        return Ok(0);
+        return Ok(gate);
     }
     println!(
         "{} routes extracted from {} against {}",
@@ -60,5 +63,5 @@ pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
         report.spec_only.len(),
         report.method_mismatches.len()
     );
-    Ok(0)
+    Ok(gate)
 }

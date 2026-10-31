@@ -24,7 +24,10 @@ pub mod watch;
 
 use std::path::PathBuf;
 
-pub use args::{Findings, FindingsFormat, Report, ReportFormat, Stream, StreamFormat};
+pub use args::{
+    Check, DocOut, Findings, FindingsFormat, Report, ReportFiles, ReportFormat, Stream,
+    StreamFormat,
+};
 use clap::{Parser, Subcommand, ValueEnum};
 pub use exit::Exit;
 pub use output::{Finding, Severity};
@@ -135,14 +138,14 @@ pub enum Command {
     Fmt {
         /// Input document.
         input: PathBuf,
-        /// Write to this file instead of stdout.
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-        /// Force JSON output.
-        #[arg(long, conflicts_with = "yaml")]
+        /// Output file and serialization.
+        #[command(flatten)]
+        out: DocOut,
+        /// Old spelling of `--to json`.
+        #[arg(long, hide = true, conflicts_with_all = ["yaml", "to"])]
         json: bool,
-        /// Force YAML output.
-        #[arg(long)]
+        /// Old spelling of `--to yaml`.
+        #[arg(long, hide = true, conflicts_with = "to")]
         yaml: bool,
     },
     /// Structural counts for a document.
@@ -157,15 +160,12 @@ pub enum Command {
     Bundle {
         /// Entry document.
         input: PathBuf,
-        /// Write to this file instead of stdout.
-        #[arg(short, long)]
-        output: Option<PathBuf>,
         /// Bundling strategy.
         #[arg(long, value_enum, default_value = "keep")]
         strategy: Strategy,
-        /// Output serialization (inline only; default: input extension).
-        #[arg(long = "format", value_enum, id = "bundle_format")]
-        out_format: Option<DocFormat>,
+        /// Output file and serialization (`--to` applies to inline only).
+        #[command(flatten)]
+        out: DocOut,
     },
     /// Semantic structural diff between two documents.
     Diff {
@@ -176,6 +176,9 @@ pub enum Command {
         /// Output format for the difference report.
         #[command(flatten)]
         report: Report,
+        /// `--check`: exit 1 when anything differs.
+        #[command(flatten)]
+        check: Check,
     },
     /// Cross-reference recorded traffic against the spec: endpoints the
     /// traffic exercised that the spec does not declare, undeclared query
@@ -192,9 +195,9 @@ pub enum Command {
         #[arg(long = "ignore-param", value_name = "NAME")]
         ignore_param: Vec<String>,
         /// Exit with status 1 when the traffic addresses undeclared
-        /// endpoints or parameters.
-        #[arg(long)]
-        exit_on_gap: bool,
+        /// endpoints or parameters (old spelling: `--exit-on-gap`).
+        #[arg(long, alias = "exit-on-gap")]
+        check: bool,
         /// Output format for the drift report.
         #[command(flatten)]
         findings: Findings,
@@ -246,6 +249,9 @@ pub enum Command {
         /// `text` for a human report, `json` for a structured report.
         #[command(flatten)]
         report: Report,
+        /// `--check`: exit 1 on undocumented or spec-only routes.
+        #[command(flatten)]
+        check: Check,
     },
     /// Generate and run stateful dependency-graph test sequences against a
     /// live server.
@@ -263,6 +269,9 @@ pub enum Command {
         /// Print the generated sequences as JSON instead of running them.
         #[arg(long)]
         emit: bool,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
     },
     /// Compile an Arazzo document into an executable suite and run it.
     Test {
@@ -282,10 +291,11 @@ pub enum Command {
         #[arg(long = "input", value_name = "NAME=VALUE")]
         inputs: Vec<String>,
         /// Run offline against a recorded Suspect Cassette instead of live HTTP.
-        #[arg(long, requires = "offline")]
-        cassette: Option<PathBuf>,
-        /// Enables offline mode (requires --cassette).
         #[arg(long)]
+        cassette: Option<PathBuf>,
+        /// No effect: `--cassette` alone runs offline. Accepted so old
+        /// invocations keep working.
+        #[arg(long, hide = true)]
         offline: bool,
         /// Event stream format: human text or one-JSON-per-line ndjson
         /// (default: `test.report`, else `text`).
@@ -307,8 +317,11 @@ pub enum Command {
         journal: Option<PathBuf>,
         /// JSON or YAML object file of workflow inputs, applied before `--input`
         /// pairs (which override it).
-        #[arg(long = "inputs", value_name = "FILE")]
+        #[arg(long = "inputs-file", value_name = "FILE", alias = "inputs")]
         inputs_file: Option<PathBuf>,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
     },
     /// Run Arazzo workflows as weighted virtual-user scenarios under a phased
     /// load profile, with latency/throughput metrics and SLO gates.
@@ -341,6 +354,9 @@ pub enum Command {
         /// Evolved fuzzing: requests per round.
         #[arg(long, default_value_t = 12)]
         per_round: u32,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
     },
     /// Trace a validation failure to its origin: source location, git
     /// blame, and whether recorded traffic ever passed it.
@@ -380,6 +396,9 @@ pub enum Command {
         /// Write the journal to this file (append) instead of stdout.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
+        /// JSON and JUnit report files.
+        #[command(flatten)]
+        report_files: ReportFiles,
     },
     /// Render documentation or custom template manifests from an OpenAPI document.
     Gen {
@@ -393,9 +412,18 @@ pub enum Command {
         #[arg(long, conflicts_with = "preset")]
         manifest: Option<PathBuf>,
         /// Output root directory.
-        #[arg(short, long, default_value = "gen-out")]
+        #[arg(
+            short = 'o',
+            long = "output",
+            visible_alias = "out",
+            value_name = "DIR",
+            default_value = "gen-out"
+        )]
         out: PathBuf,
-        /// Print unified diffs without writing files; exit 1 when output or ownership drifts.
+        /// Write nothing; exit 1 when output or ownership drifts.
+        #[command(flatten)]
+        check: Check,
+        /// Also print unified diffs of drifted files; implies `--check`.
         #[arg(long)]
         diff: bool,
         /// Stable logical owner when sharing an output root across generation streams.
@@ -424,18 +452,17 @@ pub enum Command {
         /// Default: `gateway.port`, else 8080.
         #[arg(long, short = 'p')]
         port: Option<u16>,
-        /// Operating mode: mock | proxy | validate | record | replay |
-        /// scenario. Default: `gateway.mode`, else `mock`.
-        #[arg(long)]
-        mode: Option<String>,
+        /// Operating mode. Default: `gateway.mode`, else `mock`.
+        #[arg(long, value_enum)]
+        mode: Option<commands::gateway::GatewayMode>,
         /// Scenario mode: JSON file of scripted steps
         /// (`{"steps": [{"method", "path_suffix", "status", "body"}]}`).
         #[arg(long, value_name = "FILE")]
         scenario: Option<PathBuf>,
         /// Upstream base URL for proxy/validate/record modes (default:
         /// `gateway.upstream`).
-        #[arg(long)]
-        upstream: Option<PathBuf>,
+        #[arg(long, value_name = "URL")]
+        upstream: Option<String>,
         /// Cassette path for record output.
         #[arg(long)]
         cassette: Option<PathBuf>,
@@ -644,35 +671,41 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
         Command::Overlay { cmd } => commands::overlay::run(cmd),
         Command::Fmt {
             input,
-            output,
+            out,
             json,
             yaml,
         } => {
-            // A typed --json/--yaml flag wins over both settings; otherwise
+            // A typed --to (or --json/--yaml) wins over both settings; otherwise
             // the file decides.
             let resolved = settings::resolve_one(&input, Layer::flags())?;
+            let json = json || out.to == Some(DocFormat::Json);
+            let yaml = yaml || out.to == Some(DocFormat::Yaml);
             let (json, yaml) = if json || yaml {
                 (json, yaml)
             } else {
                 (resolved.settings.format.json, resolved.settings.format.yaml)
             };
-            commands::fmt::fmt(&input, output.as_deref(), json, yaml)
+            commands::fmt::fmt(&input, out.output.as_deref(), json, yaml)
         }
         Command::Stats { path, report } => commands::stats::stats(&path, report.format),
         Command::Bundle {
             input,
-            output,
             strategy,
-            out_format,
-        } => bundle::bundle(&input, output.as_deref(), strategy, out_format),
-        Command::Diff { a, b, report } => diff::diff_files(&a, &b, report.format),
+            out,
+        } => bundle::bundle(&input, out.output.as_deref(), strategy, out.to),
+        Command::Diff {
+            a,
+            b,
+            report,
+            check,
+        } => diff::diff_files(&a, &b, report.format, check.check),
         Command::Drift {
             spec,
             traffic,
             ignore_param,
-            exit_on_gap,
+            check,
             findings,
-        } => commands::drift::drift(&spec, &traffic, &ignore_param, exit_on_gap, findings.format),
+        } => commands::drift::drift(&spec, &traffic, &ignore_param, check, findings.format),
         Command::Har { traffic, output } => commands::har::har(&traffic, output.as_deref()),
         Command::Bench {
             fixture,
@@ -689,6 +722,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             evolved,
             rounds,
             per_round,
+            report_files,
         } => commands::fuzz::fuzz(
             &spec,
             &test_settings(&spec, base_url, None, None)?.base_url,
@@ -698,13 +732,21 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             evolved,
             rounds,
             per_round,
+            &report_files,
         ),
         Command::Replay {
             cassette,
             upstream,
             diff,
             journal,
-        } => commands::replay::replay(&cassette, &upstream, diff, journal.as_deref()),
+            report_files,
+        } => commands::replay::replay(
+            &cassette,
+            &upstream,
+            diff,
+            journal.as_deref(),
+            &report_files,
+        ),
         Command::Bridge {
             spec,
             interval_ms,
@@ -718,17 +760,20 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             source,
             spec,
             report,
-        } => commands::reverse::reverse(&source, &spec, report.format.is_json()),
+            check,
+        } => commands::reverse::reverse(&source, &spec, report.format.is_json(), check.check),
         Command::Stateful {
             spec,
             base_url,
             filter,
             emit,
+            report_files,
         } => commands::stateful::stateful(
             &spec,
             &test_settings(&spec, base_url, None, None)?.base_url,
             filter.as_deref(),
             emit,
+            &report_files,
         ),
         Command::Auth {
             cmd: commands::auth::AuthCmd::Check { credentials },
@@ -753,9 +798,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             credentials,
             journal,
             inputs_file,
+            report_files,
         } => {
             let test = test_settings(&arazzo, base_url, credentials, format)?;
-            commands::test::test_with_messages(
+            commands::test::test_with_reports(
                 &arazzo,
                 &test.base_url,
                 filter.as_deref(),
@@ -765,6 +811,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                 message_broker.as_deref(),
                 test.credentials.as_deref(),
                 journal.as_deref(),
+                &report_files,
             )
         }
         Command::Why {
@@ -789,6 +836,7 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             preset,
             manifest,
             out,
+            check,
             diff,
             owner,
             adopt_identical,
@@ -797,7 +845,10 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
             preset.as_deref(),
             manifest.as_deref(),
             &out,
-            diff,
+            commands::generate::Gate {
+                check: check.check || diff,
+                diff,
+            },
             owner.as_deref(),
             adopt_identical,
         ),
@@ -823,19 +874,18 @@ fn dispatch(cli: Cli) -> anyhow::Result<i32> {
                     port.map(|p| Raw::Int(u64::from(p))),
                     "--port",
                 )
-                .set("gateway.mode", mode.map(Raw::Str), "--mode")
                 .set(
-                    "gateway.upstream",
-                    upstream.map(|u| Raw::Str(u.display().to_string())),
-                    "--upstream",
-                );
+                    "gateway.mode",
+                    mode.map(|m| Raw::Str(m.name().to_owned())),
+                    "--mode",
+                )
+                .set("gateway.upstream", upstream.map(Raw::Str), "--upstream");
             let gateway = settings::resolve_one(&spec, flags)?.settings.gateway;
-            let upstream = gateway.upstream.map(PathBuf::from);
             commands::gateway::gateway(
                 &spec,
                 gateway.port,
                 &gateway.mode,
-                upstream.as_ref(),
+                gateway.upstream.as_deref(),
                 cassette.as_ref(),
                 enforce,
                 delay_ms,

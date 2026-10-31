@@ -29,7 +29,7 @@ pub struct DocsGenArgs {
     pub style: Option<DocsStyle>,
     /// Output path: a file for `html`, a directory for `markdown` and
     /// `sveltekit`.
-    #[arg(long)]
+    #[arg(short = 'o', long, value_name = "PATH")]
     pub output: Option<PathBuf>,
     /// Override the document title (defaults to `info.title`).
     #[arg(long)]

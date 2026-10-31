@@ -33,10 +33,19 @@ pub struct ContractArgs {
     #[arg(required = true)]
     pub input: PathBuf,
     /// Output directory for the contract package.
-    #[arg(short, long, default_value = "contract")]
+    #[arg(
+        short = 'o',
+        long = "output",
+        visible_alias = "out",
+        value_name = "DIR",
+        default_value = "contract"
+    )]
     pub out: PathBuf,
-    /// Emit the description as JSON instead of YAML.
-    #[arg(long)]
+    /// Description serialization [default: yaml].
+    #[arg(long = "to", value_enum, conflicts_with = "json")]
+    pub to: Option<crate::DocFormat>,
+    /// Old spelling of `--to json`.
+    #[arg(long, hide = true)]
     pub json: bool,
     /// Overlay documents applied in order before emission (repeatable).
     #[arg(long = "overlay", value_name = "FILE")]
@@ -247,7 +256,10 @@ pub fn contract_on_workspace(
 
     mark("ir");
     if args.check {
-        let description_path = description_path(&args.out, args.json);
+        let description_path = description_path(
+            &args.out,
+            args.json || args.to == Some(crate::DocFormat::Json),
+        );
         let manifest_path = args.out.join("manifest.json");
         let lock_path = args.out.join("contract.lock.json");
         let mut stale: Vec<String> = Vec::new();
@@ -303,7 +315,10 @@ pub fn contract_on_workspace(
     }
 
     std::fs::create_dir_all(&args.out)?;
-    let description_path = description_path(&args.out, args.json);
+    let description_path = description_path(
+        &args.out,
+        args.json || args.to == Some(crate::DocFormat::Json),
+    );
     std::fs::write(&description_path, &description)?;
     std::fs::write(
         args.out.join("manifest.json"),

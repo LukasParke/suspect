@@ -24,7 +24,13 @@ pub struct SessionArgs {
     #[arg(long)]
     pub config: PathBuf,
     /// Owned output root.
-    #[arg(long, default_value = "sdk-out")]
+    #[arg(
+        short = 'o',
+        long = "output",
+        visible_alias = "out",
+        value_name = "DIR",
+        default_value = "sdk-out"
+    )]
     pub out: PathBuf,
     /// Preserve a process/session across input and configuration changes.
     #[arg(long)]

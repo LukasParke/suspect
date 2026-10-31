@@ -701,6 +701,7 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
             &crate::commands::contract::ContractArgs {
                 input: project.publish_output.clone(),
                 out: out.clone(),
+                to: None,
                 json: false,
                 overlays: Vec::new(),
                 check: false,

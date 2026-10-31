@@ -14,7 +14,7 @@ code. Design and rationale: [LOAD-TESTING-PLAN.md](LOAD-TESTING-PLAN.md).
 $ suspect gateway examples/load/petstore.openapi.yaml -p 8080 --mode mock
 $ suspect load examples/load/petstore.load.yaml --dry-run      # resolve, send nothing
 $ suspect load examples/load/petstore.load.yaml -e smoke       # 5s smoke environment
-$ suspect load examples/load/petstore.load.yaml --json out/report.json --junit out/load.xml
+$ suspect load examples/load/petstore.load.yaml --report-file out/report.json --junit out/load.xml
 ```
 
 Profile-less, straight from an Arazzo document:
@@ -192,7 +192,7 @@ Counters with no entries (`http.codes.503` when none occurred) read as
   `load_snapshot` (interval + cumulative metrics), `log` notes, the full
   JSON report, and a `run_summary` whose `passed`/`failed` count ensure
   checks.
-- **`--json FILE`**: versioned report (`version: 1`) with `run`,
+- **`--report-file FILE`**: versioned report (`version: 1`) with `run`,
   `scenarios`, `phases`, `hooks`, `intervals[]`, `aggregate`, `ensure`.
 - **`--junit FILE`**: one `<testcase>` per ensure check; strict failures
   are `<failure>`, non-strict ones `<skipped>`.

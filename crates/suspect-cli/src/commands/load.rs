@@ -58,7 +58,7 @@ pub struct LoadArgs {
     #[arg(long = "input", value_name = "KEY=VALUE")]
     pub input_pairs: Vec<String>,
     /// JSON or YAML object file of workflow inputs applied to every scenario.
-    #[arg(long = "inputs", value_name = "FILE")]
+    #[arg(long = "inputs-file", value_name = "FILE", alias = "inputs")]
     pub inputs_file: Option<PathBuf>,
     /// Credentials file for the security schemes the workflows exercise.
     /// Default: `.suspect/credentials.json` discovered by walking up from
@@ -96,12 +96,10 @@ pub struct LoadArgs {
     /// Accept invalid TLS certificates.
     #[arg(long)]
     pub insecure: bool,
-    /// Write the JSON report here; overrides the profile.
-    #[arg(long, value_name = "FILE")]
-    pub json: Option<PathBuf>,
-    /// Write a JUnit report (one testcase per ensure check) here.
-    #[arg(long, value_name = "FILE")]
-    pub junit: Option<PathBuf>,
+    /// JSON report and JUnit report (one testcase per ensure check) files;
+    /// override the profile's `report.json` and `report.junit`.
+    #[command(flatten)]
+    pub report_files: crate::ReportFiles,
     /// Resolve and print the plan (phases, scenarios, prerequisites) without sending anything.
     #[arg(long)]
     pub dry_run: bool,
@@ -293,7 +291,12 @@ fn finish(
         println!();
         print!("{}", report::console_final(summary));
     }
-    if let Some(path) = args.json.clone().or_else(|| profile.report.json.clone()) {
+    if let Some(path) = args
+        .report_files
+        .report_file
+        .clone()
+        .or_else(|| profile.report.json.clone())
+    {
         write_file(
             &path,
             &serde_json::to_string_pretty(&report::json(summary))?,
@@ -302,7 +305,12 @@ fn finish(
             println!("json report: {}", path.display());
         }
     }
-    if let Some(path) = args.junit.clone().or_else(|| profile.report.junit.clone()) {
+    if let Some(path) = args
+        .report_files
+        .junit
+        .clone()
+        .or_else(|| profile.report.junit.clone())
+    {
         write_file(&path, &report::junit(summary))?;
         if !ndjson {
             println!("junit report: {}", path.display());

@@ -20,6 +20,7 @@ pub fn stateful(
     base_url: &str,
     filter: Option<&str>,
     emit: bool,
+    report_files: &crate::ReportFiles,
 ) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(spec)?;
     let uri = suspect_source::Uri::from_path(spec)?;
@@ -44,6 +45,7 @@ pub fn stateful(
         return Ok(0);
     }
 
+    let started = std::time::Instant::now();
     let rt = tokio::runtime::Runtime::new()?;
     let http = super::http::LiveTransport::new(std::time::Duration::from_secs(30))?;
     let mut passed = 0usize;
@@ -70,5 +72,6 @@ pub fn stateful(
         "stateful complete: {} sequences, {failed} failed",
         sequences.len()
     );
+    report_files.write_counts("stateful", passed, failed, started)?;
     Ok(i32::from(failed > 0))
 }

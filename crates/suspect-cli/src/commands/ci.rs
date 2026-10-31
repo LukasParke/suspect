@@ -536,6 +536,7 @@ fn contract_stage(manifest: &Path) -> StageResult {
     let check = crate::commands::contract::contract(&crate::commands::contract::ContractArgs {
         input: spec,
         out,
+        to: None,
         json: false,
         overlays: Vec::new(),
         check: true,

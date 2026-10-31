@@ -351,9 +351,9 @@ pub fn gap_findings(report: &DriftReport, spec_path: &Path) -> Vec<crate::Findin
     findings
 }
 
-/// `suspect drift <SPEC> <TRAFFIC> [--format text|json|sarif]
-/// [--exit-on-gap] [--ignore-param NAME]`. Exits 1 on gaps with
-/// `--exit-on-gap`, else 0.
+/// `suspect drift <SPEC> <TRAFFIC> [--format text|json|sarif|junit]
+/// [--check] [--ignore-param NAME]`. Exits 1 on gaps with
+/// `--check`, else 0.
 ///
 /// # Errors
 /// IO or parse failures on either file.
@@ -361,7 +361,7 @@ pub fn drift(
     spec_path: &Path,
     traffic_path: &Path,
     ignored_params: &[String],
-    exit_on_gap: bool,
+    check: bool,
     format: FindingsFormat,
 ) -> anyhow::Result<i32> {
     let spec = IrSpec::from_file(spec_path).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -398,7 +398,7 @@ pub fn drift(
         }
     }
 
-    if exit_on_gap {
+    if check {
         let gaps = report.summary.missing_from_spec + report.summary.query_param_gaps;
         if gaps > 0 {
             eprintln!(

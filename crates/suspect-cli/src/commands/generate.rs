@@ -12,6 +12,15 @@ fn ir_for(spec: &Path) -> anyhow::Result<IrSpec> {
     IrSpec::from_workspace(&ws, &uri).map_err(anyhow::Error::msg)
 }
 
+/// `--check` and `--diff` for `suspect gen`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Gate {
+    /// Write nothing; exit 1 when output or ownership drifts.
+    pub check: bool,
+    /// Also print unified diffs of drifted files.
+    pub diff: bool,
+}
+
 /// Runs `suspect gen`.
 ///
 /// # Errors
@@ -21,7 +30,7 @@ pub fn generate(
     preset: Option<&str>,
     manifest: Option<&Path>,
     out: &Path,
-    diff: bool,
+    gate: Gate,
     selected_owner: Option<&str>,
     adopt_identical: bool,
 ) -> anyhow::Result<i32> {
@@ -73,7 +82,7 @@ pub fn generate(
         &manifest_obj,
         &ctx,
         out,
-        diff,
+        gate.check,
         selected_owner.unwrap_or(&owner),
         if adopt_identical {
             suspect_gen::Adoption::Identical
@@ -82,7 +91,7 @@ pub fn generate(
         },
     )?;
     for o in &outcomes {
-        let status = if diff {
+        let status = if gate.diff {
             "diff"
         } else {
             match o.reason {
@@ -98,15 +107,15 @@ pub fn generate(
         if let Some(conflict) = &o.conflict {
             println!(" conflict  {}: {conflict}", o.path.display());
         }
-        if let Some(d) = &o.diff {
-            println!("--- {}\n{d}", o.path.display());
-        } else {
-            println!("{status:>9}  {}", o.path.display());
+        match &o.diff {
+            Some(d) if gate.diff => println!("--- {}\n{d}", o.path.display()),
+            _ => println!("{status:>9}  {}", o.path.display()),
         }
     }
     Ok(i32::from(
-        diff && outcomes
-            .iter()
-            .any(|outcome| outcome.reason != suspect_gen::WriteReason::Unchanged),
+        gate.check
+            && outcomes
+                .iter()
+                .any(|outcome| outcome.reason != suspect_gen::WriteReason::Unchanged),
     ))
 }

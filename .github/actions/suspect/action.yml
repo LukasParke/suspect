@@ -35,7 +35,7 @@ inputs:
     required: false
     default: 'http://127.0.0.1:8080'
   cassette:
-    description: 'test: record a Suspect Cassette to replay offline (implies --offline).'
+    description: 'test: a recorded Suspect Cassette to replay offline instead of live HTTP.'
     required: false
     default: ''
   report:
@@ -193,7 +193,7 @@ runs:
             fi
             ARGS=(test "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --format "$INPUT_REPORT")
             if [ -n "$INPUT_FILTER" ]; then ARGS+=(--filter "$INPUT_FILTER"); fi
-            if [ -n "$INPUT_CASSETTE" ]; then ARGS+=(--offline --cassette "$INPUT_CASSETTE"); fi
+            if [ -n "$INPUT_CASSETTE" ]; then ARGS+=(--cassette "$INPUT_CASSETTE"); fi
             "$BIN" "${ARGS[@]}" "${EXTRA[@]}" || rc=$?
             ;;
           gen)
@@ -204,8 +204,8 @@ runs:
             ARGS=(gen)
             if [ -n "$INPUT_PRESET" ]; then ARGS+=(--preset "$INPUT_PRESET");
             else ARGS+=(--manifest "$INPUT_MANIFEST"); fi
-            ARGS+=("--out" "$INPUT_OUT_DIR")
-            if [ "$INPUT_DIFF" = "true" ]; then ARGS+=(--diff); fi
+            ARGS+=("--output" "$INPUT_OUT_DIR")
+            if [ "$INPUT_DIFF" = "true" ]; then ARGS+=(--check --diff); fi
             "$BIN" "${ARGS[@]}" "${EXTRA[@]}" || rc=$?
             ;;
           *)

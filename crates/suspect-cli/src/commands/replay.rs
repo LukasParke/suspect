@@ -39,6 +39,7 @@ pub fn replay(
     upstream: &str,
     diff: bool,
     journal_file: Option<&Path>,
+    report_files: &crate::ReportFiles,
 ) -> anyhow::Result<i32> {
     let file = std::fs::File::open(cassette)?;
     let (header, entries) = suspect_journal::read_cassette(file)?;
@@ -95,6 +96,7 @@ pub fn replay(
     let mut journal = Journal::new(super::sink(journal_file)?);
     journal.run_summary("replay", matched, drifted, 0, elapsed_ms);
     journal.flush()?;
+    report_files.write_counts("replay", matched as usize, drifted as usize, started)?;
     Ok(i32::from(drifted > 0))
 }
 

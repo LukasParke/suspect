@@ -210,10 +210,10 @@ Arguments:
   <INPUT>  The OpenAPI document to document
 
 Options:
-      --style <STYLE>    Output style (default: a single HTML file, or `docs.style` from `.suspect.yaml`) [possible values: html, markdown, sveltekit]
-      --output <OUTPUT>  Output path: a file for `html`, a directory for `markdown` and `sveltekit`
-      --title <TITLE>    Override the document title (defaults to `info.title`)
-  -h, --help             Print help (see more with '--help')
+      --style <STYLE>  Output style (default: a single HTML file, or `docs.style` from `.suspect.yaml`) [possible values: html, markdown, sveltekit]
+  -o, --output <PATH>  Output path: a file for `html`, a directory for `markdown` and `sveltekit`
+      --title <TITLE>  Override the document title (defaults to `info.title`)
+  -h, --help           Print help (see more with '--help')
 ```
 
 ## `suspect stubs`
@@ -221,14 +221,14 @@ Options:
 ```text
 Generate typed server stubs from an OpenAPI document
 
-Usage: suspect stubs --backend <BACKEND> --out <OUT> <INPUT>
+Usage: suspect stubs --backend <BACKEND> --output <DIR> <INPUT>
 
 Arguments:
   <INPUT>  The OpenAPI document
 
 Options:
       --backend <BACKEND>  Target framework: `rust-axum` or `ts-express` [possible values: rust-axum, ts-express]
-      --out <OUT>          Output directory
+  -o, --output <DIR>       Output directory [alias: --out]
   -h, --help               Print help (see more with '--help')
 ```
 
@@ -274,9 +274,9 @@ Arguments:
   <INPUT>  The Swagger 2.0 document to upgrade
 
 Options:
-      --output <OUTPUT>          Output path (`stdout` when omitted)
-      --format <upgrade_format>  Serialization for the upgraded document (default: the `--output` extension, else the input's — `.yaml`/`.yml` emit YAML, anything else JSON) [possible values: json, yaml]
-  -h, --help                     Print help (see more with '--help')
+  -o, --output <FILE>  Write the document here instead of stdout
+      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+  -h, --help           Print help (see more with '--help')
 ```
 
 ## `suspect rules`
@@ -390,8 +390,9 @@ Arguments:
   <TARGET>   Document the overlay acts on
 
 Options:
-  -o, --output <OUTPUT>  Write the result here instead of stdout
-  -h, --help             Print help
+  -o, --output <FILE>  Write the document here instead of stdout
+      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+  -h, --help           Print help (see more with '--help')
 ```
 
 ## `suspect overlay explain`
@@ -399,14 +400,16 @@ Options:
 ```text
 Explain what each action selects and changes, in sequence
 
-Usage: suspect overlay explain <OVERLAY> <TARGET>
+Usage: suspect overlay explain [OPTIONS] <OVERLAY> <TARGET>
 
 Arguments:
   <OVERLAY>  Overlay 1.0/1.1 document
   <TARGET>   Document the overlay acts on
 
 Options:
-  -h, --help  Print help
+      --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
+      --check            Exit 1 when the result is not clean
+  -h, --help             Print help (see more with '--help')
 ```
 
 ## `suspect overlay diff`
@@ -421,8 +424,9 @@ Arguments:
   <NEW>  The revised document
 
 Options:
-  -o, --output <OUTPUT>  Write the overlay here instead of stdout
-  -h, --help             Print help
+  -o, --output <FILE>  Write the document here instead of stdout
+      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+  -h, --help           Print help (see more with '--help')
 ```
 
 ## `suspect fmt`
@@ -436,10 +440,9 @@ Arguments:
   <INPUT>  Input document
 
 Options:
-  -o, --output <OUTPUT>  Write to this file instead of stdout
-      --json             Force JSON output
-      --yaml             Force YAML output
-  -h, --help             Print help
+  -o, --output <FILE>  Write the document here instead of stdout
+      --to <TO>        Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+  -h, --help           Print help (see more with '--help')
 ```
 
 ## `suspect stats`
@@ -468,10 +471,10 @@ Arguments:
   <INPUT>  Entry document
 
 Options:
-  -o, --output <OUTPUT>         Write to this file instead of stdout
-      --strategy <STRATEGY>     Bundling strategy [default: keep] [possible values: keep, inline]
-      --format <bundle_format>  Output serialization (inline only; default: input extension) [possible values: json, yaml]
-  -h, --help                    Print help (see more with '--help')
+      --strategy <STRATEGY>  Bundling strategy [default: keep] [possible values: keep, inline]
+  -o, --output <FILE>        Write the document here instead of stdout
+      --to <TO>              Serialization (default: the `--output` extension, else the input's). `--format` is the old `bundle`/`upgrade` spelling [possible values: json, yaml]
+  -h, --help                 Print help (see more with '--help')
 ```
 
 ## `suspect diff`
@@ -487,6 +490,7 @@ Arguments:
 
 Options:
       --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
+      --check            Exit 1 when the result is not clean
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -503,7 +507,7 @@ Arguments:
 
 Options:
       --ignore-param <NAME>  Query parameter names to ignore in gap analysis (repeatable); the CI-passed auth token lives here, for instance
-      --exit-on-gap          Exit with status 1 when the traffic addresses undeclared endpoints or parameters
+      --check                Exit with status 1 when the traffic addresses undeclared endpoints or parameters (old spelling: `--exit-on-gap`)
       --format <FORMAT>      Output format for the finding list [default: text] [possible values: text, json, sarif, junit]
   -h, --help                 Print help (see more with '--help')
 ```
@@ -568,6 +572,7 @@ Arguments:
 
 Options:
       --format <FORMAT>  Output format for the report [default: text] [possible values: text, json]
+      --check            Exit 1 when the result is not clean
   -h, --help             Print help (see more with '--help')
 ```
 
@@ -585,6 +590,8 @@ Options:
       --base-url <BASE_URL>  Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
       --filter <FILTER>      Run only sequences whose target operationId contains this
       --emit                 Print the generated sequences as JSON instead of running them
+      --report-file <FILE>   Write the JSON run report here. `--json` is the old `load` spelling
+      --junit <FILE>         Write a JUnit XML report here
   -h, --help                 Print help
 ```
 
@@ -603,12 +610,13 @@ Options:
       --filter <FILTER>       Run only workflows whose id contains this substring
       --input <NAME=VALUE>    Provide a workflow input: `--input name=value` (repeatable). The value is parsed as JSON when it parses, else taken as a string; applies to every workflow that declares the input
       --cassette <CASSETTE>   Run offline against a recorded Suspect Cassette instead of live HTTP
-      --offline               Enables offline mode (requires --cassette)
       --format <FORMAT>       Event stream format: human text or one-JSON-per-line ndjson (default: `test.report`, else `text`) [possible values: text, ndjson]
       --message-broker <DIR>  Message broker directory for Arazzo 1.1 AsyncAPI steps: `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl` collects what the workflow published
       --credentials <FILE>    Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `test.credentials` and `SUSPECT_CREDENTIALS` override it
       --journal <FILE>        Write the journal to this file (append) instead of stdout
-      --inputs <FILE>         JSON or YAML object file of workflow inputs, applied before `--input` pairs (which override it)
+      --inputs-file <FILE>    JSON or YAML object file of workflow inputs, applied before `--input` pairs (which override it)
+      --report-file <FILE>    Write the JSON run report here. `--json` is the old `load` spelling
+      --junit <FILE>          Write a JUnit XML report here
   -h, --help                  Print help (see more with '--help')
 ```
 
@@ -633,7 +641,7 @@ Options:
       --duration <DURATION>         Profile-less run: phase length (`30s`, `2m`)
       --max-vus <MAX_VUS>           Cap on concurrently running users (arrivals beyond it are skipped)
       --input <KEY=VALUE>           Workflow input binding `key=value` applied to every scenario; repeatable
-      --inputs <FILE>               JSON or YAML object file of workflow inputs applied to every scenario
+      --inputs-file <FILE>          JSON or YAML object file of workflow inputs applied to every scenario
       --credentials <FILE>          Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `SUSPECT_CREDENTIALS` overrides. Every virtual user shares one token cache
       --validate-responses          Also validate every response body against the schema the operation declares for its status; a violation counts as a contract failure. Off by default: it costs a schema compile per response on the generator
       --seed <SEED>                 RNG seed for reproducible scenario selection, pools and jitter
@@ -644,8 +652,8 @@ Options:
       --timeout <DURATION>          Per-request timeout; overrides the profile
       --http1                       Disable HTTP/2 negotiation
       --insecure                    Accept invalid TLS certificates
-      --json <FILE>                 Write the JSON report here; overrides the profile
-      --junit <FILE>                Write a JUnit report (one testcase per ensure check) here
+      --report-file <FILE>          Write the JSON run report here. `--json` is the old `load` spelling
+      --junit <FILE>                Write a JUnit XML report here
       --dry-run                     Resolve and print the plan (phases, scenarios, prerequisites) without sending anything
   -h, --help                        Print help (see more with '--help')
 ```
@@ -668,6 +676,8 @@ Options:
       --evolved                Grammar-evolved, coverage-guided fuzzing: novel response shapes become seeds the campaign exploits
       --rounds <ROUNDS>        Evolved fuzzing: rounds per operation [default: 8]
       --per-round <PER_ROUND>  Evolved fuzzing: requests per round [default: 12]
+      --report-file <FILE>     Write the JSON run report here. `--json` is the old `load` spelling
+      --junit <FILE>           Write a JUnit XML report here
   -h, --help                   Print help
 ```
 
@@ -705,6 +715,8 @@ Options:
       --upstream <UPSTREAM>  Upstream base URL the recorded traffic is re-issued against
       --diff                 Print unified diffs of drifted UTF-8 response bodies
       --journal <FILE>       Write the journal to this file (append) instead of stdout
+      --report-file <FILE>   Write the JSON run report here. `--json` is the old `load` spelling
+      --junit <FILE>         Write a JUnit XML report here
   -h, --help                 Print help
 ```
 
@@ -721,8 +733,9 @@ Arguments:
 Options:
       --preset <PRESET>      Shipped documentation preset [possible values: docs-md]
       --manifest <MANIFEST>  Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json` (templates resolved relative to it)
-  -o, --out <OUT>            Output root directory [default: gen-out]
-      --diff                 Print unified diffs without writing files; exit 1 when output or ownership drifts
+  -o, --output <DIR>         Output root directory [default: gen-out] [alias: --out]
+      --check                Exit 1 when the result is not clean
+      --diff                 Also print unified diffs of drifted files; implies `--check`
       --owner <OWNER>        Stable logical owner when sharing an output root across generation streams
       --adopt-identical      Explicitly adopt only byte-identical unowned output
   -h, --help                 Print help
@@ -755,9 +768,9 @@ Arguments:
 
 Options:
   -p, --port <PORT>                  TCP port to bind on 127.0.0.1 (`0` picks a free port). The bound address is printed on stderr once the gateway can serve. Default: `gateway.port`, else 8080
-      --mode <MODE>                  Operating mode: mock | proxy | validate | record | replay | scenario. Default: `gateway.mode`, else `mock`
+      --mode <MODE>                  Operating mode. Default: `gateway.mode`, else `mock` [possible values: mock, proxy, validate, record, replay, scenario]
       --scenario <FILE>              Scenario mode: JSON file of scripted steps (`{"steps": [{"method", "path_suffix", "status", "body"}]}`)
-      --upstream <UPSTREAM>          Upstream base URL for proxy/validate/record modes (default: `gateway.upstream`)
+      --upstream <URL>               Upstream base URL for proxy/validate/record modes (default: `gateway.upstream`)
       --cassette <CASSETTE>          Cassette path for record output
       --enforce                      Validate mode only: reject invalid requests with 400 instead of forwarding them
       --delay-ms <DELAY_MS>          Fault injection: delay in milliseconds [default: 0]
@@ -767,7 +780,7 @@ Options:
       --journal <FILE>               Write the journal to this file (append) instead of stdout
       --redact-header <NAME>         Header name redacted from journals and cassettes beyond the default denylist (repeatable)
       --redact-json-key <KEY>        JSON body key redacted from journals and cassettes beyond the default denylist (repeatable)
-  -h, --help                         Print help
+  -h, --help                         Print help (see more with '--help')
 ```
 
 ## `suspect codegen`
@@ -801,8 +814,8 @@ Options:
           Explicit versioned source interpretation (repeatable); ordinary OpenAPI semantics remain the default, independently of native feature support [possible values: legacy-binary-string-v1, oas30-nullable-in-3.1-v1, colon-path-parameters-v1, schemaless-stream-events-v1, all-of-scoped-mode-v1]
       --defaults <FILE>
           Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding `compatibility_profiles`, `credential_env` and `sdk_defaults` (the same schema `codegen-session` accepts). Flag-declared compatibility profiles are added on top
-  -o, --out <OUT>
-          Output root for generated artifacts. Defaults to `.suspect.yaml`'s `codegen.out`, then `codegen-out`
+  -o, --output <DIR>
+          Output root for generated artifacts. Defaults to `.suspect.yaml`'s `codegen.out`, then `codegen-out` [alias: --out]
       --check
           Check ownership and drift without writing
       --format <FORMAT>
@@ -832,8 +845,8 @@ Options:
           Closed, versioned Terraform lifecycle/state mapping (JSON, or YAML by `.yaml`/`.yml` extension)
       --target-config <TARGET_CONFIG>
           Provider/toolchain identity and pinned generated-Go-SDK dependency (JSON, or YAML by extension)
-  -o, --out <OUT>
-          Output root containing go/ and the dependent terraform/ artifacts [default: terraform-out]
+  -o, --output <DIR>
+          Output root containing go/ and the dependent terraform/ artifacts [default: terraform-out] [alias: --out]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -863,8 +876,8 @@ Options:
           Closed, versioned application surface mapping (JSON, or YAML by `.yaml`/`.yml` extension)
       --target-config <TARGET_CONFIG>
           Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
-  -o, --out <OUT>
-          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
+  -o, --output <DIR>
+          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp] [alias: --out]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -894,8 +907,8 @@ Options:
           Closed, versioned application surface mapping (JSON, or YAML by `.yaml`/`.yml` extension)
       --target-config <TARGET_CONFIG>
           Package/toolchain identity, credential policy and runtime bounds (JSON, or YAML by extension)
-  -o, --out <OUT>
-          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp]
+  -o, --output <DIR>
+          Output root owning the application and its embedded generated SDK [default: cli-out for codegen-cli, mcp-out for codegen-mcp] [alias: --out]
       --check
           Read-only ownership/drift check
       --format <FORMAT>
@@ -926,7 +939,7 @@ Usage: suspect codegen-session [OPTIONS] --config <CONFIG>
 
 Options:
       --config <CONFIG>            JSON or YAML (`.yaml`/`.yml`) configuration file; relative source paths resolve from its directory
-      --out <OUT>                  Owned output root [default: sdk-out]
+  -o, --output <DIR>               Owned output root [default: sdk-out] [alias: --out]
       --watch                      Preserve a process/session across input and configuration changes
       --check                      Check disk drift and conflicts without writing
       --preview                    Return complete generated contents as readonly preview artifacts
@@ -1057,11 +1070,11 @@ Arguments:
   <INPUT>  Entry OpenAPI document
 
 Options:
-  -o, --out <OUT>       Output directory for the contract package [default: contract]
-      --json            Emit the description as JSON instead of YAML
+  -o, --output <DIR>    Output directory for the contract package [default: contract] [alias: --out]
+      --to <TO>         Description serialization [default: yaml] [possible values: json, yaml]
       --overlay <FILE>  Overlay documents applied in order before emission (repeatable)
       --check           Verify the existing package matches the current source instead of writing; exit 1 when it is stale or missing
-  -h, --help            Print help
+  -h, --help            Print help (see more with '--help')
 ```
 
 ## `suspect config`

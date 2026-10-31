@@ -153,7 +153,7 @@ $ suspect bundle api.yaml --strategy inline -o bundled.yaml
 $ suspect overlay apply overlay.yaml api.yaml -o out.yaml
 $ suspect diff old.yaml new.yaml
 $ suspect stats api.yaml
-$ suspect fmt api.yaml --json
+$ suspect fmt api.yaml --to json
 $ suspect bench fixture.yaml           # per-stage timings
 $ suspect test flows.arazzo.yaml --base-url http://localhost:8080 --input petName=Rex
 $ suspect load profile.load.yaml       # Artillery-style load test from Arazzo scenarios
@@ -161,9 +161,9 @@ $ suspect lsp                          # stdio language server
 $ suspect gateway api.yaml -p 8080 --mode mock
 $ suspect gateway api.yaml -p 9000 --mode record --upstream http://staging:80 --cassette rec.scj
 $ suspect gateway api.yaml -p 9001 --mode replay --cassette rec.scj
-$ suspect test flows.arazzo.yaml --offline --cassette rec.scj
+$ suspect test flows.arazzo.yaml --cassette rec.scj
 $ suspect fuzz api.yaml --base-url http://localhost:8080 --runs 50
-$ suspect watch . -- suspect test flows.arazzo.yaml --offline --cassette rec.scj
+$ suspect watch . -- suspect test flows.arazzo.yaml --cassette rec.scj
 $ suspect config                       # settings in effect, and where they came from
 ```
 
@@ -179,7 +179,7 @@ Generate the shared create/update/list/get example contract:
 ```sh
 suspect codegen crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml \
   --profile typescript-http --package-name @example/widgets \
-  --package-version 0.1.0 --out generated
+  --package-version 0.1.0 -o generated
 ```
 
 Profiles are the twelve registered backends listed by `suspect
@@ -213,7 +213,7 @@ and the runnable example in [`examples/load/`](examples/load/).
 
 `suspect gateway` serves a spec as a mock, or proxies an upstream while
 validating, recording or replaying traffic. Recorded traffic feeds offline
-contract tests (`suspect test --offline --cassette`), drift reports
+contract tests (`suspect test --cassette`), drift reports
 (`suspect drift`), HAR export (`suspect har`) and impact analysis
 (`suspect impact`).
 

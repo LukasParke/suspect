@@ -43,7 +43,13 @@ pub struct TerraformArgs {
     #[arg(long)]
     pub target_config: PathBuf,
     /// Output root containing go/ and the dependent terraform/ artifacts.
-    #[arg(short, long, default_value = "terraform-out")]
+    #[arg(
+        short = 'o',
+        long = "output",
+        visible_alias = "out",
+        value_name = "DIR",
+        default_value = "terraform-out"
+    )]
     pub out: PathBuf,
     /// Read-only ownership/drift check.
     #[arg(long)]

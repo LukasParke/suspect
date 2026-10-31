@@ -86,6 +86,7 @@ pub fn fuzz(
     evolved: bool,
     rounds: u32,
     per_round: u32,
+    report_files: &crate::ReportFiles,
 ) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(spec)?;
     let uri = Uri::from_path(spec)?;
@@ -159,6 +160,7 @@ pub fn fuzz(
         let mut journal = Journal::new(super::sink(journal)?);
         journal.run_summary("evolved-fuzz", survivors, total_crashes, 0, elapsed_ms);
         journal.flush()?;
+        report_files.write_counts("fuzz", survivors as usize, total_crashes as usize, started)?;
         return Ok(i32::from(total_crashes > 0));
     }
 
@@ -213,6 +215,7 @@ pub fn fuzz(
     let mut journal = Journal::new(super::sink(journal)?);
     journal.run_summary("fuzz", survivors, total_crashes, 0, elapsed_ms);
     journal.flush()?;
+    report_files.write_counts("fuzz", survivors as usize, total_crashes as usize, started)?;
     Ok(i32::from(total_crashes > 0))
 }
 

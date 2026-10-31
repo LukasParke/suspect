@@ -752,6 +752,25 @@ step that changes the tree.
    `reverse` and `overlay explain`, and `--format` to `overlay explain`.
    Tests: one alias test per renamed flag (old spelling parses to the same
    value). Estimate: 1 day.
+   **Done.** Deviations: `Check` holds only `--check`. `--diff` exists
+   only on `gen`, where it implies `--check` instead of requiring it, so
+   the old `gen --diff` keeps working unchanged; the conventions rule is
+   "`--diff` only where `--check` exists", with `replay --diff`
+   (response-body diffs) allowlisted. Existing `--check` flags on the
+   generators stay plain `bool` fields; `drift` spells its own
+   `--check` (alias `--exit-on-gap`). `har` and `release-workflow` keep
+   `-o/--output` without `--to` (one format each). `fmt --json/--yaml`
+   and `contract --json` are hidden switches beside `--to`, since a bool
+   cannot alias a value flag. `DocOut.to` carries the `--format` alias for
+   `bundle`/`upgrade`. `ReportFiles` writes a small JSON run report
+   (`version`, `command`, `passed`, `failed`, `skipped`, `duration_ms`) and
+   JUnit through `suspect_test::reporters::junit` for `test`, `stateful`,
+   `fuzz` and `replay`; `load` keeps its own report shapes behind the same
+   flags. `docs --output` gains `-o` and keeps its long name. `diff
+   routes`' `--check` gates on undocumented and spec-only routes, not
+   method mismatches. Tests: `tests/cli_conventions.rs` (rules plus
+   alias tests) and `tests/gate_flags.rs` (`diff`, `reverse`, `overlay
+   explain`, `gen --check`).
 4. **Command tree and legacy dispatch.** Regroup `Command` into group enums
    (`DiffCmd`, `GenCmd`, `TestCmd`, `TrafficCmd`, `ReleaseCmd`, `DevCmd`) in
    `lib.rs`, one variant per existing `Args` type. Add `legacy.rs` and the

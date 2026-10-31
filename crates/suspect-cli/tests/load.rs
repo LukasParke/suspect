@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use suspect_cli::commands::load::{JitterArg, LoadArgs, load};
-use suspect_cli::{Stream, StreamFormat};
+use suspect_cli::{ReportFiles, Stream, StreamFormat};
 use suspect_gateway::{FaultConfig, GatewayConfig, Mode};
 use suspect_journal::{Journal, VecSink};
 
@@ -103,8 +103,10 @@ fn args(profile: PathBuf, port: u16, junit: PathBuf, json: PathBuf) -> LoadArgs 
         timeout: None,
         http1: false,
         insecure: false,
-        json: Some(json),
-        junit: Some(junit),
+        report_files: ReportFiles {
+            report_file: Some(json),
+            junit: Some(junit),
+        },
         dry_run: false,
     }
 }

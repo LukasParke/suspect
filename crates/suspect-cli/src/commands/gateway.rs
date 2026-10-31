@@ -8,10 +8,43 @@ use std::time::Duration;
 use suspect_gateway::{FaultConfig, GatewayConfig, Mode};
 use suspect_journal::Journal;
 
+/// `--mode` values; `gateway.mode` in config uses the same names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum GatewayMode {
+    /// Serve spec-derived mock responses.
+    Mock,
+    /// Forward to `--upstream`.
+    Proxy,
+    /// Forward to `--upstream`, validating requests and responses.
+    Validate,
+    /// Forward to `--upstream` and record a cassette.
+    Record,
+    /// Serve a recorded cassette.
+    Replay,
+    /// Serve the scripted steps of `--scenario`.
+    Scenario,
+}
+
+impl GatewayMode {
+    /// The mode's name, as config files spell it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Mock => "mock",
+            Self::Proxy => "proxy",
+            Self::Validate => "validate",
+            Self::Record => "record",
+            Self::Replay => "replay",
+            Self::Scenario => "scenario",
+        }
+    }
+}
+
 /// Resolves the upstream URL or fails with a mode-specific message.
-fn require_upstream(upstream: Option<&PathBuf>) -> anyhow::Result<String> {
+fn require_upstream(upstream: Option<&str>) -> anyhow::Result<String> {
     upstream
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(str::to_owned)
         .ok_or_else(|| anyhow::anyhow!("--upstream http://host[:port] is required for this mode"))
 }
 
@@ -24,7 +57,7 @@ pub fn gateway(
     spec: &Path,
     port: u16,
     mode: &str,
-    upstream: Option<&PathBuf>,
+    upstream: Option<&str>,
     cassette: Option<&PathBuf>,
     enforce: bool,
     delay_ms: u64,

@@ -339,7 +339,10 @@ fn overlay_apply_writes_output_and_reports_unmatched() {
     let code = suspect_cli::commands::overlay::run(OverlayCmd::Apply {
         overlay,
         target,
-        output: Some(out.clone()),
+        out: suspect_cli::DocOut {
+            output: Some(out.clone()),
+            to: None,
+        },
     })
     .expect("run works");
     assert_eq!(code, 0);

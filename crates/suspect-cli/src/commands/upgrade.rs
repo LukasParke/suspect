@@ -8,14 +8,10 @@ pub struct UpgradeArgs {
     /// The Swagger 2.0 document to upgrade.
     #[arg(required = true)]
     pub input: PathBuf,
-    /// Output path (`stdout` when omitted).
-    #[arg(long)]
-    pub output: Option<PathBuf>,
-    /// Serialization for the upgraded document (default: the `--output`
-    /// extension, else the input's — `.yaml`/`.yml` emit YAML, anything
-    /// else JSON).
-    #[arg(long = "format", value_enum, id = "upgrade_format")]
-    pub format: Option<crate::DocFormat>,
+    /// Output file and serialization (default: the `--output` extension,
+    /// else the input's — `.yaml`/`.yml` emit YAML, anything else JSON).
+    #[command(flatten)]
+    pub out: crate::DocOut,
 }
 
 /// The emission format: the explicit flag, then a `.json`/`.yaml`/`.yml`
@@ -31,8 +27,9 @@ fn pick_format(args: &UpgradeArgs) -> crate::DocFormat {
         Some("json") => Some(crate::DocFormat::Json),
         _ => None,
     };
-    args.format
-        .or_else(|| args.output.as_deref().and_then(by_extension))
+    args.out
+        .to
+        .or_else(|| args.out.output.as_deref().and_then(by_extension))
         .or_else(|| by_extension(&args.input))
         .unwrap_or(crate::DocFormat::Json)
 }
@@ -80,7 +77,7 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
             yaml
         }
     };
-    match &args.output {
+    match &args.out.output {
         Some(path) => {
             std::fs::write(path, &output_text)?;
             eprintln!("upgraded → {}", path.display());
@@ -89,7 +86,7 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     }
     // Validate the upgraded document with the 3.1 battery so the user
     // sees the remaining findings when the output is a file.
-    if let Some(out_path) = &args.output {
+    if let Some(out_path) = &args.out.output {
         let findings = crate::commands::validate::validate_file(out_path.as_path(), None, false);
         let error_count = findings
             .iter()

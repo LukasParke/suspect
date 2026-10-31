@@ -112,12 +112,12 @@ pub fn diff_values(path: &str, a: &Value, b: &Value, report: &mut DiffReport) {
     }
 }
 
-/// Diffs two documents and prints the report; exit code is always 0
-/// (differences are a result, not a failure).
+/// Diffs two documents and prints the report. Exits 0 (differences are a
+/// result, not a failure), or with `check` 1 when anything differs.
 ///
 /// # Errors
 /// IO or parse failures on either input.
-pub fn diff_files(a: &Path, b: &Path, format: ReportFormat) -> anyhow::Result<i32> {
+pub fn diff_files(a: &Path, b: &Path, format: ReportFormat, check: bool) -> anyhow::Result<i32> {
     let doc_a = crate::load_doc(a)?;
     let doc_b = crate::load_doc(b)?;
     let va = Value::from_node(doc_a.root());
@@ -138,5 +138,5 @@ pub fn diff_files(a: &Path, b: &Path, format: ReportFormat) -> anyhow::Result<i3
         }
         ReportFormat::Json => output::print_json(&report)?,
     }
-    Ok(0)
+    Ok(i32::from(check && !report.is_empty()))
 }
