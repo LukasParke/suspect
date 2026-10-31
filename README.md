@@ -78,8 +78,8 @@ $ suspect gen sdk crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yam
 $ suspect gen docs api.yaml --style markdown -o docs/api
 ```
 
-`suspect gen profiles` lists the twelve backends. `--check` turns any
-generator into a read-only drift check
+`suspect gen profiles` lists the twelve backends. `--check` makes `gen sdk`,
+`gen template` and the other file generators a read-only drift check
 ([SDK generation](docs/guide/sdk-generation.md),
 [docs generation](docs/guide/docs-generation.md)).
 
@@ -132,8 +132,9 @@ interrupted.
 - Guides: [linting](docs/guide/linting.md), [editors](docs/guide/editors.md),
   [gateway](docs/guide/gateway.md), [docs generation](docs/guide/docs-generation.md),
   [SDK generation](docs/guide/sdk-generation.md), [load testing](docs/guide/load-testing.md).
-- Reference: [CLI](docs/reference/cli.md), [LSP features](docs/reference/lsp-features.md),
-  [SDK features](docs/reference/sdk-features.md).
+- Reference: [CLI](docs/reference/cli.md), [diagnostic codes](docs/reference/diagnostics.md),
+  [configuration](docs/reference/config.md), [environment variables](docs/reference/environment.md),
+  [LSP features](docs/reference/lsp-features.md), [SDK features](docs/reference/sdk-features.md).
 - [How suspect compares](docs/internal/LSP_COMPARISON.md) with vacuum and
   Telescope.
 - Plans: the [toolchain unification proposals](docs/proposals/README.md).

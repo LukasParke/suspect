@@ -533,6 +533,23 @@ would have to be deleted when P1 lands.
    P1), `reference/config.md` + `suspect.schema.json` (after P2.7) and
    `reference/environment.md` (after P2.4). Each is one render function plus
    one assertion in `reference_docs.rs`. 0.5 day each.
+   **Done.** `diagnostics_page` renders `suspect_check::registry::builtin()`
+   with one section per check (code, default severity, class, summary, how
+   to fix, aliases; a lint code that is an alias says "alias of `X`"),
+   plus the admission code families. `config_page` renders
+   `schema::SETTINGS` one subsection per top-level key (type and values,
+   default, description, env variable, VS Code setting and its older
+   `suspect.*` keys, flags, older spellings), `schema::MANIFEST`,
+   `TARGET_FIELDS`, `RELEASE_FIELDS` and `RELEASE_TARGET_FIELDS`.
+   `environment_page` renders `schema::env_vars()` and `DEBUG_VARS`.
+   Deviations: no `reference/suspect.schema.json` copy; `config.md` links
+   the schemas P2.7 already blesses in `editors/vscode/schemas/`, so there
+   is one checked-in schema per file. The setting tables name flags with
+   the pre-P3 command names (`gateway --port`); the page spells them with
+   today's path through `legacy::RENAMED`/`DEFAULT_SUB`
+   (`suspect traffic gateway --port`) and fails when a flag no longer
+   exists in the clap tree. A prose default ("the directory name") is not
+   put in a code span.
 
 Steps 1-4 total 2.5 days. Each step leaves CI green: after steps 3 and 4 the
 lychee job, the guard tests and the two bless tests all run on the new paths.

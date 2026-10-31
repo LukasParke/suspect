@@ -98,7 +98,8 @@ and the layer it came from, editor settings included (what `suspect config
 --explain` shows, plus the layer the CLI cannot see), and `Suspect: Open
 Configuration` opens
 `.suspect.yaml`. `.suspect.yaml` and `suspect.project.json` are validated
-against the checked-in JSON Schemas.
+against the checked-in JSON Schemas (see the
+[configuration reference](../reference/config.md)).
 
 Beyond the language features, the extension adds:
 

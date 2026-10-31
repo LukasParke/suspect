@@ -29,7 +29,8 @@ how to fix: Add an `operationId` so generated SDK methods carry a stable name.
 ```
 
 A problem is reported once, under one code, in the CLI, CI, SARIF and the
-editor. Some lint rules have older Spectral names (`operation-operationId`);
+editor. Every code, with its check, default severity and aliases, is in the
+[diagnostic codes reference](../reference/diagnostics.md). Some lint rules have older Spectral names (`operation-operationId`);
 they are aliases of the canonical code, and both spellings work in
 configuration and suppressions.
 
@@ -66,7 +67,8 @@ validate:
 ```
 
 `lint.rules` merges per key across files (`extends`) and layers, so a project
-file can override one rule without restating the others. Flags win over the
+file can override one rule without restating the others. Every key is in the
+[configuration reference](../reference/config.md). Flags win over the
 file: `--min-severity`, `--ruleset`, `--strict-format`. `suspect config
 --explain` shows the value in effect for every key and where it came from.
 

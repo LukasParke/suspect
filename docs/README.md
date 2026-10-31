@@ -35,10 +35,13 @@ Each directory holds one kind of page:
 
 ## Reference
 
-- [suspect command reference](reference/cli.md)
+- [suspect command reference](reference/cli.md) (generated)
+- [Diagnostic codes](reference/diagnostics.md) (generated): every code, its check, default severity and aliases
+- [Configuration reference](reference/config.md) (generated): every `.suspect.yaml` and `suspect.project.json` key, with its JSON Schema
+- [Environment variables](reference/environment.md) (generated)
 - [LSP Feature Matrix — Full LSP 3.17 Specification Coverage](reference/lsp-features.md)
 - [SDK generation capabilities](reference/sdk-capabilities.md)
-- [Generated-SDK feature matrix](reference/sdk-features.md)
+- [Generated-SDK feature matrix](reference/sdk-features.md) (generated)
 - [OpenAPI support matrix for SDK generation](reference/openapi-matrix.md)
 - [Explicit runtime environment credentials — v1](reference/credential-env.md)
 - [Generated artifact ownership](reference/artifact-ownership.md)

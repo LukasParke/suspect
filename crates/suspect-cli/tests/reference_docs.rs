@@ -4,6 +4,10 @@
 //!
 //! - `cli.md` from the clap command tree ([`suspect_cli::Cli`]), so a new
 //!   command or flag that is not reflected in the file fails here.
+//! - `diagnostics.md` from the `suspect-check` rule registry.
+//! - `config.md` from the `suspect_config::schema` setting tables.
+//! - `environment.md` from the same tables' `env` column and
+//!   `schema::DEBUG_VARS`.
 //!
 //! Regenerate every page with:
 //!
@@ -143,4 +147,364 @@ fn bless(page: &str, rendered: &str) {
 #[test]
 fn the_cli_reference_matches_the_command_tree() {
     bless("cli.md", &cli_page());
+}
+
+/// One Markdown table cell: pipes escaped, line breaks folded.
+fn cell(text: &str) -> String {
+    text.replace('|', "\\|").replace('\n', " ")
+}
+
+/// A list of names as backticked, comma-separated code spans.
+fn codes<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
+    names
+        .into_iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn generated_note(source: &str) -> String {
+    format!(
+        "<!-- Generated from {source} by crates/suspect-cli/tests/reference_docs.rs; \
+         do not edit by hand. Regenerate with \
+         `SUSPECT_BLESS=1 cargo test -p suspect-cli --test reference_docs`. -->\n\n"
+    )
+}
+
+fn class_name(class: suspect_diag::RuleClass) -> &'static str {
+    match class {
+        suspect_diag::RuleClass::Document => "document",
+        suspect_diag::RuleClass::Design => "design",
+        suspect_diag::RuleClass::Sdk => "sdk",
+    }
+}
+
+/// `docs/reference/diagnostics.md`: every builtin code, grouped by check.
+fn diagnostics_page() -> String {
+    let registry = suspect_check::registry::builtin();
+    let mut out = String::from("# Diagnostic codes\n\n");
+    out.push_str(&generated_note("the suspect-check rule registry"));
+    out.push_str(
+        "Every code a builtin check reports, with the check that owns it, its \
+         default severity, its class and its aliases. `lint.rules.<code>` in \
+         `.suspect.yaml` overrides a severity (or turns a code `off`), \
+         `lint.design` sets every design-class code at once, and SDK-class \
+         codes appear only when the project configures code generation. An \
+         alias names the same problem under another code (usually the Spectral \
+         rule name); it is accepted wherever a code is, and findings report the \
+         canonical code. See the [linting guide](../guide/linting.md) for \
+         settings, suppression comments and baselines.\n\n",
+    );
+    let mut checks: Vec<suspect_diag::CheckId> = registry.rules().map(|r| r.check).collect();
+    checks.sort();
+    checks.dedup();
+    let links: Vec<String> = checks
+        .iter()
+        .map(|c| format!("[`{0}`](#{0})", c.name()))
+        .collect();
+    writeln!(out, "Checks: {}.\n", links.join(", ")).unwrap();
+    for check in checks {
+        writeln!(out, "## {}\n", check.name()).unwrap();
+        writeln!(
+            out,
+            "| Code | Default | Class | Summary | How to fix | Aliases |\n\
+             |---|---|---|---|---|---|"
+        )
+        .unwrap();
+        let mut rules: Vec<&suspect_diag::RuleInfo> =
+            registry.rules().filter(|r| r.check == check).collect();
+        rules.sort_by_key(|r| r.code);
+        for rule in rules {
+            let targets = registry.alias_targets(rule.code);
+            let aliases = if targets.is_empty() {
+                codes(rule.aliases.iter().copied())
+            } else {
+                format!("alias of {}", codes(targets.iter().copied()))
+            };
+            writeln!(
+                out,
+                "| `{}` | {} | {} | {} | {} | {} |",
+                rule.code,
+                rule.default.label(),
+                class_name(rule.class),
+                cell(rule.summary),
+                cell(rule.how_to_fix),
+                aliases
+            )
+            .unwrap();
+        }
+        out.push('\n');
+    }
+    let families = registry.families();
+    if !families.is_empty() {
+        out.push_str(
+            "## Code families\n\n\
+             Open-ended codes registered by prefix: a code no table lists takes the \
+             metadata of the family with the longest matching prefix.\n\n\
+             | Family | Check | Default | Class | Summary |\n|---|---|---|---|---|\n",
+        );
+        for family in families {
+            writeln!(
+                out,
+                "| `{}` | {} | {} | {} | {} |",
+                family.rule.code,
+                family.rule.check.name(),
+                family.rule.default.label(),
+                class_name(family.rule.class),
+                cell(family.rule.summary)
+            )
+            .unwrap();
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// A setting's flag as the setting table writes it (`gateway --port`),
+/// spelled with today's command path (`suspect traffic gateway --port`).
+///
+/// # Panics
+/// When the command or the flag does not exist, so a renamed flag cannot
+/// leave the page pointing at nothing.
+fn current_flag(flag: &str) -> String {
+    use suspect_cli::legacy::{DEFAULT_SUB, RENAMED};
+    let (command, long) = flag.rsplit_once(' ').expect("`<command> --<flag>`");
+    let mut words: Vec<&str> = command.split(' ').collect();
+    if let Some(row) = RENAMED.iter().find(|r| r.old == words[0]) {
+        words.splice(0..1, row.new.iter().copied());
+    } else if let (1, Some((_, sub))) = (
+        words.len(),
+        DEFAULT_SUB.iter().find(|(group, _)| *group == words[0]),
+    ) {
+        words.push(sub);
+    }
+    let root = suspect_cli::Cli::command();
+    let leaf = words
+        .iter()
+        .try_fold(&root, |cmd, name| cmd.find_subcommand(name))
+        .unwrap_or_else(|| panic!("setting flag `{flag}`: no command `{}`", words.join(" ")));
+    let name = long.trim_start_matches("--");
+    let known = leaf.get_arguments().any(|arg| {
+        arg.get_long() == Some(name)
+            || arg
+                .get_all_aliases()
+                .is_some_and(|aliases| aliases.contains(&name))
+    });
+    assert!(
+        known,
+        "setting flag `{flag}`: `suspect {}` has no `{long}`",
+        words.join(" ")
+    );
+    format!("suspect {} {long}", words.join(" "))
+}
+
+/// The type of a setting as the reference shows it.
+fn kind_text(kind: suspect_config::schema::Kind) -> String {
+    use suspect_config::schema::Kind;
+    let (name, values) = match kind {
+        Kind::Map(inner) => (format!("map of {}", inner.type_name()), inner.values()),
+        other => (other.type_name().to_owned(), other.values()),
+    };
+    if values.is_empty() {
+        name
+    } else {
+        format!("{name}: {}", codes(values.iter().copied()))
+    }
+}
+
+/// A default as YAML in a code span, or as prose ("the directory name").
+fn default_text(setting: &suspect_config::schema::Setting) -> String {
+    match setting.default {
+        None => String::new(),
+        Some(d) if d.contains(' ') && !d.starts_with(['[', '{', '"']) => cell(d),
+        Some(d) => format!("`{}`", cell(d)),
+    }
+}
+
+/// One settings table, one subsection per top-level key.
+fn settings_table(out: &mut String, table: &'static [suspect_config::schema::Setting]) {
+    use suspect_config::schema::Kind;
+    let mut open = false;
+    for setting in table.iter().filter(|s| !s.path.is_empty()) {
+        if !setting.path.contains('.') {
+            if open {
+                out.push('\n');
+            }
+            writeln!(out, "### `{}`\n", setting.path).unwrap();
+            open = false;
+            if setting.kind == Kind::Section {
+                writeln!(out, "{}\n", setting.doc).unwrap();
+                if !setting.aliases.is_empty() {
+                    writeln!(
+                        out,
+                        "Older spelling: {}.\n",
+                        codes(setting.aliases.iter().copied())
+                    )
+                    .unwrap();
+                }
+                continue;
+            }
+        }
+        if setting.kind == Kind::Section {
+            // A nested section: its rows follow with full paths.
+            continue;
+        }
+        if !open {
+            out.push_str(
+                "| Key | Type | Default | Description | Env | Editor setting | Flags | Older spellings |\n\
+                 |---|---|---|---|---|---|---|---|\n",
+            );
+            open = true;
+        }
+        let editor = setting.editor.map_or_else(String::new, |key| {
+            let mut text = format!("`suspect.{key}`");
+            if !setting.editor_aliases.is_empty() {
+                let old: Vec<String> = setting
+                    .editor_aliases
+                    .iter()
+                    .map(|a| format!("suspect.{a}"))
+                    .collect();
+                write!(text, " (was {})", codes(old.iter().map(String::as_str))).unwrap();
+            }
+            text
+        });
+        let flags: Vec<String> = setting.flags.iter().map(|f| current_flag(f)).collect();
+        writeln!(
+            out,
+            "| `{}` | {} | {} | {} | {} | {} | {} | {} |",
+            setting.path,
+            cell(&kind_text(setting.kind)),
+            default_text(setting),
+            cell(setting.doc),
+            setting.env.map_or_else(String::new, |e| format!("`{e}`")),
+            editor,
+            codes(flags.iter().map(String::as_str)),
+            codes(setting.aliases.iter().copied())
+        )
+        .unwrap();
+    }
+    if open {
+        out.push('\n');
+    }
+}
+
+/// A table of nested object fields (codegen targets, release entries).
+fn fields_table(out: &mut String, fields: &'static [suspect_config::schema::Setting]) {
+    out.push_str("| Field | Type | Default | Description |\n|---|---|---|---|\n");
+    for field in fields {
+        writeln!(
+            out,
+            "| `{}` | {} | {} | {} |",
+            field.path,
+            cell(&kind_text(field.kind)),
+            default_text(field),
+            cell(field.doc)
+        )
+        .unwrap();
+    }
+    out.push('\n');
+}
+
+/// `docs/reference/config.md`: both configuration files, key by key.
+fn config_page() -> String {
+    use suspect_config::schema;
+    let mut out = String::from("# Configuration reference\n\n");
+    out.push_str(&generated_note("the suspect_config::schema setting tables"));
+    out.push_str(
+        "suspect reads two files. `.suspect.yaml` holds the settings every \
+         command, CI and the editor share. `suspect.project.json` describes what \
+         a project builds. Both are validated against checked-in JSON Schemas \
+         generated from the same tables: \
+         [`suspect.schema.json`](../../editors/vscode/schemas/suspect.schema.json) \
+         and [`suspect.project.schema.json`](../../editors/vscode/schemas/suspect.project.schema.json). \
+         Point an editor's YAML or JSON schema setting at them; the VS Code \
+         extension does this already.\n\n\
+         Precedence, lowest first: the default, the project manifest \
+         (deprecated policy keys), `.suspect.yaml` (over its `extends` parent), \
+         the environment variable, then an editor setting or a command-line \
+         flag. `lint.rules` merges per rule across layers. Paths are relative \
+         to the file that sets them. `suspect config --explain` lists every key \
+         with its value and where it came from. Older spellings still work and \
+         print a warning naming the current key. Environment variables are also \
+         listed in the [environment reference](environment.md).\n\n",
+    );
+    writeln!(out, "## `.suspect.yaml`\n\n{}\n", schema::SETTINGS[0].doc).unwrap();
+    settings_table(&mut out, schema::SETTINGS);
+    writeln!(
+        out,
+        "## `suspect.project.json`\n\n{}\n",
+        schema::MANIFEST[0].doc
+    )
+    .unwrap();
+    out.push_str(
+        "Settings that moved to `.suspect.yaml` (`lint`, `validate`, `editor`) are \
+         still read here for one release, with a warning; `suspect config migrate` \
+         moves them.\n\n",
+    );
+    fields_table(&mut out, &schema::MANIFEST[1..]);
+    out.push_str("### `codegen` targets\n\nEach entry of the manifest's `codegen` list.\n\n");
+    fields_table(&mut out, schema::TARGET_FIELDS);
+    out.push_str("### `release` fields\n\n");
+    fields_table(&mut out, schema::RELEASE_FIELDS);
+    out.push_str("### `release.targets` entries\n\n");
+    fields_table(&mut out, schema::RELEASE_TARGET_FIELDS);
+    out
+}
+
+/// `docs/reference/environment.md`: every `SUSPECT_*` variable the binary
+/// reads.
+fn environment_page() -> String {
+    use suspect_config::schema;
+    let mut out = String::from("# Environment variables\n\n");
+    out.push_str(&generated_note(
+        "the suspect_config::schema tables (`env` column and `DEBUG_VARS`)",
+    ));
+    out.push_str(
+        "Every `SUSPECT_*` variable the `suspect` binary reads. A test \
+         (`crates/suspect-config/tests/env_registry.rs`) fails when the code \
+         reads one that is not listed here.\n\n\
+         ## Settings\n\n\
+         Each variable sets one [configuration key](config.md). It overrides \
+         `.suspect.yaml` and is overridden by an editor setting or a flag; \
+         `suspect config --explain` names it as the origin.\n\n\
+         | Variable | Key | Type | Default | Description |\n|---|---|---|---|---|\n",
+    );
+    let mut vars: Vec<(&str, &schema::Setting)> = schema::env_vars().collect();
+    vars.sort_by_key(|(name, _)| *name);
+    for (name, setting) in vars {
+        writeln!(
+            out,
+            "| `{name}` | `{}` | {} | {} | {} |",
+            setting.path,
+            cell(&kind_text(setting.kind)),
+            default_text(setting),
+            cell(setting.doc)
+        )
+        .unwrap();
+    }
+    out.push_str(
+        "\n## Debugging\n\n\
+         These change diagnostic output only; `suspect config --explain` lists \
+         the ones that are set.\n\n\
+         | Variable | Prints |\n|---|---|\n",
+    );
+    for var in schema::DEBUG_VARS {
+        writeln!(out, "| `{}` | {} |", var.name, cell(var.doc)).unwrap();
+    }
+    out
+}
+
+#[test]
+fn the_diagnostics_reference_matches_the_registry() {
+    bless("diagnostics.md", &diagnostics_page());
+}
+
+#[test]
+fn the_config_reference_matches_the_setting_tables() {
+    bless("config.md", &config_page());
+}
+
+#[test]
+fn the_environment_reference_matches_the_env_registry() {
+    bless("environment.md", &environment_page());
 }
