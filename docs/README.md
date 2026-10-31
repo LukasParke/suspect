@@ -18,6 +18,10 @@ Each directory holds one kind of page:
 
 ## Guide
 
+- [Checking and linting](guide/linting.md): `check`, rule settings, suppression comments, baselines, custom rules
+- [Editors](guide/editors.md): VS Code, Zed and other LSP clients
+- [Gateway, recording and replay](guide/gateway.md)
+- [Documentation generation](guide/docs-generation.md): `gen docs` and custom templates
 - [Golden SDK defaults — user guide](guide/sdk-generation.md)
 - [Canonical incremental SDK generation](guide/sdk-incremental-generation.md)
 - [SDK editor preview and watch](guide/sdk-editor-preview.md)

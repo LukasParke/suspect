@@ -504,6 +504,17 @@ would have to be deleted when P1 lands.
    `guide/gateway.md` and `guide/docs-generation.md`, written from
    `README.md` sections and `editors/*/README.md`. Shortens `README.md` to
    install, tour, command map and links. 1 day.
+   **Done.** `guide/linting.md` covers `check`/`validate`/`lint`, the SDK
+   category, `lint.*` settings, suppression comments and
+   `x-suspect-disable`, baselines, rulesets and TS rules (P1 steps 5-8);
+   `guide/editors.md` takes the README's screenshot gallery and the VS Code
+   binary order, settings and commands; `guide/gateway.md` takes the
+   cassette format; `guide/docs-generation.md` covers `gen docs` and `gen
+   template` (manifest, context, filters, user-code regions, ownership).
+   The README command map is the P3 tree. The crate table and the
+   "Notable engineering" notes moved to `CONTRIBUTING.md` ("Crates", which
+   gains the `suspect-diag` and `suspect-check` rows). `guide/config.md` is
+   not written here; `reference/config.md` (step 7) is generated instead.
 6. **`reference_docs.rs` and `SUSPECT_BLESS` everywhere.** Folds
    `cli_reference.rs` into `reference_docs.rs` and renames the
    feature-manifest variable with the alias. 0.25 day.

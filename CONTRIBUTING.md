@@ -10,6 +10,46 @@
 - `xtask/` — `cargo xtask ci`, corpus fetching and SDK verification tasks.
 - `docs/` — see [docs/README.md](docs/README.md) for the index.
 
+## Crates
+
+| Crate | Purpose |
+|---|---|
+| `suspect-source` | Loading: mmap, encodings (UTF-8/16, BOM), line indexes, URIs |
+| `suspect-syntax` | Lossless tree-sitter CSTs (vendored grammars, patched for >32k-line YAML) |
+| `suspect-low` | Ordered model, source maps, YAML 1.2 typing, aliases/merge keys, pointers |
+| `suspect-ref` | `$ref` engine: workspace graph, cycle census (legal vs illegal), memos |
+| `suspect-jsonpath` | RFC 9535 JSONPath over low nodes |
+| `suspect-schema` | Source-bound JSON Schema validation and checked owned programs for SDK codecs |
+| `suspect-oas` | Typed OpenAPI 3.x views; `$ref`-transparent, cycle-safe |
+| `suspect-ir` | Source-addressed SDK `Contract`, indexed platform snapshots, deterministic example values (`faker`) |
+| `suspect-codegen` | Native SDK models, codecs, HTTP packages, docs, sessions and compatibility |
+| `suspect-gen` | Markdown documentation preset and custom manifest/template rendering |
+| `suspect-artifact` | Shared ownership-aware output, drift checks and changed-file writes |
+| `suspect-overlay` | Overlay 1.0 models + apply engine |
+| `suspect-arazzo` | Arazzo 1.0 models, runtime expressions, cross-ref validation |
+| `suspect-test` | Arazzo plan compiler, observable executor, load generator (profiles, scheduler, metrics, SLO gates), reporters |
+| `suspect-validate` | Source-located semantic checks with stable diagnostic codes |
+| `suspect-lint` | Spectral-compatible rulesets and builtin rules |
+| `suspect-diag` | `Finding`, `Severity`, rule metadata and the text/JSON/SARIF/JUnit renderers |
+| `suspect-check` | The check pass: rule registry and aliases, policy, suppression, the per-check producers |
+| `suspect-config` | One settings schema (`.suspect.yaml`) and precedence rule for the CLI and LSP |
+| `suspect-runtime` | Shared contract runtime: one interpretation of a contract for every surface |
+| `suspect-journal` | Structured JSONL journals, traffic records, Suspect Cassette format |
+| `suspect-gateway` | HTTP contract gateway: mock, proxy, validate, record, replay |
+| `suspect-rules` | TS/JS custom rule runtime (Bun sidecar) |
+| `suspect-lsp` | tower-lsp server: diagnostics, goto-def/references, hover, symbols, completion |
+| `suspect-cli` | `suspect` binary: authoring, SDK generation, tests, gateway and editor commands |
+
+Two details worth knowing before changing the parse layer:
+
+- **Vendored grammars**: `crates/suspect-syntax/grammars/` with a local patch
+  widening the YAML scanner's `int16_t` row tracking to `int32_t` — upstream
+  tree-sitter-yaml v0.7.2 corrupts parses beyond 32,767 lines; suspect handles
+  100k+-line documents (guarded by `crates/suspect-low/tests/large_yaml.rs`).
+- **Cycle taxonomy**: `$ref` loops are classified as legal schema recursion or
+  illegal (unresolvable) loops with exact cycle paths — never stack overflow,
+  never hangs.
+
 ## Checks
 
 `cargo xtask ci` runs every job CI runs, with the same commands; `cargo xtask
