@@ -638,6 +638,21 @@ workflow does, required secrets), and its "Checks" list is replaced by
 7. **GitHub Action from releases.** Rewrite `action.yml`; add a workflow
    that uses `./.github/actions/suspect` against `docs/demo/petstore.yaml`
    on a pinned released version. 2-3 h.
+   **Done; the workflow cannot pass before v0.1.0 exists.** `action.yml`
+   takes `version` (`0.2.0`, `v0.2.0` or `latest`; default
+   `github.action_ref` when it is a `v*` tag, else an error asking for the
+   input), maps `RUNNER_OS`/`RUNNER_ARCH` to the editor triples (musl on
+   Linux), downloads the archive and `.sha256` with curl, verifies,
+   extracts (7-Zip for the Windows zip), finds `suspect` at depth 1-2 and
+   puts it on `PATH`. Additions: `command` may be empty (install only);
+   outputs `version`, `path`, `exit-code`; `fail-on-findings: false` lets a
+   `check` that exits 1 pass. `.github/workflows/action-smoke.yml` runs the
+   action on `ubuntu-22.04`, `ubuntu-22.04-arm`, `macos-14` and
+   `windows-2022` against `docs/demo/petstore.yaml` with version `0.1.0`;
+   it is `workflow_dispatch` only until the first release, then gains a
+   `release: published` trigger. The install and run steps were exercised
+   locally against a fake release (correct version, missing version, bad
+   checksum, findings tolerated and not).
 8. **Zed registry automation.** Script the extensions-repo PR in
    `publish-editors.yml` once the first submission is merged. 2 h.
 
