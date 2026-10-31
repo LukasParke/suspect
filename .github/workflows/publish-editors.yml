@@ -64,3 +64,27 @@ jobs:
         run: |
           [ -n "$VSCE_PAT" ] || echo "::notice::VSCE_PAT is not set; the VS Code Marketplace was skipped"
           [ -n "$OVSX_PAT" ] || echo "::notice::OVSX_PAT is not set; Open VSX was skipped"
+
+  # The zed-industries/extensions PR that moves the suspect submodule to the
+  # release commit (.github/scripts/zed-registry-pr.sh). Runs only once the
+  # first, manual submission is merged: set the repository variable
+  # ZED_REGISTRY_FORK (owner/name of a fork of zed-industries/extensions)
+  # and the ZED_EXTENSIONS_TOKEN secret.
+  zed:
+    runs-on: ubuntu-22.04
+    environment: release
+    env:
+      GH_TOKEN: ${{ secrets.ZED_EXTENSIONS_TOKEN }}
+      ZED_REGISTRY_FORK: ${{ vars.ZED_REGISTRY_FORK }}
+    steps:
+      # Full history: the script checks the tag commit is on main.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Open the registry PR
+        if: env.GH_TOKEN != '' && env.ZED_REGISTRY_FORK != ''
+        run: .github/scripts/zed-registry-pr.sh "$(jq -r '.announcement_tag' <<< "$PLAN")"
+      - name: Skipped
+        if: env.GH_TOKEN == '' || env.ZED_REGISTRY_FORK == ''
+        run: echo "::notice::ZED_EXTENSIONS_TOKEN or ZED_REGISTRY_FORK is not set; the Zed registry PR was skipped"

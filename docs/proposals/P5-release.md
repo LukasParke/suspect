@@ -655,6 +655,18 @@ workflow does, required secrets), and its "Checks" list is replaced by
    checksum, findings tolerated and not).
 8. **Zed registry automation.** Script the extensions-repo PR in
    `publish-editors.yml` once the first submission is merged. 2 h.
+   **Done, not run.** `.github/scripts/zed-registry-pr.sh <version>` checks
+   that the tag commit is on `main` (Zed builds only branch commits) and that
+   `editors/zed/extension.toml` has the version, makes a shallow,
+   blob-less clone of `zed-industries/extensions`, sets `version` in the
+   existing `[suspect]` table, moves the submodule gitlink with `git
+   update-index` (no submodule fetch), syncs the fork, pushes
+   `suspect-v<V>` to it and opens the PR with `gh`. It refuses when the
+   registry has no `[suspect]` entry, so the first submission stays manual.
+   The `zed` job in `publish-editors.yml` runs it only when the
+   `ZED_EXTENSIONS_TOKEN` secret and the `ZED_REGISTRY_FORK` repository
+   variable are set. Tested with `DRY_RUN=1` against local fake repositories
+   (version edited, gitlink moved, version mismatch rejected).
 
 Steps 1-3 are useful on their own and can land before the tooling decision
 in step 4. Each step leaves main green.
