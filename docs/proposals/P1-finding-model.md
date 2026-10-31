@@ -917,6 +917,32 @@ releasable on its own.
    path; an override through an alias and through the canonical code (the
    canonical one wins); a redefined custom rule keeps its code; Swagger
    keeps the lint finding. Estimate: 1 day.
+   **Done.** `suspect_check::registry::ALIASES` holds table v1 plus the
+   Overlay pair `overlay-action-missing-description` (canonical, overlay
+   check) / `overlay-action-description` (lint), which the LSP golden
+   shows at the same range on the action mapping. `Registry` gains
+   `with_aliases`, `alias_targets` and `resolve`; `canonical` returns
+   `None` for an alias. The registry also gains `syntax-error`,
+   `suspect.config`, `config-manifest-policy`, `extension-schema` and the
+   `md-*` table. `apply_policy` steps 1-2: a builtin lint finding with an
+   alias code takes the canonical code and default severity; a
+   multi-target alias takes the target reported at the same position,
+   else keeps its own code; overrides look up the canonical code, then
+   its aliases. Deviation: dedupe merges only findings that reached one
+   canonical code from different codes (key: canonical code, document,
+   range start, else pointer), so repeats of one code at one spot (two
+   undeclared parameters on one path item) are all kept. Tests:
+   `crates/suspect-check/tests/aliases.rs` (petstore once per operation,
+   alias vs canonical override, redefined custom rule, Swagger keeps the
+   lint finding, multi-target, overlay pair, `syntax`) and the `policy.rs`
+   unit tests; the LSP golden asserts the petstore case on the editor path.
+   The regenerated golden drops 129 `operation-tag-defined`, 2
+   `operation-operationId`, 2 `arazzo-step-operation` and 1
+   `overlay-action-description` duplicates, renames the two Swagger
+   `operation-operationId` findings (error -> warning) and `syntax`. The
+   CLI is unchanged until step 5, so `finding_output.rs` goldens do not
+   move. `docs/capture/showcase_data.json` (written by the `showcase`
+   example) still shows the old codes.
 5. **CLI on `suspect-check`.** New `check` command, `--only`,
    `--parse-only`, `--sdk`/`--no-sdk`; `validate` and `lint` become filters;
    `ci` gets a `check` stage; `stats` gains the census; JUnit renderer; docs

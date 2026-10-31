@@ -12,9 +12,9 @@ use suspect_ref::Workspace;
 
 use crate::Policy;
 
-/// The code a YAML/JSON syntax error carries (the editor's code; the
-/// CLI's `syntax-error` becomes the one code in P1 step 4).
-pub const SYNTAX_CODE: &str = "syntax";
+/// The code a YAML/JSON syntax error carries, in the CLI and the editor
+/// (the editor's old `syntax` is an alias).
+pub const SYNTAX_CODE: &str = "syntax-error";
 
 /// What a check pass runs against.
 #[derive(Clone, Copy)]

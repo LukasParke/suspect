@@ -135,16 +135,30 @@ impl Policy {
         self.recommended || self.custom_ruleset
     }
 
-    /// The override for `code`, when one is configured.
+    /// The override for a (canonical) code: one keyed on the code itself
+    /// wins, else one keyed on any of its aliases.
     fn override_for(&self, code: &str) -> Option<Level> {
-        self.overrides.get(code).copied()
+        if let Some(level) = self.overrides.get(code) {
+            return Some(*level);
+        }
+        let aliases = self
+            .registry
+            .info(code)
+            .map_or(&[][..], |info| info.aliases);
+        aliases
+            .iter()
+            .find_map(|alias| self.overrides.get(*alias).copied())
     }
 
     /// The rule class of a finding: a lint rule's from the compiled
     /// ruleset (a ruleset rule extending a builtin keeps its class), any
     /// other code's from the registry.
     fn class_of(&self, finding: &Finding) -> RuleClass {
-        if finding.check == CheckId::Lint {
+        let lint_code = self
+            .registry
+            .info(&finding.code)
+            .is_none_or(|info| info.check == CheckId::Lint);
+        if finding.check == CheckId::Lint && lint_code {
             return match self.linter.category_of(&finding.code) {
                 suspect_lint::Category::Design => RuleClass::Design,
                 suspect_lint::Category::Document => RuleClass::Document,
@@ -195,11 +209,20 @@ fn cached_ruleset(path: &Path) -> Option<Arc<suspect_lint::Linter>> {
 
 /// Applies `policy` to the findings of one document, in a fixed order:
 ///
-/// 1. *(P1 step 4: canonicalize aliases.)*
-/// 2. *(P1 step 4: dedupe.)*
-/// 3. **Overrides**: the level configured for the code, else `lint.design`
-///    for a design-class rule, else the finding's own severity; `off`
-///    drops the finding.
+/// 1. **Canonicalize**: a finding from a builtin rule whose code is an
+///    alias takes the canonical code and its default severity
+///    (`operation-operationId` becomes the warning
+///    `oas-operation-missing-operationId`). An alias with several targets
+///    takes the one reported at the same position, else keeps its code. A
+///    custom ruleset rule reusing a builtin name is a different check and
+///    keeps its code.
+/// 2. **Dedupe**: findings with the same canonical code, document and
+///    position that came from different codes are one problem; the one
+///    from the code's owner check is kept, else the first. Repeats of one
+///    code (two undeclared parameters on one path item) are all kept.
+/// 3. **Overrides**: the level configured for the canonical code, else
+///    for one of its aliases, else `lint.design` for a design-class rule,
+///    else the finding's own severity; `off` drops the finding.
 /// 4. **Category gates**: SDK-readiness findings only with `policy.sdk`;
 ///    lint and markdown findings only when lint is enabled.
 /// 5. *(P1 step 7: suppressions.)*
@@ -207,7 +230,8 @@ fn cached_ruleset(path: &Path) -> Option<Arc<suspect_lint::Linter>> {
 #[must_use]
 pub fn apply_policy(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> Vec<Finding> {
     let _ = doc;
-    findings
+    let canonical = canonicalize(findings, policy);
+    dedupe(canonical, &policy.registry)
         .into_iter()
         .filter_map(|mut finding| {
             // 3. Overrides.
@@ -237,6 +261,108 @@ pub fn apply_policy(findings: Vec<Finding>, doc: &LowDoc, policy: &Policy) -> Ve
         .collect()
 }
 
+/// A finding and the code it was emitted with, when canonicalization
+/// renamed it.
+struct Canonical {
+    finding: Finding,
+    renamed_from: Option<Box<str>>,
+}
+
+/// Where a finding is, for dedupe: document plus start offset, else the
+/// pointer.
+type Location = (String, Option<usize>, Option<Box<str>>);
+
+fn location(finding: &Finding) -> Location {
+    let start = finding.range.as_ref().map(|r| r.start);
+    let pointer = if start.is_none() {
+        finding.pointer.clone()
+    } else {
+        None
+    };
+    (finding.document.as_str().to_owned(), start, pointer)
+}
+
+/// Step 1.
+fn canonicalize(findings: Vec<Finding>, policy: &Policy) -> Vec<Canonical> {
+    let registry = &policy.registry;
+    // Codes present per location, for aliases with several targets.
+    let present: std::collections::HashSet<(Location, String)> = findings
+        .iter()
+        .map(|f| (location(f), f.code.to_string()))
+        .collect();
+    findings
+        .into_iter()
+        .map(|mut finding| {
+            let targets = registry.alias_targets(&finding.code);
+            // Aliases apply to builtin rule definitions only.
+            let builtin = finding.check != CheckId::Lint || policy.linter.is_builtin(&finding.code);
+            let target = match targets {
+                [] => None,
+                _ if !builtin => None,
+                [one] => Some(*one),
+                many => {
+                    let at = location(&finding);
+                    many.iter()
+                        .copied()
+                        .find(|code| present.contains(&(at.clone(), (*code).to_owned())))
+                }
+            };
+            let Some(target) = target else {
+                return Canonical {
+                    finding,
+                    renamed_from: None,
+                };
+            };
+            let from = std::mem::replace(&mut finding.code, target.into());
+            if let Some(info) = registry.info(target) {
+                finding.severity = info.default;
+            }
+            Canonical {
+                finding,
+                renamed_from: Some(from.into_owned().into_boxed_str()),
+            }
+        })
+        .collect()
+}
+
+/// Step 2.
+fn dedupe(findings: Vec<Canonical>, registry: &Registry) -> Vec<Finding> {
+    let owner = |c: &Canonical| {
+        registry
+            .info(&c.finding.code)
+            .is_some_and(|info| info.check == c.finding.check)
+    };
+    let mut kept: Vec<Canonical> = Vec::with_capacity(findings.len());
+    // (code, location) -> indices in `kept` with that key.
+    let mut by_key: HashMap<(String, Location), Vec<usize>> = HashMap::new();
+    for candidate in findings {
+        let key = (
+            candidate.finding.code.to_string(),
+            location(&candidate.finding),
+        );
+        let slots = by_key.entry(key).or_default();
+        // Only findings that reached this code by different routes are the
+        // same problem; one code repeated at one spot is not.
+        let twin = slots.iter().copied().find(|&i| {
+            let k = &kept[i];
+            (k.renamed_from.is_some() || candidate.renamed_from.is_some())
+                && k.renamed_from != candidate.renamed_from
+        });
+        match twin {
+            Some(i) => {
+                if owner(&candidate) && !owner(&kept[i]) {
+                    kept[i] = candidate;
+                }
+            }
+            None => {
+                slots.push(kept.len());
+                kept.push(candidate);
+            }
+        }
+    }
+    kept.into_iter().map(|c| c.finding).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,6 +384,82 @@ mod tests {
             .iter()
             .map(|f| (f.code.to_string(), f.severity))
             .collect()
+    }
+
+    #[test]
+    fn an_alias_takes_the_canonical_code_and_severity_and_the_owner_is_kept() {
+        let policy = Policy::default();
+        // The lint finding comes first; the validate finding owns the code.
+        let kept = apply_policy(
+            vec![
+                finding(CheckId::Lint, "operation-operationId", Severity::Error),
+                finding(
+                    CheckId::Validate,
+                    "oas-operation-missing-operationId",
+                    Severity::Warning,
+                ),
+            ],
+            &doc(),
+            &policy,
+        );
+        assert_eq!(kept.len(), 1, "{kept:?}");
+        assert_eq!(kept[0].check, CheckId::Validate);
+        assert_eq!(kept[0].severity, Severity::Warning);
+        // Alone, the alias survives under the canonical code and severity.
+        let kept = apply_policy(
+            vec![finding(
+                CheckId::Lint,
+                "operation-operationId",
+                Severity::Error,
+            )],
+            &doc(),
+            &policy,
+        );
+        assert_eq!(
+            codes(&kept),
+            vec![(
+                "oas-operation-missing-operationId".to_owned(),
+                Severity::Warning
+            )]
+        );
+    }
+
+    #[test]
+    fn repeats_of_one_code_at_one_spot_are_kept() {
+        let kept = apply_policy(
+            vec![
+                finding(
+                    CheckId::Validate,
+                    "oas-path-param-not-declared",
+                    Severity::Error,
+                ),
+                finding(
+                    CheckId::Validate,
+                    "oas-path-param-not-declared",
+                    Severity::Error,
+                ),
+            ],
+            &doc(),
+            &Policy::default(),
+        );
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn findings_at_different_positions_are_not_merged() {
+        let kept = apply_policy(
+            vec![
+                finding(
+                    CheckId::Validate,
+                    "oas-operation-missing-operationId",
+                    Severity::Warning,
+                ),
+                finding(CheckId::Lint, "operation-operationId", Severity::Error).with_range(5..9),
+            ],
+            &doc(),
+            &Policy::default(),
+        );
+        assert_eq!(kept.len(), 2);
     }
 
     #[test]

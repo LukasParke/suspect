@@ -116,7 +116,7 @@ mod tests {
         let diags = compute_diagnostics(None, &low, &Default::default());
         let d = diags
             .iter()
-            .find(|d| d.code == Some(NumberOrString::String("syntax".to_owned())))
+            .find(|d| d.code == Some(NumberOrString::String("syntax-error".to_owned())))
             .expect("a syntax diagnostic");
         assert_eq!(d.source.as_deref(), Some(SOURCE));
         assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));

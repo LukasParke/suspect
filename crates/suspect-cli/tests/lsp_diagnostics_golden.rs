@@ -158,6 +158,19 @@ fn the_editor_reports_the_recorded_findings() {
         }
         lines.extend(found);
     }
+    // The petstore has two operations without an `operationId`: one
+    // finding each, under the canonical code, whatever else changes.
+    let missing: Vec<&String> = lines
+        .iter()
+        .filter(|l| l.starts_with("petstore.yaml:") && l.contains("operationId"))
+        .collect();
+    assert_eq!(missing.len(), 2, "{missing:#?}");
+    assert!(
+        missing
+            .iter()
+            .all(|l| l.contains(" warning suspect oas-operation-missing-operationId:")),
+        "{missing:#?}"
+    );
     let root_url = url_of(&root);
     let actual = lines.join("\n").replace(&root_url, "file://ROOT") + "\n";
     let golden =

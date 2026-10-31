@@ -200,9 +200,10 @@ fn every_rule_has_a_summary() {
             "{} has no summary",
             rule.code
         );
+        // Aliases hang off the canonical code, which is never a lint rule.
         assert!(
-            rule.aliases.is_empty(),
-            "{} has aliases before step 4",
+            rule.aliases.is_empty() || rule.check != CheckId::Lint,
+            "{} is a lint code with aliases",
             rule.code
         );
     }
