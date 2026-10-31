@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import { availableSdkProfiles, SdkProfile } from './generation';
 import { errorMessage, suspectBinary } from './runner';
+import * as settings from './settings.generated';
 
 type ClientGetter = () => LanguageClient | undefined;
 
@@ -165,8 +166,8 @@ export function registerLiveSdkPreview(getClient: ClientGetter): vscode.Disposab
 				{ placeHolder: 'Suspect: live SDK preview — choose a profile' },
 			);
 			if (!pick) return;
-			const config = vscode.workspace.getConfiguration('suspect', editor.document.uri);
-			const packageName = config.get<string>('sdk.packageName', '');
+			const scope = editor.document.uri;
+			const packageName = settings.sdkPackageName(scope);
 			if (!packageName) {
 				void vscode.window.showWarningMessage('Set suspect.sdk.packageName to identify the preview package.');
 				return;
@@ -176,9 +177,9 @@ export function registerLiveSdkPreview(getClient: ClientGetter): vscode.Disposab
 				uri: editor.document.uri,
 				profile: pick.label as SdkProfile,
 				packageName,
-				packageVersion: config.get<string>('sdk.packageVersion', '0.1.0'),
-				importName: config.get<Record<string, string>>('sdk.importNames', {})[pick.label] || undefined,
-				operationIds: config.get<string[]>('sdk.operationIds', []),
+				packageVersion: settings.sdkPackageVersion(scope) || '0.1.0',
+				importName: settings.sdkImportNames(scope)[pick.label] || undefined,
+				operationIds: [...settings.sdkOperationIds(scope)],
 			});
 			active.start();
 		}),

@@ -9,3 +9,7 @@ dist/**/*.map
 *.vsix.sha256
 .vscode/**
 .vscode-test/**
+
+# Settings generator inputs (scripts/settings.cjs); the generated output ships.
+scripts/**
+settings.editor.json

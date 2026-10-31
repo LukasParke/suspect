@@ -19,6 +19,7 @@ import { DocumentKindTracker, trackDocumentKind } from './documentKind';
 import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
+import * as settings from './settings.generated';
 
 interface GatewayState {
 	child: cp.ChildProcess;
@@ -342,8 +343,8 @@ function updateGatewayStatus(): void {
 }
 
 /** Prompts for explicit package identity and exact selectors shared by the canonical HTTP profiles. */
-async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, profile: SdkProfile): Promise<{ packageName: string; packageVersion: string; importName?: string; compatibilityProfiles: SdkCompatibilityProfile[]; operationIds: string[] } | undefined> {
-    const compatibilityProfiles = readSdkCompatibilityProfiles(config.get<unknown>('sdk.compatibilityProfiles', []));
+async function promptPackageIdentity(scope: vscode.Uri, profile: SdkProfile): Promise<{ packageName: string; packageVersion: string; importName?: string; compatibilityProfiles: SdkCompatibilityProfile[]; operationIds: string[] } | undefined> {
+    const compatibilityProfiles = readSdkCompatibilityProfiles(settings.sdkCompatibilityProfiles(scope));
     const packagePrompts: Record<SdkProfile, string> = {
         'typescript-http': 'Explicit npm package name (independent of the API title)',
         'rust-http': 'Explicit Cargo package name (independent of the API title)',
@@ -360,7 +361,7 @@ async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, prof
     };
     const packageName = await vscode.window.showInputBox({
         prompt: packagePrompts[profile],
-        value: config.get<string>('sdk.packageName', ''),
+        value: settings.sdkPackageName(scope),
         validateInput: (value) => value.length ? undefined : 'A package name is required',
     });
     if (packageName === undefined) return undefined;
@@ -370,13 +371,13 @@ async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, prof
             : profile === 'swift-http'
             ? `Exact stable SemVer (no prerelease/build metadata); default Swift module: ${packageName}. Configure sdk.importNames for an override.`
             : 'Explicit package SemVer (independent of the API version)',
-        value: config.get<string>('sdk.packageVersion', ''),
+        value: settings.sdkPackageVersion(scope),
         validateInput: (value) => value.length ? undefined : 'A package version is required',
     });
     if (packageVersion === undefined) return undefined;
     const selectors = await vscode.window.showInputBox({
         prompt: 'Exact operation IDs as a JSON string array; [] attempts every operation',
-        value: JSON.stringify(config.get<string[]>('sdk.operationIds', [])),
+        value: JSON.stringify(settings.sdkOperationIds(scope)),
         validateInput: (value) => {
             try {
                 const ids: unknown = JSON.parse(value);
@@ -386,7 +387,7 @@ async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, prof
         },
     });
     if (selectors === undefined) return undefined;
-    const importName = config.get<Record<string, string>>('sdk.importNames', {})[profile];
+    const importName = settings.sdkImportNames(scope)[profile];
     return { packageName, packageVersion, ...(importName ? { importName } : {}), compatibilityProfiles, operationIds: JSON.parse(selectors) };
 }
 
@@ -432,7 +433,7 @@ async function genPresetCommand(): Promise<void> {
     try {
         if (isSdkProfile(presetPick.generationKind)) {
             const identity = await promptPackageIdentity(
-                vscode.workspace.getConfiguration('suspect', spec),
+                spec,
                 presetPick.generationKind,
             );
             if (!identity) return;
@@ -630,11 +631,11 @@ class SdkGenerationController implements vscode.Disposable {
 			const active = vscode.window.activeTextEditor?.document.uri;
 			let folder = active ? vscode.workspace.getWorkspaceFolder(active) : undefined;
 			if (!folder && vscode.workspace.workspaceFolders?.length === 1) folder = vscode.workspace.workspaceFolders[0];
-			let configured = vscode.workspace.getConfiguration('suspect', folder?.uri).get<string>('sdk.sessionConfig', '');
+			let configured = settings.sdkSessionConfig(folder?.uri);
 			if (configured && !path.isAbsolute(configured) && !folder) {
 				folder = await vscode.window.showWorkspaceFolderPick({ placeHolder: 'Workspace containing the SDK session config' });
 				if (!folder) return undefined;
-				configured = vscode.workspace.getConfiguration('suspect', folder.uri).get<string>('sdk.sessionConfig', '');
+				configured = settings.sdkSessionConfig(folder.uri);
 			}
 			if (configured) {
 				configUri = vscode.Uri.file(path.resolve(folder?.uri.fsPath ?? '', configured));
@@ -648,10 +649,9 @@ class SdkGenerationController implements vscode.Disposable {
 		}
 		if (!configUri) return undefined;
 		if (configUri.scheme !== 'file') throw new Error('Select a local JSON SDK session config.');
-		const settings = vscode.workspace.getConfiguration('suspect', configUri);
 		const out = await vscode.window.showInputBox({
 			prompt: `SDK output directory to compare; relative paths resolve from ${path.dirname(configUri.fsPath)}`,
-			value: settings.get<string>('sdk.sessionOutput', 'sdk-out'),
+			value: settings.sdkSessionOutput(configUri),
 			validateInput: (value) => value.length && !value.includes('\0') ? undefined : 'Enter an output directory',
 		});
 		if (out === undefined) return undefined;

@@ -1,7 +1,7 @@
 import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
+import * as settings from './settings.generated';
 
 /**
  * NDJSON TestEvent stream emitted by `suspect test --report ndjson`.
@@ -48,10 +48,6 @@ export interface SuspectRunHandle {
 	kill(): void;
 }
 
-function config(): vscode.WorkspaceConfiguration {
-	return vscode.workspace.getConfiguration('suspect');
-}
-
 /**
  * Settings that select the CLI binary: `suspect.basePath`, plus the
  * deprecated `suspect.server.path` from the retired legacy extension.
@@ -64,9 +60,9 @@ export const BINARY_SETTINGS: readonly string[] = ['suspect.basePath', 'suspect.
  * `suspect` (resolved from $PATH).
  */
 function configuredBase(): string {
-	const base = (config().get<string>('basePath') ?? '').trim();
+	const base = settings.basePath().trim();
 	if (base && base !== 'suspect') return base;
-	const legacy = (config().get<string>('server.path') ?? '').trim();
+	const legacy = settings.serverPath().trim();
 	if (legacy) return legacy;
 	return base || 'suspect';
 }
@@ -88,12 +84,18 @@ export function suspectBinary(): string {
 	return path.join(base, 'suspect');
 }
 
-export function testBaseUrl(): string {
-	return config().get<string>('testBaseUrl') ?? 'http://localhost:8080';
+/**
+ * `suspect.test.baseUrl` (or the old `suspect.testBaseUrl`). `undefined`
+ * leaves `--base-url` off, so the CLI applies `test.base_url` from the
+ * committed `.suspect.yaml`.
+ */
+export function testBaseUrl(): string | undefined {
+	return settings.testBaseUrl() ?? undefined;
 }
 
+/** `suspect.gateway.port` (or the old `suspect.gatewayPort`), else 8080. */
 export function gatewayPort(): number {
-	return config().get<number>('gatewayPort') ?? 8080;
+	return settings.gatewayPort() ?? 8080;
 }
 
 /**
@@ -104,7 +106,7 @@ export function gatewayPort(): number {
  * anything else (spawn failure, usage error) rejects.
  */
 export interface RunOptions {
-	/** Base URL the suite runs against. Defaults to the editor setting. */
+	/** Base URL the suite runs against. Defaults to the editor setting, then the CLI's `test.base_url`. */
 	baseUrl?: string;
 	/** Recorded cassette: runs the suite offline, replaying the recording. */
 	cassette?: string;
@@ -125,7 +127,12 @@ export function spawnSuspectRunWith(
 	onEvent: (event: SuspectEvent) => void,
 	binary: string = suspectBinary(),
 ): SuspectRunHandle {
-	const args = ['test', arazzoPath, '--base-url', options.baseUrl ?? testBaseUrl(), '--report', 'ndjson'];
+	const args = ['test', arazzoPath];
+	const baseUrl = options.baseUrl ?? testBaseUrl();
+	if (baseUrl !== undefined) {
+		args.push('--base-url', baseUrl);
+	}
+	args.push('--report', 'ndjson');
 	if (options.filter !== undefined) {
 		args.push('--filter', options.filter);
 	}

@@ -9,6 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { lintMinSeverity } from './settings.generated';
 
 const FLOORS: { label: string; detail: string; value: string }[] = [
 	{ label: 'Error', detail: 'only errors — the publish gate', value: 'error' },
@@ -37,7 +38,7 @@ export function resolveFloor(input: { setting?: string | null; workspaceYaml?: s
 
 /** `resolveFloor` over the live workspace. */
 export async function effectiveFloor(root: string | undefined, manifestFloor?: string): Promise<FloorResolution> {
-	const setting = vscode.workspace.getConfiguration('suspect').get<string | null>('lint.minSeverity');
+	const setting = lintMinSeverity();
 	let workspaceYaml: string | undefined;
 	if (root !== undefined) {
 		try {

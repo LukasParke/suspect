@@ -746,6 +746,26 @@ Each step leaves `main` green. Steps 1-3 need nothing from P2 or P5.
    `package.json`; replace `config.get` calls with the typed getters.
    Tests: the drift test, plus the existing `ui-surface.cjs` settings
    assertions rewritten against the schema. 1 day.
+   **Done.** The setting table's `editor` column is now the camelCase path
+   (`test.baseUrl`), and a new `editor_aliases` column holds the old client
+   keys (`testBaseUrl`, `gatewayPort`, `ci.baseline`, `formatting.sortKeys`,
+   `inlayHints.refs`, `inlayHints.properties`); `x-suspect-editor` is
+   `{key, scope, aliases?}` and sits on canonical properties only.
+   `scripts/settings.cjs` emits each alias as a deprecated setting with
+   default `null` (so an untouched old key no longer overrides the files, as
+   `testBaseUrl`'s `http://localhost:8080` default used to), plus
+   `RENAMED_SETTINGS` and `CONFIG_KEYS` in `settings.generated.ts`; getters
+   read the new key, then the old ones. `npm run settings:write` rewrites
+   both outputs; `test/settings.cjs` also fails when a source file reads a
+   `suspect.*` setting by string. With `suspect.test.baseUrl` unset the
+   Testing view leaves `--base-url` off, so `suspect test` applies
+   `test.base_url` from `.suspect.yaml`. Deviation: P2 did not add
+   `codegen.package_name`, `import_names`, `operation_ids` or
+   `compatibility_profiles`, and `codegen.out` means something else than
+   `sdk.sessionOutput` (an output root for `codegen`, not the session
+   preview's prompt default), so all `suspect.sdk.*` settings stay
+   editor-only in `settings.editor.json` for now; the `sdk.*` to `codegen.*`
+   renames wait for those keys.
 5. **Server reads the editor layer through `resolve_with`** (after P2.1).
    Delete `editor_config::apply_client`, the client half of
    `parse_config`, and the manifest `editor` unwrapping. Migrate the

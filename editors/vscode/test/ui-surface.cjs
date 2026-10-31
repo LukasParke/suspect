@@ -223,17 +223,21 @@ test('the extension manifest contributes one view, one controller, and commands 
 	// The activation events cover projects without a single *.arazzo.yaml.
 	assert.ok(packageManifest.activationEvents.includes('workspaceContains:**/suspect.project.json'));
 
-	// The settings the Testing view reads exist in the shape the code expects.
+	// The settings the Testing view reads exist in the shape the code expects,
+	// which is the configuration schema's (test/settings.cjs pins the rest).
 	const props = contributes.configuration.properties;
+	const schema = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'schemas', 'suspect.schema.json'), 'utf8'));
+	const lint = schema.properties.lint.properties;
 	// One severity spelling across settings: minSeverity matches the rule
 	// severity enum (`info`), and unset (null) defers to .suspect.yaml.
-	assert.deepEqual(props['suspect.lint.minSeverity'].enum, ['error', 'warning', 'info', 'hint', null]);
+	assert.deepEqual(props['suspect.lint.minSeverity'].enum, [...lint.min_severity.enum, null]);
 	assert.equal(props['suspect.lint.minSeverity'].default, null);
-	for (const severity of ['error', 'warning', 'info', 'hint']) assert.ok(props['suspect.lint.rules'].additionalProperties.enum.includes(severity));
+	assert.deepEqual(props['suspect.lint.rules'].additionalProperties.enum, lint.rules.additionalProperties.enum);
 	// The legacy extension's binary setting survives as a deprecated alias.
 	assert.equal(props['suspect.server.path'].type, 'string');
 	assert.ok(props['suspect.server.path'].deprecationMessage.includes('suspect.basePath'));
-	assert.equal(props['suspect.ci.baseline'].type, 'string');
+	assert.deepEqual(props['suspect.diff.baseline'].type, [schema.properties.diff.properties.baseline.type, 'null']);
+	assert.ok(props['suspect.ci.baseline'].deprecationMessage.includes('suspect.diff.baseline'));
 });
 
 test('only one test controller is created', () => {
@@ -269,16 +273,21 @@ test('the server-side commands have editor entry points and the server settings 
 	// The settings the server parses are declared in the Settings UI, in
 	// the shapes its configuration schema accepts.
 	const props = contributes.configuration.properties;
-	assert.equal(props['suspect.lint.recommended'].type, 'boolean');
-	assert.equal(props['suspect.lint.rules'].type, 'object');
-	assert.equal(props['suspect.lint.design'].type, 'string');
+	for (const [key, type] of [
+		['suspect.lint.recommended', 'boolean'],
+		['suspect.lint.rules', 'object'],
+		['suspect.lint.design', 'string'],
+		['suspect.lint.ruleset', 'string'],
+		['suspect.validate.strictFormat', 'boolean'],
+		['suspect.ref.maxDocs', 'integer'],
+		['suspect.editor.inlayHints.refs', 'boolean'],
+		['suspect.editor.inlayHints.properties', 'boolean'],
+		['suspect.format.sortKeys', 'boolean'],
+	]) {
+		assert.deepEqual(props[key].type, [type, 'null'], key);
+		assert.equal(props[key].default, null, key);
+	}
 	assert.equal(props['suspect.lint.design'].enum.includes('off'), true);
-	assert.equal(props['suspect.lint.ruleset'].type, 'string');
-	assert.equal(props['suspect.validate.strictFormat'].type, 'boolean');
-	assert.equal(props['suspect.ref.maxDocs'].type, 'number');
-	assert.equal(props['suspect.inlayHints.refs'].type, 'boolean');
-	assert.equal(props['suspect.inlayHints.properties'].type, 'boolean');
-	assert.equal(props['suspect.formatting.sortKeys'].type, 'boolean');
 });
 
 test('server commands travel over executeCommand and the admission review over its custom request', () => {
@@ -377,7 +386,7 @@ test('the document kind comes from the server, and only when it offers the reque
 
 test('the CLI binary honors the deprecated suspect.server.path only while suspect.basePath is default', () => {
 	const settings = new Map();
-	const stub = { workspace: { getConfiguration: () => ({ get: (key) => settings.get(key) }) } };
+	const stub = { workspace: { getConfiguration: () => ({ get: (key, fallback) => (settings.has(key) ? settings.get(key) : fallback) }) } };
 	const { suspectBinary } = loadModule('runner', stub);
 	assert.equal(suspectBinary(), 'suspect');
 	settings.set('server.path', '/opt/legacy/suspect');
