@@ -449,12 +449,12 @@ for (const [profile, name, directory, packagePrompt] of [
 		assert.match(h.prompts[0].prompt, packagePrompt);
 		if (python) {
 			assert.match(h.prompts[1].prompt, /fixture_editor_python/);
-			assert.match(h.prompts[1].prompt, /Configure sdk.importNames for an override/);
+			assert.match(h.prompts[1].prompt, /Configure codegen.importNames for an override/);
 		} else if (swift) {
 			assert.match(h.prompts[0].prompt, /default module has the same name/);
 			assert.match(h.prompts[1].prompt, /stable SemVer \(no prerelease\/build metadata\)/);
 			assert.match(h.prompts[1].prompt, /Swift module: ExampleSDK/);
-			assert.match(h.prompts[1].prompt, /Configure sdk.importNames for an override/);
+			assert.match(h.prompts[1].prompt, /Configure codegen.importNames for an override/);
 		} else if (profile === 'go-http') assert.match(h.prompts[0].prompt, /package is named sdk/);
 		assert.equal(h.prompts[2].validateInput(JSON.stringify([operationId])), undefined);
 		assert.match(h.prompts[2].validateInput('[1]'), /exact operation ID strings/);
@@ -657,14 +657,12 @@ test('picker enables compatibility only from explicit settings and passes it alo
 
 test('unknown or malformed compatibility settings fail before package prompts or generation, even if inventory advertises them', async (t) => {
 	for (const compatibilityProfiles of [
-		['future-profile'], ['legacy-binary-string-v1', '$(touch sentinel)'], 'legacy-binary-string-v1', [null], null,
+		['future-profile'], ['legacy-binary-string-v1', '$(touch sentinel)'], 'legacy-binary-string-v1', [null],
 	]) {
 		await t.test(JSON.stringify(compatibilityProfiles), async (t) => {
 			const h = await editor(t);
 			h.inventory.compatibilityProfiles = ['future-profile', '$(touch sentinel)'];
 			h.settings.set('sdk.compatibilityProfiles', compatibilityProfiles);
-			// Unlike the mock's usual missing-value fallback, an explicitly malformed null is preserved.
-			if (compatibilityProfiles === null) h.vscode.workspace.getConfiguration = () => ({ get: (key, fallback) => h.settings.has(key) ? h.settings.get(key) : fallback });
 			h.vscode.window.activeTextEditor = { document: { uri: Uri.file(h.source) } };
 			h.pick = async (items) => items.find((item) => item.generationKind === 'typescript-http');
 			await h.run('suspect.genPreset');

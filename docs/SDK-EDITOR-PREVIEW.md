@@ -38,8 +38,12 @@ as a JSON string array. It invokes `suspect codegen SPEC --profile PROFILE` with
 `--package-name`, `--package-version`, repeated exact `--operation-id` arguments,
 and JSON diagnostics. Output is under `gen-out/PROFILE/LANGUAGE/` in the selected
 spec's workspace folder, and the action opens that package's `README.md`.
-`suspect.sdk.packageName`, `packageVersion`, and `operationIds` supply initial
-prompt values.
+`suspect.codegen.packageName`, `packageVersion`, and `operationIds` supply
+initial prompt values; unset, the committed `codegen.package_name`,
+`codegen.package_version` and `codegen.operation_ids` from `.suspect.yaml` do.
+Every `suspect.codegen.*` setting is that `.suspect.yaml` key, and the old
+`suspect.sdk.*` spellings still apply with a deprecation warning (the extension
+offers to move them).
 
 The **Markdown documentation** choice invokes `suspect gen SPEC --preset docs-md`.
 The **Custom template manifest** choice asks for a TOML manifest and invokes
@@ -47,19 +51,19 @@ The **Custom template manifest** choice asks for a TOML manifest and invokes
 selected spec's workspace and open a produced document. SDK choices use the
 required `codegen --profile` interface with explicit package identity.
 
-`suspect.sdk.importNames` supplies per-profile native import/module/namespace
+`suspect.codegen.importNames` (`codegen.import_names`) supplies per-profile native import/module/namespace
 overrides through the single-package CLI's `--import-name` option. For example:
 
 ```json
 {
-  "suspect.sdk.importNames": {
+  "suspect.codegen.importNames": {
     "python-http": "custom_widgets_sdk",
     "swift-http": "WidgetsClient",
     "ruby-http": "WidgetsSDK",
     "csharp-http": "Example.Widgets",
     "java-http": "com.example.widgets"
   },
-  "suspect.sdk.compatibilityProfiles": []
+  "suspect.codegen.compatibilityProfiles": []
 }
 ```
 
@@ -71,19 +75,21 @@ title/version.
 Swift package and module names must be valid, non-keyword Swift identifiers.
 The CLI validates reserved module names as well. Swift requires exact stable
 SemVer without prerelease or build metadata. The picker shows the default module
-name; `sdk.importNames["swift-http"]` or a session target's `import_name` supplies
+name; `codegen.importNames["swift-http"]` or a session target's `import_name` supplies
 a custom Swift module name.
 Canonical Swift output is at `swift/README.md`, `swift/Package.swift`, and
 `swift/Sources/MODULE/`. See [SDK-SWIFT.md](SDK-SWIFT.md) for the native SDK gates.
 
 ### Explicit compatibility
 
-`suspect.sdk.compatibilityProfiles` defaults to `[]`, preserving ordinary OpenAPI
+`suspect.codegen.compatibilityProfiles` (`codegen.compatibility_profiles`)
+defaults to `[]`, preserving ordinary OpenAPI
 interpretation. To explicitly interpret legacy OAS 3.1+ `type: string, format:
 binary` markers as bytes in binary contexts, set it to
 `["legacy-binary-string-v1"]`. Each configured value becomes its own
 `--compatibility-profile VALUE` argument alongside any `--import-name` and exact
-operation selectors.
+operation selectors. It accepts the same names as `suspect codegen
+--compatibility-profile`.
 
 The setting uses a closed enum validated by the editor. Unknown or malformed
 values produce an error before package prompts or generation. Discovery's
@@ -154,13 +160,14 @@ Optional workspace settings:
 ```json
 {
   "suspect.basePath": "/absolute/path/to/suspect",
-  "suspect.sdk.sessionConfig": "configs/suspect-sdk.json",
-  "suspect.sdk.sessionOutput": "../generated"
+  "suspect.codegen.session.config": "configs/suspect-sdk.json",
+  "suspect.codegen.session.out": "../generated"
 }
 ```
 
-- `sessionConfig` is absolute or relative to the selected workspace folder. When
-  empty, the action opens a JSON file picker.
+- `session.config` is absolute or relative to the selected workspace folder
+  (`codegen.session.config` in `.suspect.yaml`: relative to that file). When
+  unset, the action opens a JSON file picker.
 - `spec` is relative to the **config directory**, or absolute. The editor and CLI
   resolve a **lexical absolute retrieval path** without following entry symlinks;
   its parent is the displayed source root and the base of relative references.
@@ -169,7 +176,7 @@ Optional workspace settings:
   An unreadable or malformed config is reported by the canonical CLI, with the
   source root explicitly unresolved until a successful plan; watch can recover
   after the config is fixed.
-- `sessionOutput` is the initial output-directory prompt value, relative to the
+- `session.out` is the initial output-directory prompt value, relative to the
   **config directory**, or absolute. Choose the same output root and owner as
   regular generation. The directory can be missing.
 - The extension passes absolute config/output paths and sets the CLI working

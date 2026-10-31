@@ -25,7 +25,15 @@ export function isSdkProfile(kind: string): kind is SdkProfile {
 	return Object.hasOwn(SDK_PROFILE_DIRECTORIES, kind);
 }
 
-export const SDK_COMPATIBILITY_PROFILES = ['legacy-binary-string-v1'] as const;
+// `suspect codegen --compatibility-profile` values, as in the
+// `codegen.compatibility_profiles` schema row (test/settings.cjs).
+export const SDK_COMPATIBILITY_PROFILES = [
+	'legacy-binary-string-v1',
+	'oas30-nullable-in-3.1-v1',
+	'colon-path-parameters-v1',
+	'schemaless-stream-events-v1',
+	'all-of-scoped-mode-v1',
+] as const;
 export type SdkCompatibilityProfile = typeof SDK_COMPATIBILITY_PROFILES[number];
 
 function isSdkCompatibilityProfiles(value: unknown): value is SdkCompatibilityProfile[] {
