@@ -43,6 +43,7 @@ pub mod sdk;
 pub mod sdk_profiles;
 pub mod stateful;
 pub mod stats;
+pub mod structured;
 pub mod stubs;
 pub mod terraform_cmd;
 pub mod test;

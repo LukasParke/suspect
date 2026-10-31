@@ -517,6 +517,12 @@ pub static MANIFEST: &[Setting] = &[
         "SDK generation targets built from the published spec.",
     )
     .default("[]"),
+    row(
+        "release",
+        Kind::Object,
+        "SDK release: the version every target carries and how each is published \
+         (`release-publish`, `release-workflow`). Replaces a standalone `release.json`.",
+    ),
     section(
         "tests",
         "Contract-test targets: Arazzo documents run against `base_url`, or offline \
@@ -598,6 +604,73 @@ pub static TARGET_FIELDS: &[Setting] = &[
         "sdk_defaults",
         Kind::Object,
         "SDK defaults: pagination, OAuth lifecycle (`codegen --defaults` schema).",
+    ),
+    row(
+        "options",
+        Kind::Object,
+        "Generation options in the `codegen --defaults` schema (`compatibility_profiles`, \
+         `credential_env`, `sdk_defaults`). A key may be set here or beside it, not both.",
+    ),
+];
+
+/// The fields of the manifest `release` section. `release` is one
+/// [`Kind::Object`] row in [`MANIFEST`]: `release-publish` validates it,
+/// and the JSON Schema spells these fields out.
+pub static RELEASE_FIELDS: &[Setting] = &[
+    row(
+        "version",
+        Kind::Str,
+        "The release version every target must carry.",
+    ),
+    row(
+        "tag",
+        Kind::Str,
+        "The tag that triggers the release workflow; `v` plus the version when unset.",
+    ),
+    row(
+        "targets",
+        Kind::List,
+        "SDK publish targets, in manifest order.",
+    ),
+];
+
+/// The fields of one `release.targets` entry.
+pub static RELEASE_TARGET_FIELDS: &[Setting] = &[
+    row(
+        "backend",
+        Kind::Str,
+        "Backend id (`typescript`, `python`, ...).",
+    ),
+    row(
+        "directory",
+        Kind::Path,
+        "Generated package directory, relative to the manifest.",
+    ),
+    row("package", Kind::Str, "Native package identity."),
+    row(
+        "registry",
+        Kind::Str,
+        "Registry id (`npm`, `pypi`, `maven-central`, ...).",
+    ),
+    row(
+        "publish",
+        Kind::Str,
+        "Exact publish command, run in `directory`.",
+    ),
+    row(
+        "version",
+        Kind::Str,
+        "This target's version, when it differs from the release version.",
+    ),
+    row(
+        "version_skew_reason",
+        Kind::Str,
+        "Why this target's version differs from the release version.",
+    ),
+    row(
+        "depends_on",
+        Kind::List,
+        "Backends that must publish first.",
     ),
 ];
 

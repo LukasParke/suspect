@@ -100,3 +100,46 @@ fn adoption_requires_an_explicit_flag_and_never_transfers_another_owners_file() 
         "generated"
     );
 }
+
+#[test]
+fn a_yaml_manifest_renders_what_the_toml_one_does() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    input(root, "item.txt");
+    std::fs::write(
+        root.join("gen.yaml"),
+        "output:\n  - template: item.j2\n    target: item.txt\n",
+    )
+    .unwrap();
+    let run = |manifest: &str, out: &str| {
+        Command::new(env!("CARGO_BIN_EXE_suspect"))
+            .current_dir(root)
+            .args(["gen", "api.yaml", "--manifest", manifest, "--out", out])
+            .output()
+            .unwrap()
+    };
+    for (manifest, out) in [("gen.toml", "from-toml"), ("gen.yaml", "from-yaml")] {
+        let output = run(manifest, out);
+        assert!(
+            output.status.success(),
+            "{manifest}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.join("from-yaml/item.txt")).unwrap(),
+        std::fs::read_to_string(root.join("from-toml/item.txt")).unwrap()
+    );
+    std::fs::write(
+        root.join("gen.yaml"),
+        "output:\n  - template: item.j2\n    targte: item.txt\n",
+    )
+    .unwrap();
+    let typo = run("gen.yaml", "typo");
+    assert!(!typo.status.success());
+    let stderr = String::from_utf8_lossy(&typo.stderr);
+    assert!(
+        stderr.contains("gen.yaml:3: unknown output rule key `targte`"),
+        "{stderr}"
+    );
+}

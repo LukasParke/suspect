@@ -10,7 +10,9 @@
 
 use serde_json::{Value, json};
 
-use crate::schema::{Kind, MANIFEST, SETTINGS, Setting, TARGET_FIELDS};
+use crate::schema::{
+    Kind, MANIFEST, RELEASE_FIELDS, RELEASE_TARGET_FIELDS, SETTINGS, Setting, TARGET_FIELDS,
+};
 
 const DRAFT: &str = "https://json-schema.org/draft/2020-12/schema";
 
@@ -36,8 +38,28 @@ pub fn manifest() -> Value {
     for section in ["lint", "validate", "editor"] {
         root["properties"][section]["deprecated"] = json!(true);
     }
+    let release = &mut root["properties"]["release"];
+    release["additionalProperties"] = json!(false);
+    release["required"] = json!(["version", "targets"]);
+    for field in RELEASE_FIELDS {
+        release["properties"][field.path] = property(field);
+    }
+    let mut target = json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["backend", "directory", "package", "registry", "publish"],
+        "properties": {},
+    });
+    for field in RELEASE_TARGET_FIELDS {
+        target["properties"][field.path] = property(field);
+    }
+    release["properties"]["targets"]["items"] = target;
     root
 }
+
+/// The `codegen --defaults` keys, which a manifest target may also nest
+/// under `options`.
+const GENERATION_OPTIONS: [&str; 3] = ["compatibility_profiles", "credential_env", "sdk_defaults"];
 
 /// Adds every row directly under `scope` (and, recursively, their
 /// children) to `node`'s `properties`.
@@ -130,6 +152,13 @@ fn property(setting: &Setting) -> Value {
             for field in TARGET_FIELDS {
                 target["properties"][field.path] = property(field);
             }
+            // `options` holds the same three keys a target may set beside it.
+            let mut options = target["properties"]["options"].take();
+            options["additionalProperties"] = json!(false);
+            for key in GENERATION_OPTIONS {
+                options["properties"][key] = target["properties"][key].clone();
+            }
+            target["properties"]["options"] = options;
             json!({"type": "array", "items": target})
         }
         kind => kind_schema(kind),
@@ -237,5 +266,26 @@ mod tests {
         );
         assert_eq!(schema["required"], json!(["version", "entry"]));
         assert_eq!(schema["properties"]["lint"]["deprecated"], true);
+        let options = &target["properties"]["options"];
+        assert_eq!(options["additionalProperties"], false);
+        assert!(options["properties"]["credential_env"].is_object());
+    }
+
+    #[test]
+    fn the_manifest_schema_closes_the_release_section() {
+        let schema = manifest();
+        let release = &schema["properties"]["release"];
+        assert_eq!(release["type"], "object");
+        assert_eq!(release["additionalProperties"], false);
+        assert_eq!(release["required"], json!(["version", "targets"]));
+        let target = &release["properties"]["targets"]["items"];
+        assert_eq!(target["additionalProperties"], false);
+        assert_eq!(target["properties"]["depends_on"]["type"], "array");
+        assert!(
+            target["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("publish"))
+        );
     }
 }

@@ -11,6 +11,9 @@ publish = false
 [dependencies]
 suspect-artifact.workspace = true
 suspect-ir = { path = "../suspect-ir" }
+suspect-low.workspace = true
+suspect-source.workspace = true
+suspect-syntax.workspace = true
 minijinja = "2"
 serde_json.workspace = true
 serde.workspace = true

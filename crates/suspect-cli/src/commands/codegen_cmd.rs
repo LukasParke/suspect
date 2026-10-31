@@ -42,7 +42,7 @@ pub struct CodegenArgs {
     /// semantics remain the default, independently of native feature support.
     #[arg(long, value_enum)]
     pub compatibility_profile: Vec<SdkCompatibilityProfile>,
-    /// Generation options file: a JSON document holding
+    /// Generation options file: a JSON or YAML (`.yaml`/`.yml`) document holding
     /// `compatibility_profiles`, `credential_env` and `sdk_defaults`
     /// (the same schema `codegen-session` accepts). Flag-declared
     /// compatibility profiles are added on top.
@@ -117,13 +117,10 @@ pub fn codegen(mut args: CodegenArgs) -> anyhow::Result<i32> {
     // knobs (credential env mapping, SDK defaults incl. pagination and
     // OAuth lifecycle); the flags add interpretation choices on top.
     let mut generation = match &args.defaults {
-        Some(path) => {
-            let bytes =
-                std::fs::read(path).map_err(|e| anyhow::anyhow!("read {}: {e}", path.display()))?;
-            serde_json::from_slice::<suspect_codegen::backend::GenerationOptions>(&bytes).map_err(
-                |e| anyhow::anyhow!("invalid generation options {}: {e}", path.display()),
-            )?
-        }
+        Some(path) => super::structured::read::<suspect_codegen::backend::GenerationOptions>(
+            path,
+            "generation options",
+        )?,
         None => suspect_codegen::backend::GenerationOptions::default(),
     };
     for profile in args.compatibility_profile {

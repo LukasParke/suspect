@@ -316,7 +316,7 @@ pub enum Command {
         /// Write the journal to this file (append) instead of stdout.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
-        /// JSON object file of workflow inputs, applied before `--input`
+        /// JSON or YAML object file of workflow inputs, applied before `--input`
         /// pairs (which override it).
         #[arg(long = "inputs", value_name = "FILE")]
         inputs_file: Option<PathBuf>,
@@ -399,7 +399,8 @@ pub enum Command {
         /// Shipped documentation preset.
         #[arg(long, conflicts_with = "manifest", value_parser=["docs-md"])]
         preset: Option<String>,
-        /// Custom gen.toml manifest (templates resolved relative to it).
+        /// Custom generation manifest: `gen.toml`, `gen.yaml` or `gen.json`
+        /// (templates resolved relative to it).
         #[arg(long, conflicts_with = "preset")]
         manifest: Option<PathBuf>,
         /// Output root directory.
