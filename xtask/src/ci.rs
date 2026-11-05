@@ -1073,13 +1073,15 @@ mod drift {
                     let Some(uses) = str_at(step, "uses") else {
                         continue;
                     };
-                    if !uses.starts_with("dtolnay/rust-toolchain@") {
+                    let Some(rev) = uses.strip_prefix("dtolnay/rust-toolchain@") else {
                         continue;
-                    }
+                    };
                     let name = path.file_name().unwrap().to_string_lossy();
-                    assert_eq!(
-                        uses, "dtolnay/rust-toolchain@master",
-                        "{name}: job `{}` must pass the toolchain explicitly",
+                    // A commit of `master`, not a channel ref like `@stable`,
+                    // which ignores `with.toolchain`.
+                    assert!(
+                        rev.len() == 40 && rev.bytes().all(|b| b.is_ascii_hexdigit()),
+                        "{name}: job `{}` must pin dtolnay/rust-toolchain to a master commit, got @{rev}",
                         job.key
                     );
                     assert_eq!(

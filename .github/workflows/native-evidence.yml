@@ -99,10 +99,10 @@ jobs:
               sudo apt-get install -y swiftlang
             test_filter: "swift_"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Builds suspect with the version in rust-toolchain.toml.
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.99.1"
 
@@ -154,7 +154,7 @@ jobs:
           } > evidence.md
 
       - name: Upload evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sdk-evidence-${{ matrix.name }}
           path: |

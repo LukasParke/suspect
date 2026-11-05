@@ -38,10 +38,10 @@ jobs:
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
       TARGETS: darwin-arm64 darwin-x64 linux-x64 linux-arm64 alpine-x64 alpine-arm64 win32-x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -96,7 +96,7 @@ jobs:
       ZED_REGISTRY_FORK: ${{ vars.ZED_REGISTRY_FORK }}
     steps:
       # Full history: the script checks the tag commit is on main.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
           fetch-depth: 0

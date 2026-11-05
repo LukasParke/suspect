@@ -37,13 +37,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12.12"
       - name: Install exact Rust toolchain
         run: rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: ". -> target/sdk-session-perf-build"
           shared-key: sdk-session-perf-1.97.1
@@ -56,7 +56,7 @@ jobs:
           python3 tools/sdk-session-perf/run.py
           --out target/sdk-session-performance-ci
           --suite compact --functional-only
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: sdk-session-smoke-${{ github.run_id }}
@@ -88,8 +88,8 @@ jobs:
       PERF_MODE: ${{ inputs.mode }}
       BASELINE_RUN_ID: ${{ inputs.baseline_run_id }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12.12"
       - name: Install exact Rust toolchain
@@ -99,7 +99,7 @@ jobs:
           python3 -c 'import os; from pathlib import Path;
           assert Path(os.environ["PERF_RUNNER_SPEC"]).is_file(), "versioned runner declaration required";
           assert os.environ["PERF_MODE"] != "compare" or os.environ["BASELINE_RUN_ID"].isdigit(), "compare requires a baseline run ID"'
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: inputs.mode == 'compare'
         with:
           name: ${{ inputs.baseline_artifact }}
@@ -124,7 +124,7 @@ jobs:
             --out target/sdk-session-performance-dedicated \
             --suite "$PERF_SUITE" --iterations 200 --warmups 5 \
             --runner "$PERF_RUNNER_SPEC" "${extra[@]}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: ${{ inputs.mode == 'calibrate' && 'sdk-session-baseline' || 'sdk-session-candidate' }}
