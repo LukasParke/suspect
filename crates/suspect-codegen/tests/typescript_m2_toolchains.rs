@@ -99,8 +99,7 @@ fn installed_sdk_checks_floor_current_types_and_executes_both_node_runtimes() {
     );
 
     let source =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(source.parent().unwrap())

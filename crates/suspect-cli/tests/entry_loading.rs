@@ -24,10 +24,11 @@ fn documentation_generation_accepts_a_relative_path_through_a_symlink() {
         .current_dir(directory.path())
         .args([
             "gen",
+            "template",
             "alias/api.yaml",
             "--preset",
             "docs-md",
-            "--out",
+            "--output",
             "docs",
         ])
         .output()
@@ -69,6 +70,7 @@ workflows:
         .current_dir(directory.path())
         .args([
             "test",
+            "run",
             "flows/check.yaml",
             "--filter",
             "no-workflow-matches",

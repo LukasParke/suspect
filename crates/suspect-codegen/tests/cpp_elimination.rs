@@ -583,7 +583,7 @@ fn cpp_consumers_eliminate_unrelated_operations() {
                     {
                         assert!(
                             !extended["markers"][*marker].as_bool().unwrap(),
-                            "{configuration}: measured code elimination regressed — {marker} is retained in the one-operation consumer; update docs/SDK-ELIMINATION-AUDIT.md"
+                            "{configuration}: measured code elimination regressed — {marker} is retained in the one-operation consumer; update docs/design/elimination-audit.md"
                         );
                     }
                     // Recorded data-granular defeat: the unrelated schema's codec
@@ -591,12 +591,12 @@ fn cpp_consumers_eliminate_unrelated_operations() {
                     for marker in UNRELATED_DATA_MARKERS {
                         assert!(
                             extended["markers"][*marker].as_bool().unwrap(),
-                            "{configuration}: recorded data-granular retention regressed — {marker} no longer ships with the one-operation consumer; update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement"
+                            "{configuration}: recorded data-granular retention regressed — {marker} no longer ships with the one-operation consumer; update docs/design/elimination-audit.md with the improved measurement"
                         );
                     }
                     assert!(
                         (8_000..=32_000).contains(&delta),
-                        "{configuration}: the unrelated schema's codec data moved the artifact by {delta} B; update docs/SDK-ELIMINATION-AUDIT.md with the new measurement"
+                        "{configuration}: the unrelated schema's codec data moved the artifact by {delta} B; update docs/design/elimination-audit.md with the new measurement"
                     );
                 } else {
                     // Recorded retention defeat: without function sections the
@@ -606,24 +606,24 @@ fn cpp_consumers_eliminate_unrelated_operations() {
                     for marker in MARKER_SEPARATE_MEMBER_MARKERS {
                         assert!(
                             !base["markers"][*marker].as_bool().unwrap(),
-                            "{configuration}: measured member elimination regressed — {marker} is retained in the one-operation consumer; update docs/SDK-ELIMINATION-AUDIT.md"
+                            "{configuration}: measured member elimination regressed — {marker} is retained in the one-operation consumer; update docs/design/elimination-audit.md"
                         );
                     }
                     for marker in MARKER_OTHER_OPERATIONS {
                         assert!(
                             base["markers"][*marker].as_bool().unwrap(),
-                            "{configuration}: measured retention of {marker} regressed; update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement"
+                            "{configuration}: measured retention of {marker} regressed; update docs/design/elimination-audit.md with the improved measurement"
                         );
                     }
                     for marker in UNRELATED_CODE_MARKERS.iter().chain(UNRELATED_DATA_MARKERS) {
                         assert!(
                             extended["markers"][*marker].as_bool().unwrap(),
-                            "{configuration}: measured retention of {marker} regressed; update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement"
+                            "{configuration}: measured retention of {marker} regressed; update docs/design/elimination-audit.md with the improved measurement"
                         );
                     }
                     assert!(
                         (16_000..=48_000).contains(&delta),
-                        "{configuration}: the unrelated operation moved the artifact by {delta} B; update docs/SDK-ELIMINATION-AUDIT.md with the new measurement"
+                        "{configuration}: the unrelated operation moved the artifact by {delta} B; update docs/design/elimination-audit.md with the new measurement"
                     );
                 }
 

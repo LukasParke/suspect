@@ -243,8 +243,7 @@ const TSC_ARGS: [&str; 8] = [
 #[test]
 fn generated_incoming_module_compiles_strictly_with_the_package() {
     if !tool_available("tsc") {
-        eprintln!("tsc is not on PATH; skipping the strict incoming compile check");
-        return;
+        panic!("tsc is not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(document()), directory.path()).unwrap();
@@ -273,8 +272,7 @@ fn generated_incoming_module_compiles_strictly_with_the_package() {
 #[test]
 fn fake_webhook_posts_drive_the_decoder_and_constructor_in_node() {
     if !tool_available("tsc") || !tool_available("node") {
-        eprintln!("tsc/node are not on PATH; skipping the behavioral incoming check");
-        return;
+        panic!("tsc/node are not on PATH");
     }
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(document()), directory.path()).unwrap();

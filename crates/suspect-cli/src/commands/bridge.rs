@@ -1,4 +1,4 @@
-//! `suspect bridge`: the live contract bridge, driven from the CLI.
+//! `suspect gen bridge`: the live contract bridge, driven from the CLI.
 //!
 //! The bridge (`suspect-gateway::bridge::ContractBridge`) runs two loops:
 //! spec changes become regeneration plans (mocks, SDK targets, docs,
@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use suspect_gateway::bridge::ContractBridge;
 
-/// Runs `suspect bridge` until interrupted.
+/// Runs `suspect gen bridge` until interrupted.
 ///
 /// # Errors
 /// Workspace loading failures on the first tick.

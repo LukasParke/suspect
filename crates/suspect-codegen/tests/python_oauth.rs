@@ -798,8 +798,9 @@ fn native_discovery_lifecycle_over_a_stubbed_transport() {
     }
 
     let Some(python) = httpx_interpreter() else {
-        eprintln!(
-            "no interpreter with httpx available; degraded to static emission and py_compile checks"
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
         );
         return;
     };
@@ -1297,8 +1298,9 @@ fn native_lifecycle_over_a_stubbed_transport() {
     }
 
     let Some(python) = httpx_interpreter() else {
-        eprintln!(
-            "no interpreter with httpx available; degraded to static emission and py_compile checks"
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
         );
         return;
     };
@@ -1707,8 +1709,9 @@ fn native_replay_lifecycle_over_a_stubbed_transport() {
     }
 
     let Some(python) = httpx_interpreter() else {
-        eprintln!(
-            "no interpreter with httpx available; degraded to static emission and py_compile checks"
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
         );
         return;
     };

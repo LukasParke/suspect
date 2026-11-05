@@ -5,7 +5,7 @@ use std::{path::PathBuf, time::Duration};
 use clap::Args;
 use suspect_ref::acquire::{AcquireOptions, RefreshPolicy, parse_utc_timestamp};
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// Acquire or verify a complete, immutable retrieval manifest.
 #[derive(Debug, Args)]
@@ -41,7 +41,7 @@ pub struct AcquireArgs {
     pub insecure_test_origin: Vec<String>,
     /// Human-readable status or a structured provenance/diagnostic report.
     #[arg(long, value_enum, default_value = "text")]
-    pub format: OutputFormat,
+    pub format: ReportFormat,
 }
 
 /// Run the public acquisition command with explicit policies.

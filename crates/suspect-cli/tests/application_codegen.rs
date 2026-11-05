@@ -60,13 +60,14 @@ fn generate(
     let mapping = format!("{name}/mapping.json");
     let target = format!("{name}/target.json");
     let mut args = vec![
+        "gen",
         command,
         spec.as_str(),
         "--mapping",
         mapping.as_str(),
         "--target-config",
         target.as_str(),
-        "--out",
+        "--output",
         out,
         "--format",
         "json",
@@ -93,6 +94,61 @@ fn operations(report: &Value) -> BTreeSet<&str> {
         .collect()
 }
 
+/// Writes `from` (JSON) as block-style YAML at `to`.
+fn yaml_copy(root: &Path, from: &str, to: &str) {
+    let doc = suspect_low::LowDoc::parse(
+        Uri::parse("mem://fixture.json").unwrap(),
+        suspect_source::Source::from_vec(std::fs::read(root.join(from)).unwrap()),
+    );
+    let yaml = suspect_overlay::Value::from_node(doc.root()).to_yaml();
+    assert!(!yaml.trim_start().starts_with('{'), "{yaml}");
+    std::fs::write(root.join(to), yaml).unwrap();
+}
+
+#[test]
+fn yaml_mapping_and_target_config_generate_what_json_does() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    for (command, name) in [("cli", "api-cli-v1"), ("mcp", "mcp-v1")] {
+        fixture(root, name);
+        yaml_copy(
+            root,
+            &format!("{name}/mapping.json"),
+            &format!("{name}/mapping.yaml"),
+        );
+        yaml_copy(
+            root,
+            &format!("{name}/target.json"),
+            &format!("{name}/target.yaml"),
+        );
+        let json_out = format!("{name}-json");
+        let yaml_out = format!("{name}-yaml");
+        let from_json = generate(root, command, name, &json_out, &[], 0);
+        let spec = format!("{name}/openapi.json");
+        let mapping = format!("{name}/mapping.yaml");
+        let target = format!("{name}/target.yaml");
+        let from_yaml = run(
+            root,
+            &[
+                "gen",
+                command,
+                spec.as_str(),
+                "--mapping",
+                mapping.as_str(),
+                "--target-config",
+                target.as_str(),
+                "--output",
+                yaml_out.as_str(),
+                "--format",
+                "json",
+            ],
+            0,
+        );
+        assert_eq!(operations(&from_yaml), operations(&from_json), "{command}");
+        assert_eq!(artifacts(&from_yaml), artifacts(&from_json), "{command}");
+    }
+}
+
 #[test]
 fn explicit_cli_mapping_generates_one_owned_go_application_root() {
     let directory = tempfile::tempdir().unwrap();
@@ -102,18 +158,11 @@ fn explicit_cli_mapping_generates_one_owned_go_application_root() {
 
     // Nothing exists yet, so the read-only check reports pending work and
     // writes nothing at all.
-    let absent = generate(
-        root,
-        "codegen-cli",
-        "api-cli-v1",
-        "generated",
-        &["--check"],
-        1,
-    );
+    let absent = generate(root, "cli", "api-cli-v1", "generated", &["--check"], 1);
     assert_eq!(absent["status"], "drift");
     assert!(!root.join("generated").exists());
 
-    let report = generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 0);
+    let report = generate(root, "cli", "api-cli-v1", "generated", &[], 0);
     assert_eq!(report["format"], "suspect.application.cli.generation.v1");
     assert_eq!(report["profile"], "suspect.application.cli.v1");
     assert_eq!(
@@ -160,18 +209,11 @@ fn explicit_cli_mapping_generates_one_owned_go_application_root() {
     let bytes = std::fs::read(&commands).unwrap();
     let timestamp = std::fs::metadata(&commands).unwrap().modified().unwrap();
     assert_eq!(
-        generate(
-            root,
-            "codegen-cli",
-            "api-cli-v1",
-            "generated",
-            &["--check"],
-            0
-        )["status"],
+        generate(root, "cli", "api-cli-v1", "generated", &["--check"], 0)["status"],
         "current"
     );
     assert_eq!(
-        generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 0)["status"],
+        generate(root, "cli", "api-cli-v1", "generated", &[], 0)["status"],
         "current"
     );
     assert_eq!(
@@ -184,13 +226,14 @@ fn explicit_cli_mapping_generates_one_owned_go_application_root() {
     let text = output(
         root,
         &[
-            "codegen-cli",
+            "gen",
+            "cli",
             "api-cli-v1/openapi.json",
             "--mapping",
             "api-cli-v1/mapping.json",
             "--target-config",
             "api-cli-v1/target.json",
-            "--out",
+            "--output",
             "generated",
         ],
         0,
@@ -204,7 +247,7 @@ fn a_user_edit_to_an_owned_application_artifact_is_never_overwritten() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     fixture(root, "api-cli-v1");
-    generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 0);
+    generate(root, "cli", "api-cli-v1", "generated", &[], 0);
 
     let commands = root.join("generated/internal/cli/commands.go");
     let runtime = root.join("generated/internal/cli/runtime.go");
@@ -213,7 +256,7 @@ fn a_user_edit_to_an_owned_application_artifact_is_never_overwritten() {
     edited.extend_from_slice(b"\n// retained user edit\n");
     std::fs::write(&commands, &edited).unwrap();
 
-    let conflict = generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 1);
+    let conflict = generate(root, "cli", "api-cli-v1", "generated", &[], 1);
     assert_eq!(conflict["status"], "conflict");
     assert!(
         conflict["diagnostics"]
@@ -228,14 +271,7 @@ fn a_user_edit_to_an_owned_application_artifact_is_never_overwritten() {
     assert_eq!(std::fs::read(&runtime).unwrap(), runtime_bytes);
 
     // The read-only mode reports the same refusal and still writes nothing.
-    let checked = generate(
-        root,
-        "codegen-cli",
-        "api-cli-v1",
-        "generated",
-        &["--check"],
-        1,
-    );
+    let checked = generate(root, "cli", "api-cli-v1", "generated", &["--check"], 1);
     assert_eq!(checked["status"], "conflict");
     assert_eq!(std::fs::read(&commands).unwrap(), edited);
 }
@@ -245,7 +281,7 @@ fn check_mode_reports_pending_drift_without_touching_the_output_root() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path();
     fixture(root, "api-cli-v1");
-    generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 0);
+    generate(root, "cli", "api-cli-v1", "generated", &[], 0);
 
     // Re-point the mapping at a different public command path: the planned
     // artifacts now differ from the owned ones on disk.
@@ -257,14 +293,7 @@ fn check_mode_reports_pending_drift_without_touching_the_output_root() {
     let commands = root.join("generated/internal/cli/commands.go");
     let bytes = std::fs::read(&commands).unwrap();
     let timestamp = std::fs::metadata(&commands).unwrap().modified().unwrap();
-    let drift = generate(
-        root,
-        "codegen-cli",
-        "api-cli-v1",
-        "generated",
-        &["--check"],
-        1,
-    );
+    let drift = generate(root, "cli", "api-cli-v1", "generated", &["--check"], 1);
     assert_eq!(drift["status"], "drift");
     assert!(drift["diagnostics"].as_array().unwrap().is_empty());
     assert_eq!(std::fs::read(&commands).unwrap(), bytes);
@@ -275,7 +304,7 @@ fn check_mode_reports_pending_drift_without_touching_the_output_root() {
 
     // The very same inputs on the write path resolve that drift.
     assert_eq!(
-        generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 0)["status"],
+        generate(root, "cli", "api-cli-v1", "generated", &[], 0)["status"],
         "generated"
     );
     assert!(std::fs::read(&commands).unwrap() != bytes);
@@ -291,7 +320,7 @@ fn malformed_mapping_and_target_configuration_stay_located_before_any_write() {
         "{\n  \"format\": \"suspect.application.cli.v1\",\n  \"commands\": [,]\n}\n",
     )
     .unwrap();
-    let report = generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 1);
+    let report = generate(root, "cli", "api-cli-v1", "generated", &[], 1);
     assert_eq!(report["status"], "failed");
     assert!(
         report["diagnostics"]
@@ -313,7 +342,7 @@ fn malformed_mapping_and_target_configuration_stay_located_before_any_write() {
     let mut target: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     target["guess_binary_name"] = json!(true);
     std::fs::write(&path, serde_json::to_vec_pretty(&target).unwrap()).unwrap();
-    let report = generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 1);
+    let report = generate(root, "cli", "api-cli-v1", "generated", &[], 1);
     assert_eq!(report["status"], "failed");
     assert!(
         report["diagnostics"]
@@ -336,7 +365,7 @@ fn an_unmapped_selector_is_refused_at_its_mapping_pointer_and_contract_source() 
     let mut mapping: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     mapping["commands"][0]["selector"] = json!("not-a-declared-operation");
     std::fs::write(&path, mapping.to_string()).unwrap();
-    let report = generate(root, "codegen-cli", "api-cli-v1", "generated", &[], 1);
+    let report = generate(root, "cli", "api-cli-v1", "generated", &[], 1);
     assert_eq!(report["status"], "failed");
     assert!(
         report["diagnostics"]
@@ -360,11 +389,11 @@ fn explicit_mcp_mapping_generates_one_owned_typescript_server_root() {
     let root = directory.path();
     fixture(root, "mcp-v1");
 
-    let absent = generate(root, "codegen-mcp", "mcp-v1", "server", &["--check"], 1);
+    let absent = generate(root, "mcp", "mcp-v1", "server", &["--check"], 1);
     assert_eq!(absent["status"], "drift");
     assert!(!root.join("server").exists());
 
-    let report = generate(root, "codegen-mcp", "mcp-v1", "server", &[], 0);
+    let report = generate(root, "mcp", "mcp-v1", "server", &[], 0);
     assert_eq!(report["format"], "suspect.application.mcp.generation.v1");
     assert_eq!(report["profile"], "suspect.application.mcp.v1");
     assert_eq!(
@@ -398,11 +427,11 @@ fn explicit_mcp_mapping_generates_one_owned_typescript_server_root() {
     }
 
     assert_eq!(
-        generate(root, "codegen-mcp", "mcp-v1", "server", &["--check"], 0)["status"],
+        generate(root, "mcp", "mcp-v1", "server", &["--check"], 0)["status"],
         "current"
     );
     assert_eq!(
-        generate(root, "codegen-mcp", "mcp-v1", "server", &[], 0)["status"],
+        generate(root, "mcp", "mcp-v1", "server", &[], 0)["status"],
         "current"
     );
 }
@@ -413,15 +442,15 @@ fn the_two_application_roots_never_take_over_each_others_owned_paths() {
     let root = directory.path();
     fixture(root, "api-cli-v1");
     fixture(root, "mcp-v1");
-    generate(root, "codegen-cli", "api-cli-v1", "shared", &[], 0);
+    generate(root, "cli", "api-cli-v1", "shared", &[], 0);
     let surface = root.join("shared/application-surface.json");
     let owned = std::fs::read(&surface).unwrap();
 
     // The MCP target plans the same surface manifest path inside a root the
     // CLI target already owns: neither check nor write may claim it.
-    let checked = generate(root, "codegen-mcp", "mcp-v1", "shared", &["--check"], 1);
+    let checked = generate(root, "mcp", "mcp-v1", "shared", &["--check"], 1);
     assert_eq!(checked["status"], "conflict");
-    let conflict = generate(root, "codegen-mcp", "mcp-v1", "shared", &[], 1);
+    let conflict = generate(root, "mcp", "mcp-v1", "shared", &[], 1);
     assert_eq!(conflict["status"], "conflict");
     assert!(
         conflict["diagnostics"]
@@ -441,7 +470,7 @@ fn the_two_application_roots_never_take_over_each_others_owned_paths() {
 
     // The CLI target's own root is untouched by the refusal.
     assert_eq!(
-        generate(root, "codegen-cli", "api-cli-v1", "shared", &["--check"], 0)["status"],
+        generate(root, "cli", "api-cli-v1", "shared", &["--check"], 0)["status"],
         "current"
     );
 }
@@ -452,7 +481,7 @@ fn application_profiles_are_discoverable_separately_from_sdk_profiles() {
     let root = directory.path();
 
     // The existing SDK inventory is unchanged, and never names an application.
-    let sdk = run(root, &["codegen-profiles", "--format", "json"], 0);
+    let sdk = run(root, &["gen", "profiles", "--format", "json"], 0);
     assert_eq!(sdk["format"], "suspect.sdk.profiles.v1");
     assert_eq!(sdk["profiles"].as_array().unwrap().len(), 12);
     assert!(
@@ -470,7 +499,8 @@ fn application_profiles_are_discoverable_separately_from_sdk_profiles() {
     let applications = run(
         root,
         &[
-            "codegen-profiles",
+            "gen",
+            "profiles",
             "--kind",
             "applications",
             "--format",
@@ -483,7 +513,7 @@ fn application_profiles_are_discoverable_separately_from_sdk_profiles() {
     assert_eq!(listed.len(), 2);
     let cli = listed
         .iter()
-        .find(|profile| profile["command"] == "codegen-cli")
+        .find(|profile| profile["command"] == "gen cli")
         .unwrap();
     assert_eq!(cli["profile"], "suspect.application.cli.v1");
     assert_eq!(cli["surfaceFormat"], "suspect.application.cli.surface.v1");
@@ -492,13 +522,13 @@ fn application_profiles_are_discoverable_separately_from_sdk_profiles() {
     assert!(cli["mapping"].is_null(), "{cli}");
     let mcp = listed
         .iter()
-        .find(|profile| profile["command"] == "codegen-mcp")
+        .find(|profile| profile["command"] == "gen mcp")
         .unwrap();
     assert_eq!(mcp["profile"], "suspect.application.mcp.v1");
     assert_eq!(mcp["surfaceFormat"], "suspect.application.mcp.surface.v1");
     assert_eq!(mcp["owner"], MCP_OWNER);
 
-    let text = output(root, &["codegen-profiles", "--kind", "applications"], 0);
+    let text = output(root, &["gen", "profiles", "--kind", "applications"], 0);
     assert!(text.contains(CLI_OWNER), "{text}");
     assert!(text.contains(MCP_OWNER), "{text}");
 }
@@ -535,7 +565,8 @@ fn a_verified_pin_manifest_drives_application_generation_with_no_entry_file() {
     std::fs::remove_file(&spec).unwrap();
 
     let args = [
-        "codegen-cli",
+        "gen",
+        "cli",
         "--pins",
         "pins.json",
         "--cache-dir",
@@ -544,7 +575,7 @@ fn a_verified_pin_manifest_drives_application_generation_with_no_entry_file() {
         "api-cli-v1/mapping.json",
         "--target-config",
         "api-cli-v1/target.json",
-        "--out",
+        "--output",
         "generated",
         "--format",
         "json",

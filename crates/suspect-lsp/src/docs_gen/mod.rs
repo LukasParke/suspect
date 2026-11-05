@@ -2,7 +2,7 @@
 //!
 //! One content model, three emitters:
 //!
-//! - [`render_html`] — a single self-contained HTML file (default `suspect docs`).
+//! - [`render_html`] — a single self-contained HTML file (default `suspect gen docs`).
 //! - [`render_markdown`] — structured Markdown files (frontmatter, per-tag and
 //!   per-schema pages) for MDX/MDsvex pipelines.
 //! - [`render_sveltekit`] — a runnable SvelteKit docs site whose generated layer

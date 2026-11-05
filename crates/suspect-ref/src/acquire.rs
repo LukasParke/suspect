@@ -3,7 +3,7 @@
 //! Acquisition is the only network-capable entry point. An [`AcquiredClosure`]
 //! provides a complete verified in-memory snapshot to ordinary offline
 //! [`crate::Workspace`] consumers. Neither identifiers nor `$ref` text expand the
-//! retrieval list. See `docs/SDK-PINNED-CLOSURE-DESIGN.md` for the versioned format.
+//! retrieval list. See `docs/design/pinned-closure.md` for the versioned format.
 
 mod cache;
 mod manifest;

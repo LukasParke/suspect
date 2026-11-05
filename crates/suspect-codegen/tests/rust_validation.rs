@@ -629,9 +629,7 @@ fn native_finite_reference_chain_honors_the_admitted_depth_ceiling() {
 #[test]
 #[ignore = "requires native Cargo and OPENROUTER_WEB_ROOT"]
 fn tracked_openrouter_nullable_caller_image_and_index_closures_match_owned_schema() {
-    let root_dir = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
-    );
+    let root_dir = suspect_codegen::test_inputs::openrouter_root();
     let path = root_dir.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(WorkspaceBuilder::new().root(&root_dir).build().unwrap());
     let contract =

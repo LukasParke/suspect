@@ -1,5 +1,4 @@
 {
-  "suspect.server.path": "/home/luke/github/suspect/target/release/suspect",
   "editor.inlayHints.enabled": "on",
   "update.mode": "none",
   "telemetry.telemetryLevel": "off",

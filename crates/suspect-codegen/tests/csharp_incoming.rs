@@ -463,11 +463,10 @@ fn incoming_run(label: &str, directory: &str, arguments: &[&str], root: &Path, d
 #[test]
 fn receipts_drive_the_decoder_and_constructor_in_dotnet() {
     let Some(dotnet) = dotnet() else {
-        eprintln!(
-            "csharp_incoming: skipping — {}",
+        panic!(
+            "csharp_incoming: {}",
             suspect_codegen::toolchain::guidance("dotnet")
         );
-        return;
     };
     eprintln!("csharp_incoming: {dotnet}");
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-incoming");

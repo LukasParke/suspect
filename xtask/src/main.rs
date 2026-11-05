@@ -1,7 +1,11 @@
 //! Workspace automation: corpus fetch, fixture generation, benches.
 
+mod ci;
+#[cfg(test)]
+mod docs_paths;
 mod sdk_full;
 mod sdk_m3_m6;
+mod versions;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -10,8 +14,13 @@ use anyhow::{Context, Result, bail};
 
 const USAGE: &str = "\
 tasks:
-  sdk-full [options]              Verify the maintained twelve-language full SDK plan.
-  sdk-m3-m6 [options]             Verify the current native SDK and iteration milestones.
+  ci [JOB...] [flags]             Run the CI jobs locally (`cargo xtask ci --help`).
+  bless                           Regenerate the checked-in generated docs (bless tests).
+  verify-sdk [options]            Verify the maintained twelve-language SDK plan.
+  verify-sdk-demo [options]       Verify the frozen five-backend M3/M6 demo scope.
+  bump <version>                  Set the one toolchain version in every manifest and lockfile,
+                                  then prepend its CHANGELOG.md section (git-cliff, if installed).
+  check-versions [--tag vX.Y.Z]   Fail when any version line (or the tag) differs.
   fetch-corpus [--force]          Download real-world OpenAPI specs into corpus/ (gitignored).
   gen-fixtures [options]          Generate deterministic synthetic OpenAPI 3.1 fixtures.
     --paths N                     Number of path items (default 100).
@@ -29,10 +38,14 @@ fn main() -> Result<()> {
     let task = args.first().map(String::as_str).unwrap_or_default();
     let rest = &args[1.min(args.len())..];
     match task {
+        "ci" => ci::run(rest),
+        "bless" => bless(rest),
         "fetch-corpus" => fetch_corpus(rest),
         "gen-fixtures" => gen_fixtures(rest),
-        "sdk-full" => sdk_full::run(rest),
-        "sdk-m3-m6" => sdk_m3_m6::run(rest),
+        "verify-sdk" => sdk_full::run(rest),
+        "verify-sdk-demo" => sdk_m3_m6::run(rest),
+        "bump" => versions::run_bump(rest),
+        "check-versions" => versions::run_check(rest),
         "-h" | "--help" | "help" => {
             println!("{USAGE}");
             Ok(())
@@ -42,6 +55,78 @@ fn main() -> Result<()> {
             std::process::exit(2);
         }
     }
+}
+
+/// The tests that compare a checked-in generated file with its renderer and
+/// rewrite it when `SUSPECT_BLESS` is set: (package, test target, extra env).
+type BlessTest = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+const BLESS_TESTS: &[BlessTest] = &[
+    ("suspect-cli", "reference_docs", &[]),
+    ("suspect-codegen", "feature_manifest", &[]),
+    ("suspect-config", "json_schema", &[]),
+    ("suspect-cli", "finding_output", &[]),
+    ("suspect-cli", "lsp_diagnostics_golden", &[]),
+];
+
+/// `cargo xtask bless`: runs every bless test with `SUSPECT_BLESS=1`.
+fn bless(args: &[String]) -> Result<()> {
+    if let Some(arg) = args.first() {
+        if arg == "-h" || arg == "--help" {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        bail!("bless: unknown argument {arg:?}");
+    }
+    let root = repo_root();
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    for (package, test, env) in BLESS_TESTS {
+        println!("$ SUSPECT_BLESS=1 cargo test -p {package} --test {test}");
+        let mut cmd = std::process::Command::new(&cargo);
+        cmd.args(["test", "-p", package, "--test", test])
+            .current_dir(&root)
+            .env("SUSPECT_BLESS", "1");
+        for (key, value) in *env {
+            cmd.env(key, value);
+        }
+        let status = cmd.status().context("spawn cargo test")?;
+        if !status.success() {
+            bail!("bless: cargo test -p {package} --test {test} exited with {status}");
+        }
+    }
+    Ok(())
+}
+
+/// The repository root (the parent of `xtask/`).
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("xtask lives one level below the repository root")
+        .to_path_buf()
+}
+
+/// Tracked files (`git ls-files`, repository-relative, `/`-separated) that
+/// match `keep`.
+fn tracked_files(root: &Path, keep: impl Fn(&str) -> bool) -> Result<Vec<String>> {
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(root)
+        .output()
+        .context("run git ls-files")?;
+    if !out.status.success() {
+        bail!(
+            "git ls-files failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|path| !path.is_empty() && keep(path))
+        .map(str::to_owned)
+        .collect())
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,6 +1103,15 @@ mod tests {
                     .len(),
                 5
             );
+        }
+    }
+
+    #[test]
+    fn every_bless_test_target_exists() {
+        let root = repo_root();
+        for (package, test, _) in BLESS_TESTS {
+            let path = root.join(format!("crates/{package}/tests/{test}.rs"));
+            assert!(path.is_file(), "bless test {} is missing", path.display());
         }
     }
 

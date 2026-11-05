@@ -3,7 +3,7 @@
 //! native backends.
 //!
 //! This file is the executable evidence for the XML rows of
-//! `docs/SDK-OPENAPI-MATRIX.md`. The v1 contract it documents is
+//! `docs/reference/openapi-matrix.md`. The v1 contract it documents is
 //! **fail-loud, never fail-silent**:
 //!
 //! 1. A declared XML *structure* — an object schema, any typed schema, a

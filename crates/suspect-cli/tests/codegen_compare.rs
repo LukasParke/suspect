@@ -17,13 +17,7 @@ fn setup() -> tempfile::TempDir {
 }
 fn compare(root: &Path, args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_suspect"))
-        .args([
-            "codegen-compare",
-            "--before",
-            "old/sdk.json",
-            "--after",
-            "new/sdk.json",
-        ])
+        .args(["diff", "sdk", "old/sdk.json", "new/sdk.json"])
         .args(args)
         .current_dir(root)
         .output()

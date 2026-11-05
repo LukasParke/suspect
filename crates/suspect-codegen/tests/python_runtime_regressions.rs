@@ -352,11 +352,8 @@ fn installed_http_rejects_invalid_ports_at_the_sdk_boundary() {
 #[test]
 #[ignore = "separate opt-in: requires OPENROUTER_WEB_ROOT and native Python"]
 fn original_openrouter_container_file_accepts_zero_padded_integer_exponents() {
-    let source = PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT")
-            .expect("set OPENROUTER_WEB_ROOT for the original ContainerFile source gate"),
-    )
-    .join("projects/docs/openapi/openapi.yaml");
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let contract = load(&source);
     let root = schema(&contract, "ContainerFile");
     let plan = plan_codecs(

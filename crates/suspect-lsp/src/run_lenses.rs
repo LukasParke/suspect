@@ -397,42 +397,5 @@ pub(crate) fn describe_event(ev: &TestEvent) -> String {
     }
 }
 
-/// Resolves the base URL used by live runs: initialization options
-/// (`suspect.run.baseUrl` or `run.baseUrl`, then top-level `baseUrl`), then
-/// `SUSPECT_BASE_URL`, then `http://localhost:8080`.
-#[must_use]
-pub fn base_url_from_options(init_options: Option<&serde_json::Value>) -> String {
-    if let Some(opts) = init_options {
-        if let Some(v) = opts.get("baseUrl").and_then(|v| v.as_str()) {
-            return v.to_owned();
-        }
-        for path in [
-            ["suspect", "run", "baseUrl"],
-            ["run", "baseUrl", ""],
-            ["baseUrl", "", ""],
-        ] {
-            let mut cur = opts;
-            let mut found = None;
-            for key in path {
-                if key.is_empty() {
-                    break;
-                }
-                match cur.get(key) {
-                    Some(v) if key == "baseUrl" => {
-                        found = v.as_str();
-                        break;
-                    }
-                    Some(next) => cur = next,
-                    None => break,
-                }
-            }
-            if let Some(v) = found {
-                return v.to_owned();
-            }
-        }
-    }
-    std::env::var("SUSPECT_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_owned())
-}
-
 #[cfg(test)]
 mod tests;

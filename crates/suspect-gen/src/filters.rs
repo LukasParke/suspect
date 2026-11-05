@@ -478,7 +478,7 @@ fn synth_example(
         )]),
         Some("string") | Some("integer") | Some("number") | Some("boolean") => {
             // Realistic synthesis: format/name semantics, bounds honored.
-            suspect_faker::value(&schema, name)
+            suspect_ir::faker::value(&schema, name)
         }
         _ => Json::Null,
     }

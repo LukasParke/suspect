@@ -1,13 +1,14 @@
 //! `suspect watch`: re-run a command whenever watched documents change.
 //!
-//! Thin glue over [`suspect_watch`]: one immediate run, then kill-and-
+//! Thin glue over [`crate::watch`]: one immediate run, then kill-and-
 //! respawn the child on every debounced change burst under `roots`.
 
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::mpsc;
 use std::time::Duration;
-use suspect_watch::{self as watcher, DebounceEvent};
+
+use crate::watch::{self as watcher, DebounceEvent};
 
 /// Debounce window coalescing editor save bursts before a re-run.
 const DEBOUNCE: Duration = Duration::from_millis(300);

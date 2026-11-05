@@ -83,7 +83,7 @@ fn native_provider_source_address_boundary() {
     .unwrap();
     let root = tempfile::Builder::new()
         .prefix("sdk-terraform-address-")
-        .tempdir_in("/private/var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/opencode")
+        .tempdir_in(native_tmp())
         .unwrap()
         .keep();
     std::fs::write(
@@ -91,11 +91,9 @@ fn native_provider_source_address_boundary() {
         format!("{}\n", root.display()),
     )
     .unwrap();
-    let terraform = std::env::var_os("SUSPECT_TERRAFORM_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from("/Users/luke/.local/share/mise/installs/terraform/latest/terraform")
-        });
+    // `SUSPECT_TERRAFORM_BIN`, the mise install, then `PATH`.
+    let terraform =
+        suspect_codegen::toolchain::gate("terraform").unwrap_or_else(|skip| panic!("{skip}"));
     let cli_config = root.join("terraform.rc");
     std::fs::write(&cli_config, "disable_checkpoint = true\n").unwrap();
     let (contract, mapping, base_config) = inputs();
@@ -206,4 +204,13 @@ fn native_provider_source_address_boundary() {
         serde_json::to_vec_pretty(&report).unwrap(),
     )
     .unwrap();
+}
+
+/// The approved native temporary directory shared with
+/// `tools/sdk-terraform-acceptance.py` (`APPROVED`): `suspect-terraform-native`
+/// under the caller's `TMPDIR`.
+fn native_tmp() -> std::path::PathBuf {
+    let path = std::env::temp_dir().join("suspect-terraform-native");
+    std::fs::create_dir_all(&path).unwrap();
+    path
 }

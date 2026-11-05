@@ -1,6 +1,6 @@
 //! TS/JS custom rule runtime.
 //!
-//! Host side of the Bun rule worker (see `docs/TS-RULE-RUNTIME.md`): spawns
+//! Host side of the Bun rule worker (see `docs/design/ts-rule-runtime.md`): spawns
 //! a long-lived `bun` sidecar, negotiates the NDJSON protocol, evaluates
 //! each rule's `given` selector natively against the [`suspect_low::LowDoc`]
 //! CST, ships

@@ -1,4 +1,4 @@
-//! `suspect reverse`: detect spec drift from server source code.
+//! `suspect diff routes`: detect spec drift from server source code.
 //!
 //! Extracts routes registered in server framework code (Rust axum/actix,
 //! TypeScript Express, Go net/http & Gin) and cross-references them with
@@ -9,18 +9,19 @@ use std::path::Path;
 
 use suspect_ir::IrSpec;
 
-/// Runs `suspect reverse`.
+/// Runs `suspect diff routes`. Exits 0, or with `check` 1 on undocumented or
+/// spec-only routes; 2 when no routes are extracted.
 ///
 /// # Errors
 /// Workspace loading, IR compilation, and report serialization failures.
-pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
+pub fn reverse(source: &Path, spec: &Path, json: bool, check: bool) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(spec)?;
     let uri = suspect_source::Uri::from_path(spec)?;
     ws.get(&uri)
         .ok_or_else(|| anyhow::anyhow!("spec document not loaded: {uri}"))?;
     let ir = IrSpec::from_workspace(&ws, &uri)
         .map_err(|e| anyhow::anyhow!("IR compilation failed: {e}"))?;
-    let routes = suspect_reverse::extract_from_tree(source);
+    let routes = crate::reverse::extract_from_tree(source);
     if routes.is_empty() {
         eprintln!(
             "no routes extracted from {} (supported: Rust axum/actix, TypeScript Express, Go net/http, Gin)",
@@ -28,13 +29,15 @@ pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
         );
         return Ok(2);
     }
-    let report = suspect_reverse::cross_reference(&ir, &routes);
+    let report = crate::reverse::cross_reference(&ir, &routes);
+    // `--check`: undocumented or spec-only routes fail the gate.
+    let gate = i32::from(check && !(report.undocumented.is_empty() && report.spec_only.is_empty()));
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&report).map_err(|e| anyhow::anyhow!("{e}"))?
         );
-        return Ok(0);
+        return Ok(gate);
     }
     println!(
         "{} routes extracted from {} against {}",
@@ -60,5 +63,5 @@ pub fn reverse(source: &Path, spec: &Path, json: bool) -> anyhow::Result<i32> {
         report.spec_only.len(),
         report.method_mismatches.len()
     );
-    Ok(0)
+    Ok(gate)
 }

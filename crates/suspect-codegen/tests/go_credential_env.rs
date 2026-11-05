@@ -579,8 +579,7 @@ func TestAllocatedAndBoundedFactory(t *testing.T){var model sdk.NewClientFromEnv
 #[ignore = "requires OPENROUTER_WEB_ROOT and native Go 1.23.12/1.27.1"]
 fn native_actual_openrouter_key_and_credits_use_env_snapshot_and_source_https() {
     let path =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())

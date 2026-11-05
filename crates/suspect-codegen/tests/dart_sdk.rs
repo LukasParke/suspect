@@ -1204,9 +1204,7 @@ fn native_runtime_vectors_refs_and_resource_classification() {
 #[test]
 #[ignore = "required actual OpenRouter source, Dart installed pub package, HTTP and dartdoc gate"]
 fn native_five_actual_openrouter_operations() {
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let before = Sha256::digest(std::fs::read(&path).expect("actual OpenRouter input is required"));
     let contract = load(&path);

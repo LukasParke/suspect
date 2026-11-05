@@ -1,8 +1,8 @@
 # Local SDK demo helpers
 
-Start with the repository-root [DEMO-README.md](../../DEMO-README.md).
+Start with [docs/internal/SDK-DEMO.md](../../docs/internal/SDK-DEMO.md).
 
-All commands run from `/Users/luke/github/suspect`. Set `DEMO` to the prepared
+All commands run from the repository root. Set `DEMO` to the prepared
 `target/sdk-demo-readme-20260911-01/candidate-02` absolute path.
 
 | Helper | Purpose |

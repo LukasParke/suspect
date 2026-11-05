@@ -377,8 +377,7 @@ print('number type contract ok')
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT and native Python 3; missing inputs fail"]
 fn tracked_openrouter_contract_documents_roundtrip_through_python_runtime() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .expect("set OPENROUTER_WEB_ROOT to the source checkout");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     for relative in [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",

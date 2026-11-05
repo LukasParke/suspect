@@ -204,23 +204,3 @@ fn failure_range_falls_back_for_transport_errors() {
     };
     assert_eq!(failure_range(&wf, &f), 0..0);
 }
-
-#[test]
-fn base_url_precedence() {
-    assert_eq!(
-        base_url_from_options(Some(&serde_json::json!({
-            "suspect": { "run": { "baseUrl": "http://init:1" } }
-        }))),
-        "http://init:1"
-    );
-    assert_eq!(
-        base_url_from_options(Some(&serde_json::json!({ "baseUrl": "http://top:2" }))),
-        "http://top:2"
-    );
-    // SAFETY: as above.
-    unsafe { std::env::set_var("SUSPECT_BASE_URL", "http://env:3") };
-    assert_eq!(base_url_from_options(None), "http://env:3");
-    // SAFETY: as above.
-    unsafe { std::env::remove_var("SUSPECT_BASE_URL") };
-    assert_eq!(base_url_from_options(None), "http://localhost:8080");
-}

@@ -1,5 +1,5 @@
 //! Shared live-HTTP plumbing for CLI commands that talk to a real server
-//! (`test`, `fuzz`, `replay`, `load`). The core crates stay dependency-free;
+//! (`test run`, `test fuzz`, `test replay`, `test load`). The core crates stay dependency-free;
 //! this is the single CLI-side [`HttpClient`] implementation.
 
 use std::time::{Duration, Instant};

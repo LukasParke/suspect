@@ -1,22 +1,9 @@
-//! `suspect arazzo-diff` — breaking changes between two Arazzo documents.
+//! Breaking changes between two Arazzo documents (`suspect diff breaking`
+//! on Arazzo input).
 
 use std::path::PathBuf;
 
 use suspect_overlay::Value as Ov;
-
-/// One Arazzo breaking-change review.
-#[derive(Debug, clap::Args)]
-pub struct ArazzoDiffArgs {
-    /// The previous Arazzo revision.
-    #[arg(required = true)]
-    pub old: PathBuf,
-    /// The current Arazzo revision.
-    #[arg(required = true)]
-    pub new: PathBuf,
-    /// Output format for the report.
-    #[command(flatten)]
-    pub text: crate::TextFormat,
-}
 
 /// One detected break.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -228,17 +215,22 @@ fn criteria_equal(old: Option<&serde_json::Value>, new: Option<&serde_json::Valu
     }
 }
 
-/// Runs the review and prints the report; exits non-zero on breaks.
+/// Compares two Arazzo revisions and renders the report; exits non-zero on
+/// breaks. `suspect diff breaking` calls this when NEW is an Arazzo document.
 ///
 /// # Errors
-/// Propagates serialization failures.
-pub fn arazzo_diff(args: &ArazzoDiffArgs) -> anyhow::Result<i32> {
+/// Propagates file IO and serialization failures.
+pub fn arazzo_diff_between(
+    old: &std::path::Path,
+    new: &std::path::Path,
+    format: crate::FindingsFormat,
+) -> anyhow::Result<i32> {
     use crate::output;
-    let findings = arazzo_break_findings(&args.old, &args.new)?;
+    let findings = arazzo_break_findings(&old.to_path_buf(), &new.to_path_buf())?;
     let rendered: Vec<output::Finding> = findings
         .iter()
         .map(|f| output::Finding {
-            file: format!("{} → {}", args.old.display(), args.new.display()),
+            file: format!("{} → {}", old.display(), new.display()),
             severity: if f.severity == "error" {
                 output::Severity::Error
             } else {
@@ -251,9 +243,6 @@ pub fn arazzo_diff(args: &ArazzoDiffArgs) -> anyhow::Result<i32> {
             range: None,
         })
         .collect();
-    match args.text.format {
-        crate::OutputFormat::Text => output::print_findings(&rendered),
-        crate::OutputFormat::Json | crate::OutputFormat::Sarif => output::print_json(&findings)?,
-    }
+    output::print_findings_as(&rendered, format)?;
     Ok(i32::from(!findings.is_empty()))
 }

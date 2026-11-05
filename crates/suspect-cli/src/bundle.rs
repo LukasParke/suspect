@@ -404,7 +404,7 @@ pub struct BundleReport {
     pub errors: Vec<Finding>,
 }
 
-/// `suspect bundle <IN> [-o OUT] [--strategy keep|inline] [--format json|yaml]`.
+/// `suspect bundle <IN> [-o OUT] [--strategy keep|inline] [--to json|yaml]`.
 ///
 /// # Errors
 /// IO, workspace load failures, or serialization failures.

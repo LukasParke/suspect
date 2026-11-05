@@ -1,0 +1,5 @@
+# `exit::abort` is the one sanctioned immediate exit; commands return
+# `Exit` (or `Err`, which `main` maps to 2) instead.
+disallowed-methods = [
+    { path = "std::process::exit", reason = "return an `Exit` from the command, or call `exit::abort`" },
+]

@@ -19,7 +19,7 @@ pub enum SpecFamily {
     Arazzo10,
     /// `overlay: "1.0.x"`
     Overlay10,
-    /// `suspectLoad: "1.x"` — a `suspect load` profile.
+    /// `suspectLoad: "1.x"` — a `suspect test load` profile.
     Load10,
     /// Anything else (including unparseable roots).
     Unknown,
@@ -94,6 +94,43 @@ impl LowDoc {
     #[must_use]
     pub fn syntax_errors(&self) -> &[suspect_syntax::SyntaxError] {
         self.doc.errors()
+    }
+
+    /// Smallest meaningful CST node whose byte range contains `offset`
+    /// (comments, directives and error nodes are skipped for their parent).
+    #[must_use]
+    pub fn node_at(&self, offset: usize) -> Option<suspect_syntax::SNode<'_>> {
+        use suspect_syntax::{SNode, SyntaxKind};
+        let inner = &self.doc;
+        let root = inner.root();
+        // Two O(log n) probes bracket the offset: `[offset, offset+1]`
+        // reaches nodes extending past it, `[offset-1, offset]` reaches
+        // nodes ending at it. Every node whose inclusive range contains
+        // `offset` spans one of the two, so the smaller meaningful survivor
+        // equals a smallest-containing-node scan without walking the tree.
+        fn probe<'d>(
+            inner: &'d SourceDoc,
+            root: &SNode<'d>,
+            start: usize,
+            end: usize,
+        ) -> Option<SNode<'d>> {
+            let mut cur = SNode::new(inner, root.raw().descendant_for_byte_range(start, end)?);
+            while matches!(cur.kind(), SyntaxKind::Comment | SyntaxKind::Directive)
+                || cur.is_error()
+            {
+                cur = cur.parent()?;
+            }
+            Some(cur)
+        }
+        let past = probe(inner, &root, offset, offset.saturating_add(1));
+        let ending = probe(inner, &root, offset.saturating_sub(1), offset);
+        match (past, ending) {
+            (Some(a), Some(b)) => {
+                let (a_len, b_len) = (a.byte_range().len(), b.byte_range().len());
+                Some(if a_len <= b_len { a } else { b })
+            }
+            (a, b) => a.or(b),
+        }
     }
 
     /// Sniffs the spec family and version from the root mapping.

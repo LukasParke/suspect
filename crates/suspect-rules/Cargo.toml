@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 description = "TS/JS custom rule runtime: Bun sidecar worker, protocol host, selector evaluation"
 license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
 
 [dependencies]
 suspect-low.workspace = true

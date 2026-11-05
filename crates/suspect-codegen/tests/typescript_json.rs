@@ -200,8 +200,7 @@ assert.equal(stringifyJson(parseJson('null', {maxDepth:0}), {maxDepth:0}), 'null
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT, native TypeScript and Node.js; missing inputs fail"]
 fn tracked_openrouter_contract_documents_roundtrip_through_native_json_runtime() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .expect("set OPENROUTER_WEB_ROOT to the source checkout");
+    let root = suspect_codegen::test_inputs::openrouter_root();
     for relative in [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",

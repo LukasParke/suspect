@@ -14,6 +14,7 @@ pub mod credential_env;
 pub mod doc_split;
 pub mod generation_session;
 pub mod sdk_defaults;
+pub mod test_inputs;
 pub mod toolchain;
 #[cfg(feature = "java-sdk")]
 #[rustfmt::skip]

@@ -78,10 +78,6 @@ fn all_profiles() -> Vec<http_protocol::CompatibilityProfile> {
     ]
 }
 
-fn tool_available(name: &str) -> bool {
-    Command::new(name).arg("--version").output().is_ok()
-}
-
 // ---------------------------------------------------------------------------
 // Profile 2: colon-path-parameters-v1
 // ---------------------------------------------------------------------------
@@ -336,14 +332,12 @@ fn emitted_field_types_for(
 
 #[test]
 fn the_nullable_profile_decodes_null_in_the_emitted_python_codecs() {
-    if !tool_available(
-        &std::env::var_os("SUSPECT_PYTHON_BIN")
-            .unwrap_or_else(|| "python3".into())
-            .to_string_lossy(),
-    ) {
-        eprintln!("python3 is not on PATH; skipping the native codec check");
+    // The emitted codecs need the generated SDK's Python floor (3.11+);
+    // `SUSPECT_PYTHON_BIN` overrides the interpreter, and an absent or
+    // older one skips with the manifest's install guidance.
+    let Some(interpreter) = suspect_codegen::toolchain::optional("python") else {
         return;
-    }
+    };
     let contract = contract_with_document(nullable_document());
     for (policy, accepts_null) in [
         (
@@ -388,13 +382,11 @@ print("OK")
 "#,
         )
         .unwrap();
-        let output = Command::new(
-            std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()),
-        )
-        .arg("consumer.py")
-        .current_dir(&python)
-        .output()
-        .unwrap();
+        let output = Command::new(&interpreter)
+            .arg("consumer.py")
+            .current_dir(&python)
+            .output()
+            .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if accepts_null {
             assert!(
@@ -698,8 +690,7 @@ fn the_emitted_typescript_sdk_normalizes_colon_paths_and_surfaces_null() {
 
 #[test]
 fn the_emitted_typescript_sdk_streams_schemaless_sse_as_untyped_frames() {
-    if !tool_available("node") {
-        eprintln!("node is not on PATH; skipping the emitted schemaless-stream check");
+    if suspect_codegen::toolchain::optional("node").is_none() {
         return;
     }
     let document = json!({

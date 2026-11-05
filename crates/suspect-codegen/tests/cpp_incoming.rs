@@ -577,8 +577,7 @@ int main() {
 #[test]
 fn native_incoming_receipts_decode_and_construct() {
     let Some((cmake, cxx)) = toolchain() else {
-        eprintln!("cpp_incoming: cmake/clang++ not available; degrading to static assertions");
-        return;
+        panic!("cpp_incoming: cmake/clang++ not available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(), root.path()).unwrap();

@@ -96,7 +96,7 @@ fn stateful_generates_and_executes_resource_sequences() {
     std::fs::write(root.join("api.yaml"), API).expect("api");
     let server = ResourceServer::spawn();
     let output = suspect()
-        .arg("stateful")
+        .args(["test", "stateful"])
         .arg(root.join("api.yaml"))
         .args(["--base-url", &format!("http://127.0.0.1:{}", server.port)])
         .output()
@@ -141,7 +141,7 @@ fn stateful_emit_prints_sequences_without_running() {
     let root = directory.path();
     std::fs::write(root.join("api.yaml"), API).expect("api");
     let output = suspect()
-        .arg("stateful")
+        .args(["test", "stateful"])
         .arg(root.join("api.yaml"))
         .arg("--emit")
         .output()
@@ -166,7 +166,7 @@ fn fuzz_evolved_runs_a_coverage_guided_campaign() {
     std::fs::write(root.join("api.yaml"), API).expect("api");
     let server = ResourceServer::spawn();
     let output = suspect()
-        .arg("fuzz")
+        .args(["test", "fuzz"])
         .arg(root.join("api.yaml"))
         .args(["--base-url", &format!("http://127.0.0.1:{}", server.port)])
         .args(["--filter", "search", "--evolved"])
@@ -219,9 +219,9 @@ paths:
     )
     .expect("spec");
     let output = suspect()
-        .arg("reverse")
-        .arg(&src)
+        .args(["diff", "routes"])
         .arg(root.join("spec.yaml"))
+        .arg(&src)
         .output()
         .expect("run");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -247,9 +247,9 @@ paths:
     );
 
     let output = suspect()
-        .arg("reverse")
-        .arg(&src)
+        .args(["diff", "routes"])
         .arg(root.join("spec.yaml"))
+        .arg(&src)
         .args(["--format", "json"])
         .output()
         .expect("run");
@@ -274,7 +274,7 @@ fn bridge_emits_regeneration_plans_when_the_spec_changes() {
     // First tick: the bridge has never seen the file, so it reloads and
     // emits a regeneration plan.
     let output = suspect()
-        .arg("bridge")
+        .args(["gen", "bridge"])
         .arg(root.join("api.yaml"))
         .args(["--max-ticks", "1"])
         .output()
@@ -296,9 +296,9 @@ fn bridge_emits_regeneration_plans_when_the_spec_changes() {
 
     // The JSON channel carries the same plan for scripts.
     let output = suspect()
-        .arg("bridge")
+        .args(["gen", "bridge"])
         .arg(root.join("api.yaml"))
-        .args(["--max-ticks", "1", "--format", "json"])
+        .args(["--max-ticks", "1", "--format", "ndjson"])
         .output()
         .expect("run");
     let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");

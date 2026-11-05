@@ -343,8 +343,7 @@ fn php() -> Option<PathBuf> {
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&document()), root.path()).unwrap();
@@ -374,8 +373,7 @@ fn emitted_php_files_lint() {
 #[test]
 fn receipt_decoders_and_constructors_drive_the_package_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&document());

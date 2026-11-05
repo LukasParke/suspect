@@ -143,7 +143,7 @@ pub struct RunSummaryRecord {
     pub duration_ms: f64,
 }
 
-/// Periodic load-test metrics snapshot (`suspect load`).
+/// Periodic load-test metrics snapshot (`suspect test load`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadSnapshotRecord {
     /// Unix epoch milliseconds.

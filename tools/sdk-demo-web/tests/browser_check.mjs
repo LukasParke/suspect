@@ -19,7 +19,8 @@ function option(name, fallback) {
 const liveURL = new URL(option('--url', 'http://127.0.0.1:8765')).origin;
 const output = path.resolve(option('--output', path.join(repo, 'target/sdk-demo-web-20260911-01/checks/browser-01')));
 assert(path.relative(path.join(repo, 'target'), output).startsWith('sdk-demo-web-20260911-'), 'Use fresh web-owned browser evidence');
-const tools = option('--tools', '/private/var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/opencode/sdk-editor-native-host-tl2581zs/tools');
+const tools = option('--tools', process.env.SUSPECT_PLAYWRIGHT_TOOLS ?? '');
+assert(tools, 'Pass --tools or set SUSPECT_PLAYWRIGHT_TOOLS to a directory with playwright-core installed');
 const require = createRequire(path.join(tools, 'package.json'));
 const { chromium } = require('playwright-core');
 const canary = 'web-browser-controlled-canary-only';

@@ -21,10 +21,13 @@
 mod engine;
 mod fast;
 mod functions;
+pub mod markdown;
 mod packs;
 pub mod quality;
 mod rule;
+mod rules;
 mod ruleset;
 
 pub use engine::{Finding, Linter, RulesetError};
 pub use rule::{Category, Severity};
+pub use rules::builtin_rules;

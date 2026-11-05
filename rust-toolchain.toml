@@ -1,0 +1,6 @@
+# One Rust version for local builds and CI, so local clippy and CI clippy
+# report the same lints. Workflows pass the same version to
+# dtolnay/rust-toolchain; an xtask test checks they agree. Bump monthly.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

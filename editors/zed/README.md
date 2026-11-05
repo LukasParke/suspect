@@ -5,19 +5,51 @@ the `suspect` language server (`suspect lsp`). The extension registers a
 `suspect-lsp` language server for **YAML** and **JSON** buffers; YAML/JSON
 language grammars themselves come from Zed's built-ins.
 
-## Prerequisites
+## The server binary
 
-The `suspect` CLI must be installed somewhere Zed can find it:
+Nothing to install on macOS (Apple silicon and Intel), Linux (x86-64 and
+arm64) and Windows (x86-64). The extension resolves the server binary in
+this order:
 
-```sh
-# from the repository root
-cargo install --path crates/suspect-cli
+1. `lsp.suspect-lsp.binary.path` in your Zed settings (with optional
+   `binary.arguments`, default `["lsp"]`, and `binary.env`);
+2. the `suspect` release build matching this extension's version: on first
+   start the extension downloads `suspect-cli-<triple>.tar.gz` (`.zip` on
+   Windows) from the GitHub release `v<version>`, checks it against the
+   release's `.sha256` file, and unpacks the binary into its work directory
+   (`suspect-<version>/`); later starts reuse it, and a new extension
+   version removes the old copy;
+3. an executable named `suspect` on the worktree's shell `PATH` (resolved by
+   Zed on the host): other platforms, or no network on first start.
+
+If none is found the language server fails to start with an error naming
+the options. To keep your own build, set `binary.path`:
+
+```json
+{
+  "lsp": {
+    "suspect-lsp": {
+      "binary": { "path": "/path/to/suspect", "arguments": ["lsp"] }
+    }
+  }
+}
 ```
 
-The extension resolves the server binary in this order:
+## Non-spec YAML and JSON
 
-1. the `SUSPECT_PATH` environment variable (verbatim path override);
-2. an executable named `suspect` found on `PATH`.
+Zed starts the server for every YAML and JSON buffer, because a language
+config cannot look at file contents. The server decides per document: on
+files that are not OpenAPI, Swagger, Arazzo, Overlay, load profiles,
+suspect config or fragments of a loaded spec (a `$ref` target, or a file in
+a spec's directory below the workspace root), it returns no hover,
+formatting, completion, code actions, symbols or links, and no
+diagnostics. `docker-compose.yml` and `package.json` are left alone.
+
+To keep the server off JSON buffers entirely:
+
+```json
+{ "languages": { "JSON": { "language_servers": ["!suspect-lsp", "..."] } } }
+```
 
 ## Install (as a dev extension)
 
@@ -40,48 +72,73 @@ cd editors/zed
 cargo build --target wasm32-wasip1
 ```
 
-CI runs the host-target equivalent (`cargo check --manifest-path
-editors/zed/Cargo.toml`) in the `zed-check` workflow job; the extension crate
-is intentionally standalone (its own `[workspace]`) so it never touches the
+CI builds the same WASI artifact (`cargo build --manifest-path
+editors/zed/Cargo.toml --target wasm32-wasip1`) in the `zed` job of the
+`platform` workflow; the extension crate is intentionally standalone (its own `[workspace]`) so it never touches the
 repository root lockfile.
 
 ## Configuration
 
-Per-project Zed settings (`lsp` section):
+Everything under `lsp.suspect-lsp.settings` is forwarded to the server as
+workspace configuration under the `suspect` section (it is wrapped for you;
+settings already nested under a `suspect` key are passed through unchanged).
+The keys the server reads are the `.suspect.yaml` keys, in camelCase (the
+VS Code `suspect.*` settings) or snake_case:
 
 ```json
 {
   "lsp": {
     "suspect-lsp": {
       "settings": {
-        "basePath": "http://127.0.0.1:8080",
-        "testBaseUrl": "http://127.0.0.1:8080"
+        "lint": {
+          "minSeverity": "warning",
+          "rules": { "operation-tags": "error" },
+          "design": "off",
+          "recommended": true,
+          "ruleset": "rules/custom.yaml"
+        },
+        "validate": { "strictFormat": false },
+        "ref": { "maxDocs": 500 },
+        "editor": { "inlayHints": { "refs": true, "properties": true } },
+        "format": { "sortKeys": false },
+        "test": { "baseUrl": "http://localhost:8080" }
       }
     }
   }
 }
 ```
 
-These are forwarded to the server as workspace configuration under the
-`suspect` section: `{ "suspect": { "basePath", "testBaseUrl" } }`.
-`basePath` anchors `$url`-style external references and hover base URLs;
-`testBaseUrl` is the default base URL for Arazzo test runs started from the
-editor.
+`lint.minSeverity` accepts `error`, `warning`, `info` (or `information`) and
+`hint`; leave it unset to defer to the committed `.suspect.yaml`. Settings
+from the editor layer over the committed `.suspect.yaml` /
+`suspect.project.json` files.
+
+The extension sends `extensionVersion` in the server's initialization options,
+merged into anything you set under `lsp.suspect-lsp.initialization_options`.
+The server compares it with its own version and shows one warning when the
+major or minor release differs (for example a `binary.path` pointing at an
+older build).
 
 ## What works
 
 - Full LSP feature set over stdio (`suspect lsp`): diagnostics (validation +
-  Spectral-style linting), `$ref` navigation, rename, completions, hover,
-  quick fixes, inlay hints, semantic highlighting.
-- Workspace configuration forwarding for `basePath` / `testBaseUrl`.
-- Tasks: Arazzo workflow runs stream back through the journal event channel;
-  custom LSP methods (`suspect/runWorkflow`, `suspect/gatewayStatus`,
-  `suspect/renderPreview`) are served by the CLI subprocess.
+  linting), `$ref` navigation, rename, completions, hover, quick fixes, inlay
+  hints, semantic highlighting, code lenses.
+- Workspace configuration forwarding (see above), re-sent on every settings
+  change.
+- Server commands over `workspace/executeCommand` (e.g. `suspect.showRefs`,
+  `suspect.addOperationId`, `suspect.generateExample`,
+  `suspect.extractSchema`, `suspect.inlineSchema`), reachable from code
+  actions and lenses.
+- Custom requests the server implements: `suspect/runWorkflow`,
+  `suspect/generationContract`, `suspect/renderSdk` and
+  `suspect/documentKind`, each listed with a version in the server's
+  `capabilities.experimental.suspect`. Zed has no UI for
+  custom requests, so these are only reachable from other clients today.
 
 ## Pending
 
-- Webview-based preview panels (`renderPreview` UI surface) — Zed extension
-  API does not expose webviews yet; the LSP method already works, only the
-  visual panel is missing.
-- Bundled prebuilt server binaries per-platform download (currently the host
-  must provide `suspect` itself).
+- Preview panels (the `suspect.renderPreview` lens and SDK previews): the Zed
+  extension API does not expose webviews.
+- Bundled prebuilt server binaries per platform (currently the host must
+  provide `suspect` itself).

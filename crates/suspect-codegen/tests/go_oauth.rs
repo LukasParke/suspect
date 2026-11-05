@@ -569,22 +569,15 @@ fn plan_carries_the_compiled_oauth_plan_only_when_configured() {
 }
 
 fn go_toolchain() -> Option<String> {
-    let output = Command::new("go").arg("version").output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    // "go version go1.27.1 darwin/arm64" — require at least the emitted go.mod
-    // language version so the module builds with the installed toolchain.
-    let version = text.split_whitespace().nth(2)?;
-    let minor = version
-        .strip_prefix("go1.")
-        .and_then(|rest| rest.split('.').next())
-        .and_then(|minor| minor.parse::<u32>().ok())?;
-    (minor >= 23).then_some(text)
+    // The manifest resolves the tool and gates the version (>= 1.23); a
+    // missing one prints the standard skip line, or fails when
+    // SUSPECT_REQUIRE_TOOLS lists `go`.
+    suspect_codegen::toolchain::optional("go").map(|path| path.to_string_lossy().into_owned())
 }
 
 #[test]
 fn native_module_builds_and_vets_with_the_oauth_file() {
     let Some(_) = go_toolchain() else {
-        eprintln!("go_oauth: Go toolchain (>= 1.23) not installed; degrading to static assertions");
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -613,7 +606,6 @@ fn native_module_builds_and_vets_with_the_oauth_file() {
 #[test]
 fn native_module_builds_with_interactive_flows() {
     let Some(_) = go_toolchain() else {
-        eprintln!("go_oauth: Go toolchain (>= 1.23) not installed; degrading to static assertions");
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -642,7 +634,6 @@ fn native_module_builds_with_interactive_flows() {
 #[test]
 fn native_module_builds_and_vets_with_discovery_flows() {
     let Some(_) = go_toolchain() else {
-        eprintln!("go_oauth: Go toolchain (>= 1.23) not installed; degrading to static assertions");
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -1038,7 +1029,6 @@ var _ = errors.New
 #[test]
 fn discovery_lifecycle_runs_against_a_fake_discovery_server() {
     let Some(_) = go_toolchain() else {
-        eprintln!("go_oauth: Go toolchain (>= 1.23) not installed; degrading to static assertions");
         return;
     };
     let root = tempfile::tempdir().unwrap();
@@ -1588,7 +1578,6 @@ func TestUnknownSchemeFailsTypedAndStoreStaysInstanceOwned(t *testing.T) {
 #[test]
 fn native_lifecycle_counts_caches_rotates_and_cancels() {
     let Some(version) = go_toolchain() else {
-        eprintln!("go_oauth: Go toolchain (>= 1.23) not installed; degrading to static assertions");
         return;
     };
     eprintln!("go_oauth: {version}");
@@ -2124,7 +2113,6 @@ var _ = strings.TrimSpace
 #[test]
 fn replay_lifecycle_runs_against_a_fake_server() {
     let Some(_) = go_toolchain() else {
-        eprintln!("go_oauth: Go toolchain (>= 1.23) not installed; degrading to static assertions");
         return;
     };
     let root = tempfile::tempdir().unwrap();

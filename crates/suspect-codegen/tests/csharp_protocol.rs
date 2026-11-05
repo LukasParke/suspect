@@ -279,8 +279,7 @@ fn rich_native_snapshot_records_parts_headers_media_and_stream_contracts() {
 #[test]
 #[ignore = "native .NET 8/10 protocol build/pack/installed-consumer witnesses"]
 fn native_protocol_matrix() {
-    let dotnet = std::env::var_os("SUSPECT_DOTNET_BIN")
-        .unwrap_or_else(|| "/Users/luke/.local/share/mise/dotnet-root/dotnet".into());
+    let dotnet = suspect_codegen::toolchain::gate("dotnet").unwrap_or_else(|skip| panic!("{skip}"));
     let root = root("native-");
     let plan = plan(&root);
     for (sdk, framework) in [("8.0.424", "net8.0"), ("10.0.400", "net10.0")] {

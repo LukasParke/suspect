@@ -16,7 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const USAGE: &str = "usage: cargo run -p xtask -- sdk-m3-m6 --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo run -p xtask -- sdk-m3-m6 --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See docs/SDK-M3-M6-EXIT.md.\n";
+const USAGE: &str = "usage: cargo xtask verify-sdk-demo --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo xtask verify-sdk-demo --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See docs/internal/SDK-M3-M6-EXIT.md.\n";
 const BOTH: &[&str] = &["M3", "M6"];
 const M3: &[&str] = &["M3"];
 const M6: &[&str] = &["M6"];
@@ -1056,27 +1056,35 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
     }
     let selected =
         |name: &str, default: &str| std::env::var(name).unwrap_or_else(|_| default.into());
+    // Interpreter defaults when the `SUSPECT_*` override is unset: the
+    // versioned executable on the caller's PATH (Python), or the mise
+    // major-version install under `$HOME` falling back to `node` on PATH.
+    // The `tool-*` stages then verify the exact versions.
+    let on_path = |name: &str| resolve(name, &run.env).display().to_string();
+    let mise_node = |major: &str| {
+        std::env::var_os("HOME")
+            .map(|home| {
+                PathBuf::from(home)
+                    .join(format!(".local/share/mise/installs/node/{major}/bin/node"))
+            })
+            .filter(|node| node.is_file())
+            .map_or_else(|| on_path("node"), |node| node.display().to_string())
+    };
+    let (python_floor, python_current) = (on_path("python3.11"), on_path("python3.14"));
+    let (node22, node24) = (mise_node("22"), mise_node("24"));
     for (token, name, default) in [
         (
             "{python-floor}",
             "SUSPECT_PYTHON_FLOOR_BIN",
-            "/Users/luke/.local/share/uv/python/cpython-3.11-macos-aarch64-none/bin/python3.11",
+            python_floor.as_str(),
         ),
         (
             "{python-current}",
             "SUSPECT_PYTHON_CURRENT_BIN",
-            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            python_current.as_str(),
         ),
-        (
-            "{node22}",
-            "SUSPECT_DOCS_NODE",
-            "/Users/luke/.local/share/mise/installs/node/22.23.1/bin/node",
-        ),
-        (
-            "{node24}",
-            "SUSPECT_NODE24_BIN",
-            "/Users/luke/.local/share/mise/installs/node/24.21.0/bin/node",
-        ),
+        ("{node22}", "SUSPECT_DOCS_NODE", node22.as_str()),
+        ("{node24}", "SUSPECT_NODE24_BIN", node24.as_str()),
         (
             "{python-tools}",
             "SUSPECT_PYTHON_TOOLS",
@@ -1146,14 +1154,6 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
         ("SUSPECT_GO_TOOLCHAIN", "local"),
         ("GOWORK", "off"),
         ("OPENROUTER_WEB_ROOT", "{out}/inputs"),
-        (
-            "SUSPECT_OPENROUTER_YAML",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
-        (
-            "SUSPECT_OPENROUTER_SPEC",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
         ("SUSPECT_PYTHON_BIN", "{python-current}"),
         ("SUSPECT_PYTHON_TOOLS", "{python-tools}"),
         ("SUSPECT_PYTHON_FLOOR_BIN", "{python-floor}"),
@@ -1525,7 +1525,7 @@ pub(super) fn editor_stages() -> Vec<Stage> {
 pub(super) fn package_stages() -> Vec<Stage> {
     let mut steps = Vec::new();
     for (id, flag, status, success, code) in [("preview", "--preview", "drift", false, 1), ("generate", "", "written", true, 0), ("drift", "--check", "current", true, 0)] {
-        let mut item = stage(&format!("five-op-{id}"), BOTH, "{out}/bin/suspect", &["codegen-session", "--config", "{out}/configs/five-operations.json", "--out", "{work}/packages", "--format", "json"], "{workspace}");
+        let mut item = stage(&format!("five-op-{id}"), BOTH, "{out}/bin/suspect", &["gen", "session", "--config", "{out}/configs/five-operations.json", "--output", "{work}/packages", "--format", "ndjson"], "{workspace}");
         if !flag.is_empty() { item.args.push(flag.into()); }
         item.expected_exit = code;
         item.criterion = Criterion::Json { report: None, assertions: BTreeMap::from([("/format".into(), json!("suspect.sdk.session.v1")), ("/status".into(), json!(status)), ("/success".into(), json!(success))]) };

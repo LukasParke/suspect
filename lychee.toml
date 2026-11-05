@@ -1,0 +1,17 @@
+# lychee.toml — relative links only; external URLs are excluded by `offline`.
+# Run: `cargo xtask ci links` (lychee 0.24.2 over `git ls-files '*.md'`).
+offline = true
+include_fragments = "anchor-only"
+no_progress = true
+exclude_path = [
+  "(^|/)target/",
+  "(^|/)node_modules/",
+  # SDK guide templates: their links resolve inside the generated package.
+  "crates/suspect-codegen/src/[a-z]+_sdk/",
+  # Frozen historical records; see docs/internal/README.md.
+  "docs/internal/",
+]
+exclude = [
+  "^file:///ws/",   # example URI in reference/lsp-features.md
+  "/target/",       # links to local build evidence
+]

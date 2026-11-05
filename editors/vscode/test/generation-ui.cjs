@@ -147,7 +147,7 @@ async function editor(t) {
 }
 
 function assertDiscovery(h) {
-	assert.deepEqual(h.discoveryCalls, [['/explicit CLI directory/suspect', ['codegen-profiles', '--format', 'json'], {
+	assert.deepEqual(h.discoveryCalls, [['/explicit CLI directory/suspect', ['gen', 'profiles', '--format', 'json'], {
 		cwd: undefined, encoding: 'utf8', timeout: 5000, maxBuffer: 256 * 1024, windowsHide: true, shell: false, killSignal: 'SIGKILL',
 	}]]);
 }
@@ -159,7 +159,7 @@ test('watch keeps one canonical process and updates read-only disk/generated dif
 	await h.run('suspect.watchSdk');
 	assert.equal(h.children.length, 1);
 	assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-		'codegen-session', '--config', h.config, '--out', h.out, '--watch', '--preview', '--format', 'json',
+		'gen', 'session', '--config', h.config, '--output', h.out, '--watch', '--preview', '--format', 'ndjson',
 	], { cwd: path.dirname(h.config), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 	assert.ok(h.prompts[0].prompt.includes(path.dirname(h.config)));
 	h.send({ newDocuments: [h.source] });
@@ -367,14 +367,14 @@ test('multi-root selection honors the selected folder config and resolves output
 	h.vscode.workspace.workspaceFolders = [{ uri: Uri.file(path.join(h.root, 'workspace A')), name: 'A', index: 0 }, chosen];
 	h.vscode.window.showWorkspaceFolderPick = async () => chosen;
 	h.vscode.workspace.getConfiguration = (_section, resource) => ({
-		get: (key, fallback) => key === 'sdk.sessionConfig' ? resource?.fsPath === chosen.uri.fsPath ? 'nested/sdk.json' : 'global.json' : fallback,
+		get: (key, fallback) => key === 'codegen.session.config' ? resource?.fsPath === chosen.uri.fsPath ? 'nested/sdk.json' : 'global.json' : fallback,
 	});
 	h.input = async () => '../generated';
 	await h.commands.get('suspect.watchSdk')();
 	assert.equal(h.children.length, 1);
 	const [, args, options] = h.spawnCalls[0];
 	assert.equal(args[args.indexOf('--config') + 1], config);
-	assert.equal(args[args.indexOf('--out') + 1], path.join(chosen.uri.fsPath, 'generated'));
+	assert.equal(args[args.indexOf('--output') + 1], path.join(chosen.uri.fsPath, 'generated'));
 	assert.equal(options.cwd, path.dirname(config));
 	assert.ok(h.output.value.includes(path.join(chosen.uri.fsPath, 'source/api.json')));
 });
@@ -443,18 +443,18 @@ for (const [profile, name, directory, packagePrompt] of [
 		await until(() => h.children.length === 1, 'picker did not launch the canonical CLI');
 		const out = path.join(h.root, 'gen-out', profile);
 		assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-			'codegen', h.source, '--profile', profile, '--package-name', name, '--package-version', '1.2.3',
-			'--out', out, '--format', 'json', '--operation-id', operationId,
+			'gen', 'sdk', h.source, '--profile', profile, '--package-name', name, '--package-version', '1.2.3',
+			'--output', out, '--format', 'json', '--operation-id', operationId,
 		], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 		assert.match(h.prompts[0].prompt, packagePrompt);
 		if (python) {
 			assert.match(h.prompts[1].prompt, /fixture_editor_python/);
-			assert.match(h.prompts[1].prompt, /Configure sdk.importNames for an override/);
+			assert.match(h.prompts[1].prompt, /Configure codegen.importNames for an override/);
 		} else if (swift) {
 			assert.match(h.prompts[0].prompt, /default module has the same name/);
 			assert.match(h.prompts[1].prompt, /stable SemVer \(no prerelease\/build metadata\)/);
 			assert.match(h.prompts[1].prompt, /Swift module: ExampleSDK/);
-			assert.match(h.prompts[1].prompt, /Configure sdk.importNames for an override/);
+			assert.match(h.prompts[1].prompt, /Configure codegen.importNames for an override/);
 		} else if (profile === 'go-http') assert.match(h.prompts[0].prompt, /package is named sdk/);
 		assert.equal(h.prompts[2].validateInput(JSON.stringify([operationId])), undefined);
 		assert.match(h.prompts[2].validateInput('[1]'), /exact operation ID strings/);
@@ -490,7 +490,7 @@ for (const kind of ['docs-md', 'custom']) {
 		await until(() => h.children.length === 1);
 		const out = path.join(h.root, 'gen-out', kind);
 		assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-			'gen', h.source, '--out', out, ...(kind === 'custom' ? ['--manifest', manifest] : ['--preset', 'docs-md']),
+			'gen', 'template', h.source, '--output', out, ...(kind === 'custom' ? ['--manifest', manifest] : ['--preset', 'docs-md']),
 		], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 		assert.equal(h.prompts.length, 0, 'documentation generation does not prompt for SDK package identity');
 		const produced = path.join(out, 'docs/result.md');
@@ -583,7 +583,7 @@ test('picker sends configured native import/module/namespace overrides exactly a
 	]) {
 		await t.test(profile, async (t) => {
 			const h = await editor(t);
-			h.settings.set('sdk.importNames', { [profile]: importName, 'unselected-profile': 'unused' });
+			h.settings.set('codegen.importNames', { [profile]: importName, 'unselected-profile': 'unused' });
 			h.vscode.window.activeTextEditor = { document: { uri: Uri.file(h.source) } };
 			h.pick = async (items) => items.find((item) => item.generationKind === profile);
 			const inputs = [packageName, '1.2.3', '["getCredits"]'];
@@ -593,8 +593,8 @@ test('picker sends configured native import/module/namespace overrides exactly a
 			assertDiscovery(h);
 			const out = path.join(h.root, 'gen-out', profile);
 			assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-				'codegen', h.source, '--profile', profile, '--package-name', packageName, '--package-version', '1.2.3',
-				'--out', out, '--format', 'json', '--import-name', importName, '--operation-id', 'getCredits',
+				'gen', 'sdk', h.source, '--profile', profile, '--package-name', packageName, '--package-version', '1.2.3',
+				'--output', out, '--format', 'json', '--import-name', importName, '--operation-id', 'getCredits',
 			], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 			const readme = path.join(out, directory, 'README.md');
 			await fs.mkdir(path.dirname(readme), { recursive: true });
@@ -631,8 +631,8 @@ test('a pending picker generates with the same CLI whose profiles it discovered'
 
 test('picker enables compatibility only from explicit settings and passes it alongside the native import name', async (t) => {
 	const h = await editor(t);
-	h.settings.set('sdk.compatibilityProfiles', ['legacy-binary-string-v1']);
-	h.settings.set('sdk.importNames', { 'python-http': 'custom_editor_sdk' });
+	h.settings.set('codegen.compatibilityProfiles', ['legacy-binary-string-v1']);
+	h.settings.set('codegen.importNames', { 'python-http': 'custom_editor_sdk' });
 	h.vscode.window.activeTextEditor = { document: { uri: Uri.file(h.source) } };
 	h.pick = async (items) => items.find((item) => item.generationKind === 'python-http');
 	const inputs = ['fixture-editor-python', '1.2.3', '[" --exact; $(prose)"]'];
@@ -642,8 +642,8 @@ test('picker enables compatibility only from explicit settings and passes it alo
 	assertDiscovery(h);
 	const out = path.join(h.root, 'gen-out/python-http');
 	assert.deepEqual(h.spawnCalls[0], ['/explicit CLI directory/suspect', [
-		'codegen', h.source, '--profile', 'python-http', '--package-name', 'fixture-editor-python', '--package-version', '1.2.3',
-		'--out', out, '--format', 'json', '--import-name', 'custom_editor_sdk',
+		'gen', 'sdk', h.source, '--profile', 'python-http', '--package-name', 'fixture-editor-python', '--package-version', '1.2.3',
+		'--output', out, '--format', 'json', '--import-name', 'custom_editor_sdk',
 		'--compatibility-profile', 'legacy-binary-string-v1', '--operation-id', ' --exact; $(prose)',
 	], { cwd: h.root, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }]);
 	const readme = path.join(out, 'python/README.md');
@@ -657,14 +657,12 @@ test('picker enables compatibility only from explicit settings and passes it alo
 
 test('unknown or malformed compatibility settings fail before package prompts or generation, even if inventory advertises them', async (t) => {
 	for (const compatibilityProfiles of [
-		['future-profile'], ['legacy-binary-string-v1', '$(touch sentinel)'], 'legacy-binary-string-v1', [null], null,
+		['future-profile'], ['legacy-binary-string-v1', '$(touch sentinel)'], 'legacy-binary-string-v1', [null],
 	]) {
 		await t.test(JSON.stringify(compatibilityProfiles), async (t) => {
 			const h = await editor(t);
 			h.inventory.compatibilityProfiles = ['future-profile', '$(touch sentinel)'];
-			h.settings.set('sdk.compatibilityProfiles', compatibilityProfiles);
-			// Unlike the mock's usual missing-value fallback, an explicitly malformed null is preserved.
-			if (compatibilityProfiles === null) h.vscode.workspace.getConfiguration = () => ({ get: (key, fallback) => h.settings.has(key) ? h.settings.get(key) : fallback });
+			h.settings.set('codegen.compatibilityProfiles', compatibilityProfiles);
 			h.vscode.window.activeTextEditor = { document: { uri: Uri.file(h.source) } };
 			h.pick = async (items) => items.find((item) => item.generationKind === 'typescript-http');
 			await h.run('suspect.genPreset');
@@ -681,13 +679,13 @@ test('unknown or malformed compatibility settings fail before package prompts or
 
 test('session actions retain saved compatibility semantics and display the canonical report instead of applying picker settings', async (t) => {
 	const h = await editor(t);
-	h.settings.set('sdk.compatibilityProfiles', ['legacy-binary-string-v1']);
+	h.settings.set('codegen.compatibilityProfiles', ['legacy-binary-string-v1']);
 	const config = JSON.parse(await fs.readFile(h.config, 'utf8'));
 	config.compatibility_profiles = [];
 	const ordinary = JSON.stringify(config, null, 2);
 	await fs.writeFile(h.config, ordinary);
 	await h.run('suspect.watchSdk');
-	assert.deepEqual(h.spawnCalls[0][1], ['codegen-session', '--config', h.config, '--out', h.out, '--watch', '--preview', '--format', 'json']);
+	assert.deepEqual(h.spawnCalls[0][1], ['gen', 'session', '--config', h.config, '--output', h.out, '--watch', '--preview', '--format', 'ndjson']);
 	assert.deepEqual(h.discoveryCalls, []);
 	h.send({ compatibilityProfiles: [] });
 	await until(() => h.diffs.length === 1);

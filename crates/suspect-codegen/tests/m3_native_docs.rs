@@ -668,15 +668,7 @@ fn go_docs_and_generated_samples_are_native_executable_artifacts() {
 #[test]
 #[ignore = "requires the tracked OpenRouter corpus and native Python/Go/Sphinx/mypy tools"]
 fn tracked_five_operation_docs_and_example_artifacts_build_natively() {
-    let source = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(
-                std::env::var_os("OPENROUTER_WEB_ROOT")
-                    .expect("set OPENROUTER_WEB_ROOT or SUSPECT_OPENROUTER_YAML"),
-            )
-            .join("projects/docs/openapi/openapi.yaml")
-        });
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&source);
     let wanted = [
         "getCredits",

@@ -339,8 +339,7 @@ fn php() -> Option<PathBuf> {
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&GenerationOptions::default()), root.path()).unwrap();
@@ -370,8 +369,7 @@ fn emitted_php_files_lint() {
 #[test]
 fn typed_stream_events_drive_stubbed_streams_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&GenerationOptions::default());

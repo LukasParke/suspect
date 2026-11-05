@@ -421,10 +421,9 @@ fn walker_templates_compile_for_every_supported_shape() {
     let manifest = directory.join("rust/Cargo.toml");
     let (ok, log) = cargo("check", &manifest, &["--features", "http"]);
     if !ok && registry_unavailable(&log) {
-        eprintln!(
-            "skipping shape compile: the pinned http-feature dependencies are not available offline\n{log}"
+        panic!(
+            "shape compile needs the pinned http-feature dependencies, which are not available offline\n{log}"
         );
-        return;
     }
     assert!(ok, "walker shapes failed to compile:\n{log}");
     if std::env::var_os("SUSPECT_KEEP_PAGINATION").is_none() {
@@ -495,12 +494,11 @@ fn emitted_walkers_drive_real_walks_in_a_compiled_package() {
     std::fs::write(consumer.join("src/lib.rs"), CONSUMER).unwrap();
     let (ok, log) = cargo("test", &consumer.join("Cargo.toml"), &[]);
     if !ok && registry_unavailable(&log) {
-        // No registry access for the pinned `url` crate: degrade to the
-        // model-only compile check plus the static assertions above and say so.
-        eprintln!(
-            "skipping behavioral walker execution: the pinned http-feature dependencies are not available offline\n{log}"
+        // No registry access for the pinned `url` crate: an explicit gate
+        // fails rather than passing on the static assertions alone.
+        panic!(
+            "behavioral walker execution needs the pinned http-feature dependencies, which are not available offline\n{log}"
         );
-        return;
     }
     assert!(ok, "behavioral consumer tests failed:\n{log}");
     if std::env::var_os("SUSPECT_KEEP_PAGINATION").is_none() {
@@ -894,10 +892,9 @@ fn page_size_fallback_supplies_the_first_page_limit_only() {
     std::fs::write(consumer.join("src/lib.rs"), PAGE_SIZE_CONSUMER).unwrap();
     let (ok, log) = cargo("test", &consumer.join("Cargo.toml"), &[]);
     if !ok && registry_unavailable(&log) {
-        eprintln!(
-            "skipping page-size behavioral execution: the pinned http-feature dependencies are not available offline\n{log}"
+        panic!(
+            "page-size behavioral execution needs the pinned http-feature dependencies, which are not available offline\n{log}"
         );
-        return;
     }
     assert!(ok, "page-size behavioral consumer tests failed:\n{log}");
     if std::env::var_os("SUSPECT_KEEP_PAGINATION").is_none() {

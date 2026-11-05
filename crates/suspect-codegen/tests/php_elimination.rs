@@ -501,7 +501,7 @@ if (class_exists('EliminationSdk\\Client', false)) { throw new RuntimeException(
         codec_extended["unrelated_markers_loaded"]["zeta-quantum"]
             .as_bool()
             .unwrap(),
-        "documented file-granular retention regressed: the unrelated schema no longer rides in Codecs.php; update docs/SDK-ELIMINATION-AUDIT.md"
+        "documented file-granular retention regressed: the unrelated schema no longer rides in Codecs.php; update docs/design/elimination-audit.md"
     );
 
     // --- Client consumer (composition shape) ---------------------------------

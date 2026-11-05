@@ -49,13 +49,14 @@ fn environment_policy_is_explicit_in_reports_and_cannot_be_ignored_before_writes
     let rejected = run(
         root,
         &[
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "after.json",
-            "--out",
+            "--output",
             "unwritten",
             "--format",
-            "json",
+            "ndjson",
         ],
         1,
     );
@@ -73,10 +74,9 @@ fn environment_policy_is_explicit_in_reports_and_cannot_be_ignored_before_writes
     let compared = run(
         root,
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "before.json",
-            "--after",
             "after.json",
             "--format",
             "json",
@@ -119,13 +119,7 @@ fn generate_with_canary(root: &Path, config: &str, out: &str, canary: &str) -> V
         .current_dir(root)
         .env("OPENROUTER_API_KEY", canary)
         .args([
-            "codegen-session",
-            "--config",
-            config,
-            "--out",
-            out,
-            "--format",
-            "json",
+            "gen", "session", "--config", config, "--output", out, "--format", "ndjson",
         ])
         .output()
         .unwrap();

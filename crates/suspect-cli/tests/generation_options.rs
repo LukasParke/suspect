@@ -1,4 +1,4 @@
-//! Generation options reach every surface: `suspect codegen --defaults`,
+//! Generation options reach every surface: `suspect gen sdk --defaults`,
 //! the project manifest's codegen targets, and the parse's diagnostics for
 //! unknown keys and typo'd styles.
 
@@ -62,7 +62,8 @@ fn codegen_defaults_file_reaches_the_generated_artifacts() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--profile",
             "python-http",
@@ -104,7 +105,8 @@ fn codegen_defaults_file_reaches_the_generated_artifacts() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--profile",
             "python-http",
@@ -287,7 +289,8 @@ fn suspect_yaml_codegen_defaults_fill_omitted_flags() {
     let output = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "api.yaml",
             "--package-name",
             "defaults-test",
@@ -305,5 +308,210 @@ fn suspect_yaml_codegen_defaults_fill_omitted_flags() {
     assert!(
         version.contains("\"version\": \"9.9.9\""),
         "the settings version lands in the generated package: {version}"
+    );
+}
+
+#[test]
+fn suspect_yaml_supplies_package_name_operation_ids_and_import_names() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    write_api(root);
+    std::fs::write(
+        root.join(".suspect.yaml"),
+        "codegen:\n  profile: python-http\n  package_name: settings-sdk\n  \
+         package_version: 1.2.3\n  out: generated\n  operation_ids: [getCurrentKey]\n  \
+         import_names:\n    python-http: settings_sdk\n",
+    )
+    .expect("settings");
+    let output = run(root, &["gen", "sdk", "api.yaml"]);
+    assert!(
+        output.status.success(),
+        "the settings must supply every required value: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let generated = root.join("generated");
+    let files: Vec<String> = walk(&generated)
+        .into_iter()
+        .map(|p| {
+            p.strip_prefix(&generated)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert!(
+        files.iter().any(|f| f.contains("settings_sdk")),
+        "the configured import name names the package: {files:?}"
+    );
+    let all: String = walk(&generated)
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect();
+    assert!(all.contains("settings-sdk"), "the configured package name");
+    // A flag still wins over the file.
+    let output = run(
+        root,
+        &[
+            "gen",
+            "sdk",
+            "api.yaml",
+            "--package-name",
+            "flag-sdk",
+            "-o",
+            "flagged",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let all: String = walk(&root.join("flagged"))
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect();
+    assert!(all.contains("flag-sdk") && !all.contains("settings-sdk"));
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn a_yaml_defaults_file_reaches_the_generated_artifacts() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    write_api(root);
+    std::fs::write(
+        root.join("defaults.yaml"),
+        "credential_env:\n  version: v1\n  schemes:\n    apiKey: OPENROUTER_API_KEY\n",
+    )
+    .expect("defaults");
+    let output = run(
+        root,
+        &[
+            "gen",
+            "sdk",
+            "api.yaml",
+            "--profile",
+            "python-http",
+            "--package-name",
+            "openrouter",
+            "--package-version",
+            "0.1.0",
+            "--import-name",
+            "openrouter",
+            "--defaults",
+            "defaults.yaml",
+            "-o",
+            "sdk",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output_text(&root.join("sdk")).contains("OPENROUTER_API_KEY"));
+
+    // A typo is rejected with the key named, as for JSON.
+    std::fs::write(root.join("typo.yml"), "credential_envs: {}\n").expect("typo");
+    let output = run(
+        root,
+        &[
+            "gen",
+            "sdk",
+            "api.yaml",
+            "--profile",
+            "python-http",
+            "--package-name",
+            "openrouter",
+            "--defaults",
+            "typo.yml",
+            "-o",
+            "sdk-typo",
+        ],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("invalid generation options typo.yml")
+            && stderr.contains("credential_envs"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn manifest_codegen_options_reach_the_generated_artifacts() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = directory.path();
+    write_api(root);
+    let target = |options: Value| {
+        let mut target = json!({
+            "name": "sdk",
+            "profile": "python-http",
+            "package_name": "openrouter",
+            "package_version": "0.1.0",
+            "import_name": "openrouter",
+            "out": "build/sdk",
+            "options": options,
+        });
+        if let Some(extra) = target["options"].get("beside").cloned() {
+            target["options"].as_object_mut().unwrap().remove("beside");
+            target["credential_env"] = extra;
+        }
+        target
+    };
+    let manifest = |target: Value| {
+        json!({
+            "version": 1,
+            "name": "opts",
+            "entry": "api.yaml",
+            "publish": {"output": "build/spec.yaml"},
+            "codegen": [target]
+        })
+        .to_string()
+    };
+    let policy = serde_json::from_str::<Value>(POLICY).unwrap();
+    std::fs::write(
+        root.join("suspect.project.json"),
+        manifest(target(json!({"credential_env": policy}))),
+    )
+    .expect("manifest");
+    let output = run(root, &["project", "build", "--skip-tests"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        output_text(&root.join("build/sdk")).contains("OPENROUTER_API_KEY"),
+        "`options.credential_env` lands in the generated SDK"
+    );
+
+    // The same key inside and beside `options` is ambiguous.
+    std::fs::write(
+        root.join("suspect.project.json"),
+        manifest(target(json!({"credential_env": policy, "beside": policy}))),
+    )
+    .expect("manifest");
+    let output = run(root, &["project", "check"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("`credential_env` is set both in `options` and beside it"),
+        "{stderr}"
     );
 }

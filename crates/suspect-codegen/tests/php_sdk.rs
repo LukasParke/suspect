@@ -859,11 +859,8 @@ fn php_literal(text: &str) -> String {
 #[ignore = "requires original tracked OpenRouter source and verified native Composer/PHPStan tools"]
 fn composer_installed_actual_openrouter_five_operations() {
     use sha2::{Digest, Sha256};
-    let path = PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT")
-            .expect("set OPENROUTER_WEB_ROOT to the read-only original source"),
-    )
-    .join("projects/docs/openapi/openapi.yaml");
+    let path =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let before = fs::read(&path).unwrap();
     let contract = load(&path);
     let wanted = [

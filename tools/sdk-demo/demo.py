@@ -131,7 +131,7 @@ def freeze(root: Path, binary: Path, receipt: Path | None) -> None:
         "responseFixture": str(REPO / "crates/suspect-codegen/tests/fixtures/openrouter-five-responses.json"),
         "responseFixtureSha256": sha(REPO / "crates/suspect-codegen/tests/fixtures/openrouter-five-responses.json"),
     })
-    result = record(root, "profiles", [str(root / "bin/suspect"), "codegen-profiles",
+    result = record(root, "profiles", [str(root / "bin/suspect"), "gen", "profiles",
                                        "--format", "json"])
     write_json(root / "profiles.json", json.loads(result.stdout))
     print(f"Frozen demo candidate: {root}\nCLI SHA-256: {sha(root / 'bin/suspect')}")
@@ -159,8 +159,8 @@ def freeze_comparison(root: Path, binary: Path, receipt: Path) -> None:
     (work / "bin").mkdir()
     shutil.copy2(binary, work / "bin/suspect")
     shutil.copy2(receipt, work / "origin-receipt.json")
-    result = record(work, "generation-parity", [str(work / "bin/suspect"), "codegen-session",
-        "--config", str(root / "session.json"), "--out", str(work / "packages"), "--format", "json"])
+    result = record(work, "generation-parity", [str(work / "bin/suspect"), "gen", "session",
+        "--config", str(root / "session.json"), "--output", str(work / "packages"), "--format", "ndjson"])
     data = json.loads(result.stdout)
     expected = {name: item["sha256"] for name, item in json.loads((root / "package-pins.json").read_text()).items()}
     actual = {str(path.relative_to(work / "packages")): sha(path)
@@ -186,9 +186,9 @@ def inventory(root: Path) -> dict[str, dict]:
 
 def generation(root: Path, action: str) -> None:
     verify_pins(root)
-    argv = [str(root / "bin/suspect"), "codegen-session", "--config",
-            str(root / "session.json"), "--out", str(root / "packages"),
-            "--format", "json"]
+    argv = [str(root / "bin/suspect"), "gen", "session", "--config",
+            str(root / "session.json"), "--output", str(root / "packages"),
+            "--format", "ndjson"]
     if action in ("check", "preview"):
         argv += [f"--{action}"]
     before = inventory(root) if action != "generate" else None

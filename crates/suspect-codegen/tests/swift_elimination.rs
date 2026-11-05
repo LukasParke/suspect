@@ -25,7 +25,7 @@
 //! module's public API; the emitter-side fix (per-operation SwiftPM targets
 //! or products, mirroring the Go per-operation functions) is out of scope
 //! for this measurement task and is documented in
-//! `docs/SDK-ELIMINATION-AUDIT.md`.
+//! `docs/design/elimination-audit.md`.
 //!
 //! Retained artifacts live under `target/sdk-swift-elimination/` and a
 //! machine-readable record of the last run is written to
@@ -572,7 +572,7 @@ fn swift_consumers_eliminate_unrelated_operations() {
             for marker in MARKER_OTHER_OPERATIONS {
                 assert!(
                     base["markers"][*marker].as_bool().unwrap(),
-                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains unrelated operations; update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement",
+                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains unrelated operations; update docs/design/elimination-audit.md with the improved measurement",
                     consumer.label
                 );
             }
@@ -583,7 +583,7 @@ fn swift_consumers_eliminate_unrelated_operations() {
             for marker in MARKER_UNRELATED_OPERATION {
                 assert!(
                     extended["markers"][*marker].as_bool().unwrap(),
-                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains the unrelated operation; update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement",
+                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains the unrelated operation; update docs/design/elimination-audit.md with the improved measurement",
                     consumer.label
                 );
             }
@@ -591,7 +591,7 @@ fn swift_consumers_eliminate_unrelated_operations() {
                 extended["binary_bytes"].as_u64().unwrap() - base["binary_bytes"].as_u64().unwrap();
             assert!(
                 (MEASURED_GROWTH_FLOOR_BYTES..=MEASURED_GROWTH_CEILING_BYTES).contains(&delta),
-                "{}/{configuration}: the unrelated operation moved the artifact by {delta} B; update docs/SDK-ELIMINATION-AUDIT.md with the new measurement",
+                "{}/{configuration}: the unrelated operation moved the artifact by {delta} B; update docs/design/elimination-audit.md with the new measurement",
                 consumer.label
             );
         }

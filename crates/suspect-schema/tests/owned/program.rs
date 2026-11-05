@@ -417,9 +417,7 @@ fn external_references_preserve_document_and_escaped_pointer_identity_after_drop
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT; missing tracked input fails this acceptance test"]
 fn tracked_openrouter_roots_export_their_actual_compiled_checks_and_reference_closure() {
-    let root_dir = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(std::path::PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT to the source checkout");
+    let root_dir = crate::test_inputs::openrouter_root();
     let path = root_dir.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(WorkspaceBuilder::new().root(&root_dir).build().unwrap());
     let contract =

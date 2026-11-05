@@ -556,9 +556,7 @@ try{
 "#;
 
 fn openrouter_plan() -> HttpPlan {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../openrouter-web"));
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let path = root.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()

@@ -187,12 +187,7 @@ fn native_codec_docs_preserve_hostile_prose_collisions_and_actual_methods() {
 #[test]
 #[ignore = "requires pinned native Node/TypeDoc and tracked OpenRouter YAML"]
 fn native_codec_docs_cover_tracked_openrouter_caller_and_image_closures() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let roots = contract
         .schema_roots()

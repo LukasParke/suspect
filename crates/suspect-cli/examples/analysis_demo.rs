@@ -76,9 +76,10 @@ fn main() -> Result<(), String> {
     );
 
     // --- R8: reverse engineering on our own gateway source ---
-    let routes = suspect_reverse::extract_from_tree(std::path::Path::new(
-        "/home/luke/github/suspect/crates/suspect-gateway/src",
-    ));
+    let routes = suspect_cli::reverse::extract_from_tree(std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../suspect-gateway/src"
+    )));
     println!(
         "reverse: {} routes extracted from gateway source",
         routes.len()
@@ -86,7 +87,7 @@ fn main() -> Result<(), String> {
     for r in routes.iter().take(3) {
         println!("  {} {} ({}:{})", r.method, r.path, r.framework, r.line);
     }
-    let xref = suspect_reverse::cross_reference(&ir, &routes);
+    let xref = suspect_cli::reverse::cross_reference(&ir, &routes);
     println!(
         "xref: {} undocumented, {} spec-only, {} method mismatches",
         xref.undocumented.len(),

@@ -1,69 +1,19 @@
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::output::{Finding, Severity};
+use crate::output::{Finding, ShownPaths, to_diag};
 
-/// Maps the tool's severity rank to a SARIF level (`note`, `warning`,
-/// `error`).
-fn level(severity: Severity) -> &'static str {
-    match severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Info | Severity::Hint => "note",
-    }
-}
-
-/// Builds a SARIF 2.1.0 log from findings. Rules are collected from the
-/// findings (deduplicated by id, first description wins); each result
-/// references its rule by index and locates the finding at
-// `file:startLine:startColumn`.
+/// Builds a SARIF 2.1.0 log from findings through
+/// `suspect_diag::render::sarif`. Rules are collected from the findings
+/// (deduplicated by id, the code as description); each result references
+/// its rule by index and locates the finding at
+/// `file:startLine:startColumn`.
 #[must_use]
 pub fn sarif_log(findings: &[Finding]) -> Value {
-    // Deduplicate rules preserving first-seen order.
-    let mut rule_ids: Vec<String> = Vec::new();
-    let mut rules: Vec<Value> = Vec::new();
-    for f in findings {
-        if !rule_ids.contains(&f.code) {
-            rule_ids.push(f.code.clone());
-            rules.push(json!({
-                "id": f.code,
-                "shortDescription": {"text": f.code},
-            }));
-        }
-    }
-    let results: Vec<Value> = findings
-        .iter()
-        .map(|f| {
-            json!({
-                "ruleId": f.code,
-                "ruleIndex": rule_ids.iter().position(|r| *r == f.code).unwrap_or(0),
-                "level": level(f.severity),
-                "message": {"text": f.message},
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": {"uri": f.file},
-                        "region": {
-                            "startLine": f.line,
-                            "startColumn": f.col,
-                        },
-                    },
-                }],
-            })
-        })
-        .collect();
-    json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": {
-                "driver": {
-                    "name": "suspect",
-                    "informationUri": "https://github.com/LukasParke/suspect",
-                    "rules": rules,
-                },
-            },
-            "results": results,
-        }],
-    })
+    suspect_diag::render::sarif(
+        &to_diag(findings),
+        &ShownPaths,
+        &suspect_diag::render::NoRules,
+    )
 }
 
 /// Pretty-prints a SARIF log to stdout.
@@ -77,6 +27,7 @@ pub fn print_sarif(findings: &[Finding]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::output::Severity;
 
     fn sample() -> Vec<Finding> {
         vec![
@@ -96,25 +47,35 @@ mod tests {
                 message: "example violates the schema".into(),
                 line: 20,
                 col: 5,
-                range: None,
+                range: Some(140..150),
             },
         ]
     }
 
     #[test]
-    fn log_is_valid_sarif_210() {
+    fn findings_round_trip_through_the_shared_model() {
+        for finding in sample() {
+            let back = Finding::from_diag(&finding.to_diag(), &ShownPaths);
+            assert_eq!(back.to_line(), finding.to_line());
+            assert_eq!(back.range, finding.range);
+        }
+        let text = crate::output::render_text(&sample());
+        let expected: String = sample().iter().map(|f| f.to_line() + "\n").collect();
+        assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn log_locates_cli_findings() {
         let log = sarif_log(&sample());
-        assert_eq!(log["version"], "2.1.0");
         let run = &log["runs"][0];
-        assert_eq!(run["tool"]["driver"]["name"], "suspect");
-        // Two findings share one rule → one deduplicated rule entry.
         assert_eq!(run["tool"]["driver"]["rules"].as_array().unwrap().len(), 1);
-        assert_eq!(run["results"].as_array().unwrap().len(), 2);
-        assert_eq!(run["results"][0]["level"], "error");
-        assert_eq!(run["results"][1]["level"], "warning");
         assert_eq!(
-            run["results"][0]["locations"][0]["physicalLocation"]["region"]["startLine"],
-            12
+            run["results"][1]["locations"][0]["physicalLocation"]["region"]["startLine"],
+            20
+        );
+        assert_eq!(
+            run["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "spec.yaml"
         );
     }
 }

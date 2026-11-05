@@ -302,12 +302,7 @@ fn unsupported_shapes_are_errors_and_never_dynamic_fallbacks() {
 #[test]
 #[ignore = "requires native Cargo and the pinned tracked OpenRouter checkout"]
 fn tracked_openrouter_nullable_caller_and_image_sources_preserve_every_payload() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let selected = roots(
         &contract,

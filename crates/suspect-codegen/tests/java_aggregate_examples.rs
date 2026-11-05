@@ -200,9 +200,8 @@ fn native_declared_aggregate_examples() {
         std::fs::write(path, file.content).unwrap();
     }
     let java = PathBuf::from(std::env::var_os("JAVA_HOME").expect("select JDK21/25"));
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/sdk-java-maven-cache/java/repository");
     checked(

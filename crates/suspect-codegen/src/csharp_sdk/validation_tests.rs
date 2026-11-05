@@ -65,8 +65,9 @@ impl Native {
         native
     }
     pub(super) fn run(&self, dir: &str, label: &str, args: &[&str]) -> Output {
-        let executable = std::env::var_os("SUSPECT_DOTNET_BIN")
-            .unwrap_or_else(|| "/Users/luke/.local/share/mise/dotnet-root/dotnet".into());
+        // `SUSPECT_DOTNET_BIN`, the mise install, then `PATH`.
+        let executable = crate::toolchain::resolve_path("dotnet")
+            .unwrap_or_else(|| panic!("{}", crate::toolchain::guidance("dotnet")));
         let mut command = Command::new(&executable);
         command
             .args(args)

@@ -768,9 +768,7 @@ fn native_m2_cpp_cmake_codecs_http_and_docs() {
 #[ignore = "requires the read-only OpenRouter checkout, C++20, libcurl, CMake and Doxygen"]
 fn native_five_actual_openrouter_operations() {
     use sha2::{Digest, Sha256};
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let before =
         Sha256::digest(std::fs::read(&path).expect("actual tracked OpenRouter source is required"));

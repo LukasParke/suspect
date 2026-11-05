@@ -5,7 +5,7 @@
 //! the feature for that backend. The manifest test in
 //! `tests/feature_manifest.rs` verifies every claim against its evidence
 //! file, verifies the converse (an evidence file without a claim fails),
-//! and regenerates `docs/SDK-FEATURES.md` byte-for-byte, so the matrix
+//! and regenerates `docs/reference/sdk-features.md` byte-for-byte, so the matrix
 //! cannot drift from reality in either direction.
 //!
 //! Where a claim is absent, the manifest is recording test debt, not
@@ -231,11 +231,11 @@ pub fn is_supported(feature: usize, backend: usize) -> bool {
     claim_for(feature, backend).is_some()
 }
 
-/// Renders the manifest as the `docs/SDK-FEATURES.md` table.
+/// Renders the manifest as the `docs/reference/sdk-features.md` table.
 #[must_use]
 pub fn feature_matrix_markdown() -> String {
     let mut out = String::from("# Generated-SDK feature matrix\n\n");
-    out.push_str("Machine-generated from [`crates/suspect-codegen/src/features.rs`](../crates/suspect-codegen/src/features.rs). Every claim is verified against the acceptance test named in the evidence column; the sync test (`tests/feature_manifest.rs`) fails if this file, the registry, or the evidence drift apart. An unclaimed cell records test debt, not necessarily absence of implementation.\n\n");
+    out.push_str("Machine-generated from [`crates/suspect-codegen/src/features.rs`](../../crates/suspect-codegen/src/features.rs). Every claim is verified against the acceptance test named in the evidence column; the sync test (`tests/feature_manifest.rs`) fails if this file, the registry, or the evidence drift apart. An unclaimed cell records test debt, not necessarily absence of implementation.\n\n");
     out.push_str("| Feature | ");
     for backend in BACKENDS {
         out.push_str(backend);

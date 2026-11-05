@@ -195,10 +195,32 @@ fn invalid_overlay_rejected() {
         }
     ));
 
-    let doc = parse_yaml("overlay: 1.0.0\ninfo: {title: t, version: v}\nactions: []\n");
+    let text = "overlay: 1.0.0\ninfo: {title: t, version: v}\nactions: []\n";
+    let doc = parse_yaml(text);
     let overlay = OverlayDoc::parse(&doc).unwrap();
     let diags = validate_overlay(&overlay);
-    assert!(diags.iter().any(|d| d.code == "overlay-empty-actions"));
+    let empty = diags
+        .iter()
+        .find(|d| d.code == "overlay-empty-actions")
+        .expect("empty actions");
+    assert_eq!(&text[empty.range.clone()], "[]", "anchored on the value");
+}
+
+#[test]
+fn action_findings_are_anchored_on_the_action() {
+    let text = "overlay: 1.0.0\ninfo: {title: t, version: v}\nactions:\n  - target: $.info\n    remove: true\n    update: {}\n";
+    let doc = parse_yaml(text);
+    let overlay = OverlayDoc::parse(&doc).unwrap();
+    let diags = validate_overlay(&overlay);
+    assert_eq!(diags.len(), 2, "{diags:?}");
+    for d in &diags {
+        assert!(
+            text[d.range.clone()].starts_with("target: $.info"),
+            "{}: {:?}",
+            d.code,
+            &text[d.range.clone()]
+        );
+    }
 }
 
 #[test]

@@ -95,9 +95,7 @@ fn fs_read(path: &Path) -> Vec<u8> {
 fn generated_sdk_runs_in_a_real_browser_with_exact_numbers_and_abort() {
     let temporary = tempfile::tempdir().unwrap();
     let retained = temporary.keep();
-    let source = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .expect("set OPENROUTER_WEB_ROOT");
+    let source = suspect_codegen::test_inputs::openrouter_root();
     let path = source.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()

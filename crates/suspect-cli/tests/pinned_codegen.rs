@@ -100,7 +100,8 @@ fn acquired_remote_schema_drives_offline_codegen_session_and_comparison() {
     let direct = run(
         root,
         &[
-            "codegen",
+            "gen",
+            "sdk",
             "--pins",
             "pins.json",
             "--cache-dir",
@@ -113,7 +114,7 @@ fn acquired_remote_schema_drives_offline_codegen_session_and_comparison() {
             "pinned-sdk",
             "--package-version",
             "1.0.0",
-            "--out",
+            "--output",
             "direct",
             "--format",
             "json",
@@ -138,10 +139,11 @@ fn acquired_remote_schema_drives_offline_codegen_session_and_comparison() {
     let watched = run(
         root,
         &[
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "session.json",
-            "--out",
+            "--output",
             "session",
             "--watch",
             "--max-iterations",
@@ -149,7 +151,7 @@ fn acquired_remote_schema_drives_offline_codegen_session_and_comparison() {
             "--interval-ms",
             "25",
             "--format",
-            "json",
+            "ndjson",
         ],
         0,
     );
@@ -167,10 +169,9 @@ fn acquired_remote_schema_drives_offline_codegen_session_and_comparison() {
     let comparison = run(
         root,
         &[
-            "codegen-compare",
-            "--before",
+            "diff",
+            "sdk",
             "session.json",
-            "--after",
             "session.json",
             "--format",
             "json",
@@ -193,14 +194,15 @@ fn acquired_remote_schema_drives_offline_codegen_session_and_comparison() {
     let rejected = run(
         root,
         &[
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "session.json",
-            "--out",
+            "--output",
             "session",
             "--check",
             "--format",
-            "json",
+            "ndjson",
         ],
         1,
     );

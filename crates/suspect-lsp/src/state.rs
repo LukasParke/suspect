@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use suspect_low::LowDoc;
-use suspect_ref::{Workspace, WorkspaceBuilder};
+use suspect_low::{LowDoc, SpecFamily};
+use suspect_ref::{ParsedRef, Workspace, WorkspaceBuilder};
 use suspect_source::{LineIndex, Source, Uri};
 use tower_lsp::lsp_types::{
     CodeLens, ColorInformation, Diagnostic, DocumentLink, DocumentSymbol, FoldingRange,
@@ -33,6 +33,159 @@ pub struct DocCache {
     pub symbols: Option<Arc<Vec<DocumentSymbol>>>,
 }
 
+/// What a document is, as far as the server's features are concerned.
+///
+/// The spec families come from [`LowDoc::sniff_family`], `Config` from the
+/// file name. `Fragment` is a document with no family of its own that
+/// belongs to a loaded spec (see [`FragmentIndex`]); navigation and hover
+/// keep working there. `None` is everything else (`docker-compose.yml`,
+/// `package.json`): the server leaves it alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocKind {
+    /// OpenAPI 3.x.
+    OpenApi,
+    /// Swagger 2.0.
+    Swagger,
+    /// Arazzo 1.x.
+    Arazzo,
+    /// Overlay 1.x.
+    Overlay,
+    /// A `suspect test load` profile.
+    Load,
+    /// `.suspect.yaml` or `suspect.project.json`.
+    Config,
+    /// Part of a spec without a family of its own.
+    Fragment,
+    /// Not a document the server has features for.
+    None,
+}
+
+impl DocKind {
+    /// The kind a document has on its own: by file name, then by family.
+    /// Never `Fragment`, which needs the workspace
+    /// ([`FragmentIndex::kind_of`]).
+    #[must_use]
+    pub fn of(uri: &Uri, low: &LowDoc) -> DocKind {
+        let config = uri
+            .as_path()
+            .and_then(|p| p.file_name()?.to_str().map(crate::config_schema::kind_of))
+            .flatten();
+        if config.is_some() {
+            return DocKind::Config;
+        }
+        Self::of_family(low.sniff_family())
+    }
+
+    /// The kind for a spec family; `Unknown` is `None`.
+    #[must_use]
+    pub fn of_family(family: SpecFamily) -> DocKind {
+        match family {
+            SpecFamily::Oas30 | SpecFamily::Oas31 | SpecFamily::Oas32 => DocKind::OpenApi,
+            SpecFamily::Oas2 => DocKind::Swagger,
+            SpecFamily::Arazzo10 => DocKind::Arazzo,
+            SpecFamily::Overlay10 => DocKind::Overlay,
+            SpecFamily::Load10 => DocKind::Load,
+            SpecFamily::Unknown => DocKind::None,
+        }
+    }
+
+    /// The name `suspect/documentKind` reports.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DocKind::OpenApi => "openapi",
+            DocKind::Swagger => "swagger",
+            DocKind::Arazzo => "arazzo",
+            DocKind::Overlay => "overlay",
+            DocKind::Load => "load",
+            DocKind::Config => "config",
+            DocKind::Fragment => "fragment",
+            DocKind::None => "none",
+        }
+    }
+
+    /// Whether the server's document features answer for this kind.
+    #[must_use]
+    pub fn is_served(self) -> bool {
+        self != DocKind::None
+    }
+}
+
+/// The `major.minor` release of a spec family (`"3.1"`, `"1.0"`).
+#[must_use]
+pub fn family_version(family: SpecFamily) -> Option<&'static str> {
+    match family {
+        SpecFamily::Oas2 => Some("2.0"),
+        SpecFamily::Oas30 => Some("3.0"),
+        SpecFamily::Oas31 => Some("3.1"),
+        SpecFamily::Oas32 => Some("3.2"),
+        SpecFamily::Arazzo10 | SpecFamily::Overlay10 | SpecFamily::Load10 => Some("1.0"),
+        SpecFamily::Unknown => None,
+    }
+}
+
+/// Which family-less documents of a workspace are fragments, computed once
+/// per workspace state rather than per request.
+///
+/// A document is a fragment when a loaded document `$ref`s it, or when it
+/// sits in the directory of a loaded spec or below it, so a new
+/// `schemas/Foo.yaml` that nothing references yet still counts. A spec at
+/// the workspace root does not claim the whole tree that way: there the
+/// root's `package.json` and `.github/` would all become fragments, so only
+/// `$ref` targets count.
+#[derive(Debug, Default)]
+pub struct FragmentIndex {
+    targets: std::collections::HashSet<Uri>,
+    spec_dirs: Vec<PathBuf>,
+}
+
+impl FragmentIndex {
+    /// Scans every loaded document's `$ref` edges and family.
+    #[must_use]
+    pub fn build(ws: &Workspace, root: Option<&std::path::Path>) -> FragmentIndex {
+        let mut index = FragmentIndex::default();
+        for uri in ws.uris() {
+            let Some(handle) = ws.get(&uri) else {
+                continue;
+            };
+            for edge in handle.edges().iter() {
+                if let ParsedRef::External { uri, .. } | ParsedRef::ExternalAnchor { uri, .. } =
+                    &edge.parsed
+                {
+                    index.targets.insert(uri.clone());
+                }
+            }
+            if handle.doc().sniff_family() != SpecFamily::Unknown
+                && let Some(dir) = uri.as_path().and_then(|p| p.parent().map(PathBuf::from))
+                && root.is_none_or(|root| dir != root)
+                && !index.spec_dirs.contains(&dir)
+            {
+                index.spec_dirs.push(dir);
+            }
+        }
+        index
+    }
+
+    /// `own` (from [`DocKind::of`]) refined: a family-less document that
+    /// belongs to a loaded spec is a `Fragment`.
+    #[must_use]
+    pub fn kind_of(&self, uri: &Uri, own: DocKind) -> DocKind {
+        if own != DocKind::None {
+            return own;
+        }
+        let referenced = self.targets.contains(uri);
+        let beside_spec = || {
+            uri.as_path()
+                .is_some_and(|p| self.spec_dirs.iter().any(|dir| p.starts_with(dir)))
+        };
+        if referenced || beside_spec() {
+            DocKind::Fragment
+        } else {
+            DocKind::None
+        }
+    }
+}
+
 /// One editor-open document: the live buffer text plus the `LowDoc` parsed
 /// from it. The line index lives inside the parsed document
 /// (`SourceDoc::line_index`), so no separate copy is kept.
@@ -41,6 +194,9 @@ pub struct OpenDoc {
     pub text: String,
     /// [`LowDoc`] parsed from [`OpenDoc::text`]; carries the line index.
     pub low: LowDoc,
+    /// The document's own kind, computed once per parse. `None` may still
+    /// be a fragment ([`FragmentIndex::kind_of`]).
+    pub kind: DocKind,
 }
 
 /// A snapshot of the per-document workspace-report cache plus the keying
@@ -120,8 +276,9 @@ impl OpenDoc {
     /// Parses the buffer text into a [`LowDoc`] (which carries the line
     /// index) and keeps the raw text alongside it.
     pub fn parse(uri: Uri, text: String) -> OpenDoc {
-        let low = LowDoc::parse(uri, Source::from_vec(text.clone().into_bytes()));
-        OpenDoc { text, low }
+        let low = LowDoc::parse(uri.clone(), Source::from_vec(text.clone().into_bytes()));
+        let kind = DocKind::of(&uri, &low);
+        OpenDoc { text, low, kind }
     }
 
     /// Reparses after ranged edits, reusing unchanged subtrees. The
@@ -134,9 +291,14 @@ impl OpenDoc {
         let low = previous
             .low
             .reparse(Source::from_vec(text.clone().into_bytes()), edits);
-        OpenDoc { text, low }
+        let kind = DocKind::of(low.uri(), &low);
+        OpenDoc { text, low, kind }
     }
 }
+
+/// The content epoch and the policy epoch a diagnostics cache entry was
+/// computed under; see [`State::cache_epoch`].
+pub type CacheEpoch = (u64, u64);
 
 /// Everything the backend knows, guarded by one async `RwLock`.
 #[derive(Default)]
@@ -175,9 +337,9 @@ pub struct State {
     /// specification that pass costs seconds, and the second one is what a
     /// hover queued behind. Keyed on the content epoch, so any edit
     /// invalidates it.
-    pub diag_cache: HashMap<Uri, (u64, String, Vec<Diagnostic>)>,
-    /// Whole-workspace diagnostics cache: the content epoch and the config
-    /// they were computed for, the result id, and the reports.
+    pub diag_cache: HashMap<Uri, (CacheEpoch, String, Vec<Diagnostic>)>,
+    /// Whole-workspace diagnostics cache: the content epoch and the policy
+    /// epoch they were computed for, the result id, and the reports.
     ///
     /// `workspace/diagnostic` re-lints every document in the project on
     /// every request, which on a 63k-line specification is about four
@@ -185,8 +347,8 @@ pub struct State {
     /// asks for hover, symbols and links. Measured on that burst: seven
     /// cheap requests finish in 290ms; adding this one takes it to 4.4s.
     pub ws_diag_cache: Option<(
+        CacheEpoch,
         u64,
-        crate::config_files::SuspectConfig,
         String,
         Vec<WorkspaceDocumentDiagnosticReport>,
     )>,
@@ -204,16 +366,26 @@ pub struct State {
     pub ws_identity: usize,
     /// Raw initialization options captured in `initialize` for later merge.
     pub pending_init_options: Option<serde_json::Value>,
-    /// Merged server configuration (initialization options < client section).
-    pub config: crate::config_files::SuspectConfig,
+    /// The client's last `suspect` settings section (from
+    /// `workspace/configuration`, or a `didChangeConfiguration` payload when
+    /// the client cannot be asked). Kept so a configuration file changing
+    /// on disk can be re-merged under it without another round trip.
+    pub client_settings: Option<serde_json::Value>,
+    /// The effective configuration per document: `.suspect.yaml`
+    /// discovered from each document's
+    /// directory, the environment, then initialization options and the
+    /// client section on top — the layers `suspect lint` reads, plus the
+    /// editor's. Replaced whenever client settings or a config file change.
+    pub resolved: std::sync::Arc<crate::config_files::ResolvedCache>,
     /// Client capabilities from `initialize`, consulted when a feature can
     /// degrade (e.g. deferring work to `codeAction/resolve` needs
     /// `codeAction.resolveSupport`).
     pub client_caps: Option<tower_lsp::lsp_types::ClientCapabilities>,
-    /// Settings from the shared schema: the workspace's `.suspect.yaml`
-    /// with the client's initialization options layered on top. This is
-    /// the same configuration the CLI reads, so the editor and CI agree.
-    pub editor_config: crate::editor_config::EditorConfig,
+    /// Bumped whenever the effective policy (config, severity floor)
+    /// changes. Diagnostics caches key on it alongside the content epoch,
+    /// so a report computed under the old policy — even one that finishes
+    /// after the change cleared the caches — is never served again.
+    pub policy_epoch: u64,
     /// The workspace reference index, cached per document generation.
     ///
     /// Rebuilding it walks every document and every `$ref`; doing that per
@@ -221,9 +393,26 @@ pub struct State {
     /// per cursor move. The generation is bumped whenever any open
     /// document changes, which is exactly when the index goes stale.
     pub index_cache: Option<(u64, std::sync::Arc<crate::meaning::Index>)>,
+    /// The fragment index, keyed on the workspace it was built from (its
+    /// pointer) and that workspace's document count, which grows as
+    /// documents load.
+    pub fragment_cache: Option<((usize, usize), Arc<FragmentIndex>)>,
+    /// The TypeScript rule runtime (`rules.enabled`), started on first
+    /// use. Its own lock, held across a TS run, never the state lock.
+    pub rule_host: Arc<tokio::sync::Mutex<crate::rule_host::RuleSlot>>,
 }
 
 impl State {
+    /// Whether the client asked for pull diagnostics
+    /// (`textDocument.diagnostic` in its capabilities). Such a client gets
+    /// diagnostics only by pulling; pushing as well duplicates them.
+    pub fn client_pulls_diagnostics(&self) -> bool {
+        self.client_caps
+            .as_ref()
+            .and_then(|caps| caps.text_document.as_ref())
+            .is_some_and(|text| text.diagnostic.is_some())
+    }
+
     /// The workspace root, when the client declared one.
     #[must_use]
     pub fn workspace_root(&self) -> Option<std::path::PathBuf> {
@@ -247,6 +436,21 @@ impl State {
         }
     }
 
+    /// The fragment index for `ws`, if one is already built for its
+    /// current contents. Built outside the lock, like the reference index.
+    #[must_use]
+    pub fn cached_fragments(&self, ws: &Arc<Workspace>) -> Option<Arc<FragmentIndex>> {
+        match &self.fragment_cache {
+            Some((key, index)) if *key == fragment_key(ws) => Some(index.clone()),
+            _ => None,
+        }
+    }
+
+    /// Records a fragment index built for `ws`.
+    pub fn store_fragments(&mut self, ws: &Arc<Workspace>, index: Arc<FragmentIndex>) {
+        self.fragment_cache = Some((fragment_key(ws), index));
+    }
+
     /// Records an index built outside the lock.
     pub fn store_index(&mut self, generation: u64, index: std::sync::Arc<crate::meaning::Index>) {
         self.index_cache = Some((generation, index));
@@ -257,12 +461,20 @@ impl State {
         self.content_epoch
     }
 
+    /// The key diagnostics caches are valid for: the content epoch and the
+    /// policy epoch. Capture it when a computation starts, not when its
+    /// result is stored.
+    pub fn cache_epoch(&self) -> CacheEpoch {
+        (self.content_epoch, self.policy_epoch)
+    }
+
     /// Forgets the disk-backed workspace, and with it the index built
     /// from it: both describe the tree as it was, not as it is.
     pub fn drop_workspace(&mut self) {
         self.ws_identity = self.ws_identity.wrapping_add(1);
         self.workspace = None;
         self.index_cache = None;
+        self.fragment_cache = None;
         self.ws_diag_cache = None;
         self.content_epoch = self.content_epoch.wrapping_add(1);
     }
@@ -307,6 +519,10 @@ impl State {
             Err(_) => None,
         }
     }
+}
+
+fn fragment_key(ws: &Arc<Workspace>) -> (usize, usize) {
+    (Arc::as_ptr(ws) as usize, ws.len())
 }
 
 /// Byte offset for an LSP position (UTF-16 line/column). Columns that land
@@ -419,6 +635,116 @@ pub fn apply_with_edits(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn kind(name: &str, text: &str) -> DocKind {
+        let uri = Uri::parse(&format!("file:///w/{name}")).unwrap();
+        OpenDoc::parse(uri, text.to_owned()).kind
+    }
+
+    #[test]
+    fn doc_kind_by_family_and_file_name() {
+        let table = [
+            ("a.yaml", "openapi: 3.0.3\n", DocKind::OpenApi),
+            ("a.yaml", "openapi: 3.1.0\n", DocKind::OpenApi),
+            ("a.json", "{\"openapi\": \"3.2.0\"}", DocKind::OpenApi),
+            ("a.yaml", "swagger: '2.0'\n", DocKind::Swagger),
+            ("a.yaml", "arazzo: 1.0.1\n", DocKind::Arazzo),
+            ("a.yaml", "overlay: 1.0.0\n", DocKind::Overlay),
+            (
+                "a.yaml",
+                "suspectLoad: '1'\narazzo: x.yaml\n",
+                DocKind::Load,
+            ),
+            (
+                ".suspect.yaml",
+                "lint:\n  min_severity: error\n",
+                DocKind::Config,
+            ),
+            ("suspect.project.json", "{}", DocKind::Config),
+            (
+                "docker-compose.yml",
+                "services:\n  web:\n    image: nginx\n",
+                DocKind::None,
+            ),
+            ("package.json", "{\"name\": \"x\"}", DocKind::None),
+            ("a.yaml", "", DocKind::None),
+            ("a.yaml", "openapi: 4.0.0\n", DocKind::None),
+        ];
+        for (name, text, want) in table {
+            assert_eq!(kind(name, text), want, "{name}: {text:?}");
+        }
+        assert_eq!(
+            [DocKind::OpenApi, DocKind::Fragment, DocKind::None].map(DocKind::as_str),
+            ["openapi", "fragment", "none"]
+        );
+        assert!(DocKind::Fragment.is_served() && !DocKind::None.is_served());
+        assert_eq!(family_version(SpecFamily::Oas31), Some("3.1"));
+        assert_eq!(family_version(SpecFamily::Unknown), None);
+    }
+
+    #[test]
+    fn a_reparse_recomputes_the_kind() {
+        let uri = Uri::parse("file:///w/a.yaml").unwrap();
+        let before = OpenDoc::parse(uri, "info: {}\n".to_owned());
+        assert_eq!(before.kind, DocKind::None);
+        let change = tower_lsp::lsp_types::TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(0, 0), Position::new(0, 0))),
+            range_length: None,
+            text: "openapi: 3.1.0\n".to_owned(),
+        };
+        let (text, edits) = apply_with_edits(&before, &[change]).unwrap();
+        assert_eq!(
+            OpenDoc::reparse(&before, text, &edits).kind,
+            DocKind::OpenApi
+        );
+    }
+
+    #[test]
+    fn fragments_are_ref_targets_or_live_below_a_spec() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let api = root.join("api");
+        std::fs::create_dir_all(api.join("schemas")).unwrap();
+        std::fs::create_dir_all(root.join("shared")).unwrap();
+        std::fs::write(
+            api.join("openapi.yaml"),
+            "openapi: 3.1.0\ninfo: {title: t, version: '1'}\npaths: {}\ncomponents:\n  schemas:\n    Pet: {$ref: '../shared/Pet.yaml'}\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("shared/Pet.yaml"), "type: object\n").unwrap();
+        std::fs::write(api.join("schemas/Draft.yaml"), "type: string\n").unwrap();
+        std::fs::write(root.join("flows.arazzo.yaml"), "arazzo: 1.0.1\n").unwrap();
+        std::fs::write(root.join("docker-compose.yml"), "services: {}\n").unwrap();
+
+        let ws = WorkspaceBuilder::new().root(&root).build().unwrap();
+        ws.load_all(&api.join("openapi.yaml").to_string_lossy())
+            .unwrap();
+        ws.load_all(&root.join("flows.arazzo.yaml").to_string_lossy())
+            .unwrap();
+        let index = FragmentIndex::build(&ws, Some(&root));
+        let uri = |p: &std::path::Path| Uri::from_path(p).unwrap();
+
+        // Referenced from the spec, outside its directory.
+        assert_eq!(
+            index.kind_of(&uri(&root.join("shared/Pet.yaml")), DocKind::None),
+            DocKind::Fragment
+        );
+        // Unreferenced, below the spec's directory.
+        assert_eq!(
+            index.kind_of(&uri(&api.join("schemas/Draft.yaml")), DocKind::None),
+            DocKind::Fragment
+        );
+        // Beside a spec at the workspace root: not claimed.
+        assert_eq!(
+            index.kind_of(&uri(&root.join("docker-compose.yml")), DocKind::None),
+            DocKind::None
+        );
+        // A document's own kind is kept.
+        assert_eq!(
+            index.kind_of(&uri(&api.join("openapi.yaml")), DocKind::OpenApi),
+            DocKind::OpenApi
+        );
+    }
 
     #[test]
     fn utf16_offset_roundtrip() {

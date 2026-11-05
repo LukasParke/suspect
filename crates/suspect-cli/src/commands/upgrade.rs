@@ -8,12 +8,30 @@ pub struct UpgradeArgs {
     /// The Swagger 2.0 document to upgrade.
     #[arg(required = true)]
     pub input: PathBuf,
-    /// Output path (`stdout` when omitted).
-    #[arg(long)]
-    pub output: Option<PathBuf>,
-    /// Serialization format for the upgraded document.
+    /// Output file and serialization (default: the `--output` extension,
+    /// else the input's — `.yaml`/`.yml` emit YAML, anything else JSON).
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub out: crate::DocOut,
+}
+
+/// The emission format: the explicit flag, then a `.json`/`.yaml`/`.yml`
+/// output path, then the input's extension; JSON when nothing says YAML.
+fn pick_format(args: &UpgradeArgs) -> crate::DocFormat {
+    let by_extension = |p: &std::path::Path| match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("yaml" | "yml") => Some(crate::DocFormat::Yaml),
+        Some("json") => Some(crate::DocFormat::Json),
+        _ => None,
+    };
+    args.out
+        .to
+        .or_else(|| args.out.output.as_deref().and_then(by_extension))
+        .or_else(|| by_extension(&args.input))
+        .unwrap_or(crate::DocFormat::Json)
 }
 
 /// Upgrades the document and writes the result; also validates the output
@@ -38,16 +56,28 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     }
     let doc = suspect_overlay::Value::from_node(low.root()).to_json();
     let doc: serde_json::Value = serde_json::from_str(&doc)?;
-    let upgraded = suspect_upgrade::upgrade(&doc).map_err(anyhow::Error::msg)?;
+    let upgraded = crate::upgrade::upgrade(&doc).map_err(anyhow::Error::msg)?;
 
-    let output_text = if absolute.to_string_lossy().ends_with(".json") {
-        serde_json::to_string_pretty(&upgraded)? + "\n"
-    } else {
-        // JSON is valid YAML; serialize through the JSON string to keep
-        // key insertion order.
-        serde_json::to_string_pretty(&upgraded)? + "\n"
+    let json_text = serde_json::to_string_pretty(&upgraded)? + "\n";
+    let output_text = match pick_format(args) {
+        crate::DocFormat::Json => json_text,
+        crate::DocFormat::Yaml => {
+            // Re-parse the JSON text (valid YAML) so the shared emitter
+            // `fmt` and `bundle` use writes it, keeping key order.
+            let uri = suspect_source::Uri::parse("mem://upgraded.json")
+                .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+            let reparsed = suspect_low::LowDoc::parse(
+                uri,
+                suspect_source::Source::from_vec(json_text.into_bytes()),
+            );
+            let mut yaml = suspect_overlay::Value::from_node(reparsed.root()).to_yaml();
+            if !yaml.ends_with('\n') {
+                yaml.push('\n');
+            }
+            yaml
+        }
     };
-    match &args.output {
+    match &args.out.output {
         Some(path) => {
             std::fs::write(path, &output_text)?;
             eprintln!("upgraded → {}", path.display());
@@ -56,7 +86,7 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     }
     // Validate the upgraded document with the 3.1 battery so the user
     // sees the remaining findings when the output is a file.
-    if let Some(out_path) = &args.output {
+    if let Some(out_path) = &args.out.output {
         let findings = crate::commands::validate::validate_file(out_path.as_path(), None, false);
         let error_count = findings
             .iter()

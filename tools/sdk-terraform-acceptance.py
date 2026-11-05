@@ -21,6 +21,7 @@ import shutil
 import signal
 import subprocess
 import tarfile
+import tempfile
 import threading
 import time
 import traceback
@@ -28,8 +29,23 @@ import urllib.parse
 import zipfile
 
 
-APPROVED = Path("/private/var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/opencode")
-TERRAFORM = Path("/Users/luke/.local/share/mise/installs/terraform/latest/terraform")
+# Native roots and shared Go caches live under the caller's temporary
+# directory (`TMPDIR`); the Rust selectors create their roots in the same place.
+APPROVED = (Path(tempfile.gettempdir()) / "suspect-terraform-native").resolve()
+# `SUSPECT_TERRAFORM_BIN` overrides the executable (as in the Rust gates);
+# otherwise `terraform` is looked up on PATH. `require_terraform()` fails
+# with an actionable message before any command runs.
+TERRAFORM = Path(os.environ.get("SUSPECT_TERRAFORM_BIN") or shutil.which("terraform") or "terraform")
+
+
+def require_terraform() -> Path:
+    if not TERRAFORM.is_file():
+        raise SystemExit(
+            f"terraform executable not found ({TERRAFORM}); install Terraform 1.10+ "
+            "(https://developer.hashicorp.com/terraform/install) and put it on PATH, "
+            "or set SUSPECT_TERRAFORM_BIN to its absolute path"
+        )
+    return TERRAFORM
 
 
 def sha(path: Path) -> str:
@@ -552,7 +568,8 @@ def main():
     parser.add_argument("--fixtures", type=Path, required=True)
     args = parser.parse_args()
     root, evidence, fixtures = args.root.resolve(), args.evidence.resolve(), args.fixtures.resolve()
-    assert root.is_relative_to(APPROVED.resolve()), "native roots must be isolated under the approved temporary directory"
+    assert root.is_relative_to(APPROVED), f"native roots must be isolated under the approved temporary directory {APPROVED}"
+    require_terraform()
     run = Runner(evidence)
     report = {"format": "suspect.terraform.acceptance.v1", "native_root": str(root), "local_acceptance_only": True, "publishing": False, "passed": False}
     try:

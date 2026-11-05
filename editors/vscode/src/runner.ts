@@ -1,10 +1,10 @@
 import * as cp from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
+import * as settings from './settings.generated';
 
 /**
- * NDJSON TestEvent stream emitted by `suspect test --report ndjson`.
+ * NDJSON TestEvent stream emitted by `suspect test run --format ndjson`.
  * Mirrors `suspect_test::exec::TestEvent` (serde tag "event", snake_case).
  */
 export type SuspectEvent =
@@ -48,44 +48,101 @@ export interface SuspectRunHandle {
 	kill(): void;
 }
 
-function config(): vscode.WorkspaceConfiguration {
-	return vscode.workspace.getConfiguration('suspect');
+/** Settings that select the CLI binary. */
+export const BINARY_SETTINGS: readonly string[] = ['suspect.basePath'];
+
+/**
+ * The configured CLI location: `suspect.basePath`, else bare `suspect`
+ * (resolved from $PATH).
+ */
+function configuredBase(): string {
+	return settings.basePath().trim() || 'suspect';
 }
 
-/** Resolve the suspect CLI path from `suspect.basePath`. */
-export function suspectBinary(): string {
-	const base = (config().get<string>('basePath') ?? 'suspect').trim();
-	if (!base || base === 'suspect') {
-		return 'suspect';
-	}
-	if (/[/\\]suspect$/.test(base)) {
-		return base;
-	}
+/** The executable's file name on this platform. */
+export const EXECUTABLE = process.platform === 'win32' ? 'suspect.exe' : 'suspect';
+
+/** Where the CLI came from: an explicit setting, the copy in this VSIX, or `PATH`. */
+export type BinarySource = 'setting' | 'bundled' | 'path';
+
+export interface BinaryChoice {
+	binary: string;
+	source: BinarySource;
+}
+
+/** The extension's install directory, set on activation; its `bin/` holds the bundled CLI. */
+let extensionRoot: string | undefined;
+
+export function useExtensionRoot(root: string | undefined): void {
+	extensionRoot = root;
+}
+
+/** `bin/suspect` of a platform VSIX, when this one ships it. */
+export function bundledBinary(root: string | undefined = extensionRoot): string | undefined {
+	if (root === undefined) return undefined;
+	const candidate = path.join(root, 'bin', EXECUTABLE);
 	try {
-		// Explicit executables may be versioned, renamed, or symlinks to a pinned
-		// build. The setting accepts the file itself as well as a CLI directory.
-		if (fs.statSync(base).isFile()) return base;
-	} catch { /* Let spawning diagnose an unavailable CLI using the directory form. */ }
-	return path.join(base, 'suspect');
-}
-
-export function testBaseUrl(): string {
-	return config().get<string>('testBaseUrl') ?? 'http://localhost:8080';
-}
-
-export function gatewayPort(): number {
-	return config().get<number>('gatewayPort') ?? 8080;
+		return fs.statSync(candidate).isFile() ? candidate : undefined;
+	} catch {
+		return undefined;
+	}
 }
 
 /**
- * Spawn `suspect test <arazzo> [--filter <id>] --base-url <url> --report ndjson`
+ * The resolution order: an explicit `suspect.basePath`, the binary bundled
+ * with this extension version,
+ * then `suspect` on `PATH`. The bundled copy comes before `PATH` so a stale
+ * `cargo install` does not win over the build this extension was made for.
+ * Pure apart from the file checks.
+ */
+export function resolveBinary(configured: string, bundled: string | undefined): BinaryChoice {
+	const base = configured.trim();
+	if (base && base !== 'suspect') {
+		if (/[/\\]suspect(\.exe)?$/.test(base)) return { binary: base, source: 'setting' };
+		try {
+			// Explicit executables may be versioned, renamed, or symlinks to a pinned
+			// build. The setting accepts the file itself as well as a CLI directory.
+			if (fs.statSync(base).isFile()) return { binary: base, source: 'setting' };
+		} catch { /* Let spawning diagnose an unavailable CLI using the directory form. */ }
+		return { binary: path.join(base, EXECUTABLE), source: 'setting' };
+	}
+	if (bundled !== undefined) return { binary: bundled, source: 'bundled' };
+	return { binary: 'suspect', source: 'path' };
+}
+
+/** The CLI every feature spawns, and where it came from. */
+export function binaryChoice(): BinaryChoice {
+	return resolveBinary(configuredBase(), bundledBinary());
+}
+
+/** The suspect CLI path (see {@link resolveBinary}). */
+export function suspectBinary(): string {
+	return binaryChoice().binary;
+}
+
+/**
+ * `suspect.test.baseUrl`. `undefined`
+ * leaves `--base-url` off, so the CLI applies `test.base_url` from the
+ * committed `.suspect.yaml`.
+ */
+export function testBaseUrl(): string | undefined {
+	return settings.testBaseUrl() ?? undefined;
+}
+
+/** `suspect.gateway.port`, else 8080. */
+export function gatewayPort(): number {
+	return settings.gatewayPort() ?? 8080;
+}
+
+/**
+ * Spawn `suspect test run <arazzo> [--filter <id>] --base-url <url> --format ndjson`
  * and stream parsed TestEvents to `onEvent`.
  *
  * Exit codes 0 (pass) and 1 (failures) resolve with the run_done totals;
  * anything else (spawn failure, usage error) rejects.
  */
 export interface RunOptions {
-	/** Base URL the suite runs against. Defaults to the editor setting. */
+	/** Base URL the suite runs against. Defaults to the editor setting, then the CLI's `test.base_url`. */
 	baseUrl?: string;
 	/** Recorded cassette: runs the suite offline, replaying the recording. */
 	cassette?: string;
@@ -106,7 +163,12 @@ export function spawnSuspectRunWith(
 	onEvent: (event: SuspectEvent) => void,
 	binary: string = suspectBinary(),
 ): SuspectRunHandle {
-	const args = ['test', arazzoPath, '--base-url', options.baseUrl ?? testBaseUrl(), '--report', 'ndjson'];
+	const args = ['test', 'run', arazzoPath];
+	const baseUrl = options.baseUrl ?? testBaseUrl();
+	if (baseUrl !== undefined) {
+		args.push('--base-url', baseUrl);
+	}
+	args.push('--format', 'ndjson');
 	if (options.filter !== undefined) {
 		args.push('--filter', options.filter);
 	}
@@ -171,7 +233,7 @@ export function spawnSuspectRunWith(
 				return;
 			}
 			const detail = stderrTail.trim();
-			reject(new Error(`suspect test exited with code ${code}${signal ? ` (${signal})` : ''}${detail ? `: ${detail}` : ''}`));
+			reject(new Error(`suspect test run exited with code ${code}${signal ? ` (${signal})` : ''}${detail ? `: ${detail}` : ''}`));
 		});
 	});
 

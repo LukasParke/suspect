@@ -2,6 +2,10 @@
 //! contract values as `ContractReader::Lossless` for accepted inputs, and
 //! must decline unsupported fast syntax with an explicit error.
 
+#[allow(dead_code)]
+#[path = "../../suspect-codegen/src/test_inputs.rs"]
+mod test_inputs;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -486,9 +490,7 @@ fn malformed_retained_declarations_have_identical_located_outcomes() {
 #[test]
 #[ignore = "requires the four tracked OpenRouter specification snapshots"]
 fn tracked_corpus_values_and_reference_targets_match_under_both_readers() {
-    let root = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
-    );
+    let root = test_inputs::openrouter_root();
     for relative in [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",

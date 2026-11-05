@@ -40,12 +40,12 @@ test('profile discovery reads the real execFile envelope with exact argv, UTF-8 
 	inventory.profiles[0].description = 'café 🦀 [run](command:execute) $(touch sentinel)';
 	const cli = await discoveryCli(t, `
 		const assert = require('node:assert/strict');
-		assert.deepEqual(process.argv.slice(2), ['codegen-profiles', '--format', 'json']);
+		assert.deepEqual(process.argv.slice(2), ['gen', 'profiles', '--format', 'json']);
 		process.stdout.write(${JSON.stringify(JSON.stringify(inventory, null, 2))});
 	`);
 	const profiles = await availableSdkProfiles(cli.binary, cli.root);
 	assert.deepEqual(profiles, inventory.profiles.map(({ profile, directory, description }) => ({ profile, directory, description })));
-	assert.deepEqual(cli.calls, [[cli.binary, ['codegen-profiles', '--format', 'json'], {
+	assert.deepEqual(cli.calls, [[cli.binary, ['gen', 'profiles', '--format', 'json'], {
 		cwd: cli.root, encoding: 'utf8', timeout: 5000, maxBuffer: 256 * 1024, windowsHide: true, shell: false, killSignal: 'SIGKILL',
 	}]]);
 	assert.equal(cli.children[0].exitCode, 0);

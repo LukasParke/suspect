@@ -1408,11 +1408,10 @@ fn native_canonical_package_and_compatibility_metadata_match_public_jvm_types() 
         .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
         });
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let repository = crate_root().join("../../target/sdk-java-maven-cache/java/repository");
     checked_native(
         std::process::Command::new(&maven)

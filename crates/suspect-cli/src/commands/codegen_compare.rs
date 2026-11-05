@@ -1,5 +1,5 @@
 //! Compare canonical wire contracts and actual native SDK interfaces.
-use crate::OutputFormat;
+use crate::ReportFormat;
 use anyhow::Result;
 use clap::Args;
 use serde_json::json;
@@ -15,14 +15,14 @@ use suspect_ir::contract::Contract;
 #[derive(Debug, Args)]
 pub struct CompareArgs {
     /// Baseline SDK session configuration; its source is relative to this file.
-    #[arg(long)]
-    pub before: PathBuf,
+    #[arg(value_name = "OLD")]
+    pub old: PathBuf,
     /// Candidate SDK session configuration; its source is relative to this file.
-    #[arg(long)]
-    pub after: PathBuf,
+    #[arg(value_name = "NEW")]
+    pub new: PathBuf,
     /// Versioned report JSON or human-readable Markdown migration notes.
     #[arg(long, value_enum, default_value = "text")]
-    pub format: OutputFormat,
+    pub format: ReportFormat,
 }
 fn load(input: &suspect_codegen::generation_session::Input) -> Result<Arc<Contract>> {
     let (workspace, entry) = input.open()?;
@@ -34,9 +34,10 @@ fn load(input: &suspect_codegen::generation_session::Input) -> Result<Arc<Contra
 /// # Errors
 /// Propagates output failures. Input/comparison failures are structured results.
 pub fn compare(args: CompareArgs) -> Result<i32> {
+    let (before, after) = (&args.old, &args.new);
     let result = (|| -> Result<compatibility::CompatibilityReport> {
-        let (old_path, old) = super::codegen_session::read_config(&args.before)?;
-        let (new_path, new) = super::codegen_session::read_config(&args.after)?;
+        let (old_path, old) = super::codegen_session::read_config(before)?;
+        let (new_path, new) = super::codegen_session::read_config(after)?;
         let old_contract = load(&old_path)?;
         let new_contract = load(&new_path)?;
         Ok(if old.operation_ids == new.operation_ids {
@@ -68,7 +69,7 @@ pub fn compare(args: CompareArgs) -> Result<i32> {
     let exit = match result {
         Ok(report) => {
             let compatible = report.is_proven_compatible();
-            if matches!(args.format, OutputFormat::Json) {
+            if matches!(args.format, ReportFormat::Json) {
                 serde_json::to_writer(&mut stdout, &report)?;
                 writeln!(stdout)?;
             } else {
@@ -77,7 +78,7 @@ pub fn compare(args: CompareArgs) -> Result<i32> {
             i32::from(!compatible)
         }
         Err(error) => {
-            if matches!(args.format, OutputFormat::Json) {
+            if matches!(args.format, ReportFormat::Json) {
                 serde_json::to_writer(
                     &mut stdout,
                     &json!({"format":"suspect-sdk-compatibility-v1","success":false,"status":"comparison-error","diagnostics":[{"code":"sdk-compatibility","message":format!("{error:#}")}]}),

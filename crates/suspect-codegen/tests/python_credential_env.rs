@@ -414,11 +414,7 @@ fn installed_python_credential_env_snapshots_and_explicit_auth_precedence() {
 #[ignore = "requires actual OpenRouter source and installed Python 3.11/3.14; controlled transport only"]
 fn installed_openrouter_python_credential_env_current_key_and_optional_credits() {
     let root = root("openrouter");
-    let source = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../openrouter-web")
-        })
+    let source = suspect_codegen::test_inputs::openrouter_root()
         .join("projects/docs/openapi/openapi.yaml")
         .canonicalize()
         .unwrap();

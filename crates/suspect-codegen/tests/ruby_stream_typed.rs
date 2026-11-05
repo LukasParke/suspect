@@ -471,8 +471,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
 #[test]
 fn native_typed_events_drive_stubbed_streams() {
     let Some(ruby) = ruby() else {
-        eprintln!("ruby_stream_typed: no Ruby >= 3.3 toolchain; degrading to static assertions");
-        return;
+        panic!("ruby_stream_typed: no Ruby >= 3.3 toolchain");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(stream_document());

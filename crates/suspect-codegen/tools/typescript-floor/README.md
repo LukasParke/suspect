@@ -26,8 +26,8 @@ npm install --package-lock-only --ignore-scripts \
 Run the gate (Node 22 pinned, Node 24 explicit additional path):
 
 ```sh
-export OPENROUTER_WEB_ROOT=/Users/luke/github/openrouter-web
-export SUSPECT_DOCS_NODE=/Users/luke/.local/share/mise/installs/node/22.23.1/bin/node
+export OPENROUTER_WEB_ROOT=/path/to/openrouter-web
+export SUSPECT_DOCS_NODE="$(mise which node --tool node@22)"
 export SUSPECT_NODE24_BIN=/path/to/node-24
 cargo test --locked -p suspect-codegen --test typescript_m2_toolchains -- --include-ignored
 ```

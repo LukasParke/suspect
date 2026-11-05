@@ -4,7 +4,7 @@ info:
   version: "1.0"
   description: >
     The same workflows run as a contract suite (`suspect test`) and as
-    weighted virtual-user scenarios (`suspect load` with petstore.load.yaml).
+    weighted virtual-user scenarios (`suspect test load` with petstore.load.yaml).
 sourceDescriptions:
   - name: petstore
     url: petstore.openapi.yaml

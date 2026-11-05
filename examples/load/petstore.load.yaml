@@ -1,9 +1,9 @@
 # Load profile for the Petstore journeys in flows.arazzo.yaml.
 #
-#   suspect gateway examples/load/petstore.openapi.yaml -p 8080 --mode mock
-#   suspect load examples/load/petstore.load.yaml
+#   suspect traffic gateway examples/load/petstore.openapi.yaml -p 8080 --mode mock
+#   suspect test load examples/load/petstore.load.yaml
 #
-# `suspect load examples/load/petstore.load.yaml --dry-run` prints the
+# `suspect test load examples/load/petstore.load.yaml --dry-run` prints the
 # resolved schedule without sending anything.
 suspectLoad: "1.0"
 arazzo: ./flows.arazzo.yaml

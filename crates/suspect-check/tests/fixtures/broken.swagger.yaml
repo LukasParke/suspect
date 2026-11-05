@@ -1,0 +1,17 @@
+# Swagger 2.0 with deliberate problems, for the registry corpus.
+swagger: "2.0"
+info:
+  title: Broken
+paths:
+  /pets/{petId}:
+    get:
+      parameters:
+        - in: query
+      security:
+        - missing: []
+    post:
+      parameters:
+        - name: body
+          in: body
+      responses:
+        "200": {}

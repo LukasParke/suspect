@@ -470,8 +470,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
 #[test]
 fn native_receipts_decode_deliveries_and_construct_replies() {
     let Some(ruby) = ruby() else {
-        eprintln!("ruby_incoming: no Ruby >= 3.3 toolchain; degrading to static assertions");
-        return;
+        panic!("ruby_incoming: no Ruby >= 3.3 toolchain");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(incoming_document());

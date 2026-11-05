@@ -246,8 +246,7 @@ fn shared_contract_examples_execute_from_both_installed_packages() {
 #[ignore = "requires native Cargo/Node/npm caches and the tracked OpenRouter corpus"]
 fn tracked_operation_examples_execute_from_both_installed_packages() {
     let source =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     native(
         &source,
         &[

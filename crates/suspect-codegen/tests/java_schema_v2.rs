@@ -83,9 +83,8 @@ fn install(plan: &SdkPlan, root: &Path) -> PathBuf {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])

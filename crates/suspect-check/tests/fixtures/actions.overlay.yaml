@@ -1,0 +1,10 @@
+# Overlay 1.0 actions with deliberate problems, for the registry corpus.
+overlay: 1.0.0
+info:
+  title: Actions
+  version: "1"
+actions:
+  - target: $.info
+    remove: true
+    update:
+      title: ignored

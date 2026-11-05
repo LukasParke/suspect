@@ -470,8 +470,7 @@ final class IncomingTests: XCTestCase {
 #[test]
 fn native_receipts_decode_and_construct() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_incoming: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_incoming: no Swift 6 toolchain");
     };
     eprintln!("swift_incoming: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();

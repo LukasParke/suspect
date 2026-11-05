@@ -860,8 +860,7 @@ fn discovery_emission_is_conditional_on_a_compiled_discovery_url() {
 #[test]
 fn native_discovery_resolves_caches_single_flights_and_retries() {
     let Some((java_home, maven)) = toolchain() else {
-        eprintln!("kotlin_oauth: no JDK 21 + Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_oauth: no JDK 21 + Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -1146,12 +1145,10 @@ fn maven() -> Option<std::path::PathBuf> {
 #[test]
 fn emitted_package_compiles_with_a_jdk_toolchain() {
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_oauth: no JDK 21 found; degrading to static assertions");
-        return;
+        panic!("kotlin_oauth: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_oauth: no Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_oauth: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&oauth_options()), root.path()).unwrap();
@@ -1176,12 +1173,10 @@ fn emitted_package_compiles_with_a_jdk_toolchain() {
 #[test]
 fn native_lifecycle_acquires_refreshes_polls_and_revokes() {
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_oauth: no JDK 21 found; degrading to static assertions");
-        return;
+        panic!("kotlin_oauth: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_oauth: no Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_oauth: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&oauth_options()), root.path()).unwrap();
@@ -1723,12 +1718,10 @@ fun main() {
 #[test]
 fn native_replay_lifecycle_over_a_stubbed_transport() {
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_oauth: no JDK 21 found; degrading to static assertions");
-        return;
+        panic!("kotlin_oauth: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_oauth: no Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_oauth: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(

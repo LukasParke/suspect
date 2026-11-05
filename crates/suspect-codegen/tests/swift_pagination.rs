@@ -606,8 +606,7 @@ fn swift_command(root: &Path, action: &str) -> Command {
 #[test]
 fn native_walks_count_requests_and_preserve_input() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_pagination: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_pagination: no Swift 6 toolchain");
     };
     eprintln!("swift_pagination: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();

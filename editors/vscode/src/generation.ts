@@ -25,7 +25,15 @@ export function isSdkProfile(kind: string): kind is SdkProfile {
 	return Object.hasOwn(SDK_PROFILE_DIRECTORIES, kind);
 }
 
-export const SDK_COMPATIBILITY_PROFILES = ['legacy-binary-string-v1'] as const;
+// `suspect gen sdk --compatibility-profile` values, as in the
+// `codegen.compatibility_profiles` schema row (test/settings.cjs).
+export const SDK_COMPATIBILITY_PROFILES = [
+	'legacy-binary-string-v1',
+	'oas30-nullable-in-3.1-v1',
+	'colon-path-parameters-v1',
+	'schemaless-stream-events-v1',
+	'all-of-scoped-mode-v1',
+] as const;
 export type SdkCompatibilityProfile = typeof SDK_COMPATIBILITY_PROFILES[number];
 
 function isSdkCompatibilityProfiles(value: unknown): value is SdkCompatibilityProfile[] {
@@ -48,13 +56,13 @@ export type Generation =
 
 /** Construct argv without shell parsing or normalizing exact operation selectors. */
 export function generationArgs(spec: string, out: string, generation: Generation): string[] {
-	const args = ['gen', spec, '--out', out];
+	const args = ['gen', 'template', spec, '--output', out];
 	if (generation.kind === 'custom') return [...args, '--manifest', generation.manifest];
 	if (generation.kind === 'docs-md') return [...args, '--preset', 'docs-md'];
 	return [
-		'codegen', spec, '--profile', generation.kind,
+		'gen', 'sdk', spec, '--profile', generation.kind,
 		'--package-name', generation.packageName, '--package-version', generation.packageVersion,
-		'--out', out, '--format', 'json',
+		'--output', out, '--format', 'json',
 		...(generation.importName === undefined ? [] : ['--import-name', generation.importName]),
 		...readSdkCompatibilityProfiles(generation.compatibilityProfiles ?? []).flatMap((profile) => ['--compatibility-profile', profile]),
 		...generation.operationIds.flatMap((id) => ['--operation-id', id]),
@@ -72,7 +80,7 @@ export interface AvailableSdkProfile {
 /** Discover compiled profiles from the real CLI instead of assuming that a menu label is supported. */
 export function availableSdkProfiles(binary: string, cwd?: string): Promise<AvailableSdkProfile[]> {
 	return new Promise((resolve, reject) => {
-		cp.execFile(binary, ['codegen-profiles', '--format', 'json'], {
+		cp.execFile(binary, ['gen', 'profiles', '--format', 'json'], {
 			cwd, encoding: 'utf8', timeout: 5000, maxBuffer: 256 * 1024, windowsHide: true, shell: false, killSignal: 'SIGKILL',
 		}, (error, stdout) => {
 			if (error) { reject(new Error(`Unable to read SDK profiles from ${binary}: ${error.message}`)); return; }
@@ -173,11 +181,11 @@ export interface SdkSessionHandle {
 /** Both arguments are explicit paths. No source prose, selector, or generated code is executed. */
 export function sdkSessionArgs(configPath: string, outDirectory: string, options: SdkSessionOptions): string[] {
 	return [
-		'codegen-session', '--config', configPath, '--out', outDirectory,
+		'gen', 'session', '--config', configPath, '--output', outDirectory,
 		...(options.watch ? ['--watch'] : []),
 		...(options.check ? ['--check'] : []),
 		...(options.preview ? ['--preview'] : []),
-		'--format', 'json',
+		'--format', 'ndjson',
 	];
 }
 
@@ -369,7 +377,7 @@ export function startSdkSession(
 			const detail = stderr.toString('utf8').trim();
 			if (failure) reject(new Error(`${failure.message}${detail ? `\n${detail}` : ''}`));
 			else if (signal || (code !== 0 && code !== 1) || !latest || (code === 1 && latest.success)) {
-				reject(new Error(`suspect codegen-session exited ${signal ? `on ${signal}` : `with code ${code}`}${!latest ? ' without a session record' : ''}${detail ? `\n${detail}` : ''}`));
+				reject(new Error(`suspect gen session exited ${signal ? `on ${signal}` : `with code ${code}`}${!latest ? ' without a session record' : ''}${detail ? `\n${detail}` : ''}`));
 			} else resolve(latest);
 		});
 	});

@@ -1,0 +1,21 @@
+docs/demo/petstore.yaml:3:3 [WARNING] info-contact: Info object should contain a contact object.
+docs/demo/petstore.yaml:3:3 [INFO] info-description: OpenAPI object should have `description`.
+docs/demo/petstore.yaml:3:3 [WARNING] info-license: Info object should contain a license object.
+docs/demo/petstore.yaml:3:3 [INFO] oas3-api-contact: OpenAPI 3.x API description must have a contact object.
+docs/demo/petstore.yaml:8:7 [WARNING] oas-operation-missing-operationId: get operation is missing an operationId
+how to fix: Add an `operationId` so generated SDK methods carry a stable name.
+docs/demo/petstore.yaml:8:7 [INFO] oas-operation-no-error-response: operation `<unnamed>` (get) declares no `default` or 4XX/5XX response
+how to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.
+docs/demo/petstore.yaml:8:7 [WARNING] operation-4xx-response: Operation should have at least one 4XX response.
+docs/demo/petstore.yaml:8:7 [WARNING] operation-tags: Operation should have non-empty `tags` array.
+docs/demo/petstore.yaml:8:7 [INFO] security-rate-limit-documented: Operations should document rate limiting — a 429 response or rate-limit headers.
+docs/demo/petstore.yaml:17:5 [ERROR] oas-path-param-not-declared: path `/pets/{petId}` uses template variable `{petId}` but no `in: path` parameter declares it
+how to fix: Declare every `{var}` in the path as an `in: path` parameter on the path item or operation.
+docs/demo/petstore.yaml:18:7 [WARNING] oas-operation-missing-operationId: get operation is missing an operationId
+how to fix: Add an `operationId` so generated SDK methods carry a stable name.
+docs/demo/petstore.yaml:18:7 [INFO] oas-operation-no-error-response: operation `<unnamed>` (get) declares no `default` or 4XX/5XX response
+how to fix: Add a `default` response or a 4XX/5XX response so client error handling is predictable.
+docs/demo/petstore.yaml:18:7 [WARNING] operation-4xx-response: Operation should have at least one 4XX response.
+docs/demo/petstore.yaml:18:7 [WARNING] operation-tags: Operation should have non-empty `tags` array.
+docs/demo/petstore.yaml:18:7 [ERROR] path-params: Operation `get` of "/pets/{petId}" does not declare path parameter {petId}
+docs/demo/petstore.yaml:18:7 [INFO] security-rate-limit-documented: Operations should document rate limiting — a 429 response or rate-limit headers.

@@ -9,7 +9,7 @@ use suspect_ref::acquire::{
     redact_uri,
 };
 
-use crate::OutputFormat;
+use crate::ReportFormat;
 
 /// Acquires or verifies one immutable manifest and prints a versioned report.
 /// Shared CLI argument parsing/registration supplies the complete options value.
@@ -21,7 +21,7 @@ use crate::OutputFormat;
 pub fn run(
     manifest_path: &Path,
     options: AcquireOptions,
-    format: OutputFormat,
+    format: ReportFormat,
 ) -> anyhow::Result<i32> {
     let offline = options.offline;
     let refresh = options.refresh;
@@ -30,15 +30,14 @@ pub fn run(
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
+    let mut interrupted = crate::interrupt::graceful();
     let result = runtime.block_on(async move {
         let mut work = tokio::task::spawn_blocking(move || acquire(&path, options));
         tokio::select! {
             result = &mut work => Ok::<_, anyhow::Error>(result?),
-            signal = tokio::signal::ctrl_c() => {
+            Ok(_) = interrupted.wait_for(|interrupted| *interrupted) => {
                 cancellation.cancel();
-                let result = work.await?;
-                signal?;
-                Ok(result)
+                Ok(work.await?)
             }
         }
     })?;
@@ -55,11 +54,11 @@ pub fn run(
     };
     let mut output = io::stdout().lock();
     match format {
-        OutputFormat::Json | OutputFormat::Sarif => {
+        ReportFormat::Json => {
             serde_json::to_writer_pretty(&mut output, &report)?;
             writeln!(output)?;
         }
-        OutputFormat::Text => {
+        ReportFormat::Text => {
             writeln!(
                 output,
                 "Pinned closure {}: {} documents, {} network requests",

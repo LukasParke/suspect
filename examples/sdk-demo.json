@@ -1,0 +1,12 @@
+{
+  "spec": "../../openrouter-web/projects/docs/openapi/openapi.yaml",
+  "targets": [
+    { "backend": "typescript-http", "package_name": "@openrouter-demo/sdk", "package_version": "0.1.0" },
+    { "backend": "python-http", "package_name": "openrouter-demo-sdk", "package_version": "0.1.0" },
+    { "backend": "go-http", "package_name": "example.com/openrouter-demo-sdk", "package_version": "0.1.0" },
+    { "backend": "rust-http", "package_name": "openrouter-demo-sdk", "package_version": "0.1.0" },
+    { "backend": "swift-http", "package_name": "OpenRouterDemoSDK", "package_version": "0.1.0" }
+  ],
+  "operation_ids": ["getCredits", "createKeys", "updateKeys", "listContainerFiles", "getContainerFile"],
+  "owner": "sdk-demo"
+}

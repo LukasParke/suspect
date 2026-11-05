@@ -32,7 +32,7 @@ pub struct OutputRule {
     pub target: String,
 }
 
-/// A parsed generation manifest (`gen.toml`).
+/// A parsed generation manifest (`gen.toml`, `gen.yaml` or `gen.json`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Manifest {
     /// All `[[output]]` rules in file order.
@@ -43,10 +43,12 @@ pub struct Manifest {
 ///
 /// Only a pragmatic subset is supported: `[output]` / `[[output]]` table
 /// headers with `template` and `target` string keys, full-line `#`
-/// comments, and blank lines. Other tables are ignored.
+/// comments, and blank lines. Any other table is an error: it would
+/// otherwise be skipped without a word.
 ///
 /// # Errors
-/// When an output rule is missing its `template` or `target` key.
+/// When an output rule is missing its `template` or `target` key, or the
+/// manifest has a table other than `output`.
 pub fn parse_manifest(text: &str) -> Result<Manifest, GenError> {
     let mut outputs = Vec::new();
     let mut current: Option<OutputRule> = None;
@@ -71,10 +73,9 @@ pub fn parse_manifest(text: &str) -> Result<Manifest, GenError> {
                     target: String::new(),
                 });
             } else {
-                if let Some(rule) = current.take() {
-                    outputs.push(rule);
-                }
-                in_output_table = false;
+                return Err(GenError(format!(
+                    "unknown table [{header}]: a generation manifest has only [[output]] tables"
+                )));
             }
             continue;
         }
@@ -166,10 +167,6 @@ fn unescape_double_quoted(s: &str) -> String {
     out
 }
 
-/// Loads and parses a manifest from `path`.
-///
-/// # Errors
-/// On I/O failure or malformed manifest content.
 /// Parses a manifest from raw TOML text (embedded preset manifests).
 ///
 /// # Errors
@@ -178,13 +175,125 @@ pub fn parse_manifest_str(text: &str) -> Result<Manifest, GenError> {
     parse_manifest(text)
 }
 
-/// Loads and parses a manifest file from disk.
+/// Loads and parses a manifest file from disk: `.yaml`/`.yml` and `.json`
+/// by extension (see [`parse_manifest_doc`]), anything else as TOML.
 ///
 /// # Errors
 /// Propagates read errors and manifest parse errors.
 pub fn load_manifest(path: &Path) -> Result<Manifest, GenError> {
-    let text = fs::read_to_string(path)?;
-    parse_manifest(&text)
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let format = match extension.as_deref() {
+        Some("yaml" | "yml") => suspect_syntax::Format::Yaml,
+        Some("json") => suspect_syntax::Format::Json,
+        _ => return parse_manifest(&fs::read_to_string(path)?),
+    };
+    parse_manifest_doc(&fs::read(path)?, format)
+        .map_err(|GenError(message)| GenError(format!("{}:{message}", path.display())))
+}
+
+/// Parses a YAML or JSON manifest: an `output` list of
+/// `{template, target}` objects, the same rules a `gen.toml` declares with
+/// `[[output]]` tables. Unknown keys are errors. Messages start with the
+/// 1-based line they point at.
+///
+/// ```yaml
+/// output:
+///   - template: index.md.j2
+///     target: index.md
+/// ```
+///
+/// # Errors
+/// A syntax error, an unknown key, or a rule missing `template`/`target`.
+pub fn parse_manifest_doc(
+    bytes: &[u8],
+    format: suspect_syntax::Format,
+) -> Result<Manifest, GenError> {
+    let uri = suspect_source::Uri::parse("mem://gen-manifest")
+        .map_err(|e| GenError(format!("1: {e}")))?;
+    let doc = suspect_low::LowDoc::with_format(
+        uri,
+        suspect_source::Source::from_vec(bytes.to_vec()),
+        format,
+    );
+    let inner = doc.inner();
+    let line_of = |offset: usize| inner.line_index().line_col(inner.bytes(), offset).0 + 1;
+    let fail = |offset: usize, message: String| GenError(format!("{}: {message}", line_of(offset)));
+    if let Some(error) = doc.syntax_errors().first() {
+        return Err(fail(error.range.start, error.message.clone()));
+    }
+    let root = doc.root();
+    if root.kind() != suspect_low::ValueKind::Object {
+        return Err(fail(
+            root.byte_range().start,
+            "a generation manifest is a mapping with an `output` list".to_owned(),
+        ));
+    }
+    let mut outputs = Vec::new();
+    for entry in root.entries() {
+        if entry.key != "output" {
+            return Err(fail(
+                entry.key_node.byte_range().start,
+                format!(
+                    "unknown key `{}`: a generation manifest has only `output`",
+                    entry.key
+                ),
+            ));
+        }
+        let Some(list) = entry.value else { continue };
+        if list.kind() != suspect_low::ValueKind::Array {
+            return Err(fail(
+                list.byte_range().start,
+                "`output` is a list of {template, target} rules".to_owned(),
+            ));
+        }
+        for item in list.items() {
+            let at = item.byte_range().start;
+            if item.kind() != suspect_low::ValueKind::Object {
+                return Err(fail(
+                    at,
+                    "an output rule is a mapping with `template` and `target`".to_owned(),
+                ));
+            }
+            let mut rule = OutputRule {
+                template: String::new(),
+                target: String::new(),
+            };
+            for field in item.entries() {
+                let slot = match field.key {
+                    "template" => &mut rule.template,
+                    "target" => &mut rule.target,
+                    other => {
+                        return Err(fail(
+                            field.key_node.byte_range().start,
+                            format!("unknown output rule key `{other}`"),
+                        ));
+                    }
+                };
+                let Some(value) = field
+                    .value
+                    .filter(|v| v.kind() == suspect_low::ValueKind::Str)
+                    .and_then(|v| v.as_str())
+                else {
+                    return Err(fail(
+                        field.key_node.byte_range().start,
+                        format!("`{}` must be a string", field.key),
+                    ));
+                };
+                value.clone_into(slot);
+            }
+            if rule.template.is_empty() || rule.target.is_empty() {
+                return Err(fail(
+                    at,
+                    "an output rule must set both `template` and `target`".to_owned(),
+                ));
+            }
+            outputs.push(rule);
+        }
+    }
+    Ok(Manifest { outputs })
 }
 
 /// Why a rendered file was or was not written.
