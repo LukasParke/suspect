@@ -72,8 +72,25 @@ fn relative(path: &Path, base: &Path) -> String {
     use std::path::Component;
     let mut path_parts = path.components().peekable();
     let mut base_parts = base.components().peekable();
-    if path_parts.peek() != base_parts.peek() {
+    // `canonicalize` yields `\\?\C:\` on Windows while a document URI
+    // yields `C:\`: the same drive, so compare roots by drive, not spelling.
+    fn root(c: Option<&Component<'_>>) -> Option<std::ffi::OsString> {
+        Some(match c? {
+            Component::Prefix(p) => match p.kind() {
+                std::path::Prefix::Disk(d) | std::path::Prefix::VerbatimDisk(d) => {
+                    format!("{}:", char::from(d.to_ascii_uppercase())).into()
+                }
+                _ => p.as_os_str().to_owned(),
+            },
+            other => other.as_os_str().to_owned(),
+        })
+    }
+    if root(path_parts.peek()) != root(base_parts.peek()) {
         return path.to_string_lossy().replace('\\', "/");
+    }
+    if matches!(path_parts.peek(), Some(Component::Prefix(_))) {
+        path_parts.next();
+        base_parts.next();
     }
     while let (Some(a), Some(b)) = (path_parts.peek(), base_parts.peek()) {
         if a != b {
@@ -272,6 +289,20 @@ mod tests {
         assert_eq!(
             baseline.covers(&[key.clone(), other, key]),
             [true, false, false]
+        );
+    }
+
+    /// A canonicalized base (`\\?\C:\`) and a URI path (`c:\`) share a drive.
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_and_plain_drive_roots_match() {
+        assert_eq!(
+            relative(Path::new(r"c:\w\api.yaml"), Path::new(r"\\?\C:\w\.suspect")),
+            "../api.yaml"
+        );
+        assert_eq!(
+            relative(Path::new(r"D:\w\api.yaml"), Path::new(r"\\?\C:\w")),
+            "D:/w/api.yaml"
         );
     }
 
