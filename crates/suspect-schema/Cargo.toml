@@ -19,7 +19,7 @@ rustc-hash.workspace = true
 smallvec.workspace = true
 iri-string = { version = "0.7.14", default-features = false, features = ["alloc"] }
 thiserror.workspace = true
-num-bigint = "0.4.8"
+num-bigint = "0.5.1"
 num-traits = "0.2.19"
 
 [dev-dependencies]
