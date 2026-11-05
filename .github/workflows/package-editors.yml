@@ -166,7 +166,7 @@ jobs:
           - runner: ubuntu-22.04
             triple: x86_64-unknown-linux-musl
             ext: tar.gz
-          - runner: macos-14
+          - runner: macos-15
             triple: aarch64-apple-darwin
             ext: tar.gz
           - runner: windows-2022
