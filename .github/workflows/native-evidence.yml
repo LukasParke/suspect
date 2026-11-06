@@ -32,7 +32,7 @@ env:
 jobs:
   matrix:
     name: ${{ matrix.name }} native evidence
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     # Never block a push or pull request on a scheduled evidence run.
     continue-on-error: true
     strategy:
@@ -53,7 +53,8 @@ jobs:
           - {name: php, toolchain: "8.3", test_filter: php, setup: php}
           - {name: dart, toolchain: "3.9.4", test_filter: dart, setup: dart}
           - {name: cpp, toolchain: "c++/cmake/doxygen", test_filter: cpp, setup: cpp}
-          - {name: swift, toolchain: "image Swift 6", test_filter: swift, setup: swift}
+          # The generated Swift SDK targets Apple platforms (docs/sdk/swift).
+          - {name: swift, toolchain: "Xcode Swift 6", test_filter: swift, setup: swift, os: macos-15}
           - {name: terraform, toolchain: "1.15.8+go1.23", test_filter: terraform, setup: terraform}
           # Cross-backend suites: Go, Node, Python, Swift and a headless
           # Chrome (preinstalled on the image).
@@ -150,8 +151,7 @@ jobs:
         uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
         with:
           sdk: "3.9.4"
-      # Swift: the ubuntu-latest image ships a Swift 6 toolchain on PATH
-      # (swift-actions/setup-swift fails on 24.04 runners).
+      # Swift runs on macOS with the image's Xcode toolchain.
       - if: matrix.name == 'terraform'
         uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:

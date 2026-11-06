@@ -50,7 +50,10 @@ Package identity is separate from API semantics. The manifest uses
 is macOS 13, iOS/tvOS 16 and watchOS 9. Verified toolchains are **Apple Swift
 6.3.3** and the official **Swift 6.0.3 release** (6.0-family floor, paired with
 the macOS 15.4 SDK), on arm64 macOS. No third-party runtime dependency is
-required. Other operating systems are not exercised by the native tests.
+required. The generated SDK targets Apple platforms only: on Linux,
+FoundationNetworking's `URLSession` and the absence of CryptoKit change
+custom-method transport, query encoding, stream cancellation and OAuth PKCE,
+so Linux is not supported and the nightly native gates run on macOS.
 
 ## Native usage
 
