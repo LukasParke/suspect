@@ -51,8 +51,12 @@ fn explain(root: &Path, args: &[&str]) -> (String, i32) {
         .env("SUSPECT_BASE_URL", "http://preview.test")
         .output()
         .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    // Text origins print native paths; compare with `/` on every platform.
+    // JSON keeps its escapes (its tests parse it).
+    let json = args.windows(2).any(|pair| pair == ["--format", "json"]);
     (
-        String::from_utf8_lossy(&out.stdout).into_owned(),
+        if json { text } else { text.replace('\\', "/") },
         out.status.code().unwrap_or(-1),
     )
 }
