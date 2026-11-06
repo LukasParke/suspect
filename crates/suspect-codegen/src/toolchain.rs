@@ -585,8 +585,10 @@ pub fn php_command() -> Option<std::process::Command> {
 }
 
 fn php_hermetic_args(php: &std::path::Path) -> Vec<String> {
-    const QUERY: &str =
-        r#"echo ini_get("extension_dir"), "\n", implode("\n", get_loaded_extensions(false));"#;
+    // Zend extensions (Xdebug, OPcache) also appear among the regular
+    // modules but must be loaded with `zend_extension=`; they are listed
+    // after a marker line and never re-added.
+    const QUERY: &str = r#"echo ini_get("extension_dir"), "\n", implode("\n", get_loaded_extensions(false)), "\n--zend--\n", implode("\n", get_loaded_extensions(true));"#;
     let loaded = |hermetic: bool| -> Option<Vec<String>> {
         let mut command = std::process::Command::new(php);
         if hermetic {
@@ -607,16 +609,27 @@ fn php_hermetic_args(php: &std::path::Path) -> Vec<String> {
     let Some((extension_dir, configured)) = configured.split_first() else {
         return args;
     };
+    let marker = configured
+        .iter()
+        .position(|line| line == "--zend--")
+        .unwrap_or(configured.len());
+    let zend: std::collections::BTreeSet<String> = configured[marker..]
+        .iter()
+        .skip(1)
+        .map(|name| name.to_lowercase())
+        .collect();
+    let configured = &configured[..marker];
     let bare: std::collections::BTreeSet<String> = bare
         .iter()
         .skip(1)
+        .take_while(|line| *line != "--zend--")
         .map(|name| name.to_lowercase())
         .collect();
     let directory = std::path::Path::new(extension_dir);
     let shared: Vec<String> = configured
         .iter()
         .map(|name| name.to_lowercase())
-        .filter(|name| !bare.contains(name))
+        .filter(|name| !bare.contains(name) && !zend.contains(name))
         .filter(|name| {
             ["so", "dll"]
                 .iter()

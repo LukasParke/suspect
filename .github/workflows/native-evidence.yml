@@ -81,6 +81,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.99.1"
+          # rust-toolchain.toml's components, installed here once: otherwise
+          # the first cargo call adds them lazily, which can collide with
+          # the image's rustup proxies (`detected conflict: bin/cargo-fmt`).
+          components: rustfmt, clippy
 
       # Official setup actions at the versions the toolchain gates pin
       # (crates/suspect-codegen/src/toolchain.rs).
@@ -155,8 +159,13 @@ jobs:
           # the address gate asserts the exact native parser revision.
           terraform_version: "1.15.8"
           terraform_wrapper: false
-      - if: matrix.name == 'shared'
-        run: echo "SUSPECT_CHROMIUM=$(command -v google-chrome)" >> "$GITHUB_ENV"
+      # Browser gates drive the image's Google Chrome (the fixtures default
+      # to the macOS app path).
+      - if: contains(fromJSON('["node","dart","shared"]'), matrix.name)
+        run: |
+          chrome="$(command -v google-chrome)"
+          echo "SUSPECT_CHROMIUM=$chrome" >> "$GITHUB_ENV"
+          echo "SUSPECT_DART_CHROME=$chrome" >> "$GITHUB_ENV"
 
       - name: Report the toolchain version
         run: |

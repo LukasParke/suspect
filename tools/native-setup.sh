@@ -45,6 +45,8 @@ serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151", features = ["raw_value"] }
 url = "=2.5.8"
 reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+# The consumer crates the Rust suites build pin their runtime exactly.
+tokio = { version = "=1.53.1", features = ["macros", "rt", "rt-multi-thread", "time"] }
 TOML
   echo "cargo fetch: generated Rust SDK dependencies"
   cargo fetch --quiet --manifest-path "$scratch/Cargo.toml"

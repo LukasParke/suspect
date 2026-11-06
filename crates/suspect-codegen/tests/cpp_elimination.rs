@@ -578,7 +578,11 @@ fn cpp_consumers_eliminate_unrelated_operations() {
                     base["markers"][MARKER_OWN_OPERATION].as_bool().unwrap(),
                     "{configuration}: the referenced operation's symbols must survive in the one-operation consumer"
                 );
-                if configuration == "dead-strip" {
+                if !cfg!(target_os = "macos") {
+                    // The exact elimination profile below is the Darwin
+                    // (ld64) measurement in docs/design/elimination-audit.md;
+                    // other linkers are recorded, not asserted.
+                } else if configuration == "dead-strip" {
                     // Measured code elimination: with function sections and
                     // linker dead stripping, every unreferenced operation's code
                     // sheds — including the unrelated operation's own symbols.
