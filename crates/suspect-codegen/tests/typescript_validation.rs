@@ -609,13 +609,17 @@ assert.deepEqual(incomplete,[tight.pointer+'/anyOf/0']);
 }
 
 #[test]
-#[ignore = "requires native TypeScript/Node.js and OPENROUTER_WEB_ROOT"]
+#[ignore = "requires native TypeScript/Node.js and the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML)"]
 fn tracked_openrouter_index_and_messages_run_in_native_typescript() {
-    let root_dir = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
+    let workspace = Arc::new(
+        WorkspaceBuilder::new()
+            .root(path.parent().unwrap())
+            .build()
+            .unwrap(),
     );
-    let path = root_dir.join("projects/docs/openapi/openapi.yaml");
-    let workspace = Arc::new(WorkspaceBuilder::new().root(&root_dir).build().unwrap());
     let contract =
         Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(&path).unwrap()).unwrap());
     let index = contract

@@ -395,13 +395,17 @@ fn checked(command: &mut Command, root: &Path) {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+/// `false` (after printing why) when the JDK or Maven is unavailable.
+fn native_tools() -> bool {
+    (std::env::var_os("SUSPECT_JAVA_HOME").is_some()
+        || suspect_codegen::toolchain::require_home("jdk").is_some())
+        && suspect_codegen::toolchain::require("maven").is_some()
+}
 fn java_home() -> PathBuf {
     std::env::var_os("SUSPECT_JAVA_HOME")
-        .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
-        })
+        .or_else(|| suspect_codegen::toolchain::resolve_home("jdk"))
+        .expect("gated by native_tools()")
 }
 fn native_package(plan: &SdkPlan, consumer: &str) -> PathBuf {
     let base = crate_root().join("../../target/sdk-java-native");
@@ -423,9 +427,7 @@ fn native_package(plan: &SdkPlan, consumer: &str) -> PathBuf {
         "required JDK: {}",
         home.display()
     );
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
     let repository = crate_root().join("../../target/sdk-java-maven-cache/java/repository");
     checked(Command::new(bin.join("java")).arg("-version"), &root);
     checked(
@@ -648,6 +650,9 @@ fn runtime_vectors(root: &Path) {
 #[test]
 #[ignore = "requires JDK 21+ and Maven; real jar, strict types, Javadoc and independent loopback wire"]
 fn maven_jar_consumer_exact_models_types_and_sync_async_wire() {
+    if !native_tools() {
+        return;
+    }
     let _gate = NATIVE_GATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -693,6 +698,9 @@ fn maven_jar_consumer_exact_models_types_and_sync_async_wire() {
 #[test]
 #[ignore = "required native model/union/literal/mutation/resource checks on JDK 21 and 25"]
 fn native_immutable_models_unions_literals_and_shared_budgets() {
+    if !native_tools() {
+        return;
+    }
     let _gate = NATIVE_GATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -759,16 +767,8 @@ fn negative_types(root: &Path, cases: &[&str]) {
     }
 }
 
-fn openrouter() -> (SdkPlan, PathBuf) {
-    let path = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into())
-        .join("projects/docs/openapi/openapi.yaml");
-    assert!(
-        path.is_file(),
-        "actual OpenRouter source required: {}",
-        path.display()
-    );
+fn openrouter() -> Option<(SdkPlan, PathBuf)> {
+    let path = suspect_codegen::toolchain::openrouter_spec()?;
     let contract = load(&path);
     let wanted = [
         "getCredits",
@@ -783,16 +783,21 @@ fn openrouter() -> (SdkPlan, PathBuf) {
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
     assert_eq!(selected.len(), 5);
-    (plan_sdk(contract, &selected, config(), &[]).unwrap(), path)
+    Some((plan_sdk(contract, &selected, config(), &[]).unwrap(), path))
 }
 
 #[test]
 #[ignore = "required installed consumer of five actual OpenRouter operations with independent response bytes"]
 fn native_five_actual_openrouter_operations_and_constructor_examples() {
+    if !native_tools() {
+        return;
+    }
     let _gate = NATIVE_GATE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (plan, source) = openrouter();
+    let Some((plan, source)) = openrouter() else {
+        return;
+    };
     let before = std::fs::read(&source).unwrap();
     assert!(
         plan.models()
@@ -953,6 +958,9 @@ fn symbols_are_readable_collision_safe_and_source_bound() {
 #[test]
 #[ignore = "required native runtime/JDK/member/operation naming and executable-example collisions"]
 fn native_names_status_alternatives_and_doc_examples() {
+    if !native_tools() {
+        return;
+    }
     use suspect_codegen::java_sdk::models::JavaDeclaration;
     let _gate = NATIVE_GATE
         .lock()

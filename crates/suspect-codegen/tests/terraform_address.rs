@@ -1,11 +1,6 @@
 //! Native provider source-address admission, independent of API lifecycle gates.
-#![cfg(feature = "http-protocol")]
 
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, process::Command, sync::Arc};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -71,31 +66,12 @@ fn provider_source_components_are_admitted_before_any_artifacts() {
 #[test]
 #[ignore = "real Terraform address parsing only; fresh isolated evidence, no API or full lifecycle replay"]
 fn native_provider_source_address_boundary() {
-    let evidence = PathBuf::from(
-        std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE").expect("set a fresh evidence directory"),
-    );
-    std::fs::create_dir(&evidence).unwrap();
+    let Some(terraform) = suspect_codegen::toolchain::require("terraform") else {
+        return;
+    };
+    let evidence = crate::terraform_support::evidence_dir("sdk-terraform-address-evidence-");
     std::fs::create_dir(evidence.join("commands")).unwrap();
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        evidence.join("generator-test.bin"),
-    )
-    .unwrap();
-    let root = tempfile::Builder::new()
-        .prefix("sdk-terraform-address-")
-        .tempdir_in("/private/var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/opencode")
-        .unwrap()
-        .keep();
-    std::fs::write(
-        evidence.join("native-root.txt"),
-        format!("{}\n", root.display()),
-    )
-    .unwrap();
-    let terraform = std::env::var_os("SUSPECT_TERRAFORM_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from("/Users/luke/.local/share/mise/installs/terraform/latest/terraform")
-        });
+    let root = crate::terraform_support::native_root("sdk-terraform-address-", &evidence);
     let cli_config = root.join("terraform.rc");
     std::fs::write(&cli_config, "disable_checkpoint = true\n").unwrap();
     let (contract, mapping, base_config) = inputs();

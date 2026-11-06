@@ -514,12 +514,26 @@ fn directional_annotations_follow_reference_identity_in_each_openapi_version() {
                 }}
             }),
             |contract| {
+                let plan = plan_models(
+                    contract,
+                    &roots(contract, &["Input"]),
+                    &[ModelView::Neutral, ModelView::Request],
+                );
+                if version.starts_with("3.0.") {
+                    // OpenAPI 3.0 directional `required` has no supported
+                    // validation profile: the referenced readOnly identity
+                    // must still be recognized, as a located refusal.
+                    assert!(
+                        plan.diagnostics().iter().any(|error| error.code
+                            == "oas30-directional-required-unsupported"
+                            && error.source.pointer() == "/components/schemas/Input/required"),
+                        "{:?}",
+                        plan.diagnostics()
+                    );
+                    return;
+                }
                 native(
-                    &plan_models(
-                        contract,
-                        &roots(contract, &["Input"]),
-                        &[ModelView::Neutral, ModelView::Request],
-                    ),
+                    &plan,
                     r#"
 import type { Input, InputRequest } from './models.js';
 const request: InputRequest = { name:'value' };
@@ -534,14 +548,11 @@ const missingNeutral: Input = { name:'value' };
 }
 
 #[test]
-#[ignore = "requires tsc and the pinned sibling OpenRouter checkout, or SUSPECT_OPENROUTER_YAML"]
+#[ignore = "requires tsc and the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML)"]
 fn tracked_openrouter_nullable_caller_and_image_source_keep_their_branches() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let contract = contract(&path);
     let roots = roots(
         &contract,

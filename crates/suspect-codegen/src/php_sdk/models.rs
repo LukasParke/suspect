@@ -1,26 +1,38 @@
 //! Native representation planning. Validation semantics stay in OwnedCompiler.
 
 use crate::http_contract::{HttpDiagnostic, Operation};
+use crate::schema_view::{self, DialectPolicy};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
-use suspect_ir::contract::{Contract, SchemaId};
+use suspect_ir::contract::{Contract, SchemaDialect, SchemaId};
 
+/// One declared object property and its PHP promoted-constructor member.
 #[derive(Debug, Clone)]
 pub struct Field {
+    /// PHP property name, unique within the class.
     pub name: String,
+    /// JSON property name.
     pub wire: String,
+    /// Schema of the property value.
     pub source: SchemaId,
+    /// Whether the property is listed in `required`.
     pub required: bool,
+    /// Source `description` of the property schema; empty when absent.
     pub description: String,
     /// Required single-valued string tags are initialized by the constructor.
     pub initializer: Option<Initializer>,
 }
 
+/// A constructor-supplied value for a required single-valued field.
 #[derive(Debug, Clone)]
 pub enum Initializer {
+    /// The sole case of a single-case string enum.
     EnumCase {
+        /// PHP enum type.
         type_name: String,
+        /// PHP case name.
         case_name: String,
+        /// Case backing value on the wire.
         wire_value: String,
     },
 }
@@ -28,67 +40,101 @@ pub enum Initializer {
 /// Actual allocated codec methods; compatibility adapters never infer these from PHP text.
 #[derive(Debug, Clone)]
 pub struct CodecSymbols {
+    /// `Codecs::decode*(string $json)`: parse and validate JSON text.
     pub decode: String,
+    /// `Codecs::encode*($value): string`: validate and serialize.
     pub encode: String,
+    /// `Codecs::from*(JsonValue $value)`: validate and convert a parsed value.
     pub from_value: String,
+    /// `Codecs::to*($value): JsonValue`: validate and convert to a JSON value.
     pub to_value: String,
 }
 
+/// The generated constructor of an object model class.
 #[derive(Debug, Clone)]
 pub struct Constructor {
+    /// PHP method name (`__construct`).
     pub method: String,
     /// Parameter/member names in actual PHP constructor order.
     pub parameters: Vec<String>,
+    /// Trailing parameter for undeclared members; absent for closed objects.
     pub extra_parameter: Option<String>,
 }
 
+/// Native PHP representation of one reachable schema.
 #[derive(Debug, Clone)]
 pub enum Shape {
     /// The actual arbitrary JSON domain (including conditionally typed assertions).
     Json,
+    /// Only JSON `null`.
     Null,
+    /// PHP `bool`.
     Boolean,
+    /// Exact `JsonNumber`.
     Number,
+    /// PHP `string`.
     String,
+    /// A backed string enum.
     Enum {
+        /// `(PHP case name, wire value)` pairs, in source order.
         cases: Vec<(String, String)>,
     },
+    /// A generated model class.
     Object {
+        /// Declared properties.
         fields: Vec<Field>,
+        /// Policy for undeclared members.
         extras: Extras,
     },
+    /// PHP list; PHPDoc `list<T>`.
     Array {
+        /// Item schema; `None` when items are unconstrained.
         item: Option<SchemaId>,
     },
+    /// Transparent carrier of another schema (`$ref` or single-branch `allOf`).
     Ref(SchemaId),
+    /// A `oneOf`/`anyOf` union over these schemas.
     Union(Vec<SchemaId>),
     /// Native union from a JSON Schema `type` array.
     Types(Vec<String>),
 }
 
+/// Policy for an object's undeclared members.
 #[derive(Debug, Clone)]
 pub enum Extras {
+    /// `additionalProperties: false`; undeclared members are rejected.
     Closed,
+    /// Undeclared members kept as unconstrained JSON values.
     Json,
+    /// Undeclared members converted through this schema.
     Typed(SchemaId),
     /// Whole-object validation dispatches every matching pattern. Values stay lossless.
     Patterned(Vec<(String, SchemaId)>),
 }
 
+/// One reachable schema's native PHP symbol and codecs.
 #[derive(Debug, Clone)]
 pub struct Node {
+    /// Canonical schema this node lowers.
     pub source: SchemaId,
     /// Stable PHP symbol / codec suffix.
     pub name: String,
+    /// Native representation.
     pub shape: Shape,
+    /// Whether the schema accepts JSON `null`.
     pub nullable: bool,
+    /// Source `description`; empty when absent.
     pub description: String,
+    /// Generated constructor; present only for object shapes.
     pub constructor: Option<Constructor>,
+    /// Allocated `Codecs` methods for this schema.
     pub codecs: CodecSymbols,
 }
 
+/// Native PHP symbols for every reachable codec schema.
 #[derive(Debug)]
 pub struct ModelPlan {
+    /// Nodes keyed by their source schema.
     pub nodes: BTreeMap<SchemaId, Node>,
 }
 
@@ -201,24 +247,6 @@ fn type_keyword(kind: &str, phpdoc: bool) -> String {
     .into()
 }
 
-#[cfg(not(feature = "http-protocol"))]
-pub(crate) fn plan(
-    contract: &Contract,
-    reachable: &[SchemaId],
-    operations: &[Operation],
-    used: &mut BTreeSet<String>,
-) -> Result<ModelPlan, Vec<HttpDiagnostic>> {
-    plan_inner(
-        contract,
-        reachable,
-        operations,
-        &BTreeMap::new(),
-        used,
-        false,
-        false,
-    )
-}
-
 pub(crate) fn plan_named(
     contract: &Contract,
     reachable: &[SchemaId],
@@ -259,7 +287,11 @@ fn plan_inner(
     let mut nodes = BTreeMap::new();
     for id in reachable {
         let schema = contract.schema(id).expect("checked closure");
-        let raw = schema.raw();
+        // An OAS 3.0 Reference Object applies only its `$ref`; the shared view
+        // drops its siblings so they never shape the native carrier.
+        let view = schema_view::raw(schema);
+        let raw = &*view;
+        let oas30 = matches!(schema.dialect(), SchemaDialect::OpenApi30);
         let hinted = if id.pointer().starts_with("/components/schemas/") {
             None
         } else {
@@ -291,7 +323,27 @@ fn plan_inner(
                 .collect(),
             _ => Vec::new(),
         };
-        let nullable = types.iter().any(|t| t == "null") && types.len() > 1;
+        // OAS 3.0 `nullable: true` adds null only to the same-object `type`;
+        // the native carrier is nullable only when the complete schema (enum,
+        // const, composition, references) still accepts null.
+        let nullable = if oas30 {
+            raw.get("nullable") == Some(&Value::Bool(true))
+                && raw.get("type").is_some_and(Value::is_string)
+                && match schema_view::null_allowed(contract, id, DialectPolicy::default()) {
+                    Ok(accepts) => accepts,
+                    Err(problem) => {
+                        errors.push(super::diagnostic(
+                            contract,
+                            problem.source,
+                            problem.code,
+                            problem.message,
+                        ));
+                        false
+                    }
+                }
+        } else {
+            types.iter().any(|t| t == "null") && types.len() > 1
+        };
         let nonnull: Vec<_> = types
             .iter()
             .filter(|t| t.as_str() != "null")
@@ -504,10 +556,17 @@ fn plan_inner(
                             wire: wire.clone(),
                             source: id.child("properties").child(wire),
                             required: required.contains(wire.as_str()),
-                            description: value
-                                .get("description")
-                                .and_then(Value::as_str)
-                                .unwrap_or("")
+                            description: contract
+                                .schema(&id.child("properties").child(wire))
+                                .map_or_else(
+                                    || {
+                                        value
+                                            .get("description")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or("")
+                                    },
+                                    schema_view::description,
+                                )
                                 .into(),
                             initializer: None,
                         })

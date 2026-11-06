@@ -223,6 +223,9 @@ fn remaining_standard_undefined_inputs_decline_before_emission() {
 #[test]
 #[ignore = "requires Swift, DocC and real socket/TLS fixtures for additional standard capabilities"]
 fn native_remaining_standard_custom_query_positional() {
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
     let contract = fixture(&remaining_fixture::document());
     let plan = plan_sdk(contract.clone(), &selected(&contract), remaining_config()).unwrap();
     remaining_harness::run(
@@ -608,25 +611,11 @@ fn checked(command: &mut Command, root: &Path) -> Output {
     output
 }
 fn swift() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/usr/bin/swift".into())
+    suspect_codegen::toolchain::resolve_path("swift")
+        .expect("gated by toolchain::require(\"swift\")")
 }
 fn swiftc() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFTC_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            if swift() == Path::new("/usr/bin/swift") {
-                let found = Command::new("xcrun")
-                    .args(["--find", "swiftc"])
-                    .output()
-                    .expect("xcrun required for the default Apple toolchain");
-                assert!(found.status.success());
-                PathBuf::from(String::from_utf8(found.stdout).unwrap().trim())
-            } else {
-                swift().with_file_name("swiftc")
-            }
-        })
+    suspect_codegen::toolchain::swift_tool("swiftc").expect("the Swift toolchain has no swiftc")
 }
 fn swift_command(action: &str) -> Command {
     let mut c = Command::new(swift());
@@ -634,23 +623,15 @@ fn swift_command(action: &str) -> Command {
     if action == "test" {
         c.arg("--disable-swift-testing");
     }
-    if let Some(sdk) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+    if let Some(sdk) = suspect_codegen::toolchain::swift_sdk_root() {
         c.arg("--sdk").arg(&sdk).env("SDKROOT", sdk);
     }
     c
 }
 fn compiler() -> Command {
     let mut c = Command::new(swiftc());
-    if let Some(sdk) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+    if let Some(sdk) = suspect_codegen::toolchain::swift_sdk_root() {
         c.arg("-sdk").arg(&sdk).env("SDKROOT", sdk);
-    } else {
-        let found = Command::new("xcrun")
-            .args(["--sdk", "macosx", "--show-sdk-path"])
-            .output()
-            .expect("an Apple SDK is required");
-        assert!(found.status.success());
-        let sdk = String::from_utf8(found.stdout).unwrap();
-        c.arg("-sdk").arg(sdk.trim()).env("SDKROOT", sdk.trim());
     }
     c
 }
@@ -699,13 +680,9 @@ fn docs(root: &Path) {
         root,
     );
     let graph = directory(&root.join("build/sdk"), "symbolgraph").unwrap();
-    let mut cmd = if let Some(bin) = std::env::var_os("SUSPECT_SWIFT_DOCC_BIN") {
-        Command::new(bin)
-    } else {
-        let mut c = Command::new("xcrun");
-        c.arg("docc");
-        c
-    };
+    let mut cmd = Command::new(
+        suspect_codegen::toolchain::swift_tool("docc").expect("the Swift toolchain has no docc"),
+    );
     checked(
         cmd.arg("convert")
             .arg(root.join("sdk/Sources/GeneratedSDK/GeneratedSDK.docc"))
@@ -719,7 +696,9 @@ fn docs(root: &Path) {
     assert!(root.join("GeneratedSDK.doccarchive/index.html").is_file());
 }
 fn typechecks(root: &Path) {
-    let modules = directory(&root.join("build/sdk"), "Modules").unwrap();
+    let modules =
+        suspect_codegen::toolchain::swift_module_dir(&root.join("build/sdk"), "GeneratedSDK")
+            .unwrap();
     let positive = root.join("positive.swift");
     std::fs::write(&positive,"import Foundation\nimport GeneratedSDK\nfunc positive(_ client: Client) async throws { let _: Bool = try await client.publicValue().data.ok; let _: HTTPEventStream<Event> = try await client.events().data; let _ = SendBodyInput(body: .json(Payload(name: \"x\"))); let _ = HTTPPart(Data([0, 255]), filename: \"a.bin\") }\n").unwrap();
     checked(
@@ -753,6 +732,9 @@ fn typechecks(root: &Path) {
 #[test]
 #[ignore = "requires installed Swift 6, DocC and real loopback sockets"]
 fn native_protocol_spm_types_wire_stream_lifetimes_and_docs() {
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
     let root = root("protocol-");
     let path = root.join("protocol.json");
     std::fs::write(&path, document().to_string()).unwrap();
@@ -785,10 +767,12 @@ fn native_protocol_spm_types_wire_stream_lifetimes_and_docs() {
 #[test]
 #[ignore = "requires the original OpenRouter checkout, Swift 6, DocC and loopback sockets"]
 fn native_new_openrouter_operations_and_explicit_legacy_binary_profile() {
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let path = checkout.join("projects/docs/openapi/openapi.yaml");
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     assert!(path.is_file(), "the actual source corpus is required");
     let contract = load(&path);
     let wanted = [
@@ -880,7 +864,9 @@ fn native_new_openrouter_operations_and_explicit_legacy_binary_profile() {
             "missing actual-operation native wire witness {marker}"
         );
     }
-    let modules = directory(&root.join("build/sdk"), "Modules").unwrap();
+    let modules =
+        suspect_codegen::toolchain::swift_module_dir(&root.join("build/sdk"), "GeneratedSDK")
+            .unwrap();
     let positive = root.join("positive.swift");
     std::fs::write(&positive, "import Foundation\nimport GeneratedSDK\nfunc probe(_ client: Client) async throws { let _: Data = try await client.downloadFileContent(DownloadFileContentInput(fileId: \"or_file_1\")).data; let _: Data = try await client.createCoinbaseCharge().data }\n").unwrap();
     checked(
@@ -910,6 +896,9 @@ fn native_new_openrouter_operations_and_explicit_legacy_binary_profile() {
 #[test]
 #[ignore = "requires installed Swift 6 and DocC; OAS 3.0 source projection witness"]
 fn native_openapi30_binary_and_nullable_http_projection() {
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
     let document = json!({"openapi":"3.0.3","info":{"title":"OAS 3.0 native HTTP witness","version":"1"},"servers":[{"url":"https://old.example.test/v0"}],
         "paths":{"/legacy/{id}":{"post":{"operationId":"legacy","parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
             "requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/OldPayload"}},"application/octet-stream":{"schema":{"type":"string","format":"binary"}}}},
@@ -995,6 +984,7 @@ impl WireServer {
             while !flag.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((socket, _)) => {
+                        socket.set_nonblocking(false).unwrap();
                         let root = dir.clone();
                         clients.push(thread::spawn(move || handler(socket, &root)));
                     }

@@ -2,6 +2,31 @@
 //!
 //! Keep this runner independent of codegen so its acceptance logic can be checked
 //! in isolation while backend owners are editing. `main` only calls `run(&args)`.
+//!
+//! # Usage
+//!
+//! ```text
+//! cargo run --locked -p xtask -- sdk-m3-m6 --source OPENROUTER_ROOT \
+//!   --out target/sdk-m3-m6-NEW [--demo | --performance-plan /absolute/plan.json]
+//! cargo run --locked -p xtask -- sdk-m3-m6 --list-stages [--demo]
+//! ```
+//!
+//! `--source` and `--out` are required. `--demo` selects the `hackathon-demo`
+//! profile: it verifies generation, native SDKs and iteration tools, lists the
+//! four numerical performance stages as deferred and keeps latency
+//! observational, while native/functional failures still block acceptance.
+//! Without it the `full-calibrated` profile requires every stage, including
+//! the performance rows; a missing, unreadable, malformed or incorrectly pinned
+//! `--performance-plan` records those rows as unmet (nonzero exit) while the
+//! other checks still run. The two options cannot be combined. `--list-stages`
+//! prints the stage inventory for the selected profile and accepts only
+//! `--demo`.
+//!
+//! `--out` must be a new directory whose existing parent lies under this
+//! workspace's `target/`. Scratch is reserved separately under
+//! `$TMPDIR/opencode/` and its ancestors must contain neither `Cargo.toml` nor
+//! `.git`. Reports record `acceptanceProfile`, `numericalPerformanceRequired`
+//! and the exact required stages.
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -16,7 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const USAGE: &str = "usage: cargo run -p xtask -- sdk-m3-m6 --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo run -p xtask -- sdk-m3-m6 --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See docs/SDK-M3-M6-EXIT.md.\n";
+const USAGE: &str = "usage: cargo run -p xtask -- sdk-m3-m6 --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo run -p xtask -- sdk-m3-m6 --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See the module docs in xtask/src/sdk_m3_m6.rs.\n";
 const BOTH: &[&str] = &["M3", "M6"];
 const M3: &[&str] = &["M3"];
 const M6: &[&str] = &["M6"];
@@ -41,6 +66,39 @@ pub(super) const PERFORMANCE: &[&str] = &[
     "performance-compare",
 ];
 const CODEGEN_LIB: &str = "suspect_codegen";
+
+/// The `suspect-codegen` integration-test binary that contains `suite`.
+///
+/// The crate groups its `tests/<suite>.rs` files one binary per backend
+/// (`tests/groups/<prefix>.rs`, see its Cargo.toml); files without a backend
+/// prefix live in `shared`. `rust_codecs_json` and the library test target
+/// stay standalone. Mirrors the grouping in crates/suspect-codegen/Cargo.toml.
+fn codegen_test_target(suite: &str) -> &str {
+    const GROUPED: [&str; 13] = [
+        "rust",
+        "go",
+        "typescript",
+        "python",
+        "csharp",
+        "java",
+        "kotlin",
+        "ruby",
+        "php",
+        "dart",
+        "cpp",
+        "swift",
+        "terraform",
+    ];
+    if suite == CODEGEN_LIB || suite == "rust_codecs_json" {
+        return suite;
+    }
+    let prefix = suite.split('_').next().unwrap_or(suite);
+    GROUPED
+        .iter()
+        .copied()
+        .find(|group| *group == prefix)
+        .unwrap_or("shared")
+}
 const SWIFT_VECTORS: &str = "swift_sdk::validation::tests::native_shared_runtime_contract_vectors";
 
 #[derive(Debug)]
@@ -320,19 +378,33 @@ impl Run {
             }
         }
         let requested = self.expand(&item.program);
+        // A codegen suite runs inside its grouped binary, filtered to its
+        // module; CLI suites and the library target are their own binaries.
+        let codegen_suite = requested
+            .strip_prefix("test:")
+            .filter(|_| !item.id.starts_with("cli-"))
+            .filter(|suite| codegen_test_target(suite) != *suite);
         let program = if let Some(suite) = requested.strip_prefix("test:") {
+            let target = if item.id.starts_with("cli-") {
+                suite
+            } else {
+                codegen_test_target(suite)
+            };
             self.tests
-                .get(suite)
+                .get(target)
                 .cloned()
                 .unwrap_or_else(|| self.work.join("missing-test").join(suite))
         } else {
             resolve(&requested, &env)
         };
-        let args = item
+        let mut args = item
             .args
             .iter()
             .map(|arg| self.expand(arg))
             .collect::<Vec<_>>();
+        if let Some(suite) = codegen_suite {
+            args.insert(0, format!("{suite}::"));
+        }
         let cwd = self.expand(&item.cwd);
         let stdout = format!("logs/{}.stdout.log", item.id);
         let stderr = format!("logs/{}.stderr.log", item.id);
@@ -1033,6 +1105,57 @@ pub(super) fn prepare(run: &mut Run) -> Result<Inventory> {
     Ok(files)
 }
 
+/// `$XDG_DATA_HOME`, else `~/.local/share` (`None` without a home).
+fn data_home() -> Option<PathBuf> {
+    let non_empty = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+    non_empty("XDG_DATA_HOME").map(PathBuf::from).or_else(|| {
+        non_empty("HOME")
+            .or_else(|| non_empty("USERPROFILE"))
+            .map(|home| PathBuf::from(home).join(".local/share"))
+    })
+}
+
+/// The pinned mise Node install (`$MISE_DATA_DIR/installs/node/<version>`).
+/// Without a home directory the bare `node` on `PATH` is used.
+fn mise_node(version: &str) -> PathBuf {
+    std::env::var_os("MISE_DATA_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| data_home().map(|dir| dir.join("mise")))
+        .map_or_else(
+            || "node".into(),
+            |mise| mise.join("installs/node").join(version).join("bin/node"),
+        )
+}
+
+/// The Python 3.11 floor interpreter: a uv-managed CPython 3.11
+/// (`$UV_PYTHON_INSTALL_DIR`, else `<data home>/uv/python`; the minor-version
+/// link `cpython-3.11-<platform>` is preferred over patch directories),
+/// else `python3.11` on `PATH`.
+fn python_floor(env: &BTreeMap<String, String>) -> PathBuf {
+    let uv = std::env::var_os("UV_PYTHON_INSTALL_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| data_home().map(|dir| dir.join("uv/python")));
+    let mut candidates: Vec<String> = uv
+        .as_deref()
+        .and_then(|dir| fs::read_dir(dir).ok())
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.starts_with("cpython-3.11-") || name.starts_with("cpython-3.11."))
+        .collect();
+    candidates.sort_by(|a, b| {
+        (!a.starts_with("cpython-3.11-"), std::cmp::Reverse(a))
+            .cmp(&(!b.starts_with("cpython-3.11-"), std::cmp::Reverse(b)))
+    });
+    candidates
+        .iter()
+        .filter_map(|name| Some(uv.as_ref()?.join(name).join("bin/python3.11")))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| resolve("python3.11", env))
+}
+
 pub(super) fn env_values(run: &mut Run) -> Result<()> {
     for name in [
         "HOME",
@@ -1056,27 +1179,22 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
     }
     let selected =
         |name: &str, default: &str| std::env::var(name).unwrap_or_else(|_| default.into());
+    let python_floor = python_floor(&run.env).display().to_string();
+    let node22 = mise_node("22.23.1").display().to_string();
+    let node24 = mise_node("24.21.0").display().to_string();
     for (token, name, default) in [
         (
             "{python-floor}",
             "SUSPECT_PYTHON_FLOOR_BIN",
-            "/Users/luke/.local/share/uv/python/cpython-3.11-macos-aarch64-none/bin/python3.11",
+            python_floor.as_str(),
         ),
         (
             "{python-current}",
             "SUSPECT_PYTHON_CURRENT_BIN",
             "/opt/homebrew/opt/python@3.14/bin/python3.14",
         ),
-        (
-            "{node22}",
-            "SUSPECT_DOCS_NODE",
-            "/Users/luke/.local/share/mise/installs/node/22.23.1/bin/node",
-        ),
-        (
-            "{node24}",
-            "SUSPECT_NODE24_BIN",
-            "/Users/luke/.local/share/mise/installs/node/24.21.0/bin/node",
-        ),
+        ("{node22}", "SUSPECT_DOCS_NODE", node22.as_str()),
+        ("{node24}", "SUSPECT_NODE24_BIN", node24.as_str()),
         (
             "{python-tools}",
             "SUSPECT_PYTHON_TOOLS",
@@ -1148,10 +1266,6 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
         ("OPENROUTER_WEB_ROOT", "{out}/inputs"),
         (
             "SUSPECT_OPENROUTER_YAML",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
-        (
-            "SUSPECT_OPENROUTER_SPEC",
             "{out}/inputs/projects/docs/openapi/openapi.yaml",
         ),
         ("SUSPECT_PYTHON_BIN", "{python-current}"),
@@ -1277,16 +1391,26 @@ fn test_build(package: &str, suites: &[String]) -> Stage {
         ],
         "{workspace}",
     );
-    for suite in suites {
-        if suite == CODEGEN_LIB {
+    // suspect-codegen suites are modules of grouped test binaries; build each
+    // binary once and record the binaries (not the modules) as the targets.
+    let targets: Vec<String> = if package == "suspect-codegen" {
+        suites
+            .iter()
+            .map(|suite| codegen_test_target(suite).to_owned())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    } else {
+        suites.to_vec()
+    };
+    for target in &targets {
+        if target == CODEGEN_LIB {
             item.args.push("--lib".into());
         } else {
-            item.args.extend(["--test".into(), suite.clone()]);
+            item.args.extend(["--test".into(), target.clone()]);
         }
     }
-    item.criterion = Criterion::TestBuild {
-        suites: suites.into(),
-    };
+    item.criterion = Criterion::TestBuild { suites: targets };
     item.environment
         .insert("RUSTUP_TOOLCHAIN".into(), "stable".into());
     item
@@ -2472,6 +2596,26 @@ mod tests {
         assert!(build.args.contains(&"--lib".into()));
         assert!(!build.args.contains(&CODEGEN_LIB.into()));
         assert_eq!(build.environment["RUSTUP_TOOLCHAIN"], "stable");
+    }
+
+    #[test]
+    fn codegen_suites_build_their_grouped_binary_once() {
+        assert_eq!(codegen_test_target("python_json"), "python");
+        assert_eq!(codegen_test_target("rust_codecs_json"), "rust_codecs_json");
+        assert_eq!(codegen_test_target("m2_vertical"), "shared");
+        assert_eq!(codegen_test_target(CODEGEN_LIB), CODEGEN_LIB);
+        let stage = test_build(
+            "suspect-codegen",
+            &["go_json".into(), "go_http".into(), "m2_vertical".into()],
+        );
+        assert_eq!(
+            stage.args[stage.args.len() - 4..],
+            ["--test", "go", "--test", "shared"]
+        );
+        // CLI suites keep their own binaries, even when a name looks like a
+        // codegen backend prefix.
+        let cli = test_build("suspect-cli", &["rust_sdk".into()]);
+        assert_eq!(cli.args[cli.args.len() - 2..], ["--test", "rust_sdk"]);
     }
 
     #[test]

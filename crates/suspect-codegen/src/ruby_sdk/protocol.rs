@@ -4,20 +4,30 @@ use crate::http_protocol as wire;
 use std::collections::{BTreeMap, BTreeSet};
 use suspect_ir::contract::{SchemaId, SourceId};
 
+/// Ruby value carrier of a parameter, media payload, part or record field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NativeType {
+    /// Generated model codec for this validation-program node.
     Codec(usize),
+    /// Schema-free JSON value.
     Json,
+    /// Schema-free text converted as this scalar.
     Scalar(wire::ScalarType),
+    /// Binary `String` (ASCII-8BIT).
     Bytes,
-    NoContent,
+    /// Generated form/multipart/header record class with this name.
     Record(String),
+    /// Repeated values.
     Array(Box<NativeType>),
+    /// A form/multipart part carrying this value plus optional part headers.
     Part(Box<NativeType>),
+    /// Lazily decoded item stream.
     Stream(Box<NativeType>),
+    /// Positional multipart alternatives, in prefix order then the item type.
     Union(Vec<NativeType>),
 }
 impl NativeType {
+    /// Program node of a [`NativeType::Codec`]; `None` for every other carrier.
     pub fn schema_index(&self) -> Option<usize> {
         if let Self::Codec(i) = self {
             Some(*i)
@@ -27,69 +37,108 @@ impl NativeType {
     }
 }
 
+/// A caller-supplied path, query, header or cookie parameter of one operation.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
+    /// Source parameter declaration.
     pub source: SourceId,
+    /// Parameter name on the wire.
     pub wire_name: String,
+    /// Ruby keyword argument, unique within the operation's keywords.
     pub keyword: String,
+    /// Whether the source marks the parameter required.
     pub required: bool,
+    /// Value carrier: the codec, or a record for form-content parameters.
     pub value_type: NativeType,
+    /// Admitted wire serialization plan.
     pub wire: wire::ParameterPlan,
 }
 impl PlannedParameter {
+    /// Codec root schema of the parameter value.
     pub fn schema(&self) -> &SchemaId {
         self.wire.codec().schema().id()
     }
+    /// Program node of the value codec, when the value is codec-bound.
     pub fn schema_index(&self) -> Option<usize> {
         self.value_type.schema_index()
     }
+    /// Where the parameter is sent.
     pub fn location(&self) -> wire::ParameterLocation {
         self.wire.location()
     }
+    /// Declared style/explode serialization.
     pub fn serialization(&self) -> &wire::ParameterSerialization {
         self.wire.serialization()
     }
 }
+/// One admitted media type of a request body or response.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
+    /// Source media-type declaration.
     pub source: SourceId,
+    /// Ruby carrier of the payload.
     pub value_type: NativeType,
+    /// Admitted media plan.
     pub wire: wire::MediaPlan,
 }
 impl PlannedMedia {
+    /// Program node of the payload codec, when the payload is codec-bound.
     pub fn schema_index(&self) -> Option<usize> {
         self.value_type.schema_index()
     }
 }
+/// The request body of one operation.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
+    /// Source request-body declaration.
     pub source: SourceId,
+    /// Whether the source marks the body required.
     pub required: bool,
+    /// Admitted media types, in declaration order.
     pub media: Vec<PlannedMedia>,
 }
+/// One declared response header.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
+    /// Source header declaration.
     pub source: SourceId,
+    /// Ruby member name, unique within the response.
     pub name: String,
+    /// Header name on the wire.
     pub wire_name: String,
+    /// Program node of the header value codec.
     pub schema_index: usize,
+    /// Whether the source marks the header required.
     pub required: bool,
+    /// Admitted header parsing plan.
     pub wire: wire::HeaderPlan,
 }
+/// One declared response status (exact, range or `default`) of an operation.
 #[derive(Debug, Clone)]
 pub struct PlannedResponse {
+    /// Source response declaration.
     pub source: SourceId,
+    /// Declared status selector.
     pub status: wire::ResponseStatus,
+    /// Status key as written in the source (`200`, `4XX`, `default`).
     pub status_key: String,
+    /// Admitted media types; empty when `body_forbidden`.
     pub media: Vec<PlannedMedia>,
+    /// Collision-free Ruby response class name.
     pub class_name: String,
+    /// Error class raised for this status; distinct from `class_name` only for `default`.
     pub error_class: String,
+    /// Declared response headers.
     pub headers: Vec<PlannedHeader>,
+    /// Generated header record class, when any header is declared.
     pub headers_class: Option<String>,
+    /// Whether HTTP forbids a body (HEAD, 1xx, 204, 205, 304).
     pub body_forbidden: bool,
+    /// Admitted response plan.
     pub wire: wire::ResponsePlan,
 }
 impl PlannedResponse {
+    /// Whether this status can match a successful (2xx) response.
     pub fn can_succeed(&self) -> bool {
         matches!(
             self.status,
@@ -98,6 +147,7 @@ impl PlannedResponse {
                 | wire::ResponseStatus::Default
         )
     }
+    /// Whether this status can match a non-2xx response.
     pub fn can_fail(&self) -> bool {
         !matches!(
             self.status,
@@ -105,39 +155,66 @@ impl PlannedResponse {
         )
     }
 }
+/// One selected outgoing operation and its Ruby client method.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Source operation declaration.
     pub source: SourceId,
+    /// Source `operationId`, or a method+path name for unnamed operations.
     pub operation_id: String,
+    /// Collision-free client method name.
     pub method_name: String,
+    /// HTTP method token.
     pub method: String,
+    /// Path template as declared.
     pub path: String,
+    /// Source description, falling back to the summary; empty when neither exists.
     pub description: String,
+    /// Caller parameters, in protocol order.
     pub parameters: Vec<PlannedParameter>,
+    /// Request body, if declared.
     pub body: Option<PlannedBody>,
+    /// Declared responses, in protocol order.
     pub responses: Vec<PlannedResponse>,
+    /// Operation-wide API error class.
     pub error_class: String,
+    /// Admitted operation plan.
     pub wire: wire::OperationPlan,
 }
+/// One member of a generated record class.
 #[derive(Debug, Clone)]
 pub struct RecordField {
+    /// Source part or header declaration.
     pub source: SourceId,
+    /// Part or header name on the wire.
     pub wire_name: String,
+    /// Ruby member name, unique within the record.
     pub name: String,
+    /// Whether the source marks the member required.
     pub required: bool,
+    /// Ruby carrier of the member value.
     pub value_type: NativeType,
 }
+/// What a generated record class encodes or decodes.
 #[derive(Debug, Clone)]
 pub enum RecordBinding {
+    /// Named form or multipart body fields.
     Media(Box<wire::MediaPlan>),
+    /// Response or part headers.
     Headers(Vec<wire::HeaderPlan>),
 }
+/// A generated record class for form/multipart fields or declared headers.
 #[derive(Debug, Clone)]
 pub struct NativeRecord {
+    /// Source media or response/part declaration the record belongs to.
     pub source: SourceId,
+    /// Collision-free Ruby class name.
     pub name: String,
+    /// Declared members.
     pub fields: Vec<RecordField>,
+    /// Carrier for undeclared parts, when the body admits them.
     pub additional: Option<NativeType>,
+    /// Wire declaration the record binds.
     pub binding: RecordBinding,
 }
 

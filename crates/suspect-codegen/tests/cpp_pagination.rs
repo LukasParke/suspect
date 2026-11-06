@@ -702,16 +702,17 @@ fn manual_templates_emit_for_every_supported_shape_and_compile() {
     );
 }
 
-fn tool(variable: &str, fallback: &str) -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os(variable) {
-        return Some(std::path::PathBuf::from(path));
-    }
-    let probe = Command::new(fallback).arg("--version").output().ok()?;
-    if probe.status.success() {
-        Some(std::path::PathBuf::from(fallback))
+/// `cmake` or the C++ compiler (`clang++`), resolved by
+/// `suspect_codegen::toolchain::require` (honouring the `SUSPECT_CPP_*`
+/// overrides): `None` after its skip message, or a panic under
+/// `SUSPECT_REQUIRE_NATIVE`, so a missing toolchain cannot pass as a
+/// degraded run in CI.
+fn tool(_variable: &str, fallback: &str) -> Option<std::path::PathBuf> {
+    suspect_codegen::toolchain::require(if fallback == "clang++" {
+        "cxx"
     } else {
-        None
-    }
+        fallback
+    })
 }
 
 /// Runs the command and fails the test with the retained log on failure.

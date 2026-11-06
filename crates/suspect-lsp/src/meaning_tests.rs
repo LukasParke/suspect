@@ -339,7 +339,7 @@ fn the_schema_position_says_how_you_get_there_from_the_schema() {
     let low = doc(text);
     let offset = text.find("type: object").expect("present");
     let index = Index::default();
-    let rendered = crate::hover_meaning(&low, offset, &index).expect("meaning half");
+    let rendered = crate::handlers::hover_meaning(&low, offset, &index).expect("meaning half");
     assert!(
         rendered.contains("inside `properties \u{203a} MediaContainer \u{203a} type`"),
         "{rendered}"

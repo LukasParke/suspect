@@ -2,11 +2,7 @@
 //! Literal normative vectors are shared with the core tests, not derived from
 //! emitted Go or from a serializer under test.
 use serde_json::{Value, json};
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, process::Command, sync::Arc};
 use suspect_codegen::go_http::{self, HttpConfig, HttpPlan, PlannedOperation};
 use suspect_codegen::http_protocol::{
     Capability, CompatibilityProfile, Representation, ResponseStatus,
@@ -602,6 +598,8 @@ fn native_forms_named_and_positional_multipart_are_structural_and_typed() {
     ] {
         spec["paths"][&format!("/{name}")] = json!({"post":{"operationId":name,"requestBody":{"required":true,"content":{media:body.clone()}},"responses":{"200":{"content":{media:body}}}}});
     }
+    // ADR 0035: a declared plain-HTTP server keeps its scheme.
+    spec["paths"]["/plain"] = json!({"get":{"operationId":"plain","servers":[{"url":"http://plain.example.test/v1"}],"responses":{"204":{"description":"none"}}}});
     let p = plan(spec);
     let upload = op(&p, "upload").body().unwrap().media()[0]
         .aggregate
@@ -632,6 +630,14 @@ fn native_forms_named_and_positional_multipart_are_structural_and_typed() {
         .unwrap();
     let mut source = PRELUDE.replace("\"bytes\";", "\"bytes\";\"mime\";\"mime/multipart\";");
     source.push_str(&format!(r#"
+// ADR 0035: one server URL policy for overrides and declared servers.
+func TestServerURLPolicy(t *testing.T){{
+ for _,bad:=range []string{{"http://example.test/api","https://example.test/a/../b","https://example.test/./b","https://example.test:0/a","https://example.test:70000/a","https://u:p@example.test/a","https://example.test/a?q","https://example.test/caf\u00e9","https://example.test/%zz"}}{{if _,err:=sdk.NewClient(sdk.Credentials{{}},sdk.ClientOptions{{ServerURL:bad}});err==nil{{t.Fatal("accepted",bad)}}}}
+ if _,err:=sdk.NewClient(sdk.Credentials{{}},sdk.ClientOptions{{ServerURL:"http://example.test/api",AllowInsecureHTTP:true}});err!=nil{{t.Fatal("opt-in refused",err)}}
+ seen:="";client:=must(sdk.NewClient(sdk.Credentials{{}},sdk.ClientOptions{{Transport:doer(func(r *http.Request)(*http.Response,error){{seen=r.URL.String();return reply(204,"",nil),nil}})}}))
+ out:=reflect.ValueOf(client).MethodByName("Plain").Call([]reflect.Value{{reflect.ValueOf(context.Background())}});if e:=out[len(out)-1].Interface();e!=nil{{t.Fatal(e)}};if seen!="http://plain.example.test/v1/plain"{{t.Fatal("declared HTTP server not honored",seen)}}
+ for _,good:=range []string{{"https://example.test/a/%2e%2E/%2f//b","http://localhost:8080/a","http://127.0.0.1/a","http://[::1]:9/a"}}{{if _,err:=sdk.NewClient(sdk.Credentials{{}},sdk.ClientOptions{{ServerURL:good}});err!=nil{{t.Fatal("refused",good,err)}}}}
+}}
 func TestNamedMultipart(t *testing.T){{
  calls:=0
  server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){{calls++;data,err:=io.ReadAll(r.Body);if err!=nil{{t.Fatal(err)}};kind,params,err:=mime.ParseMediaType(r.Header.Get("Content-Type"));if err!=nil||kind!="multipart/form-data"{{t.Fatal(kind,err)}};reader:=multipart.NewReader(bytes.NewReader(data),params["boundary"]);values:=map[string][][]byte{{}};for{{part,err:=reader.NextPart();if err==io.EOF{{break}};if err!=nil{{t.Fatal(err)}};body,err:=io.ReadAll(part);if err!=nil{{t.Fatal(err)}};values[part.FormName()]=append(values[part.FormName()],body);if part.FormName()=="file"&&(part.FileName()!="snow 雪.png"||part.Header.Get("Content-Type")!="image/png"||part.Header.Get("X-Part-Id")!="p1"){{t.Fatal(part.Header)}}}};if !bytes.Equal(values["file"][0],[]byte{{0,255,10}})||string(values["metadata"][0])!=`{{"title":"native"}}`||len(values["files"])!=2||!bytes.Equal(values["files"][1],[]byte{{128,0}})||string(values["labels"][1])!="two"{{t.Fatal(values)}};w.Header().Set("Content-Type",r.Header.Get("Content-Type"));_,_=w.Write(data)}}));defer server.Close()
@@ -747,11 +753,11 @@ func TestFiniteRequestStreams(t *testing.T){{calls:=0;client:=must(sdk.NewClient
 }
 
 #[test]
-#[ignore = "requires OPENROUTER_WEB_ROOT and native Go 1.23.12/1.27.1"]
+#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) and native Go 1.23.12/1.27.1"]
 fn native_actual_openrouter_five_plus_crud_and_binary_operations() {
-    let path =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let contract = load(&path);
     let wanted = [
         "getCredits",
@@ -957,6 +963,16 @@ func TestPartByteBoundaryExcludesHeaderOverhead(t *testing.T){{client:=must(sdk.
 #[test]
 #[ignore = "requires native Go and Sphinx 8.2.3 (SUSPECT_SPHINX_PYTHON)"]
 fn native_protocol_documentation_builds_from_real_symbols() {
+    if suspect_codegen::toolchain::require("go").is_none() {
+        return;
+    }
+    let Some(python) = suspect_codegen::toolchain::require_provisioned(
+        "SUSPECT_SPHINX_PYTHON",
+        "sdk-native-python-tools/bin/python",
+        "python",
+    ) else {
+        return;
+    };
     let core: Value = serde_json::from_str(CORE).unwrap();
     let mut spec = base();
     spec["components"] = core["baseline"]["components"].clone();
@@ -972,12 +988,6 @@ fn native_protocol_documentation_builds_from_real_symbols() {
         .unwrap()
         .keep();
     suspect_codegen::write_files(&p.render(), &root).unwrap();
-    let python = std::env::var_os("SUSPECT_SPHINX_PYTHON")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/sdk-native-python-tools/bin/python")
-        });
     let output = Command::new(python)
         .args([
             "-m",

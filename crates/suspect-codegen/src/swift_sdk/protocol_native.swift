@@ -143,10 +143,14 @@ final class ProtocolTests: XCTestCase {
         _ = try await client.serverChoice(); var request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "https://docs.example.test/v1/server")
         _ = try await client.serverChoice(options: RequestOptions(serverVariables: ["version": "v2"])); request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "https://docs.example.test/v2/server")
         _ = try await client.serverChoice(options: RequestOptions(serverIndex: 1, serverVariables: ["region": "us", "version": "v3"])); request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "https://us.example.test/v3/server")
-        _ = try await client.serverChoice(options: RequestOptions(serverIndex: 2)); request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "http://plain.example.test/v1/server")
         _ = try await client.defaultServer(); request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "https://docs.example.test/default-server")
+        // ADR 0035: a declared plain-HTTP server keeps its scheme; a non-loopback HTTP override needs allowHTTP.
+        _ = try await client.serverChoice(options: RequestOptions(serverIndex: 2)); request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "http://plain.example.test/v1/server")
+        _ = try await Client(transport: recorder, options: ClientOptions(allowHTTP: true)).serverChoice(options: RequestOptions(serverURL: "http://plain.example.test/v1")); request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "http://plain.example.test/v1/server")
+        // ADR 0035: encoded octets are opaque path data, sent verbatim.
+        _ = try await client.serverChoice(options: RequestOptions(serverURL: "https://example.test/a/%2E%2e/%2f//v1")); request = try await recorder.last(); XCTAssertEqual(request.url.absoluteString, "https://example.test/a/%2E%2e/%2f//v1/server")
         let count = await recorder.count()
-        for options in [RequestOptions(serverVariables: ["version": "bad"]), RequestOptions(serverVariables: ["unknown": "x"]), RequestOptions(serverIndex: 3), RequestOptions(serverIndex: 1, serverVariables: ["version": "../bad"]), RequestOptions(serverIndex: 1, serverVariables: ["version": "bad?query"])] {
+        for options in [RequestOptions(serverVariables: ["version": "bad"]), RequestOptions(serverVariables: ["unknown": "x"]), RequestOptions(serverIndex: 3), RequestOptions(serverURL: "http://plain.example.test/v1"), RequestOptions(serverURL: "https://example.test/./v1"), RequestOptions(serverURL: "https://example.test:0/v1"), RequestOptions(serverIndex: 1, serverVariables: ["version": "../bad"]), RequestOptions(serverIndex: 1, serverVariables: ["version": "bad?query"])] {
             do { _ = try await client.serverChoice(options: options); XCTFail("invalid override accepted") } catch let error as SDKError { XCTAssertEqual(error.kind, .requestRepresentation) }
         }
         do { _ = try await Client(transport: recorder).defaultServer(); XCTFail("invented local-file origin") } catch let error as SDKError { XCTAssertEqual(error.kind, .requestRepresentation) }

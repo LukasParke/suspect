@@ -198,6 +198,9 @@ fn checked_emission_declines_malformed_profiles_at_sources() {
 #[test]
 #[ignore = "Swift v2 runtime oracle, scoped annotations and finite evaluation budgets on an installed toolchain"]
 fn native_evaluated_applicator_vectors() {
+    if !support::available() {
+        return;
+    }
     let root = support::root("runtime-v2-");
     let cases = cases();
     let mut groups: BTreeMap<String, Vec<(usize, &Value)>> = BTreeMap::new();

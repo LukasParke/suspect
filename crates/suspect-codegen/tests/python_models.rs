@@ -7,6 +7,8 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+use crate::python_support;
+
 fn load(path: &Path) -> Arc<Contract> {
     let workspace = Arc::new(
         WorkspaceBuilder::new()
@@ -29,12 +31,14 @@ fn native(plan: &ModelPlan, source: &str) {
     let directory = tempfile::tempdir().unwrap().keep();
     suspect_codegen::write_files(&plan.render().unwrap(), &directory).unwrap();
     std::fs::write(directory.join("consumer.py"), source).unwrap();
-    let output =
-        Command::new(std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()))
-            .current_dir(&directory)
-            .arg("consumer.py")
-            .output()
-            .unwrap();
+    let Some(python) = python_support::python() else {
+        return;
+    };
+    let output = Command::new(python)
+        .current_dir(&directory)
+        .arg("consumer.py")
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "fixture {}\n{}{}",
@@ -151,8 +155,10 @@ assert inspect.signature(models.Node).parameters['optional'].default is models.U
 #[test]
 #[ignore = "requires native Python and the tracked OpenRouter checkout"]
 fn tracked_credits_closure_has_native_exact_number_fields() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
-    let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));
+    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
+    let contract = load(&spec);
     let response = contract
         .operations()
         .find(|op| op.operation_id() == Some("getCredits"))

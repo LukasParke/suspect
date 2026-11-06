@@ -1,7 +1,9 @@
-# Go HTTP SDK — current M3 slice
+# Go SDK — HTTP client
 
 `suspect_codegen::go_http` plans source-selected Go packages using the standard
-library HTTP transport and shared strict `http_contract` admission. The native
+library HTTP transport. Admission and wire semantics come from the shared
+`http_protocol::ProtocolPlan` ([SDK-HTTP-PROTOCOL.md](SDK-HTTP-PROTOCOL.md));
+the adapter identity is `go-net-http-protocol-v1`. The native
 plan owns operation, constructor, field, setter and status-type names. Models
 and codecs retain native typed descriptors; documentation and examples reuse
 those descriptors and the shared `ExamplePlan`.
@@ -31,7 +33,7 @@ emit_http(&HttpPlan, &PackageConfig) -> Result<Vec<OutFile>, Vec<String>>
 - `HttpConfig` carries the shared `go_codecs::CodecConfig` and positive byte
   ceilings for responses and assembled requests/bodies.
 - Directional `readOnly`/`writeOnly` annotations anywhere in the neutral codec
-  closure are explicitly unsupported initially and produce
+  closure are explicitly unsupported and produce
   `http-directional-codec-unsupported` source-linked diagnostics.
 - The codec closure is planned by `go_codecs::plan_codecs`. Documentation
   inventories are derived from its retained model descriptors and fields.
@@ -62,6 +64,76 @@ emit_http(&HttpPlan, &PackageConfig) -> Result<Vec<OutFile>, Vec<String>>
   errors embed `APIResponse[Model]` with status, headers and validated data.
 - Inputs are validated (declared constraints and schema mutations) before the
   request is assembled; no SDK defaults or auth are inferred from names.
+  OAuth token lifecycle and pagination helpers are generated only through an
+  `sdk_defaults` policy ([golden defaults](SDK-GOLDEN-DEFAULTS.md)), and
+  environment credentials only through an explicit
+  [credential-env policy](SDK-CREDENTIAL-ENV.md).
+- Operations with no required inputs accept zero or one typed input. Optional
+  inputs use the allocated `New…Input().With…` API.
+- A single unambiguous successful representation also gets an allocated
+  `…Data` method. The ordinary method retains actual status, typed status/media
+  alternatives, raw headers, `DecodedHeaders` and link metadata.
+- Result and declared API-error interfaces support `Close`. Buffered responses
+  need no cleanup; closing a response carrying an iterator releases its stream.
+- `Part[T]` holds native `Data`, `ContentType`, `Filename` and `http.Header`.
+  `NewPart`, `WithContentType`, `WithFilename` and `WithHeader` are ordinary
+  native constructors/setters. File data is finite `[]byte`; a filename never
+  opens a file.
+
+Models are encoded and decoded through the typed codec registry, whose entries
+use the allocated native model names (`User` is illustrative). Each entry is a
+`Codec[T]` with `Decode`, `DecodeValue`, `Encode` and `EncodeValue`:
+
+```go
+user, err := sdk.Codecs.User.Decode(data)
+if err != nil {
+    return err
+}
+wire, err := sdk.Codecs.User.Encode(user)
+```
+
+### Stream lifetime
+
+```go
+stream, err := client.EventsData(ctx)
+if err != nil { return err }
+defer stream.Close()
+for stream.Next() {
+    event := stream.Value()
+    fmt.Println(event.Data)
+}
+return stream.Err()
+```
+
+Iteration has one consumer, with bounded read-ahead and no background read loop.
+Cancellation, timeout, early close, EOF, framing/codec errors and budget failures
+release the body and timeout resources. `Close` can interrupt a blocked `Next`.
+
+### Generation bounds
+
+| Policy | Default |
+| --- | ---: |
+| Assembled request URL/body | 8 MiB |
+| Response body / total stream wire bytes | 8 MiB |
+| Individual part payload | 1 MiB |
+| Form fields / MIME parts, including repeated expansions | 4096 |
+| Stream item | 64 KiB |
+| Diagnostic capture | 4096 bytes, clamped to response ceiling |
+
+`HttpConfig` ceilings must be positive and fit a portable signed 32-bit integer;
+client response/part/item/capture limits may only lower them.
+
+### Go-specific refusals and opt-ins
+
+Go refuses source request parameters named Content-Length, Transfer-Encoding or
+Trailer (`http-go-header-framing-unsupported`), because `net/http` owns those
+framing fields. No admitted parameter is silently discarded to accommodate
+native framing.
+
+For OAS 3.1/3.2, `type: string, format: binary` in binary media or parts requires the
+explicit `CompatibilityProfile::LegacyBinaryStringV1` in
+`HttpConfig.compatibility_profiles`. OAS 3.0's binary marker and ordinary
+unconstrained binary schemas need no opt-in.
 
 ## Packaging
 
@@ -137,8 +209,8 @@ executes the generated sample against an independent create/update/list/get
 recording server, and rejects mistyped consumer inputs and missing docs.
 
 ```sh
-SUSPECT_GO_TOOLCHAIN=go1.23.12 cargo test -p suspect-codegen --test m3_native_docs go_docs_and_generated_samples_are_native_executable_artifacts -- --ignored
-SUSPECT_GO_TOOLCHAIN=go1.27.1 cargo test -p suspect-codegen --test m3_native_docs go_docs_and_generated_samples_are_native_executable_artifacts -- --ignored
+SUSPECT_GO_TOOLCHAIN=go1.23.12 cargo test -p suspect-codegen --test shared go_docs_and_generated_samples_are_native_executable_artifacts -- --ignored
+SUSPECT_GO_TOOLCHAIN=go1.27.1 cargo test -p suspect-codegen --test shared go_docs_and_generated_samples_are_native_executable_artifacts -- --ignored
 ```
 
 `SUSPECT_GO_BIN` selects the Go executable; `SUSPECT_PYTHON_TOOLS` selects the
@@ -153,6 +225,3 @@ checks identical shared-example provenance. Select the corpus through
 `OPENROUTER_WEB_ROOT` or `SUSPECT_OPENROUTER_YAML` and use `--ignored`; the
 independent five-operation HTTP consumers remain in `tests/wave_a_openrouter.rs`.
 
-This is documentation and executable-example support for the admitted M3
-HTTP slice. Broader schema/HTTP features and a complete release remain subject
-to their own source-fidelity and installed-native gates.

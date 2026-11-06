@@ -114,7 +114,9 @@ The physical document is retained by `ServerPlan::document_base()`, including
 redirected retrievals and defaults inherited through referenced path items.
 Logical `$self`/`$id` addresses remain separate metadata. RFC3986 resolution
 preserves encoded dots/slashes, percent-triplet case and repeated path separators.
-`server_url` is an explicit complete override. HTTP method token case is retained,
+`server_url` is an explicit complete override: HTTPS, or plain HTTP to a loopback
+host unless `allow_insecure_http` is set (ADR 0035); declared servers keep their
+scheme. HTTP method token case is retained,
 including OpenAPI 3.2 QUERY and additionalOperations.
 
 Request bodies with several media types use a native variant of named content

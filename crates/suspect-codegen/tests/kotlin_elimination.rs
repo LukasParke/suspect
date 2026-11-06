@@ -291,22 +291,32 @@ fn generate(document: Value) -> Vec<OutFile> {
     .unwrap()
 }
 
-fn java_home() -> PathBuf {
-    if let Some(home) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME")
+fn java_home_override() -> Option<PathBuf> {
+    std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME")
         .or_else(|| std::env::var_os("SUSPECT_JAVA_HOME"))
-    {
-        return home.into();
-    }
-    Path::new("/Users/luke/.local/share/mise/installs/java").join("temurin-21.0.12+101.0.LTS")
+        .map(PathBuf::from)
+}
+
+fn maven_override() -> Option<PathBuf> {
+    std::env::var_os("SUSPECT_KOTLIN_MAVEN").map(PathBuf::from)
+}
+
+/// `false` (after printing why) when the JDK or Maven is unavailable.
+fn native_tools() -> bool {
+    (java_home_override().is_some() || suspect_codegen::toolchain::require_home("jdk").is_some())
+        && (maven_override().is_some() || suspect_codegen::toolchain::require("maven").is_some())
+}
+
+fn java_home() -> PathBuf {
+    java_home_override()
+        .or_else(|| suspect_codegen::toolchain::resolve_home("jdk"))
+        .expect("gated by native_tools()")
 }
 
 fn maven() -> PathBuf {
-    std::env::var_os("SUSPECT_KOTLIN_MAVEN")
-        .or_else(|| std::env::var_os("SUSPECT_MAVEN_BIN"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-        })
+    maven_override()
+        .or_else(|| suspect_codegen::toolchain::resolve_path("maven"))
+        .expect("gated by native_tools()")
 }
 
 fn maven_repository() -> PathBuf {
@@ -489,6 +499,9 @@ fn write_report(report: &Value) {
 #[test]
 fn kotlin_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();
+    if !native_tools() {
+        return;
+    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-kotlin-elimination");
     fs::create_dir_all(&root).unwrap();
 

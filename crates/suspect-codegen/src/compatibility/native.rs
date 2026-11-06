@@ -19,18 +19,26 @@ use super::{
 
 const FORMAT: &str = "suspect-native-interface-v1";
 
+/// Whether a native descriptor was captured from a real plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanStatus {
+    /// The backend planned the selection.
     Planned,
+    /// Nothing was selected, so no plan was attempted.
     EmptySelection,
+    /// The target configuration or planner refused; see the findings.
     Unavailable,
 }
 
+/// A configuration or planner finding recorded in a native snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlanFinding {
+    /// Diagnostic code.
     pub code: String,
+    /// Source location, when the finding has one.
     pub source: Option<Location>,
+    /// Human-readable explanation.
     pub message: String,
 }
 
@@ -38,16 +46,24 @@ pub struct PlanFinding {
 /// versioned runtime release. The exact fingerprint scope is recorded below.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RuntimeProvenance {
+    /// Generator crate version.
     pub generator_version: String,
+    /// Independent runtime release version; `None` while runtimes ship with the generator.
     pub runtime_version: Option<String>,
+    /// Native adapter profile the descriptor was captured under.
     pub profile: String,
+    /// SHA-256 over the length-prefixed names and bytes of every fingerprinted asset.
     pub plan_and_runtime_sha256: String,
+    /// Generator source assets covered by the fingerprint, sorted.
     pub fingerprinted_assets: Vec<String>,
 }
 
+/// Native interface of one selected operation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NativeOperation {
+    /// Source location of the operation declaration.
     pub source: Location,
+    /// Source operation identity.
     pub operation_id: String,
     /// Actual collision-allocated names: method, module, input/constructor,
     /// result and errors.
@@ -57,12 +73,16 @@ pub struct NativeOperation {
     pub descriptor: Value,
 }
 
+/// Native identity of one generated model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NativeModel {
+    /// Source location of the model's schema.
     pub source: Location,
+    /// Allocated native model name.
     pub name: String,
     /// Model/non-null model, directional view, or source-bound codec property.
     pub role: String,
+    /// Native shape of the model, when the backend captures one.
     pub descriptor: Option<Value>,
 }
 
@@ -70,7 +90,9 @@ pub struct NativeModel {
 /// Runtime public APIs outside this descriptor profile need their native gates.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NativeSnapshot {
+    /// Descriptor format identifier, `suspect-native-interface-v1`.
     pub format: String,
+    /// Target and package configuration the plan was built with.
     pub target: TargetConfig,
     /// Explicit interpretation used to produce this native plan.
     #[serde(default)]
@@ -84,10 +106,15 @@ pub struct NativeSnapshot {
     /// Typed client-default policy, captured from the actual native plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaultsDescriptor>,
+    /// Whether the descriptor comes from a real plan.
     pub status: PlanStatus,
+    /// Generator and runtime asset provenance.
     pub runtime: RuntimeProvenance,
+    /// Selected operations' native interfaces.
     pub operations: Vec<NativeOperation>,
+    /// Generated models' native identities.
     pub models: Vec<NativeModel>,
+    /// Configuration and planner findings.
     pub findings: Vec<PlanFinding>,
 }
 

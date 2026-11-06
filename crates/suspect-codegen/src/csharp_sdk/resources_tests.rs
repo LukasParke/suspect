@@ -383,7 +383,7 @@ fn native_name<'a>(plan: &'a super::SdkPlan, document: &str, pointer: &str) -> &
 }
 fn consumer(plan: &super::SdkPlan) -> String {
     let mut text = include_str!("testdata/ResourceSdkConsumer.cs").to_owned();
-    let entry = "http://api.csharp.test/v1/spec/openapi.json";
+    let entry = "https://api.csharp.test/v1/spec/openapi.json";
     for name in ["Tree", "Strict", "Envelope", "NullableEnvelope"] {
         text = text.replace(
             &format!("__{}__", name.to_uppercase()),
@@ -393,17 +393,17 @@ fn consumer(plan: &super::SdkPlan) -> String {
     for (name, document, pointer) in [
         (
             "CHOICE",
-            "http://storage.csharp.test/schema/choice.json",
+            "https://storage.csharp.test/schema/choice.json",
             "",
         ),
         (
             "INTEGER",
-            "http://storage.csharp.test/schema/catalog.json",
+            "https://storage.csharp.test/schema/catalog.json",
             "/$defs/a~1b~0% #é",
         ),
         (
             "NESTED",
-            "http://storage.csharp.test/schema/detached.json",
+            "https://storage.csharp.test/schema/detached.json",
             "/$defs/start",
         ),
     ] {
@@ -440,7 +440,7 @@ fn source_resource_sdk_models_and_metadata() {
         (OwnedProgram::V3_VERSION, OwnedProgram::V3_PROFILE)
     );
     assert_eq!(plan.operations().len(), 8);
-    let entry = "http://api.csharp.test/v1/spec/openapi.json";
+    let entry = "https://api.csharp.test/v1/spec/openapi.json";
     let tree = source(entry, "/components/schemas/Tree");
     let super::models::CsDecl::Record { fields, .. } =
         &plan.models().declarations()[&super::models::key(&tree)]
@@ -474,10 +474,10 @@ fn source_resource_sdk_models_and_metadata() {
     );
     assert!(
         plan.models()
-            .is_json_carrier(&source("http://storage.csharp.test/schema/choice.json", ""))
+            .is_json_carrier(&source("https://storage.csharp.test/schema/choice.json", ""))
     );
     assert!(!plan.program().nodes.iter().any(|node| node.source.document
-        == "http://storage.csharp.test/schema/detached.json"
+        == "https://storage.csharp.test/schema/detached.json"
         && node.source.pointer.is_empty()));
     for node in &plan.program().nodes {
         if node.source.pointer.contains("/$defs/Binding") {
@@ -566,12 +566,12 @@ fn native_resource_sdk_packages() {
         native.project("negative", Some("Resources.Csharp"), false);
         let tree = native_name(
             &plan,
-            "http://api.csharp.test/v1/spec/openapi.json",
+            "https://api.csharp.test/v1/spec/openapi.json",
             "/components/schemas/Tree",
         );
         let envelope = native_name(
             &plan,
-            "http://api.csharp.test/v1/spec/openapi.json",
+            "https://api.csharp.test/v1/spec/openapi.json",
             "/components/schemas/Envelope",
         );
         write(
@@ -707,7 +707,7 @@ fn source_resource_examples_and_unsupported_boundaries() {
             .diagnostics()
             .iter()
             .any(|d| d.code == "examples-declared-invalid"
-                && d.source.document().as_str() == "http://api.csharp.test/v1/spec/openapi.json"
+                && d.source.document().as_str() == "https://api.csharp.test/v1/spec/openapi.json"
                 && d.source.pointer()
                     == "/paths/~1envelope/post/requestBody/content/application~1json/example"
                 && d.at.end > d.at.start)
@@ -740,7 +740,7 @@ fn source_resource_examples_and_unsupported_boundaries() {
             .declared_source
             .as_ref()
             .is_none_or(
-                |s| s.document().as_str() != "http://storage.csharp.test/schema/fallback.json"
+                |s| s.document().as_str() != "https://storage.csharp.test/schema/fallback.json"
             ))
     );
     assert!(
@@ -863,7 +863,7 @@ fn source_canonical_resource_capture_keeps_dynamic_codec_obligations() {
         .models
         .iter()
         .find(|m| {
-            m.source.document == "http://storage.csharp.test/schema/choice.json"
+            m.source.document == "https://storage.csharp.test/schema/choice.json"
                 && m.source.pointer.is_empty()
                 && m.role == "erased-alias"
         })

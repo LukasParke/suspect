@@ -1,9 +1,5 @@
 //! Primary-corpus Python/Go consumers use independent hand-authored HTTP bytes.
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, process::Command, sync::Arc};
 use suspect_ir::contract::{Contract, SourceId};
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
@@ -14,10 +10,8 @@ const WANTED: &[&str] = &[
     "listContainerFiles",
     "getContainerFile",
 ];
-fn source() -> (Arc<Contract>, Vec<SourceId>) {
-    let path =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+fn source() -> Option<(Arc<Contract>, Vec<SourceId>)> {
+    let path = suspect_codegen::toolchain::openrouter_spec()?;
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())
@@ -32,7 +26,7 @@ fn source() -> (Arc<Contract>, Vec<SourceId>) {
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
     assert_eq!(selected.len(), 5);
-    (contract, selected)
+    Some((contract, selected))
 }
 fn checked(command: &mut Command, root: &Path) {
     let output = command.output().unwrap();
@@ -60,7 +54,9 @@ fn body(contract: &Contract, id: &str) -> SourceId {
 #[test]
 #[ignore = "requires tracked public corpus, Python wheel tools and native Python"]
 fn installed_python_five_operations_preserve_the_actual_wire_contract() {
-    let (contract, selected) = source();
+    let Some((contract, selected)) = source() else {
+        return;
+    };
     let plan =
         suspect_codegen::python_http::plan_http(contract.clone(), &selected, Default::default())
             .unwrap();
@@ -100,7 +96,9 @@ fn installed_python_five_operations_preserve_the_actual_wire_contract() {
         .map(|entry| entry.unwrap().path())
         .find(|file| file.extension().is_some_and(|ext| ext == "whl"))
         .unwrap();
-    let interpreter = std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into());
+    let Some(interpreter) = suspect_codegen::toolchain::pinned_python("3.11") else {
+        return;
+    };
     checked(
         Command::new("uv")
             .args(["venv", "--python"])
@@ -137,7 +135,9 @@ fn installed_python_five_operations_preserve_the_actual_wire_contract() {
 #[test]
 #[ignore = "requires tracked public corpus and native Go"]
 fn native_go_five_operations_preserve_the_actual_wire_contract() {
-    let (contract, selected) = source();
+    let Some((contract, selected)) = source() else {
+        return;
+    };
     let plan = suspect_codegen::go_http::plan_http(contract.clone(), &selected, Default::default())
         .unwrap();
     let name = |id: &str| {

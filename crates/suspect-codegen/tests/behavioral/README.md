@@ -35,7 +35,7 @@ native toolchain runs.
 3. Add `x-suspect-behavior` entries per backend, taking the markers from
    that backend's acceptance suite (the `*_pagination.rs`-style files) —
    they are the same assertions, re-pinned per fragment.
-4. Run `cargo test -p suspect-codegen --test behavioral_fragments`. If a
+4. Run `cargo test -p suspect-codegen --test shared`. If a
    backend's markers fail, fix the markers against the emitted output —
    never loosen the invariant to make it pass.
 

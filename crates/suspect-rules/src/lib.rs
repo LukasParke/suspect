@@ -1,11 +1,34 @@
 //! TS/JS custom rule runtime.
 //!
-//! Host side of the Bun rule worker (see `docs/TS-RULE-RUNTIME.md`): spawns
-//! a long-lived `bun` sidecar, negotiates the NDJSON protocol, evaluates
-//! each rule's `given` selector natively against the [`suspect_low::LowDoc`]
-//! CST, ships
-//! only the selected nodes, enforces per-run deadlines with kill-and-restart
-//! semantics, and resolves finding spans back to byte ranges.
+//! Host side of the Bun rule worker: spawns a long-lived `bun` sidecar,
+//! negotiates the NDJSON protocol, evaluates each rule's `given` selector
+//! natively against the [`suspect_low::LowDoc`] CST, ships only the
+//! selected nodes, enforces per-run deadlines with kill-and-restart
+//! semantics, and resolves finding spans back to byte ranges. Why it is a
+//! sidecar: `docs/adr/0005-custom-rules-in-a-bun-sidecar.md`.
+//!
+//! # Authoring a rule
+//!
+//! Rules are TypeScript files under `.suspect/rules/` (scaffold one with
+//! `suspect rules new <name>`). Each file default-exports `defineRule(...)`
+//! from `@suspect/rules-sdk` (`rules-runtime/`):
+//!
+//! ```text
+//! import { defineRule, r } from "@suspect/rules-sdk";
+//!
+//! export default defineRule({
+//!   meta: { id: "operation-summary", description: "Operations need a summary", type: "problem" },
+//!   given: r.operation,          // selector, evaluated Rust-side
+//!   check(op, ctx) {
+//!     if (!op.summary) ctx.report({ message: "Operation is missing a summary", at: op });
+//!   },
+//! });
+//! ```
+//!
+//! Bun mode `auto` skips TS rules when `bun` is not on PATH, `require` makes
+//! that an error, and `off` never starts the worker. Each run has a deadline
+//! ([`DEFAULT_TIMEOUT_MS`] unless configured); a rule that breaches it is
+//! disabled for the session.
 //!
 //! ```no_run
 //! # async fn demo() -> Result<(), suspect_rules::Error> {

@@ -17,11 +17,11 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 use suspect_ir::contract::{Contract, SourceId};
 
-use super::SourceLocation;
 use super::model::{
     CredentialHook, CredentialRequirement, OAuthFlow, OAuthFlowKind as DeclaredFlowKind,
     ProtocolPlan,
 };
+use super::{OperationPlan, Representation, SourceLocation};
 pub use crate::http_contract::HttpDiagnostic;
 pub use crate::sdk_defaults::{
     OAuthDefaults, OAuthMode, OAuthRefresh, OAuthSchemeConfig, OAuthStorage, SdkDefaults,
@@ -31,8 +31,10 @@ pub use crate::sdk_defaults::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OAuthSchemeKind {
+    /// `type: oauth2`.
     #[serde(rename = "oauth2")]
     OAuth2,
+    /// `type: openIdConnect`.
     #[serde(rename = "open-id-connect")]
     OpenIdConnect,
 }
@@ -44,7 +46,9 @@ pub enum OAuthSchemeKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OAuthClientAuth {
+    /// HTTP Basic with the client id and secret (RFC 6749 section 2.3.1).
     ClientSecretBasic,
+    /// Public client: only `client_id` is sent.
     None,
 }
 
@@ -52,14 +56,19 @@ pub enum OAuthClientAuth {
 /// absent declarations stay absent and are never invented.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OAuthFlowDescriptor {
+    /// Grant this flow performs.
     pub kind: OAuthFlowDescriptorKind,
+    /// Declared `authorizationUrl`.
     pub authorization_url: Option<String>,
+    /// Declared `tokenUrl`.
     pub token_url: Option<String>,
+    /// Declared `refreshUrl`.
     pub refresh_url: Option<String>,
     /// OAS 3.2 device-authorization endpoint.
     pub device_authorization_url: Option<String>,
     /// Declared scope name to description, in sorted order.
     pub scopes: BTreeMap<String, String>,
+    /// How the client authenticates to the token endpoint.
     pub client_auth: OAuthClientAuth,
     /// Implicit and password flows are represented for documentation but are
     /// never executed by generated code.
@@ -70,10 +79,15 @@ pub struct OAuthFlowDescriptor {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OAuthFlowDescriptorKind {
+    /// Implicit grant (deprecated; never executed).
     Implicit,
+    /// Resource owner password grant (deprecated; never executed).
     Password,
+    /// Client credentials grant.
     ClientCredentials,
+    /// Authorization code grant; PKCE is the interactive default.
     AuthorizationCode,
+    /// Device authorization grant (RFC 8628, OAS 3.2).
     DeviceAuthorization,
 }
 
@@ -83,31 +97,188 @@ pub struct OAuthSchemePlan {
     /// Source Security Scheme name; also the `sdk_defaults.oauth.schemes`
     /// configuration key for supplements.
     pub name: String,
+    /// Declared scheme type.
     pub kind: OAuthSchemeKind,
     /// Declared flows in declaration order. Empty for OpenID Connect, whose
     /// flows the discovery document defines at runtime.
     pub flows: Vec<OAuthFlowDescriptor>,
+    /// Configured environment variable holding the client id.
     pub client_id_env: Option<String>,
+    /// Configured environment variable holding the client secret.
     pub client_secret_env: Option<String>,
     /// Refresh-before-expiry clock skew in seconds; default 30.
     pub refresh_skew_seconds: u32,
     /// Configuration-supplied only; OpenAPI flow objects do not declare one.
     pub revocation_endpoint: Option<String>,
+    /// Configuration-supplied only, like `revocation_endpoint`.
     pub introspection_endpoint: Option<String>,
     /// The known discovery/metadata document: the declared `openIdConnectUrl`
     /// for OpenID Connect, otherwise the declared `oauth2MetadataUrl` or the
     /// configured `discovery_url` for OAuth2.
     pub discovery: Option<String>,
+    /// Runtime token store.
     pub storage: OAuthStorage,
+    /// Runtime refresh policy.
     pub refresh: OAuthRefresh,
 }
 
 /// Complete generation-time OAuth lifecycle planning for one document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct OAuthPlan {
+    /// Configured lifecycle mode; `Off` leaves `schemes` empty.
     pub mode: OAuthMode,
     /// Compiled descriptors for used source schemes, sorted by name.
     pub schemes: Vec<OAuthSchemePlan>,
+}
+
+impl OAuthFlowDescriptor {
+    /// Whether generated code runs this flow: it is not a deprecated grant
+    /// (implicit, password — see ADR 0027) and every endpoint its grant
+    /// needs is declared. Every backend uses this one definition, so a flow
+    /// missing its token endpoint behaves the same in all twelve SDKs.
+    #[must_use]
+    pub fn is_executable(&self) -> bool {
+        if self.deprecated_flow {
+            return false;
+        }
+        match self.kind {
+            OAuthFlowDescriptorKind::ClientCredentials => self.token_url.is_some(),
+            OAuthFlowDescriptorKind::AuthorizationCode => {
+                self.authorization_url.is_some() && self.token_url.is_some()
+            }
+            OAuthFlowDescriptorKind::DeviceAuthorization => {
+                self.device_authorization_url.is_some() && self.token_url.is_some()
+            }
+            OAuthFlowDescriptorKind::Implicit | OAuthFlowDescriptorKind::Password => false,
+        }
+    }
+}
+
+impl OAuthSchemePlan {
+    /// The flows generated code runs, in declaration order.
+    pub fn executable_flows(&self) -> impl Iterator<Item = &OAuthFlowDescriptor> {
+        self.flows.iter().filter(|flow| flow.is_executable())
+    }
+
+    /// Whether generated code runs a flow of this kind for this scheme.
+    #[must_use]
+    pub fn executes(&self, kind: OAuthFlowDescriptorKind) -> bool {
+        self.executable_flows().any(|flow| flow.kind == kind)
+    }
+
+    /// Whether the scheme needs a runtime at all: it has an executable flow
+    /// or OpenID Connect discovery (whose flows are known only at runtime).
+    #[must_use]
+    pub fn is_usable(&self) -> bool {
+        self.discovery.is_some() || self.executable_flows().next().is_some()
+    }
+}
+
+impl OAuthPlan {
+    /// The schemes that need a runtime, in plan (name) order.
+    pub fn usable_schemes(&self) -> impl Iterator<Item = &OAuthSchemePlan> {
+        self.schemes.iter().filter(|scheme| scheme.is_usable())
+    }
+
+    /// Whether a backend emits its OAuth lifecycle module.
+    #[must_use]
+    pub fn emits(&self) -> bool {
+        self.mode != OAuthMode::Off && self.usable_schemes().next().is_some()
+    }
+
+    /// Whether any scheme executes a flow of this kind.
+    #[must_use]
+    pub fn executes(&self, kind: OAuthFlowDescriptorKind) -> bool {
+        self.schemes.iter().any(|scheme| scheme.executes(kind))
+    }
+
+    /// Whether any scheme uses OpenID Connect discovery.
+    #[must_use]
+    pub fn has_discovery(&self) -> bool {
+        self.schemes.iter().any(|scheme| scheme.discovery.is_some())
+    }
+}
+
+/// One OAuth/OIDC security requirement protecting a streaming operation: the
+/// unit every backend's no-replay table is built from.
+#[derive(Debug, Clone, Copy)]
+pub struct StreamProtectedRequirement<'a, O> {
+    /// The requirement's source Security Scheme name.
+    pub scheme: &'a str,
+    /// The backend's operation (or the bare [`OperationPlan`]) carrying it.
+    pub operation: &'a O,
+    /// The security requirement itself.
+    pub requirement: &'a CredentialRequirement,
+}
+
+/// Every OAuth2/OpenID Connect security requirement, naming a scheme in
+/// `scheme_names`, on an operation any of whose response media is a
+/// [`Representation::Stream`], in operation then alternative then requirement
+/// order (duplicates included).
+///
+/// The 401 refresh-and-replay wrapper never replays these: a stream body
+/// cannot be resent once delivered. Backends key their compiled no-replay
+/// table by whatever their generated runtime reads back at attach time (the
+/// requirement's source pointer, its `document#pointer` address, the
+/// operation's pointer or its ID), so this yields the backend's own
+/// operation value alongside the requirement; `wire` projects it to the
+/// protocol operation.
+pub fn stream_protected_requirements<'a, O>(
+    operations: impl IntoIterator<Item = &'a O>,
+    wire: impl Fn(&'a O) -> &'a OperationPlan,
+    scheme_names: &std::collections::BTreeSet<&str>,
+) -> impl Iterator<Item = StreamProtectedRequirement<'a, O>>
+where
+    O: 'a,
+{
+    operations
+        .into_iter()
+        .map(move |operation| (operation, wire(operation)))
+        .filter(|(_, plan)| {
+            plan.responses().iter().any(|response| {
+                response
+                    .media()
+                    .iter()
+                    .any(|media| matches!(media.representation(), Representation::Stream { .. }))
+            })
+        })
+        .flat_map(move |(operation, plan)| {
+            plan.security()
+                .alternatives()
+                .iter()
+                .flat_map(|alternative| alternative.requirements())
+                .filter(move |requirement| {
+                    matches!(
+                        requirement.credential(),
+                        CredentialHook::OAuth2 { .. } | CredentialHook::OpenIdConnect { .. }
+                    ) && scheme_names.contains(requirement.name())
+                })
+                .map(move |requirement| StreamProtectedRequirement {
+                    scheme: requirement.name(),
+                    operation,
+                    requirement,
+                })
+        })
+}
+
+/// Security-requirement source pointers, per OAuth/OIDC scheme name, that
+/// protect a streaming operation (see [`stream_protected_requirements`]).
+/// Backends whose runtime reads the bare pointer embed this table; the others
+/// build their own key from the same iterator. Only schemes in
+/// `scheme_names` are considered.
+#[must_use]
+pub fn no_replay_requirements<'a>(
+    operations: impl IntoIterator<Item = &'a OperationPlan>,
+    scheme_names: &std::collections::BTreeSet<&str>,
+) -> BTreeMap<String, std::collections::BTreeSet<String>> {
+    let mut pointers: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+    for found in stream_protected_requirements(operations, |operation| operation, scheme_names) {
+        pointers
+            .entry(found.scheme.to_owned())
+            .or_default()
+            .insert(found.requirement.source().source().pointer().to_owned());
+    }
+    pointers
 }
 
 fn diagnostic(

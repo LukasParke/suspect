@@ -101,7 +101,7 @@ pub(super) struct IncomingEmission {
     pub route_const: String,
     pub payload_type: String,
     pub decode: String,
-    pub construct: Option<String>,
+    pub construct: String,
     pub payload: Payload,
     pub required_body: bool,
     pub required_headers: Vec<String>,
@@ -336,7 +336,7 @@ pub(super) fn prepare(
             route_const,
             payload_type,
             decode,
-            construct: Some(construct),
+            construct,
             payload,
             required_body: operation
                 .request()
@@ -454,9 +454,7 @@ fn decoder(entry: &IncomingEmission) -> String {
 
 /// One receipt's reply constructor, when an exact 2xx response is declared.
 fn constructor(entry: &IncomingEmission, response: &ConstructedResponse) -> String {
-    let Some(construct) = &entry.construct else {
-        return String::new();
-    };
+    let construct = &entry.construct;
     let has_body = response.body.is_some();
     let has_headers = !response.headers.is_empty();
     let result_type = match &response.body {

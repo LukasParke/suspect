@@ -330,7 +330,9 @@ fn prepare(target: Target, args: &ApplicationArgs) -> Result<Prepared, Vec<Diagn
             })
             .collect::<Vec<_>>()
     };
-    let (files, operations) = match mapping {
+    type Planned = Result<(Vec<suspect_codegen::OutFile>, Vec<Value>), Vec<Diagnostic>>;
+    let planned = suspect_codegen::guard::catch(target.profile(), || -> Planned {
+        match mapping {
         Mapping::Cli(inputs) => {
             let (mapping, config) = *inputs;
             let plan = api_cli::plan_cli(contract, mapping, config).map_err(locate)?;
@@ -338,7 +340,7 @@ fn prepare(target: Target, args: &ApplicationArgs) -> Result<Prepared, Vec<Diagn
                 "operationId":operation.operation_id, "nativeMethod":operation.method_name,
                 "document":operation.source.document().as_str(), "pointer":operation.source.pointer(),
             })).collect();
-            (api_cli::emit_cli(&plan), operations)
+            Ok((api_cli::emit_cli(&plan), operations))
         }
         Mapping::Mcp(inputs) => {
             let (mapping, config) = *inputs;
@@ -347,9 +349,12 @@ fn prepare(target: Target, args: &ApplicationArgs) -> Result<Prepared, Vec<Diagn
                 "operationId":operation.operation_id, "nativeMethod":operation.function_name,
                 "document":operation.source.document().as_str(), "pointer":operation.source.pointer(),
             })).collect();
-            (mcp::emit_server(&plan), operations)
+            Ok((mcp::emit_server(&plan), operations))
         }
-    };
+        }
+    })
+    .map_err(|message| vec![Diagnostic::file(&args.mapping, target.code("internal-error"), message)])?;
+    let (files, operations) = planned?;
     Ok(Prepared {
         files,
         source: entry.to_string(),

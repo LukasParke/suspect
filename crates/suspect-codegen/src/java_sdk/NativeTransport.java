@@ -35,7 +35,11 @@ public final class NativeTransport {
     }
     public static void main(String[] args) throws Exception {
         for (String token : List.of("", "====", "a=b", "token\r\nX: secret", "雪", "Bearer value")) invalid(() -> HttpRuntime.Options.builder().credential("apiKey", token));
-        for (String url : List.of("http://example.com", "https://u:p@example.com/api", "https://example.com/?x=1", "https://example.com/#x", "http://127.0.0.1:bad", "https://example.com:65536", "https://example.com:0", "https://example.com/api/..", "https://example.com/api/%2E%2e%2Fprivate", "https://example.com/%FF", "https://example.com/%5cpath")) invalid(() -> HttpRuntime.Options.builder().serverUrl(URI.create(url)).build());
+        for (String url : List.of("http://example.com", "https://u:p@example.com/api", "https://example.com/?x=1", "https://example.com/#x", "http://127.0.0.1:bad", "https://example.com:65536", "https://example.com:0", "https://example.com/api/..", "https://example.com/./api", "https://example.com/caf\u00e9")) invalid(() -> HttpRuntime.Options.builder().serverUrl(URI.create(url)).build());
+        // ADR 0035: encoded octets are opaque path data, never decoded or refused for what they decode to.
+        for (String url : List.of("https://example.com/api/%2E%2e%2Fprivate", "https://example.com/%FF", "https://example.com/%5cpath", "http://localhost:8080/api", "http://[::1]/api")) HttpRuntime.Options.builder().serverUrl(URI.create(url)).build();
+        // ADR 0035: a non-loopback plain-HTTP override needs the explicit opt-in.
+        HttpRuntime.Options.builder().allowInsecureHttp(true).serverUrl(URI.create("http://example.com/api")).build();
         invalid(() -> HttpRuntime.Options.builder().timeout(Duration.ZERO).build());
         invalid(() -> HttpRuntime.Options.builder().maxRequestBytes(0).build());
         for (int mode = 0; mode < 3; mode++) {
@@ -56,6 +60,11 @@ public final class NativeTransport {
             NativeSupport.check(wire.headers().get("Authorization").equals(List.of("Bearer explicit-token==")), "source credential");
             NativeSupport.check(!wire.headers().containsKey("Cookie") && wire.body().length == 0, "implicit request state");
             try { value.headers().clear(); throw new AssertionError("mutable headers"); } catch (UnsupportedOperationException expected) { }
+        }
+        var opaque = new NativeSupport.Mock(new NativeSupport.Script(200, "application/json", WIDGET));
+        try (var client = new OpenRouter(options(opaque).serverUrl(URI.create("https://fixture.example.test/api/%2E%2e/%2f//v1")).build())) {
+            client.getWidget(input);
+            NativeSupport.check(opaque.requests.getFirst().uri().startsWith("https://fixture.example.test/api/%2E%2e/%2f//v1/widgets/"), "server path octets rewritten");
         }
         NativeSupport.check(successful.shutdowns.get() == 0, "SDK closed caller-owned transport");
         var queries = new NativeSupport.Mock(new NativeSupport.Script(200, "application/json", PAGE));
@@ -84,7 +93,10 @@ public final class NativeTransport {
             fails("resource-limit", () -> client.createWidget(CreateWidgetInput.builder(WidgetInput.builder("x".repeat(1000)).build()).build()));
             NativeSupport.check(limits.requests.isEmpty(), "oversized body reached transport");
         }
-        for (String media : List.of("text/plain", "application/json; charset=iso-8859-1", "application/json; broken", "application/json; charset=\"unterminated")) {
+        // JSON is UTF-8 whatever its charset label says (RFC 8259).
+        var labelled = new NativeSupport.Mock(new NativeSupport.Script(200, "application/json; charset=iso-8859-1", WIDGET));
+        try (var client = new OpenRouter(options(labelled).build())) { NativeSupport.check(client.getWidget(input) != null, "charset label changed JSON decoding"); }
+        for (String media : List.of("text/plain", "application/json; broken", "application/json; charset=\"unterminated")) {
             var transport = new NativeSupport.Mock(new NativeSupport.Script(200, media, WIDGET));
             try (var client = new OpenRouter(options(transport).build())) { fails("unexpected-content-type", () -> client.getWidget(input)); }
         }

@@ -324,7 +324,7 @@ use generated_models::{{models::*,codecs::*,Nullable,Presence}};
             good = GOOD
         );
         std::fs::write(directory.join("rust/tests/dialect.rs"), source).unwrap();
-        run(Command::new("cargo")
+        run(suspect_codegen::toolchain::nested_cargo()
             .args(["test", "--offline", "--quiet", "-j", "2", "--manifest-path"])
             .arg(directory.join("rust/Cargo.toml"))
             .arg("--target-dir")
@@ -435,6 +435,9 @@ fn conditional_nullability_is_retained_by_the_admitted_scoped_codec_profile() {
 #[test]
 #[ignore = "requires installed Python"]
 fn python_native_dialect_models_and_codecs() {
+    let Some(python) = suspect_codegen::toolchain::pinned_python("3.11") else {
+        return;
+    };
     for version in ["3.0.4", "3.1.2"] {
         let contract = fixture(version);
         let roots = [root(&contract, "Record")];
@@ -470,17 +473,18 @@ assert C.ChoiceCodec.decode('1')==1
             invalid = serde_json::to_string(&invalid_inputs()).unwrap()
         );
         std::fs::write(directory.join("python/dialect_consumer.py"), source).unwrap();
-        run(Command::new(
-            std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()),
-        )
-        .arg("dialect_consumer.py")
-        .current_dir(directory.join("python")));
+        run(Command::new(&python)
+            .arg("dialect_consumer.py")
+            .current_dir(directory.join("python")));
     }
 }
 
 #[test]
 #[ignore = "requires installed Go"]
 fn go_native_dialect_models_and_codecs() {
+    let Some(go) = suspect_codegen::toolchain::require("go") else {
+        return;
+    };
     for version in ["3.0.4", "3.1.2"] {
         let contract = fixture(version);
         let roots = [root(&contract, "Record")];
@@ -513,7 +517,7 @@ func TestDialectConsumer(t *testing.T) {{
 "#
         );
         std::fs::write(directory.join("go/dialect_test.go"), source).unwrap();
-        run(Command::new("go")
+        run(Command::new(&go)
             .args(["test", "-p", "2", "./..."])
             .env("GOTOOLCHAIN", "local")
             .current_dir(directory.join("go")));
@@ -523,6 +527,12 @@ func TestDialectConsumer(t *testing.T) {{
 #[test]
 #[ignore = "requires installed Node and TypeScript"]
 fn typescript_native_dialect_models_and_codecs() {
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
+    // The workspace-pinned compiler `tools/native-setup.sh typescript` installs.
+    let tsc = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tools/typescript-docs/node_modules/typescript/bin/tsc");
     for version in ["3.0.4", "3.1.2"] {
         let contract = fixture(version);
         let roots = [root(&contract, "Record")];
@@ -561,7 +571,8 @@ const absent: {name}={{word:'live',small:0,wide:1n}};
             invalid = serde_json::to_string(&invalid_inputs()).unwrap()
         );
         std::fs::write(directory.join("typescript/dialect-consumer.ts"), source).unwrap();
-        run(Command::new("tsc")
+        run(Command::new(&node)
+            .arg(&tsc)
             .args([
                 "--target",
                 "ES2022",
@@ -577,7 +588,7 @@ const absent: {name}={{word:'live',small:0,wide:1n}};
                 "dialect-consumer.ts",
             ])
             .current_dir(directory.join("typescript")));
-        run(Command::new("node")
+        run(Command::new(&node)
             .arg("compiled/dialect-consumer.js")
             .current_dir(directory.join("typescript")));
     }
@@ -607,7 +618,8 @@ if(!rejected)throw new Error('modern sibling type was ignored');
 // @ts-expect-error modern ref siblings remove null from the native intersection
 const invalid:Record=null;
 "#).unwrap();
-    run(Command::new("tsc")
+    run(Command::new(&node)
+        .arg(&tsc)
         .args([
             "--target",
             "ES2022",
@@ -623,7 +635,7 @@ const invalid:Record=null;
             "dialect-consumer.ts",
         ])
         .current_dir(directory.join("typescript")));
-    run(Command::new("node")
+    run(Command::new(&node)
         .arg("compiled/dialect-consumer.js")
         .current_dir(directory.join("typescript")));
 }
@@ -631,6 +643,9 @@ const invalid:Record=null;
 #[test]
 #[ignore = "requires installed Swift 6"]
 fn swift_native_dialect_models_and_codecs() {
+    let Some(swift) = suspect_codegen::toolchain::require("swift") else {
+        return;
+    };
     for version in ["3.0.4", "3.1.2"] {
         let contract = fixture(version);
         let selected = contract
@@ -677,7 +692,7 @@ final class DialectTests: XCTestCase {{
 "##
         );
         std::fs::write(target.join("DialectTests.swift"), source).unwrap();
-        run(Command::new("swift")
+        run(Command::new(&swift)
             .args(["test", "-j", "2", "--disable-swift-testing"])
             .current_dir(&directory));
     }

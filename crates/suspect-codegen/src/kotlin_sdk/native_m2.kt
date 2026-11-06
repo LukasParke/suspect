@@ -184,7 +184,9 @@ private suspend fun wire() {
             check(denied.data.message == "private rejection" && denied.response.status == 422 && denied.operationId == "createWidget")
             check(!denied.toString().contains("private rejection") && !denied.toString().contains("test-key"))
             check(fails<GetWidgetApiException.Status404> { client.getWidget(GetWidgetInput("missing")) }.data.message == "private rejection")
-            for (path in listOf("badmedia", "badcharset", "duplicate-media", "encoding")) {
+            // JSON is UTF-8 whatever its charset label says (RFC 8259).
+            check(client.getWidget(GetWidgetInput("badcharset")).data.id.isNotEmpty())
+            for (path in listOf("badmedia", "duplicate-media", "encoding")) {
                 check(fails<SdkException> { client.getWidget(GetWidgetInput(path)) }.kind == FailureKind.CONTENT_TYPE)
             }
             for (path in listOf("badjson", "badmodel", "invalid-error")) {
@@ -310,9 +312,16 @@ private suspend fun injected() {
     }
     check(primary.kind == FailureKind.RESPONSE_VALIDATION && primary.suppressed.size == 1 && closing.closed)
     check(primary.suppressed.single() is SdkException && !primary.suppressed.single().toString().contains("private"))
-    for (url in listOf("https://user:pass@example.test", "https://example.test/api/../private", "https://example.test/api/%2e%2e%2fprivate", "https://example.test:70000", "http://example.test", "https://example.test?query")) {
+    for (url in listOf("https://user:pass@example.test", "https://example.test/api/../private", "https://example.test/./private", "https://example.test:70000", "https://example.test:0", "http://example.test", "https://example.test?query", "https://example.test/caf\u00e9")) {
         bad<IllegalArgumentException> { ClientOptions(serverUrl = URI(url)) }
     }
+    // ADR 0035: encoded octets are opaque path data, sent verbatim.
+    for (url in listOf("https://example.test/api/%2e%2e%2fprivate", "https://example.test/%2E/%2f/", "http://localhost:8080/api", "http://[::1]/api")) {
+        check(ClientOptions(serverUrl = URI(url)).serverUrl.toString() == url)
+    }
+    check(ClientOptions(serverUrl = URI("http://example.test/api"), allowInsecureHttp = true).serverUrl.toString() == "http://example.test/api")
+    val opaque = Client(Credentials(apiKey = "test-key"), Transport { request -> check(request.url.toString().startsWith("https://example.test/a/%2E%2e/%2f//v1/")); reply() }, ClientOptions(serverUrl = URI("https://example.test/a/%2E%2e/%2f//v1")))
+    opaque.use { it.getWidget(GetWidgetInput("x")) }
     println("KOTLIN_INJECTED_TRANSPORT_AND_CLEANUP_PASSED")
 }
 

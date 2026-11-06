@@ -40,7 +40,7 @@ Subsequent builds use `npm ci` with the recorded lock, then run the native tests
 
 ```sh
 SUSPECT_DOCS_NODE=/path/to/node-22.23.1 \
-  cargo test --offline -p suspect-codegen --test typescript_docs \
+  cargo test --offline -p suspect-codegen --test typescript \
   -- --include-ignored --nocapture
 ```
 

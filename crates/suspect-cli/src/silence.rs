@@ -32,6 +32,9 @@ impl Silenced {
             match null {
                 Some(null) => {
                     let null_fd = null.as_raw_fd();
+                    // SAFETY: dup/dup2 only take integer descriptors; the
+                    // standard streams and `null_fd` are open here, and a
+                    // failed dup (-1) is filtered out before it is reused.
                     let saved_out = unsafe { libc::dup(libc::STDOUT_FILENO) };
                     let saved_err = unsafe { libc::dup(libc::STDERR_FILENO) };
                     unsafe {
@@ -42,8 +45,8 @@ impl Silenced {
                     // descriptors it created are now owned by the process.
                     drop(null);
                     Self {
-                        saved_out: Some(saved_out),
-                        saved_err: Some(saved_err),
+                        saved_out: (saved_out >= 0).then_some(saved_out),
+                        saved_err: (saved_err >= 0).then_some(saved_err),
                     }
                 }
                 None => Self {
@@ -63,6 +66,9 @@ impl Drop for Silenced {
     fn drop(&mut self) {
         #[cfg(unix)]
         {
+            // SAFETY: each saved descriptor came from a successful dup in
+            // `start` and is owned solely by this guard, so restoring and
+            // closing it once is sound.
             if let Some(saved) = self.saved_out.take() {
                 unsafe {
                     libc::dup2(saved, libc::STDOUT_FILENO);

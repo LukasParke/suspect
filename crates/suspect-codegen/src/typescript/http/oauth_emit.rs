@@ -19,8 +19,7 @@
 //! a discovery URL.
 
 use crate::http_protocol::{
-    CredentialHook, OAuthClientAuth, OAuthFlowDescriptorKind, OAuthPlan, OAuthSchemeKind,
-    OAuthSchemePlan, Representation,
+    OAuthClientAuth, OAuthFlowDescriptorKind, OAuthSchemeKind, OAuthSchemePlan,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -51,47 +50,6 @@ fn scheme_kind(kind: OAuthSchemeKind) -> &'static str {
     }
 }
 
-fn executable(scheme: &OAuthSchemePlan, kind: OAuthFlowDescriptorKind) -> bool {
-    scheme
-        .flows
-        .iter()
-        .any(|flow| flow.kind == kind && !flow.deprecated_flow)
-}
-
-/// Whether the plan compiles at least one scheme with an executable flow or a
-/// discovery URL, so `typescript/oauth.ts` participates in the package. A
-/// discovery URL makes a scheme usable even with no declared flows: OpenID
-/// Connect schemes have their endpoints defined by the discovery document at
-/// runtime.
-pub(super) fn has_usable(plan: &OAuthPlan) -> bool {
-    plan.schemes.iter().any(|scheme| {
-        has_discovery(scheme) || scheme.flows.iter().any(|flow| !flow.deprecated_flow)
-    })
-}
-
-/// The usable subset: schemes carrying at least one executable flow or a
-/// discovery URL. Deprecated implicit/password flows are represented in their
-/// scheme's frozen descriptor but never execute, and a scheme with only those
-/// flows and no discovery URL emits nothing.
-pub(super) fn usable(plan: &OAuthPlan) -> Vec<&OAuthSchemePlan> {
-    plan.schemes
-        .iter()
-        .filter(|scheme| {
-            has_discovery(scheme) || scheme.flows.iter().any(|flow| !flow.deprecated_flow)
-        })
-        .collect()
-}
-
-/// Whether one compiled scheme carries a discovery/metadata URL, which the
-/// generated runtime resolves at call time.
-fn has_discovery(scheme: &OAuthSchemePlan) -> bool {
-    scheme.discovery.is_some()
-}
-
-fn has_discovery_among(schemes: &[&OAuthSchemePlan]) -> bool {
-    schemes.iter().any(|scheme| has_discovery(scheme))
-}
-
 fn has_revocation(schemes: &[&OAuthSchemePlan]) -> bool {
     schemes
         .iter()
@@ -102,65 +60,6 @@ fn has_introspection(schemes: &[&OAuthSchemePlan]) -> bool {
     schemes
         .iter()
         .any(|scheme| scheme.introspection_endpoint.is_some())
-}
-
-fn has_device(schemes: &[&OAuthSchemePlan]) -> bool {
-    schemes
-        .iter()
-        .any(|scheme| executable(scheme, OAuthFlowDescriptorKind::DeviceAuthorization))
-}
-
-/// Whether at least one compiled scheme carries an executable
-/// client-credentials flow, so the replaying credential wrapper participates.
-/// The wrapper serves exactly that provider, so schemes without one compile
-/// exactly the pre-replay bytes.
-fn has_client_credentials(schemes: &[&OAuthSchemePlan]) -> bool {
-    schemes
-        .iter()
-        .any(|scheme| executable(scheme, OAuthFlowDescriptorKind::ClientCredentials))
-}
-
-/// The security-requirement source pointers whose attaches must never be
-/// replayed: requirements that name a compiled scheme on an operation whose
-/// responses carry a stream representation. Delivered stream data prevents a
-/// transparent restart, so those operations are excluded from the replay
-/// wrapper's one-replay budget.
-pub(super) fn no_replay_requirements(
-    schemes: &[&OAuthSchemePlan],
-    operations: &[super::PlannedOperation],
-) -> BTreeMap<String, BTreeSet<String>> {
-    let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.protocol().responses().iter().any(|response| {
-            response
-                .media()
-                .iter()
-                .any(|media| matches!(media.representation(), Representation::Stream { .. }))
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.protocol().security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    CredentialHook::OAuth2 { .. } | CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if schemes
-                    .iter()
-                    .any(|scheme| scheme.name == requirement.name())
-                {
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(requirement.source().source().pointer().to_owned());
-                }
-            }
-        }
-    }
-    pointers
 }
 
 /// The value exports of the generated module, exactly as emitted.
@@ -211,13 +110,19 @@ pub(super) fn exported_symbols(schemes: &[&OAuthSchemePlan]) -> Vec<&'static str
     if has_introspection(schemes) {
         names.extend(["introspect", "IntrospectOptions"]);
     }
-    if has_device(schemes) {
+    if schemes
+        .iter()
+        .any(|scheme| scheme.executes(OAuthFlowDescriptorKind::DeviceAuthorization))
+    {
         names.extend([
             "beginDeviceAuthorization",
             "BeginDeviceAuthorizationOptions",
         ]);
     }
-    if has_client_credentials(schemes) {
+    if schemes
+        .iter()
+        .any(|scheme| scheme.executes(OAuthFlowDescriptorKind::ClientCredentials))
+    {
         names.extend(["createReplayingCredentialsProvider", "ReplayingCredential"]);
     }
     names
@@ -236,11 +141,17 @@ pub(super) fn reexports(schemes: &[&OAuthSchemePlan]) -> String {
         values.push("introspect");
         types.push("IntrospectOptions");
     }
-    if has_device(schemes) {
+    if schemes
+        .iter()
+        .any(|scheme| scheme.executes(OAuthFlowDescriptorKind::DeviceAuthorization))
+    {
         values.push("beginDeviceAuthorization");
         types.push("BeginDeviceAuthorizationOptions");
     }
-    if has_client_credentials(schemes) {
+    if schemes
+        .iter()
+        .any(|scheme| scheme.executes(OAuthFlowDescriptorKind::ClientCredentials))
+    {
         values.push("createReplayingCredentialsProvider");
         types.push("ReplayingCredential");
     }
@@ -312,7 +223,7 @@ pub(super) fn emit(
     schemes: &[&OAuthSchemePlan],
     no_replay: &BTreeMap<String, BTreeSet<String>>,
 ) -> String {
-    let discovery = has_discovery_among(schemes);
+    let discovery = schemes.iter().any(|scheme| scheme.discovery.is_some());
     let mut code = String::new();
     code.push_str(CORE_PREFIX);
     code.push_str(if discovery {
@@ -359,13 +270,19 @@ pub(super) fn emit(
             INTROSPECT
         });
     }
-    if has_device(schemes) {
+    if schemes
+        .iter()
+        .any(|scheme| scheme.executes(OAuthFlowDescriptorKind::DeviceAuthorization))
+    {
         code.push_str(DEVICE);
     }
     if discovery {
         code.push_str(DISCOVERY);
     }
-    if has_client_credentials(schemes) {
+    if schemes
+        .iter()
+        .any(|scheme| scheme.executes(OAuthFlowDescriptorKind::ClientCredentials))
+    {
         code.push_str(&replay_section(schemes, no_replay));
     }
     code
@@ -381,7 +298,7 @@ fn replay_section(
     schemes: &[&OAuthSchemePlan],
     no_replay: &BTreeMap<String, BTreeSet<String>>,
 ) -> String {
-    let discovery = has_discovery_among(schemes);
+    let discovery = schemes.iter().any(|scheme| scheme.discovery.is_some());
     let mut code = String::from(
         "\n/** Compiled stream-protected requirements: security-requirement source pointers whose attaches are never replayed, because delivered stream data prevents a transparent restart. */\nconst noReplayRequirements: Readonly<Record<string, ReadonlySet<string>>> = {\n",
     );

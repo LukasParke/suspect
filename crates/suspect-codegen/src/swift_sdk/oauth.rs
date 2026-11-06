@@ -82,55 +82,6 @@ pub(super) const CLIENT_METHODS: &[&str] = &[
     "revokeToken",
 ];
 
-/// Whether one compiled flow can be executed by the generated runtime.
-fn executable(flow: &wire::OAuthFlowDescriptor) -> bool {
-    if flow.deprecated_flow {
-        return false;
-    }
-    match flow.kind {
-        wire::OAuthFlowDescriptorKind::ClientCredentials => flow.token_url.is_some(),
-        wire::OAuthFlowDescriptorKind::AuthorizationCode => {
-            flow.authorization_url.is_some() && flow.token_url.is_some()
-        }
-        wire::OAuthFlowDescriptorKind::DeviceAuthorization => {
-            flow.device_authorization_url.is_some() && flow.token_url.is_some()
-        }
-        // Implicit and password flows are never executed by generated code.
-        wire::OAuthFlowDescriptorKind::Implicit | wire::OAuthFlowDescriptorKind::Password => false,
-    }
-}
-
-/// The executable flow subset of one scheme, in declaration order.
-fn executable_flows(scheme: &wire::OAuthSchemePlan) -> Vec<&wire::OAuthFlowDescriptor> {
-    scheme
-        .flows
-        .iter()
-        .filter(|flow| executable(flow))
-        .collect()
-}
-
-/// Whether one compiled scheme carries an executable client-credentials flow,
-/// so the replaying credential wrapper participates. The wrapper serves
-/// exactly that provider, so schemes without one compile exactly the
-/// pre-replay bytes.
-fn has_client_credentials(scheme: &wire::OAuthSchemePlan) -> bool {
-    scheme.flows.iter().any(|flow| {
-        flow.kind == wire::OAuthFlowDescriptorKind::ClientCredentials && executable(flow)
-    })
-}
-
-/// Whether the compiled plan admits at least one usable scheme, so the
-/// generated package carries `OAuth.swift`. A discovery URL makes a scheme
-/// usable even with no executable declared flow: the discovery document
-/// defines its endpoints at runtime.
-pub(super) fn emits(oauth: &wire::OAuthPlan) -> bool {
-    oauth.mode != wire::OAuthMode::Off
-        && oauth
-            .schemes
-            .iter()
-            .any(|scheme| !executable_flows(scheme).is_empty() || scheme.discovery.is_some())
-}
-
 /// Compiled OAuth planning carried by the plan: only a configured policy is
 /// lowered, mirroring pagination, so no-policy output stays byte-identical for
 /// every document. Planning errors are the shared planner's
@@ -151,10 +102,10 @@ pub(super) fn plan(
         return Ok(None);
     }
     let plan = wire::plan_oauth(contract, wire_plan, Some(defaults))?;
-    if !emits(&plan) {
+    if !plan.emits() {
         return Ok(None);
     }
-    let replay = plan.schemes.iter().any(has_client_credentials);
+    let replay = plan.executes(wire::OAuthFlowDescriptorKind::ClientCredentials);
     let fallback =
         suspect_ir::contract::SourceId::new(contract.entry().clone(), Default::default());
     let mut errors = Vec::new();
@@ -219,7 +170,7 @@ struct Scheme {
 }
 
 fn lower(scheme: &wire::OAuthSchemePlan) -> Option<Scheme> {
-    let flows = executable_flows(scheme);
+    let flows: Vec<&wire::OAuthFlowDescriptor> = scheme.executable_flows().collect();
     if flows.is_empty() && scheme.discovery.is_none() {
         return None;
     }
@@ -293,12 +244,7 @@ fn q(value: &str) -> String {
 /// exists, so no-policy output stays byte-identical.
 pub(super) fn emit(plan: &SdkPlan) -> Option<String> {
     let oauth = plan.oauth.as_ref()?;
-    let schemes: Vec<Scheme> = oauth
-        .schemes
-        .iter()
-        .filter(|scheme| !executable_flows(scheme).is_empty() || scheme.discovery.is_some())
-        .filter_map(lower)
-        .collect();
+    let schemes: Vec<Scheme> = oauth.usable_schemes().filter_map(lower).collect();
     if schemes.is_empty() {
         return None;
     }
@@ -328,7 +274,12 @@ pub(super) fn emit(plan: &SdkPlan) -> Option<String> {
         .iter()
         .any(|scheme| !scheme.client_credentials.is_empty());
     let no_replay = if has_client_credentials {
-        no_replay_requirements(&schemes, plan.operations())
+        wire::oauth_no_replay_requirements(
+            plan.operations()
+                .iter()
+                .map(super::PlannedOperation::protocol),
+            &schemes.iter().map(|scheme| scheme.name.as_str()).collect(),
+        )
     } else {
         BTreeMap::new()
     };
@@ -381,50 +332,6 @@ pub(super) fn emit(plan: &SdkPlan) -> Option<String> {
         out.push_str(&replay_section(&no_replay, has_discovery));
     }
     Some(out)
-}
-
-/// The security-requirement source pointers whose attaches must never be
-/// replayed: requirements that name a compiled scheme on an operation whose
-/// responses carry a stream representation. Delivered stream data prevents a
-/// transparent restart, so those operations are excluded from the replay
-/// wrapper's one-replay budget.
-fn no_replay_requirements(
-    schemes: &[Scheme],
-    operations: &[super::PlannedOperation],
-) -> BTreeMap<String, BTreeSet<String>> {
-    let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.protocol().responses().iter().any(|response| {
-            response
-                .media()
-                .iter()
-                .any(|media| matches!(media.representation(), wire::Representation::Stream { .. }))
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.protocol().security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    wire::CredentialHook::OAuth2 { .. }
-                        | wire::CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if schemes
-                    .iter()
-                    .any(|scheme| scheme.name == requirement.name())
-                {
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(requirement.source().source().pointer().to_owned());
-                }
-            }
-        }
-    }
-    pointers
 }
 
 /// The replaying credential wrapper: one coordinated refresh plus one
@@ -669,10 +576,10 @@ enum OAuthLifecycle {
         var id = clientID ?? ""
         var secret = clientSecret ?? ""
         if id.isEmpty, !descriptor.clientIDEnv.isEmpty {
-            id = ProcessInfo.processInfo.environment[descriptor.clientIDEnv] ?? ""
+            id = Foundation.ProcessInfo.processInfo.environment[descriptor.clientIDEnv] ?? ""
         }
         if secret.isEmpty, !descriptor.clientSecretEnv.isEmpty {
-            secret = ProcessInfo.processInfo.environment[descriptor.clientSecretEnv] ?? ""
+            secret = Foundation.ProcessInfo.processInfo.environment[descriptor.clientSecretEnv] ?? ""
         }
         return (id, secret)
     }

@@ -146,7 +146,7 @@ impl Session {
         let version = OasVersion::sniff(document.doc());
         let roots = match version {
             Some(version) => {
-                OpenApi::new(self, version, doc, document.doc().root()).declared_schema_roots()
+                OpenApi::new(self, version, document.doc().root()).declared_schema_roots()
             }
             None => vec![SchemaView::new(self, document.doc().root())],
         };

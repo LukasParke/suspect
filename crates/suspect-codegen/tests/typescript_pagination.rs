@@ -2,8 +2,6 @@
 //! per-operation page/item/next-page exports, strict compilation, and native
 //! node behavior against a stubbed fetch.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::{process::Command, sync::Arc};
 use suspect_codegen::backend::{Backend, GenerationOptions, TargetConfig, generate_with_options};

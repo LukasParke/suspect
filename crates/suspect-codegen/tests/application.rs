@@ -1,6 +1,5 @@
 //! Source-addressed operation selector: exact operationId, exact
 //! "METHOD /path", ambiguity refusal, and missing-operation refusal.
-#![cfg(feature = "http-protocol")]
 
 use std::{path::Path, sync::Arc};
 

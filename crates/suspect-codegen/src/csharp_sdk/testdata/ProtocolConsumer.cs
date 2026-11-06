@@ -98,7 +98,7 @@ static class Probe
         {
             string Read(string path){using var reader=new StreamReader(archive.GetEntry(path)!.Open());return reader.ReadToEnd();}
             var xml=XDocument.Parse(Read("lib/net8.0/Protocol.Csharp.xml")).Descendants("member").Select(v=>(string)v.Attribute("name")!).ToHashSet();
-            using var reference=JsonDocument.Parse(Read("docs/reference.json"));var html=Read("docs/index.html");
+            using var reference=JsonDocument.Parse(Read("docs/reference.json"));var html=string.Concat(archive.Entries.Where(e=>e.FullName.StartsWith("docs/",StringComparison.Ordinal)&&e.FullName.EndsWith(".html",StringComparison.Ordinal)).OrderBy(e=>e.FullName,StringComparer.Ordinal).Select(e=>Read(e.FullName)));
             foreach(var symbol in reference.RootElement.GetProperty("symbols").EnumerateArray()){Check(xml.Contains(symbol.GetProperty("xmlId").GetString()!),"Actual native XML symbol "+symbol.GetProperty("xmlId"));Check(html.Contains("id=\""+symbol.GetProperty("id").GetString()+"\""),"Browsable native reference anchor");}
             Check(archive.GetEntry("examples/native-fixtures.json") is not null,"Explicit byte fixture provenance");
         }

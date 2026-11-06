@@ -2,7 +2,15 @@
 //!
 //! Parses server framework route registrations (Rust axum/actix, TypeScript
 //! Express, Go net/http & Gin) and cross-references them against the spec
-//! to detect undocumented endpoints and parameter mismatches.
+//! to detect undocumented endpoints, spec-only endpoints, and paths whose
+//! implemented and documented method sets are disjoint.
+//!
+//! Extraction is regex-based, not a parser: it sees literal route strings
+//! only. The `suspect reverse` CLI command walks a source tree with
+//! [`extract_from_tree`] and compares the result to the spec's
+//! [`suspect_ir::IrSpec`] with [`cross_reference`].
+
+#![deny(missing_docs)]
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -163,9 +171,19 @@ pub fn extract_from_tree(root: &Path) -> Vec<ExtractedRoute> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return routes;
     };
-    for entry in entries.flatten() {
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
         let path = entry.path();
-        if path.is_dir() {
+        // `file_type` does not follow symlinks, so a symlinked directory
+        // (possibly a cycle back to an ancestor) is never descended into.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if matches!(name, "target" | "node_modules" | ".git" | "vendor" | "dist") {
                 continue;
@@ -190,28 +208,29 @@ pub fn cross_reference(spec: &suspect_ir::IrSpec, routes: &[ExtractedRoute]) -> 
         ..ReverseReport::default()
     };
 
-    // Normalize both sides: "METHOD /path"
+    // Key both sides by (METHOD, path shape). The shape erases parameter
+    // names, so the spec's `/pets/{petId}` matches the code's
+    // `/pets/{id}`; messages keep each side's real path. A route
+    // registered twice keeps its first registration.
     let mut impl_set: BTreeMap<(String, String), &ExtractedRoute> = BTreeMap::new();
     for r in routes {
-        impl_set.insert((r.method.clone(), normalize_oas(r.path.clone())), r);
+        impl_set
+            .entry((r.method.clone(), path_shape(&r.path)))
+            .or_insert(r);
     }
 
-    let mut spec_set: BTreeMap<(String, String), ()> = BTreeMap::new();
+    let mut spec_set: BTreeMap<(String, String), String> = BTreeMap::new();
     for op in &spec.operations {
-        spec_set.insert(
-            (
-                op.method.as_str().to_uppercase(),
-                normalize_oas(op.path.clone()),
-            ),
-            (),
-        );
+        spec_set
+            .entry((op.method.as_str().to_uppercase(), path_shape(&op.path)))
+            .or_insert_with(|| normalize_oas(op.path.clone()));
     }
 
-    // Implemented but undocumented
-    for ((method, path), route) in &impl_set {
-        let spec_has = spec_set.contains_key(&("ANY".to_owned(), path.clone()))
-            || spec_set.contains_key(&(method.clone(), path.clone()));
-        if !spec_has && method != "ANY" {
+    // Implemented but undocumented. An `ANY` route documents nothing by
+    // itself; it is matched against the spec in the other direction.
+    for ((method, shape), route) in &impl_set {
+        if method != "ANY" && !spec_set.contains_key(&(method.clone(), shape.clone())) {
+            let path = normalize_oas(route.path.clone());
             report.undocumented.push(Mismatch {
                 kind: "undocumented_endpoint".to_owned(),
                 route: format!("{method} {path}"),
@@ -219,16 +238,16 @@ pub fn cross_reference(spec: &suspect_ir::IrSpec, routes: &[ExtractedRoute]) -> 
                     "Endpoint implemented in {} at {}:{} but missing from the spec",
                     route.framework, route.file, route.line
                 ),
-                spec_fragment: Some(spec_fragment_for(method, path)),
+                spec_fragment: Some(spec_fragment_for(method, &path)),
             });
         }
     }
 
-    // Documented but not implemented
-    for (method, path) in spec_set.keys() {
+    // Documented but not implemented.
+    for ((method, shape), path) in &spec_set {
         let impl_has = impl_set
             .keys()
-            .any(|(m, p)| p == path && (m == method || m == "ANY"));
+            .any(|(m, s)| s == shape && (m == method || m == "ANY"));
         if !impl_has {
             report.spec_only.push(Mismatch {
                 kind: "spec_only_endpoint".to_owned(),
@@ -239,17 +258,28 @@ pub fn cross_reference(spec: &suspect_ir::IrSpec, routes: &[ExtractedRoute]) -> 
         }
     }
 
-    // Method mismatches: same path, disjoint methods
-    let mut impl_by_path: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for (m, p) in impl_set.keys() {
-        impl_by_path.entry(p.clone()).or_default().insert(m.clone());
+    // Method mismatches: same path, disjoint methods. A path served with
+    // `ANY` accepts every documented method, so it never mismatches.
+    let mut impl_by_shape: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for (m, shape) in impl_set.keys() {
+        impl_by_shape
+            .entry(shape.clone())
+            .or_default()
+            .insert(m.clone());
     }
-    let mut spec_by_path: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for (m, p) in spec_set.keys() {
-        spec_by_path.entry(p.clone()).or_default().insert(m.clone());
+    let mut spec_by_shape: BTreeMap<String, (String, BTreeSet<String>)> = BTreeMap::new();
+    for ((m, shape), path) in &spec_set {
+        spec_by_shape
+            .entry(shape.clone())
+            .or_insert_with(|| (path.clone(), BTreeSet::new()))
+            .1
+            .insert(m.clone());
     }
-    for (path, impl_methods) in &impl_by_path {
-        if let Some(spec_methods) = spec_by_path.get(path)
+    for (shape, impl_methods) in &impl_by_shape {
+        if impl_methods.contains("ANY") {
+            continue;
+        }
+        if let Some((path, spec_methods)) = spec_by_shape.get(shape)
             && impl_methods.is_disjoint(spec_methods)
         {
             report.method_mismatches.push(Mismatch {
@@ -270,6 +300,29 @@ pub fn cross_reference(spec: &suspect_ir::IrSpec, routes: &[ExtractedRoute]) -> 
 fn normalize_path(p: &str) -> String {
     // axum: :param → {param}; express: :param → {param}
     PATH_PARAM.replace_all(p, "{$1}").to_string()
+}
+
+/// The comparison key for a path: trailing slashes trimmed and every
+/// `{param}` name erased to `{}`.
+fn path_shape(path: &str) -> String {
+    let normalized = normalize_oas(path.to_owned());
+    let mut out = String::with_capacity(normalized.len());
+    let mut in_param = false;
+    for c in normalized.chars() {
+        match c {
+            '{' => {
+                in_param = true;
+                out.push('{');
+            }
+            '}' => {
+                in_param = false;
+                out.push('}');
+            }
+            _ if in_param => {}
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Normalizes an OAS path for comparison (trailing slashes, etc.).
@@ -357,5 +410,76 @@ mod tests {
         assert!(report.undocumented[0].spec_fragment.is_some());
         assert_eq!(report.spec_only.len(), 1);
         assert_eq!(report.spec_only[0].route, "GET /only-in-spec");
+    }
+
+    fn spec_with(method: suspect_ir::Method, path: &str) -> suspect_ir::IrSpec {
+        suspect_ir::IrSpec {
+            operations: vec![suspect_ir::IrOperation {
+                id: None,
+                method,
+                path: path.to_owned(),
+                summary: None,
+                description: None,
+                tags: Vec::new(),
+                deprecated: false,
+                parameters: Vec::new(),
+                body_schema: None,
+                responses: Vec::new(),
+            }],
+            ..suspect_ir::IrSpec::default()
+        }
+    }
+
+    fn route(method: &str, path: &str, line: u32) -> ExtractedRoute {
+        ExtractedRoute {
+            method: method.to_owned(),
+            path: path.to_owned(),
+            file: "main.go".to_owned(),
+            line,
+            framework: "gin".to_owned(),
+        }
+    }
+
+    #[test]
+    fn parameter_names_do_not_affect_matching() {
+        let spec = spec_with(suspect_ir::Method::Get, "/pets/{petId}");
+        let report = cross_reference(&spec, &[route("GET", "/pets/{id}", 1)]);
+        assert!(report.undocumented.is_empty(), "{:?}", report.undocumented);
+        assert!(report.spec_only.is_empty(), "{:?}", report.spec_only);
+    }
+
+    #[test]
+    fn an_any_route_serves_every_documented_method_without_mismatch() {
+        let spec = spec_with(suspect_ir::Method::Post, "/hooks");
+        let report = cross_reference(&spec, &[route("ANY", "/hooks", 1)]);
+        assert!(
+            report.method_mismatches.is_empty(),
+            "{:?}",
+            report.method_mismatches
+        );
+        assert!(report.spec_only.is_empty());
+        assert!(report.undocumented.is_empty());
+    }
+
+    #[test]
+    fn a_duplicate_registration_reports_the_first_location() {
+        let spec = suspect_ir::IrSpec::default();
+        let report = cross_reference(&spec, &[route("GET", "/x", 3), route("GET", "/x", 9)]);
+        assert_eq!(report.undocumented.len(), 1);
+        assert!(
+            report.undocumented[0]
+                .message
+                .ends_with("main.go:3 but missing from the spec")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cycle_does_not_recurse_forever() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("main.go"), r#"r.GET("/ping", h)"#).unwrap();
+        std::os::unix::fs::symlink(dir.path(), dir.path().join("loop")).unwrap();
+        let routes = extract_from_tree(dir.path());
+        assert_eq!(routes.len(), 1);
     }
 }

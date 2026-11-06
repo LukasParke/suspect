@@ -34,7 +34,9 @@ pub use docs::{JavaExample, JavaOperationExample};
 /// Explicit wire policy. Compatibility profiles never activate from API names.
 #[derive(Debug, Clone, Default)]
 pub struct ProtocolConfig {
+    /// Finite transport byte bounds for bodies, parts and stream items.
     pub limits: crate::http_protocol::ByteLimits,
+    /// Explicit versioned compatibility policies; ordinary OpenAPI semantics are the default.
     pub compatibility_profiles: BTreeSet<crate::http_protocol::CompatibilityProfile>,
     /// Explicit runtime variable names, bound after protocol admission.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,

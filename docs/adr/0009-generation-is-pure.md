@@ -1,0 +1,3 @@
+# Generation is a pure step; building and publishing are out of scope
+
+`backend::generate*` does no input IO, runs no native toolchain and publishes nothing: it turns a Contract and a configuration into a file set. Native build, install, docs and consumer runs are separate verification gates (tests and `xtask`). Registry accounts, signing and publishing are deliberately outside the repository. Emitted manifests carry `releaseReady: false` / `status: "prototype"`, and promoting a package is a reviewed human decision. This keeps generation deterministic, fast enough for editor preview and watch, and usable with no toolchain installed.

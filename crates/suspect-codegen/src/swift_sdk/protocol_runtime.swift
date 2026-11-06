@@ -127,6 +127,16 @@ public struct HTTPServer: Sendable {
             if let allowed = variable.values, !allowed.contains(where: { $0.value.utf8.elementsEqual(value.utf8) }) {
                 throw JsonError(.representation, "server override is not a declared enum value")
             }
+            // Dot segments inside a value are resolved by normalization below,
+            // but a value may never climb out of itself into the template's
+            // literal path (Foundation's own refusal varies by release).
+            var depth = 0
+            for segment in value.split(separator: "/", omittingEmptySubsequences: false) {
+                if segment == ".." {
+                    guard depth > 0 else { throw JsonError(.representation, "server variable value escapes its template position") }
+                    depth -= 1
+                } else if segment != "." { depth += 1 }
+            }
             try expanded.append(value); rest = rest[rest.index(after: close)...]
         }
         try expanded.append(String(rest))
@@ -135,9 +145,14 @@ public struct HTTPServer: Sendable {
               value.utf8.allSatisfy({ $0 > 32 && $0 < 127 }), HTTPWire.percentTriples(value),
               let components = URLComponents(string: value), components.string == value else { throw JsonError(.representation, "invalid expanded server URL") }
         let anchor = documentURL ?? documentBase.document
+        // ADR 0035: an absolute server is checked as written; only a relative
+        // reference is resolved, removing literal dot segments only.
+        if components.scheme != nil, let url = components.url {
+            try HTTPBuild.serverPolicy(value, maxBytes: maxBytes, loopbackOnly: false)
+            return url
+        }
         let absolute: URL
-        if components.scheme != nil, let url = components.url { absolute = url }
-        else {
+        do {
             guard anchor.utf8.allSatisfy({ $0 > 32 && $0 < 127 }), !anchor.contains("\\"), HTTPWire.percentTriples(anchor),
                   let metadata = URLComponents(string: anchor), metadata.string == anchor, metadata.fragment == nil,
                   let base = metadata.url, ["http", "https"].contains(base.scheme?.lowercased() ?? ""),
@@ -151,12 +166,12 @@ public struct HTTPServer: Sendable {
         normalized.percentEncodedHost = normalized.percentEncodedHost?.lowercased()
         normalized.percentEncodedPath = Self.literalDotSegments(normalized.percentEncodedPath)
         guard let result = normalized.url else { throw JsonError(.representation, "invalid resolved server URL") }
-        try HTTPBuild.serverPolicy(result.absoluteString, maxBytes: maxBytes, allowHTTP: true, encodedDotsAreData: true)
+        try HTTPBuild.serverPolicy(result.absoluteString, maxBytes: maxBytes, loopbackOnly: false)
         return result
     }
     // RFC 3986 removes only literal dot segments. Encoded slashes/dots and
-    // repeated separators remain data; Foundation does not normalize absolute
-    // reference paths, so perform that final step for both reference forms.
+    // repeated separators remain data; Foundation's resolution leaves some
+    // dot segments in place, so perform that final step after resolving.
     private static func literalDotSegments(_ path: String) -> String {
         if path.isEmpty { return path }
         let pieces = path.split(separator: "/", omittingEmptySubsequences: false)
@@ -274,20 +289,26 @@ extension HTTPBuild {
             totalLimit: totalLimit, captureLimit: captureLimit,
             response: HTTPResponse(status: response.status, headers: response.headers, body: Data()))
     }
-    static func serverPolicy(_ base: String, maxBytes: Int, allowHTTP: Bool, encodedDotsAreData: Bool = false) throws {
+    /// One server URL policy (ADR 0035): a declared server keeps its scheme; a
+    /// caller override (`loopbackOnly`) is https, or plain http only to loopback
+    /// unless `allowHTTP` is set; no userinfo, query or fragment;
+    /// a valid port; literal `.`/`..` segments refused, never resolved;
+    /// percent-encoded octets are opaque path data sent verbatim; non-ASCII,
+    /// controls and backslashes refused.
+    static func serverPolicy(_ base: String, maxBytes: Int, loopbackOnly: Bool) throws {
         guard base.utf8.count <= maxBytes, !base.contains("\\"), HTTPWire.percentTriples(base),
-              !base.unicodeScalars.contains(where: { $0.value <= 32 || $0.value == 127 }),
+              !base.unicodeScalars.contains(where: { $0.value <= 32 || $0.value >= 127 }),
               let url = URLComponents(string: base), let host = url.host, !host.isEmpty,
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
-              url.scheme?.lowercased() == "https" || url.scheme?.lowercased() == "http" && (allowHTTP || ["127.0.0.1", "localhost", "[::1]", "::1"].contains(host)),
-              !url.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false).contains(where: {
-                  let value = encodedDotsAreData ? String($0) : String($0).removingPercentEncoding; return value == "." || value == ".."
-              }) else { throw JsonError(.representation, "invalid server URL policy") }
+              url.port.map({ (1...65535).contains($0) }) ?? true,
+              url.scheme?.lowercased() == "https" || url.scheme?.lowercased() == "http" && (!loopbackOnly || ["127.0.0.1", "localhost", "[::1]", "::1"].contains(host.lowercased())),
+              !url.percentEncodedPath.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == "." || $0 == ".." })
+        else { throw JsonError(.representation, "invalid server URL policy") }
     }
     static func server(_ metadata: HTTPMetadata, options: ClientOptions, request: RequestOptions, maxBytes: Int) throws -> String {
         if let override = request.serverURL ?? options.serverURL {
             guard request.serverIndex == nil, request.serverVariables == nil else { throw JsonError(.representation, "server override cannot also select a template") }
-            try serverPolicy(override, maxBytes: maxBytes, allowHTTP: options.allowHTTP)
+            try serverPolicy(override, maxBytes: maxBytes, loopbackOnly: !options.allowHTTP)
             return override
         }
         let index = request.serverIndex ?? options.serverIndex
@@ -363,7 +384,7 @@ extension HTTPBuild {
     /// Runtime-discovered platform version, compact. `operatingSystemVersionString`
     /// is too verbose for the ua/v1 comment; `unknown` degrades without omission.
     static let languageVersion: String = {
-        let version = ProcessInfo.processInfo.operatingSystemVersion
+        let version = Foundation.ProcessInfo.processInfo.operatingSystemVersion
         guard version.majorVersion != 0 || version.minorVersion != 0 || version.patchVersion != 0 else { return "unknown" }
         var compact = "\(version.majorVersion).\(version.minorVersion)"
         if version.patchVersion != 0 { compact += ".\(version.patchVersion)" }

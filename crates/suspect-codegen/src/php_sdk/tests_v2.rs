@@ -22,10 +22,16 @@ pub(super) fn repo() -> PathBuf {
                 .unwrap()
         })
 }
-pub(super) fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo().join("target/sdk-php-tools/php-8.3.32/php"))
+/// PHP plus the provisioned Composer/PHPStan phars (`tools/native-setup.sh php`),
+/// or `false` after the skip message (a panic under `SUSPECT_REQUIRE_NATIVE`).
+pub(super) fn native_php() -> bool {
+    crate::toolchain::require("php").is_some()
+        && crate::toolchain::require_provisioned("SUSPECT_COMPOSER_PHAR", "sdk-php-tools/composer-2.10.3.phar", "php").is_some()
+        && crate::toolchain::require_provisioned("SUSPECT_PHPSTAN_PHAR", "sdk-php-tools/phpstan-2.2.13.phar", "php").is_some()
+}
+/// The resolved PHP with `-n` plus the ini-enabled shared extensions.
+pub(super) fn php_command() -> Command {
+    crate::toolchain::php_command().expect("PHP is gated by native_php()")
 }
 pub(super) fn composer() -> PathBuf {
     std::env::var_os("SUSPECT_COMPOSER_PHAR")
@@ -111,8 +117,7 @@ pub(super) fn install(root: &Path, files: &[OutFile], name: &str) -> PathBuf {
     }
     let tools = repo().join("target/sdk-php-tools");
     run(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(composer())
             .args([
                 "archive",
@@ -132,8 +137,7 @@ pub(super) fn install(root: &Path, files: &[OutFile], name: &str) -> PathBuf {
     fs::create_dir(&consumer).unwrap();
     fs::write(consumer.join("composer.json"),json!({"name":"fixture/consumer","require":{manifest["name"].as_str().unwrap():"0.1.0"},"repositories":[{"type":"package","package":manifest},{"packagist.org":false}],"config":{"allow-plugins":false}}).to_string()).unwrap();
     run(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(composer())
             .args([
                 "install",
@@ -164,8 +168,7 @@ pub(super) fn install(root: &Path, files: &[OutFile], name: &str) -> PathBuf {
 }
 pub(super) fn typecheck(root: &Path, consumer: &Path, paths: &[&str], label: &str) {
     run(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -200,6 +203,9 @@ fn instance_path(id: &str) -> &'static str {
 #[test]
 #[ignore = "source-driven 32-case v2 corpus; Composer-installed PHP and PHPStan required"]
 fn native_v2_source_vectors() {
+    if !native_php() {
+        return;
+    }
     let root = root("vectors-");
     let source = repo().join("crates/suspect-schema/tests/fixtures/owned-applicators-v2.json");
     let bytes = fs::read(&source).unwrap();
@@ -298,15 +304,14 @@ fn execute_vectors(root: &Path, cases: &[Value], provenance: Value, extra: Optio
     let consumer = install(root, &files, "php-validation-v2");
     fs::write(consumer.join("vectors.php"), script).unwrap();
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "vectors.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "vectors.php"])
             .current_dir(&consumer),
         root,
         "native-vectors",
     );
     run(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -326,6 +331,9 @@ fn execute_vectors(root: &Path, cases: &[Value], provenance: Value, extra: Optio
 #[test]
 #[ignore = "native scoped merge costs, key identity, recursion, cancellation and ownership"]
 fn native_v2_scope_resource_controls() {
+    if !native_php() {
+        return;
+    }
     let root = root("controls-");
     let merge = r#"{"allOf":[{"properties":{"a":true}},{"properties":{"a":true}}],"unevaluatedProperties":false}"#;
     let one = r#"{"oneOf":[{"properties":{"a":true}},{"properties":{"a":true}}],"unevaluatedProperties":false}"#;
@@ -426,8 +434,10 @@ fn v1_program_bytes_and_explicit_profile_guards_are_preserved() {
 
 #[test]
 #[ignore = "real scoped SDK operations; installed Composer package, native types and docs"]
-#[cfg(feature = "http-protocol")]
 fn native_v2_sdk_packages_models_codecs() {
+    if !native_php() {
+        return;
+    }
     let root = root("sdk-");
     let record = json!({"type":"object","required":["kind","name","nullable"],"properties":{
         "kind":{"type":"string","const":"record"},"name":{"type":"string","minLength":1},"nullable":{"type":["string","null"]},
@@ -500,8 +510,7 @@ fn native_v2_sdk_packages_models_codecs() {
     .unwrap();
     let installed = consumer.join("vendor/fixture/php-v2-sdk");
     run(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -516,8 +525,8 @@ fn native_v2_sdk_packages_models_codecs() {
     );
     for name in ["codecs", "client", "quickstart"] {
         run(
-            Command::new(php())
-                .args(["-n", "-d", "error_reporting=-1"])
+            php_command()
+                .args(["-d", "error_reporting=-1"])
                 .arg(installed.join(format!("examples/{name}.php")))
                 .env("SUSPECT_SDK_AUTOLOAD", consumer.join("vendor/autoload.php"))
                 .current_dir(&consumer),
@@ -528,8 +537,8 @@ fn native_v2_sdk_packages_models_codecs() {
     fs::write(consumer.join("positive.php"), SDK_CONSUMER).unwrap();
     typecheck(&root, &consumer, &["positive.php"], "consumer-types");
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .current_dir(&consumer),
         &root,
         "native-sdk",
@@ -540,16 +549,15 @@ fn native_v2_sdk_packages_models_codecs() {
     )
     .unwrap();
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "docs.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "docs.php"])
             .arg(&installed)
             .current_dir(&consumer),
         &root,
         "native-docs",
     );
     fs::write(consumer.join("negative.php"), SDK_NEGATIVE).unwrap();
-    let output = Command::new(php())
-        .arg("-n")
+    let output = php_command()
         .arg(phpstan())
         .args([
             "analyse",

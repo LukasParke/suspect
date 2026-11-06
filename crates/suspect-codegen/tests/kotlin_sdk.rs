@@ -14,6 +14,8 @@ use suspect_ir::contract::{Contract, SourceId};
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+use crate::kotlin_support as support;
+
 fn root(name: &str) -> PathBuf {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-kotlin-native");
     std::fs::create_dir_all(&base).unwrap();
@@ -82,7 +84,6 @@ fn canonical() -> Plan {
 #[test]
 fn canonical_plan_retains_native_descriptors_and_checked_program() {
     let plan = canonical();
-    #[cfg(feature = "http-protocol")]
     {
         assert_eq!(
             plan.protocol().capabilities().adapter(),
@@ -163,7 +164,6 @@ fn canonical_plan_retains_native_descriptors_and_checked_program() {
 }
 
 #[test]
-#[cfg(feature = "http-protocol")]
 fn shared_protocol_source_profiles_are_admitted_explicitly() {
     let base = envelope(json!({"Value":{"type":"string"}}));
     let mut cases = Vec::new();
@@ -319,22 +319,17 @@ fn malformed_paths_are_source_linked_before_native_emission() {
     }
 }
 
+/// See `support::java_homes`: empty (after a skip message) when the JDK
+/// or Maven is unavailable.
 fn java_homes() -> Vec<PathBuf> {
-    if let Some(home) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME") {
-        return vec![home.into()];
-    }
-    ["temurin-21.0.12+101.0.LTS", "temurin-25.0.4+101.0.LTS"]
-        .iter()
-        .map(|name| Path::new("/Users/luke/.local/share/mise/installs/java").join(name))
+    support::java_homes()
+        .into_iter()
+        .map(|(_, home)| home)
         .collect()
 }
 
 fn maven(home: &Path) -> Command {
-    let binary = std::env::var_os("SUSPECT_KOTLIN_MAVEN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-        });
+    let binary = support::maven_binary().expect("gated by java_homes()");
     let mut command = Command::new(binary);
     command
         .args(["-B", "--no-transfer-progress"])
@@ -605,6 +600,9 @@ fn native_docs(plan: &Plan, root: &Path, jdk: usize) {
 #[test]
 #[ignore = "requires Maven, Kotlin/Dokka artifacts and JDK 21/25; real installed native module"]
 fn native_m2_installed_module_models_coroutines_wire_docs_and_types() {
+    if java_homes().is_empty() {
+        return;
+    }
     let plan = canonical();
     let root = native_package(
         &plan,
@@ -681,10 +679,12 @@ fn native_negative_types(root: &Path, cases: &[&str]) {
 #[ignore = "requires actual read-only OpenRouter corpus and native Maven/JDK toolchains"]
 fn native_actual_five_openrouter_operations() {
     use sha2::Digest;
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let path = checkout.join("projects/docs/openapi/openapi.yaml");
+    if java_homes().is_empty() {
+        return;
+    }
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let bytes = std::fs::read(&path).expect("actual OpenRouter description is required");
     assert_eq!(
         format!("{:x}", sha2::Sha256::digest(&bytes)),
@@ -768,6 +768,9 @@ fn native_actual_five_openrouter_operations() {
 #[test]
 #[ignore = "standalone installed Kotlin validation module: all 17 shared vectors and resource controls"]
 fn native_shared_17_validation_vectors() {
+    if java_homes().is_empty() {
+        return;
+    }
     let corpus: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
     let cases = corpus["cases"].as_array().unwrap();
@@ -865,6 +868,9 @@ fn native_shared_17_validation_vectors() {
 #[test]
 #[ignore = "native model/union/presence/budget and hostile name/prose regression package"]
 fn native_adversarial_models_names_and_examples() {
+    if java_homes().is_empty() {
+        return;
+    }
     let hostile_key = "$payload */ \u{000c} 😀";
     let hostile_text = "$message */ \u{000c} \u{2028} <script>alert('x')</script>";
     let response = json!({"required_nullable":null,hostile_key:hostile_text});
@@ -975,4 +981,175 @@ fn native_adversarial_models_names_and_examples() {
     {
         assert!(!file.content.contains("<script>alert('x')</script>"));
     }
+}
+
+fn oas30_fixture() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/oas30/petstore-nullable.openapi.yaml")
+}
+
+/// OAS 3.0 lowering (ADR 0016) as native Kotlin: `nullable` changes only the
+/// same-object type, Boolean exclusive bounds modify the adjacent bound, and a
+/// Reference Object applies only its `$ref` (siblings neither refuse nor alter).
+#[test]
+fn oas30_nullable_exclusive_bounds_and_reference_siblings_lower_natively() {
+    use suspect_schema::ProgramInstruction;
+    let contract = load(&oas30_fixture());
+    let plan = plan_sdk(contract.clone(), &selected(&contract), config("oas30-sdk"))
+        .unwrap_or_else(|errors| panic!("OAS 3.0 petstore is admitted: {errors:#?}"));
+    assert_eq!(plan.operations().len(), 3);
+    let pet = plan
+        .models()
+        .symbols()
+        .iter()
+        .find(|s| s.source.pointer() == "/components/schemas/Pet")
+        .unwrap();
+    let Shape::Object { fields, .. } = &pet.shape else {
+        panic!("Pet is a data class: {:?}", pet.shape);
+    };
+    let ty = |wire: &str| {
+        fields
+            .iter()
+            .find(|f| f.wire_name == wire)
+            .unwrap_or_else(|| panic!("{wire}"))
+            .kotlin_type
+            .as_str()
+    };
+    assert_eq!(ty("tag"), "String?", "scalar nullable");
+    assert_eq!(
+        ty("owner"),
+        "Owner",
+        "Reference Object siblings are ignored"
+    );
+    assert_eq!(
+        ty("nickname"),
+        "Presence<String?>",
+        "nullable via the $ref target"
+    );
+    assert_eq!(ty("metadata"), "Presence<PetMetadata?>", "object nullable");
+    assert_eq!(ty("status"), "Presence<PetStatus?>", "enum lists null");
+    assert_eq!(ty("weight"), "Presence<JsonNumber>");
+    assert_eq!(
+        ty("anything"),
+        "Presence<JsonValue>",
+        "nullable without type"
+    );
+    assert_eq!(ty("id"), "JsonNumber");
+    let owner = plan
+        .models()
+        .symbols()
+        .iter()
+        .find(|s| s.source.pointer() == "/components/schemas/Pet/properties/owner")
+        .unwrap();
+    assert!(
+        !owner.nullable
+            && matches!(&owner.shape, Shape::Alias(target) if target.pointer() == "/components/schemas/Owner")
+    );
+
+    let checks = |pointer: &str| {
+        plan.program()
+            .nodes
+            .iter()
+            .find(|n| n.source.pointer == pointer)
+            .unwrap_or_else(|| panic!("{pointer}"))
+            .checks
+            .iter()
+            .map(|c| c.instruction.clone())
+            .collect::<Vec<_>>()
+    };
+    let bound = |pointer: &str, value: &str, maximum: bool| {
+        checks(pointer).iter().any(|c| {
+            matches!(c, ProgramInstruction::Bound { value: v, maximum: m, exclusive: true } if v == value && *m == maximum)
+        })
+    };
+    assert!(bound(
+        "/components/schemas/Pet/properties/weight",
+        "50",
+        true
+    ));
+    assert!(bound("/components/schemas/Pet/properties/id", "0", false));
+    let owner = checks("/components/schemas/Pet/properties/owner");
+    assert!(
+        matches!(owner.as_slice(), [ProgramInstruction::Ref { .. }]),
+        "only the $ref applies: {owner:?}"
+    );
+
+    let files = plan.render().unwrap();
+    let models = &files
+        .iter()
+        .find(|f| f.path.ends_with("/Models.kt"))
+        .unwrap()
+        .content;
+    for declaration in [
+        "public val tag: String?,",
+        "public val owner: Owner,",
+        "public val nickname: Presence<String?> = Presence.Absent,",
+        "public val metadata: Presence<PetMetadata?> = Presence.Absent,",
+    ] {
+        assert!(models.contains(declaration), "{declaration}\n{models}");
+    }
+    assert!(
+        files
+            .iter()
+            .all(|f| !f.content.contains("Ignored Reference Object sibling"))
+    );
+    let readme = &files
+        .iter()
+        .find(|f| f.path == "kotlin/README.md")
+        .unwrap()
+        .content;
+    assert!(
+        readme.contains("OpenAPI 3.0 Schema Objects are lowered"),
+        "{readme}"
+    );
+}
+
+#[test]
+#[ignore = "requires Maven, Kotlin/Dokka artifacts and JDK 21/25; OpenAPI 3.0 installed consumer"]
+fn native_oas30_petstore_nullable_consumer() {
+    if java_homes().is_empty() {
+        return;
+    }
+    let path = oas30_fixture();
+    let original = std::fs::read(&path).unwrap();
+    let contract = load(&path);
+    let plan = plan_sdk(contract.clone(), &selected(&contract), config("oas30-sdk")).unwrap();
+    let root = native_package(
+        &plan,
+        "NativeOas30",
+        include_str!("../src/kotlin_sdk/native_oas30.kt"),
+    );
+    native_negative_types(
+        &root,
+        &[
+            "val invalid = Owner(name = null)",
+            "val invalid = Pet(id = JsonNumber.of(1), name = \"x\", owner = null, tag = null)",
+            "val invalid = Pet(id = JsonNumber.of(1), name = \"x\", owner = Owner(name = \"x\"))",
+            "val invalid = Pet(id = JsonNumber.of(1), name = \"x\", owner = Owner(name = \"x\"), tag = null, weight = Presence.Present(null))",
+        ],
+    );
+    assert_eq!(
+        std::fs::read(path).unwrap(),
+        original,
+        "the 3.0 fixture is read-only"
+    );
+}
+
+/// OAS 3.0's direction-dependent `required` (a required readOnly member)
+/// stays a located refusal: this native profile has no directional views.
+#[test]
+fn oas30_directional_required_is_refused_with_a_located_diagnostic() {
+    let source = load(&oas30_fixture());
+    let mut document = source.document(source.entry()).unwrap().clone();
+    document["components"]["schemas"]["Owner"]["properties"]["name"]["readOnly"] = json!(true);
+    let contract = fixture(document);
+    let errors = plan_sdk(contract.clone(), &selected(&contract), config("oas30-sdk")).unwrap_err();
+    let error = errors
+        .iter()
+        .find(|e| {
+            e.code == "kotlin-schema-unsupported"
+                && e.source.pointer() == "/components/schemas/Owner/required"
+        })
+        .unwrap_or_else(|| panic!("located Owner refusal: {errors:#?}"));
+    assert!(contract.source(&error.source).is_some() && error.at.end > error.at.start);
 }

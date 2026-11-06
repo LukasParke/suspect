@@ -9,15 +9,15 @@ use std::collections::BTreeMap;
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Which document kind a rule (or run) evaluates.
+///
+/// Only the OpenAPI document exists today. The field stays in the protocol
+/// and the rule API so another kind can be added without a frame change;
+/// the worker rejects any other value when it loads a rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TargetKind {
     /// The OpenAPI document.
     Spec,
-    /// Code-extraction facts (fold: `suspect-code`).
-    Facts,
-    /// Spec ∪ facts merged graph.
-    Union,
 }
 
 /// Worker → host: per-rule metadata; the host compiles `given` natively.

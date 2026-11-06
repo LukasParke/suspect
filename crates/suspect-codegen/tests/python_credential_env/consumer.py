@@ -188,4 +188,10 @@ async def asynchronous() -> None:
             assert len(wire)==before
 
 asyncio.run(asynchronous())
+# The environment client forwards every base client option.
+with patch.dict(os.environ,initial,clear=True), httpx.MockTransport(handle) as transport:
+    with Client(transport=transport, user_agent='consumer/1.0', allow_insecure_http=True) as configured:
+        configured.get_current_key()
+        assert wire[-1].headers['User-Agent']=='consumer/1.0'
+
 print(json.dumps({'python':sys.version,'installed':sdk.__file__,'requests':len(wire),'pre_http_failures':failures,'import_reads':0,'creation_snapshot':True,'explicit_argument_precedence':True,'source_default_https':True,'unavailable_environment':True}))

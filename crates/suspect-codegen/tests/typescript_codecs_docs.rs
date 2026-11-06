@@ -121,14 +121,16 @@ fn codec_manifest_binds_every_public_model_to_its_codec_and_source() {
     assert!(!module.contains("@example untrusted"));
 }
 
-fn build(root: &Path) -> Output {
+fn build(root: &Path) -> Option<Output> {
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/typescript-docs/build.mjs");
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
-    Command::new(node)
-        .arg(tool)
-        .arg(root)
-        .output()
-        .expect("native documentation requires pinned Node and TypeDoc")
+    let node = suspect_codegen::toolchain::pinned_node(22)?;
+    Some(
+        Command::new(node)
+            .arg(tool)
+            .arg(root)
+            .output()
+            .expect("native documentation requires pinned Node and TypeDoc"),
+    )
 }
 
 fn output_text(output: &Output) -> String {
@@ -145,7 +147,9 @@ fn native_docs(plan: &CodecPlan) {
     let planned = manifest(&files);
     suspect_codegen::write_files(&files, directory.path()).unwrap();
     let root = directory.path().join("typescript");
-    let output = build(&root);
+    let Some(output) = build(&root) else {
+        return;
+    };
     assert!(output.status.success(), "{}", output_text(&output));
     let coverage: Value =
         serde_json::from_slice(&std::fs::read(root.join("docs/coverage.json")).unwrap()).unwrap();
@@ -187,12 +191,9 @@ fn native_codec_docs_preserve_hostile_prose_collisions_and_actual_methods() {
 #[test]
 #[ignore = "requires pinned native Node/TypeDoc and tracked OpenRouter YAML"]
 fn native_codec_docs_cover_tracked_openrouter_caller_and_image_closures() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let contract = contract(&path);
     let roots = contract
         .schema_roots()
@@ -263,7 +264,9 @@ fn native_gate_rejects_missing_codec_manifest_and_undocumented_methods() {
             _ => unreachable!(),
         }
         suspect_codegen::write_files(&files, directory.path()).unwrap();
-        let output = build(&directory.path().join("typescript"));
+        let Some(output) = build(&directory.path().join("typescript")) else {
+            return;
+        };
         assert!(
             !output.status.success(),
             "missing {mutation} coverage must block the gate"

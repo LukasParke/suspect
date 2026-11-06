@@ -59,6 +59,12 @@ async function importRule(file: string): Promise<RuleDefinition> {
 
 function metaOf(file: string, def: RuleDefinition): RuleMeta {
   const targets = def.meta.targets ?? ["spec"];
+  const unknown = (targets as string[]).filter((t) => t !== "spec");
+  if (unknown.length > 0) {
+    throw new Error(
+      `rule ${def.meta.id} in ${file}: unsupported targets ${JSON.stringify(unknown)}; only "spec" is supported`,
+    );
+  }
   if (isWalkRule(def)) {
     return {
       id: def.meta.id,

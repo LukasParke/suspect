@@ -9,12 +9,11 @@ fields resolve to documented defaults, unknown fields are errors, and every
 accepted value participates in the generation fingerprint, compatibility
 reports, and captures.
 
-This guide describes what is generated **today**. Where a behavior is still
-planned, the text says so explicitly. The implementation plan is
-[SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md); the credential
-runtime semantics are specified in
-[SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md); the normative OpenAPI support
-matrix is [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md).
+This guide describes what generated packages do. Why conveniences need an explicit policy
+is recorded in [ADR 0011](adr/0011-behavior-comes-only-from-the-spec.md); the
+credential runtime semantics are specified in
+[SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md); the supported OpenAPI scope is
+[SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
 
 - Applies to: all twelve language packages (TypeScript/JavaScript, Python, Go,
   Rust, Swift, Java, Kotlin, C#, Ruby, PHP, Dart, C++).
@@ -85,10 +84,10 @@ JSON; forwarded through generation options like `credential_env`):
 | `env_prefix` | `1..=64` bytes, `[A-Za-z_][A-Za-z0-9_]*` | Enables the automatic `<ENV_PREFIX>_API_KEY` convention. See §2. |
 | `pagination` | `"auto"`, `"off"`, or the expanded object | Shorthand strings normalize to the expanded form. See §4. |
 | `pagination.mode` | `"auto"` (default) or `"off"` | `off` disables inference; explicit per-operation entries still apply. |
-| `pagination.patterns` | list of `limit-offset`, `cursor`, `page-number`, `next-link` | Accepted and fingerprinted; **not yet enforced** — detection currently always uses the built-in set. |
+| `pagination.patterns` | list of `limit-offset`, `cursor`, `page-number`, `next-link` | Restricts automatic detection to this subset (default: all four). A matched pattern outside the subset leaves the operation single-page with an explanation; explicit per-operation mappings are unaffected. |
 | `pagination.aliases` | `limit`/`offset`/`cursor`/`page` → list of request-key synonyms | Extends the built-in vocabulary. One name cannot be claimed by two roles. |
 | `pagination.operations` | per-operation mapping or `false` | Mapping object or explicit disable, keyed by `operationId` (or `METHOD /path` for unnamed operations). |
-| `pagination.page_size` | `1..=10000` | Proposed SDK fallback page size. Accepted and fingerprinted; **not yet consumed by emitted helpers**. It never asserts a server default. |
+| `pagination.page_size` | `1..=10000` | SDK fallback page size, sent on the first request only when the caller omits the limit-role parameter and the source declares no `default` for it. A size above the parameter's declared `maximum`/`exclusiveMaximum` is a generation error. It never asserts a server default. |
 | `oauth` | `"auto"`, `"off"`, or the expanded object | Lifecycle policy for used OAuth 2.0/OIDC schemes. See §5. |
 | `oauth.storage` | `"memory"` (only value in v1) | The enum is closed; future stores are explicit configuration. |
 | `oauth.refresh` | `"on-demand"` (only value in v1) | Refresh-before-expiry gate; background refresh is future work. |
@@ -249,10 +248,12 @@ Additional rules:
   operations, body-carried pagination, and header controls need a manual
   mapping today.
 - `next-link` is admitted as a manual mapping pattern; v1 walkers do not follow
-  links, so such helpers stop after the first page.
-- `pagination.patterns` and `pagination.page_size` are accepted, validated, and
-  fingerprinted, but not yet enforced by the detection planner or consumed by
-  emitted helpers (see the field table above).
+  links. Depending on the backend, such a mapping yields a helper that stops
+  after the first page or no helper at all (Go rejects it with a generation
+  diagnostic).
+- `pagination.patterns` restricts which detected patterns are admitted, and
+  `pagination.page_size` supplies the first-request limit fallback described in
+  the field table above.
 
 Precedence: an explicit per-operation entry (mapping **or** `false` disable)
 wins; otherwise detection runs with the built-in + alias vocabulary; otherwise
@@ -311,7 +312,7 @@ helpers where a toolchain exists on the host.
 
 ## 5. OAuth lifecycle
 
-### What is generated today
+### Compiled descriptors
 
 `http_protocol` compiles one lifecycle descriptor per **used** OAuth 2.0/OIDC
 security scheme. The descriptor carries exactly what the source declares plus
@@ -334,57 +335,78 @@ what `sdk_defaults.oauth.schemes` supplements; endpoints are never invented:
   authorization-code with PKCE is the normal interactive default and
   client-credentials the normal service default.
 
-Generated packages today describe these flows and pass the descriptors —
-source, flow, scope, and discovery metadata — to **caller credential hooks**.
-The SDK performs no discovery, acquisition, refresh, or retry on its own. An
-OAuth credential is attached exactly like the source declares (for example a
-bearer `Authorization` value supplied by your callback).
+### First-party token lifecycle
 
-**Opt-in 401 replay wrapper (unified request policy).** On top of the plain
-provider — which keeps today's attach-only semantics and never retries — the
-four reference backends (TypeScript, Python, Go, Rust) emit an opt-in
-*replaying* variant of the client-credentials provider. When a protected
-request answers HTTP 401 (and only 401) with a token the replaying provider
-itself attached, it performs exactly **one coordinated refresh** (concurrent
-401s share one token request through the same single-flight round) and
-exactly **one replay** of the request with the fresh token, preserving method,
-URL and body while regenerating headers through the normal attach path. The
-second response is surfaced whatever it is: a second 401 reaches the caller
+Every backend lowers the compiled descriptors into one generated OAuth module
+(for example `_oauth.py`, `oauth.go`, `OAuth.java`, `src/OAuth.g.cs`,
+`include/<package>/oauth.hpp`). The module is emitted only when `sdk_defaults`
+is configured and at least one scheme is usable: a non-deprecated flow whose
+declared endpoints satisfy its grant (client-credentials needs a token URL;
+authorization-code needs authorization and token URLs; device authorization
+needs device-authorization and token URLs), or a compiled discovery URL.
+Schemes with only implicit/password flows emit nothing, and packages without a
+usable scheme stay byte-identical. The runtime never parses OpenAPI; every
+endpoint is a frozen generation-time constant.
+
+- **Token store.** A native `TokenSet`, a caller-implementable token store
+  interface, and an instance-owned in-memory store (`oauth.storage: "memory"`).
+  There is no process-global token cache; tokens are partitioned per scheme,
+  token endpoint and client identity.
+- **Client credentials.** Skew-aware acquisition cached until
+  `expiry − refresh_skew_seconds`, single-flight per scheme/token-endpoint/
+  client identity, with atomic replacement of the stored token set.
+- **Refresh.** Explicit refresh targets the declared refresh URL, else the
+  flow's token URL. A rotated refresh token in the response replaces the stored
+  one.
+- **Authorization code with PKCE (S256)** and **RFC 8628 device
+  authorization** (interval, `authorization_pending`, `slow_down` and expiry
+  handling), each only when the compiled scheme carries that flow.
+- **Revocation (RFC 7009) and introspection (RFC 7662)** helpers only when the
+  corresponding endpoint is configured or discovered.
+- **Discovery.** A compiled discovery URL resolves the endpoints the compiled
+  plan omits through RFC 8414 / OpenID Connect discovery; a compiled endpoint
+  always wins over a discovered one.
+- Client identity comes from explicit call arguments or the compiled
+  `client_id_env`/`client_secret_env` names, read at call time; generated code
+  never embeds credential values. Token requests use the client's own
+  transport, so caller transport policy covers the lifecycle too. Typed
+  authentication errors never carry token or secret values.
+
+Without the lifecycle module (no `sdk_defaults`, `oauth: "off"`, or no usable
+scheme),
+packages pass the descriptors to **caller credential hooks** and perform no
+discovery, acquisition, refresh, or retry on their own. An OAuth credential is
+attached exactly as the source declares (for example a bearer `Authorization`
+value supplied by your callback).
+
+### Opt-in 401 replay
+
+On top of the plain provider — which only attaches and never retries — every
+backend emits an opt-in *replaying* variant of the client-credentials provider
+when a compiled scheme carries an executable client-credentials flow. When a
+protected request answers HTTP 401 (and only 401) with a token the replaying
+provider itself attached, it performs exactly **one coordinated refresh**
+(concurrent 401s share one token request through the same single-flight round)
+and exactly **one replay** of the request with the fresh token, preserving
+method, URL and body while regenerating headers through the normal attach path.
+The second response is surfaced whatever it is: a second 401 reaches the caller
 as the declared error, and the overall budget is one refresh plus one replay,
-never nested with other retry policies. Attaches for **stream-protected
-requirements are never replayed**, because delivered stream data prevents a
-transparent restart; a failed refresh surfaces as the typed authentication
-failure instead of a replay. Replay is wired per call site: the provider is
-passed as the scheme's `auth` member and its transport wrapper as the
-client's transport, so existing packages and callers are unaffected unless
-they opt in.
+never nested with other retry policies
+([ADR 0025](adr/0025-one-http-exchange-per-call.md)). Attaches for
+**stream-protected requirements are never replayed**, because delivered stream
+data prevents a transparent restart, and lifecycle endpoints are never
+replayed; a failed refresh surfaces as the typed authentication failure instead
+of a replay. Replay is wired per call site: the provider is passed as the
+scheme's `auth` member and its transport wrapper as the client's transport, so
+existing packages and callers are unaffected unless they opt in.
 
-### Planned: first-party token lifecycle (M5)
-
-The plan's target runtime — not yet emitted by generated packages — is:
-
-- A native **token store interface** plus an instance-owned in-memory store;
-  persistence is always an explicit choice. The store holds the access token,
-  token type, refresh token if present, known expiry, granted scope, and
-  issuer/audience identity, partitioned per authorization context.
-- **Client credentials** with single-flight acquisition, cached until
-  `expiry − refresh_skew_seconds` against an injectable clock.
-- **On-demand refresh** with rotation semantics: a replacement refresh token in
-  a refresh response atomically replaces the token set; an omitted one is
-  retained where the protocol permits; concurrent refreshes coordinate before
-  contacting the token endpoint.
-- **Revocation and introspection** helpers only when the corresponding endpoint
-  is configured or discovered.
-- Typed authentication errors that never carry token values.
-
-Until that runtime lands, applications implement acquisition/refresh in their
-own credential hooks; the descriptors above are the contract those hooks
-consume. Status and milestone tracking are in
-[SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md).
+Deprecated implicit and password flows are described but never executed
+([ADR 0027](adr/0027-deprecated-oauth-flows-are-not-executed.md)).
 
 ## 6. Migrating from pre-1.0 generated SDKs
 
-Regenerating a package with `sdk_defaults` changes three observable behaviors.
+Regenerating a package with `sdk_defaults` changes three observable behaviors
+(plus an additive OAuth module when a used scheme is usable; see §5).
 All are configuration-driven: regenerate without an `sdk_defaults` section (or
 with the relevant section removed) to keep the previous behavior.
 
@@ -414,12 +436,14 @@ with the relevant section removed) to keep the previous behavior.
 
 ## References
 
-- [SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) — the program plan
-  and milestone status.
+- ADRs behind these defaults: [0011](adr/0011-behavior-comes-only-from-the-spec.md)
+  (explicit `sdk_defaults` policy), [0025](adr/0025-one-http-exchange-per-call.md)
+  (one HTTP exchange per call), [0026](adr/0026-environment-credentials-are-opt-in.md)
+  (opt-in environment credentials), [0027](adr/0027-deprecated-oauth-flows-are-not-executed.md)
+  (deprecated OAuth flows) and [0028](adr/0028-ua-v1-attribution.md) (`ua/v1`
+  attribution).
 - [SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md) — environment-credential
   runtime semantics and per-language constructor forms.
-- [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md) — the normative OpenAPI
-  feature matrix with honest per-row status.
 - [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md) — the `repeated-v1` native cost
   methodology.
 - [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md) — the twelve-backend capability

@@ -32,103 +32,6 @@ use crate::http_protocol::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Whether one compiled flow can be executed by the generated runtime.
-fn executable(flow: &OAuthFlowDescriptor) -> bool {
-    if flow.deprecated_flow {
-        return false;
-    }
-    match flow.kind {
-        OAuthFlowDescriptorKind::ClientCredentials => flow.token_url.is_some(),
-        OAuthFlowDescriptorKind::AuthorizationCode => {
-            flow.authorization_url.is_some() && flow.token_url.is_some()
-        }
-        OAuthFlowDescriptorKind::DeviceAuthorization => {
-            flow.device_authorization_url.is_some() && flow.token_url.is_some()
-        }
-        // Implicit and password flows are never executed by generated code.
-        OAuthFlowDescriptorKind::Implicit | OAuthFlowDescriptorKind::Password => false,
-    }
-}
-
-/// The executable flow subset of one scheme, in declaration order.
-fn executable_flows(scheme: &OAuthSchemePlan) -> Vec<&OAuthFlowDescriptor> {
-    scheme
-        .flows
-        .iter()
-        .filter(|flow| executable(flow))
-        .collect()
-}
-
-/// Whether the compiled plan admits at least one usable scheme, so the runtime
-/// file carries content. A scheme carrying a discovery URL is usable even
-/// with no executable flows: the discovery document defines its endpoints.
-#[must_use]
-pub(super) fn emits(oauth: &OAuthPlan) -> bool {
-    oauth.mode != OAuthMode::Off
-        && oauth
-            .schemes
-            .iter()
-            .any(|scheme| !executable_flows(scheme).is_empty() || scheme.discovery.is_some())
-}
-
-/// Whether at least one compiled scheme carries an executable
-/// client-credentials endpoint, so the replaying credential wrapper
-/// participates. The wrapper serves exactly that provider, so schemes
-/// without one compile exactly the pre-replay bytes.
-#[must_use]
-pub(super) fn has_client_credentials(oauth: &OAuthPlan) -> bool {
-    oauth.mode != OAuthMode::Off
-        && oauth.schemes.iter().any(|scheme| {
-            executable_flows(scheme)
-                .iter()
-                .any(|flow| flow.kind == OAuthFlowDescriptorKind::ClientCredentials)
-        })
-}
-
-/// The security-requirement source pointers whose attaches must never be
-/// replayed: requirements that name a compiled scheme on an operation whose
-/// responses carry a stream representation. Delivered stream data prevents a
-/// transparent restart, so those operations are excluded from the replay
-/// wrapper's one-replay budget.
-pub(super) fn no_replay_requirements(
-    oauth: &OAuthPlan,
-    operations: &[super::PlannedOperation],
-) -> BTreeMap<String, BTreeSet<String>> {
-    let names: BTreeSet<&str> = oauth.schemes.iter().map(|s| s.name.as_str()).collect();
-    let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.wire().responses().iter().any(|response| {
-            response.media().iter().any(|media| {
-                matches!(
-                    media.representation(),
-                    crate::http_protocol::Representation::Stream { .. }
-                )
-            })
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.wire().security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    crate::http_protocol::CredentialHook::OAuth2 { .. }
-                        | crate::http_protocol::CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if names.contains(requirement.name()) {
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(requirement.source().source().pointer().to_owned());
-                }
-            }
-        }
-    }
-    pointers
-}
-
 /// Compiled OAuth planning carried by the plan: only a configured policy is
 /// lowered, mirroring pagination helpers, so no-policy output stays
 /// byte-identical for every document. Planning errors are the shared
@@ -207,7 +110,7 @@ struct Scheme {
 }
 
 fn lower(scheme: &OAuthSchemePlan) -> Option<Scheme> {
-    let flows = executable_flows(scheme);
+    let flows: Vec<&OAuthFlowDescriptor> = scheme.executable_flows().collect();
     let discovery_url = scheme.discovery.clone().unwrap_or_default();
     let first = match flows.first() {
         Some(first) => first,
@@ -309,7 +212,7 @@ pub(super) fn emit(oauth: &OAuthPlan, no_replay: &BTreeMap<String, BTreeSet<Stri
         "sync",
         "time",
     ]);
-    if has_client_credentials(oauth) {
+    if oauth.executes(OAuthFlowDescriptorKind::ClientCredentials) {
         imports.insert("bytes");
     }
     if has_authorization {
@@ -380,7 +283,7 @@ pub(super) fn emit(oauth: &OAuthPlan, no_replay: &BTreeMap<String, BTreeSet<Stri
     if discovery {
         code.push_str(DISCOVERY);
     }
-    if has_client_credentials(oauth) {
+    if oauth.executes(OAuthFlowDescriptorKind::ClientCredentials) {
         code.push_str(&replay_section(oauth, no_replay));
     }
     code

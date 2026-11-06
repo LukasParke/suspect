@@ -202,8 +202,13 @@ pub struct State {
     /// Identity of the currently cached workspace; changes when the
     /// workspace is dropped and rebuilt (saves, watched-file events).
     pub ws_identity: usize,
-    /// Raw initialization options captured in `initialize` for later merge.
-    pub pending_init_options: Option<serde_json::Value>,
+    /// Raw initialization options captured in `initialize`; the lowest
+    /// client layer of every config merge and the live-run base URL source,
+    /// so they are kept for the whole session.
+    pub init_options: Option<serde_json::Value>,
+    /// The client's last `suspect` settings (from `workspace/configuration`
+    /// or `didChangeConfiguration`), re-layered when a config file changes.
+    pub client_settings: Option<serde_json::Value>,
     /// Merged server configuration (initialization options < client section).
     pub config: crate::config_files::SuspectConfig,
     /// Client capabilities from `initialize`, consulted when a feature can
@@ -227,7 +232,13 @@ impl State {
     /// The workspace root, when the client declared one.
     #[must_use]
     pub fn workspace_root(&self) -> Option<std::path::PathBuf> {
-        self.workspace.as_ref().and_then(super::workspace_root)
+        // The cached ref workspace is dropped on every save and watched-file
+        // event; the client's root still names the project, so committed
+        // config files keep layering in after a drop.
+        self.workspace
+            .as_ref()
+            .and_then(super::workspace_root)
+            .or_else(|| self.root.clone())
     }
 
     /// The reference index for the current generation, building it once

@@ -1,9 +1,9 @@
 //! Maintained source-driven resource/dynamic native witnesses, independent of target exports.
-use super::tests_v2::{install, literal, php, phpstan, repo, run, typecheck};
+use super::tests_v2::{install, literal, native_php, php_command, phpstan, repo, run, typecheck};
 use super::*;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{fmt::Write as _, fs, path::PathBuf, process::Command};
+use std::{fmt::Write as _, fs, path::PathBuf};
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
 
@@ -12,8 +12,10 @@ mod sdk;
 
 #[test]
 #[ignore = "resource/dynamic SDK operations with independent HTTP, installed native types and examples"]
-#[cfg(feature = "http-protocol")]
 fn native_v3_sdk_packages_models_codecs() {
+    if !native_php() {
+        return;
+    }
     sdk::verify();
 }
 
@@ -188,15 +190,14 @@ fn native_cases(
     let consumer = install(&root, &files, "php-validation-v3");
     fs::write(consumer.join("cases.php"), script).unwrap();
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "cases.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "cases.php"])
             .current_dir(&consumer),
         &root,
         "native-cases",
     );
     run(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -217,6 +218,9 @@ fn native_cases(
 #[test]
 #[ignore = "44 unmodified official source cases, supplied remotes and installed PHP runtime"]
 fn native_v3_source_fixtures() {
+    if !native_php() {
+        return;
+    }
     let directory = repo().join("crates/suspect-schema/tests/fixtures/resource-conformance");
     let bytes = fs::read(directory.join("dynamicRef.json")).unwrap();
     let groups: Vec<Value> = serde_json::from_slice(&bytes).unwrap();
@@ -274,6 +278,9 @@ fn native_v3_source_fixtures() {
 #[test]
 #[ignore = "independent dynamic context, scope, budget, key and ownership controls"]
 fn native_v3_scope_resource_controls() {
+    if !native_php() {
+        return;
+    }
     let contract = provided(
         api(json!({
             "Leaf":{"$id":"urn:leaf","const":false,"$defs":{"t":{"$dynamicAnchor":"t","type":"string"}}},
@@ -535,7 +542,6 @@ echo 'resource return/trial/cancellation restoration and ownership passed',PHP_E
 "#;
 
 #[test]
-#[cfg(feature = "http-protocol")]
 fn ordinary_v1_v2_programs_and_entrypoints_keep_their_bytes() {
     for scoped in [false, true] {
         let mut root = json!({"type":"object","properties":{"a":{"type":"integer"},"b":{"type":"integer"}},"additionalProperties":false});

@@ -74,6 +74,7 @@ impl CodecPlan {
     pub fn validation_version(&self) -> &'static str {
         self.validation_version
     }
+    /// Checked validation profile paired with [`Self::validation_version`].
     #[must_use]
     pub fn validation_profile(&self) -> &'static str {
         self.validation_profile

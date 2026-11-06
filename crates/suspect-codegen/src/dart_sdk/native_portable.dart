@@ -432,22 +432,32 @@ Future<void> requestBoundaries() async {
       'credential validation is redacted',
     );
   }
+  // A server override is resolved per request (like credentials above), so
+  // an invalid one fails the call before transport rather than the
+  // constructor. ADR 0035: plain `http` is valid only to a loopback host;
+  // escaped path octets such as `%2F` are opaque path data. (Dart's `Uri`
+  // itself canonicalizes escapes in the caller's override before the SDK sees it.)
   for (final uri in [
     'http://example.test',
+    'https://example.test:0',
     'ftp://example.test',
     'https://u:p@example.test',
     'https://example.test/?q=1',
     'https://example.test/#x',
-    'https://example.test/api/%2fescape',
   ]) {
-    fails<ConfigurationException>(
-      () => Client(
-        transport: recording,
-        credentials: credentials,
-        server: Uri.parse(uri),
-      ),
+    final bad = Client(
+      transport: recording,
+      credentials: credentials,
+      server: Uri.parse(uri),
+    );
+    await failsAsync<ConfigurationException>(
+      () => bad.getWidget(widgetId: 'x'),
     );
   }
+  check(
+    recording.requests.isEmpty,
+    'invalid server overrides must not enter transport',
+  );
   fails<ConfigurationException>(
     () => Client(
       transport: recording,
@@ -489,6 +499,28 @@ Future<void> requestBoundaries() async {
   );
   await overridden.getWidget(widgetId: 'x');
   await overridden.close();
+  for (final base in ['https://override.test/api/%2Fescape', 'http://127.0.0.1:8080/api', 'http://localhost/api', 'http://[::1]/api']) {
+    final accepted = Recording([
+      Fixture(method: 'GET', url: '$base/widgets/x', text: widgetWire),
+    ]);
+    final client = Client(
+      transport: accepted,
+      credentials: credentials,
+      server: Uri.parse(base),
+    );
+    await client.getWidget(widgetId: 'x');
+    await client.close();
+  }
+  final insecure = Client(
+    transport: Recording([
+      Fixture(method: 'GET', url: 'http://override.test/api/widgets/x', text: widgetWire),
+    ]),
+    credentials: credentials,
+    server: Uri.parse('http://override.test/api'),
+    allowInsecureHttp: true,
+  );
+  await insecure.getWidget(widgetId: 'x');
+  await insecure.close();
 }
 
 Future<void> responses() async {
@@ -497,6 +529,9 @@ Future<void> responses() async {
     'application/json ; Charset="UTF-8"',
     'application/json; profile="a;b"',
     ' application/json\t; profile="escaped\\\"quote" ',
+    // RFC 8259 defines no charset parameter for application/json; JSON is
+    // always decoded (and validated) as UTF-8.
+    'application/json;charset=utf-16',
   ]) {
     final recording = Recording([
       Fixture(
@@ -532,9 +567,6 @@ Future<void> responses() async {
       'Content-Type': ['application/json'],
     },
     {
-      'content-type': ['application/json;charset=utf-16'],
-    },
-    {
       'content-type': ['application/json;'],
     },
     {
@@ -562,8 +594,10 @@ Future<void> responses() async {
     final error = await failsAsync<MediaTypeException>(
       () => client.getWidget(widgetId: 'x'),
     );
+    // The media type is rejected from the headers alone: no byte of an
+    // undeclared representation is read or captured.
     check(
-      error.response.body.length == 64 && error.response.truncated,
+      error.response.body.isEmpty && error.response.truncated,
       'media capture bounded',
     );
     check(recording.responsesClosed == 1, 'media failure closes response');

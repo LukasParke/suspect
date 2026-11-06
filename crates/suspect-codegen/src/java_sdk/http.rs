@@ -8,71 +8,125 @@ use crate::http_protocol as wire;
 use std::collections::BTreeSet;
 use suspect_ir::contract::{SchemaId, SourceId};
 
+/// One positional argument of an input type's `builder(...)` factory.
 #[derive(Debug, Clone)]
 pub struct JavaInputArgument {
+    /// Java parameter name.
     pub name: String,
+    /// Source parameter or request body bound to the argument.
     pub source: SourceId,
+    /// Native value carried by the argument.
     pub ty: JavaValue,
 }
+/// Static factory that constructs an operation input from its required values.
 #[derive(Debug, Clone)]
 pub struct JavaInputConstructor {
+    /// Factory method name.
     pub name: String,
+    /// Required parameters in source order, followed by a required body.
     pub arguments: Vec<JavaInputArgument>,
 }
+/// Generated client method pair, input type and status variants for one operation.
 #[derive(Debug, Clone)]
 pub struct JavaOperation {
+    /// Terminal source operation.
     pub source: SourceId,
+    /// Source `operationId`, or `"<METHOD> <path>"` when absent.
     pub operation_id: String,
+    /// Synchronous client method.
     pub method_name: String,
+    /// `CompletableFuture` client method (`<method>Async`).
     pub async_method_name: String,
+    /// Generated immutable input class.
     pub input_type: String,
+    /// Factory taking the input's required values.
     pub constructor: JavaInputConstructor,
+    /// Success result type: the single success variant, a sealed interface over
+    /// several, or `Never` when no response can succeed.
     pub success_type: String,
+    /// Upper-case HTTP method.
     pub http_method: String,
+    /// Source path template.
     pub path: String,
+    /// Planned parameters in protocol order.
     pub parameters: Vec<JavaParameter>,
+    /// Planned request body, when declared.
     pub body: Option<JavaBody>,
+    /// Planned responses in protocol order.
     pub responses: Vec<JavaResponse>,
+    /// Source description; empty when absent.
     pub description: String,
+    /// Shared wire decisions for the operation.
     pub wire: wire::OperationPlan,
 }
+/// One operation parameter as an input-builder member.
 #[derive(Debug, Clone)]
 pub struct JavaParameter {
+    /// Parameter use site.
     pub source: SourceId,
+    /// Java member name, unique within the input type.
     pub native_name: String,
+    /// Rendered Java type of the parameter codec schema.
     pub native_type: String,
+    /// Parameter codec schema.
     pub schema: SchemaId,
+    /// Whether the parameter is a `builder(...)` argument.
     pub required: bool,
+    /// Shared wire decisions for the parameter.
     pub wire: wire::ParameterPlan,
 }
+/// Operation request body as the input's `body` member.
 #[derive(Debug, Clone)]
 pub struct JavaBody {
+    /// Request body use site.
     pub source: SourceId,
+    /// Java member name.
     pub native_name: String,
+    /// Rendered Java type of `value`.
     pub native_type: String,
+    /// Whether the body is a `builder(...)` argument.
     pub required: bool,
+    /// Sealed choice type over several media; `None` for a single media.
     pub choice_type: Option<String>,
+    /// Body value: the choice type, or the single media's value.
     pub value: JavaValue,
+    /// Planned request media in protocol order.
     pub media: Vec<JavaMedia>,
+    /// Shared wire decisions for the body.
     pub wire: wire::BodyPlan,
 }
+/// One declared response status as a native result or exception variant.
 #[derive(Debug, Clone)]
 pub struct JavaResponse {
+    /// Response use site.
     pub source: SourceId,
+    /// Generated status variant class.
     pub variant_name: String,
+    /// Exception class thrown for this status, when it can fail; equals
+    /// `variant_name` when the status can only fail.
     pub error_variant_name: Option<String>,
+    /// Rendered Java type of `value`.
     pub native_type: String,
+    /// Response data: [`JavaValue::NoContent`] when the body is forbidden, raw
+    /// bytes when no media is declared, wrapped in
+    /// [`JavaValue::ResponseBody`] when the body may be empty.
     pub value: JavaValue,
+    /// Sealed choice type over several media; `None` otherwise.
     pub choice_type: Option<String>,
+    /// Planned response media; empty when the body is forbidden.
     pub media: Vec<JavaMedia>,
+    /// Typed response headers class, when headers are declared.
     pub headers: Option<JavaHeaders>,
+    /// Shared wire decisions for the response.
     pub wire: wire::ResponsePlan,
 }
 impl JavaResponse {
+    /// Whether this status can yield a success: 2xx, `2XX` or `default`.
     #[must_use]
     pub fn can_succeed(&self) -> bool {
         protocol::can_succeed(self.wire.status())
     }
+    /// Whether this status can yield an error: anything but 2xx or `2XX`.
     #[must_use]
     pub fn can_fail(&self) -> bool {
         protocol::can_fail(self.wire.status())

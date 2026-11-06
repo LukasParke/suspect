@@ -13,26 +13,45 @@ use serde_json::{Value, json};
 use suspect_ir::contract::{SchemaId, SourceId};
 use suspect_schema::OwnedSchema;
 
+/// One validated example value bound to a planned Java model type.
 #[derive(Debug, Clone)]
 pub struct JavaExample {
+    /// Schema the value validates against.
     pub schema: SchemaId,
+    /// Parameter, body, part or response site that carries the value.
     pub container: SourceId,
+    /// Whether the value was declared in the source or synthesized.
     pub origin: ExampleOrigin,
+    /// Source location of the declared example, when declared.
     pub declared_source: Option<SourceId>,
+    /// Request or response position of the value.
     pub role: ExampleRole,
+    /// Positional-array occurrence, when the container is a positional part.
     pub part_position: Option<crate::examples::ExamplePartPosition>,
+    /// Rendered Java type of `schema`.
     pub native_type: String,
+    /// Java class holding the checked codec for `schema`.
     pub codec_holder: String,
+    /// Example value serialized as compact JSON.
     pub value_json: String,
+    /// Native Java construction expression, when the value has one.
     pub expression: Option<String>,
 }
+/// Generated example methods and input construction for one planned operation.
 #[derive(Debug, Clone)]
 pub struct JavaOperationExample {
+    /// Source operation.
     pub source: SourceId,
+    /// Source `operationId`.
     pub operation_id: String,
+    /// Generated synchronous example method (`<method>Example`).
     pub method_name: String,
+    /// Generated asynchronous example method (`<method>AsyncExample`).
     pub async_method_name: String,
+    /// Input builder expression; `None` when a required parameter or body has
+    /// no usable example.
     pub input_expression: Option<String>,
+    /// Example values for this operation whose schemas have Java symbols.
     pub entries: Vec<JavaExample>,
     /// Native byte fixtures are explicitly synthesized and checked as octets.
     pub synthesized_native_bytes: bool,

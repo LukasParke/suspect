@@ -8,8 +8,8 @@
 //! The gate has two layers, mirroring how the repo splits static Dart gates
 //! (`dart_sdk.rs`, `dart_protocol.rs`) from native ones:
 //!
-//! 1. `dart_emission_shape_supports_elimination` (always runs): the
-//!    toolchain-independent structural gate. It generates the canonical
+//! 1. `dart_emission_shape_supports_elimination`: the toolchain-light
+//!    structural gate. It generates the canonical
 //!    fixture and the same fixture plus one unrelated operation through
 //!    `generate_with_options(Backend::DartHttp)`, then measures — on the
 //!    emitted bytes — the launcher byte-identity set, the per-contract
@@ -19,29 +19,20 @@
 //!    zero-dependency pubspec (the no-transitive-retention guarantee,
 //!    proven by `dart pub get --offline`). It also probes
 //!    `dart analyze` and records the outcome without asserting it.
-//! 2. `dart_consumers_eliminate_unrelated_operations` (currently
-//!    `#[ignore]`d): the full AOT consumer gate. `dart compile exe` builds
+//! 2. `dart_consumers_eliminate_unrelated_operations`: the full AOT
+//!    consumer gate. It first requires the emitted package to pass
+//!    `dart analyze --fatal-infos`, then `dart compile exe` builds
 //!    three consumer entrypoints — `one-operation` (only `getGadget`),
 //!    `codec-only` (only `gadgetCodec`), and an `all-operations` tear-off
 //!    baseline — against both generations, measures artifact bytes, sha256,
 //!    `nm` symbol counts and raw-bytes markers, and asserts the pinned
 //!    outcomes exactly like the Swift/C++ gates.
 //!
-//! Measured blocker (2026-09-16): the AOT layer cannot run yet — the
-//! emitted dart-http package fails `dart analyze` under Dart 3.9.4 with six
-//! hard errors across four emission/runtime defects (one universal:
-//! `_ClientBase` in the static `transport.dart` runtime leaves the final
-//! fields `_userAgent`/`_applicationId` uninitialized, so every dart-http
-//! package is un-compilable). Every defect lives in emitter/runtime files
-//! that this measurement task must not touch, so the defects are recorded —
-//! not fixed — in `docs/SDK-ELIMINATION-AUDIT.md` (§ Dart), and the AOT
-//! layer runs now that the emitted package analyzes cleanly under Dart 3.9.4.
+//! Both gates are `#[ignore]`d only because they need the Dart SDK on the
+//! test host. Why an unused operation must cost a consumer nothing is
+//! recorded in `docs/adr/0029-unused-operations-cost-zero-bytes.md`.
 //!
-//! To still measure what Dart AOT actually sheds, the same four defects were
-//! repaired by hand in throwaway copies under `target/sdk-dart-elimination/`
-//! (never in the repo, never in the emitted bytes this gate asserts on) and
-//! the full consumer matrix was compiled and measured there. Measured
-//! findings, now pinned below and recorded in the audit: function-granular
+//! Measured findings, pinned below: function-granular
 //! code shedding is thorough (every unreferenced operation, pagination
 //! walker, OAuth grant and stream machinery sheds, including name strings;
 //! measured 0 B additivity deltas for the single-op and codec-only
@@ -54,9 +45,9 @@
 //! real unreachable-at-runtime calls are required); `dart compile exe` is
 //! size-deterministic but not byte-deterministic across compiles; and `nm`
 //! symbol counts are constant (621) across all profiles, so they do not
-//! discriminate — sizes and raw-bytes markers are the signals. When the AOT
-//! layer is unignored, its assertions are already pinned to these measured
-//! outcomes; a failure forces the audit to be re-pinned.
+//! discriminate — sizes and raw-bytes markers are the signals. A failure
+//! means the measured outcome changed: re-measure and update the pinned
+//! expectations in this test.
 //!
 //! Retained artifacts live under `target/sdk-dart-elimination/` and
 //! machine-readable records are written to
@@ -315,25 +306,11 @@ fn generate(document: Value) -> Vec<OutFile> {
     .unwrap()
 }
 
-/// The Dart 3.9 toolchain. `SUSPECT_DART_BIN` wins; otherwise the pinned
-/// mise install (the shim refuses to run without a selected default version,
-/// and `mise x` breaks under a redirected HOME, so the install binary is
-/// used directly); the `mise x dart@3.9 -- dart ...` passthrough is the last
-/// fallback.
+/// The Dart toolchain resolved by `suspect_codegen::toolchain` (gated with
+/// `toolchain::require("dart")` at the top of each native test).
 fn dart() -> Command {
-    let mut command = match std::env::var_os("SUSPECT_DART_BIN") {
-        Some(binary) => Command::new(PathBuf::from(binary)),
-        None => {
-            let installed = home_dir().join(".local/share/mise/installs/dart/3.9/bin/dart");
-            if installed.is_file() {
-                Command::new(installed)
-            } else {
-                let mut command = Command::new("mise");
-                command.args(["x", "dart@3.9", "--", "dart"]);
-                command
-            }
-        }
-    };
+    let mut command =
+        suspect_codegen::toolchain::command("dart").expect("gated by toolchain::require(\"dart\")");
     command
         .env(
             "PUB_CACHE",
@@ -359,12 +336,6 @@ fn dart_version() -> String {
         .unwrap_or(text.lines().next().unwrap_or_default())
         .trim()
         .to_owned()
-}
-
-fn home_dir() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .expect("a HOME directory is required to locate the Dart install")
 }
 
 fn repository() -> PathBuf {
@@ -458,9 +429,12 @@ fn contains(haystack: &[u8], needle: &str) -> bool {
 /// differ when one unrelated operation is added, and every other emitted
 /// file is byte-identical across generations (the Dart analogue of the
 /// TypeScript launcher gate). Measured on 2026-09-16 with Dart 3.9.4-era
-/// emission; a change here forces an audit update.
+/// emission; a change here forces a re-measurement of this pin.
 const EXPECTED_PER_CONTRACT: &[&str] = &[
     "dart/doc/API.md",
+    // The unrelated operation is untagged, so it lands on the split
+    // reference page for the default `other` group.
+    "dart/doc/operations/other.md",
     "dart/doc/validation-program.json",
     "dart/example/source_examples.dart",
     "dart/lib/src/client.dart",
@@ -485,6 +459,9 @@ const OPERATION_METHOD_MARKERS: &[&str] = &[
 #[ignore = "requires the Dart SDK for dart analyze (structural gate)"]
 #[test]
 fn dart_emission_shape_supports_elimination() {
+    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
+        return;
+    };
     let _gate = NATIVE_GATE.lock().unwrap();
     let root = gate_root();
     std::fs::create_dir_all(&root).unwrap();
@@ -531,7 +508,7 @@ fn dart_emission_shape_supports_elimination() {
         .collect();
     assert!(
         unexpected.is_empty() && missing.is_empty(),
-        "the per-contract launcher diff set changed: unexpected={unexpected:?} missing={missing:?}; update docs/SDK-ELIMINATION-AUDIT.md"
+        "the per-contract launcher diff set changed: unexpected={unexpected:?} missing={missing:?}; re-measure and update the pinned expectation in this test"
     );
 
     // --- Composition shape ---------------------------------------------------
@@ -641,7 +618,7 @@ fn dart_emission_shape_supports_elimination() {
         .collect();
     if !analyze.status.success() {
         println!(
-            "DART ELIMINATION GATE: the emitted dart-http package does NOT analyze cleanly under {} — the AOT consumer gate is blocked by {:?} emission errors; see docs/SDK-ELIMINATION-AUDIT.md § Dart",
+            "DART ELIMINATION GATE: the emitted dart-http package does NOT analyze cleanly under {} — the AOT consumer gate is blocked by {:?} emission errors",
             dart_version(),
             errors.len()
         );
@@ -672,15 +649,13 @@ fn analyze_command() -> Command {
 }
 
 // ---------------------------------------------------------------------------
-// AOT consumer gate: the strict half, currently blocked by the recorded
-// emission defects (see the module documentation and the audit).
+// AOT consumer gate: the strict half (see the module documentation).
 // ---------------------------------------------------------------------------
 
 /// Provisional additivity slack for AOT snapshots. The TypeScript bundler
 /// gate uses 64 B; a Dart AOT snapshot re-lays out string pools and object
 /// tables when the shared validation-program tables change, so the
-/// provisional bound is one page of slack. Measured 2026-09-16 (on the
-/// locally repaired copies): the unrelated operation moves the one-operation
+/// provisional bound is one page of slack. Measured 2026-09-16: the unrelated operation moves the one-operation
 /// and codec-only artifacts by exactly 0 B — the retained program data fits
 /// inside snapshot pool slack — so this bound has margin. A larger measured
 /// delta means the unrelated operation's code is retained and must be
@@ -704,7 +679,7 @@ const UNRELATED_CODE_MARKERS: &[&str] = &["listGizmos", "UnrelatedGizmo"];
 /// codec-only consumer never reaches `requireValid` and sheds the tables
 /// entirely. Recorded as the Dart data-granular defeat (the analogue of the
 /// C++ `zeta-quantum` +16 512 B retention); the assertion pins the defeat so
-/// per-root table splits fail loudly and force an audit update.
+/// per-root table splits fail loudly and force a re-measurement.
 const UNRELATED_DATA_MARKERS: &[&str] = &["zeta-quantum"];
 /// Markers of the other selected operations and their wire data.
 const MARKER_OTHER_OPERATIONS: &[&str] = &[
@@ -886,6 +861,9 @@ fn unrelated_marker_summary(markers: &BTreeMap<String, bool>) -> String {
 #[ignore = "requires the Dart SDK on the test host"]
 #[test]
 fn dart_consumers_eliminate_unrelated_operations() {
+    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
+        return;
+    };
     let _gate = NATIVE_GATE.lock().unwrap();
     let root = gate_root();
     std::fs::create_dir_all(&root).unwrap();
@@ -917,7 +895,7 @@ fn dart_consumers_eliminate_unrelated_operations() {
     }
 
     // Stage 2: the emitted package must analyze cleanly (the compile-clean
-    // proof). This is the stage the current emission defects block.
+    // proof).
     for (label, package) in [
         (BASE_LABEL, &base_package),
         (EXTENDED_LABEL, &extended_package),
@@ -1002,8 +980,7 @@ fn dart_consumers_eliminate_unrelated_operations() {
     );
 
     // --- Pinned measured outcomes --------------------------------------------
-    // Measured 2026-09-16 on Dart 3.9.4 (on locally repaired emission copies;
-    // see the audit): code sheds at function granularity — unreferenced
+    // Measured on Dart 3.9.4: code sheds at function granularity — unreferenced
     // operation methods, pagination walkers, OAuth grants and typed-stream
     // machinery all shed, including their name strings — while the shared
     // validation-program tables (`_validationNodes`/`_validationRoots`) are
@@ -1027,9 +1004,9 @@ fn dart_consumers_eliminate_unrelated_operations() {
         // Measured code elimination: the unrelated operation's code (method
         // names) must shed from every single-operation consumer. If Dart AOT
         // ever retains unreferenced operations the way the Swift linker does,
-        // this fails loudly and the audit records the retention defeat.
+        // this fails loudly and the retention defeat must be pinned here.
         //
-        // Recorded data-granular defeat (measured 2026-09-16, see the audit):
+        // Recorded data-granular defeat (measured 2026-09-16):
         // the validating one-operation consumer retains the shared
         // `_validationNodes`/`_validationRoots` program tables as one unit, so
         // the unrelated schema's data strings (`UnrelatedGizmo`,
@@ -1044,7 +1021,7 @@ fn dart_consumers_eliminate_unrelated_operations() {
         for marker in code_markers {
             assert!(
                 !markers(&extended, marker),
-                "{consumer_label}: measured code elimination regressed — unrelated {marker} is retained in the AOT artifact; update docs/SDK-ELIMINATION-AUDIT.md with the measured retention"
+                "{consumer_label}: measured code elimination regressed — unrelated {marker} is retained in the AOT artifact; re-measure and update the pinned expectation in this test with the measured retention"
             );
         }
 
@@ -1057,7 +1034,7 @@ fn dart_consumers_eliminate_unrelated_operations() {
         {
             assert!(
                 !markers(&extended, marker),
-                "{consumer_label}: measured surface elimination regressed — {marker} is retained; update docs/SDK-ELIMINATION-AUDIT.md with the measured retention"
+                "{consumer_label}: measured surface elimination regressed — {marker} is retained; re-measure and update the pinned expectation in this test with the measured retention"
             );
         }
 
@@ -1067,12 +1044,12 @@ fn dart_consumers_eliminate_unrelated_operations() {
             // data (`zeta-quantum`, `UnrelatedGizmo` pointers) is retained
             // even though its code sheds. Measured size-neutral (0 B delta:
             // snapshot pool slack absorbs it). If the emitter ever splits
-            // the tables per schema root, this fails and forces an audit
-            // update with the improved measurement.
+            // the tables per schema root, this fails and forces the pin
+            // to be updated with the improved measurement.
             for marker in UNRELATED_DATA_MARKERS {
                 assert!(
                     markers(&extended, marker),
-                    "{consumer_label}: recorded data-granular retention regressed — {marker} no longer ships in the validating consumer (the shared program tables may have been split per schema root); update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement"
+                    "{consumer_label}: recorded data-granular retention regressed — {marker} no longer ships in the validating consumer (the shared program tables may have been split per schema root); re-measure and update the pinned expectation in this test with the improved measurement"
                 );
             }
         } else {
@@ -1083,7 +1060,7 @@ fn dart_consumers_eliminate_unrelated_operations() {
             for marker in UNRELATED_DATA_MARKERS {
                 assert!(
                     !markers(&extended, marker),
-                    "{consumer_label}: measured full isolation regressed — unrelated {marker} is retained in the codec-only artifact; update docs/SDK-ELIMINATION-AUDIT.md with the measured retention"
+                    "{consumer_label}: measured full isolation regressed — unrelated {marker} is retained in the codec-only artifact; re-measure and update the pinned expectation in this test with the measured retention"
                 );
             }
         }
@@ -1095,7 +1072,7 @@ fn dart_consumers_eliminate_unrelated_operations() {
             extended["binary_bytes"].as_i64().unwrap() - base["binary_bytes"].as_i64().unwrap();
         assert!(
             (0..=ELIMINATION_SLACK_BYTES as i64).contains(&delta),
-            "{consumer_label}: the unrelated operation moved the artifact by {delta} B (slack {ELIMINATION_SLACK_BYTES}); update docs/SDK-ELIMINATION-AUDIT.md with the new measurement",
+            "{consumer_label}: the unrelated operation moved the artifact by {delta} B (slack {ELIMINATION_SLACK_BYTES}); re-measure and update the pinned expectation in this test with the new measurement",
         );
         measurements.insert(
             format!("{consumer_label}/additivity"),

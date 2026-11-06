@@ -2,10 +2,15 @@
 //! Source-addressed contracts drive native models, checked
 //! codecs, HTTP clients, documentation and compatibility reports.
 
+#![deny(missing_docs)]
+
+// Test-support files are shared between in-crate tests and the integration
+// test binaries (via `#[path]`); this lets both spell `suspect_codegen::…`.
+#[cfg(test)]
+extern crate self as suspect_codegen;
+
 pub mod admission;
-#[cfg(feature = "http-protocol")]
 pub mod api_cli;
-#[cfg(feature = "http-protocol")]
 pub mod application;
 pub mod attribution;
 pub mod backend;
@@ -43,11 +48,10 @@ pub mod go_http;
 pub mod go_json;
 pub mod go_models;
 pub mod go_validation;
+pub mod guard;
 pub(crate) mod http_contract;
 mod http_examples;
-#[cfg(feature = "http-protocol")]
 pub mod http_protocol;
-#[cfg(feature = "http-protocol")]
 pub mod mcp;
 mod model_naming;
 pub mod python_codecs;
@@ -61,7 +65,6 @@ pub mod rust_models;
 pub mod rust_validation;
 pub mod schema_view;
 pub mod swift_sdk;
-#[cfg(feature = "http-protocol")]
 pub mod terraform;
 pub mod typescript;
 

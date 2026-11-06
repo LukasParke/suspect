@@ -6,7 +6,7 @@
 //! polling, revocation and introspection. Static runtime files are never
 //! modified; plans without a configured policy — or with only the deprecated
 //! implicit and password flows — emit nothing at all.
-#![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
+#![cfg(feature = "php-sdk")]
 
 use std::{fs, path::PathBuf, process::Command, sync::Arc};
 
@@ -363,9 +363,9 @@ fn oauth_file_emits_only_under_a_usable_scheme() {
 
 /// The repository's verified PHP 8.3 interpreter, when available.
 fn php() -> Option<PathBuf> {
-    // The manifest resolves `SUSPECT_PHP_BIN`, the pinned target-dir
-    // toolchain, then `PATH`, and gates the version (>= 8.2).
-    suspect_codegen::toolchain::gate("php").ok()
+    // `SUSPECT_PHP_BIN`, the source-built target-dir PHP, then `PATH`;
+    // a hard failure under `SUSPECT_REQUIRE_NATIVE`.
+    suspect_codegen::toolchain::require("php")
 }
 
 #[ignore = "requires the PHP CLI on the test host"]

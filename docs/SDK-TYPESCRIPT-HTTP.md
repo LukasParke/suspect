@@ -4,9 +4,11 @@
 immutable plan only after every selected operation fits its implemented
 profile. `typescript::package::emit_http(&plan, &PackageConfig)` wraps its
 artifacts in a private, installable ESM package with zero runtime dependencies.
-These are experimental capabilities; complete SDK release gates remain open.
 
-The canonical `codegen` CLI exposes this profile without a custom Rust integration:
+The canonical `codegen` CLI exposes this package without a custom Rust
+integration. The CLI `typescript-http` profile selects the ExpandedV1 protocol
+profile through `backend::typescript_options`; its protocol surface is
+documented in [SDK-TYPESCRIPT-PROTOCOL.md](SDK-TYPESCRIPT-PROTOCOL.md).
 
 ```sh
 cargo run --locked -p suspect-cli -- codegen \
@@ -32,19 +34,18 @@ The CLI-to-package native gate uses the tracked source directly, installs the
 emitted tarball, compiles a strict TypeScript consumer, calls a localhost credits
 server, checks exact decimals, and builds/validates TypeDoc. The editor uses the
 same profile for generation and the shared session command for watch/preview.
-Current verification is recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md) and
-[editor integration](SDK-EDITOR-PREVIEW.md).
+See [editor integration](SDK-EDITOR-PREVIEW.md) for the editor workflow.
 
-## Admitted contract
+## StrictJson profile
 
-The profile supports static HTTPS source servers, one HTTP bearer requirement,
+The library default, `HttpConfig::default()` (StrictJson), supports static HTTPS source servers, one HTTP bearer requirement,
 required string path parameters with simple serialization, and non-null scalar
 or scalar-array query parameters with `style=form`, either `explode` value and
 `allowReserved=false`. JSON request bodies and exact-status JSON responses are
 supported. GET, POST, PATCH, PUT and DELETE are admitted. HEAD, OPTIONS, TRACE,
 security alternatives, server variables, other parameter encodings/media,
-response ranges/defaults, headers and links produce source-located errors.
-Multipart/form bodies and streaming/SSE remain required work.
+response ranges/defaults, headers, links, multipart/form bodies and streams
+produce source-located errors under this profile; ExpandedV1 admits them.
 
 Optional query values are omitted when absent; empty scalar strings remain
 present. Optional empty arrays emit no pairs. Required empty arrays fail with
@@ -52,7 +53,9 @@ present. Optional empty arrays emit no pairs. Required empty arrays fail with
 the mandatory parameter. Nullable/object/nested-array/ambiguous union queries,
 `allowReserved=true`, `allowEmptyValue=true`, and content parameters remain
 explicitly unsupported. The tracked `/keys` operation named `list` has a nullable
-offset and is not admitted by guessing a null encoding. Pagination is not inferred.
+offset and is not admitted by guessing a null encoding. Pagination is not
+inferred; helpers are generated only through an `sdk_defaults` policy
+([golden defaults](SDK-GOLDEN-DEFAULTS.md#4-automatic-pagination)).
 
 The HTTP planner plans the selected closure's model codecs through
 `plan_codecs_with_views`. A closure without directional annotations plans one
@@ -109,7 +112,7 @@ exact `JsonNumber` values. Operation-specific error guards bind identity through
 private WeakMaps; mutating public metadata cannot forge another operation's
 error. Every response branch preserves its actual model/status/media tuple.
 
-## Package, docs and evidence
+## Package, docs and tests
 
 The package root exposes `createClient` and the `operations`, `models` and
 `codecs` namespaces. `/operations`, `/models`, `/codecs` and `/json` subpaths
@@ -130,12 +133,20 @@ anchors. Altered prose, missing exports/manifests, wrong Promise bindings,
 swapped error bodies and wrong guard targets fail the gate. Hostile prose must
 remain inert in rendered documentation.
 
-The GLM continuation checkpoint passes 21 checks across the five HTTP/package
-suites, with all native/corpus cases enabled: `target/sdk-glm-http-native-tests.log`.
 Negative request tests count transport entry before assertions and require
 request-side failure kinds, so transport assertion failures cannot masquerade
 as request validation. Native docs resolve written model aliases through the
 TypeScript checker before allowing TypeDoc's intrinsic alias erasure.
-Earlier evidence remains in `target/typescript-http-patterns-node22-native-checkpoint.log`
-and the separate integration/package logs. These functional checks do not
-establish ideal bundle sizes or complete transport performance.
+These functional checks do not establish ideal bundle sizes or complete
+transport performance.
+
+The suites are `tests/typescript_http.rs`, `typescript_http_runtime.rs`,
+`typescript_http_docs.rs`, `typescript_http_bundle.rs`,
+`typescript_http_directional.rs` and `typescript_package.rs`; native cases are
+`--ignored` and need the pinned Node/npm/TypeScript/TypeDoc toolchain:
+
+```sh
+cargo test --locked -p suspect-codegen --test typescript -- --ignored \
+  typescript_http:: typescript_http_runtime:: typescript_http_docs:: \
+  typescript_http_bundle:: typescript_package::
+```

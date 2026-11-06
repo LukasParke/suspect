@@ -107,12 +107,7 @@ impl Session {
         let version = OasVersion::sniff(handle.doc()).ok_or(ModelError::NotOpenApi {
             family: handle.doc().sniff_family(),
         })?;
-        Ok(OpenApi::new(
-            self,
-            version,
-            handle.id(),
-            handle.doc().root(),
-        ))
+        Ok(OpenApi::new(self, version, handle.doc().root()))
     }
 
     /// Resolves through the workspace's canonical decoder and iterative
@@ -154,29 +149,25 @@ impl std::fmt::Debug for Session {
 pub struct OpenApi<'s> {
     pub(crate) session: &'s Session,
     pub(crate) version: OasVersion,
-    #[allow(dead_code)] // exposed via doc_id()
-    pub(crate) doc: suspect_ref::DocId,
     pub(crate) root: NodeRef<'s>,
 }
 
 impl<'s> OpenApi<'s> {
-    pub(crate) fn new(
-        session: &'s Session,
-        version: OasVersion,
-        doc: suspect_ref::DocId,
-        root: NodeRef<'s>,
-    ) -> Self {
+    pub(crate) fn new(session: &'s Session, version: OasVersion, root: NodeRef<'s>) -> Self {
         Self {
             session,
             version,
-            doc,
             root,
         }
     }
 
-    /// Family of this document (diagnostics).
+    /// Spec family of this document, from its parsed OpenAPI version.
     #[must_use]
     pub fn family(&self) -> SpecFamily {
-        SpecFamily::Unknown
+        match self.version {
+            OasVersion::V30 => SpecFamily::Oas30,
+            OasVersion::V31 => SpecFamily::Oas31,
+            OasVersion::V32 => SpecFamily::Oas32,
+        }
     }
 }

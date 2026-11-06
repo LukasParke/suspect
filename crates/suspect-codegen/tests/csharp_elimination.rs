@@ -295,9 +295,7 @@ fn generate(document: Value) -> Vec<OutFile> {
 }
 
 fn dotnet() -> PathBuf {
-    std::env::var_os("SUSPECT_DOTNET_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/.local/share/mise/dotnet-root/dotnet".into())
+    suspect_codegen::toolchain::resolve_path("dotnet").expect("dotnet is gated by the test entry")
 }
 
 fn dotnet_command(directory: &Path, home: &Path) -> Command {
@@ -524,6 +522,9 @@ fn write_report(report: &Value) {
 #[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn csharp_consumers_eliminate_unrelated_operations() {
+    if suspect_codegen::toolchain::require("dotnet").is_none() {
+        return;
+    }
     let _gate = NATIVE_GATE.lock().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-elimination");
     fs::create_dir_all(&root).unwrap();

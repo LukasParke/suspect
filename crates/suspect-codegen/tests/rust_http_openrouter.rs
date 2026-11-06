@@ -24,7 +24,9 @@ const WANTED: [&str; 5] = [
 #[ignore = "requires native Cargo, the tracked OpenRouter checkout and pinned crates"]
 fn installed_expanded_openrouter_bytes_anonymous_and_delete_operations() {
     use suspect_codegen::http_protocol::{CompatibilityProfile, SecurityPlan};
-    let contract = contract();
+    let Some(contract) = contract() else {
+        return;
+    };
     let wanted = [
         "downloadContainerFileContent",
         "downloadFileContent",
@@ -106,7 +108,7 @@ fn installed_expanded_openrouter_bytes_anonymous_and_delete_operations() {
     ] {
         checked(
             native_env(
-                Command::new("cargo")
+                suspect_codegen::toolchain::nested_cargo()
                     .args(args)
                     .args(["--offline", "--quiet", "--manifest-path"])
                     .arg(&manifest),
@@ -133,7 +135,7 @@ fn installed_expanded_openrouter_bytes_anonymous_and_delete_operations() {
     std::fs::write(consumer.join("src/lib.rs"), EXPANDED_CONSUMER).unwrap();
     checked(
         native_env(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args(["test", "--offline", "--quiet", "--manifest-path"])
                 .arg(consumer.join("Cargo.toml")),
         )
@@ -165,23 +167,17 @@ fn native_env(command: &mut Command) -> &mut Command {
         .env("RUSTDOCFLAGS", "-D warnings")
 }
 
-fn contract() -> Arc<Contract> {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let path = root.join("projects/docs/openapi/openapi.yaml");
-    assert!(
-        path.is_file(),
-        "tracked OpenRouter source checkout (corpus) is required at {}",
-        path.display()
-    );
+/// The pinned OpenRouter contract, or `None` (after printing a skip
+/// message) when the pinned revision is not available.
+fn contract() -> Option<Arc<Contract>> {
+    let path = suspect_codegen::toolchain::openrouter_spec()?;
     let workspace = WorkspaceBuilder::new()
         .root(path.parent().unwrap())
         .build()
         .unwrap();
-    Arc::new(
+    Some(Arc::new(
         Contract::from_workspace(&Arc::new(workspace), &Uri::from_path(&path).unwrap()).unwrap(),
-    )
+    ))
 }
 
 fn selected(contract: &Arc<Contract>) -> Vec<SourceId> {
@@ -234,7 +230,10 @@ fn body_symbol(plan: &HttpPlan, op: &PlannedOperation) -> String {
 #[ignore = "requires native Cargo, the tracked OpenRouter checkout and the pinned crate cache"]
 fn installed_openrouter_native_consumer_preserves_source_wire_values() {
     assert!(
-        Command::new("cargo").arg("--version").output().is_ok(),
+        suspect_codegen::toolchain::nested_cargo()
+            .arg("--version")
+            .output()
+            .is_ok(),
         "native Cargo is required by this opt-in gate"
     );
     assert!(
@@ -242,7 +241,9 @@ fn installed_openrouter_native_consumer_preserves_source_wire_values() {
         "external tar is required to extract the packaged .crate"
     );
 
-    let contract = contract();
+    let Some(contract) = contract() else {
+        return;
+    };
     let operations = selected(&contract);
     let plan = plan_http(contract, &operations, HttpConfig::default()).unwrap();
     assert_eq!(plan.operations().len(), WANTED.len());
@@ -295,7 +296,7 @@ fn installed_openrouter_native_consumer_preserves_source_wire_values() {
     );
     checked(
         native_env(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args(["test", "--doc", "--offline", "--quiet", "--manifest-path"])
                 .arg(generated.join("Cargo.toml")),
         )
@@ -306,7 +307,7 @@ fn installed_openrouter_native_consumer_preserves_source_wire_values() {
     );
     checked(
         native_env(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args([
                     "doc",
                     "--no-deps",
@@ -323,7 +324,7 @@ fn installed_openrouter_native_consumer_preserves_source_wire_values() {
     );
     checked(
         native_env(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args([
                     "package",
                     "--offline",
@@ -379,7 +380,7 @@ fn installed_openrouter_native_consumer_preserves_source_wire_values() {
     .unwrap();
     checked(
         native_env(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args(["test", "--offline", "--quiet", "--manifest-path"])
                 .arg(consumer.join("Cargo.toml")),
         )

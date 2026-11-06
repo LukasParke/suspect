@@ -214,6 +214,11 @@ private suspend fun resources() {
     val transport=Transport{calls.incrementAndGet();HttpResponse(200,mapOf("Content-Type" to listOf("application/json")),REPLY.toByteArray())}
     Client(transport=transport).use{client->fails<SdkException>{client.basic()};fails<SdkException>{client.secure(requestOptions=RequestOptions(securityAlternative=0))}}
     Client(Credentials(basicAuth=BasicCredentials("user\n","password")),transport).use{client->check(fails<SdkException>{client.basic()}.kind==FailureKind.AUTHENTICATION)}
+    // ADR 0035: a declared plain-HTTP server keeps its scheme; a non-loopback HTTP override needs the opt-in.
+    val seen=mutableListOf<String>();val recording=Transport{seen.add(it.url.toString());HttpResponse(200,mapOf("Content-Type" to listOf("application/json")),REPLY.toByteArray())}
+    Client(transport=recording,options=ClientOptions(serverIndex=2)).use{client->client.servers();check(seen.single()=="http://plain.example.test/api/servers")}
+    check(runCatching{ClientOptions(serverUrl=URI("http://plain.example.test/api"))}.isFailure)
+    Client(transport=recording,options=ClientOptions(serverUrl=URI("http://plain.example.test/api"),allowInsecureHttp=true)).use{client->client.servers();check(seen.last()=="http://plain.example.test/api/servers")}
     check(calls.get()==0)
     var producerClosed=false
     Client(transport=transport,options=ClientOptions(maxRequestBytes=128,maxStreamItemBytes=64)).use{client->

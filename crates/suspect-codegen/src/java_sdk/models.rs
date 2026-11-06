@@ -36,12 +36,19 @@ pub enum JavaType {
 /// A model member and its actual public builder/accessor identity.
 #[derive(Debug, Clone)]
 pub struct JavaField {
+    /// Java builder/accessor name, unique within the model.
     pub name: String,
+    /// JSON property name.
     pub wire: String,
+    /// Native member type.
     pub ty: JavaType,
+    /// Whether the property must be present.
     pub required: bool,
+    /// Whether the value domain admits JSON null.
     pub nullable: bool,
+    /// Property schema.
     pub source: SchemaId,
+    /// Property schema description; empty when absent.
     pub description: String,
     /// A required, source-proved singleton. This is not a schema default.
     pub fixed: Option<Value>,
@@ -52,9 +59,13 @@ pub struct JavaField {
 /// The ordered arguments of a generated factory or constructor.
 #[derive(Debug, Clone)]
 pub struct JavaArgument {
+    /// Java parameter name.
     pub name: String,
+    /// Native parameter type.
     pub ty: JavaType,
+    /// Schema the argument is bound to.
     pub source: SchemaId,
+    /// Whether the argument admits JSON null.
     pub nullable: bool,
 }
 
@@ -63,15 +74,20 @@ pub struct JavaArgument {
 pub struct JavaConstructor {
     /// `builder` for objects; `new VariantN` for union arms.
     pub name: String,
+    /// Required, non-fixed arguments in declaration order.
     pub arguments: Vec<JavaArgument>,
 }
 
 /// One explicit native union arm, with its own checked codec binding.
 #[derive(Debug, Clone)]
 pub struct JavaVariant {
+    /// Nested variant class name.
     pub name: String,
+    /// Arm schema.
     pub source: SchemaId,
+    /// Native type wrapped by the arm.
     pub ty: JavaType,
+    /// Arm construction signature.
     pub constructor: JavaConstructor,
 }
 
@@ -79,7 +95,9 @@ pub struct JavaVariant {
 /// retained when a mathematically equal value is decoded.
 #[derive(Debug, Clone)]
 pub struct JavaLiteral {
+    /// Java constant name.
     pub name: String,
+    /// Source literal value.
     pub value: Value,
 }
 
@@ -87,17 +105,27 @@ pub struct JavaLiteral {
 /// holder class, but callers use the alias's resolved native type.
 #[derive(Debug, Clone)]
 pub enum JavaDeclaration {
+    /// Immutable object class with a builder.
     Object {
+        /// Declared properties in source order.
         fields: Vec<JavaField>,
+        /// Value type of undeclared properties; `None` when they are forbidden.
         extras: Option<JavaType>,
+        /// `builder` factory signature.
         constructor: JavaConstructor,
     },
+    /// Erased alias for another native type.
     Alias(JavaType),
+    /// Sealed union over explicit arms.
     Union {
+        /// `oneOf` (exactly one arm matches) rather than `anyOf`.
         exclusive: bool,
+        /// Arms in source order.
         variants: Vec<JavaVariant>,
     },
+    /// Closed set of literal constants.
     Literals {
+        /// Constants in source order.
         values: Vec<JavaLiteral>,
     },
 }
@@ -105,10 +133,15 @@ pub enum JavaDeclaration {
 /// A binding to the emitted `OwnedProgram`, never a Java-text lookup.
 #[derive(Debug, Clone)]
 pub struct JavaCodecBinding {
+    /// Schema the codec checks.
     pub source: SchemaId,
+    /// Java class declaring the codec.
     pub holder: String,
+    /// Static codec field on `holder`.
     pub field: &'static str,
+    /// Root instruction index in the compiled program.
     pub root: usize,
+    /// Rendered Java type the codec decodes to.
     pub native_type: String,
 }
 
@@ -124,26 +157,32 @@ pub struct JavaSymbol {
 }
 
 impl JavaSymbol {
+    /// Declaring schema.
     #[must_use]
     pub fn source(&self) -> &SchemaId {
         &self.source
     }
+    /// Generated class name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
+    /// Schema description; empty when absent.
     #[must_use]
     pub fn description(&self) -> &str {
         &self.description
     }
+    /// Native declaration shape.
     #[must_use]
     pub const fn declaration(&self) -> &JavaDeclaration {
         &self.declaration
     }
+    /// Whether the schema's value domain admits JSON null.
     #[must_use]
     pub const fn nullable(&self) -> bool {
         self.nullable
     }
+    /// Checked codec bound to this declaration.
     #[must_use]
     pub const fn codec(&self) -> &JavaCodecBinding {
         &self.codec
@@ -153,12 +192,19 @@ impl JavaSymbol {
 /// Flattened member identities for consumers that do not need the full graph.
 #[derive(Debug, Clone)]
 pub struct JavaFieldWire {
+    /// Owning model class name.
     pub model: String,
+    /// Java member name.
     pub field: String,
+    /// JSON property name.
     pub wire: String,
+    /// Rendered Java member type.
     pub native_type: String,
+    /// Whether the property must be present.
     pub required: bool,
+    /// Whether the value domain admits JSON null.
     pub nullable: bool,
+    /// Property schema.
     pub source: SchemaId,
 }
 
@@ -173,32 +219,51 @@ pub struct JavaModelPlan {
 }
 
 impl JavaModelPlan {
+    /// Declarations ordered by schema identity.
     #[must_use]
     pub fn symbols(&self) -> &[JavaSymbol] {
         &self.symbols
     }
+    /// Every object member across all declarations.
     #[must_use]
     pub fn fields(&self) -> &[JavaFieldWire] {
         &self.fields
     }
+    /// Allocated class name for every planned schema.
     #[must_use]
     pub fn names(&self) -> &BTreeMap<SchemaId, String> {
         &self.names
     }
+    /// Declaration for `id`, when planned.
     #[must_use]
     pub fn symbol(&self, id: &SchemaId) -> Option<&JavaSymbol> {
         self.positions
             .get(id)
             .map(|&position| &self.symbols[position])
     }
+    /// Checked codec for `id`.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `id` is not a planned schema.
     #[must_use]
     pub fn codec(&self, id: &SchemaId) -> &JavaCodecBinding {
         &self.symbols[self.positions[id]].codec
     }
+    /// Rendered Java type of `id`, resolving aliases.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `id` is not a planned schema.
     #[must_use]
     pub fn native_type(&self, id: &SchemaId) -> String {
         self.render_type(&JavaType::Named(id.clone()))
     }
+    /// Java source spelling of `ty`, resolving aliases; nullability is not spelled.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `ty` names a schema that is not planned.
     #[must_use]
     pub fn render_type(&self, ty: &JavaType) -> String {
         match ty {
@@ -1136,7 +1201,7 @@ const KEYWORDS: &[&str] = &[
     "when",
 ];
 #[must_use]
-pub fn is_java_identifier(name: &str) -> bool {
+pub(crate) fn is_java_identifier(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 100
         && !KEYWORDS.contains(&name)

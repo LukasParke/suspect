@@ -66,13 +66,16 @@ fn identity() -> PackageConfig {
         namespace: "ReadmeProbe".into(),
     }
 }
+/// The Ruby prefix resolved by `suspect_codegen::toolchain`
+/// (`SUSPECT_RUBY_HOME`, the mise install, or `ruby` on `PATH`); test
+/// entries gate on [`native_ready`] first.
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
+}
+/// Ruby is resolvable (skip message, or a panic under
+/// `SUSPECT_REQUIRE_NATIVE`, otherwise).
+fn native_ready() -> bool {
+    suspect_codegen::toolchain::require_home("ruby").is_some()
 }
 fn first_request(readme: &str) -> &str {
     readme
@@ -88,8 +91,28 @@ fn first_request(readme: &str) -> &str {
 }
 
 #[test]
+fn no_input_readme_first_request_calls_the_first_callable_operation() {
+    for json_response in [false, true] {
+        let files = ruby_sdk::emit_sdk(&plan(source(json_response)), &identity()).unwrap();
+        let readme = &files
+            .iter()
+            .find(|file| file.path == "ruby/README.md")
+            .unwrap()
+            .content;
+        let snippet = first_request(readme);
+        assert!(
+            snippet.contains("response = client.inspect_value\n"),
+            "{snippet}"
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires Ruby 3.3.12/4.0.6; executes the emitted README fence, with no real network calls"]
 fn emitted_no_input_readme_executes_the_allocated_source_method() {
+    if !native_ready() {
+        return;
+    }
     for json_response in [false, true] {
         let plan = plan(source(json_response));
         let method = &plan

@@ -1,15 +1,17 @@
-# Swift SDK: selected-operation M3 slice
+# Swift SDK: HTTP client
 
-This document retains the original slice and toolchain evidence. Later additive
-coverage is documented in [Swift HTTP protocol](SDK-SWIFT-PROTOCOL.md),
-[scoped validation v2](SDK-SWIFT-VALIDATION-V2.md), and
-[resources/dynamic references and physical server bases](SDK-SWIFT-RESOURCES.md).
+This document covers the generated Swift package, its exact JSON and validation
+runtime, and the URLSession client. The shared HTTP
+protocol surface is summarized under [HTTP and concurrency](#http-and-concurrency);
+versioned validation programs follow
+[ADR 0020](adr/0020-validation-programs-are-versioned-and-frozen.md), and
+[resources/dynamic references and physical server bases](SDK-SWIFT-RESOURCES.md)
+are documented separately.
 
 The Swift backend emits a working Swift 6 package from the canonical contract.
-Swift is part of the **2026-09-09 M3 priority**, alongside Python, Go and Rust.
-The verification inputs are the original
+The verification inputs are
 [`canonical.openapi.yaml`](../crates/suspect-codegen/tests/fixtures/m2/canonical.openapi.yaml)
-and these five operations in the actual `openrouter-web` checkout:
+and these five operations in an `openrouter-web` checkout:
 
 - `getCredits`
 - `createKeys`
@@ -48,15 +50,13 @@ The package contains:
 Package identity is separate from API semantics. The manifest uses
 `swift-tools-version: 6.0` and Swift 6 language mode. Its Apple deployment floor
 is macOS 13, iOS/tvOS 16 and watchOS 9. Verified toolchains are **Apple Swift
-6.3.3** (current, `/usr/bin/swift`) and the official **Swift 6.0.3 release**
-(6.0-family floor, paired with the existing macOS 15.4 SDK), on arm64 macOS.
-No third-party runtime dependency is required. The original unpatched Swift 6.0
-release's SDK failure evidence is retained separately below. Other operating
-systems have not been executed in this gate.
+6.3.3** and the official **Swift 6.0.3 release** (6.0-family floor, paired with
+the macOS 15.4 SDK), on arm64 macOS. No third-party runtime dependency is
+required. Other operating systems are not exercised by the native tests.
 
 ## Native usage
 
-These names are emitted from the unchanged M2 fixture:
+These names are emitted from the canonical fixture:
 
 ```swift
 import GeneratedSDK
@@ -161,19 +161,75 @@ bound the SDK's work and output, rather than promising a fixed process RSS.
 
 ## HTTP and concurrency
 
-The shared `http_contract` determines methods, paths, effective servers,
-security, parameter serialization, body requiredness and response schemas.
-The admitted profile has one canonical static HTTPS server, one bearer scheme,
-simple string path parameters, form scalar/scalar-array queries,
-`application/json` bodies/responses and exact status codes.
+Swift HTTP planning consumes the shared `http_protocol::ProtocolPlan`
+([SDK-HTTP-PROTOCOL.md](SDK-HTTP-PROTOCOL.md)). The explicit adapter identity is
+**`swift-http-protocol-v1`**; the generator lists individual capabilities and
+never opts into `Capability::ALL`.
+
+| Area | Native behavior |
+| --- | --- |
+| Versions and methods | OAS 3.0, 3.1 and 3.2; named and unnamed operations; fixed methods and exact case-sensitive `additionalOperations` tokens, including `get`, `GeT`, `head`, `COPY`, `MiXeD`, `x-PING` and `pOsT`. |
+| Servers | Ordered effective choices, relative URLs, default `/`, variable defaults/enums and explicit overrides. Relative local-file descriptions require a caller-supplied HTTP document URL. |
+| Security | Undeclared, disabled, anonymous, OR and AND requirements; case-insensitive bearer/basic scheme names; header/query/cookie API keys; distinct roles/scopes; OAuth/OIDC caller hooks. Conflicting attachments decline before artifacts or fail before transport. |
+| Parameters | Scalar, scalar-array and flat-object simple/label/matrix/form/spaceDelimited/pipeDelimited/deepObject; headers, cookie form and OAS 3.2 cookie style; JSON/plain-text content; reserved expansion and UTF-8 escaping. Nested/null/ambiguous wire values are guarded. Object key order and identity use UTF-8 bytes. |
+| Whole query | OAS 3.2 JSON and UTF-8 text with one URI-component encoding pass and no name prefix; form-urlencoded from the typed native object through the aggregate and field codecs, with no second encoding pass. Empty-present and missing queries remain distinct. |
+| Request media | JSON and structured `+json`, schema-free JSON, UTF-8 scalar text, finite bytes, form-urlencoded and named multipart. Concrete Content-Type must select the same typed body case; wildcard bytes cannot bypass a more specific JSON schema. |
+| Responses | Exact > class > default before media matching. Concrete media > type wildcard > `*/*`, then matching parameter count. Success is determined from the actual 200–299 status. Media mismatch does not fall through to another status declaration; content is not sniffed. |
+| Body suppression | HEAD, 1xx, 204, 205 and 304 expose no decoded/raw body. No declared content otherwise means bounded unspecified bytes, not an empty-body assertion. |
+| Headers and links | Required typed scalar/array/flat-object/content headers, unchanged raw fields, precise header failure sources, and link literals/expressions/targets/provenance as metadata. Links trigger no calls. |
+| Parts | Separate aggregate and per-part ceilings; required/extras/property counts; named repeated fields; typed positional prefix slots and remaining items; item cardinality/codecs; binary equality including zero/non-UTF8 octets; typed part headers; explicit media choices; non-expansive MIME style values; bounded request/response parsing. Preamble/epilogue are ignored. |
+| Streams | Standard OAS 3.2 `itemSchema`, parsed SSE envelopes, `application/jsonl` and `application/x-ndjson`; arbitrary chunk and UTF-8 splits, CR/LF framing, comments, multiline data, numeric retry, id handling, codec errors and bounded captures. |
+
+### Server and credential policy
+
+`ClientOptions` and `RequestOptions` select a server index, variables and document
+URL. A full `serverURL` override is also available. Declared HTTP servers retain
+their scheme; overrides require HTTPS or loopback HTTP unless `allowHTTP` is set
+([ADR 0035](adr/0035-one-server-url-policy.md)). Literal dot segments are refused.
+Invalid names, enum values, URL characters and path traversal fail before I/O.
+
+Security defaults to the first fully configured alternative, including an
+anonymous alternative in its declared position. `securityAlternative` selects an
+explicit alternative. AND members are all required. Credentials stay named by
+their source schemes; basic credentials take username/password values and use
+UTF-8 before base64 encoding.
+
+OAuth/OIDC providers are `@Sendable` async closures receiving
+`HTTPCredentialContext`: scheme/requirement provenance, permissions, flow URLs,
+scope metadata and discovery/metadata URLs. They return a **complete Authorization
+field**, so token type is caller-selected. A generated token lifecycle is added
+only through an `sdk_defaults` OAuth policy
+([golden defaults](SDK-GOLDEN-DEFAULTS.md#5-oauth-lifecycle)).
+
+### Stream limits
+
+`HTTPEventStream<T>` is a single-consumer AsyncSequence that validates each parsed
+item with the exact source-bound codec. Early break, exhaustion, failure,
+cancellation and idempotent `close()` release the transfer; URLSession's delegate
+uses demand-driven suspension, a finite queue and a total received-byte ceiling,
+and overflow is an explicit error.
+
+| Generation policy | Default |
+| --- | --- |
+| Assembled request URL and serialized request body | 8 MiB each |
+| Received response / complete stream | 8 MiB |
+| Each in-memory part | 8 MiB |
+| Each parsed/framed stream item | 1 MiB |
+| Queued stream transport bytes | 64 KiB |
+| Raw failure capture | 8 MiB, independently configurable |
+| Headers | 256 fields / 64 KiB |
+| Timeout | 60 seconds, positive finite values up to one day |
+
+### Transport
 
 `Client` and all its stored configuration/models are `Sendable`. An injected
 `HTTPTransport` must also be `Sendable`. The default `URLSessionTransport` uses
 an ephemeral session for each transfer, disables cookie/cache/credential storage,
 rejects redirects and bounds response accumulation in delegate callbacks,
 including responses without Content-Length. It invalidates its session on
-completion, error, size rejection or cancellation. No operation retries or
-pagination loops are inferred.
+completion, error, size rejection or cancellation. No operation retries
+([ADR 0025](adr/0025-one-http-exchange-per-call.md)); pagination is generated only
+through an `sdk_defaults` policy.
 
 The one `@unchecked Sendable` type is the private URLSession delegate state
 holder. Its mutable state is protected by a lock; continuations and external
@@ -183,7 +239,7 @@ or task installation is retained. The caller receives native
 
 `ClientOptions` configures the server override, whole-transfer timeout and lower
 response ceiling. `RequestOptions` supplies a per-call timeout and may further
-lower that ceiling. Cleartext overrides are restricted to loopback fixtures.
+lower that ceiling.
 Custom transports must implement cancellation, timeouts, redirect and byte-limit
 policy; the client checks cancellation and verifies returned status/header/body
 bounds as well.
@@ -201,141 +257,32 @@ The tests are in
 [`tests/swift_sdk.rs`](../crates/suspect-codegen/tests/swift_sdk.rs) and the private
 Swift validation module. Required native gates fail if their toolchain/corpus is
 missing; their `ignore` annotations make native verification explicit.
-
-The Swift 6.3.3 execution on 2026-09-09: **13/13 integration tests passed**, including
-both native package/consumer/DocC gates, and **1/1 shared native validation gate
-passed**. Standalone type probes use `swiftc`, first require a successful positive
+Standalone type probes use `swiftc`, first require a successful positive
 control, and then require five real type-check failures.
 
-The **6.0.3 + SDK 15.4 floor run also passed both native SDK gates and the shared
-native validation gate**. This is the tested 6.0 patch tier; the package's
-declared tools/language baseline remains 6.0.
-
 ```sh
-export CARGO_TARGET_DIR="${TMPDIR%/}/opencode/swift-integration-cargo"
-cargo test --locked -p suspect-codegen --test swift_sdk
-cargo test --locked -p suspect-codegen --test swift_sdk -- --ignored --nocapture
+export CARGO_TARGET_DIR="${TMPDIR%/}/suspect-swift-integration-cargo"
+cargo test --locked -p suspect-codegen --test swift swift_sdk::
+cargo test --locked -p suspect-codegen --test swift swift_sdk:: -- --ignored --nocapture
 cargo test --locked -p suspect-codegen --lib \
   swift_sdk::validation::tests::native_shared_runtime_contract_vectors \
   -- --ignored --nocapture
 ```
 
-### Original Swift 6.0 release probe (retained)
+### Toolchain floor
 
-The exact official **6.0** release was downloaded from
-[download.swift.org](https://download.swift.org/swift-6.0-release/xcode/swift-6.0-RELEASE/swift-6.0-RELEASE-osx.pkg)
-and extracted with `pkgutil --expand-full` into isolated temporary tooling.
-The [official release catalog](https://www.swift.org/api/v1/install/releases.json)
-identifies `swift-6.0-RELEASE`, dated 2024-09-16, with Xcode 16. Package identity
-is `org.swift.600202409101a`, version `6.0.20240910101`.
+The declared tools/language baseline is 6.0; the tested 6.0 patch tier is
+**6.0.3** with the macOS 15.4 SDK. The original unpatched Swift 6.0 release is
+not usable with the available macOS 15.4 and 26.5 SDKs: even a standalone
+`import Foundation` program crashes the compiler during Darwin SDK module
+deserialization.
 
-Verification:
-
-- Downloaded package SHA-256:
-  `2b53b7ceaadded915213a7155131e0f14bef8e766859f88c68d128822058d159`.
-  This is a locally recorded artifact identity. The adjacent `.pkg.sha256` URL
-  returned 404; no separately published checksum is claimed.
-- `pkgutil --check-signature` reported a trusted Apple notarization and timestamp
-  `2024-09-13 18:45:03 +0000`, signed by
-  `Developer ID Installer: Swift Open Source (V9AUD2URP3)`, matching the
-  [official macOS signing instructions](https://www.swift.org/install/macos/package_installer/).
-- `codesign --verify --strict` accepted the extracted `swift-frontend`.
-- The extracted binaries report
-  `Apple Swift version 6.0 (swift-6.0-RELEASE)`.
-- A Foundation-free executable compiled the unchanged `number.swift` with that
-  compiler and passed exact comparison, signed-zero, divisibility and 4,000-digit
-  zero-padded exponent probes. This is a numeric/compiler smoke check, not the
-  complete native validation or SDK gate.
-
-**Original-release SDK blocker:** both installed SDK candidates fail even a small
-standalone `import Foundation` program under this compiler, targeting macOS 13.
-
-| Existing SDK | Observed Swift 6.0 result |
-| --- | --- |
-| `/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk` | Compiler signal 6 during Darwin `MandatorySILLinker`; `POSIXErrorCode.init(rawValue:)` deserialization mismatch through `_errno`, built from the SDK swiftinterface into a fresh isolated module cache |
-| `/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk` | The same Darwin function deserialization failure through `_DarwinFoundation1`, using a separate fresh cache |
-
-The existing 15.4 SDK identifies build `24E241`; its Foundation interface reports
-Apple Swift 6.1. Its installed file receipt is
-`com.apple.pkg.CLTools_SDK_macOS_LMOS`, version `26.6.0.0.1781586411`.
-The actual M2 SwiftPM gate was then run with explicit Swift 6.0 `SWIFT_EXEC` and
-the 15.4 SDK. It reached generated source compilation and reproduced the same
-Darwin SDK crash. Native M2 execution, five-operation execution, standalone type
-checks, full portable validation and DocC promotion under the original unpatched
-6.0 release were blocked by that prerequisite. The subsequent 6.0.3 floor results
-below are separate evidence.
-
-The declared tools/language baseline remains 6.0. No SDK files or installer
-scripts were modified or activated globally. These original 6.0 logs remain a
-record of the observed failure; the patch-tier verification below does not
-reinterpret that failure as a pass.
-
-Tooling and complete failure logs are retained locally under
-`${TMPDIR%/}/opencode/swift-6.0-toolchain/`:
-`PROVENANCE.md`, `foundation-sdk15.4.log`, `foundation-sdk26.5.log`, and
-`m2-floor.log`. The generated failed-floor fixture is `gates/m2-tJUkcW`.
-
-#### Bounded matching-SDK inventory
-
-A follow-up inventory found Xcode **26.6** in `/Applications/Xcode.app` and no
-Xcode 16 bundle in either application directory. Available SDKs remain 15.4
-(`24E241`) and 26.5 (`25F70`); no existing SDK 15.0/15.1 was found in the Xcode,
-CommandLineTools, user Developer or approved tooling roots.
-
-The official direct disk-image endpoints for
-[CLT 16.0](https://download.developer.apple.com/Developer_Tools/Command_Line_Tools_for_Xcode_16/Command_Line_Tools_for_Xcode_16.dmg)
-and
-[CLT 16.1](https://download.developer.apple.com/Developer_Tools/Command_Line_Tools_for_Xcode_16.1/Command_Line_Tools_for_Xcode_16.1.dmg)
-both redirected to `https://developer.apple.com/unauthorized/`. Their final
-response was an HTML page, not an available SDK disk image. A bounded check of
-Apple's macOS-14 merged software-update catalog returned 404. SDK acquisition
-stopped at this boundary without credentials, third-party SDK mirrors or a full
-Xcode download.
-
-### Verified Swift 6.0 patch tier: 6.0.3
-
-The latest official 6.0 patch release,
-[Swift 6.0.3](https://download.swift.org/swift-6.0.3-release/xcode/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-osx.pkg),
-was acquired and extracted into a separate isolated tooling directory.
-
-- Package SHA-256:
-  `764c3d5ba27473494206278c27d1bb0fdc3a8bca35ed902ed030f6699904e903`.
-- `pkgutil --check-signature`: trusted Apple notarization, trusted timestamp
-  `2024-12-11 23:08:18 +0000`, and the documented
-  `Developer ID Installer: Swift Open Source (V9AUD2URP3)` identity.
-- `codesign --verify --strict` accepted the extracted `swift-frontend`.
-- Bundle `org.swift.603202412101a`, version `6.0.3.20241210101`.
-- Driver and compiler report `Apple Swift version 6.0.3 (swift-6.0.3-RELEASE)`.
-- Tiny Foundation and Darwin programs compiled and ran first, using
-  `-swift-version 6`, target `arm64-apple-macosx13.0`, SDK 15.4 and separate fresh
-  module caches.
-- Both native SDK gates then passed with this exact compiler/SDK pairing:
-  M2 and the five actual OpenRouter operations, independent consumers, actual
-  loopback URLSession wire checks, positive-controlled negative type checks, and
-  DocC from the same 6.0.3 toolchain.
-- The full shared native validation corpus and adversarial budget gate passed.
-
-The first 6.0.3 test invocation passed its XCTest cases but then failed in
-SwiftPM's separate Swift Testing discovery helper while loading the newer
-Xcode's private `XCTestCore` framework. All tests in these gates are XCTest.
-The harness now uses the documented `--disable-swift-testing` selector to run
-that framework explicitly. No test case, compiler diagnostic, validator check
-or generated SDK behavior is disabled. Fresh full gates passed in this mode.
-Integration scratch paths use `build/sdk` and `build/consumer`, avoiding
-overlapping source/build path prefixes in older Swift debug-info paths.
-
-Successful floor artifacts are retained under
-`${TMPDIR%/}/opencode/swift-6.0.3-toolchain/`:
-
-- `gates/m2-lgvm9X` — original M2 package, consumer, type probes and DocC archive;
-- `gates/openrouter-zjAYTJ` — five-operation package, consumer and DocC archive;
-- `sdk-floor-gates.log`, `validation-floor-gate.log`, and `PROVENANCE.md`;
-- initial helper failures in `initial-sdk-gates-swift-testing-helper.log` and
-  `initial-validation-swift-testing-helper.log`.
-
-The native validation fixture is retained at
-`${TMPDIR%/}/opencode/swift-validation-TIItqG`. The original `swift-6.0-toolchain`
-directory and its failure reproductions remain available.
+All tests in these gates are XCTest. The harness passes
+`--disable-swift-testing` so SwiftPM does not run its separate Swift Testing
+discovery helper, which fails on 6.0.3 while loading a newer Xcode's private
+`XCTestCore` framework. Integration scratch paths use `build/sdk` and
+`build/consumer`, avoiding overlapping source/build path prefixes in older Swift
+debug-info paths.
 
 Native harness selectors (per invocation):
 
@@ -349,17 +296,18 @@ Native harness selectors (per invocation):
 
 The harness sets `SWIFT_EXEC` only on native subprocesses to the selected
 compiler. Both the integration gates and portable validation unit gate honor
-the compiler/SDK selectors. For the verified floor pairing:
+the compiler/SDK selectors. For example, with an extracted 6.0.3 toolchain and
+the 15.4 SDK:
 
 ```sh
-floor="${TMPDIR%/}/opencode/swift-6.0.3-toolchain"
+floor="${TMPDIR%/}/suspect-swift-6.0.3-toolchain"
 toolchain="$floor/expanded/swift-6.0.3-RELEASE-osx-package.pkg/Payload"
 export SUSPECT_SWIFT_BIN="$toolchain/usr/bin/swift"
 export SUSPECT_SWIFTC_BIN="$toolchain/usr/bin/swiftc"
 export SUSPECT_SWIFT_DOCC_BIN="$toolchain/usr/bin/docc"
 export SUSPECT_SWIFT_SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk
 export SUSPECT_SWIFT_GATE_ROOT="$floor/gates"
-cargo test --locked -p suspect-codegen --test swift_sdk -- --ignored --nocapture
+cargo test --locked -p suspect-codegen --test swift swift_sdk:: -- --ignored --nocapture
 cargo test --locked -p suspect-codegen --lib \
   swift_sdk::validation::tests::native_shared_runtime_contract_vectors \
   -- --ignored --nocapture
@@ -371,9 +319,9 @@ Native verification performs:
    shared source-validated example round trips.
 2. A separate SwiftPM consumer importing the generated library, with no repaired
    generated source.
-3. All four original M2 operations through independently specified recording
+3. All four canonical-fixture operations through independently specified recording
    transports, plus positive/negative compile-time presence/union/input checks.
-4. All five actual OpenRouter operations through both recording transports and
+4. All five OpenRouter operations through both recording transports and
    real loopback URLSession exchanges. The independent TCP fixture checks
    method, path/query escaping, headers and exact request body bytes.
 5. Real URLSession redirect refusal, chunked response limits, timeout, in-flight
@@ -391,39 +339,32 @@ Host checks cover source-linked rejection, package identity, naming reservations
 repeat emission and an operation-description-only edit. That edit changes just
 the operation doc comments and operation reference page; executable text,
 models, codecs, validation tables and package identity remain byte-identical.
-The shared generation session/artifact writer owns the broader M6 lifecycle.
+The shared generation session/artifact writer owns the broader artifact lifecycle.
 Within the crate, `SdkPlan::models()` exposes immutable typed declarations,
 native names/type bindings, codec symbols, field requiredness, typed initializer
 defaults, constructor order and union/literal cases for compatibility analysis.
 This interface uses planned descriptors rather than parsing emitted Swift.
 
-### Independent review regressions
+### Native regressions
 
-Two native package/client regressions lock down the final Swift review findings:
+Two native package/client regressions cover example naming and query budgeting:
 
 - **Example locals:** required parameters named `client`, `body`, `input`,
   `_parameter0` and `request_body` generate and execute a real `Examples` call.
-  The regression reproduced `String has no member 'echoNames'` before the fix.
-  Example locals now use an independent indexed namespace and a separate request
+  Example locals use an independent indexed namespace and a separate request
   body local; the native public input labels are preserved and exercised by a
   second direct client call. Guides and compiled examples share this lowering.
 - **Query amplification:** 10,000 short array values with a 4-KiB wire name
-  previously materialized 40,960,000 bytes of repeated keys before the 8-MiB
-  guard. The native client regression observed 53,723,136 bytes of peak RSS
-  growth before the fix, even though the request eventually failed.
-  Serialization now checks minimum repeated-key/separator cost before allocating
+  would materialize ~40 MB of repeated keys if serialized before the 8-MiB
+  guard. Serialization checks minimum repeated-key/separator cost before allocating
   pairs, sizes each percent-encoded value against the shared remaining budget,
   and sizes comma-joined arrays without retaining an encoded-string array.
   The query budget accounts for the final server/path prefix and the question
   mark, then remains shared across parameters.
 
-The regressions passed on both Swift 6.3.3 and the verified Swift 6.0.3 + SDK 15.4
-pairing. The observed amplification-case peak RSS increases were **851,968 bytes**
-on current and **753,664 bytes** on the floor. The prior-parameter budget case
-grew by 262,144 and 49,152 bytes respectively. These are isolated process
-high-water-mark measurements after warm-up, not claims of exact allocation counts
-or a general performance budget. The test's conservative 24-MiB amplification
-threshold rejected the pre-fix behavior. It also checks that oversized requests
+The test bounds isolated process peak RSS growth with a conservative 24-MiB
+amplification threshold; this is a regression guard, not an allocation count or
+a performance budget. It also checks that oversized requests
 never reach transport, that a ~3-MiB JSON array cannot allocate its ~9-MiB URI
 expansion, and that escaping, order, exact numeric tokens and optional empty
 arrays keep their existing wire behavior.
@@ -431,34 +372,26 @@ arrays keep their existing wire behavior.
 Run just these package regressions with the native selectors above:
 
 ```sh
-cargo test --locked -p suspect-codegen --test swift_sdk native_review_ \
+cargo test --locked -p suspect-codegen --test swift native_review_ \
   -- --ignored --nocapture
 ```
 
 `SUSPECT_SWIFT_REVIEW_ROOT` optionally selects a stable isolated artifact directory
-for incremental repro runs. The local red/current evidence is under
-`${TMPDIR%/}/opencode/swift-review-current/`; floor evidence is under
-`${TMPDIR%/}/opencode/swift-review-floor/`. The original M2/five-operation gates
-remain their prior independent evidence; the focused review checks exercise
-these changes without repeating the full native matrix.
+for incremental repro runs.
 
-## Original slice boundaries (historical)
+## Limits
 
-The original gate verified a selected-operation JSON HTTP profile. Its unsupported schema
-layouts fail before emission, including general intersections/ref assertion
-siblings, tuple models, multiple non-null `type` array members, untyped
-conditional layouts and boolean-false model values. The supported `allOf` proof
-admits a reference carrier with redundant overlays or strengthened requiredness
-of already-declared fields. The portable executor independently supports its
-full instruction set even when a native model layout is rejected.
+Under the v1 validation program, unsupported schema layouts fail before
+emission, including general
+intersections/ref assertion siblings, tuple models, multiple non-null `type`
+array members, untyped conditional layouts and boolean-false model values
+([ADR 0010](adr/0010-refuse-what-cannot-be-represented.md)). The supported
+`allOf` proof admits a reference carrier with redundant overlays or strengthened
+requiredness of already-declared fields. Programs v2 and later carry tuple and
+untyped-assertion shapes as checked `JsonValue` values instead. The portable executor independently
+supports its full instruction set even when a native model layout is rejected.
 
-At that checkpoint, active `readOnly`/`writeOnly`, unsupported dialects/vocabularies, dynamic refs,
-other HTTP media/security shapes, typed response headers/links, range/default
-statuses, uploads and streamed API media were
-outside that slice and produced source-linked admission findings. Unconstrained
-JSON legitimately uses `JsonValue`; unsupported schemas do not fall back to it.
-Service workflows are not inferred from operation or property names.
-
-The 6.0 family floor is verified at patch release 6.0.3. Additional-platform
-runs remain separate release-matrix evidence. Native rendered docs and executable examples are present; this gate
-does not certify a numerical performance budget or full OpenAPI coverage.
+Unconstrained JSON legitimately uses `JsonValue`; unsupported schemas do not
+fall back to it. Service workflows are not inferred from operation or property
+names. The native tests do not certify a numerical performance budget or full
+OpenAPI coverage.

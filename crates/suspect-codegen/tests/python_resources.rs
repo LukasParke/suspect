@@ -1,16 +1,13 @@
 //! Unmodified official source fixtures -> real compile_v3 -> native Python.
 use serde_json::{Value, json};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{fs, path::Path, process::Command, sync::Arc};
 use suspect_codegen::{python_json, python_validation};
 use suspect_ir::contract::{Contract, SourceId};
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_schema::{Config, OwnedCompiler, OwnedProgram};
 use suspect_source::Uri;
+
+use crate::python_support;
 
 const ENTRY: &str = "https://physical.example.test/api.json";
 fn id(document: &str, pointer: &str) -> SourceId {
@@ -410,6 +407,12 @@ fn checked(command: &mut Command, root: &Path, label: &str) {
 #[test]
 #[ignore = "requires Python 3.11/3.14; actual compile_v3 with closed supplied official documents"]
 fn python_v3_executes_official_sources_dynamic_scopes_guards_and_exact_budgets() {
+    let (Some(interpreters), Some(tools)) = (
+        python_support::pinned_all(["3.11", "3.14"]),
+        python_support::tools(),
+    ) else {
+        return;
+    };
     let root = tempfile::Builder::new()
         .prefix("sdk-python-resources-runtime-")
         .tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))
@@ -435,11 +438,9 @@ fn python_v3_executes_official_sources_dynamic_scopes_guards_and_exact_budgets()
         include_str!("python_resources/consumer.py"),
     )
     .unwrap();
-    let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/sdk-native-python-tools/bin/python");
-    for version in ["3.11", "3.14"] {
+    for (version, python) in ["3.11", "3.14"].into_iter().zip(&interpreters) {
         checked(
-            Command::new(format!("python{version}"))
+            Command::new(python)
                 .arg("consumer.py")
                 .current_dir(root.join("python")),
             &root,

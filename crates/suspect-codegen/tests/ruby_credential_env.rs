@@ -286,7 +286,8 @@ fn isolated_current_contract() {
         command
             .args([
                 "--exact",
-                "bound_policy_uses_admitted_source_names_and_keeps_no_policy_bytes",
+                qualified("bound_policy_uses_admitted_source_names_and_keeps_no_policy_bytes")
+                    .as_str(),
                 "--nocapture",
             ])
             .env("SUSPECT_RUBY_ENV_HOST_PROBE_INPUT", &first)
@@ -297,6 +298,7 @@ fn isolated_current_contract() {
             command.env(variable, canary);
         }
         let output = command.output().unwrap();
+        assert_ran_one(&output.stdout);
         assert!(
             output.status.success(),
             "host probe failed: {}{}",
@@ -543,13 +545,22 @@ fn canonical_credential_env_capture_is_semantic_and_keeps_credential_surface() {
     );
 }
 
+/// The Ruby prefix resolved by `suspect_codegen::toolchain`
+/// (`SUSPECT_RUBY_HOME`, the mise install, or `ruby` on `PATH`); test
+/// entries gate on [`native_ready`] first.
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
+}
+/// Ruby and the provisioned gems are available (skip message, or a panic
+/// under `SUSPECT_REQUIRE_NATIVE`, otherwise).
+fn native_ready() -> bool {
+    suspect_codegen::toolchain::require_home("ruby").is_some()
+        && suspect_codegen::toolchain::require_provisioned(
+            "SUSPECT_RUBY_GEMS",
+            "sdk-ruby-tools/gems",
+            "ruby",
+        )
+        .is_some()
 }
 fn default_gems() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))
@@ -558,10 +569,15 @@ fn default_gems() -> PathBuf {
         .find(|path| path.is_dir())
         .unwrap()
 }
+/// The RBS/Steep/YARD gems `tools/native-setup.sh ruby` provisions
+/// (`SUSPECT_RUBY_GEMS` overrides); test entries gate on [`native_ready`].
 fn tools() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_GEMS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root().join("target/sdk-ruby-tools/gems"))
+    suspect_codegen::toolchain::require_provisioned(
+        "SUSPECT_RUBY_GEMS",
+        "sdk-ruby-tools/gems",
+        "ruby",
+    )
+    .expect("gated by native_ready()")
 }
 fn ruby() -> Command {
     let mut command = Command::new(ruby_home().join("bin/ruby"));
@@ -680,6 +696,9 @@ fn consumer(directory: &Path, text: &str) {
 #[test]
 #[ignore = "requires Ruby 3.3.12/4.0.6; isolated gem installation and bounded credential-env transport controls"]
 fn installed_credential_env_omission_precedence_choices_and_snapshot() {
+    if !native_ready() {
+        return;
+    }
     let plan = plan(
         load(&fixture()),
         RubyConfig {
@@ -694,13 +713,12 @@ fn installed_credential_env_omission_precedence_choices_and_snapshot() {
     );
 }
 
-fn openrouter_source() -> PathBuf {
-    std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root().join("../openrouter-web"))
-        .join("projects/docs/openapi/openapi.yaml")
-        .canonicalize()
-        .unwrap()
+fn openrouter_source() -> Option<PathBuf> {
+    Some(
+        suspect_codegen::toolchain::openrouter_spec()?
+            .canonicalize()
+            .unwrap(),
+    )
 }
 fn openrouter_plan(contract: Arc<Contract>, env: bool) -> SdkPlan {
     let selection = contract
@@ -730,7 +748,13 @@ fn openrouter_plan(contract: Arc<Contract>, env: bool) -> SdkPlan {
 #[test]
 #[ignore = "requires actual OpenRouter source, native Ruby, installed gem, RBS/Steep/YARD; HTTPS captured by a controlled transport"]
 fn installed_openrouter_env_uses_source_default_https_and_real_key_schemas() {
-    let contract = load(&openrouter_source());
+    if !native_ready() {
+        return;
+    }
+    let Some(source) = openrouter_source() else {
+        return;
+    };
+    let contract = load(&source);
     let plain = openrouter_plan(contract.clone(), false);
     let plan = openrouter_plan(contract, true);
     assert_current_policy_delta(&emitted(&plain), &emitted(&plan));
@@ -757,7 +781,7 @@ fn installed_openrouter_env_uses_source_default_https_and_real_key_schemas() {
         "https://openrouter.ai/api/v1"
     );
     let directory = native_package(&plan, "openrouter-");
-    std::fs::write(directory.join("source.json"), serde_json::to_vec_pretty(&json!({"path":openrouter_source(),"sha256":format!("{:x}",Sha256::digest(std::fs::read(openrouter_source()).unwrap())),"operations":["getCurrentKey","getCredits"]})).unwrap()).unwrap();
+    std::fs::write(directory.join("source.json"), serde_json::to_vec_pretty(&json!({"path":source,"sha256":format!("{:x}",Sha256::digest(std::fs::read(&source).unwrap())),"operations":["getCurrentKey","getCredits"]})).unwrap()).unwrap();
     consumer(
         &directory,
         include_str!("../src/ruby_sdk/tests/credential_env_openrouter.rb"),
@@ -804,5 +828,26 @@ fn installed_openrouter_env_uses_source_default_https_and_real_key_schemas() {
             ),
         &directory,
         "types",
+    );
+}
+
+/// The libtest name of `test` in this binary: `<file module>::<test>` when
+/// this file is a module of a grouped test binary (tests/groups/), the bare
+/// name when it is its own crate. Self-invocations with `--exact` need it,
+/// or the child runs zero tests and the check passes vacuously.
+fn qualified(test: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{test}"),
+        None => test.to_owned(),
+    }
+}
+
+/// Fails unless a self-invocation actually ran exactly one test: an
+/// `--exact` filter that matches nothing also exits successfully.
+fn assert_ran_one(stdout: &[u8]) {
+    let text = String::from_utf8_lossy(stdout);
+    assert!(
+        text.contains("running 1 test"),
+        "self-invocation selected no test (check the --exact name):\n{text}"
     );
 }

@@ -175,7 +175,20 @@ fn prepare(args: &TerraformArgs) -> Result<Prepared, Vec<Diagnostic>> {
         Contract::from_workspace(&workspace, &entry)
             .map_err(|error| vec![Diagnostic::file(input.path(), "terraform-input", error)])?,
     );
-    let plan = terraform::plan_provider(contract, mapping, config).map_err(|errors| {
+    let mapping_path = args.mapping.clone();
+    let guarded = suspect_codegen::guard::catch(terraform::PROFILE, || {
+        let plan = terraform::plan_provider(contract, mapping, config)?;
+        let files = terraform::emit_provider(&plan);
+        Ok((plan, files))
+    })
+    .map_err(|message| {
+        vec![Diagnostic::file(
+            &mapping_path,
+            "terraform-internal-error",
+            message,
+        )]
+    })?;
+    let (plan, files) = guarded.map_err(|errors: Vec<_>| {
         errors
             .into_iter()
             .map(|error| {
@@ -206,7 +219,7 @@ fn prepare(args: &TerraformArgs) -> Result<Prepared, Vec<Diagnostic>> {
         "document":operation.source.document().as_str(), "pointer":operation.source.pointer(),
     })).collect();
     Ok(Prepared {
-        files: terraform::emit_provider(&plan),
+        files,
         source: entry.to_string(),
         operations,
         dependency: json!(plan.config().sdk),

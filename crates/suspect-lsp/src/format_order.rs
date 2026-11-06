@@ -195,7 +195,7 @@ fn collect_layer(
     };
     let region = start..end;
     match best {
-        Some((depth, edits)) if *depth > layer => {} // a deeper layer exists
+        Some((depth, _)) if *depth > layer => {} // a deeper layer exists
         Some((depth, edits)) if *depth == layer => {
             let overlaps = edits
                 .iter()

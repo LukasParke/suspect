@@ -48,89 +48,6 @@ fn sq(text: &str) -> String {
     out
 }
 
-/// Whether one compiled flow can be executed by the emitted runtime.
-fn executable_flow(flow: &p::OAuthFlowDescriptor) -> bool {
-    if flow.deprecated_flow {
-        return false;
-    }
-    match flow.kind {
-        p::OAuthFlowDescriptorKind::ClientCredentials => flow.token_url.is_some(),
-        p::OAuthFlowDescriptorKind::AuthorizationCode => {
-            flow.authorization_url.is_some() && flow.token_url.is_some()
-        }
-        p::OAuthFlowDescriptorKind::DeviceAuthorization => {
-            flow.device_authorization_url.is_some() && flow.token_url.is_some()
-        }
-        p::OAuthFlowDescriptorKind::Implicit | p::OAuthFlowDescriptorKind::Password => false,
-    }
-}
-
-/// Whether one compiled scheme contributes anything executable, or carries a
-/// discovery URL whose document defines its endpoints at runtime.
-fn usable_scheme(scheme: &p::OAuthSchemePlan) -> bool {
-    scheme.discovery.is_some() || scheme.flows.iter().any(executable_flow)
-}
-
-/// Whether the plan justifies emitting `_oauth.py` at all.
-pub(super) fn emittable(plan: &p::OAuthPlan) -> bool {
-    plan.schemes.iter().any(usable_scheme)
-}
-
-/// Whether at least one compiled scheme carries an executable
-/// client-credentials flow, so the replaying credential wrapper participates.
-/// The wrapper serves exactly that provider, so schemes without one compile
-/// exactly the pre-replay bytes.
-fn has_client_credentials(plan: &p::OAuthPlan) -> bool {
-    plan.schemes.iter().any(|scheme| {
-        scheme.flows.iter().any(|flow| {
-            flow.kind == p::OAuthFlowDescriptorKind::ClientCredentials
-                && !flow.deprecated_flow
-                && executable_flow(flow)
-        })
-    })
-}
-
-/// The security-requirement source pointers whose attaches must never be
-/// replayed: requirements that name a compiled scheme on an operation whose
-/// responses carry a stream representation. Delivered stream data prevents a
-/// transparent restart, so those operations are excluded from the replay
-/// wrapper's one-replay budget.
-pub(super) fn no_replay_requirements(
-    plan: &p::OAuthPlan,
-    operations: &[super::planning::PlannedOperation],
-) -> BTreeMap<String, BTreeSet<String>> {
-    let names: BTreeSet<&str> = plan.schemes.iter().map(|s| s.name.as_str()).collect();
-    let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.wire.responses().iter().any(|response| {
-            response
-                .media()
-                .iter()
-                .any(|media| matches!(media.representation(), p::Representation::Stream { .. }))
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.wire.security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    p::CredentialHook::OAuth2 { .. } | p::CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if names.contains(requirement.name()) {
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(requirement.source().source().pointer().to_owned());
-                }
-            }
-        }
-    }
-    pointers
-}
-
 fn flow_kind_name(kind: p::OAuthFlowDescriptorKind) -> &'static str {
     match kind {
         p::OAuthFlowDescriptorKind::Implicit => "implicit",
@@ -244,29 +161,13 @@ pub(super) fn runtime(
     plan: &p::OAuthPlan,
     no_replay: &BTreeMap<String, BTreeSet<String>>,
 ) -> String {
-    let schemes: Vec<&p::OAuthSchemePlan> = plan
-        .schemes
-        .iter()
-        .filter(|scheme| usable_scheme(scheme))
-        .collect();
+    let schemes: Vec<&p::OAuthSchemePlan> = plan.usable_schemes().collect();
     debug_assert!(
         !schemes.is_empty(),
         "emission is gated on at least one usable scheme"
     );
-    let authorization = schemes.iter().any(|scheme| {
-        scheme.flows.iter().any(|flow| {
-            !flow.deprecated_flow
-                && executable_flow(flow)
-                && flow.kind == p::OAuthFlowDescriptorKind::AuthorizationCode
-        })
-    });
-    let device = schemes.iter().any(|scheme| {
-        scheme.flows.iter().any(|flow| {
-            !flow.deprecated_flow
-                && executable_flow(flow)
-                && flow.kind == p::OAuthFlowDescriptorKind::DeviceAuthorization
-        })
-    });
+    let authorization = plan.executes(p::OAuthFlowDescriptorKind::AuthorizationCode);
+    let device = plan.executes(p::OAuthFlowDescriptorKind::DeviceAuthorization);
     let revocation = schemes
         .iter()
         .any(|scheme| scheme.revocation_endpoint.is_some());
@@ -318,7 +219,7 @@ pub(super) fn runtime(
     if discovery {
         source.push_str(DISCOVERY);
     }
-    if has_client_credentials(plan) {
+    if plan.executes(p::OAuthFlowDescriptorKind::ClientCredentials) {
         source.push_str(&replay_section(plan, no_replay, discovery));
     }
 
@@ -353,7 +254,7 @@ pub(super) fn runtime(
     if introspection {
         exports.extend(["introspect", "introspect_async"]);
     }
-    if has_client_credentials(plan) {
+    if plan.executes(p::OAuthFlowDescriptorKind::ClientCredentials) {
         exports.push("replaying_credential");
     }
     let rendered: Vec<String> = exports.iter().map(|name| sq(name)).collect();

@@ -88,6 +88,7 @@ fn rust_no_policy_artifacts_match_pre_env_checkpoint() {
             )
         })
         .collect::<BTreeMap<_, _>>();
+    // Pin (servers.rs, http.rs, execution-contract.md) updated for the ADR 0035 server URL policy.
     let expected: BTreeMap<String, String> =
         serde_json::from_str(include_str!("fixtures/rust-credential-env-no-policy.json")).unwrap();
     assert_eq!(
@@ -229,13 +230,15 @@ fn rust_credential_env_generation_does_not_capture_generator_values() {
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "rust_credential_env_generation_does_not_capture_generator_values",
+                qualified("rust_credential_env_generation_does_not_capture_generator_values")
+                    .as_str(),
                 "--nocapture",
             ])
             .env("SUSPECT_RUST_ENV_CANARY_CHILD", "1")
             .env("SDK_TEST_BEARER", CANARY)
             .output()
             .unwrap();
+        assert_ran_one(&output.stdout);
         assert!(
             output.status.success(),
             "{}",
@@ -275,7 +278,7 @@ fn target() -> PathBuf {
         })
 }
 fn cargo(mode: &str, manifest: &Path, target: &Path) -> Command {
-    let mut c = Command::new("cargo");
+    let mut c = suspect_codegen::toolchain::nested_cargo();
     c.args([mode, "--offline", "--quiet", "--manifest-path"])
         .arg(manifest)
         .arg("--target-dir")
@@ -476,10 +479,9 @@ fn installed_rust_credential_env_snapshots_and_explicit_credentials_obey_source_
 #[test]
 #[ignore = "requires native Rust 1.88/stable, tracked OpenRouter source and pinned Cargo dependencies"]
 fn installed_rust_openrouter_env_current_key_uses_source_default_https() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let path = root.join("projects/docs/openapi/openapi.yaml");
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())
@@ -601,3 +603,24 @@ fn main(){
     });
 }
 "#;
+
+/// The libtest name of `test` in this binary: `<file module>::<test>` when
+/// this file is a module of a grouped test binary (tests/groups/), the bare
+/// name when it is its own crate. Self-invocations with `--exact` need it,
+/// or the child runs zero tests and the check passes vacuously.
+fn qualified(test: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{test}"),
+        None => test.to_owned(),
+    }
+}
+
+/// Fails unless a self-invocation actually ran exactly one test: an
+/// `--exact` filter that matches nothing also exits successfully.
+fn assert_ran_one(stdout: &[u8]) {
+    let text = String::from_utf8_lossy(stdout);
+    assert!(
+        text.contains("running 1 test"),
+        "self-invocation selected no test (check the --exact name):\n{text}"
+    );
+}

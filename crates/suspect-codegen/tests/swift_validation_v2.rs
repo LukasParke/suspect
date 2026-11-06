@@ -7,8 +7,7 @@ use suspect_ref::WorkspaceBuilder;
 use suspect_schema::{OwnedCompiler, OwnedProgram};
 use suspect_source::Uri;
 
-#[path = "../src/swift_sdk/validation_v2_support.rs"]
-mod support;
+use crate::swift_validation_v2_support as support;
 
 fn document() -> Value {
     let schemas = json!({
@@ -237,6 +236,9 @@ fn unsupported_v2_layouts_and_resource_policy_stay_located() {
 #[test]
 #[ignore = "installed Swift v2 SDK models/codecs, positive-controlled typing and DocC on selected toolchain"]
 fn native_installed_v2_codecs_types_and_docs() {
+    if !support::available() {
+        return;
+    }
     let root = support::root("sdk-v2-");
     let input = root.join("api.json");
     std::fs::write(&input, document().to_string()).unwrap();
@@ -268,7 +270,9 @@ fn native_installed_v2_codecs_types_and_docs() {
             .args(["-Xswiftc", "-warnings-as-errors"]),
         &root,
     );
-    let modules = support::directory(&root.join("build/sdk"), "Modules").unwrap();
+    let modules =
+        suspect_codegen::toolchain::swift_module_dir(&root.join("build/sdk"), "GeneratedSDK")
+            .unwrap();
     let positive = root.join("positive.swift");
     std::fs::write(&positive,"import GeneratedSDK\nlet _ = Checkout(amount: 1, mode: .cash)\nlet _ = ConditionalCarrier(value: .array([.string(\"x\")]))\nlet _ = TupleEnvelope(value: [.string(\"s\"), .number(1)])\nlet _ = CarrierBox(choice: .null)\n").unwrap();
     support::checked(

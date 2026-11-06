@@ -9,8 +9,10 @@ export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promi
 export interface ClientOptions<Scheme extends string = string> {
     /** Credentials keyed by the exact selected source security-scheme name. */
     readonly auth: Readonly<Record<Scheme, string>>;
-    /** Explicit server override. The source server remains the descriptor default. */
+    /** Explicit server override: HTTPS, or plain HTTP to a loopback host unless allowInsecureHttp is set (ADR 0035). The source server remains the descriptor default and keeps its scheme. */
     readonly serverURL?: string;
+    /** Opt in to a plain-HTTP serverURL on a non-loopback host. Defaults to false. */
+    readonly allowInsecureHttp?: boolean;
     readonly fetch?: Fetch;
     readonly maxResponseBytes?: number;
     readonly maxErrorCaptureBytes?: number;
@@ -244,7 +246,7 @@ function queryPairs(value: unknown, parameter: Parameter<unknown>, operation: Va
     }
 }
 
-function requestURL<I>(descriptor: OperationDescriptor<I, unknown, unknown>, input: I, serverURL: string): URL {
+function requestURL<I>(descriptor: OperationDescriptor<I, unknown, unknown>, input: I, serverURL: string, loopbackOnly: boolean): URL {
     let path = descriptor.pathTemplate;
     const query: string[] = [];
     for (const parameter of descriptor.parameters) {
@@ -264,10 +266,22 @@ function requestURL<I>(descriptor: OperationDescriptor<I, unknown, unknown>, inp
     if (/\{[^}]+\}/.test(path)) throw new RuntimeError('request-representation', 'path template contains an unbound parameter', descriptor.source, descriptor.source);
     if (path.includes('\\')) throw new RuntimeError('request-representation', 'operation path contains an unsupported backslash', descriptor.source, descriptor.source);
     try {
+        // One server URL policy (ADR 0035): a declared server keeps its scheme;
+        // an override is https, or plain http only to loopback unless
+        // allowInsecureHttp is set; no userinfo, query or fragment; a valid port; literal
+        // dot segments refused, never resolved; percent-encoded octets are
+        // opaque. Non-ASCII, controls, backslashes and malformed escapes are refused.
+        if (/[^\x21-\x7e]|\\|%(?![0-9A-Fa-f]{2})/.test(serverURL)) throw new TypeError('server URL contains invalid characters or escapes');
         const base = new URL(serverURL);
         if (base.protocol !== 'https:' && base.protocol !== 'http:') throw new TypeError('server URL must use HTTP or HTTPS');
         if (base.username !== '' || base.password !== '') throw new TypeError('server URL must not contain credentials');
-        if (base.hash !== '' || base.search !== '') throw new TypeError('server URL must not contain a query or fragment');
+        if (base.hash !== '' || base.search !== '' || /[?#]/.test(serverURL)) throw new TypeError('server URL must not contain a query or fragment');
+        if (base.port === '0' || /^[^:]+:\/\/[^/]*:0*(?:\/|$)/.test(serverURL)) throw new TypeError('server URL requires a valid port');
+        if (loopbackOnly && base.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(base.hostname)) throw new TypeError('plain HTTP servers must be loopback');
+        const written = serverURL.replace(/^[^:]+:\/\/[^/]*/, '') || '/';
+        if (written.split('/').some(segment => segment === '.' || segment === '..')) throw new TypeError('server path contains a literal dot segment');
+        // Native URL/Fetch reinterpret encoded dot segments; refuse rather than send a rewritten path.
+        if (base.pathname !== written) throw new TypeError('native URL cannot represent this server path unchanged');
         const wanted = `${base.pathname.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
         base.pathname = wanted;
         if (base.pathname !== wanted) throw new TypeError('operation route would be normalized to a different path');
@@ -406,7 +420,7 @@ export async function executeOperation<I, S, E = never, Scheme extends string = 
     const maximum = budget(client.maxResponseBytes, ceiling, 'maxResponseBytes', descriptor.source);
     if (maximum > ceiling) throw new RuntimeError('request-representation', `maxResponseBytes exceeds the generated ${ceiling} byte ceiling`, descriptor.source, descriptor.source);
     const captureMaximum = budget(client.maxErrorCaptureBytes, DEFAULT_CAPTURE_BYTES, 'maxErrorCaptureBytes', descriptor.source);
-    const url = requestURL(descriptor as OperationDescriptor<I, unknown, unknown>, input, client.serverURL ?? descriptor.serverURL);
+    const url = requestURL(descriptor as OperationDescriptor<I, unknown, unknown>, input, client.serverURL ?? descriptor.serverURL, client.serverURL !== undefined && client.allowInsecureHttp !== true);
     const schemeName = descriptor.security.schemeName;
     if (typeof client.auth !== 'object' || client.auth === null || !Object.hasOwn(client.auth, schemeName) || typeof client.auth[schemeName] !== 'string') {
         throw new RuntimeError('request-validation', `auth must contain an own string credential for ${schemeName}`, descriptor.source, descriptor.security.source);

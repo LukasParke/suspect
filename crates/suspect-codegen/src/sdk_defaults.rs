@@ -20,6 +20,7 @@ use suspect_ir::contract::{Contract, SourceId};
 /// Closed version of the SDK defaults policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SdkDefaultsVersion {
+    /// `"v1"`, the only admitted version.
     #[serde(rename = "v1")]
     V1,
 }
@@ -28,12 +29,14 @@ pub enum SdkDefaultsVersion {
 /// explicit values are never silently combined with different implicit ones.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SdkDefaults {
+    /// Closed policy version; unknown versions are deserialization errors.
     pub version: SdkDefaultsVersion,
     /// Stable service identity for the automatic API-key environment variable
     /// (`<ENV_PREFIX>_API_KEY`). Explicit `credential_env` mappings remain the
     /// precise override and take precedence when both are configured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_prefix: Option<String>,
+    /// Automatic pagination detection and per-operation overrides.
     #[serde(default)]
     pub pagination: PaginationDefaults,
     /// OAuth 2.0 / OpenID Connect lifecycle policy; omitted resolves to the
@@ -55,6 +58,7 @@ impl Default for SdkDefaults {
 }
 
 impl SdkDefaults {
+    /// The documented v1 golden defaults; same as [`Default::default`].
     #[must_use]
     pub fn v1() -> Self {
         Self::default()
@@ -131,8 +135,10 @@ impl<'de> Deserialize<'de> for SdkDefaults {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationMode {
+    /// Detect pagination from parameters and success schemas.
     #[default]
     Auto,
+    /// No inference; only explicit per-operation mappings paginate.
     Off,
 }
 
@@ -141,9 +147,14 @@ pub enum PaginationMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationPattern {
+    /// `limit-offset`: a page size and an item offset.
     LimitOffset,
+    /// `cursor`: an opaque continuation token from the previous page.
     Cursor,
+    /// `page-number`: a page index plus a page size.
     PageNumber,
+    /// `next-link`: a followable next-page URL; manual mapping only, and v1
+    /// walkers do not follow it.
     NextLink,
 }
 
@@ -151,9 +162,13 @@ pub enum PaginationPattern {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationRequestRole {
+    /// Page size parameter.
     Limit,
+    /// Item offset parameter.
     Offset,
+    /// Continuation token parameter.
     Cursor,
+    /// Page index parameter.
     Page,
 }
 
@@ -161,11 +176,17 @@ pub enum PaginationRequestRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationResponseRole {
+    /// The page's item collection.
     Items,
+    /// Total item count.
     Total,
+    /// Continuation token for the next page.
     NextCursor,
+    /// Offset of the next page.
     NextOffset,
+    /// Whether another page exists.
     HasMore,
+    /// Total page count.
     TotalPages,
 }
 
@@ -173,9 +194,13 @@ pub enum PaginationResponseRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationAliasRole {
+    /// Synonyms for the page size parameter.
     Limit,
+    /// Synonyms for the item offset parameter.
     Offset,
+    /// Synonyms for the continuation token parameter.
     Cursor,
+    /// Synonyms for the page index parameter.
     Page,
 }
 
@@ -183,7 +208,9 @@ pub enum PaginationAliasRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationAdvance {
+    /// `items-returned`: the offset advances by the previous page's item count.
     ItemsReturned,
+    /// `next-offset`: the offset is read from the `next-offset` response pointer.
     NextOffset,
 }
 
@@ -191,6 +218,8 @@ pub enum PaginationAdvance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PaginationStop {
+    /// `missing-or-null-cursor`: stop when the continuation pointer reads
+    /// absent, `null` or the empty string.
     MissingOrNullCursor,
 }
 
@@ -198,7 +227,9 @@ pub enum PaginationStop {
 /// operation; the expanded object replaces detection with an exact mapping.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum PaginationOperation {
+    /// `false`: the operation stays a single-page call.
     Disabled,
+    /// An exact mapping replacing detection.
     Mapping(PaginationMapping),
 }
 
@@ -208,15 +239,21 @@ pub enum PaginationOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PaginationMapping {
+    /// The pagination pattern this mapping implements.
     pub pattern: PaginationPattern,
+    /// Role to actual request parameter name; one name per role.
     #[serde(default)]
     pub request: BTreeMap<PaginationRequestRole, String>,
+    /// Role to JSON Pointer into the decoded success body; one pointer per role.
     #[serde(default)]
     pub response: BTreeMap<PaginationResponseRole, String>,
+    /// First offset or page number used when the caller leaves the control unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_offset: Option<u32>,
+    /// Continuation advance; `None` uses the pattern's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub advance: Option<PaginationAdvance>,
+    /// Termination policy; `None` uses the pattern's default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stop: Option<PaginationStop>,
 }
@@ -235,6 +272,7 @@ impl PaginationMapping {
         }
     }
 
+    /// Response roles each pattern requires before a mapping is admitted.
     #[must_use]
     pub fn required_response_roles(
         pattern: PaginationPattern,
@@ -274,6 +312,7 @@ impl<'de> Deserialize<'de> for PaginationOperation {
 /// the expanded representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PaginationDefaults {
+    /// Whether automatic detection runs.
     pub mode: PaginationMode,
     /// Restrict automatic detection to this subset; `None` uses the built-in
     /// default set (limit-offset, cursor, page-number, next-link).
@@ -342,11 +381,13 @@ impl<'de> Deserialize<'de> for PaginationDefaults {
 }
 
 impl PaginationDefaults {
+    /// Automatic detection with the built-in vocabulary; the `"auto"` shorthand.
     #[must_use]
     pub fn auto() -> Self {
         Self::default()
     }
 
+    /// Detection disabled; the `"off"` shorthand.
     #[must_use]
     pub fn off() -> Self {
         Self {
@@ -436,8 +477,10 @@ impl PaginationMapping {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OAuthMode {
+    /// Plan the lifecycle for every used OAuth 2.0 / OpenID Connect scheme.
     #[default]
     Auto,
+    /// No lifecycle planning.
     Off,
 }
 
@@ -447,6 +490,7 @@ pub enum OAuthMode {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OAuthStorage {
+    /// Tokens are held in process memory only.
     #[default]
     Memory,
 }
@@ -456,6 +500,7 @@ pub enum OAuthStorage {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OAuthRefresh {
+    /// Refresh when a request finds the token within the refresh skew of expiry.
     #[default]
     OnDemand,
 }
@@ -466,18 +511,24 @@ pub enum OAuthRefresh {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OAuthSchemeConfig {
+    /// Portable environment variable name holding the client ID.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id_env: Option<String>,
+    /// Portable environment variable name holding the client secret.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_secret_env: Option<String>,
     /// Refresh-before-expiry clock skew in seconds (0..=3600, default 30).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refresh_skew_seconds: Option<u32>,
-    /// Configuration-supplied only; OpenAPI flow objects do not declare one.
+    /// RFC 7009 revocation endpoint, an absolute http(s) URL. Configuration-
+    /// supplied only; OpenAPI flow objects do not declare one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revocation_endpoint: Option<String>,
+    /// RFC 7662 introspection endpoint, an absolute http(s) URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub introspection_endpoint: Option<String>,
+    /// RFC 8414 metadata URL for an OAuth2 scheme that declares no
+    /// `oauth2MetadataUrl`; an absolute http(s) URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discovery_url: Option<String>,
 }
@@ -487,9 +538,13 @@ pub struct OAuthSchemeConfig {
 /// leave declared-scheme-only planning in place.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct OAuthDefaults {
+    /// Whether lifecycle planning runs.
     pub mode: OAuthMode,
+    /// Runtime token store.
     pub storage: OAuthStorage,
+    /// Token refresh policy.
     pub refresh: OAuthRefresh,
+    /// Per-scheme configuration keyed by source Security Scheme name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub schemes: BTreeMap<String, OAuthSchemeConfig>,
 }
@@ -506,11 +561,13 @@ impl Default for OAuthDefaults {
 }
 
 impl OAuthDefaults {
+    /// Lifecycle planning with no per-scheme configuration; the `"auto"` shorthand.
     #[must_use]
     pub fn auto() -> Self {
         Self::default()
     }
 
+    /// Lifecycle planning disabled; the `"off"` shorthand.
     #[must_use]
     pub fn off() -> Self {
         Self {
@@ -664,9 +721,13 @@ pub(crate) fn validate_json_pointer(pointer: &str) -> Result<(), String> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SdkDefaultsDescriptor {
+    /// See [`SdkDefaults::version`].
     pub version: SdkDefaultsVersion,
+    /// See [`SdkDefaults::env_prefix`].
     pub env_prefix: Option<String>,
+    /// See [`SdkDefaults::pagination`].
     pub pagination: PaginationDefaults,
+    /// See [`SdkDefaults::oauth`].
     #[serde(default, skip_serializing_if = "OAuthDefaults::is_default")]
     pub oauth: OAuthDefaults,
 }

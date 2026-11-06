@@ -60,13 +60,9 @@ pub struct GenerationContractResult {
     pub refusals: usize,
 }
 
-/// Marker type naming the `suspect/generationContract` custom request;
-/// never constructed.
-pub enum GenerationContractRequest {
-    /// Never constructed; the enum exists only to name the request type.
-    #[allow(dead_code)]
-    Marker,
-}
+/// Names the `suspect/generationContract` custom request. Uninhabited: it
+/// is only ever used as a type.
+pub enum GenerationContractRequest {}
 
 impl Request for GenerationContractRequest {
     type Params = GenerationContractParams;

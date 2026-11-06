@@ -46,18 +46,32 @@ fn source(schema: Value) -> (Arc<Contract>, SchemaId) {
         .child("Root");
     (c, id)
 }
+/// The Ruby prefix resolved by `suspect_codegen::toolchain`
+/// (`SUSPECT_RUBY_HOME`, the mise install, or `ruby` on `PATH`); test
+/// entries gate on [`native_ready`] first.
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
 }
+/// Ruby and the provisioned gems are available (skip message, or a panic
+/// under `SUSPECT_REQUIRE_NATIVE`, otherwise).
+fn native_ready() -> bool {
+    suspect_codegen::toolchain::require_home("ruby").is_some()
+        && suspect_codegen::toolchain::require_provisioned(
+            "SUSPECT_RUBY_GEMS",
+            "sdk-ruby-tools/gems",
+            "ruby",
+        )
+        .is_some()
+}
+/// The RBS/Steep/YARD gems `tools/native-setup.sh ruby` provisions
+/// (`SUSPECT_RUBY_GEMS` overrides); test entries gate on [`native_ready`].
 fn tools() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_GEMS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root().join("target/sdk-ruby-tools/gems"))
+    suspect_codegen::toolchain::require_provisioned(
+        "SUSPECT_RUBY_GEMS",
+        "sdk-ruby-tools/gems",
+        "ruby",
+    )
+    .expect("gated by native_ready()")
 }
 fn default_gems() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))
@@ -187,6 +201,9 @@ fn case(
 #[test]
 #[ignore = "requires native Ruby; compiles the maintained 32 source cases through compile_v2 and installs the Ruby runtime"]
 fn source_driven_v2_instructions_scopes_budgets_and_program_guards() {
+    if !native_ready() {
+        return;
+    }
     let fixture: Value = serde_json::from_str(
         &std::fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -488,6 +505,9 @@ fn scoped_native_descriptors_retain_fields_patterns_and_real_program_identity() 
 #[test]
 #[ignore = "requires native Ruby, local gem install, RBS/Steep/YARD; actual v2 SDK calls and examples"]
 fn installed_scoped_sdk_models_types_examples_and_wire() {
+    if !native_ready() {
+        return;
+    }
     let plan = scoped_sdk();
     let dir = package(&plan, "sdk-");
     consumer(

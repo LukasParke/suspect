@@ -1,4 +1,5 @@
-#![cfg(all(feature = "kotlin-sdk", feature = "http-protocol"))]
+#![cfg(feature = "kotlin-sdk")]
+use crate::kotlin_support as support;
 use serde_json::{Value, json};
 use std::{
     io::{Read, Write},
@@ -14,9 +15,6 @@ use suspect_codegen::kotlin_sdk::{self, SdkConfig};
 use suspect_ir::contract::Contract;
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
-#[path = "kotlin_support/mod.rs"]
-#[allow(dead_code)]
-mod support;
 
 struct Server {
     base: String,

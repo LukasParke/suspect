@@ -307,10 +307,7 @@ fn receipt_less_contracts_emit_no_new_bytes() {
         .find(|receipt| receipt.name == "newIssue")
         .unwrap();
     assert_eq!(new_issue.decode, "decode_new_issue_webhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("construct_new_issue_response")
-    );
+    assert_eq!(new_issue.construct, "construct_new_issue_response");
     assert_eq!(new_issue.route_const, "NEW_ISSUE_WEBHOOK_ROUTE");
     assert_eq!(new_issue.method, "POST");
     assert_eq!(new_issue.route, "newIssue");
@@ -426,32 +423,30 @@ raise 'callback decode changed' unless event.kind == 'open'
 puts 'incoming behavior verified'
 "#;
 
-fn ruby_home() -> std::path::PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
-}
-
 /// The gem requires Ruby >= 3.3; older interpreters cannot even parse the
-/// emitted runtime syntax, so discovery refuses them.
+/// emitted runtime syntax, so discovery refuses them. The interpreter is
+/// resolved by `suspect_codegen::toolchain` (`SUSPECT_RUBY_BIN`,
+/// `SUSPECT_RUBY_HOME`, mise, `PATH`); a missing or too-old Ruby is a hard
+/// failure under `SUSPECT_REQUIRE_NATIVE`.
 fn ruby() -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os("SUSPECT_RUBY_BIN") {
-        return Some(std::path::PathBuf::from(path));
-    }
-    let ruby = ruby_home().join("bin/ruby");
-    if !ruby.is_file() {
-        return None;
-    }
+    let ruby = suspect_codegen::toolchain::require("ruby")?;
     let output = Command::new(&ruby).arg("--version").output().ok()?;
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let minor = text
-        .strip_prefix("ruby ")
-        .and_then(|rest| rest.split('.').nth(1))
-        .and_then(|minor| minor.parse::<u32>().ok())?;
-    (minor >= 3).then_some(ruby)
+    let found = String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or_default()
+        .to_owned();
+    if suspect_codegen::toolchain::version_at_least(&found, "3.3") {
+        return Some(ruby);
+    }
+    let required = std::env::var(suspect_codegen::toolchain::REQUIRE_NATIVE_ENV)
+        .is_ok_and(|value| !value.is_empty() && value != "0");
+    assert!(
+        !required,
+        "{} is Ruby {found}; the generated gem needs Ruby >= 3.3",
+        ruby.display()
+    );
+    None
 }
 
 fn checked(command: &mut Command, root: &std::path::Path, label: &str) {

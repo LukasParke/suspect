@@ -9,25 +9,30 @@ use memchr::memchr_iter;
 /// UTF-16 code units).
 #[derive(Debug, Clone)]
 pub struct LineIndex {
-    line_starts: Vec<u32>,
+    // `usize`, not `u32`: offsets in documents over 4 GiB must not wrap.
+    line_starts: Vec<usize>,
 }
 
 impl LineIndex {
+    /// Scans `bytes` once for `\n` and records every line start.
     #[must_use]
     pub fn new(bytes: &[u8]) -> Self {
         let mut line_starts = Vec::with_capacity(64);
-        line_starts.push(0u32);
+        line_starts.push(0);
         for i in memchr_iter(b'\n', bytes) {
-            line_starts.push(i as u32 + 1);
+            line_starts.push(i + 1);
         }
         Self { line_starts }
     }
 
+    /// Number of lines; a trailing newline starts an extra empty line.
     #[must_use]
     pub fn len_lines(&self) -> usize {
         self.line_starts.len()
     }
 
+    /// True when the buffer contains no `\n`, i.e. at most one line (not
+    /// necessarily zero bytes).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.line_starts.len() <= 1
@@ -35,7 +40,7 @@ impl LineIndex {
 
     fn line_for(&self, offset: usize, len: usize) -> usize {
         let offset = offset.min(len);
-        match self.line_starts.binary_search(&(offset as u32)) {
+        match self.line_starts.binary_search(&offset) {
             Ok(l) => l,
             Err(ins) => ins.saturating_sub(1),
         }
@@ -47,7 +52,7 @@ impl LineIndex {
     pub fn line_col(&self, bytes: &[u8], offset: usize) -> (u32, u32) {
         let clamped = offset.min(bytes.len());
         let line = self.line_for(clamped, bytes.len());
-        let start = self.line_starts[line] as usize;
+        let start = self.line_starts[line];
         let col = String::from_utf8_lossy(&bytes[start..clamped.max(start)])
             .chars()
             .count() as u32;
@@ -59,7 +64,7 @@ impl LineIndex {
     pub fn line_col_utf16(&self, bytes: &[u8], offset: usize) -> (u32, u32) {
         let clamped = offset.min(bytes.len());
         let line = self.line_for(clamped, bytes.len());
-        let start = self.line_starts[line] as usize;
+        let start = self.line_starts[line];
         let col = String::from_utf8_lossy(&bytes[start..clamped.max(start)])
             .chars()
             .map(char::len_utf16)
@@ -72,7 +77,7 @@ impl LineIndex {
     pub fn line_col_bytes(&self, bytes: &[u8], offset: usize) -> (usize, usize) {
         let clamped = offset.min(bytes.len());
         let line = self.line_for(clamped, bytes.len());
-        let start = self.line_starts[line] as usize;
+        let start = self.line_starts[line];
         (line, clamped - start)
     }
 
@@ -80,7 +85,7 @@ impl LineIndex {
     /// scalars.
     #[must_use]
     pub fn offset_of(&self, bytes: &[u8], line: u32, col: u32) -> Option<usize> {
-        let start = *self.line_starts.get(line as usize)? as usize;
+        let start = *self.line_starts.get(line as usize)?;
         if start > bytes.len() {
             return None;
         }
@@ -89,12 +94,26 @@ impl LineIndex {
             .iter()
             .position(|&b| b == b'\n')
             .unwrap_or(line_bytes.len());
-        for (scalars, (i, _)) in String::from_utf8_lossy(&line_bytes[..line_end])
-            .char_indices()
-            .enumerate()
-        {
-            if scalars as u32 == col {
-                return Some(start + i);
+        // Walk scalar boundaries in the original bytes, counting an invalid
+        // UTF-8 sequence as one scalar exactly as `from_utf8_lossy` (and so
+        // `line_col`) does; offsets into a lossily decoded copy would drift
+        // after the first invalid byte.
+        let mut scalars = 0u32;
+        let mut position = 0usize;
+        for chunk in line_bytes[..line_end].utf8_chunks() {
+            for (i, _) in chunk.valid().char_indices() {
+                if scalars == col {
+                    return Some(start + position + i);
+                }
+                scalars += 1;
+            }
+            position += chunk.valid().len();
+            if !chunk.invalid().is_empty() {
+                if scalars == col {
+                    return Some(start + position);
+                }
+                scalars += 1;
+                position += chunk.invalid().len();
             }
         }
         Some(start + line_end)
@@ -103,7 +122,7 @@ impl LineIndex {
     /// Byte range of a line, excluding the trailing `\r\n` or `\n`.
     #[must_use]
     pub fn line_range(&self, bytes: &[u8], line: u32) -> Option<std::ops::Range<usize>> {
-        let start = *self.line_starts.get(line as usize)? as usize;
+        let start = *self.line_starts.get(line as usize)?;
         if start > bytes.len() {
             return None;
         }
@@ -170,5 +189,19 @@ mod tests {
         assert_eq!(idx.line_range(bytes, 0).unwrap(), 0..1);
         let empty = LineIndex::new(b"");
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn offset_of_counts_invalid_utf8_like_line_col() {
+        // 0xFF is one replacement scalar; `b` is the second scalar.
+        let bytes = b"\xFFb\xF0\x9F\x98\x80c\n";
+        let idx = LineIndex::new(bytes);
+        assert_eq!(idx.offset_of(bytes, 0, 1), Some(1));
+        assert_eq!(idx.offset_of(bytes, 0, 2), Some(2));
+        assert_eq!(idx.offset_of(bytes, 0, 3), Some(6));
+        for offset in [0, 1, 2, 6] {
+            let (line, col) = idx.line_col(bytes, offset);
+            assert_eq!(idx.offset_of(bytes, line, col), Some(offset));
+        }
     }
 }

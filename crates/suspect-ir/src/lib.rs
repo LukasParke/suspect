@@ -11,6 +11,12 @@
 //! resolved to the bare component name; references into other files stay
 //! unresolved (`None`) in v1 — presets treat those schemas as opaque
 //! objects. Cross-file resolution is a planned upgrade behind the same API.
+//!
+//! [`contract`] is the lossless counterpart: a source-addressed view over
+//! every loaded document, used where exact provenance and OpenAPI 3.1/3.2
+//! HTTP semantics matter more than a flattened snapshot.
+
+#![deny(missing_docs)]
 
 use std::collections::HashMap;
 use std::path::Path;

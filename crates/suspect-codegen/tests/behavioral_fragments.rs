@@ -17,7 +17,6 @@
 //! also fail, so the list can only shrink.
 
 #![cfg(all(
-    feature = "http-protocol",
     feature = "cpp-sdk",
     feature = "csharp-sdk",
     feature = "dart-sdk",
@@ -270,7 +269,7 @@ fn generate_control(fragment: &Fragment, backend: &str) -> Vec<suspect_codegen::
 
 /// Dumps every covered backend's configured generation to
 /// `target/behavioral-dump/<fragment>/<backend>/…` for marker authoring.
-/// Run with: `cargo test --test behavioral_fragments dump_generated_output -- --ignored --nocapture`
+/// Run with: `cargo test --test shared dump_generated_output -- --ignored --nocapture`
 #[test]
 #[ignore = "authoring helper: dumps generated SDK sources for marker writing"]
 fn dump_generated_output() {

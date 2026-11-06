@@ -263,6 +263,7 @@ impl Server {
             while !done.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((mut socket, _)) => {
+                        socket.set_nonblocking(false).unwrap();
                         socket
                             .set_read_timeout(Some(Duration::from_secs(3)))
                             .unwrap();
@@ -302,13 +303,16 @@ impl Drop for Server {
         }
     }
 }
+/// The Ruby prefix resolved by `suspect_codegen::toolchain`
+/// (`SUSPECT_RUBY_HOME`, the mise install, or `ruby` on `PATH`); test
+/// entries gate on [`native_ready`] first.
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
+}
+/// Ruby is resolvable (skip message, or a panic under
+/// `SUSPECT_REQUIRE_NATIVE`, otherwise).
+fn native_ready() -> bool {
+    suspect_codegen::toolchain::require_home("ruby").is_some()
 }
 fn gem_defaults() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))
@@ -339,6 +343,9 @@ fn checked(c: &mut Command, root: &Path, label: &str) {
 #[test]
 #[ignore = "requires installed Ruby 3.3.12+/4.0.6; builds a gem and records actual physical-origin requests"]
 fn installed_gem_uses_effective_physical_document_server_bases() {
+    if !native_ready() {
+        return;
+    }
     let entry = Server::new();
     let parts = Server::new();
     let explicit = Server::new();

@@ -1,0 +1,5 @@
+# Labels of this repository's self-hosted runners (see
+# .github/workflows/sdk-session-performance.yml).
+self-hosted-runner:
+  labels:
+    - sdk-session-perf-v1

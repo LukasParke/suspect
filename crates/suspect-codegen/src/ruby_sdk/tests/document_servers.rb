@@ -31,4 +31,29 @@ Client.open(timeout: 3, credential_provider: provider) do |client|
   assert(client.oidc_metadata.data.data == 'ok')
 end
 assert(contexts.length == 2, 'authentication metadata caused additional requests')
+# ADR 0035: a source-declared plain-HTTP server keeps its scheme; a plain-HTTP
+# override to a non-loopback host needs allow_insecure_http: true.
+class RecordingTransport
+  attr_reader :urls
+  def initialize = @urls = []
+  def exchange(request:, context:)
+    @urls << request.url
+    yield WireResponse.new(status: 200, headers: {}, body: 'ok')
+    nil
+  end
+  def close = nil
+end
+recording = RecordingTransport.new
+Client.open(transport: recording) do |client|
+  client.relative_document(server: 'variable', server_variables: {'endpoint' => 'http://plain.example.test/Base'})
+end
+assert(recording.urls == ['http://plain.example.test/Base/relative'], recording.urls.inspect)
+begin
+  Client.new(transport: recording, server_url: 'http://plain.example.test/Base')
+  raise 'non-loopback HTTP override accepted without opt-in'
+rescue ArgumentError
+  nil
+end
+Client.open(transport: recording, server_url: 'http://plain.example.test/Base', allow_insecure_http: true) { |client| client.inherited_document }
+assert(recording.urls.last == 'http://plain.example.test/Base/inherited', recording.urls.inspect)
 puts 'Native physical document bases, redirect identities, explicit overrides, encoded path spelling and effective-server auth metadata passed'

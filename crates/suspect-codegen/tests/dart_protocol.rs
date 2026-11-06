@@ -1,5 +1,5 @@
 //! Independent rich-protocol Dart package, wire, framing and cleanup gates.
-#![cfg(all(feature = "dart-sdk", feature = "http-protocol"))]
+#![cfg(feature = "dart-sdk")]
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -130,13 +130,15 @@ fn check(cmd: &mut Command, root: &Path, name: &str) {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+/// The Dart toolchain resolved by `suspect_codegen::toolchain`; each native
+/// test gates on `toolchain::require("dart")` first.
 fn dart(root: &Path) -> Command {
-    let binary = std::env::var_os("SUSPECT_DART_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repository().join("target/sdk-dart-tools/dart-sdk/bin/dart"));
-    let mut c = Command::new(binary);
+    let mut c =
+        suspect_codegen::toolchain::command("dart").expect("gated by toolchain::require(\"dart\")");
+    let home = repository().join("target/sdk-dart-tools/home");
+    std::fs::create_dir_all(&home).unwrap();
     c.current_dir(root)
-        .env("HOME", repository().join("target/sdk-dart-tools/home"))
+        .env("HOME", home)
         .env("PUB_CACHE", root.join("pub-cache"))
         .env("CI", "true")
         .env("DART_SUPPRESS_ANALYTICS", "true");
@@ -384,6 +386,9 @@ fn typed_protocol_admission_retains_real_inputs_and_declines_undefined_profiles(
 #[test]
 #[ignore = "native pub, strict typing, wire/framing/cleanup gate on Dart floor/current and portable JS"]
 fn native_rich_protocol() {
+    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
+        return;
+    };
     let root = root("protocol-");
     let path = root.join("api.json");
     std::fs::write(&path, document().to_string()).unwrap();
@@ -637,6 +642,9 @@ fn native_rich_protocol() {
 #[test]
 #[ignore = "native sparse selections must analyze without invented JSON schemas or unused runtime branches"]
 fn native_sparse_selections() {
+    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
+        return;
+    };
     for (label, method, operation) in [
         (
             "no-body",
@@ -687,6 +695,9 @@ fn native_sparse_selections() {
 #[test]
 #[ignore = "explicit compatibility option with installed native bytes and JSON-context witnesses"]
 fn native_explicit_legacy_binary_profile() {
+    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
+        return;
+    };
     use suspect_codegen::{
         backend::{self, Backend, GenerationOptions, TargetConfig},
         compatibility::{self, PlanStatus},
@@ -714,10 +725,23 @@ fn native_explicit_legacy_binary_profile() {
     options
         .compatibility_profiles
         .insert(CompatibilityProfile::LegacyBinaryStringV1);
+    // backend.rs compiles the ua/v1 attribution descriptor into every
+    // Backend::DartHttp package; the direct plan carries the same one so the
+    // byte-equality check below compares like with like.
+    let native_config = dart_sdk::DartConfig {
+        attribution: Some(suspect_codegen::attribution::AttributionDescriptor::plan(
+            env!("CARGO_PKG_VERSION"),
+            "generated_sdk",
+            "0.0.0",
+            "3.2.0",
+            "dart",
+        )),
+        ..Default::default()
+    };
     let plan = dart_sdk::plan_sdk_with_profiles(
         contract.clone(),
         &selected,
-        Default::default(),
+        native_config,
         &options.compatibility_profiles,
     )
     .unwrap();

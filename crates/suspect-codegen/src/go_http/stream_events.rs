@@ -37,6 +37,7 @@ pub struct StreamEventsOperation {
     pub operation_id: String,
     /// Exported client method this iterator extends, e.g. `StreamChat`.
     pub method_name: String,
+    /// The operation's allocated input type name.
     pub input_type: String,
     /// Concrete success response wrapper carrying the stream, e.g.
     /// `StreamChatStatus200`.
@@ -52,12 +53,17 @@ pub struct StreamEventsOperation {
     /// Whether the last data frame before the sentinel or end of body is
     /// preserved as the completion's terminal usage instead of being yielded.
     pub keep_final_usage: bool,
+    /// Item model field carrying the declared SSE `id` metadata, when the model has one.
     pub id_metadata: Option<MetadataField>,
+    /// Item model field carrying the declared SSE `retry` metadata, when the model has one.
     pub retry_metadata: Option<MetadataField>,
-    /// Allocated, collision-free public type and method names.
+    /// Allocated typed event struct name, e.g. `StreamChatEvent`.
     pub events_type: String,
+    /// Allocated terminal metadata struct name, e.g. `StreamChatCompletion`.
     pub completion_type: String,
+    /// Allocated iterator type name, e.g. `StreamChatEventIterator`.
     pub iterator_type: String,
+    /// Allocated client method name, e.g. `StreamChatEvents`.
     pub events_method: String,
 }
 
@@ -66,6 +72,7 @@ pub struct StreamEventsOperation {
 /// stays byte-identical.
 #[derive(Debug, Clone)]
 pub struct StreamEventsPlan {
+    /// Operations that emit a typed events iterator.
     pub operations: Vec<StreamEventsOperation>,
 }
 

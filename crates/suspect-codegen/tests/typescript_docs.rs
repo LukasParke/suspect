@@ -100,7 +100,9 @@ fn native_docs(plan: &ModelPlan) {
     suspect_codegen::write_files(&plan.render().unwrap(), directory.path()).unwrap();
     let root = directory.path().join("typescript");
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/typescript-docs/build.mjs");
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let output = Command::new(node)
         .arg(tool)
         .arg(&root)
@@ -186,12 +188,9 @@ fn native_typedoc_preserves_hostile_prose_and_escaped_symbol_names_as_text() {
 #[test]
 #[ignore = "requires pinned Node/TypeDoc and tracked OpenRouter public YAML"]
 fn native_typedoc_covers_tracked_openrouter_caller_and_image_closures() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let contract = contract(&path);
     let roots = contract
         .schema_roots()

@@ -45,9 +45,11 @@ pub struct CliRuntime {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CliOutput {
+    /// Layout of every machine-output document.
     pub format: OutputFormat,
 }
 
+/// Layout of the JSON documents the emitted binary writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputFormat {
@@ -71,6 +73,7 @@ impl OutputFormat {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MappingProfile {
+    /// Profile version identifier; must be exactly [`super::PROFILE`].
     pub format: String,
     /// Long help for the root command.
     pub description: String,
@@ -93,18 +96,23 @@ pub struct CommandMapping {
     /// Flag names keyed by exact source parameter name. Every source
     /// parameter needs exactly one entry; unknown names are refused.
     pub parameters: BTreeMap<String, ParameterMapping>,
+    /// How the command accepts the operation's request body.
     pub body: BodyPolicy,
+    /// Whether the command demands an explicit confirmation token before sending.
     pub confirmation: ConfirmationPolicy,
 }
 
+/// The flag that carries one source parameter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParameterMapping {
     /// Long flag name without leading dashes.
     pub flag: String,
+    /// Flag help text.
     pub description: String,
 }
 
+/// How a command accepts its request body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BodyPolicy {
@@ -117,12 +125,15 @@ pub enum BodyPolicy {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+/// Whether a command must be confirmed before it sends its request.
 pub enum ConfirmationPolicy {
+    /// The command sends without confirmation.
     NotRequired,
     /// The command prints its target operation and refuses to send unless
     /// `--confirm <token>` matches, or `--confirm -` reads the exact token
     /// from the first line of standard input.
     Required {
+        /// Exact token `--confirm` must supply.
         token: String,
     },
 }

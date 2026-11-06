@@ -4,8 +4,6 @@
 //! discriminated stream schema emit nothing at all, and the direct operation
 //! functions plus their untyped AsyncIterables stay unchanged.
 
-#![cfg(feature = "http-protocol")]
-
 use std::{process::Command, sync::Arc};
 
 use serde_json::{Value, json};

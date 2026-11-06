@@ -38,7 +38,9 @@ pub enum Payload {
     None,
     /// JSON through the receipt's own compiled model codec.
     Json {
+        /// Fully spelled C++ payload type.
         cpp_type: String,
+        /// Codec type that decodes the payload.
         codec_name: String,
     },
     /// Schema-free JSON: the decoded value is the parsed JSON value.
@@ -61,7 +63,9 @@ impl Payload {
 pub enum ConstructedBody {
     /// JSON through the receipt's own compiled model codec.
     Json {
+        /// Fully spelled C++ reply body type.
         cpp_type: String,
+        /// Codec type that encodes the reply body.
         codec_name: String,
     },
     /// Schema-free JSON: the reply value is encoded as bounded JSON.
@@ -96,22 +100,35 @@ pub struct ConstructedResponse {
 pub struct IncomingReceipt {
     /// Webhook key, or `parentOperationId.callbackName`.
     pub name: String,
+    /// `"webhook"` or `"callback"`.
     pub kind: &'static str,
     /// The verb the provider sends.
     pub method: String,
+    /// Declared route: a webhook path or a callback runtime expression.
     pub route: String,
+    /// Whether `route` is a callback runtime expression rather than a literal path.
     pub expression: bool,
+    /// Use-site source of the incoming operation.
     pub source: SourceId,
     /// The allocated, collision-free descriptor-table key.
     pub descriptor_key: String,
+    /// Allocated name of the route constant (`<name>_webhook_route`).
     pub route_const: String,
+    /// Allocated payload type alias (`<Name>Payload`).
     pub payload_alias: String,
+    /// Allocated decode helper name (`decode_<name>_webhook`).
     pub decode: String,
-    pub construct: Option<String>,
+    /// Allocated reply constructor name (`construct_<name>_response`); only emitted when `response` is present.
+    pub construct: String,
+    /// How the received body is decoded.
     pub payload: Payload,
+    /// Whether the declared request body is required.
     pub required_body: bool,
+    /// Required request header wire names the decoder checks.
     pub required_headers: Vec<String>,
+    /// The reply the constructor builds: the first declared exact 2xx response.
     pub response: Option<ConstructedResponse>,
+    /// Shared-plan and lowering explanations rendered as helper comments.
     pub explanations: Vec<String>,
 }
 
@@ -120,6 +137,7 @@ pub struct IncomingReceipt {
 pub struct IncomingEmission {
     /// The shared compiled incoming selection this emission follows.
     pub plan: IncomingPlan,
+    /// Lowered receipts in plan order.
     pub receipts: Vec<IncomingReceipt>,
 }
 
@@ -317,7 +335,7 @@ pub(super) fn lower(
             route_const,
             payload_alias,
             decode,
-            construct: Some(construct),
+            construct,
             payload,
             required_body: operation
                 .request()
@@ -458,9 +476,7 @@ fn decoder(receipt: &IncomingReceipt) -> String {
 
 /// One receipt's reply constructor, when an exact 2xx response is declared.
 fn constructor(receipt: &IncomingReceipt, response: &ConstructedResponse) -> String {
-    let Some(construct) = &receipt.construct else {
-        return String::new();
-    };
+    let construct = &receipt.construct;
     let has_body = response.body.is_some();
     let has_headers = !response.headers.is_empty();
     let mut out = comments(receipt);

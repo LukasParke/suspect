@@ -38,7 +38,9 @@ final class PhysicalServerTests: XCTestCase {
     }
 
     func testGenericURIResolutionPreservesEncodedDataAndRejectsRepair() throws {
-        XCTAssertEqual(try AbsoluteServerHTTP.metadata.servers[0].resolve(documentURL: "file:///ignored.json").absoluteString, "https://example.test/API%2Fv1")
+        // ADR 0035: a literal dot segment in an absolute server is refused, never resolved.
+        XCTAssertThrowsError(try AbsoluteServerHTTP.metadata.servers[0].resolve(documentURL: "file:///ignored.json"))
+        // ADR 0035: a declared (here network-path) plain-HTTP server keeps its scheme.
         XCTAssertEqual(try NetworkServerHTTP.metadata.servers[0].resolve().absoluteString, "http://other.test/API")
         XCTAssertEqual(try EncodedServerHTTP.metadata.servers[0].resolve().absoluteString, base + "/specs/releases/%2e%2e/Api%2Fv1")
         let variable = VariableServerHTTP.metadata.servers[0]

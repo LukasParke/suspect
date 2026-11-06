@@ -184,7 +184,9 @@ const { createClient, isSdkError } = operations;
     }
 })().catch(error=>{ console.error(error);process.exitCode=1; });
 "#).unwrap();
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     for args in [
         vec![consumer.join("consumer.mjs")],
         vec![

@@ -27,10 +27,16 @@ fn contract(root: &Path, document: Value) -> Arc<Contract> {
     let workspace = Arc::new(WorkspaceBuilder::new().root(root).build().unwrap());
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(&path).unwrap()).unwrap())
 }
-fn cxx() -> PathBuf {
-    std::env::var_os("SUSPECT_CPP_CXX")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "clang++".into())
+/// The C++ compiler resolved by [`crate::toolchain`] (`SUSPECT_CPP_CXX`
+/// wins); each native test gates on [`native_tools`] first.
+pub(super) fn cxx() -> PathBuf {
+    crate::toolchain::resolve_path("cxx").expect("gated by native_tools")
+}
+/// Whether every listed toolchain id (`cmake`, `cxx`, `doxygen`) is
+/// available: skips after the toolchain's message, or panics under
+/// `SUSPECT_REQUIRE_NATIVE`.
+pub(super) fn native_tools(ids: &[&str]) -> bool {
+    ids.iter().all(|id| crate::toolchain::require(id).is_some())
 }
 fn checked(command: &mut Command, root: &Path) -> std::process::Output {
     use std::io::Write;
@@ -96,6 +102,9 @@ fn expected_path(id: &str) -> &'static str {
 #[test]
 #[ignore = "C++20 source-driven independent scoped-applicator runtime gate"]
 fn native_v2_independent_32() {
+    if !native_tools(&["cxx"]) {
+        return;
+    }
     let fixture: Value = serde_json::from_str(include_str!(
         "../../../suspect-schema/tests/fixtures/owned-applicators-v2.json"
     ))
@@ -238,10 +247,8 @@ int main(){{{calls}}}
     println!("C++ independent 32 v2 vectors: {}", root.display());
 }
 
-fn cmake() -> PathBuf {
-    std::env::var_os("SUSPECT_CPP_CMAKE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "cmake".into())
+pub(super) fn cmake() -> PathBuf {
+    crate::toolchain::resolve_path("cmake").expect("gated by native_tools")
 }
 pub(super) fn package(plan: &SdkPlan, root: &Path) {
     package_files(plan.render().unwrap(), root);
@@ -263,7 +270,9 @@ pub(super) fn package_files(files: Vec<crate::OutFile>, root: &Path) {
             .arg("-DSUSPECT_SDK_BUILD_DOCS=ON")
             .arg(format!(
                 "-DDOXYGEN_EXECUTABLE={}",
-                std::env::var("SUSPECT_CPP_DOXYGEN").unwrap_or_else(|_| "doxygen".into())
+                crate::toolchain::resolve_path("doxygen")
+                    .expect("gated by native_tools")
+                    .display()
             )),
         root,
     );
@@ -298,6 +307,9 @@ pub(super) fn package_files(files: Vec<crate::OutFile>, root: &Path) {
 #[test]
 #[ignore = "installed CMake/Doxygen scoped models, codecs, mutable validation and real libcurl operations"]
 fn native_v2_sdk_operations() {
+    if !native_tools(&["cmake", "cxx", "doxygen"]) {
+        return;
+    }
     use std::io::{Read, Write};
     let root = root("sdk-");
     let document: Value = serde_json::from_str(include_str!("tests/scoped.openapi.json")).unwrap();
@@ -485,6 +497,9 @@ fn native_v2_sdk_operations() {
 #[test]
 #[ignore = "C++ scoped visit boundaries, lexical keys, identity, failure propagation and 2MiB-stack RAII"]
 fn native_v2_scope_resource_edges() {
+    if !native_tools(&["cxx"]) {
+        return;
+    }
     let cases = [
         (
             "eight-visits",

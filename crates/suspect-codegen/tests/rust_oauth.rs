@@ -6,7 +6,6 @@
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::Command,
     sync::Arc,
 };
 use suspect_codegen::{
@@ -578,7 +577,7 @@ fn cargo(command: &str, manifest: &Path, args: &[&str]) -> (bool, String) {
     // while a genuine compile error still fails every attempt.
     let mut log = String::new();
     for attempt in 0..2 {
-        let output = Command::new("cargo")
+        let output = suspect_codegen::toolchain::nested_cargo()
             .arg(command)
             .arg("--offline")
             .arg("--quiet")

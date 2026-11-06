@@ -3,8 +3,7 @@
 `rust_http::plan_http(Arc<Contract>, &[SourceId], HttpConfig)` plans selected
 outgoing operations. `rust_http::emit_http(&plan, &PackageConfig)` produces a
 private Cargo package under `rust/`, with native models/codecs, async operations,
-Rustdoc, a package guide and a source/symbol HTTP manifest. Native acceptance
-passes for this bounded profile; emission does not certify a complete SDK.
+Rustdoc, a package guide and a source/symbol HTTP manifest.
 
 ## Generate and consume
 
@@ -49,8 +48,15 @@ async fn credits(token: String) -> Result<(), Box<dyn std::error::Error>> {
 
 `token` is application-supplied. The source scheme named `apiKey` is an HTTP
 bearer scheme; the generated constructor follows that declaration. It produces
-`Authorization: Bearer …`, not a guessed API-key header. No credentials are
-discovered from environment variables or embedded into generated artifacts.
+`Authorization: Bearer …`, not a guessed API-key header. Credentials are never
+embedded into generated artifacts. Environment credentials are opt-in: only
+when the generation config sets a `credential_env` policy or
+`sdk_defaults.env_prefix` does the package emit `Credentials::from_env()`,
+`Client::from_env()` and `Client::with_transport_from_env()`, which snapshot the
+mapped variables once at client creation
+([ADR 0026](adr/0026-environment-credentials-are-opt-in.md),
+[SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md)). Without a policy no variable is
+read.
 
 ## Native interface
 
@@ -59,10 +65,15 @@ discovered from environment variables or embedded into generated artifacts.
   The manifest retains every original wire name and source identity.
 - Required parameters followed by a required body become constructor arguments.
   `with_<member>` supplies optional inputs; absence does not apply schema defaults.
+  When every input is optional, a no-input `<operation>_default` helper omits
+  them all.
   Models use the existing `Nullable`, `Presence`, exact `JsonInteger` and
   `JsonNumber` representations. Encoding validates mutable models again.
 - A free function and a borrowed-client method execute the same operation.
   Results contain status-specific success variants and native model bodies.
+  A sole-success enum implements `Deref<Target = ApiResponse<...>>`,
+  `into_response()` and `into_data()`; multiple-success operations keep explicit
+  variants.
   `OperationError::Api(Box<OperationApiError>)` contains declared error variants;
   `OperationError::Sdk(Box<SdkError>)` contains runtime failures. Boxing keeps large
   response models out of the size of every returned `Result`.
@@ -81,6 +92,7 @@ discovered from environment variables or embedded into generated artifacts.
 | Defaults | Models, exact JSON, validation and codecs; no external dependencies |
 | `http` | Generic `Transport` / `ResponseBody` async seam; pinned `url = 2.5.8` |
 | `reqwest-rustls` | Recommended reqwest 0.12.28 adapter, default features disabled, rustls TLS; caller-owned Tokio runtime |
+| `serde-json` | Optional `serialize`/`deserialize` functions on each codec for `#[serde(with = ...)]`, running the validated codec ([ADR 0018](adr/0018-no-serde-derives-in-generated-rust.md)) |
 
 `Client::with_transport` accepts a native transport. `ClientOptions` holds an
 explicit server override and lower response/capture limits. The source HTTPS
@@ -98,27 +110,38 @@ cancels by ownership; callers can use `tokio::time::timeout` or their executor's
 future selection. The SDK starts no executor or detached request task. Connection
 pool internals remain the selected adapter's responsibility.
 
-## Admitted profile and boundaries
+## Protocol profile and boundaries
 
-HTTP declaration admission is shared by the five SDK profiles through `http_contract`.
-The bounded profile supports a static HTTPS source server, one HTTP bearer
-requirement, GET/POST/PUT/PATCH/DELETE, required simple string paths, non-null form
-scalar/scalar-array queries with either explode value, JSON request bodies and
-exact-status JSON responses. Encoders use RFC3986 UTF-8 escaping and exact numeric
-tokens. Required empty query arrays fail representation before transport;
-optional empty arrays omit. Null query encoding and pagination are not inferred.
+HTTP admission consumes the shared `http_protocol::ProtocolPlan`
+([SDK-HTTP-PROTOCOL.md](SDK-HTTP-PROTOCOL.md)); the native profile is
+`rust-http-protocol-v1`, and its explicitly enumerated capabilities are
+published by `rust_http::native_capabilities()`. New shared capabilities are
+never enabled automatically.
+
+`HttpConfig` holds the codec policy plus `max_request_bytes`,
+`max_response_bytes`, `max_part_bytes`, `max_stream_item_bytes`,
+`max_chunk_bytes`, `max_header_bytes` and `compatibility_profiles`. Use
+`..Default::default()` when specifying individual overrides. Defaults are 8 MiB
+request/response/part/chunk, 1 MiB stream item and 64 KiB headers. Generation
+limits must be positive and portable to 32-bit `usize`; caller limits can only
+lower them.
+
+Response selection is **exact status → class range → default**, followed by
+media selection: concrete media outrank type ranges and `*/*`, with declared
+parameter count breaking specificity ties. A media mismatch never falls through
+to another status rule. Actual 200–299 status determines success, including for
+default responses.
+
+`CompatibilityProfile::LegacyBinaryStringV1` is an explicit opt-in for legacy
+3.1/3.2 `type: string, format: binary` byte markers. Ordinary 3.1+ byte schemas
+are unconstrained; standard 3.0 binary markers are supported directly.
 
 Rust still requires neutral directional equivalence: readOnly/writeOnly must be
-absent or false in its selected closure. Other media, ranges/default responses,
-typed headers/links, alternative security, server variables, streams and
-unimplemented schema representations remain source-linked planner errors.
-
+absent or false in its selected closure (`http-directional-codec-unsupported`).
 Rust strings contain Unicode scalar values; lone UTF-16 surrogate representation
 remains a documented cross-language gap. URL-normalizing path values such as dot
 segments fail explicitly before sending. The separate byte, depth, evaluation
-and conversion policies are not complete CPU or allocator accounting. Model-only
-planning still records its codec obligations, and no complete language SDK or
-milestone is promoted by this slice.
+and conversion policies are not complete CPU or allocator accounting.
 
 ## Verification
 
@@ -126,10 +149,7 @@ The native seams are maintained in `tests/rust_http.rs`,
 `tests/rust_http_runtime.rs`, `tests/rust_http_openrouter.rs`, CLI
 `tests/rust_sdk.rs`, and the editor's real helper-to-CLI test. Native checks cover
 generation, drift, model-only/custom/reqwest builds, Rustdoc and private packing
-for credits, keys and container-file groups. The integrated gate is documented
-in [SDK-M3-M6-EXIT.md](SDK-M3-M6-EXIT.md).
-
-Results are recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md) and the
-[session handoff](SDK-SESSION-HANDOFF.md). Generated-package consumers,
-Rustdoc/doctests and installed native HTTP checks pass on Rust 1.88.0 and the
-current compiler, including the recommended reqwest/rustls profile.
+for credits, keys and container-file groups. Generated packages target Rust 1.88
+/ edition 2024; generated-package consumers, Rustdoc/doctests and installed
+native HTTP checks run on Rust 1.88 and the current compiler, including the
+recommended reqwest/rustls profile.

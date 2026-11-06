@@ -5,7 +5,7 @@ use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
 
-pub use super::validation_v2_support::{checked, compiler, directory, docs, swift};
+pub use super::validation_v2_support::{available, checked, compiler, docs, swift};
 
 pub const ENTRY: &str = "https://swift-resources.test/api.json";
 

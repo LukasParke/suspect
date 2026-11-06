@@ -26,11 +26,13 @@ pub use crate::sdk_defaults::{
 pub struct OperationPagination {
     /// Operation identifier, or `METHOD /path` when unnamed.
     pub operation: String,
+    /// Detected or configured pagination pattern.
     pub pattern: PaginationPattern,
     /// Role -> actual request parameter name (query parameters in v1).
     pub request: BTreeMap<PaginationRequestRole, String>,
     /// Role -> JSON Pointer (RFC 6901) into the decoded response body.
     pub response: BTreeMap<PaginationResponseRole, String>,
+    /// Offset sent with the first request, when the pattern starts from one.
     pub initial_offset: Option<u32>,
     /// The documented SDK fallback page size (`sdk_defaults.pagination.page_size`)
     /// applied to the first request only, and only when the caller omits the
@@ -39,6 +41,7 @@ pub struct OperationPagination {
     /// limit parameter this stays `None` so the server default is honored.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_limit: Option<u32>,
+    /// How the next request's position is computed from a page.
     pub advance: PaginationAdvance,
     /// The source operation declaration that motivated this selection.
     pub source: Provenance,
@@ -47,14 +50,18 @@ pub struct OperationPagination {
 /// Why an operation stays an ordinary single-page call.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SinglePageExplanation {
+    /// Operation identifier, or `METHOD /path` when unnamed.
     pub operation: String,
+    /// Human-readable reason no pagination pattern applies.
     pub reason: String,
 }
 
 /// Complete generation-time pagination selection for one document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub struct PaginationOutcome {
+    /// Operations compiled with a pagination pattern.
     pub paginated: Vec<OperationPagination>,
+    /// Every other operation, each with its explanation.
     pub single_page: Vec<SinglePageExplanation>,
 }
 

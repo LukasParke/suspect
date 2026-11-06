@@ -152,8 +152,11 @@ pub fn offset_to_line_col(path: &Path, offset: usize) -> Option<(usize, usize)> 
 /// Git blame result for one line.
 #[derive(Debug, Clone, Default)]
 pub struct BlameInfo {
+    /// Commit SHA that last touched the line.
     pub commit: Option<String>,
+    /// Author name from the porcelain `author` header.
     pub author: Option<String>,
+    /// Author time as ISO 8601 UTC (from `author-time`).
     pub date: Option<String>,
 }
 
@@ -176,13 +179,23 @@ pub fn git_blame(path: &Path, line: usize) -> Option<BlameInfo> {
         return None;
     }
 
-    let text = String::from_utf8_lossy(&output.stdout);
+    Some(parse_blame_porcelain(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// Parses `git blame --porcelain` output for one line. The first line of
+/// each entry is `<commit> <orig-line> <final-line> [<count>]`, where the
+/// commit is 40 (SHA-1) or 64 (SHA-256) hex digits.
+fn parse_blame_porcelain(text: &str) -> BlameInfo {
     let mut info = BlameInfo::default();
     for line in text.lines() {
-        if let Some(sha) = line.strip_suffix(" HEAD") {
-            info.commit = Some(sha.to_owned());
-        } else if line.len() == 40 && line.chars().all(|c| c.is_ascii_hexdigit()) {
-            info.commit = Some(line.to_owned());
+        let first = line.split(' ').next().unwrap_or("");
+        if info.commit.is_none()
+            && matches!(first.len(), 40 | 64)
+            && first.chars().all(|c| c.is_ascii_hexdigit())
+        {
+            info.commit = Some(first.to_owned());
         } else if let Some(author) = line.strip_prefix("author ") {
             info.author = Some(author.to_owned());
         } else if let Some(ts) = line.strip_prefix("author-time ")
@@ -191,7 +204,7 @@ pub fn git_blame(path: &Path, line: usize) -> Option<BlameInfo> {
             info.date = Some(unix_to_iso(secs));
         }
     }
-    Some(info)
+    info
 }
 
 /// Converts a Unix timestamp to ISO 8601 UTC.
@@ -230,8 +243,10 @@ pub fn search_cassette_history(
     let mut first_failure: Option<String> = None;
     let mut ever_passed = false;
 
-    for entry in entries.flatten() {
-        let path = entry.path();
+    // Directory order is unspecified; sort so results are reproducible.
+    let mut paths: Vec<_> = entries.flatten().map(|entry| entry.path()).collect();
+    paths.sort();
+    for path in paths {
         let ext = path.extension().and_then(|e| e.to_str());
         if !matches!(ext, Some("jsonl") | Some("ndjson") | Some("json")) {
             continue;
@@ -254,9 +269,15 @@ pub fn search_cassette_history(
                     .map(std::borrow::ToOwned::to_owned);
                 let is_violation = v.get("kind").and_then(|k| k.as_str()) == Some("violation")
                     || v.get("violation").is_some();
-                if is_violation && first_failure.is_none() {
-                    first_failure = ts;
-                } else if !is_violation {
+                if is_violation {
+                    // The earliest timestamp wins; RFC 3339 / ISO 8601 UTC
+                    // strings order correctly as text.
+                    if let Some(ts) = ts
+                        && first_failure.as_ref().is_none_or(|current| ts < *current)
+                    {
+                        first_failure = Some(ts);
+                    }
+                } else {
                     ever_passed = true;
                 }
             }
@@ -285,6 +306,36 @@ mod tests {
         // Offset of "title" line start: 21
         assert_eq!(offset_to_line_col(&path, 21), Some((3, 1)));
         assert_eq!(offset_to_line_col(&path, 0), Some((1, 1)));
+    }
+
+    #[test]
+    fn porcelain_blame_yields_the_commit_author_and_date() {
+        let sha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let text = format!(
+            "{sha} 12 12 1\nauthor Ada Lovelace\nauthor-mail <ada@example.com>\nauthor-time 1710489600\nauthor-tz +0000\nsummary fix\nfilename spec.yaml\n\tminLength: 3\n"
+        );
+        let info = parse_blame_porcelain(&text);
+        assert_eq!(info.commit.as_deref(), Some(sha));
+        assert_eq!(info.author.as_deref(), Some("Ada Lovelace"));
+        assert_eq!(info.date.as_deref(), Some("2024-03-15T08:00:00Z"));
+    }
+
+    #[test]
+    fn the_earliest_violation_is_the_first_failure_regardless_of_file_order() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.jsonl"),
+            "{\"kind\":\"violation\",\"constraint\":\"minLength\",\"ts\":\"2024-05-01T00:00:00Z\"}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.jsonl"),
+            "{\"kind\":\"violation\",\"constraint\":\"minLength\",\"ts\":\"2024-01-01T00:00:00Z\"}\n",
+        )
+        .unwrap();
+        let (ever_passed, first) = search_cassette_history("minLength", Some(dir.path()));
+        assert!(!ever_passed);
+        assert_eq!(first.as_deref(), Some("2024-01-01T00:00:00Z"));
     }
 
     #[test]

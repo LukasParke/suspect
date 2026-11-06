@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use suspect_low::{LowDoc, SpecFamily};
-use suspect_test::{HttpClient, HttpRequest, HttpResponse, Plan, RunSummary, TestEvent, WfPlan};
+use suspect_test::{HttpClient, Plan, RunSummary, TestEvent, WfPlan};
+#[cfg(feature = "live-run")]
+use suspect_test::{HttpRequest, HttpResponse};
 use tower_lsp::lsp_types::{
     CodeLens, Command, Diagnostic, DiagnosticSeverity, NumberOrString, request,
 };
@@ -98,6 +100,7 @@ pub fn run_lenses(doc: &LowDoc) -> Vec<CodeLens> {
 ///
 /// `crit` is the criterion description from the event stream; the source
 /// range is recovered by matching it against the plan's compiled criteria.
+#[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CriterionFailure {
     /// Step whose criterion failed.
@@ -114,6 +117,7 @@ pub(crate) struct CriterionFailure {
 /// the recorded range of the failing criterion's condition string, falling
 /// back to the document start for transport-level failures with no
 /// criterion counterpart.
+#[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) fn failure_range(wf: &WfPlan, failure: &CriterionFailure) -> Range<usize> {
     if failure.crit == "transport" {
         return 0..0;
@@ -131,6 +135,7 @@ pub(crate) fn failure_range(wf: &WfPlan, failure: &CriterionFailure) -> Range<us
 /// Runs a single compiled workflow against `transport`, mirroring every
 /// [`TestEvent`] into `mirror` (when given) so callers can stream progress,
 /// and returning the run summary plus the criteria that failed.
+#[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) async fn run_workflow_core(
     wf: &WfPlan,
     base_url: &str,
@@ -182,6 +187,7 @@ pub(crate) async fn run_workflow_core(
 
 /// Converts criterion failures into editor diagnostics anchored at each
 /// failing criterion's recorded condition range.
+#[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) fn failures_to_diagnostics(
     wf: &WfPlan,
     failures: &[CriterionFailure],
@@ -352,6 +358,7 @@ pub(crate) fn pick_outcome(outcomes: &[suspect_gen::RenderOutcome]) -> Option<&P
 }
 
 /// One-line human rendering of a [`TestEvent`] for `window/logMessage`.
+#[cfg(feature = "live-run")]
 #[must_use]
 pub(crate) fn describe_event(ev: &TestEvent) -> String {
     match ev {

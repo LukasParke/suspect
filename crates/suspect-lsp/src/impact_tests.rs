@@ -74,6 +74,8 @@ fn workspace_with(spec: &str) -> (std::sync::Arc<suspect_ref::Workspace>, IrSpec
     let low = ws.get(&ws.uris()[0]).expect("handle").doc();
     // The documents live as long as the workspace; leak the handle so the
     // borrow outlives this function.
+    // SAFETY: the workspace and its temp dir are leaked just below, so the
+    // document this points into is never freed.
     let low: &'static LowDoc = unsafe { std::mem::transmute(low) };
     std::mem::forget(ws.clone());
     std::mem::forget(dir);

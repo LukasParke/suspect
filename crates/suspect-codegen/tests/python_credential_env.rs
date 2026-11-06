@@ -17,10 +17,13 @@ use suspect_ir::contract::Contract;
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
 
+use crate::python_support;
+
 const IMPORT: &str = "credential_python_sdk";
 // Captured after the split documentation emission (docs/api/*.rst and
 // docs/operations/*.rst pages replace the single-page api/operations bodies).
-const NO_POLICY_SHA256: &str = "ce899150ba3083146f3662848e40eeec3979e7b68201c21c63dae70d1a7f7dc0";
+// Pin updated for the ADR 0035 server URL policy edit to the runtime.
+const NO_POLICY_SHA256: &str = "b68bc1e74ee4badb3a64c417dc4eb22b5d31a74618d27ea683344f7da858d59c";
 
 fn root(label: &str) -> PathBuf {
     tempfile::Builder::new()
@@ -274,11 +277,14 @@ fn checked(command: &mut Command, root: &Path, label: &str) {
     );
 }
 
-fn tools() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-native-python-tools/bin/python")
-}
-
-fn verify_package(root: &Path, files: &[OutFile], consumer: &str, negative: &str) {
+fn verify_package(
+    native: &python_support::Installed,
+    root: &Path,
+    files: &[OutFile],
+    consumer: &str,
+    negative: &str,
+) {
+    let tools = || &native.tools;
     suspect_codegen::write_files(files, &root.join("generated")).unwrap();
     fs::write(root.join("consumer.py"), consumer).unwrap();
     fs::write(root.join("negative.py"), negative).unwrap();
@@ -295,18 +301,20 @@ fn verify_package(root: &Path, files: &[OutFile], consumer: &str, negative: &str
         .map(|entry| entry.unwrap().path())
         .find(|path| path.extension().is_some_and(|ext| ext == "whl"))
         .unwrap();
-    for version in ["3.11", "3.14"] {
+    for (version, interpreter) in &native.interpreters {
+        let version = *version;
         let venv = root.join(format!("venv-{version}"));
         checked(
-            Command::new("uv")
-                .args(["venv", "--offline", "--python", version])
+            Command::new(&native.uv)
+                .args(["venv", "--offline", "--python"])
+                .arg(interpreter)
                 .arg(&venv),
             root,
             &format!("venv-{version}"),
         );
         let python = venv.join("bin/python");
         checked(
-            Command::new("uv")
+            Command::new(&native.uv)
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&python)
                 .arg(&wheel)
@@ -392,6 +400,9 @@ fn verify_package(root: &Path, files: &[OutFile], consumer: &str, negative: &str
 #[test]
 #[ignore = "requires installed Python 3.11/3.14 and cached wheel/mypy/Sphinx tools"]
 fn installed_python_credential_env_snapshots_and_explicit_auth_precedence() {
+    let Some(native) = python_support::installed() else {
+        return;
+    };
     let root = root("native");
     let (_, files) = package(fixture(), configured(), IMPORT);
     for file in &files {
@@ -401,6 +412,7 @@ fn installed_python_credential_env_snapshots_and_explicit_auth_precedence() {
         );
     }
     verify_package(
+        &native,
         &root,
         &files,
         include_str!("python_credential_env/consumer.py"),
@@ -411,17 +423,16 @@ fn installed_python_credential_env_snapshots_and_explicit_auth_precedence() {
 }
 
 #[test]
-#[ignore = "requires actual OpenRouter source and installed Python 3.11/3.14; controlled transport only"]
+#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) and installed Python 3.11/3.14; controlled transport only"]
 fn installed_openrouter_python_credential_env_current_key_and_optional_credits() {
+    let (Some(native), Some(source)) = (
+        python_support::installed(),
+        suspect_codegen::toolchain::openrouter_spec(),
+    ) else {
+        return;
+    };
+    let source = source.canonicalize().unwrap();
     let root = root("openrouter");
-    let source = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../openrouter-web")
-        })
-        .join("projects/docs/openapi/openapi.yaml")
-        .canonicalize()
-        .unwrap();
     let bytes = fs::read(&source).unwrap();
     let workspace = Arc::new(
         WorkspaceBuilder::new()
@@ -494,6 +505,7 @@ fn installed_openrouter_python_credential_env_current_key_and_optional_credits()
     .unwrap();
     fs::write(root.join("source.json"),serde_json::to_vec_pretty(&json!({"path":source,"sha256":format!("{:x}",Sha256::digest(&bytes)),"operations":names,"credentialEnv":policy,"descriptor":policy.semantic_descriptor()})).unwrap()).unwrap();
     verify_package(
+        &native,
         &root,
         &files,
         include_str!("python_credential_env/openrouter.py"),

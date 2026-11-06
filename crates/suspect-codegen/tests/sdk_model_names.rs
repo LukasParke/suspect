@@ -8,6 +8,8 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+use crate::python_support;
+
 fn specification() -> Value {
     json!({"openapi":"3.1.0","info":{"title":"Naming","version":"1"},
     "servers":[{"url":"https://api.example.test/v1"}], "security":[{"Bearer":[]}],
@@ -61,7 +63,10 @@ fn native_python_constructor_has_an_operation_role_name_and_original_source_bind
     );
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&plan.render().unwrap(), directory.path()).unwrap();
-    let result = Command::new(std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()))
+    let Some(python_bin) = python_support::python_at_least("SUSPECT_PYTHON_BIN", (3, 10)) else {
+        return;
+    };
+    let result = Command::new(python_bin)
         .current_dir(directory.path()).args(["-c", "from python.models import CreateWidgetRequest, CreateWidgetRequestMetadata\nvalue = CreateWidgetRequest(name='demo', metadata=CreateWidgetRequestMetadata(label='owned'))\nassert value.name == 'demo' and value.metadata.label == 'owned'"])
         .output().unwrap();
     assert!(

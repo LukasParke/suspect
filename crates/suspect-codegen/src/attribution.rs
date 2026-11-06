@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 /// Closed version of the attribution grammar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttributionTemplateVersion {
+    /// The `ua/v1` grammar, serialized as `"v1"`.
     #[serde(rename = "v1")]
     V1,
 }
@@ -35,7 +36,10 @@ fn sanitize_token(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut last_dash = false;
     for character in value.chars() {
-        let keep = character.is_ascii_alphanumeric() || TOKEN_EXTRA.contains(&(character as u8));
+        // Only ASCII can be a token character; `as u8` on a wider char would
+        // truncate it (U+0121 → b'!') and wrongly keep it.
+        let keep = character.is_ascii()
+            && (character.is_ascii_alphanumeric() || TOKEN_EXTRA.contains(&(character as u8)));
         if keep {
             out.push(character);
             last_dash = false;
@@ -123,10 +127,13 @@ impl ApplicationIdentity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttributionDescriptor {
+    /// Grammar version the emitted User-Agent follows.
     pub template_version: AttributionTemplateVersion,
     /// Suspect generator version captured at generation time.
     pub suspect_version: String,
+    /// Package identity, sanitized to an RFC 9110 token.
     pub sdk_name: String,
+    /// Package version, paired with `sdk_name` as the default identity token.
     pub sdk_version: String,
     /// Source document's declared OpenAPI or Swagger version.
     pub spec_version: String,
@@ -150,11 +157,16 @@ impl AttributionDescriptor {
         if sdk_name.is_empty() {
             sdk_name = "sdk".into();
         }
+        // The version is the token after `/`, so it must be a token too.
+        let mut sdk_version = sanitize_token(sdk_version);
+        if sdk_version.is_empty() {
+            sdk_version = "0".into();
+        }
         Self {
             template_version: AttributionTemplateVersion::V1,
             suspect_version: suspect_version.into(),
             sdk_name,
-            sdk_version: sdk_version.into(),
+            sdk_version,
             spec_version: spec_version.into(),
             language: language.into(),
         }
@@ -208,6 +220,17 @@ impl AttributionDescriptor {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn identity_tokens_stay_valid_for_any_package_name_or_version() {
+        let plan = AttributionDescriptor::plan("1.0.0", "ġreat sdk", "1.0 beta", "3.1.0", "rust");
+        let token = plan.identity_token(None);
+        assert_eq!(token, "reat-sdk/1.0-beta");
+        assert!(token.split('/').all(is_token), "{token}");
+        let empty = AttributionDescriptor::plan("1.0.0", "", "", "3.1.0", "rust");
+        assert_eq!(empty.identity_token(None), "sdk/0");
+    }
+
     use super::*;
 
     fn descriptor() -> AttributionDescriptor {

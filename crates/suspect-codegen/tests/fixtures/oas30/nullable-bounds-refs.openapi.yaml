@@ -1,0 +1,128 @@
+# OpenAPI 3.0 witness for Dart and PHP native model/codec planning.
+# Oracle: OAS 3.0.3 Schema Object (`nullable` widens only a same-object `type`;
+# Boolean `exclusiveMinimum`/`exclusiveMaximum` modify the adjacent bound) and
+# Reference Object (every sibling of `$ref` is ignored). See ADR 0016.
+openapi: 3.0.3
+info:
+  title: OAS 3.0 native witness
+  version: "1.0.0"
+servers:
+  - url: https://example.test/api/v1
+security:
+  - bearer: []
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            exclusiveMinimum: true
+            maximum: 100
+      responses:
+        "200":
+          description: A page of pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+    post:
+      operationId: echoPet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "200":
+          description: The same pet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+  /photo:
+    get:
+      operationId: getPhoto
+      responses:
+        "200":
+          description: Raw photo bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  schemas:
+    Pet:
+      type: object
+      required: [id, name, tag, owner]
+      additionalProperties: false
+      properties:
+        # Boolean exclusive bounds: 0 < id < 100.
+        id:
+          type: integer
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 100
+          exclusiveMaximum: true
+        name:
+          type: string
+        # Scalar nullable: the same-object type gains null.
+        tag:
+          type: string
+          nullable: true
+        # Reference Object: every sibling is ignored, so the effective schema
+        # is exactly Owner (a nullable object), not a read-only string.
+        owner:
+          $ref: "#/components/schemas/Owner"
+          type: string
+          readOnly: true
+          description: Ignored Reference Object sibling.
+        # A $ref to a nullable scalar is nullable through its target.
+        nickname:
+          $ref: "#/components/schemas/Nickname"
+        # exclusiveMaximum: false leaves the adjacent maximum inclusive.
+        weight:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 50
+          exclusiveMaximum: false
+        # nullable cannot bypass the enum: null is still rejected.
+        status:
+          type: string
+          nullable: true
+          enum: [available, sold]
+        # nullable admits null because the enum also lists it.
+        mood:
+          type: string
+          nullable: true
+          enum: [calm, null]
+        # nullable without a same-object type has no effect.
+        anything:
+          nullable: true
+          description: Arbitrary JSON.
+    # Object nullable.
+    Owner:
+      type: object
+      nullable: true
+      required: [name]
+      properties:
+        name:
+          type: string
+    Nickname:
+      type: string
+      nullable: true
+      minLength: 1
+      description: A nullable scalar.

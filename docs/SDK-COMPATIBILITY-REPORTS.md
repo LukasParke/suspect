@@ -1,6 +1,6 @@
 # Source-aware SDK compatibility reports
 
-M6 comparison input is an owned source-addressed `Contract` plus the actual
+Comparison input is an owned source-addressed `Contract` plus the actual
 selected native language plans. `suspect_codegen::compatibility` compares typed
 descriptors and the resolved HTTP/schema graph directly.
 
@@ -29,6 +29,8 @@ let compatible_within_scope = report.is_proven_compatible();
 package names, package versions, effective Python/Swift import identities, and
 target additions/removals. Each backend may appear once in each target list.
 An empty target list is an explicit wire-only comparison.
+`snapshot_with_options` and `compare_with_options` take the exact generation
+options (`sdk_defaults`, `credential_env`, compatibility profiles) for each side.
 
 For repeated comparisons, retain `CompatibilitySnapshot`s:
 
@@ -165,7 +167,7 @@ Schema defaults and documentation do not become invented runtime behavior.
 Unchanged unsupported declarations can still produce contract/native diagnostics;
 “no textual change” is not a substitute for a usable target plan.
 
-## Native-plan coverage and owner accessors
+## Native-plan coverage and accessors
 
 Native records use format `suspect-native-interface-v1`. Native shapes preserve
 allocated names and typed wrappers/variants; source comments, descriptions and
@@ -202,8 +204,7 @@ package/module identifiers and the exact version through `PackageConfig`
 admission. An explicit import equal to the default does not invent a source
 change; an invalid module name produces an unavailable target with its diagnostic.
 
-The selected targets' native accessors are integrated. Rust constructor parameter
-order and `Default` availability follow the actual `Init` variants, including
+Rust constructor parameter order and `Default` availability follow the actual `Init` variants, including
 source-defined singleton initialization; Python concrete response names are read
 from `PlannedResponse`, not recomputed from operationId. Native self-comparison
 uses the same selected planner/options as canonical generation. Dynamic wire
@@ -240,13 +241,12 @@ in the native record. HTTP records use the actual success/error enum names and
 their exact `statusNNN` cases; the non-emitted `error_variant` planning
 label is excluded.
 
-Go's model-level literal/variant suffixes now come from global allocation that
+Go's model-level literal/variant suffixes come from global allocation that
 also reserves constructors and runtime constants; the existing typed descriptor
 adapter retains those allocated suffixes. The HTTP namespace guard still turns
 any future intrinsic inconsistency into a source-linked planner refusal. Such
 refusals remain unknown in compatibility reports. A wire-only result can be
-compatible while a refused native target
-is unknown.
+compatible while a refused native target is unknown.
 
 ## Provenance and verification
 
@@ -287,17 +287,15 @@ per-language operation/model renames, null/presence and input/output variance,
 operation removal, method/path/security changes, native refusal, contradictory
 literal intersections, composition/pattern/large-number uncertainty, recursive
 references, status/default coverage, package identity, and serializable native
-provenance. Native cases cover completed no-change/docs-only proofs, unchanged
+provenance. Native cases cover no-change/docs-only proofs, unchanged
 names under source relocation, collision-driven native renames, Rust singleton
 constructors and `Default`, Python keyword/status-class allocation, TypeScript
 directional field expressions, Go constructor/response/setter collisions and
 closed response method membership, and Swift initializer/default ordering,
 model-versus-codec roles under shared-component reuse, nullable codec signatures,
-module admission, and all-target field/null/union changes. These checks do not derive their oracle from
-emitted code or compare the implementation to itself.
+module admission, and all-target field/null/union changes. These checks do not
+derive their oracle from emitted code or compare the implementation to itself.
 
 ```sh
-cargo test -p suspect-codegen --test sdk_compatibility --locked
+cargo test -p suspect-codegen --test shared sdk_compatibility:: --locked
 ```
-
-Current integrated verification is recorded in [SDK-PROGRESS.md](SDK-PROGRESS.md).

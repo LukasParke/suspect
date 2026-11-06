@@ -100,7 +100,7 @@ public enum TransportError: Error, Sendable {
 }
 
 /// Client-wide server selection and finite transport policy. Cleartext overrides
-/// require loopback or allowHTTP; declared server URLs retain their scheme.
+/// require loopback or allowHTTP; declared server URLs retain their scheme (ADR 0035).
 /// Per-call limits may only lower generated ceilings. Timeouts cover the transfer.
 public struct ClientOptions: Sendable {
     public var serverURL: String?

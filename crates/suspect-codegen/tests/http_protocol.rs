@@ -1,8 +1,6 @@
 //! Public source Contract -> immutable wire plan seam. Expectations live in a
 //! literal, independently sourced normative fixture, not generated snapshots.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 use suspect_codegen::http_protocol::{self as http, Capabilities, Capability, plan};

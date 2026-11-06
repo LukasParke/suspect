@@ -197,16 +197,35 @@ fn checked(command: &mut Command, cwd: &std::path::Path, stage: &'static str) {
     );
 }
 
+/// `python3` when it imports httpx, else the provisioned tools venv
+/// (`tools/native-setup.sh python`; `SUSPECT_PYTHON_BIN` overrides). Missing
+/// or httpx-less, the venv is a hard failure under `SUSPECT_REQUIRE_NATIVE`.
 fn interpreter_with_httpx() -> Option<String> {
-    let python = std::env::var_os("SUSPECT_PYTHON_BIN")
-        .unwrap_or_else(|| "python3".into())
-        .to_string_lossy()
-        .to_string();
-    let probe = Command::new(&python)
-        .args(["-c", "import httpx"])
-        .output()
-        .ok()?;
-    probe.status.success().then_some(python)
+    let imports_httpx = |python: &std::ffi::OsStr| {
+        Command::new(python)
+            .args(["-c", "import httpx"])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    };
+    if imports_httpx("python3".as_ref()) {
+        return Some("python3".to_owned());
+    }
+    let candidate = suspect_codegen::toolchain::require_provisioned(
+        "SUSPECT_PYTHON_BIN",
+        "sdk-native-python-tools/bin/python",
+        "python",
+    )?;
+    if imports_httpx(candidate.as_os_str()) {
+        return Some(candidate.to_string_lossy().into_owned());
+    }
+    let required = std::env::var(suspect_codegen::toolchain::REQUIRE_NATIVE_ENV)
+        .is_ok_and(|value| !value.is_empty() && value != "0");
+    assert!(
+        !required,
+        "{} cannot import httpx; run `tools/native-setup.sh python`",
+        candidate.display()
+    );
+    None
 }
 
 const BEHAVIOR: &str = r#"

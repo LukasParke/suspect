@@ -5,16 +5,26 @@ use super::{allocate, python_name};
 use crate::http_protocol as p;
 use suspect_ir::contract::{SchemaId, SourceId};
 
+/// Python type of one native value, rendered against the model symbol table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NativeType {
+    /// A generated model class, `models.<Name>`.
     Model(SchemaId),
+    /// A builtin or runtime type such as `bytes`, `str`, `None` or `JsonValue`.
     Builtin(&'static str),
+    /// A generated form, multipart, part or headers class in `operations`.
     Group(String),
+    /// `list[T]`, for repeated parts.
     List(Box<Self>),
+    /// `Part[T]`, a part value without declared headers.
     Part(Box<Self>),
+    /// A deduplicated `A | B` union.
     Union(Vec<Self>),
-    /// A declared stream item schema, or `None` for a schemaless stream.
+    /// A response stream: `SyncStream[T]` / `AsyncStream[T]` of the declared
+    /// item schema, or of `JsonValue` when `None`.
     Stream(Option<SchemaId>),
+    /// A request stream: `Iterable[T]` (plus `AsyncIterable[T]` for the async
+    /// client) of the declared item schema, or of `JsonValue` when `None`.
     Items(Option<SchemaId>),
 }
 
@@ -69,6 +79,7 @@ impl NativeType {
             },
         }
     }
+    /// The model schema, when this is exactly one [`Self::Model`].
     pub fn schema(&self) -> Option<&SchemaId> {
         if let Self::Model(source) = self {
             Some(source)
@@ -76,7 +87,8 @@ impl NativeType {
             None
         }
     }
-    pub fn streaming(&self) -> bool {
+    /// Whether this is, or is a union containing, a response stream.
+    pub(crate) fn streaming(&self) -> bool {
         match self {
             Self::Stream(_) => true,
             Self::Union(values) => values.iter().any(Self::streaming),
@@ -98,15 +110,19 @@ impl NativeType {
     }
 }
 
+/// One source parameter's allocated keyword argument.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
+    /// Allocated snake-case Python argument name.
     pub name: String,
     pub(crate) wire: p::ParameterPlan,
 }
 impl PlannedParameter {
+    /// Codec schema of the parameter value.
     pub fn schema(&self) -> &SchemaId {
         self.wire.codec().schema().id()
     }
+    /// Shared wire plan of the source parameter.
     pub fn protocol(&self) -> &p::ParameterPlan {
         &self.wire
     }
@@ -115,84 +131,124 @@ impl PlannedParameter {
     }
 }
 
+/// One declared response or part header's allocated attribute.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
+    /// Allocated snake-case Python attribute name.
     pub name: String,
     pub(crate) wire: p::HeaderPlan,
 }
 impl PlannedHeader {
+    /// Codec schema of the header value.
     pub fn schema(&self) -> &SchemaId {
         self.wire.codec().schema().id()
     }
+    /// Shared wire plan of the source header.
     pub fn protocol(&self) -> &p::HeaderPlan {
         &self.wire
     }
 }
 
+/// One attribute of a generated form, multipart or headers class.
 #[derive(Debug, Clone)]
 pub struct PlannedField {
+    /// Allocated snake-case Python attribute name.
     pub name: String,
+    /// Exact field, part or header name on the wire.
     pub wire_name: String,
+    /// Use-site source of the field declaration.
     pub source: SourceId,
+    /// Python type of the attribute.
     pub ty: NativeType,
+    /// Whether the source declares the field required.
     pub required: bool,
     pub(crate) part: Option<p::PartPlan>,
 }
 
+/// One generated class in `operations` for a form, multipart body, part with
+/// headers, or header set.
 #[derive(Debug, Clone)]
 pub struct PlannedGroup {
+    /// Allocated class name.
     pub name: String,
+    /// Source the class is generated from.
     pub source: SourceId,
+    /// `"form"`, `"multipart"`, `"part"` or `"headers"`.
     pub kind: &'static str,
+    /// Declared attributes in source order; empty for `"part"`.
     pub fields: Vec<PlannedField>,
+    /// Type of admitted additional fields or parts, when allowed.
     pub additional: Option<NativeType>,
     pub(crate) additional_part: Option<p::PartPlan>,
+    /// Allocated headers of a `"headers"` group; empty otherwise.
     pub headers: Vec<PlannedHeader>,
     pub(crate) part_value: Option<NativeType>,
     pub(crate) header_group: Option<String>,
     pub(crate) required_headers: bool,
 }
 
+/// One declared media with its Python type.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
+    /// Python type of a value in this media.
     pub ty: NativeType,
     pub(crate) wire: p::MediaPlan,
 }
 impl PlannedMedia {
+    /// Shared wire plan of the source media.
     pub fn protocol(&self) -> &p::MediaPlan {
         &self.wire
     }
 }
 
+/// One request body's `body` argument.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
+    /// Use-site source of the request body declaration.
     pub source: SourceId,
+    /// Whether the source declares the body required.
     pub required: bool,
+    /// Declared media in source order.
     pub media: Vec<PlannedMedia>,
+    /// Union of the media types.
     pub ty: NativeType,
+    /// Whether the call takes a `content_type` argument: several media, or a
+    /// media range.
     pub content_type_parameter: bool,
 }
 impl PlannedBody {
+    /// The model schema, when the body is exactly one model.
     pub fn schema(&self) -> Option<&SchemaId> {
         self.ty.schema()
     }
 }
 
+/// One declared response with its allocated result classes.
 #[derive(Debug, Clone)]
 pub struct PlannedResponse {
+    /// Allocated `<Stem>Status<Suffix>` result class.
     pub class_name: String,
+    /// Async client result class; differs from `class_name` only for streams.
     pub async_class_name: String,
+    /// API error class; a separate `<Stem>StatusDefaultApiError` for `default`.
     pub error_class_name: String,
+    /// Async client API error class; differs only for streams.
     pub async_error_class_name: String,
+    /// Python type of the decoded body, `None` when the method or status
+    /// forbids one and `| None` when a range or default status permits none.
     pub ty: NativeType,
+    /// Declared media in source order; empty when a body is forbidden.
     pub media: Vec<PlannedMedia>,
+    /// Allocated headers class name, present when headers are declared.
     pub header_group: Option<String>,
     pub(crate) wire: p::ResponsePlan,
 }
 impl PlannedResponse {
+    /// Source-declared status selector.
     pub fn status(&self) -> p::ResponseStatus {
         self.wire.status()
     }
+    /// The declared status, when it is an exact code.
     pub fn exact_status(&self) -> Option<u16> {
         if let p::ResponseStatus::Exact(status) = self.status() {
             Some(status)
@@ -200,35 +256,47 @@ impl PlannedResponse {
             None
         }
     }
+    /// The model schema, when the body is exactly one model.
     pub fn schema(&self) -> Option<&SchemaId> {
         self.ty.schema()
     }
+    /// Shared wire plan of the source response.
     pub fn protocol(&self) -> &p::ResponsePlan {
         &self.wire
     }
     pub(crate) fn wire(&self) -> &p::ResponsePlan {
         &self.wire
     }
-    pub fn succeeds(&self) -> bool {
+    /// Whether the status selector admits a success (2xx, `2XX`, `default`).
+    pub(crate) fn succeeds(&self) -> bool {
         match self.status() {
             p::ResponseStatus::Exact(n) => (200..300).contains(&n),
             p::ResponseStatus::Range(n) => n == 2,
             p::ResponseStatus::Default => true,
         }
     }
-    pub fn fails(&self) -> bool {
+    /// Whether the status selector admits a failure (non-2xx, `default`).
+    pub(crate) fn fails(&self) -> bool {
         self.status() == p::ResponseStatus::Default || !self.succeeds()
     }
 }
 
+/// Allocated native operation names shared by code, examples and documentation.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Source location of the operation declaration.
     pub source: SourceId,
+    /// Source operationId, or `<METHOD>_<path>` when none is declared.
     pub operation_id: String,
+    /// Allocated snake-case client method name.
     pub snake_name: String,
+    /// `<Stem>Success` result union name.
     pub success_type: String,
+    /// Async client result union; differs from `success_type` only for streams.
     pub async_success_type: String,
+    /// `<Stem>ApiError` error union name.
     pub error_type: String,
+    /// Async client error union; differs from `error_type` only for streams.
     pub async_error_type: String,
     pub(crate) wire: p::OperationPlan,
     pub(crate) parameters: Vec<PlannedParameter>,
@@ -236,21 +304,26 @@ pub struct PlannedOperation {
     pub(crate) responses: Vec<PlannedResponse>,
 }
 impl PlannedOperation {
+    /// Allocated keyword arguments in source parameter order.
     pub fn parameters(&self) -> &[PlannedParameter] {
         &self.parameters
     }
+    /// Declared responses in source order.
     pub fn responses(&self) -> &[PlannedResponse] {
         &self.responses
     }
+    /// The request body, when declared.
     pub fn body(&self) -> Option<&PlannedBody> {
         self.body.as_ref()
     }
+    /// Shared wire plan of the source operation.
     pub fn protocol(&self) -> &p::OperationPlan {
         &self.wire
     }
     pub(crate) fn wire(&self) -> &p::OperationPlan {
         &self.wire
     }
+    /// Source operation description, empty when none is declared.
     pub fn description(&self) -> &str {
         self.wire.description().map_or("", |text| text.value())
     }

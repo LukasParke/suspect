@@ -84,10 +84,13 @@ pub trait Transport: Send + Sync {
 /// Explicit runtime selection and lower resource limits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientOptions {
-    /// Absolute server override. HTTP overrides target loopback; declared HTTP
-    /// candidates retain their declared origins. Cannot be combined with a
-    /// candidate index or variable overrides.
+    /// Absolute server override: HTTPS, or plain HTTP to a loopback host
+    /// unless `allow_insecure_http` is set (ADR 0035); declared servers keep
+    /// their scheme. Cannot be combined with a candidate index or variable
+    /// overrides.
     pub server_url: Option<String>,
+    /// Opt in to a plain-HTTP `server_url` on a non-loopback host.
+    pub allow_insecure_http: bool,
     pub server_index: Option<usize>,
     pub server_variables: std::collections::BTreeMap<String, String>,
     /// URL serving a local-file description when its server is relative.
@@ -108,6 +111,7 @@ impl Default for ClientOptions {
     fn default() -> Self {
         Self {
             server_url: None,
+            allow_insecure_http: false,
             server_index: None,
             server_variables: Default::default(),
             document_url: None,

@@ -90,6 +90,9 @@ impl hyper::rt::Read for TokioStream {
         match std::pin::Pin::new(&mut self.get_mut().0).poll_read(cx, &mut tbuf) {
             std::task::Poll::Ready(Ok(())) => {
                 let filled = tbuf.filled().len();
+                // SAFETY: tokio only reports bytes it actually wrote into
+                // `tbuf`, which views the same memory as `buf`, so the first
+                // `filled` bytes are initialized.
                 unsafe { buf.advance(filled) };
                 std::task::Poll::Ready(Ok(()))
             }

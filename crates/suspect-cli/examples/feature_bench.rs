@@ -3,6 +3,9 @@
 //! server, timing each hot path.
 //!
 //! Run: cargo run --release -p suspect-cli --example feature_bench
+//!
+//! The stripe-sdk and api.github.com specs come from the gitignored
+//! `corpus/` directory: fetch them with `cargo run -p xtask -- fetch-corpus`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,9 +13,35 @@ use std::time::{Duration, Instant};
 
 use suspect_ir::IrSpec;
 
-fn load_ir(root: &str, entry: &str) -> Result<(Arc<suspect_ref::Workspace>, IrSpec), String> {
+/// The workspace root (two levels above this crate's manifest).
+fn workspace_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+/// The gitignored `corpus/` directory populated by `xtask fetch-corpus`.
+fn corpus_dir() -> std::path::PathBuf {
+    workspace_root().join("corpus")
+}
+
+/// Exits with a clear message when a corpus file has not been fetched.
+fn require_corpus(entry: &str) -> std::path::PathBuf {
+    let dir = corpus_dir();
+    if !dir.join(entry).is_file() {
+        eprintln!(
+            "missing corpus file {}; fetch it with `cargo run -p xtask -- fetch-corpus`",
+            dir.join(entry).display()
+        );
+        std::process::exit(1);
+    }
+    dir
+}
+
+fn load_ir(
+    root: &std::path::Path,
+    entry: &str,
+) -> Result<(Arc<suspect_ref::Workspace>, IrSpec), String> {
     let ws = suspect_ref::WorkspaceBuilder::new()
-        .root(std::path::Path::new(root))
+        .root(root)
         .build()
         .map_err(|e| e.to_string())?;
     ws.load_all(entry).map_err(|e| e.to_string())?;
@@ -141,9 +170,7 @@ fn bench_r4_stateful(name: &str, ir: &IrSpec) {
 fn bench_r8_reverse(name: &str, ir: &IrSpec) {
     // Extract routes from our own workspace source tree
     let s = Instant::now();
-    let routes = suspect_reverse::extract_from_tree(std::path::Path::new(
-        "/home/luke/github/suspect/crates",
-    ));
+    let routes = suspect_reverse::extract_from_tree(&workspace_root().join("crates"));
     let extract_t = s.elapsed();
 
     let s = Instant::now();
@@ -173,9 +200,7 @@ fn bench_r8_reverse(name: &str, ir: &IrSpec) {
 fn bench_r2_causal(_name: &str, _ir: &IrSpec, iters: usize) {
     let spec_path = std::path::PathBuf::from("/tmp/plex-api-spec/plex-api-spec.yaml")
         .canonicalize()
-        .unwrap_or_else(|_| {
-            std::path::PathBuf::from("/home/luke/github/suspect/corpus/stripe-sdk.yaml")
-        });
+        .unwrap_or_else(|_| require_corpus("stripe-sdk.yaml").join("stripe-sdk.yaml"));
     let mut times = Vec::new();
     for i in 0..iters {
         let offset = (i * 997) % 100_000;
@@ -291,9 +316,15 @@ fn main() -> Result<(), String> {
     println!();
 
     // --- Load corpus ---
-    let (_, stripe) = load_ir("/home/luke/github/suspect/corpus", "stripe-sdk.yaml")?;
-    let (_, github) = load_ir("/home/luke/github/suspect/corpus", "api.github.com.yaml")?;
-    let (plex_ws, plex) = load_ir("/tmp/plex-api-spec", "plex-api-spec.yaml")?;
+    let (_, stripe) = load_ir(&require_corpus("stripe-sdk.yaml"), "stripe-sdk.yaml")?;
+    let (_, github) = load_ir(
+        &require_corpus("api.github.com.yaml"),
+        "api.github.com.yaml",
+    )?;
+    let (plex_ws, plex) = load_ir(
+        std::path::Path::new("/tmp/plex-api-spec"),
+        "plex-api-spec.yaml",
+    )?;
     println!(
         "corpus: stripe-sdk {} ops/{} schemas, github {} ops/{} schemas, plex {} ops/{} schemas",
         stripe.operations.len(),

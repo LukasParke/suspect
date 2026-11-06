@@ -109,7 +109,6 @@ fn value_type(models: &ModelPlan, value: &ruby_sdk::NativeType, namespace: &str)
         Codec(i) => type_name(models, *i, namespace),
         Json => json!({"kind":"primitive","name":"JsonValue"}),
         Bytes => json!({"kind":"bytes","name":format!("{namespace}::Bytes")}),
-        NoContent => json!({"kind":"no-content"}),
         Scalar(s) => json!({"kind":"text-scalar","scalar":s}),
         Record(n) => json!({"kind":"named","name":format!("{namespace}::Models::{n}")}),
         Array(t) => json!({"kind":"array","item":value_type(models,t,namespace)}),

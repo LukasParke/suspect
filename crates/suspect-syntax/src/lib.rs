@@ -12,12 +12,16 @@ unsafe extern "C" {
 /// The vendored JSON grammar.
 #[must_use]
 pub fn json_language() -> Language {
+    // SAFETY: `tree_sitter_json` is the generated parser entry point compiled
+    // from the vendored grammar by build.rs; it takes no arguments and returns
+    // a static `TSLanguage`.
     unsafe { LanguageFn::from_raw(tree_sitter_json).into() }
 }
 
 /// The vendored YAML grammar.
 #[must_use]
 pub fn yaml_language() -> Language {
+    // SAFETY: as for `json_language`, with the vendored YAML grammar.
     unsafe { LanguageFn::from_raw(tree_sitter_yaml).into() }
 }
 

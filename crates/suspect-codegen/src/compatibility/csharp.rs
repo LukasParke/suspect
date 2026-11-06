@@ -135,7 +135,7 @@ fn union_arm(models: &ModelPlan, namespace: &str, parent: &str, branch: &CsBranc
 }
 
 fn model(plan: &SdkPlan, key: &Key, decl: &CsDecl) -> Value {
-    let namespace = &plan.package().namespace;
+    let namespace = &plan.config().namespace;
     let models = plan.models();
     let name = qualified(namespace, &models.names()[key]);
     let mut result = match decl {
@@ -195,13 +195,13 @@ fn model(plan: &SdkPlan, key: &Key, decl: &CsDecl) -> Value {
 }
 
 fn input_property(plan: &SdkPlan, name: &str, schema: &SchemaId, required: bool) -> Value {
-    let value = type_at(plan.models(), schema, &plan.package().namespace);
+    let value = type_at(plan.models(), schema, &plan.config().namespace);
     property(
         name,
         if required {
             value
         } else {
-            optional(&plan.package().namespace, value)
+            optional(&plan.config().namespace, value)
         },
         Some("set"),
         required,
@@ -213,7 +213,7 @@ fn parameter(name: &str, ty: Value, required: bool, default: Value) -> Value {
 }
 fn media_type(plan: &SdkPlan, media: &csharp_sdk::protocol::PlannedMedia) -> Value {
     use crate::http_protocol::Representation;
-    let ns = &plan.package().namespace;
+    let ns = &plan.config().namespace;
     match media.wire.representation(){
         Representation::Json{codec}=>codec.as_ref().map_or(json!({"kind":"primitive","name":"System.Text.Json.JsonElement","jsonNullAllowed":true}),|c|type_at(plan.models(),c.schema().id(),ns)),
         Representation::Text{codec,..}=>codec.as_ref().map_or(json!({"kind":"primitive","name":"string"}),|c|type_at(plan.models(),c.schema().id(),ns)),
@@ -224,7 +224,7 @@ fn media_type(plan: &SdkPlan, media: &csharp_sdk::protocol::PlannedMedia) -> Val
 }
 fn response_type(plan: &SdkPlan, response: &csharp_sdk::PlannedResponse) -> Value {
     if response.always_empty || response.union {
-        named(qualified(&plan.package().namespace, &response.native_type))
+        named(qualified(&plan.config().namespace, &response.native_type))
     } else if response.media.is_empty() {
         json!({"kind":"array","type":{"kind":"primitive","name":"byte"}})
     } else {
@@ -234,7 +234,7 @@ fn response_type(plan: &SdkPlan, response: &csharp_sdk::PlannedResponse) -> Valu
 fn protocol_models(plan: &SdkPlan, snapshot: &mut NativeSnapshot) {
     use crate::http_protocol::{PartMultiplicity, PartRepresentation};
     use csharp_sdk::protocol::{PlannedHeader, PlannedMedia, PlannedPart};
-    let ns = &plan.package().namespace;
+    let ns = &plan.config().namespace;
     let mut seen = BTreeSet::new();
     let mut add = |name: &str, source: &SourceId, role: &str, value: Value| {
         if seen.insert((name.to_owned(), role.to_owned())) {
@@ -500,7 +500,7 @@ fn protocol_models(plan: &SdkPlan, snapshot: &mut NativeSnapshot) {
     }
 }
 fn operation(plan: &SdkPlan, operation: &PlannedOperation) -> NativeOperation {
-    let namespace = &plan.package().namespace;
+    let namespace = &plan.config().namespace;
     let input = qualified(namespace, &operation.input_type);
     let result = qualified(namespace, &operation.result_type);
     let error = qualified(namespace, &operation.error_type);
@@ -615,7 +615,7 @@ fn operation(plan: &SdkPlan, operation: &PlannedOperation) -> NativeOperation {
     }
 }
 fn credential(plan: &SdkPlan, scheme: &str) -> Value {
-    let namespace = &plan.package().namespace;
+    let namespace = &plan.config().namespace;
     let binding = plan
         .credential_bindings()
         .iter()
@@ -668,7 +668,7 @@ pub(super) fn capture(
     snapshot.credential_env = plan
         .credential_env()
         .map(crate::credential_env::CredentialEnvPlan::semantic_descriptor);
-    let namespace = &plan.package().namespace;
+    let namespace = &plan.config().namespace;
     let models = plan.models();
     for operation in plan.operations() {
         snapshot.operations.push(self::operation(&plan, operation));

@@ -1,4 +1,4 @@
-#![cfg(all(feature = "kotlin-sdk", feature = "http-protocol"))]
+#![cfg(feature = "kotlin-sdk")]
 use serde_json::{Value, json};
 use std::{path::Path, sync::Arc};
 use suspect_codegen::{

@@ -57,8 +57,11 @@ definitions:
         "upgrade failed: {}",
         String::from_utf8_lossy(&status.stderr)
     );
+    // A `.yaml` destination gets YAML, with the conventional key order; the
+    // command already validated the written document (exit status above).
     let text = std::fs::read_to_string(&output).unwrap();
-    assert!(text.contains("\"openapi\": \"3.1.0\""));
+    assert!(text.starts_with("openapi:"), "{text}");
+    assert!(text.contains("3.1.0"));
     assert!(text.contains("#/components/schemas/Pet"));
     assert!(text.contains("servers"));
 }

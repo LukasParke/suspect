@@ -14,9 +14,9 @@ backends — **TypeScript/JavaScript, Python, Go, Rust, Swift, Java, Kotlin, C#,
 Ruby, PHP, Dart and C++** — producing native models, checked codecs, HTTP
 operations, packages, golden-defaults behavior (attribution, pagination,
 OAuth, env-credential defaults) and documentation.
-The [hackathon demo](docs/SDK-DEMO.md) generates SDKs from the real
-OpenRouter specification. See [SDK capabilities](docs/SDK-CAPABILITIES.md) and
-[verified demo scope](docs/SDK-PROGRESS.md).
+See [SDK capabilities](docs/SDK-CAPABILITIES.md) for the supported scope, and
+[docs/adr/](docs/adr/) for the architecture decisions behind the toolkit and
+the generator.
 
 ## LSP — full-featured editor experience
 
@@ -33,12 +33,6 @@ and `source.fixAll.suspect`, document formatting, semantic highlighting,
 `$ref`-target inlay hints, property type hints, document highlights,
 selection ranges, rename with workspace-wide `$ref` rewriting
 (`prepareRename` guarded), workspace symbols, folding ranges.
-
-## How we compare
-
-A detailed feature-by-feature comparison against **vacuum** (pb33f/daveshanley)
-and **Telescope** (sailpoint-oss) is in
-[docs/LSP_COMPARISON.md](docs/LSP_COMPARISON.md).
 
 ### In action (VS Code + the bundled extension)
 
@@ -174,8 +168,34 @@ and the runnable example in [`examples/load/`](examples/load/).
 - **Cycle taxonomy**: `$ref` loops are classified as legal schema recursion or
   illegal (unresolvable) loops with exact cycle paths — never stack overflow,
   never hangs.
-- **CI**: `.github/workflows/ci.yml` gates fmt, clippy (`-D warnings`), tests,
-  and a bench smoke run.
+- **CI**: `.github/workflows/ci.yml` gates fmt, clippy (`-D warnings`, also
+  for `suspect-lsp --no-default-features`), the MSRV (1.88) build, rustdoc,
+  `cargo deny`, workflow lint (actionlint), tests and a bench smoke run, and
+  publishes line coverage. `native-evidence.yml` runs the native SDK suites
+  nightly, one job per backend plus one for the cross-backend `shared` suites.
+  Set the `OPENROUTER_WEB_TOKEN` secret to include the OpenRouter-pinned
+  suites.
+
+## Testing
+
+`cargo test --workspace` runs everything that needs only Rust.
+
+Each SDK backend also has opt-in native suites (`#[ignore]`d) that build and
+run the generated package with the real language toolchain. They are grouped
+one test binary per backend (`crates/suspect-codegen/tests/groups/`):
+
+```console
+tools/native-setup.sh typescript            # per-suite packages under target/
+cargo test -p suspect-codegen --test typescript -- --ignored
+cargo test -p suspect-codegen --test go go_oauth:: -- --ignored   # one file
+```
+
+Toolchains are found by `suspect_codegen::toolchain` (environment overrides,
+then mise/uv installs, then `PATH`); a missing one skips the test with an
+install hint, or fails it when `SUSPECT_REQUIRE_NATIVE=1` (as in CI). Suites
+that exercise the real OpenRouter API description use a pinned revision of
+it: `toolchain::openrouter_spec()` prints how to materialize the file when it
+is absent.
 
 ## VS Code extension
 

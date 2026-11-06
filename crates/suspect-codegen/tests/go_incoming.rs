@@ -290,10 +290,7 @@ fn plan_carries_the_incoming_receipts_only_when_emission_happens() {
     assert_eq!(new_issue.payload_type, "NewIssuePayload");
     assert_eq!(new_issue.route_const, "NewIssueWebhookRoute");
     assert_eq!(new_issue.decode, "DecodeNewIssueWebhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("ConstructNewIssueResponse")
-    );
+    assert_eq!(new_issue.construct, "ConstructNewIssueResponse");
     assert_eq!(new_issue.required_headers, vec!["x-signature".to_owned()]);
     assert!(new_issue.required_body);
     assert_eq!(

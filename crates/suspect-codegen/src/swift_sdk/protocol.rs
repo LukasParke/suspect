@@ -247,93 +247,142 @@ impl PlannedCredential {
     }
 }
 
+/// One typed response or part header property.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
+    /// Shared wire decisions for the header.
     pub wire: HeaderPlan,
+    /// Swift property name, unique within its headers type.
     pub field_name: String,
+    /// Swift type of the header codec schema.
     pub type_name: String,
 }
 
+/// One form field or multipart part.
 #[derive(Debug, Clone)]
 pub struct PlannedPart {
+    /// Shared wire decisions for the part.
     pub wire: PartPlan,
+    /// Swift property name, unique within its aggregate.
     pub field_name: String,
     /// One part's native payload, without optional/repeated or metadata wrappers.
     pub value_type: String,
     /// One part input, including multipart filename/media/typed headers.
     pub item_type: String,
+    /// Property type: `item_type`, as an array for repeated array items.
     pub type_name: String,
+    /// Generated part headers type, when headers are declared.
     pub header_type: Option<String>,
+    /// Part header properties in declaration order.
     pub headers: Vec<PlannedHeader>,
 }
 
+/// Generated URL-encoded form or named multipart body type.
 #[derive(Debug, Clone)]
 pub struct PlannedParts {
+    /// Generated struct name.
     pub type_name: String,
+    /// Multipart rather than URL-encoded form.
     pub multipart: bool,
+    /// Object rules the runtime enforces over fields.
     pub rules: ObjectRules,
+    /// Declared fields in source order.
     pub fields: Vec<PlannedPart>,
+    /// Additional-property part; `None` when additional fields are forbidden.
     pub additional: Option<Box<PlannedPart>>,
 }
 
+/// Whole-query form encoder for a `content`-typed form query parameter.
 #[derive(Debug, Clone)]
 pub struct PlannedQueryForm {
+    /// Shared form encoding decisions.
     pub wire: FormPlan,
+    /// Generated encoder name.
     pub encoder_name: String,
 }
 
 /// Ordered, finite MIME positions. The aggregate is never a JSON codec input.
 #[derive(Debug, Clone)]
 pub struct PlannedPositionalParts {
+    /// Generated struct name.
     pub type_name: String,
+    /// Array schema the parts are drawn from.
     pub schema: SchemaUse,
+    /// Positional prefix parts (`part1`, `part2`, ...).
     pub prefix: Vec<PlannedPart>,
+    /// Part for the remaining items; `None` when extra items are forbidden.
     pub items: Option<Box<PlannedPart>>,
+    /// Source `minItems`, when declared.
     pub min_items: Option<Located<u64>>,
+    /// Source `maxItems`, when declared.
     pub max_items: Option<Located<u64>>,
+    /// Whether the media type is exactly `multipart/form-data`.
     pub form_data: bool,
 }
 
+/// One request or response media type and its native value.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
+    /// Shared wire decisions for the media.
     pub wire: MediaPlan,
+    /// Enum case name derived from the representation, unique within its body
+    /// or response.
     pub case_name: String,
+    /// Swift type of the media value.
     pub type_name: String,
+    /// Named form or multipart aggregate, when the representation is one.
     pub parts: Option<PlannedParts>,
+    /// Positional multipart aggregate, when the representation is one.
     pub positional: Option<PlannedPositionalParts>,
 }
 
+/// Operation request body as the input's `body` field.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
+    /// Shared wire decisions for the body.
     pub wire: BodyPlan,
     /// Type accepted by the input's body field (before OptionalField).
     pub type_name: String,
+    /// Planned media in protocol order.
     pub media: Vec<PlannedMedia>,
+    /// Whether `type_name` is a generated enum over media, used for several
+    /// media or any media range.
     pub is_enum: bool,
 }
 
+/// One declared response status as a result or API error case.
 #[derive(Debug, Clone)]
 pub struct PlannedResponse {
+    /// Shared wire decisions for the response.
     pub wire: ResponsePlan,
+    /// Enum case name (`status<key>` or `defaultResponse`).
     pub case_name: String,
     /// Body payload or discriminated media/no-content union.
     pub type_name: String,
     /// Complete response, `APIResponse<T>` or a wrapper with typed headers.
     pub response_type: String,
+    /// Generated response headers type, when headers are declared.
     pub header_type: Option<String>,
+    /// Response header properties in declaration order.
     pub headers: Vec<PlannedHeader>,
+    /// Planned media; empty when the body is always empty.
     pub media: Vec<PlannedMedia>,
+    /// Whether `type_name` is a generated enum over media and no-content.
     pub is_enum: bool,
+    /// Whether HTTP forbids a body: `HEAD`, 1xx, 204, 205 or 304.
     pub always_empty: bool,
+    /// Whether the body may be absent: `always_empty`, `2XX`, `3XX` or `default`.
     pub may_be_empty: bool,
 }
 impl PlannedResponse {
+    /// Whether this status can yield a success: 2xx, `2XX` or `default`.
     pub fn may_succeed(&self) -> bool {
         matches!(
             self.wire.status(),
             ResponseStatus::Exact(200..=299) | ResponseStatus::Range(2) | ResponseStatus::Default
         )
     }
+    /// Whether this status can yield an error: anything but 2xx or `2XX`.
     pub fn may_fail(&self) -> bool {
         !matches!(
             self.wire.status(),

@@ -1,8 +1,5 @@
 //! Canonical generation determinism and ownership-aware artifact writes.
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::{
     OutFile,
     backend::{Backend, TargetConfig},
@@ -209,11 +206,11 @@ fn symlink_targets_cannot_write_or_satisfy_drift_checks() {
 }
 
 #[test]
-#[ignore = "requires SUSPECT_OPENROUTER_SPEC pointing to the tracked public YAML"]
+#[ignore = "requires the pinned OpenRouter OpenAPI document"]
 fn openrouter_generation_is_byte_and_metadata_stable() {
-    let source = PathBuf::from(
-        std::env::var_os("SUSPECT_OPENROUTER_SPEC").expect("set SUSPECT_OPENROUTER_SPEC"),
-    );
+    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let directory = tempfile::tempdir().unwrap();
     let wanted = [
         "getCredits",

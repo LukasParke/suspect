@@ -83,7 +83,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
         "both languages must use the same values and source provenance"
     );
     let manifest: Value = serde_json::from_str(content(&ts, "typescript/examples.json")).unwrap();
-    assert_eq!(manifest["format"], "suspect-sdk-examples-v1");
+    assert_eq!(manifest["format"], "suspect-sdk-examples-v2");
     let count: usize = manifest["operations"]
         .as_array()
         .unwrap()
@@ -97,7 +97,9 @@ fn native(source: &Path, operation_ids: &[&str]) {
     suspect_codegen::write_files(&ts, &root).unwrap();
     suspect_codegen::write_files(&rs, &root.join("rs")).unwrap();
 
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let output = checked(
         Command::new(&node).args(["--print", "process.execPath"]),
         &root,
@@ -175,7 +177,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
     let generated = root.join("rs/rust");
     checked(
         cargo(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args([
                     "package",
                     "--offline",
@@ -209,7 +211,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
     );
     let executed = checked(
         cargo(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args([
                     "run",
                     "--offline",
@@ -245,9 +247,9 @@ fn shared_contract_examples_execute_from_both_installed_packages() {
 #[test]
 #[ignore = "requires native Cargo/Node/npm caches and the tracked OpenRouter corpus"]
 fn tracked_operation_examples_execute_from_both_installed_packages() {
-    let source =
-        PathBuf::from(std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"))
-            .join("projects/docs/openapi/openapi.yaml");
+    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     native(
         &source,
         &[

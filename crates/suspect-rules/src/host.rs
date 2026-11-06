@@ -189,20 +189,10 @@ impl RuleHost {
                     let Some(selector) = self.selectors.get(&rule.id) else {
                         continue;
                     };
-                    let targets_ok =
-                        rule.targets.is_empty() || rule.targets.contains(&TargetKind::Spec);
-                    if !targets_ok {
-                        continue;
-                    }
                     let pointers = selector.select_pointers(doc);
                     selections.insert(rule.id.clone(), pointers);
                 }
                 crate::protocol::Shape::Walk => {
-                    let targets_ok =
-                        rule.targets.is_empty() || rule.targets.contains(&TargetKind::Spec);
-                    if !targets_ok {
-                        continue;
-                    }
                     walks.insert(
                         rule.id.clone(),
                         crate::protocol::WalkEntry {

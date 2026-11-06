@@ -240,7 +240,8 @@ impl<'a> ArtifactBatch<'a> {
         let mut next_files = Vec::new();
         let current_paths: BTreeSet<_> = self.files.iter().map(|file| file.path.clone()).collect();
         for file in &self.files {
-            let path = file.path.to_str().expect("validated UTF-8 path");
+            let portable = crate::portable_path(&file.path);
+            let path = portable.as_str();
             let previous = registered.get(path);
             let conflict=match previous {
                 Some((previous_owner,_)) if *previous_owner != owner => Some(format!("owned by `{previous_owner}`; owner `{owner}` cannot overwrite or adopt it")),
@@ -540,7 +541,7 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, ArtifactError> {
         }
         for record in &owner.files {
             let path = normalize_target(Path::new(&record.path))?;
-            if path.to_str() != Some(&record.path) {
+            if crate::portable_path(&path) != record.path {
                 return Err(ArtifactError(
                     "ownership manifest paths must already be normalized".into(),
                 ));

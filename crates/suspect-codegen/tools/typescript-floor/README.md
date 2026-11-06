@@ -29,7 +29,7 @@ Run the gate (Node 22 pinned, Node 24 explicit additional path):
 export OPENROUTER_WEB_ROOT=/Users/luke/github/openrouter-web
 export SUSPECT_DOCS_NODE=/Users/luke/.local/share/mise/installs/node/22.23.1/bin/node
 export SUSPECT_NODE24_BIN=/path/to/node-24
-cargo test --locked -p suspect-codegen --test typescript_m2_toolchains -- --include-ignored
+cargo test --locked -p suspect-codegen --test typescript typescript_m2_toolchains:: -- --include-ignored
 ```
 
 The independent `tests/m2_browser.rs` gate runs the generated ESM in isolated

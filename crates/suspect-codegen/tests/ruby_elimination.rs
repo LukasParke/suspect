@@ -293,10 +293,14 @@ fn generate(document: Value) -> Vec<OutFile> {
     .unwrap()
 }
 
+/// The Ruby prefix (`SUSPECT_RUBY_HOME`, else the resolved toolchain's).
+/// The test entry gates on [`suspect_codegen::toolchain::require_home`].
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new("/Users/luke").join(".local/share/mise/installs/ruby/3.3.12"))
+    static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    HOME.get_or_init(|| {
+        suspect_codegen::toolchain::resolve_home("ruby").expect("ruby is gated by the test entry")
+    })
+    .clone()
 }
 
 fn ruby_command() -> Command {
@@ -393,6 +397,9 @@ fn write_report(report: &Value) {
 #[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn ruby_consumers_eliminate_unrelated_operations() {
+    if suspect_codegen::toolchain::require_home("ruby").is_none() {
+        return;
+    }
     let _gate = NATIVE_GATE.lock().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-ruby-elimination");
     std::fs::create_dir_all(&root).unwrap();
@@ -481,7 +488,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
     assert!(
         extended_markers["listGizmos"].as_bool().unwrap()
             && extended_markers["zeta-quantum"].as_bool().unwrap(),
-        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; update docs/SDK-ELIMINATION-AUDIT.md"
+        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; re-measure and update the pinned expectation in this test"
     );
 
     // --- Codec-only consumer ------------------------------------------------
@@ -543,7 +550,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
         codec_extended["unrelated_markers_loaded"]["zeta-quantum"]
             .as_bool()
             .unwrap(),
-        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; update docs/SDK-ELIMINATION-AUDIT.md"
+        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; re-measure and update the pinned expectation in this test"
     );
     // The codec consumer works against the models/codecs table pair, which
     // grows by the unrelated schema's shape+codec data (measured, recorded).

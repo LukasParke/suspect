@@ -9,7 +9,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-use suspect_ir::contract::{Contract, SchemaDialect, SourceId};
+use suspect_ir::contract::{Contract, SourceId};
 use suspect_schema::Config;
 
 pub(super) fn capabilities() -> w::Capabilities {
@@ -56,6 +56,7 @@ pub(super) fn capabilities() -> w::Capabilities {
             PartEncodings,
             ServerSentEvents,
             JsonLines,
+            OpenApi30,
             OpenApi32,
             SchemaResources,
             DynamicSchemaReferences,
@@ -102,7 +103,11 @@ pub(super) fn plan(
     }
     let mut capabilities = profiles
         .iter()
-        .fold(capabilities(), |caps, profile| caps.with_profile(*profile));
+        .fold(
+            // OpenApi30 is listed only for 3.0 sources (byte-stable 3.1/3.2).
+            crate::schema_view::oas30_capability_for(&contract, capabilities()),
+            |caps, profile| caps.with_profile(*profile),
+        );
     if resources {
         capabilities = capabilities
             .with(w::Capability::SchemaResources)
@@ -158,16 +163,6 @@ pub(super) fn plan(
         codec_roots.sort();
         codec_roots.dedup();
         roots = contract.effective_schema_closure(&codec_roots);
-    }
-    if let Some(id) = roots.iter().find(|id| {
-        contract
-            .schema(id)
-            .is_some_and(|s| matches!(s.dialect(), SchemaDialect::OpenApi30))
-    }) {
-        return Err(error(
-            id.clone(),
-            "OpenAPI 3.0 native schema views are not enabled",
-        ));
     }
     let needs_resources = resources
         || roots.iter().any(|id| {

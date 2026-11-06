@@ -1,7 +1,7 @@
 //! Canonical Contract → Rust models/docs → native package consumers.
 
 use serde_json::{Value, json};
-use std::{path::Path, process::Command, sync::Arc};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::rust_models::{ModelPlan, plan_models};
 use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::WorkspaceBuilder;
@@ -60,7 +60,7 @@ fn native(plan: &ModelPlan, consumer: &str) {
         ("test", false, true),
         ("doc", false, false),
     ] {
-        let mut command = Command::new("cargo");
+        let mut command = suspect_codegen::toolchain::nested_cargo();
         let manifest = if use_consumer {
             consumer_package.join("Cargo.toml")
         } else {
@@ -302,12 +302,9 @@ fn unsupported_shapes_are_errors_and_never_dynamic_fallbacks() {
 #[test]
 #[ignore = "requires native Cargo and the pinned tracked OpenRouter checkout"]
 fn tracked_openrouter_nullable_caller_and_image_sources_preserve_every_payload() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let contract = contract(&path);
     let selected = roots(
         &contract,

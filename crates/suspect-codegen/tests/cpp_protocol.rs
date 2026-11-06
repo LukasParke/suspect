@@ -1,5 +1,5 @@
 //! Fresh C++20 protocol packages and independent native wire/resource witnesses.
-#![cfg(all(feature = "cpp-sdk", feature = "http-protocol"))]
+#![cfg(feature = "cpp-sdk")]
 use serde_json::{Value, json};
 use std::fmt::Write as _;
 use std::{
@@ -46,10 +46,24 @@ fn plan(document: &Value, root: &Path, config: SdkConfig) -> SdkPlan {
         .collect::<Vec<_>>();
     plan_sdk(contract, &selected, config).unwrap_or_else(|errors| panic!("{errors:#?}"))
 }
-fn tool(variable: &str, default: &str) -> PathBuf {
-    std::env::var_os(variable)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default.into())
+/// `cmake`, the C++ compiler (`clang++`) or `doxygen`, resolved by
+/// `suspect_codegen::toolchain` (which honours the `SUSPECT_CPP_*`
+/// overrides). Each native test gates on [`cpp_tools`] first.
+fn tool(_variable: &str, fallback: &str) -> PathBuf {
+    let id = if fallback == "clang++" {
+        "cxx"
+    } else {
+        fallback
+    };
+    suspect_codegen::toolchain::resolve_path(id)
+        .unwrap_or_else(|| panic!("{id} is gated by cpp_tools()"))
+}
+/// Whether CMake, a C++20 compiler and Doxygen are available: skips (after
+/// the toolchain's message), or panics under `SUSPECT_REQUIRE_NATIVE`.
+fn cpp_tools() -> bool {
+    ["cmake", "cxx", "doxygen"]
+        .iter()
+        .all(|id| suspect_codegen::toolchain::require(id).is_some())
 }
 fn cmake() -> PathBuf {
     tool("SUSPECT_CPP_CMAKE", "cmake")
@@ -204,6 +218,9 @@ fn shared_protocol_roots_preserve_real_parts_headers_and_items() {
 #[test]
 #[ignore = "C++20/libcurl/CMake/Doxygen: fresh expanded-runtime regression package"]
 fn native_fresh_m2_codecs_and_installed_package() {
+    if !cpp_tools() {
+        return;
+    }
     let input =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/m2/canonical.openapi.yaml");
     let contract = load(&input);
@@ -265,10 +282,9 @@ fn undefined_stream_and_positional_profiles_are_source_located_refusals() {
 #[test]
 #[ignore = "requires the actual read-only OpenRouter checkout"]
 fn actual_openrouter_expanded_selection_has_real_byte_and_form_roots() {
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let file = checkout.join("projects/docs/openapi/openapi.yaml");
+    let Some(file) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     assert!(file.is_file(), "actual OpenRouter corpus required");
     let contract = load(&file);
     let names = [
@@ -313,11 +329,13 @@ fn actual_openrouter_expanded_selection_has_real_byte_and_form_roots() {
 #[test]
 #[ignore = "actual OpenRouter input and installed native C++ bytes/no-content HTTP operations"]
 fn native_additional_openrouter_operations() {
+    if !cpp_tools() {
+        return;
+    }
     use sha2::{Digest, Sha256};
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let path = checkout.join("projects/docs/openapi/openapi.yaml");
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let before = Sha256::digest(std::fs::read(&path).unwrap());
     let contract = load(&path);
     let names = [
@@ -562,6 +580,9 @@ fn native_aliases(plan: &SdkPlan) -> String {
 #[test]
 #[ignore = "installed native C++20 rich protocol, normative styles, real libcurl wire and live streams"]
 fn native_rich_protocol_installed_wire_and_streams() {
+    if !cpp_tools() {
+        return;
+    }
     let (document, cases) = rich_document();
     let root = root("rich-");
     let plan = plan(&document, &root, Default::default());
@@ -614,6 +635,9 @@ fn negative_consumers(root: &Path, aliases: &str) {
 #[test]
 #[ignore = "installed C++ dialect witnesses: OAS 3.1 form style and 3.0 nullable/binary semantics"]
 fn native_dialect_form_and_nullable_bytes() {
+    if !cpp_tools() {
+        return;
+    }
     for version in ["3.1.2", "3.0.4"] {
         let schema = if version.starts_with("3.0") {
             json!({"type":"object","required":["note"],"properties":{"note":{"type":"string","nullable":true}}})
@@ -685,6 +709,9 @@ int main(){{Client client(std::make_shared<Fixture>());{setup}auto result=client
 #[test]
 #[ignore = "installed C++ resource witnesses: request and response items share codec/evaluation budgets"]
 fn native_stream_budgets_are_shared_across_request_and_every_item() {
+    if !cpp_tools() {
+        return;
+    }
     let response = json!({"200":{"content":{"application/x-ndjson":{"itemSchema":{"$ref":"#/components/schemas/Count"}}}}});
     let document = json!({"openapi":"3.2.0","info":{"title":"One call budget","version":"1"},"servers":[{"url":"https://example.test"}],"components":{"schemas":{"Count":{"type":"integer","const":1}}},"paths":{
         "/collect":{"get":{"operationId":"collect","responses":response}},
@@ -717,6 +744,9 @@ fn native_stream_budgets_are_shared_across_request_and_every_item() {
 #[test]
 #[ignore = "fresh advanced C++ HTTPS streams, cookie style, request JSON-lines and typed aggregate extras"]
 fn native_advanced_protocol_https_and_remaining_representations() {
+    if !cpp_tools() {
+        return;
+    }
     use std::io::BufRead;
     let mut document = json!({"openapi":"3.2.0","info":{"title":"Advanced native protocol","version":"1"},"servers":[{"url":"https://example.test"}],"components":{"schemas":{
         "Colors":{"type":"object","required":["G","R"],"properties":{"G":{"type":"string"},"R":{"type":"string"}},"additionalProperties":false},
@@ -884,6 +914,9 @@ fn native_advanced_protocol_https_and_remaining_representations() {
 #[test]
 #[ignore = "fresh installed core-only C++ byte/Unit package with zero JSON codec roots and native constructor example"]
 fn native_byte_only_core_package_has_no_json_standins() {
+    if !cpp_tools() {
+        return;
+    }
     let document = json!({"openapi":"3.2.0","info":{"title":"Real bytes without a JSON model","version":"1"},"servers":[{"url":"https://example.test"}],"paths":{
         "/bytes":{"post":{"operationId":"roundtripBytes","requestBody":{"required":true,"content":{"application/octet-stream":{}}},"responses":{"200":{"content":{"application/octet-stream":{}}}}}},
         "/empty":{"get":{"operationId":"empty","responses":{"204":{}}}}
@@ -920,6 +953,9 @@ int main(){Client client(std::make_shared<Echo>());auto value=client.roundtrip_b
 #[test]
 #[ignore = "native OAS 3.2 deepObject part ignores explode while preserving typed multipart values"]
 fn native_oas32_deep_object_part_ignores_explode() {
+    if !cpp_tools() {
+        return;
+    }
     let mut document: Value =
         serde_json::from_str(include_str!("../src/cpp_sdk/tests/protocol.openapi.json")).unwrap();
     let paths = document["paths"].as_object_mut().unwrap();

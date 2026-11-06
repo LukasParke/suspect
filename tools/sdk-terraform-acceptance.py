@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+import fcntl
 import hashlib
 import http.server
 import json
@@ -21,6 +22,7 @@ import shutil
 import signal
 import subprocess
 import tarfile
+import tempfile
 import threading
 import time
 import traceback
@@ -28,8 +30,114 @@ import urllib.parse
 import zipfile
 
 
-APPROVED = Path("/private/var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/opencode")
-TERRAFORM = Path("/Users/luke/.local/share/mise/installs/terraform/latest/terraform")
+APPROVED = Path(tempfile.gettempdir()) / "opencode"
+
+
+def mise_data_dir() -> Path:
+    """The mise data directory: $MISE_DATA_DIR, $XDG_DATA_HOME/mise, or ~/.local/share/mise."""
+    if os.environ.get("MISE_DATA_DIR"):
+        return Path(os.environ["MISE_DATA_DIR"])
+    if os.environ.get("XDG_DATA_HOME"):
+        return Path(os.environ["XDG_DATA_HOME"]) / "mise"
+    return Path.home() / ".local/share/mise"
+
+
+def resolve_terraform() -> Path:
+    """SUSPECT_TERRAFORM_BIN, then `terraform` on PATH, then the mise install."""
+    override = os.environ.get("SUSPECT_TERRAFORM_BIN")
+    if override:
+        return Path(override)
+    on_path = shutil.which("terraform")
+    if on_path:
+        return Path(on_path)
+    managed = mise_data_dir() / "installs/terraform/latest/terraform"
+    if managed.is_file():
+        return managed
+    raise SystemExit(
+        "terraform not found: set SUSPECT_TERRAFORM_BIN, put terraform on PATH, or install it with mise"
+    )
+
+
+TERRAFORM = resolve_terraform()
+
+
+GO_CACHES = Path(__file__).resolve().parent.parent / "target/sdk-terraform-tools"
+
+
+def go_binary() -> str:
+    """SUSPECT_GO_BIN (the executable the Rust gate resolved), else `go` on PATH."""
+    return os.environ.get("SUSPECT_GO_BIN") or "go"
+
+
+def go_tiers(floor: str) -> dict[str, dict[str, str]]:
+    """The two Go toolchain tiers a focused gate runs under: the provider's
+    declared floor toolchain (downloaded through the module proxy by
+    `GOTOOLCHAIN`), and the locally installed Go."""
+    return {floor: {"GOTOOLCHAIN": floor}, "local": {"GOTOOLCHAIN": "local"}}
+
+
+def claim_go_tier(run, label, tier, floor, version):
+    """The floor tier must be exactly the pinned toolchain; the local tier at least as new."""
+    if tier == floor:
+        run.claim(label, version == floor, version)
+    else:
+        def numbers(text):
+            return tuple(int(part) for part in text.removeprefix("go").split(".") if part.isdigit())
+        run.claim(label, numbers(version) >= numbers(floor), {"local": version, "floor": floor})
+
+
+_CACHE_LOCK = None
+
+
+def lock_go_caches() -> None:
+    """Holds an exclusive lock on the shared Go caches until this runner
+    exits. The gates run concurrently (one grouped test binary) and each
+    emits different bytes for the same private module@version, so one
+    runner purging or extracting the private host must never interleave
+    with another runner's build."""
+    global _CACHE_LOCK
+    if _CACHE_LOCK is None:
+        GO_CACHES.mkdir(parents=True, exist_ok=True)
+        _CACHE_LOCK = open(GO_CACHES / ".lock", "w")
+        fcntl.flock(_CACHE_LOCK, fcntl.LOCK_EX)
+
+
+def go_platform(env: dict[str, str]) -> str:
+    """The host Go platform (`darwin_arm64`, `linux_amd64`, ...) of the local toolchain."""
+    out = subprocess.run([go_binary(), "env", "GOOS", "GOARCH"], env={**env, "GOTOOLCHAIN": "local"}, capture_output=True, check=True).stdout
+    return "_".join(out.decode().split())
+
+
+def focused_go_env(proxy: Path, private_module: str) -> dict[str, str]:
+    """Go environment for native gates: the freshly emitted SDK from the
+    local file proxy, public dependencies from proxy.golang.org (checksum
+    verified), and persistent module/build caches under
+    target/sdk-terraform-tools. Takes the cache lock (see lock_go_caches),
+    then purges the private fixture host from the shared module cache so a
+    stale SDK zip from an earlier generator (or another gate's variant) can
+    never satisfy the lookup. Each call re-purges, so call it once per
+    distinct emitted SDK."""
+    lock_go_caches()
+    host = private_module.split("/")[0]
+    modcache, gocache = GO_CACHES / "gomodcache", GO_CACHES / "gocache"
+
+    for stale in (modcache / host, modcache / "cache/download" / host):
+        if stale.exists():
+            for directory, _, _ in os.walk(stale):
+                os.chmod(directory, 0o700)
+            shutil.rmtree(stale)
+    modcache.mkdir(parents=True, exist_ok=True)
+    gocache.mkdir(parents=True, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("GO", "TF_"))}
+    env.update(
+        GOWORK="off",
+        GOFLAGS="-modcacherw",
+        GOPROXY=f"file://{proxy},https://proxy.golang.org",
+        GONOSUMDB=host,
+        GOMODCACHE=str(modcache),
+        GOCACHE=str(gocache),
+    )
+    return env
 
 
 def sha(path: Path) -> str:
@@ -260,7 +368,9 @@ def native_packages(run, root, evidence, fixtures, config, env):
     emitted_mod = (package / "go.mod").read_bytes()
     emitted_sum = (package / "go.sum").read_bytes() if (package / "go.sum").exists() else None
     shutil.copy2(fixtures / "provider_test.go", package / "provider/terraform_native_test.go")
-    run.run("dependencies-tidy", ["go", "mod", "tidy"], package, {**env, "GOTOOLCHAIN": config["go_toolchain"]}, timeout=300)
+    go = go_binary()
+    host = go_platform(env)
+    run.run("dependencies-tidy", [go, "mod", "tidy"], package, {**env, "GOTOOLCHAIN": config["go_toolchain"]}, timeout=300)
     shutil.copy2(package / "go.mod", evidence / "resolved.go.mod")
     shutil.copy2(package / "go.sum", evidence / "resolved.go.sum")
     # A dependency bootstrap is retained as a failed attempt until the generator
@@ -268,30 +378,31 @@ def native_packages(run, root, evidence, fixtures, config, env):
     run.claim("emitted-module-is-completely-pinned", emitted_mod == (package / "go.mod").read_bytes(), "go mod tidy must not change the emitted go.mod")
     run.claim("emitted-module-checksums-are-complete", emitted_sum == (package / "go.sum").read_bytes(), "go mod tidy must not change the emitted go.sum")
     binaries = {}
-    for tier in ("go1.23.12", "go1.27.1"):
-        selected = {**env, "GOTOOLCHAIN": tier}
-        run.run(f"{tier}-version", ["go", "version"], package, selected)
-        tool_env = run.run(f"{tier}-tool-env", ["go", "env", "-json", "GOVERSION", "GOROOT", "GOOS", "GOARCH", "GOTOOLCHAIN", "GOMODCACHE", "GOCACHE"], package, selected)
+    floor = config["go_toolchain"]
+    for tier, selection in go_tiers(floor).items():
+        selected = {**env, **selection}
+        run.run(f"{tier}-version", [go, "version"], package, selected)
+        tool_env = run.run(f"{tier}-tool-env", [go, "env", "-json", "GOVERSION", "GOROOT", "GOOS", "GOARCH", "GOTOOLCHAIN", "GOMODCACHE", "GOCACHE"], package, selected)
         info = json.loads(tool_env)
-        run.claim(f"{tier}-exact-toolchain", info["GOVERSION"] == tier, info)
-        run.claim(f"{tier}-native-platform", info["GOOS"] == "darwin" and info["GOARCH"] == "arm64")
+        claim_go_tier(run, f"{tier}-exact-toolchain", tier, floor, info["GOVERSION"])
+        run.claim(f"{tier}-native-platform", f"{info['GOOS']}_{info['GOARCH']}" == host, {"tier": f"{info['GOOS']}_{info['GOARCH']}", "host": host})
         native = evidence / tier
         native.mkdir()
-        save_json(native / "tool-digests.json", {"go": sha(Path(info["GOROOT"]) / "bin/go"), "compile": sha(Path(info["GOROOT"]) / "pkg/tool/darwin_arm64/compile")})
-        run.run(f"{tier}-provider-tests", ["go", "test", "-mod=readonly", "-race", "-count=1", "-v", "./..."], package, selected, timeout=300)
-        run.run(f"{tier}-provider-vet", ["go", "vet", "-mod=readonly", "./..."], package, selected)
-        doc = run.run(f"{tier}-native-docs", ["go", "doc", "-all", "./provider"], package, selected)
+        save_json(native / "tool-digests.json", {"go": sha(Path(info["GOROOT"]) / "bin/go"), "compile": sha(Path(info["GOROOT"]) / f"pkg/tool/{host}/compile")})
+        run.run(f"{tier}-provider-tests", [go, "test", "-mod=readonly", "-race", "-count=1", "-v", "./..."], package, selected, timeout=300)
+        run.run(f"{tier}-provider-vet", [go, "vet", "-mod=readonly", "./..."], package, selected)
+        doc = run.run(f"{tier}-native-docs", [go, "doc", "-all", "./provider"], package, selected)
         (native / "provider.godoc.txt").write_bytes(doc)
         for symbol in ["func New(", "func NewWithTransport(", "func NewResource0(", "func NewDataSource0(", "ImportState(", "Create(", "Update(", "Delete("]:
             run.claim(f"{tier}-native-doc-symbol-{symbol}", symbol.encode() in doc)
-        modules = list(json_stream(run.run(f"{tier}-module-linkage", ["go", "list", "-m", "-json", "all"], package, selected)))
+        modules = list(json_stream(run.run(f"{tier}-module-linkage", [go, "list", "-m", "-json", "all"], package, selected)))
         save_json(native / "modules.json", modules)
         sdk = next(item for item in modules if item["Path"] == config["sdk"]["module_path"])
         expected = json.loads((evidence / "sdk-proxy.json").read_text())
         run.claim(f"{tier}-pinned-sdk-linkage", sdk["Version"] == expected["version"] and "Replace" not in sdk and sdk["Sum"] == expected["sum"] and sdk["GoModSum"] == expected["go_mod_sum"], sdk)
         binary = native / f"terraform-provider-{config['provider_name']}_v{config['version']}"
-        run.run(f"{tier}-provider-build", ["go", "build", "-mod=readonly", "-trimpath", "-o", binary, "."], package, selected, timeout=300)
-        build_info = run.run(f"{tier}-binary-linkage", ["go", "version", "-m", binary], package, selected)
+        run.run(f"{tier}-provider-build", [go, "build", "-mod=readonly", "-trimpath", "-o", binary, "."], package, selected, timeout=300)
+        build_info = run.run(f"{tier}-binary-linkage", [go, "version", "-m", binary], package, selected)
         run.claim(f"{tier}-binary-sdk-linkage", f"{expected['module']}\t{expected['version']}\t{expected['sum']}".encode() in build_info)
         save_json(native / "binary.json", {"path": str(binary), "sha256": sha(binary), "size": binary.stat().st_size})
         binaries[tier] = binary
@@ -301,8 +412,8 @@ def native_packages(run, root, evidence, fixtures, config, env):
         negative.mkdir()
         (negative / "go.mod").write_text(f"module example.com/negative\n\ngo {config['go_version']}\nrequire {config['module_path']} v{config['version']}\nreplace {config['module_path']} => {package}\n")
         shutil.copy2(fixtures / "negative.go", negative / "negative.go")
-        run.run(f"{tier}-negative-dependencies", ["go", "mod", "tidy"], negative, selected)
-        output = run.run(f"{tier}-negative-native-consumer", ["go", "test", "./..."], negative, selected, expected=(1,))
+        run.run(f"{tier}-negative-dependencies", [go, "mod", "tidy"], negative, selected)
+        output = run.run(f"{tier}-negative-native-consumer", [go, "test", "./..."], negative, selected, expected=(1,))
         run.claim(f"{tier}-negative-fails-compilation", b"build failed" in output)
     return binaries
 
@@ -321,12 +432,12 @@ def schema_gate(run, schema, plan, tier):
                 run.claim(f"{tier}-{kind}-{name}-native-doc-description", actual["description"] == attr["description"])
 
 
-def lifecycle(run, root, evidence, config, binary, tier, base_env):
+def lifecycle(run, root, evidence, config, binary, tier, base_env, host):
     fixture = Fixture()
     attempt = evidence / tier
     consumer_root = root / f"terraform-{tier}"
     consumer_root.mkdir()
-    mirror = consumer_root / "mirror" / config["provider_address"] / config["version"] / "darwin_arm64"
+    mirror = consumer_root / "mirror" / config["provider_address"] / config["version"] / host
     mirror.mkdir(parents=True)
     installed = mirror / binary.name
     shutil.copy2(binary, installed)
@@ -572,18 +683,16 @@ def main():
         proxy, proxy_info = prepare_proxy(root, generated / "go", config)
         save_json(evidence / "sdk-proxy.json", proxy_info)
         shutil.copy2(root / "proxy" / config["sdk"]["module_path"] / "@v" / f"v{config['sdk']['version']}.zip", evidence / "generated-sdk.zip")
-        module_cache = APPROVED / "sdk-terraform-dependency-cache-20260910-01"
-        go_cache = APPROVED / "sdk-terraform-build-cache-20260910-01"
         # The SDK's private local proxy checksum is also emitted in go.sum;
-        # skip public sumdb discovery only for this unpublished fixture module.
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("TF_", "GOTOOLCHAIN", "GOPROXY", "GONOSUMDB", "GOPRIVATE", "GOWORK", "GOFLAGS"))}
-        env.update(GOWORK="off", GOMODCACHE=str(module_cache), GOCACHE=str(go_cache), GOPROXY=f"file://{proxy},https://proxy.golang.org", GONOSUMDB=config["sdk"]["module_path"], GOFLAGS="")
+        # skip public sumdb discovery only for this unpublished fixture host.
+        env = focused_go_env(proxy, config["sdk"]["module_path"])
+        host = go_platform(env)
         version = json.loads(run.run("terraform-version", [TERRAFORM, "version", "-json"], root, {**env, "CHECKPOINT_DISABLE": "1"}))
-        run.claim("exact-terraform-version-platform", version["terraform_version"] == config["terraform_version"] and version["platform"] == "darwin_arm64", version)
+        run.claim("exact-terraform-version-platform", version["terraform_version"] == config["terraform_version"] and version["platform"] == host, {"terraform": version, "host": host})
         save_json(evidence / "terraform-tool.json", {"path": str(TERRAFORM.resolve()), "sha256": sha(TERRAFORM), "version": version})
         binaries = native_packages(run, root, evidence, fixtures, config, env)
         for tier, binary in binaries.items():
-            lifecycle(run, root, evidence, config, binary, tier, env)
+            lifecycle(run, root, evidence, config, binary, tier, env, host)
         actual = tree_hashes(generated)
         run.claim("all-emitted-source-bytes-remain-exact", all(actual[name] == digest for name, digest in source_hashes.items()))
         report["passed"] = True

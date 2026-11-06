@@ -78,7 +78,7 @@ typed headers remain available and validated on bodyless responses.
 
 ### Credentials and servers
 
-An explicitly configured [credential-env v1 policy](SDK-TYPESCRIPT-CREDENTIAL-ENV.md)
+An explicitly configured [credential-env v1 policy](SDK-CREDENTIAL-ENV.md)
 adds creation-time defaults to `createClient()` / `createClient({})`. Only an
 omitted own auth property enables lookup. Unconfigured output retains its original
 bytes and constructor behavior; explicit auth is never supplemented from env.
@@ -89,8 +89,10 @@ bytes and constructor behavior; explicit auth is never supplemented from env.
   credentials require explicit `encoding: "utf-8" | "latin1"`.
 - OAuth2/OIDC uses a complete `{authorization: "Scheme credential"}` or a
   caller callback returning it. Callbacks receive source/flow/discovery metadata,
-  located scopes versus roles, and AbortSignal. There is no acquisition,
-  discovery, refresh, fallback retry, or inferred Bearer token type.
+  located scopes versus roles, and AbortSignal. Without an `sdk_defaults`
+  OAuth policy ([golden defaults](SDK-GOLDEN-DEFAULTS.md#5-oauth-lifecycle))
+  there is no acquisition, discovery, refresh, fallback retry, or inferred
+  Bearer token type.
 - `server: {index}` or `{name}` selects a declared server. `variables` validates
   defaults, names and enums. Relative local-file servers need an explicit HTTP
   `documentURL` or `serverURL`. Per-call server choices override client choices.
@@ -152,8 +154,8 @@ stream item, 128 KiB per retained transport chunk, and 100,000 stream items.
 Caller limits can only reduce them. Multipart also limits physical part count
 (10,000), part header count (100), and part header bytes (64 KiB).
 
-Native Fetch cannot send TRACE or browser Cookie headers. TRACE is witnessed
-with a capable explicit Fetch-shaped transport; browser Cookie is refused before
+Native Fetch cannot send TRACE or browser Cookie headers. TRACE requires a
+capable explicit Fetch-shaped transport; browser Cookie is refused before
 transport. CORS/Fetch limits response-header visibility. Required unavailable
 headers fail decoding. Repeated Set-Cookie cannot be folded into a scalar header.
 
@@ -189,7 +191,7 @@ is retained separately. Parameter native names remain explicit.
 protocol, native input types, codec bindings, `inputOptional`, provenance,
 credential/server choices and limits.
 
-Main's `examples::plan_protocol_examples_v2` and `plan_protocol_examples_v3` are
+`examples::plan_protocol_examples_v2` and `plan_protocol_examples_v3` are
 selected from the actual native codec profile. The v2 example roles use
 `role.is_response()` for direction. Native examples use typed literals and
 JsonNumber/bigint only where the model requires them; ordinary inputs do not
@@ -197,49 +199,46 @@ start with JSON codec plumbing. The package build compiles both validated values
 and `examples/first-request.ts`.
 
 Scoped native schema validation, faithful pattern extras/prefix items, checked
-codec capture and installed/browser evidence are recorded in
-[TypeScript validation v2](SDK-TYPESCRIPT-VALIDATION-V2.md). Codec graphs come
+codec capture and installed/browser checks belong to the versioned v2 program
+([ADR 0020](adr/0020-validation-programs-are-versioned-and-frozen.md)). Codec graphs come
 directly from checked programs and retain opaque literal data independently of
 source/prose correspondence.
 
-The [v3 native resource profile](SDK-TYPESCRIPT-VALIDATION-V3.md) adds checked
+The v3 native resource profile ([SDK-SCHEMA-RESOURCES.md](SDK-SCHEMA-RESOURCES.md)) adds checked
 canonical resource/dynamic execution, source-aware model/codec admission and
-context-aware conversion traces. ExpandedV1 now enumerates the verified
+context-aware conversion traces. ExpandedV1 enumerates the verified
 SchemaResources, DynamicSchemaReferences and DocumentRelativeServers capabilities.
 Ordinary closures retain their established v1/v2 programs.
 
-## Acceptance evidence
+## Tests
 
 Tests are at the public Contract → TypeScript HTTP/package → native consumer
 seam. Literal vectors come from the independent normative protocol fixture;
 they are not snapshots derived from emitter text.
 
-### Follow-up targeted acceptance
+- `tests/typescript_protocol.rs`: protocol planning plus `--ignored` installed
+  ESM packages on Node 22/24 with strict TypeScript 5.5/5.9 declarations and
+  executable validated examples — literal parameter vectors, whole-query bytes,
+  case-exact custom methods, credentials/servers, media/header/link dispatch,
+  default/range/bodyless discriminants, binary/form/named/positional multipart,
+  streaming/cancellation and explicit legacy byte profiles. The browser Fetch
+  test needs an isolated Chromium; set `SUSPECT_CHROMIUM` if it is not at the
+  macOS default, and `SUSPECT_NODE24_BIN` to add a second Node runtime.
+- `tests/typescript_protocol_compatibility.rs`: rich compatibility capture;
+  relocated/prose-only sources stay stable while native
+  part/header/stream/signature/credential/status/link literal mutations are
+  detected.
+- `tests/typescript_multipart_ignored_encoding.rs`: ignored multipart encoding
+  styles (below).
 
-- `sdk-typescript-workspace-response-green-02.log`: the original response dispatch
-  and header/provenance consumer passes strict TypeScript 5.5/5.9 declarations and
-  installed Node 22/24 execution. Its status-based body narrowing is preserved.
-- `sdk-typescript-workspace-discriminants-green-02.log`: focused default/2XX
-  201/204/205 discriminant regression, including required headers on bodyless
-  responses. Red compiler attempts remain retained alongside the passing logs.
+```sh
+cargo test --locked -p suspect-codegen --test typescript typescript_protocol::
+cargo test --locked -p suspect-codegen --test typescript typescript_protocol:: -- --ignored --nocapture
+cargo test --locked -p suspect-codegen --test typescript typescript_protocol_compatibility:: -- --ignored
+cargo test --locked -p suspect-codegen --test typescript typescript_multipart_ignored_encoding:: -- --ignored
+```
 
-- `sdk-typescript-protocol-compat-07.log`: final real-crate rich capture, relocated/prose-only
-  sources stable, and native part/header/stream/signature/credential/status/link
-  literal mutations detected.
-- `sdk-typescript-protocol-sdk-compatibility-01.log`: all **29** existing SDK
-  compatibility tests passed after the new capture was integrated.
-- `sdk-typescript-protocol-query-02.log` and
-  `sdk-typescript-protocol-custom-methods-01.log`: literal whole-query bytes and
-  case-exact custom methods, installed Node 22/24 with TypeScript 5.5/5.9.
-- `sdk-typescript-protocol-multipart-style-03.log`: independent literal MIME
-  requests and responses, 3.1/3.2 item behavior, UTF-8, exact integers, grouping,
-  delimiters, headers, collisions, size and framing controls; installed packages
-  on both runtimes/compilers.
-- `sdk-typescript-protocol-browser-expansion-01.log`: real browser Fetch for the
-  added whole-query, custom-method and physical multipart paths.
-
-The ignored-style content-plan gap is closed by the shared `PartContext` fix and
-the focused TypeScript installed witness. Outside `multipart/form-data`, ignored
+Outside `multipart/form-data`, ignored
 style/explode/allowReserved fields preserve JSON/text/binary content plans,
 content types, required headers and actual codec roots. The defensive
 `http-typescript-multipart-content-plan-required` invariant remains; correct
@@ -253,58 +252,6 @@ required headers, exact integers, five indexed codec roots, all eight located
 ignored-field warnings, a four-part response with an empty array/absent tail,
 11 pre-transport request controls and nine response-decoding controls.
 
-`target/sdk-typescript-ignored-encoding-native-01.log`: **1 focused test passed**,
-with separate TypeScript **5.5.4 / 5.9.3** tarballs installed and executed on Node
-**22.23.1 / 24.21.0**. Strict positive/negative consumers and generated example
-execution pass in each installed package. Raw wire bytes, per-runtime results,
-source/typed descriptors and package artifacts are retained under
-`target/sdk-typescript-ignored-encoding-20260910/native-01/ignored-multipart-x8cUsR/`.
-This follow-up needed no TypeScript production asset changes or completed matrix
-replay.
-
-The previously completed native matrix below was preserved. Follow-up testing is
-targeted to the new capabilities and their actual affected paths.
-
-**Final real-crate gate:** `sdk-typescript-protocol-final-native-01.log` passed
-30 tests with `--no-default-features --features http-protocol`: all 15 new
-protocol tests (including the real browser and extra OpenRouter operations),
-the nine baseline HTTP tests, directional HTTP, three TypeDoc/mutation tests,
-the bundle gate, and the original five-operation installed toolchain gate.
-Node 22/24 execution, TypeScript 5.5/5.9 declarations and compiled/native
-examples are included. `sdk-typescript-protocol-original-m2-full-01.log` also
-passed the original coupled Rust + TypeScript M2 vertical gate in the real crate.
-`sdk-typescript-protocol-headerless-parts-01.log` subsequently passed the added
-literal MIME witness for a positional text part with no part headers, including
-installed Node 22/24 execution and both declaration compilers.
-
-- `sdk-typescript-protocol-installed-01.log`: 10 protocol tests, installed ESM on
-  Node **22.23.1 / 24.21.0**, strict declarations on TypeScript **5.5.4 / 5.9.3**,
-  plus executable validated examples. Includes 30 literal parameter vectors,
-  credentials/servers, media/header/link dispatch, binary/form/named/positional
-  multipart, streaming/cancellation and explicit legacy byte profiles.
-- `sdk-typescript-protocol-browser-05.log`: real isolated Chromium Fetch,
-  credentials, exact numbers, typed headers, opaque bytes, multipart, SSE,
-  redirect protection, Cookie refusal and early-return network cancellation.
-- `sdk-typescript-protocol-original-m2-01.log`: unchanged original M2 TypeScript
-  and JavaScript consumer fixtures, installed and executed on Node 22/24 with
-  floor/current strict declarations.
-- `sdk-typescript-protocol-openrouter-m2-01.log`: original five real OpenRouter
-  operations through the existing installed-package/toolchain gate.
-- `sdk-typescript-protocol-openrouter-extra-01.log`: real `listProviders` and
-  `downloadContainerFileContent`; byte compatibility is explicitly opted in.
-- `sdk-typescript-protocol-baseline-02.log`: nine baseline source/runtime tests.
-- `sdk-typescript-protocol-directional-04.log`: directional HTTP validation and
-  native documentation.
-- `sdk-typescript-protocol-docs-01.log`: all three original TypeDoc tests,
-  including mutation gates and the five real OpenRouter operations.
-- `sdk-typescript-protocol-bundle-02.log`: installed bundle/runtime gate;
-  getCredits-only output sheds createKeys/updateKeys. Exact numeric metadata
-  constructors are marked pure so unused operation descriptors can be removed.
-
-Logs are under `target/`. Intermediate red attempts are retained. During sibling
-adapter migration, these native tests used the source-only harness at
-`target/sdk-typescript-protocol-probe`, importing the actual unchanged TypeScript,
-protocol, IR and codec modules. Aggregate checkpoints 05/06 were blocked by
-in-progress Java/Swift/C# modules and compatibility updates, outside this task's
-ownership. The final real-crate gates above do not claim that every optional
-language feature or the entire workspace suite passed.
+It runs with separate TypeScript **5.5 / 5.9** tarballs installed and executed
+on Node **22 / 24**; strict positive/negative consumers and generated example
+execution run in each installed package.

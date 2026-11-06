@@ -3,7 +3,7 @@
 //! builder per paginated operation, a javac compile gate over the whole
 //! package, and native behavior against a stubbed `HttpClient`. Static runtime
 //! files are never modified, and no-policy generation emits no new file at all.
-#![cfg(all(feature = "java-sdk", feature = "http-protocol"))]
+#![cfg(feature = "java-sdk")]
 
 use std::{
     fs,
@@ -266,19 +266,16 @@ fn policy_without_paginated_operations_emits_nothing_new() {
 }
 
 /// A JDK 21+ toolchain, mirroring the other Java acceptance tests.
-fn java_home() -> PathBuf {
+fn java_home() -> Option<PathBuf> {
     std::env::var_os("SUSPECT_JAVA_HOME")
-        .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
-        })
+        .or_else(|| suspect_codegen::toolchain::require_home("jdk"))
 }
 
 /// Compile the whole emitted package; the classes directory doubles as the
 /// behavioral probe's classpath, including the generated resources.
-fn compiled_package(root: &Path) -> PathBuf {
-    let home = java_home();
+fn compiled_package(root: &Path) -> Option<PathBuf> {
+    let home = java_home()?;
     assert!(
         home.join("bin/javac").is_file(),
         "required JDK: {}",
@@ -328,7 +325,7 @@ fn compiled_package(root: &Path) -> PathBuf {
         )
         .unwrap();
     }
-    classes
+    Some(classes)
 }
 
 #[ignore = "requires JDK and Maven on the test host"]
@@ -345,9 +342,13 @@ fn pagination_walks_drive_stubbed_pages_in_java() {
     let root = tempfile::tempdir().unwrap();
     let files = generate(&configured());
     suspect_codegen::write_files(&files, root.path()).unwrap();
-    let classes = compiled_package(root.path());
+    let Some(classes) = compiled_package(root.path()) else {
+        return;
+    };
     fs::write(root.path().join("PaginationProbe.java"), PROBE).unwrap();
-    let home = java_home();
+    let Some(home) = java_home() else {
+        return;
+    };
     let output = Command::new(home.join("bin/javac"))
         .args(["--release", "21", "-Xlint:all", "-Werror", "-cp"])
         .arg(&classes)

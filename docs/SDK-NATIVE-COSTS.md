@@ -1,8 +1,16 @@
 # Native SDK cost observations
 
 `crates/suspect-codegen/tests/sdk_native_measurements.rs` supplies the maintained
-native-cost entrypoint required by [SDK-FULL-EXIT.md](SDK-FULL-EXIT.md#native-cost-integration-contract).
-Its ignored `native_build_import_codec_request_costs` test dispatches
+native-cost entrypoint for the integrated `sdk-full` runner. Its contract: given
+the [six runner locations](#runner-api), execute real native build, import,
+codec and request work against the frozen packages and independent fixtures,
+and write one `complete: true` `suspect.sdk.native-costs.v1` report bound to the
+source-census and CLI fingerprints, with exactly one row per maintained
+language × toolchain tier × phase. Every sample's raw logs, executable bytes and
+package manifest must match their recorded digests
+([Evidence and sizes](#evidence-and-sizes)). Partial development observations
+never satisfy it, and the results are observations, not calibrated thresholds
+([ADR 0033](adr/0033-performance-numbers-are-observations.md)). Its ignored `native_build_import_codec_request_costs` test dispatches
 `tools/sdk-native-costs/run.py collect`. Explicit execution requires the full
 environment and fails on missing inputs, tools, measurements, or native witnesses.
 
@@ -195,8 +203,8 @@ native completion witnesses and request records. Stored summaries are never
 trusted: validation re-counts each row's retained run kinds against its declared
 `runs` policy and **recomputes the steady-state statistics from the retained raw
 samples**, rejecting any row whose `summary` disagrees with its own raw data. A
-row or report that declares a different `methodology` is refused. Historical
-single-sample receipts without a `methodology` field still verify and summarize
+row or report that declares a different `methodology` is refused. Older
+single-sample reports without a `methodology` field still verify and summarize
 as their own one-run set. Source/CLI fingerprints remain
 the full runner's frozen-census authority; the collector separately fingerprints
 its own sources, drivers and interpreter. A killed process without a final report
@@ -211,7 +219,7 @@ status or regression threshold.
 
 ```sh
 # Host/adversarial checks; the native integration entrypoint remains ignored.
-cargo test --locked --offline -p suspect-codegen --test sdk_native_measurements
+cargo test --locked --offline -p suspect-codegen --test shared sdk_native_measurements::
 
 # Direct stdlib checks.
 python3 -B -m unittest discover -s tools/sdk-native-costs -p 'test_*.py' -v
@@ -245,46 +253,3 @@ allocated-name metadata, immutable-source/installed-root drift, artifact/log/too
 tampering, traversal/symlink escapes, failed or fake exit-zero samples, missing
 encode work, wrong precision/counts, wire auth/body/cookie errors, deadlines and
 cleanup. Their synthetic `UNIT` report fixtures are never native measurements.
-
-### Retained development validation, 2026-09-10
-
-Forty real observations were collected against **new canonical-name packages
-emitted by an existing source-attributed, frozen five-backend CLI**. These
-receipts predate `repeated-v1`; validation still accepts them and summarizes
-each row as its own one-run set, while any row that declares a `methodology`
-must be a complete, self-consistent `repeated-v1` run set. Their identity
-and original source-census linkage are retained in
-`target/sdk-native-costs-validation-20260910-03/historical-cli-provenance.json`.
-These exercise the collector; they are not the fresh twelve-backend full-runner
-acceptance required for the current implementation.
-
-| Retained report | Successful native rows |
-| --- | --- |
-| `target/sdk-native-costs-validation-20260910-03/observations-01/report.json` | 24: TypeScript, Python, Go; both tiers, all four phases |
-| `target/sdk-native-costs-observations-20260910-04/report/report.json` | 12: Rust on both tiers and current Swift, all four phases |
-| `target/sdk-native-costs-observations-20260910-05/report/report.json` | 4: recovered Swift floor, all four phases |
-
-The Rust/Swift collector survived a harness-server restart and completed its
-existing attempt. Completed observations were retained rather than re-collected.
-The first Swift-floor attempt remains an explicit failure: the original
-`swift-6.0.3-toolchain/expanded` payload lacks `SwiftShims`. Only that unfinished
-tier was subsequently run with the already-restored toolchain documented in
-[SDK-SWIFT-PROTOCOL.md](SDK-SWIFT-PROTOCOL.md#verification-and-retained-evidence).
-For this host, select its actual payload before the full runner starts:
-
-```sh
-export SUSPECT_SWIFT_FLOOR_ROOT="${TMPDIR%/}/opencode/swift-6.0.3-protocol-reexpanded/swift-6.0.3-RELEASE-osx-package.pkg/Payload"
-export SUSPECT_SWIFT_FLOOR_BIN="$SUSPECT_SWIFT_FLOOR_ROOT/usr/bin/swift"
-export SUSPECT_SWIFTC_FLOOR_BIN="$SUSPECT_SWIFT_FLOOR_ROOT/usr/bin/swiftc"
-export SUSPECT_SWIFT_FLOOR_DOCC_BIN="$SUSPECT_SWIFT_FLOOR_ROOT/usr/bin/docc"
-export SUSPECT_SWIFT_FLOOR_SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk
-```
-
-Each partial report preserves `complete: false` and its exact missing dimensions.
-The remaining Java/C#/Kotlin/Ruby/PHP/Dart/C++ recipes are implemented for the full
-runner's canonical packages and installed roots; their 52 native cost dimensions
-still require that fresh integrated invocation. The earlier all-feature CLI build
-attempt in `target/sdk-native-costs-validation-20260910-02/` captured in-progress
-Java/C++ migration errors and is retained as a failed historical attempt. Main
-subsequently reported canonical-options, all-twelve feature capture and CLI tests
-passing; that earlier build failure is not a claim about Main's current tree.

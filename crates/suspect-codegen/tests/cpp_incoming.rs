@@ -308,10 +308,7 @@ fn plan_carries_the_compiled_receipts() {
     assert!(!new_issue.expression);
     assert_eq!(new_issue.payload_alias, "NewIssuePayload");
     assert_eq!(new_issue.decode, "decode_new_issue_webhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("construct_new_issue_response")
-    );
+    assert_eq!(new_issue.construct, "construct_new_issue_response");
     assert_eq!(new_issue.required_headers, vec!["x-signature".to_owned()]);
     assert!(new_issue.required_body);
     assert!(matches!(
@@ -380,15 +377,17 @@ fn toolchain() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
     Some((cmake, cxx))
 }
 
-fn tool(variable: &str, fallback: &str) -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os(variable) {
-        return Some(std::path::PathBuf::from(path));
-    }
-    let probe = Command::new(fallback).arg("--version").output().ok()?;
-    probe
-        .status
-        .success()
-        .then(|| std::path::PathBuf::from(fallback))
+/// `cmake` or the C++ compiler (`clang++`), resolved by
+/// `suspect_codegen::toolchain::require` (honouring the `SUSPECT_CPP_*`
+/// overrides): `None` after its skip message, or a panic under
+/// `SUSPECT_REQUIRE_NATIVE`, so a missing toolchain cannot pass as a
+/// degraded run in CI.
+fn tool(_variable: &str, fallback: &str) -> Option<std::path::PathBuf> {
+    suspect_codegen::toolchain::require(if fallback == "clang++" {
+        "cxx"
+    } else {
+        fallback
+    })
 }
 
 /// Runs the command and fails the test with the retained log on failure.

@@ -141,10 +141,24 @@ static void edge_cases(){
         error(scripted(input).form(FormInput(form),options),SdkError::Kind::ResourceLimit);CHECK(input->opens==0);
     }
     {
+        auto input=script("text/plain","ok");ClientOptions options;options.document_url="https://Example.TEST:00443/a/spec.json?revision=1";options.server_index=1;
+        CHECK(scripted(input,options).servers());CHECK(input->request.url=="https://example.test/api/servers");
+        // ADR 0035: encoded octets are opaque path data, sent verbatim.
+        auto encoded=script("text/plain","ok");options.server_url="https://example.test/a/%2e%2e/%E9%9B%AA//keep/";
+        CHECK(scripted(encoded,options).public_call());CHECK(encoded->request.url=="https://example.test/a/%2e%2e/%E9%9B%AA//keep/public");
+        // ADR 0035: cleartext only to loopback; literal dot segments and port 0 are refused.
+        for(const char* invalid:{"http://example.test/a","https://example.test/a/../b","https://example.test/./b","https://example.test:0/a"}){
+            auto refused=script("text/plain","ok");options.server_url=invalid;error(scripted(refused,options).public_call(),SdkError::Kind::RequestRepresentation);CHECK(refused->opens==0);
+        }
+        auto loopback=script("text/plain","ok");options.server_url="http://[::1]:8080/a";
+        CHECK(scripted(loopback,options).public_call());CHECK(loopback->request.url=="http://[::1]:8080/a/public");
+        auto insecure=script("text/plain","ok");options.server_url="http://example.test/a";options.allow_insecure_http=true;
+        CHECK(scripted(insecure,options).public_call());CHECK(insecure->request.url=="http://example.test/a/public");
+    }
+    {
+        // ADR 0035: a source-declared plain-HTTP server keeps its scheme.
         auto input=script("text/plain","ok");ClientOptions options;options.document_url="http://Example.TEST:00080/a/spec.json?revision=1";options.server_index=1;
         CHECK(scripted(input,options).servers());CHECK(input->request.url=="http://example.test/api/servers");
-        auto encoded=script("text/plain","ok");options.server_url="http://example.test/a/%2e%2e/%E9%9B%AA//keep/";
-        CHECK(scripted(encoded,options).public_call());CHECK(encoded->request.url=="http://example.test/a/%2e%2e/%E9%9B%AA//keep/public");
     }
     {
         auto input=script("text/plain","unused");Credentials credentials;credentials.oauth=CredentialProvider([](const CredentialRequest&)->Result<Authorization,TransportError>{throw std::runtime_error("provider failed");});

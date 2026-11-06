@@ -225,7 +225,18 @@ fn plan_with_compiler(
         }
         plan.operations.push(OperationExamples {
             source: source.clone(),
-            operation_id: declared.operation_id().unwrap_or("").into(),
+            // Unnamed operations get the same `METHOD /path` identity as in
+            // the other plans, never an empty name (it titles example docs).
+            operation_id: declared.operation_id().map_or_else(
+                || {
+                    format!(
+                        "{} {}",
+                        declared.method().as_str().to_uppercase(),
+                        declared.path_template().unwrap_or("")
+                    )
+                },
+                str::to_owned,
+            ),
             entries,
             validated_aggregates,
         });

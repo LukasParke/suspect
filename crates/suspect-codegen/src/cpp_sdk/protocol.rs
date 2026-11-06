@@ -9,27 +9,43 @@ use std::{
 use suspect_ir::contract::{Contract, SchemaId, SourceId};
 use suspect_schema::OwnedCompiler;
 
+/// How a planned value is represented and encoded in the generated C++.
 #[derive(Debug, Clone)]
 pub enum ValueKind {
+    /// A generated model type with a JSON codec.
     Model(SchemaId),
+    /// Untyped JSON, surfaced as the runtime's `JsonValue`/`Json`.
     Json,
+    /// A schemaless text value decoded as one scalar.
     Scalar(wire::ScalarType),
+    /// Opaque bytes.
     Bytes,
+    /// No payload (`Unit`).
     Unit,
+    /// A generated form or multipart aggregate, by type name.
     Aggregate(String),
+    /// A generated request-body variant over several media types, by type name.
     Choice(String),
+    /// A framed stream of codec-backed items.
     Stream {
+        /// Schema of each stream item.
         schema: SchemaId,
+        /// Wire framing of the stream.
         framing: wire::StreamFraming,
+        /// Per-item byte ceiling declared by the protocol plan.
         max_item_bytes: usize,
     },
 }
+/// A planned value's spelled C++ type together with its representation.
 #[derive(Debug, Clone)]
 pub struct ValueType {
+    /// Fully spelled C++ type (qualified, before any `Presence<..>` wrapping).
     pub cpp_type: String,
+    /// Representation used to encode/decode the value.
     pub kind: ValueKind,
 }
 impl ValueType {
+    /// The schema backing a model or stream value, if any.
     pub fn schema(&self) -> Option<&SchemaId> {
         match &self.kind {
             ValueKind::Model(id) | ValueKind::Stream { schema: id, .. } => Some(id),
@@ -37,79 +53,136 @@ impl ValueType {
         }
     }
 }
+/// A planned request or response header.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
+    /// Declaring source location.
     pub source: SourceId,
+    /// Allocated C++ member name.
     pub field_name: String,
+    /// Planned header value.
     pub value: ValueType,
+    /// Shared wire plan for the header.
     pub wire: wire::HeaderPlan,
 }
+/// One field of a form or multipart aggregate.
 #[derive(Debug, Clone)]
 pub struct PlannedPart {
+    /// Declaring source location.
     pub source: SourceId,
+    /// Allocated C++ member name.
     pub field_name: String,
+    /// Declared wire field name; `None` for the additional-fields catch-all.
     pub name: Option<String>,
+    /// Planned field value.
     pub value: ValueType,
+    /// Generated per-part wrapper type; multipart only.
     pub part_type: Option<String>,
+    /// Generated type holding the part's headers, when it declares any.
     pub headers_type: Option<String>,
+    /// Planned per-part headers.
     pub headers: Vec<PlannedHeader>,
+    /// Shared wire plan for the part.
     pub wire: wire::PartPlan,
 }
+/// A generated `application/x-www-form-urlencoded` or multipart aggregate type.
 #[derive(Debug, Clone)]
 pub struct PlannedAggregate {
+    /// Declaring media source location.
     pub source: SourceId,
+    /// Allocated, unqualified C++ type name.
     pub type_name: String,
+    /// Whether this is multipart (otherwise a URL-encoded form).
     pub multipart: bool,
+    /// Declared fields in wire order.
     pub fields: Vec<PlannedPart>,
+    /// Catch-all for undeclared fields, when additional fields are allowed.
     pub additional: Option<PlannedPart>,
+    /// Shared object rules (required/additional handling) for the aggregate.
     pub rules: wire::ObjectRules,
 }
+/// One media type of a request body.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
+    /// Declaring media source location.
     pub source: SourceId,
+    /// Planned payload value for this media type.
     pub value: ValueType,
+    /// Generated wrapper type pairing the value with its content type.
     pub wrapper_type: String,
+    /// Whether the caller must supply a concrete content type (the declared media is a range).
     pub requires_content_type: bool,
+    /// Shared wire plan for the media type.
     pub wire: wire::MediaPlan,
 }
+/// A planned operation request body.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
+    /// Declaring source location.
     pub source: SourceId,
+    /// Whether the body is required.
     pub required: bool,
+    /// Input member type: `value.cpp_type`, wrapped in `Presence<..>` when optional.
     pub cpp_type: String,
+    /// Body value; a [`ValueKind::Choice`] when several media types are declared.
     pub value: ValueType,
+    /// Planned media types in declaration order.
     pub media: Vec<PlannedMedia>,
+    /// Generated variant type, present when the body is a choice over media types.
     pub choice_type: Option<String>,
 }
+/// A planned operation parameter (path, query, header or cookie).
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
+    /// Declaring use-site source location.
     pub source: SourceId,
+    /// Allocated C++ input member name.
     pub field_name: String,
+    /// Declared parameter name sent on the wire.
     pub wire_name: String,
+    /// Whether the parameter is required.
     pub required: bool,
+    /// Input member type: `value.cpp_type`, wrapped in `Presence<..>` when optional.
     pub cpp_type: String,
+    /// Planned parameter value.
     pub value: ValueType,
+    /// Shared wire plan for the parameter.
     pub wire: wire::ParameterPlan,
 }
+/// One alternative of a planned response: a media type or a no-content case.
 #[derive(Debug, Clone)]
 pub struct PlannedResponseCase {
+    /// Declaring source location.
     pub source: SourceId,
+    /// Generated variant type for this case.
     pub variant_type: String,
+    /// Decoded payload value.
     pub value: ValueType,
+    /// Media plan; `None` for bodiless cases.
     pub media: Option<wire::MediaPlan>,
+    /// Whether a body is forbidden: HEAD, 1xx/204/205/304, or the implicit no-content case of a range/default response.
     pub forbidden: bool,
 }
+/// A planned response for one declared status, status range or default.
 #[derive(Debug, Clone)]
 pub struct PlannedResponse {
+    /// Declaring source location.
     pub source: SourceId,
+    /// Declared status selector.
     pub status: wire::ResponseStatus,
+    /// Declared status key, as spelled in the responses map.
     pub status_key: String,
+    /// Generated type holding the response headers, when any are declared.
     pub headers_type: Option<String>,
+    /// Planned response headers.
     pub headers: Vec<PlannedHeader>,
+    /// Cases in match order.
     pub cases: Vec<PlannedResponseCase>,
+    /// Shared wire plan for the response.
     pub wire: wire::ResponsePlan,
 }
 impl PlannedResponse {
+    /// Whether this response can land in the success result (2xx, 2XX or default).
     pub fn can_succeed(&self) -> bool {
         matches!(
             self.status,
@@ -118,6 +191,7 @@ impl PlannedResponse {
                 | wire::ResponseStatus::Default
         )
     }
+    /// Whether this response can land in the error result (anything but 2xx/2XX).
     pub fn can_fail(&self) -> bool {
         !matches!(
             self.status,
@@ -125,38 +199,64 @@ impl PlannedResponse {
         )
     }
 }
+/// A planned security-scheme credential member on the client.
 #[derive(Debug, Clone)]
 pub struct PlannedCredential {
+    /// Security-scheme source location.
     pub source: SourceId,
+    /// Allocated C++ member name.
     pub field_name: String,
+    /// C++ type of the credential member.
     pub cpp_type: String,
+    /// Shared wire requirement for the credential.
     pub wire: wire::CredentialRequirement,
 }
+/// One positional parameter of an operation input constructor.
 #[derive(Debug, Clone)]
 pub struct InputArgument {
+    /// Constructor parameter name (`argN`).
     pub name: String,
+    /// Input member initialized from this argument.
     pub member_name: String,
+    /// Argument value.
     pub value: ValueType,
+    /// Spelled C++ parameter type.
     pub cpp_type: String,
 }
+/// The positional constructor of an operation input, over its required members.
 #[derive(Debug, Clone)]
 pub struct InputConstructor {
+    /// Input type name the constructor belongs to.
     pub name: String,
+    /// Required parameters, then a required body, in order.
     pub parameters: Vec<InputArgument>,
 }
+/// A planned outgoing operation with its generated input, success and error types.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Operation source location.
     pub source: SourceId,
+    /// Declared `operationId`, or `METHOD path` when undeclared.
     pub operation_id: String,
+    /// `operationId` exactly as declared, if any.
     pub declared_operation_id: Option<String>,
+    /// Allocated client method name.
     pub method_name: String,
+    /// Generated input type name.
     pub input_type: String,
+    /// Generated success result type name.
     pub success_type: String,
+    /// Generated error result type name.
     pub error_type: String,
+    /// Positional input constructor.
     pub constructor: InputConstructor,
+    /// Planned parameters in declaration order.
     pub parameters: Vec<PlannedParameter>,
+    /// Planned request body, if declared.
     pub body: Option<PlannedBody>,
+    /// Planned responses in declaration order.
     pub responses: Vec<PlannedResponse>,
+    /// Shared wire plan for the operation.
     pub wire: wire::OperationPlan,
 }
 

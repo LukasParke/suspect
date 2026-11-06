@@ -51,8 +51,10 @@ NuGet package**. Byte recipes are explicitly labeled native fixtures.
   with operation/requirement/scheme identities, scopes versus roles, permission
   sources, flow URLs/scope descriptions and discovery metadata. It returns an
   explicit `AuthorizationValue(scheme, parameter)`.
-- No discovery, acquisition, refresh, flow selection, bearer inference or business
-  permission check is performed. Conflicting attachments fail before sending.
+- Without an `sdk_defaults` OAuth policy, no discovery, acquisition, refresh, flow
+  selection, bearer inference or business permission check is performed; the opt-in
+  token lifecycle is described in [SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md).
+  Conflicting attachments fail before sending.
 
 ### Servers, methods and parameters
 
@@ -250,8 +252,7 @@ Unknown versions, profile mismatches and malformed instructions fail explicitly.
 Resource-bearing codec closures explicitly use `OwnedCompiler::compile_v3` and
 the exact pair `suspect.validation.experimental.v3` /
 `oas31-jsonschema202012-resources-dynamic`. `SchemaResources` and
-`DynamicSchemaReferences` are enabled after the source-driven and installed native
-proofs below. The existing `plan_sdk`, `plan_sdk_with_options`, generated `Codecs`
+`DynamicSchemaReferences` are enabled. The existing `plan_sdk`, `plan_sdk_with_options`, generated `Codecs`
 and `Client` entrypoints select the checked profile; canonical dispatch needs no
 new public entrypoint. Ordinary closures keep their established v1/v2 programs.
 
@@ -289,9 +290,31 @@ the exact envelope, physical containment, canonical/alias syntax and identity,
 node-scope alignment, original declaration/anchor sources, finite targets and
 initial-resource agreement before evaluation.
 
+## OpenAPI 3.0
+
+`csharp-http-protocol-v1` opts in to OpenAPI 3.0 documents. Per
+[ADR 0016](adr/0016-closed-dialect-set.md), 3.0 Schema Objects are lowered onto
+the same owned validation instructions as 3.1/3.2, and model planning reads
+them through the shared `schema_view` dialect view, so native types and
+validation agree:
+
+- `nullable: true` adds null to the same-object `type` only. `type: string,
+  nullable: true` becomes `string?`, a nullable object becomes `Model?`, and a
+  `$ref` to a nullable schema is nullable through its target. An `enum` must
+  still list `null`; `nullable` without a same-object `type` has no effect.
+- Boolean `exclusiveMinimum`/`exclusiveMaximum` make the adjacent
+  `minimum`/`maximum` exclusive (the finding keeps the bound's source).
+- A Reference Object applies only its `$ref`: siblings such as `nullable`,
+  `type` or `description` neither refuse nor change the alias.
+- Direction-dependent `required` (a required `readOnly`/`writeOnly` member)
+  stays a located refusal, like every active directional annotation here.
+
+`tests/fixtures/oas30/petstore-nullable.openapi.yaml` is the plan/emit witness
+and the installed .NET 8/10 consumer fixture.
+
 ## Explicit limits and compatibility profiles
 
-Source-located refusals remain for OAS 3.0, streamed multipart, request
+Source-located refusals remain for streamed multipart, request
 streams, nested multipart, undefined composite inverse response styles, untyped
 extra header values, active directional projections, custom vocabularies/dialects
 and legacy recursive-reference keywords. Portable pattern syntax remains the
@@ -352,7 +375,7 @@ performed.
 
 The factory and `CredentialEnvironment.cs` helper are emitted only with a bound
 policy. Unconfigured packages retain their existing explicit construction and
-output bytes. The actual-source native witness selects only `getCurrentKey` and
+output bytes. The actual-source native test selects only `getCurrentKey` and
 `getCredits`, loads their original schemas/examples, and injects a controlled
 HttpClient handler at the source HTTPS URL; it makes no live account calls.
 
@@ -411,67 +434,30 @@ Version-2 examples preserve response-pattern/header/part/item roles and findings
 
 ```sh
 CARGO_TARGET_DIR=target/sdk-csharp-cargo cargo test -p suspect-codegen \
-  --test csharp_protocol -- --include-ignored --nocapture --test-threads=1
+  --test csharp csharp_protocol:: -- --include-ignored --nocapture --test-threads=1
 CARGO_TARGET_DIR=target/sdk-csharp-cargo cargo test -p suspect-codegen \
-  --test csharp_sdk --test csharp_integration \
-  -- --include-ignored --nocapture --test-threads=1
+  --test csharp -- --include-ignored --nocapture --test-threads=1 \
+  csharp_sdk:: csharp_integration::
 ```
 
 The expanded native matrix uses the literal shared protocol vectors and an
 independent loopback server, with .NET 8/10 package installation, negative types,
 native XML/reference binding checks, byte fixtures and stream lifetime controls.
-The unchanged M2 fixture, five actual OpenRouter operations, shared 17 validator
-cases and CLR descriptor probes remain regression gates. New real operation
-witnesses cover `createCoinbaseCharge`, `downloadContainerFileContent` and
+The base fixture, five actual OpenRouter operations, shared 17 validator
+cases and CLR descriptor probes remain regression gates. Real operation
+tests also cover `createCoinbaseCharge`, `downloadContainerFileContent` and
 `downloadFileContent` (downloads use the explicit legacy binary profile).
 
-Fresh phase-3 native packages/logs live under `target/sdk-csharp-protocol/` and
-`target/sdk-csharp-native/`. Earlier accepted evidence under
-`target/sdk-csharp-verification-20260910/` and
-`target/sdk-csharp-compatibility-20260910/` is preserved as historical evidence.
 Protocol capability support is distinct from whole-API or release-readiness claims.
 
-### Phase-3 recorded results (2026-09-10)
+### Verification
 
-The indexed evidence is
-[`target/sdk-csharp-protocol-evidence-20260910/report.json`](../target/sdk-csharp-protocol-evidence-20260910/report.json).
-The final expanded matrix passed **4/4 tests**, including **787 native checks and
-79 independent loopback requests per SDK** on SDK 8.0.424/.NET 8.0.30 and SDK
-10.0.400/.NET 10.0.11. Both installed packages passed the compiler-negative cases,
-XML/HTML symbol checks, 59 source-bound values and 46 executable operation recipes.
-
-The base/new-real-operation regression suite passed **13/13**, and the
-compatibility/CLR descriptor suite passed **11/11**. All native protocol commands,
-including negative builds, were independently witnessed through
-`SUSPECT_DOTNET_BIN`; exact `global.json` SDK pins retain `rollForward: disable`.
-The final protocol packages' runtime templates match the current C# sources.
-
-Scoped formatting/whitespace checks pass. C# findings from the initial Clippy pass
-were fixed; subsequent whole-library Clippy/Rustdoc attempts are blocked by
-concurrent unowned shared/Go/Rust/Swift work (including the unquoted
-`APIResponse<T>` Rustdoc text in Swift's protocol plan). Those attempts are not
-reported as clean whole-workspace quality gates.
-
-### Positional follow-up results (2026-09-10)
-
-`csharp_positional` passed **5/5 focused tests**, including independently installed
-NuGet consumers on SDK **8.0.424** and **10.0.400**. Each consumer passed **355 CLR,
-MIME, type, source/doc and lifecycle checks** with **22 loopback requests**. The
-negative builds reject wrong byte payloads, missing required prefix/header values
-and inaccessible slots beyond a false-prefix barrier. Source-bound examples build
-and run against the installed package.
-
-Evidence: `target/sdk-csharp-positional/native-1MyKdg/` and
-`target/sdk-csharp-positional-evidence-20260910/`. The canonical generation/options
-capture test passes with explicit LegacyBinaryStringV1; the standard profile
-continues to reject those legacy markers. The direct HttpClient witness on both
-runtimes observed `source=hEaD, wire=HEAD, bodyBytes=0`, confirming the documented
-case-distinct known-method refusal. Earlier accepted base/protocol reports remain
-preserved; their unaffected matrices were not repeated for this follow-up.
-
-### Scoped v2 validation results (2026-09-10)
-
-Both pinned tiers passed the maintained library-native witnesses:
+Native tests are `#[ignore]`d and need the .NET SDKs. Every native command honors
+`SUSPECT_DOTNET_BIN` (falling back to the mise-installed `dotnet`), and each tier's
+`global.json` pins the exact SDK (8.0.424 or 10.0.400) with `rollForward: disable`.
+`csharp_positional` covers finite positional multipart, including the case-distinct
+known-method refusal. Scoped v2 validation, physical document servers and v3
+resources have library-native selectors:
 
 ```text
 csharp_sdk::validation_tests::native_scoped_source_vectors
@@ -479,44 +465,8 @@ csharp_sdk::validation_tests::native_scoped_limits_and_admission
 csharp_sdk::validation_tests::native_scoped_sdk_packages
 ```
 
-Per tier: **32 independent shared source cases / 77 checks**, **28 additional
-source cases / 112 checks** (including **36 malformed-program refusals**), and
-**349 installed-SDK checks** with **12 handler-recorded requests across eight
-source operations**. Installed examples validate **30 source-bound values** and
-execute **8 operation recipes** plus the native quickstart. Negative builds prove
-required fields, exact numeric types, patterned-extra carriers and heterogeneous
-array/JSON-carrier input types.
-
-The four Rust-only gates cover native fields/carriers, canonical compatibility
-capture, source-located profile refusals and inactive-v2 parity: the v1 program and
-all **26 generated package files** are byte-identical under either compiler for a
-base closure. Public `compile_v2` activation followed the native proofs.
-
-Evidence and source/tool/package fingerprints:
-`target/sdk-csharp-schema-v2-evidence-20260910/report.json`. All native commands
-honor `SUSPECT_DOTNET_BIN` with the explicit installed-path fallback and per-tier
-SDK pins. The accepted base, protocol, positional and metadata matrices retain
-their previous evidence.
-
-### Physical document-server results (2026-09-10)
-
-The focused native selector is
-`csharp_sdk::server_tests::native_document_relative_servers`. Both SDK tiers passed
-**89 checks and 17 real loopback requests**, plus independently installed NuGet
-consumers and executable examples. The first red witness sent an imported
-operation's implicit default to the definition document instead of the entry
-document; the shared physical `document_base` now controls that choice.
-
-Evidence: `target/sdk-csharp-document-servers/native-resume-rqe1d8ga/`. Every command
-used the exact selector and SDK pins. The completed SDK8 package build was reused
-while the corrected consumer and SDK10 package completed; earlier attempts remain
-preserved. This gate enables `DocumentRelativeServers`; schema resource/dynamic
-execution has its independently witnessed V3 gate below.
-
-### Resource/dynamic v3 results (2026-09-10)
-
-Each maintained ignored library test runs both exact SDK tiers, **8.0.424** and
-**10.0.400**, with `global.json` and `rollForward: disable`:
+`csharp_sdk::server_tests::native_document_relative_servers` covers
+`DocumentRelativeServers`.
 
 ```text
 csharp_sdk::resources_tests::native_resource_source_vectors
@@ -524,21 +474,7 @@ csharp_sdk::resources_tests::native_resource_scope_and_admission
 csharp_sdk::resources_tests::native_resource_sdk_packages
 ```
 
-| Native witness | Per SDK tier |
-| --- | --- |
-| Unmodified official dynamicRef source plus closed supplied remote documents | **44 cases / 67 checks** |
-| Independent scope, fallback, context-cycle, annotation and exact-budget controls; four formerly deferred official dynamic/unevaluated cases; 2 MiB-stack depth failure; native guard and ownership checks | **43 source cases / 174 checks**, including **55 malformed-program refusals** |
-| Installed NuGet models/codecs, required and optional CLR types, exact wire values, source errors, logical metadata, XML/rendered docs and concurrent scope isolation | **212 checks / 12 real TCP requests across eight operations** |
-| Installed positive/negative compiler builds and source-bound executable examples | **20 values / eight operation recipes and quickstart** |
-
-Total: **453 native runtime/SDK checks per tier**, plus the compiler and executable
-example gates. Maintained tests compile the source fixtures through the real
-`compile_v3`; they have no dependency on the one-off executable handoff JSON.
-
-Retained native roots are `target/sdk-csharp-schema-v3/vectors-1tnnV0/`,
-`controls-EGQN6v/` and `sdk-hpi98K/`. The separate evidence index is
-`target/sdk-csharp-schema-v3-evidence-20260910/report.json`. Every native command
-honors `SUSPECT_DOTNET_BIN`, with the sole fallback
-`/Users/luke/.local/share/mise/dotnet-root/dotnet`. Sources, programs, packages,
-command records, logs and private caches remain preserved. Earlier evidence keeps
-its original completed scope.
+These compile their source fixtures through the real `compile_v2`/`compile_v3`
+and run against both SDK tiers with installed NuGet consumers and executable
+examples. For a base closure, the v1 program and generated package files are
+byte-identical under either compiler.

@@ -33,7 +33,9 @@ catch (CreateWidgetStatus422Error $error) {
     check($error->body->message === 'denied-private-body' && $error->status === 422, 'typed error lost');
     check($error->operationId === 'createWidget' && !str_contains((string) $error, 'denied-private-body'), 'error identity or formatting');
 }
-foreach (['media' => 'unexpected_media', 'duplicate' => 'unexpected_media', 'charset' => 'unexpected_media', 'encoding' => 'unexpected_encoding', 'redirect' => 'unexpected_status', 'invalid' => 'response_validation'] as $path => $kind) {
+// JSON is UTF-8 whatever its charset label says (RFC 8259).
+$client->getWidget(new GetWidgetInput(widgetId: 'charset'));
+foreach (['media' => 'unexpected_media', 'duplicate' => 'unexpected_media', 'encoding' => 'unexpected_encoding', 'redirect' => 'unexpected_status', 'invalid' => 'response_validation'] as $path => $kind) {
     $error = failure($kind, static fn () => $client->getWidget(new GetWidgetInput(widgetId: $path)));
     check($error->operationId === 'getWidget' && $error->source !== null, 'missing operation/source identity');
     check($error->response !== null && $error->response->status >= 200, 'missing failure capture');
@@ -48,8 +50,11 @@ failure('timeout', static fn () => $client->getWidget(new GetWidgetInput(widgetI
 $cancel = new CancellationToken(); $cancel->cancel();
 failure('cancelled', static fn () => $client->getWidget(new GetWidgetInput(widgetId: 'never-sent'), new RequestOptions(cancellation: $cancel)));
 foreach (['====', '', "secret\r\nInjected: value", 'non ascii 雪'] as $token) { failure('credentials', static fn () => new Credentials(['apiKey' => $token])); }
-foreach (['https://user:secret@example.test/api', 'http://example.test/api', 'http://127.0.0.1:bad/api', 'http://127.0.0.1:0/api', 'https://example.test/api?query', 'https://example.test/api#fragment', 'https://example.test/../api', 'https://example.test/%2e%2e/api', 'https://example.test/api/%2fsecret'] as $url) { failure('configuration', static fn () => new ClientOptions(serverUrl: $url)); }
+foreach (['https://user:secret@example.test/api', 'http://example.test/api', 'http://127.0.0.1:bad/api', 'http://127.0.0.1:0/api', 'https://example.test/api?query', 'https://example.test/api#fragment', 'https://example.test/../api', 'https://example.test/./api', "https://example.test/caf\u{e9}", 'https://example.test/a\\b', 'https://example.test/%zz'] as $url) { failure('configuration', static fn () => new ClientOptions(serverUrl: $url)); }
+// ADR 0035: encoded octets are opaque path data, kept verbatim rather than refused.
+foreach (['https://example.test/%2e%2e/api', 'https://example.test/api/%2fsecret', 'http://localhost:8080/api', 'http://[::1]/api'] as $url) { check((new ClientOptions(serverUrl: $url))->serverUrl === $url, 'valid server override must be kept verbatim'); }
 check((new ClientOptions(serverUrl: 'HTTPS://example.test/api'))->serverUrl === 'HTTPS://example.test/api', 'URI scheme case must be accepted');
+check((new ClientOptions(serverUrl: 'http://example.test/api', allowInsecureHttp: true))->serverUrl === 'http://example.test/api', 'insecure HTTP opt-in must be honored');
 failure('configuration', static fn () => $client->getWidget(new GetWidgetInput(widgetId: 'not-sent'), new RequestOptions(timeoutMilliseconds: 30001)));
 
 // A blocking custom adapter must honor the same deadline. The outer exchange

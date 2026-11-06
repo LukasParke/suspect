@@ -85,8 +85,10 @@ public sealed class UnexpectedResponseException : SdkException
 /// <summary>Finite transport policy and explicit source-server selection.</summary>
 public sealed record ClientOptions
 {
-    /// <summary>Explicit absolute HTTP(S) override.</summary>
+    /// <summary>Explicit absolute HTTPS override, or plain HTTP to a loopback host unless <see cref="AllowInsecureHttp"/> is set.</summary>
     public string? ServerUrl { get; init; }
+    /// <summary>Allow a plain-HTTP <see cref="ServerUrl"/> (client or per call) to a non-loopback host. Default false; source-declared servers keep their scheme regardless.</summary>
+    public bool AllowInsecureHttp { get; init; }
     /// <summary>Index of an effective source server. Default is its first candidate.</summary>
     public int? ServerIndex { get; init; }
     /// <summary>Source-server variable overrides; unknown names and enum violations reject.</summary>
@@ -210,7 +212,7 @@ internal sealed class HttpRuntime : IDisposable
     {
         _options=options??new ClientOptions();
         if(_options.Timeout<=TimeSpan.Zero||_options.Timeout>TimeSpan.FromMinutes(10)||_options.MaxResponseBytes<1||_options.MaxResponseBytes>JsonRuntime.MaxBytes||_options.MaxCaptureBytes<0||_options.MaxCaptureBytes>65_536||_options.MaxHeaderBytes<1||_options.MaxHeaderBytes>65_536||_options.MaxHeaderValues<1||_options.MaxHeaderValues>1024)throw new SdkException(SdkErrorKind.RequestRepresentation);
-        if(_options.ServerUrl is not null)ServerRuntime.Explicit(_options.ServerUrl);
+        if(_options.ServerUrl is not null)ServerRuntime.Explicit(_options.ServerUrl,_options.AllowInsecureHttp);
         _lifetimeToken=_lifetime.Token;_owned=http is null;
         _http=http??new HttpClient(new SocketsHttpHandler {AllowAutoRedirect=false,UseCookies=false,UseProxy=false,AutomaticDecompression=DecompressionMethods.None,Credentials=null,PreAuthenticate=false,MaxConnectionsPerServer=16,MaxResponseDrainSize=0,MaxResponseHeadersLength=Math.Max(1,(_options.MaxHeaderBytes+1023)/1024)},true){Timeout=global::System.Threading.Timeout.InfiniteTimeSpan};
     }
@@ -407,7 +409,7 @@ internal sealed class HttpRuntime : IDisposable
     {
         ValidateServer(server);foreach(var p in request.Paths)path=path.Replace("{"+p.Name+"}",p.Value,StringComparison.Ordinal);
         if(!path.StartsWith('/')||path.IndexOfAny(new[]{'{','}','?','#','\\'})>=0||path.Any(char.IsControl))throw new SdkException(SdkErrorKind.RequestRepresentation);
-        var url=server.TrimEnd('/')+path+(request.Query.Count==0?"":"?"+string.Join("&",request.Query));if(url.Length>65_536)throw new SdkException(SdkErrorKind.ResourceLimit);
+        var url=(server.EndsWith('/')?server[..^1]:server)+path+(request.Query.Count==0?"":"?"+string.Join("&",request.Query));if(url.Length>65_536)throw new SdkException(SdkErrorKind.ResourceLimit);
         return new Uri(url,new UriCreationOptions{DangerousDisablePathAndQueryCanonicalization=true});
     }
     private static void ValidateServer(string value)

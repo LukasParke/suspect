@@ -666,6 +666,9 @@ fn unavailable_package_or_schema_is_located_instead_of_an_incomplete_native_snap
 #[ignore = "narrow .NET 8 metadata/constructor gate for the new snapshot descriptors; preserves native evidence"]
 fn native_package_metadata_agrees_with_snapshot_construction_and_accessors() {
     use std::process::Command;
+    let Some(dotnet) = suspect_codegen::toolchain::require("dotnet") else {
+        return;
+    };
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-integration");
     fs::create_dir_all(&parent).unwrap();
     let parent = fs::canonicalize(parent).unwrap();
@@ -682,10 +685,7 @@ fn native_package_metadata_agrees_with_snapshot_construction_and_accessors() {
     fs::create_dir(root.join("feed")).unwrap();
     fs::write(root.join("NuGet.Config"),"<configuration><packageSources><clear/><add key=\"local\" value=\"feed\"/></packageSources></configuration>").unwrap();
     let run = |directory: &Path, label: &str, args: &[&str], success: bool| {
-        let mut command = Command::new(
-            std::env::var_os("SUSPECT_DOTNET_BIN")
-                .unwrap_or_else(|| "/Users/luke/.local/share/mise/dotnet-root/dotnet".into()),
-        );
+        let mut command = Command::new(&dotnet);
         command
             .args(args)
             .current_dir(directory)

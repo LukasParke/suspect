@@ -4,7 +4,7 @@
 //! compile gate over the whole package, and native behavior for decode and
 //! construct against the generated codecs. Static runtime files are never
 //! modified, and plans without a webhook or callback emit no new file at all.
-#![cfg(all(feature = "java-sdk", feature = "http-protocol"))]
+#![cfg(feature = "java-sdk")]
 
 use std::{
     fs,
@@ -274,18 +274,15 @@ fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
 }
 
 /// A JDK 21+ toolchain, mirroring the other Java acceptance tests.
-fn java_home() -> PathBuf {
+fn java_home() -> Option<PathBuf> {
     std::env::var_os("SUSPECT_JAVA_HOME")
-        .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
-        })
+        .or_else(|| suspect_codegen::toolchain::require_home("jdk"))
 }
 
 /// Compile the whole emitted package, including the generated Incoming class.
-fn compiled_package(root: &Path) -> PathBuf {
-    let home = java_home();
+fn compiled_package(root: &Path) -> Option<PathBuf> {
+    let home = java_home()?;
     assert!(
         home.join("bin/javac").is_file(),
         "required JDK: {}",
@@ -335,7 +332,7 @@ fn compiled_package(root: &Path) -> PathBuf {
         )
         .unwrap();
     }
-    classes
+    Some(classes)
 }
 
 #[ignore = "needs updating for the scoped-mode Java emission changes"]
@@ -351,9 +348,13 @@ fn generated_incoming_compiles_strictly_with_the_package() {
 fn fake_webhook_deliveries_drive_the_decoder_and_constructor_in_java() {
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(), root.path()).unwrap();
-    let classes = compiled_package(root.path());
+    let Some(classes) = compiled_package(root.path()) else {
+        return;
+    };
     fs::write(root.path().join("IncomingProbe.java"), PROBE).unwrap();
-    let home = java_home();
+    let Some(home) = java_home() else {
+        return;
+    };
     let output = Command::new(home.join("bin/javac"))
         .args(["--release", "21", "-Xlint:all", "-Werror", "-cp"])
         .arg(&classes)

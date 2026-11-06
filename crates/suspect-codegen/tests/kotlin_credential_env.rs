@@ -1,5 +1,6 @@
-#![cfg(all(feature = "kotlin-sdk", feature = "http-protocol"))]
+#![cfg(feature = "kotlin-sdk")]
 //! Runtime environment defaults over the admitted native protocol seam.
+use crate::kotlin_support as support;
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
@@ -16,9 +17,6 @@ use suspect_codegen::{
 use suspect_ir::contract::Contract;
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
-#[path = "kotlin_support/mod.rs"]
-#[allow(dead_code)]
-mod support;
 
 fn root() -> PathBuf {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-kotlin-credential-env");
@@ -224,13 +222,14 @@ fn generator_environment_canary_is_not_emitted() {
     let result = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "generator_environment_canary_is_not_emitted",
+            qualified("generator_environment_canary_is_not_emitted").as_str(),
             "--nocapture",
         ])
         .env("KOTLIN_ENV_CANARY_CHILD", "1")
         .env("KOTLIN_ENV_A", CANARY)
         .output()
         .unwrap();
+    assert_ran_one(&result.stdout);
     assert!(
         result.status.success(),
         "{}{}",
@@ -361,12 +360,9 @@ fn policy_edit_and_revert_are_session_identity_without_secret_values() {
     assert_eq!(descriptors["bindings"].as_array().unwrap().len(), 6);
 }
 
-fn openrouter() -> Plan {
+fn openrouter() -> Option<Plan> {
     use sha2::{Digest, Sha256};
-    let base = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let path = base.join("projects/docs/openapi/openapi.yaml");
+    let path = suspect_codegen::toolchain::openrouter_spec()?;
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&bytes)),
@@ -386,22 +382,24 @@ fn openrouter() -> Plan {
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
     assert_eq!(selected.len(), 1);
-    kotlin_sdk::plan_sdk(
-        contract,
-        &selected,
-        SdkConfig {
-            group_id: "ai.openrouter".into(),
-            artifact_id: "openrouter-kotlin".into(),
-            version: "0.1.0".into(),
-            package_name: "ai.openrouter.kotlin".into(),
-            credential_env: Some(CredentialEnv::v1(
-                [("apiKey".into(), "OPENROUTER_API_KEY".into())].into(),
-            )),
-            sdk_defaults: None,
-            attribution: None,
-        },
+    Some(
+        kotlin_sdk::plan_sdk(
+            contract,
+            &selected,
+            SdkConfig {
+                group_id: "ai.openrouter".into(),
+                artifact_id: "openrouter-kotlin".into(),
+                version: "0.1.0".into(),
+                package_name: "ai.openrouter.kotlin".into(),
+                credential_env: Some(CredentialEnv::v1(
+                    [("apiKey".into(), "OPENROUTER_API_KEY".into())].into(),
+                )),
+                sdk_defaults: None,
+                attribution: None,
+            },
+        )
+        .unwrap(),
     )
-    .unwrap()
 }
 fn native_package(plan: &Plan, source: &str, modes: &[&str], negatives: &[&str]) -> PathBuf {
     let root = root();
@@ -522,6 +520,9 @@ fn check(root: &Path, label: &str, output: std::process::Output) {
 #[test]
 #[ignore = "JDK21/25 installed env precedence/identity/OR/AND/anonymous/snapshot controls"]
 fn native_environment_controls() {
+    if support::java_homes().is_empty() {
+        return;
+    }
     native_package(
         &control_plan(Some(policy())),
         include_str!("../src/kotlin_sdk/native_credential_env.kt"),
@@ -536,10 +537,37 @@ fn native_environment_controls() {
 #[test]
 #[ignore = "JDK21/25 actual source getCurrentKey, default HTTPS, env positive/missing/empty and compiled helper"]
 fn native_openrouter_current_key_environment() {
+    if support::java_homes().is_empty() {
+        return;
+    }
+    let Some(plan) = openrouter() else {
+        return;
+    };
     native_package(
-        &openrouter(),
+        &plan,
         include_str!("../src/kotlin_sdk/native_openrouter_env.kt"),
         &["positive", "missing", "empty"],
         &["val bad = Client(credentials = null)"],
+    );
+}
+
+/// The libtest name of `test` in this binary: `<file module>::<test>` when
+/// this file is a module of a grouped test binary (tests/groups/), the bare
+/// name when it is its own crate. Self-invocations with `--exact` need it,
+/// or the child runs zero tests and the check passes vacuously.
+fn qualified(test: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{test}"),
+        None => test.to_owned(),
+    }
+}
+
+/// Fails unless a self-invocation actually ran exactly one test: an
+/// `--exact` filter that matches nothing also exits successfully.
+fn assert_ran_one(stdout: &[u8]) {
+    let text = String::from_utf8_lossy(stdout);
+    assert!(
+        text.contains("running 1 test"),
+        "self-invocation selected no test (check the --exact name):\n{text}"
     );
 }

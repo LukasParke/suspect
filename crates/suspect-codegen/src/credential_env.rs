@@ -13,6 +13,7 @@ use crate::sdk_defaults::SdkDefaults;
 /// Closed version of the application credential-loading policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CredentialEnvVersion {
+    /// Policy v1, serialized as `"v1"`.
     #[serde(rename = "v1")]
     V1,
 }
@@ -20,11 +21,15 @@ pub enum CredentialEnvVersion {
 /// Variable names selected explicitly by source Security Scheme name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CredentialEnv {
+    /// Policy version the configuration was written against.
     pub version: CredentialEnvVersion,
+    /// Source Security Scheme name -> environment variable name (1..=64 entries).
     pub schemes: BTreeMap<String, String>,
 }
 
 impl CredentialEnv {
+    /// Policy v1 configuration with the given scheme -> variable mappings.
+    /// Validation happens on deserialization and planning, not here.
     #[must_use]
     pub fn v1(schemes: BTreeMap<String, String>) -> Self {
         Self {
@@ -125,7 +130,9 @@ fn unique_schemes<'de, D: Deserializer<'de>>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CredentialEnvKind {
+    /// HTTP bearer token sent in `Authorization`.
     Bearer,
+    /// API key attached where the source scheme declares it.
     ApiKey,
 }
 
@@ -139,21 +146,25 @@ pub struct CredentialEnvBinding {
 }
 
 impl CredentialEnvBinding {
+    /// Source Security Scheme name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    /// Environment variable the generated client reads at runtime.
     #[must_use]
     pub fn variable(&self) -> &str {
         &self.variable
     }
 
+    /// How the variable's value is attached to requests.
     #[must_use]
     pub fn kind(&self) -> CredentialEnvKind {
         self.kind
     }
 
+    /// Source location of the bound Security Scheme declaration.
     #[must_use]
     pub fn scheme(&self) -> &Provenance {
         &self.scheme
@@ -164,15 +175,21 @@ impl CredentialEnvBinding {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialEnvDescriptor {
+    /// Policy version of the plan.
     pub version: CredentialEnvVersion,
+    /// Bindings without source provenance, in plan order.
     pub bindings: Vec<CredentialEnvDescriptorBinding>,
 }
 
+/// [`CredentialEnvBinding`] without its source provenance.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialEnvDescriptorBinding {
+    /// Source Security Scheme name.
     pub name: String,
+    /// Environment variable the generated client reads at runtime.
     pub variable: String,
+    /// How the variable's value is attached to requests.
     pub kind: CredentialEnvKind,
 }
 
@@ -184,11 +201,13 @@ pub struct CredentialEnvPlan {
 }
 
 impl CredentialEnvPlan {
+    /// Policy version of the plan.
     #[must_use]
     pub fn version(&self) -> CredentialEnvVersion {
         self.version
     }
 
+    /// One binding per bound Security Scheme declaration.
     #[must_use]
     pub fn bindings(&self) -> &[CredentialEnvBinding] {
         &self.bindings

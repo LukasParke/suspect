@@ -163,8 +163,13 @@ Generation profiles are explicit. The default planner does not treat
 media/parts. JSON media still carries a JSON string. The manifest records every
 requested profile and the core's source-linked compatibility warning.
 
+OpenAPI 3.0 Schema Objects are lowered onto the same checked program: `nullable`
+widens only a same-object `type`, Boolean `exclusiveMinimum`/`exclusiveMaximum`
+modify the adjacent bound, and a Reference Object applies only its `$ref`.
+Direction-dependent `required` (readOnly/writeOnly) remains a located refusal.
+
 Known undefined/unimplemented profiles fail with source-located diagnostics:
-OpenAPI 3.0, directional codecs, unnamed operations, undefined style combinations,
+directional codecs, unnamed operations, undefined style combinations,
 arbitrary untyped form extras, JSON cookie content without an escaping policy,
 positional/nested multipart, response form/multipart parsing, request item streams,
 aggregate stream schemas, JSON-sequence framing and mixed streaming success/error

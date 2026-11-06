@@ -607,10 +607,13 @@ fn depth_program() -> OwnedProgram {
         limits(),
     )
 }
+/// `false` (after printing why) when the JDK or Maven is unavailable.
+fn native_tools() -> bool {
+    suspect_codegen::toolchain::require_home("jdk").is_some()
+        && suspect_codegen::toolchain::require("maven").is_some()
+}
 fn java() -> PathBuf {
-    std::env::var_os("JAVA_HOME")
-        .map(PathBuf::from)
-        .expect("select JDK 21 or 25 using JAVA_HOME")
+    suspect_codegen::toolchain::resolve_home("jdk").expect("gated by native_tools()")
 }
 fn checked(command: &mut Command, root: &Path) {
     let result = command.output().unwrap();
@@ -642,9 +645,7 @@ fn install(plan: &SdkPlan, root: &Path) -> PathBuf {
         std::fs::write(path, file.content).unwrap();
     }
     let repository = crate_root().join("../../target/sdk-java-maven-cache/java/repository");
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -688,6 +689,9 @@ fn baseline() -> SdkPlan {
 #[test]
 #[ignore = "unmodified 44 official source cases and independent V3 controls; installed JDK21/25 jar"]
 fn native_schema_v3_resource_conformance() {
+    if !native_tools() {
+        return;
+    }
     let root = attempt();
     let jar = install(&baseline(), &root);
     let mut cases = official_cases();
@@ -911,6 +915,9 @@ fn explicit_v3_preserves_base_plans_and_old_entrypoint_refusals() {
 #[test]
 #[ignore = "installed resource/dynamic SDK, examples/Javadoc/type and wire/control consumers on JDK21/25"]
 fn native_schema_v3_sdk_operations() {
+    if !native_tools() {
+        return;
+    }
     let root = attempt();
     let plan = sdk_plan();
     let jar = install(&plan, &root);

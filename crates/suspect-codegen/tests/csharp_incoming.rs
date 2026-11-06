@@ -170,15 +170,34 @@ fn incoming_helpers_emit_exactly_when_receipts_are_declared() {
     let control = files_map(&generate(control_document()));
     let emptied = files_map(&generate(emptied_document()));
 
-    // Exactly one new file: the incoming receipt helpers.
+    // Exactly one new package file: the incoming receipt helpers. The API
+    // reference is split into one page per symbol group, so the new public
+    // symbols may add reference pages under `csharp/docs/`, and nothing else.
     let incoming = configured
         .get("csharp/src/Incoming.g.cs")
         .expect("the incoming helpers are emitted for a webhook/callback contract");
     assert!(
-        configured.len() == control.len() + 1,
-        "the declared receipts add exactly one file ({} vs {})",
-        configured.len(),
-        control.len()
+        control.keys().all(|path| configured.contains_key(path)),
+        "the declared receipts must not drop files"
+    );
+    let added = configured
+        .keys()
+        .filter(|path| !control.contains_key(*path))
+        .collect::<Vec<_>>();
+    let added_package = added
+        .iter()
+        .filter(|path| !path.starts_with("csharp/docs/"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        added_package,
+        [&&"csharp/src/Incoming.g.cs".to_string()],
+        "the declared receipts add exactly one package file (all added: {added:?})"
+    );
+    assert!(
+        added
+            .iter()
+            .all(|path| path.ends_with(".html") || path.as_str() == "csharp/src/Incoming.g.cs"),
+        "only reference pages may accompany the receipt helpers: {added:?}"
     );
     assert!(!control.contains_key("csharp/src/Incoming.g.cs"));
     assert!(!emptied.contains_key("csharp/src/Incoming.g.cs"));

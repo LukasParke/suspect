@@ -181,6 +181,7 @@ pub struct PaginationPlan {
     pub error_type: String,
     control_failure: String,
     advance_failure: String,
+    /// Emittable paginated operations, in the shared outcome's order.
     pub operations: Vec<PaginationOperation>,
 }
 

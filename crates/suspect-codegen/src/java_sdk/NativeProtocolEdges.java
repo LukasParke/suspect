@@ -89,8 +89,13 @@ public final class NativeProtocolEdges {
         try (var client = new Client(options(transport).documentUrl(URI.create("https://docs.example.test/specs/openapi.json")).serverName("regional").build())) {
             client.serverChoice(RequestOptions.builder().serverIndex(0).build());
             check(transport.requests.getLast().uri().equals("https://docs.example.test/v1/server"), "per-call index did not override default name");
+            // ADR 0035: a source-declared plain-HTTP server keeps its scheme.
+            client.serverChoice(RequestOptions.builder().serverIndex(2).build());
+            check(transport.requests.getLast().uri().equals("http://plain.example.test/v1/server"), "declared HTTP server not honored");
         }
-        try (var client = new Client(options(transport).serverUrl(URI.create("https://münich.example.test/base")).build())) {
+        // ADR 0035: a server URL is ASCII; a Unicode host needs its IDNA spelling.
+        try { options(transport).serverUrl(URI.create("https://münich.example.test/base")).build(); throw new AssertionError("non-ASCII server host accepted"); } catch (IllegalArgumentException expected) { }
+        try (var client = new Client(options(transport).serverUrl(URI.create("https://xn--mnich-kva.example.test/base")).build())) {
             client.unicodePath();
             check(transport.requests.getLast().uri().equals("https://xn--mnich-kva.example.test/base/snow/%E9%9B%AA/%F0%9F%98%80"), "Unicode host/path URI");
         }

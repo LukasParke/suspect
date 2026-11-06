@@ -39,11 +39,10 @@ fn load(path: &Path) -> Arc<Contract> {
     );
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(path).unwrap()).unwrap())
 }
-fn openrouter() -> Arc<Contract> {
-    let base = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    load(&base.join("projects/docs/openapi/openapi.yaml"))
+/// The contract of the pinned OpenRouter document, or `None` (after
+/// printing a skip message).
+fn openrouter() -> Option<Arc<Contract>> {
+    Some(load(&suspect_codegen::toolchain::openrouter_spec()?))
 }
 fn config() -> SdkConfig {
     SdkConfig {
@@ -94,10 +93,24 @@ fn checked(command: &mut Command, root: &Path) -> std::process::Output {
     );
     output
 }
-fn tool(variable: &str, fallback: &str) -> PathBuf {
-    std::env::var_os(variable)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| fallback.into())
+/// `cmake`, the C++ compiler (`clang++`) or `doxygen`, resolved by
+/// `suspect_codegen::toolchain` (which honours the `SUSPECT_CPP_*`
+/// overrides). Each native test gates on [`cpp_tools`] first.
+fn tool(_variable: &str, fallback: &str) -> PathBuf {
+    let id = if fallback == "clang++" {
+        "cxx"
+    } else {
+        fallback
+    };
+    suspect_codegen::toolchain::resolve_path(id)
+        .unwrap_or_else(|| panic!("{id} is gated by cpp_tools()"))
+}
+/// Whether CMake, a C++20 compiler and Doxygen are available: skips (after
+/// the toolchain's message), or panics under `SUSPECT_REQUIRE_NATIVE`.
+fn cpp_tools() -> bool {
+    ["cmake", "cxx", "doxygen"]
+        .iter()
+        .all(|id| suspect_codegen::toolchain::require(id).is_some())
 }
 
 fn cpp_string(value: &str) -> String {
@@ -201,7 +214,12 @@ fn consumer(root: &Path, package: &str, text: &str) -> PathBuf {
 #[test]
 #[ignore = "actual OpenRouter source, installed branded C++ env factory, controlled source-default HTTPS requests"]
 fn native_openrouter_credential_env_snapshot_and_explicit_precedence() {
-    let contract = openrouter();
+    if !cpp_tools() {
+        return;
+    }
+    let Some(contract) = openrouter() else {
+        return;
+    };
     let config = SdkConfig {
         credential_env: Some(policy(&[("apiKey", "OPENROUTER_API_KEY")])),
         ..config()
@@ -358,7 +376,9 @@ fn credential_env_binds_native_declarations_and_reserves_only_configured_helpers
 #[test]
 #[ignore = "actual OpenRouter source generation/no-policy/canary receipt; no native or account calls"]
 fn actual_openrouter_credential_env_generation_contract() {
-    let contract = openrouter();
+    let Some(contract) = openrouter() else {
+        return;
+    };
     let names = ["getCurrentKey", "getCredits"];
     let plain = selected_plan(contract.clone(), &names, config());
     assert!(plain.credential_env().is_none());
@@ -438,6 +458,9 @@ fn actual_openrouter_credential_env_generation_contract() {
 #[test]
 #[ignore = "C++ env OR/AND/anonymous/API-key/alias and core-only construction controls"]
 fn native_credential_env_security_and_portable_controls() {
+    if !cpp_tools() {
+        return;
+    }
     let root = root("security-");
     let plan = synthetic_plan(&root, true);
     package(&plan, &root);

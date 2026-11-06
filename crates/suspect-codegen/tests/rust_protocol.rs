@@ -497,7 +497,7 @@ fn checked(command: &mut Command, retained: &Path) {
     );
 }
 fn cargo(mode: &str, manifest: &Path, target: &Path) -> Command {
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     command
         .args([mode, "--offline", "--quiet", "--manifest-path"])
         .arg(manifest)
@@ -1093,7 +1093,12 @@ async fn native_server_selection_relative_document_base_and_variable_guards(){
     let (client,seen,_)=mock(204,None,vec![]);client.servers_default().await.unwrap();assert_eq!(seen.lock().unwrap()[0].url,"https://demo.example.test/v2/servers");
     let (client,seen,_)=mock(204,None,vec![]);let client=client.with_options(ClientOptions{server_variables:std::collections::BTreeMap::from([("tenant".into(),"customer".into()),("port".into(),"8443".into()),("basePath".into(),"v3".into())]),..Default::default()});client.servers_default().await.unwrap();assert_eq!(seen.lock().unwrap()[0].url,"https://customer.example.test:8443/v3/servers");
     let (client,seen,_)=mock(204,None,vec![]);let client=client.with_options(ClientOptions{server_index:Some(1),document_url:Some("https://docs.example.test/specs/openapi.json".into()),..Default::default()});client.servers_default().await.unwrap();assert_eq!(seen.lock().unwrap()[0].url,"https://docs.example.test/api/servers");
+    // ADR 0035: a declared plain-HTTP server keeps its scheme; a non-loopback HTTP override needs the opt-in.
     let (client,seen,_)=mock(204,None,vec![]);client.http_default().await.unwrap();assert_eq!(seen.lock().unwrap()[0].url,"http://api.example.test/base/http");
+    let (client,seen,_)=mock(204,None,vec![]);assert!(client.with_options(ClientOptions{server_url:Some("http://api.example.test/base".into()),..Default::default()}).http_default().await.is_err());assert!(seen.lock().unwrap().is_empty());
+    let (client,seen,_)=mock(204,None,vec![]);client.with_options(ClientOptions{server_url:Some("http://api.example.test/base".into()),allow_insecure_http:true,..Default::default()}).http_default().await.unwrap();assert_eq!(seen.lock().unwrap()[0].url,"http://api.example.test/base/http");
+    for (server_url,expected) in [("https://api.example.test/a/%2Fkeep//b","https://api.example.test/a/%2Fkeep//b/http"),("http://127.0.0.1:8080/a","http://127.0.0.1:8080/a/http")]{let (client,seen,_)=mock(204,None,vec![]);client.with_options(ClientOptions{server_url:Some(server_url.into()),..Default::default()}).http_default().await.unwrap();assert_eq!(seen.lock().unwrap()[0].url,expected);}
+    for server_url in ["https://api.example.test/a/../b","https://api.example.test/./b","https://api.example.test:0/a","http://localhost.example.test/a"]{let (client,seen,_)=mock(204,None,vec![]);assert!(client.with_options(ClientOptions{server_url:Some(server_url.into()),..Default::default()}).http_default().await.is_err());assert!(seen.lock().unwrap().is_empty());}
     for options in [ClientOptions{server_index:Some(1),..Default::default()},ClientOptions{server_index:Some(5),..Default::default()},ClientOptions{server_variables:std::collections::BTreeMap::from([("port".into(),"1234".into())]),..Default::default()},ClientOptions{server_variables:std::collections::BTreeMap::from([("typo".into(),"x".into())]),..Default::default()}]{let (client,seen,_)=mock(204,None,vec![]);assert!(client.with_options(options).servers_default().await.is_err());assert!(seen.lock().unwrap().is_empty());}
 }
 

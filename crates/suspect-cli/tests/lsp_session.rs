@@ -1989,10 +1989,11 @@ fn render_sdk_tracks_the_live_buffer_through_incremental_edits() {
 fn the_project_manifest_drives_the_editor_lint_battery() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ws = Workspace::build(dir.path());
-    let editor = Editor::start(&ws.root, editor_capabilities());
 
     // A committed manifest turning a rule OFF and setting a floor: the
-    // battery must honor both without any client configuration.
+    // battery must honor both without any client configuration. Written
+    // before the editor starts: the server reads committed files at
+    // initialization (mid-session edits arrive as watched-file events).
     std::fs::write(
         ws.root.join("suspect.project.json"),
         r#"{
@@ -2001,6 +2002,7 @@ fn the_project_manifest_drives_the_editor_lint_battery() {
         }"#,
     )
     .expect("manifest");
+    let editor = Editor::start(&ws.root, editor_capabilities());
 
     let (path, text) = (
         &ws.openapi,
@@ -2101,7 +2103,6 @@ fn manifest_design_off_drops_api_design_findings_not_document_ones() {
     // is about the manifest alone. Remove it BEFORE the editor starts —
     // the editor loads configuration once at initialization.
     std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
-    let editor = Editor::start(&ws.root, editor_capabilities());
     std::fs::write(
         ws.root.join("suspect.project.json"),
         r#"{
@@ -2110,6 +2111,7 @@ fn manifest_design_off_drops_api_design_findings_not_document_ones() {
         }"#,
     )
     .expect("manifest");
+    let editor = Editor::start(&ws.root, editor_capabilities());
 
     let path = design_document(&ws.root);
     let text = std::fs::read_to_string(&path).expect("read");
@@ -2127,6 +2129,54 @@ fn manifest_design_off_drops_api_design_findings_not_document_ones() {
             .iter()
             .any(|(code, _)| code == "operation-operationId"),
         "a document-class finding must survive lint.design: off — got {findings:?}"
+    );
+}
+
+#[test]
+fn a_manifest_edited_mid_session_reloads_the_lint_policy() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ws = Workspace::build(dir.path());
+    std::fs::remove_file(&ws.config).expect("remove .suspect.yaml");
+    let editor = Editor::start(&ws.root, editor_capabilities());
+    let path = design_document(&ws.root);
+    let text = std::fs::read_to_string(&path).expect("read");
+    editor.open(&path, &text);
+    let uri = url_of(&path);
+    let design = |findings: &[(String, i64)]| {
+        findings
+            .iter()
+            .any(|(code, _)| code == "security-server-https-only")
+    };
+    let before = pull_findings(&editor, &uri);
+    assert!(design(&before), "no manifest yet — got {before:?}");
+
+    let manifest = ws.root.join("suspect.project.json");
+    std::fs::write(
+        &manifest,
+        r#"{"entry": "design.yaml", "lint": {"design": "off"}}"#,
+    )
+    .expect("manifest");
+    editor.notify(
+        "workspace/didChangeWatchedFiles",
+        serde_json::json!({"changes": [{"uri": url_of(&manifest), "type": 1}]}),
+    );
+    // The reload is a notification; poll until the new policy answers.
+    let mut after = pull_findings(&editor, &uri);
+    for _ in 0..20 {
+        if !design(&after) {
+            break;
+        }
+        after = pull_findings(&editor, &uri);
+    }
+    assert!(
+        !design(&after),
+        "the edited manifest was not reloaded — got {after:?}"
+    );
+    assert!(
+        after
+            .iter()
+            .any(|(code, _)| code == "operation-operationId"),
+        "document findings survive the reload — got {after:?}"
     );
 }
 

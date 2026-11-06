@@ -76,9 +76,9 @@ fn main() -> Result<(), String> {
     );
 
     // --- R8: reverse engineering on our own gateway source ---
-    let routes = suspect_reverse::extract_from_tree(std::path::Path::new(
-        "/home/luke/github/suspect/crates/suspect-gateway/src",
-    ));
+    let gateway_src =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../suspect-gateway/src");
+    let routes = suspect_reverse::extract_from_tree(&gateway_src);
     println!(
         "reverse: {} routes extracted from gateway source",
         routes.len()

@@ -1,13 +1,13 @@
 //! Security and wire-fidelity regressions for the generated Rust HTTP stack,
 //! through generated clients over custom transports (generated-package ->
 //! native consumer seam). Native tests are opt-in like tests/rust_http.rs:
-//! Main runs `cargo test --test rust_http_security -- --ignored`.
+//! Main runs `cargo test --test rust rust_http_security:: -- --ignored`.
 //!
 //! Server path prefixes are retained; standard authority case/default-port
 //! normalization preserves identity. Whitespace and route-changing forms fail.
 
 use serde_json::{Value, json};
-use std::{path::Path, process::Command, sync::Arc};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::rust_http::{HttpConfig, HttpPlan, PackageConfig, emit_http, plan_http};
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
@@ -70,7 +70,7 @@ fn native(plan: &HttpPlan, source: &str) {
     } else {
         "../../target/native-rust-http-security"
     });
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     command
         .args(["test", "--offline", "--quiet", "--manifest-path"])
         .arg(consumer.join("Cargo.toml"))

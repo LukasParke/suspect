@@ -405,7 +405,20 @@ fn html_coverage(package: &Path, language: &str, hostile_prose: bool) {
     let bindings: Value =
         serde_json::from_slice(&std::fs::read(package.join("docs/source-bindings.json")).unwrap())
             .unwrap();
-    let html = std::fs::read_to_string(package.join("docs/_build/html/api.html")).unwrap();
+    // The API reference is `api.html` plus the bounded per-group pages under
+    // `api/` (doc_split); a symbol's anchor lives on its group page.
+    let built = package.join("docs/_build/html");
+    let mut html = std::fs::read_to_string(built.join("api.html")).unwrap();
+    if let Ok(pages) = std::fs::read_dir(built.join("api")) {
+        let mut pages: Vec<_> = pages.map(|entry| entry.unwrap().path()).collect();
+        pages.sort();
+        for page in pages
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "html"))
+        {
+            html.push_str(&std::fs::read_to_string(page).unwrap());
+        }
+    }
     let coverage: Value = serde_json::from_slice(
         &std::fs::read(package.join("docs/_build/html/coverage.json")).unwrap(),
     )
@@ -668,15 +681,9 @@ fn go_docs_and_generated_samples_are_native_executable_artifacts() {
 #[test]
 #[ignore = "requires the tracked OpenRouter corpus and native Python/Go/Sphinx/mypy tools"]
 fn tracked_five_operation_docs_and_example_artifacts_build_natively() {
-    let source = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(
-                std::env::var_os("OPENROUTER_WEB_ROOT")
-                    .expect("set OPENROUTER_WEB_ROOT or SUSPECT_OPENROUTER_YAML"),
-            )
-            .join("projects/docs/openapi/openapi.yaml")
-        });
+    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let contract = contract(&source);
     let wanted = [
         "getCredits",

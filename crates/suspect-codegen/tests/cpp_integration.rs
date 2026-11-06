@@ -1189,3 +1189,42 @@ fn cpp_session_has_zero_unchanged_compiles_renders_or_owned_writes() {
     assert!(paths.iter().all(|path| path.starts_with("cpp/")));
     assert_eq!(document["openapi"], "3.1.0");
 }
+
+/// Every Markdown page the split reference links to is a Doxygen input:
+/// `WARN_AS_ERROR` turns each `[..](operations.md)` link to a page outside
+/// `INPUT` into an unresolved-`\ref` failure of the `sdk_docs` target.
+#[test]
+fn doxygen_inputs_cover_every_emitted_markdown_page() {
+    let fixture = Fixture::new(&document());
+    let contract = fixture.load();
+    let selected = selected(&contract);
+    let files = backend::generate(contract, &selected, &target()).unwrap();
+    let doxyfile = &files
+        .iter()
+        .find(|file| file.path == "cpp/Doxyfile")
+        .unwrap()
+        .content;
+    let input = doxyfile
+        .lines()
+        .find_map(|line| line.strip_prefix("INPUT = "))
+        .unwrap();
+    let roots: Vec<&str> = input
+        .split('"')
+        .filter_map(|entry| entry.split_once("/").map(|(_, relative)| relative))
+        .filter(|relative| !relative.is_empty())
+        .collect();
+    let pages: Vec<&str> = files
+        .iter()
+        .filter_map(|file| file.path.strip_prefix("cpp/"))
+        .filter(|path| path.ends_with(".md"))
+        .collect();
+    assert!(pages.iter().any(|page| page.starts_with("docs/operations")));
+    for page in pages {
+        assert!(
+            roots
+                .iter()
+                .any(|root| page == *root || page.starts_with(&format!("{root}/"))),
+            "{page} is not under a Doxygen INPUT ({input})"
+        );
+    }
+}

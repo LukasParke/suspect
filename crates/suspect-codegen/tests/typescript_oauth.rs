@@ -3,8 +3,6 @@
 //! compilation, and native node behavior against a local `node:http` fake
 //! authorization server.
 
-#![cfg(feature = "http-protocol")]
-
 use std::{collections::BTreeMap, process::Command, sync::Arc};
 
 use serde_json::{Value, json};

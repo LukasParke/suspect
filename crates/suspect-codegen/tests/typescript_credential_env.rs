@@ -1,7 +1,5 @@
 //! Explicit environment defaults through source-bound TypeScript SDK plans.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -105,6 +103,7 @@ fn hashes(files: &[OutFile]) -> BTreeMap<String, String> {
 #[test]
 fn no_policy_http_package_keeps_its_baseline_bytes() {
     let files = package(&plan(load_at(fixture(), ENTRY), HttpConfig::expanded()));
+    // http/security.ts, http/types.ts and http.md pins updated for the ADR 0035 server URL policy (declared scheme kept, allowInsecureHttp opt-in).
     let expected: BTreeMap<String, String> = serde_json::from_str(include_str!(
         "fixtures/typescript-credential-env-no-policy-v1.json"
     ))
@@ -308,14 +307,17 @@ fn installed(label: &str, planned: &HttpPlan, types: &str, script: &str) {
         serde_json::to_vec_pretty(planned.credential_env().unwrap()).unwrap(),
     )
     .unwrap();
-    let selected_node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(selected_node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let executable = checked(
         Command::new(selected_node).args(["--print", "process.execPath"]),
         &root,
     );
     let node = PathBuf::from(String::from_utf8(executable.stdout).unwrap().trim());
-    let node24 = std::env::var_os("SUSPECT_NODE24_BIN")
-        .expect("set SUSPECT_NODE24_BIN for required Node 24 execution");
+    let Some(node24) = suspect_codegen::toolchain::pinned_node(24) else {
+        return;
+    };
     for (node, major) in [(node.as_os_str(), "22"), (node24.as_os_str(), "24")] {
         let version = checked(
             Command::new(node).args(["--print", "process.versions.node.split('.')[0]"]),
@@ -555,11 +557,8 @@ try{
 }finally{Object.defineProperty(processObject,'env',environmentDescriptor);globalThis.fetch=originalFetch;}
 "#;
 
-fn openrouter_plan() -> HttpPlan {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../openrouter-web"));
-    let path = root.join("projects/docs/openapi/openapi.yaml");
+fn openrouter_plan() -> Option<HttpPlan> {
+    let path = suspect_codegen::toolchain::openrouter_spec()?;
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())
@@ -613,7 +612,7 @@ fn openrouter_plan() -> HttpPlan {
             .path(),
         "/key"
     );
-    plan
+    Some(plan)
 }
 
 fn openrouter_responses(plan: &HttpPlan) -> String {
@@ -640,7 +639,9 @@ fn openrouter_responses(plan: &HttpPlan) -> String {
 #[test]
 #[ignore = "requires tracked OpenRouter, pinned Node 22/24, offline TypeScript 5.5/5.9 and TypeDoc"]
 fn installed_openrouter_current_key_uses_source_bearer_env_and_default_https() {
-    let plan = openrouter_plan();
+    let Some(plan) = openrouter_plan() else {
+        return;
+    };
     assert!(package(&plan).iter().all(|file| {
         !file
             .content
@@ -717,14 +718,18 @@ fn browser_environment_absence_preserves_explicit_and_anonymous_source_clients()
             ..HttpConfig::expanded()
         },
     );
-    let actual = openrouter_plan();
+    let Some(actual) = openrouter_plan() else {
+        return;
+    };
     for (directory, planned) in [("synthetic", &synthetic), ("openrouter", &actual)] {
         let destination = root.join(directory);
         std::fs::create_dir(&destination).unwrap();
         suspect_codegen::write_files(&package(planned), &destination).unwrap();
         let compiler = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tools/typescript-docs/node_modules/typescript/bin/tsc");
-        let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+        let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+            return;
+        };
         checked(
             Command::new(node)
                 .arg(compiler)
@@ -739,7 +744,9 @@ fn browser_environment_absence_preserves_explicit_and_anonymous_source_clients()
         include_str!("fixtures/typescript-credential-env-browser.mjs"),
     )
     .unwrap();
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let result = checked(
         Command::new(node).current_dir(&root).arg("browser.mjs"),
         &root,

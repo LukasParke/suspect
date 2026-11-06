@@ -48,13 +48,30 @@ The initial dialects are the standard OAS 3.1 base dialect and JSON Schema
 | References | Strict URI-reference syntax followed by Contract-indexed static local, external, recursive and anchored `$ref` edges, including sibling assertions |
 | Annotations | Retained source prose, examples, defaults, content annotations and OAS metadata; annotation-mode formats; unknown modern annotations |
 
-OAS 3.0 and custom dialects are explicitly unsupported. Dynamic references,
-embedded `$id` resources, custom vocabularies, pattern properties, lookarounds,
-backreferences, Unicode property escapes, conditionals,
+Admission is a closed dialect set
+([ADR 0016](adr/0016-closed-dialect-set.md)):
+
+| Input | Admission |
+| --- | --- |
+| OAS 3.0.x | Version-specific Schema Object rules, lowered to the same static subset |
+| OAS 3.1.x standard base dialect | The 2020-12 static subset plus explicitly inert forms |
+| OAS 3.2.x standard base dialect | Same assertion vocabulary; version-aware OAS annotation declarations |
+| Explicit JSON Schema 2020-12 | Same static subset, including explicit null, Boolean schemas and schema `$ref` siblings |
+| Other/custom dialects | Located `Unsupported` error; vocabulary semantics are not guessed |
+
+Dynamic references, embedded `$id` resources, custom vocabularies, pattern
+properties, lookarounds, backreferences, Unicode property escapes, conditionals,
 dependency applicators, `contains`, and unevaluated applicators reject
 compilation in this initial program. Format assertion mode also rejects a
 closure that uses `format`. These are explicit capability limits rather than
-approximations or successful no-ops.
+approximations or successful no-ops. The additive, separately versioned
+programs lift some of them
+([ADR 0020](adr/0020-validation-programs-are-versioned-and-frozen.md)):
+`compile_v2` admits conditionals, dependency applicators, `contains`, pattern
+properties, `propertyNames` and unevaluated applicators
+([SDK-SCHEMA-APPLICATORS.md](SDK-SCHEMA-APPLICATORS.md)), and `compile_v3`
+admits embedded resources and dynamic references
+([SDK-SCHEMA-RESOURCES.md](SDK-SCHEMA-RESOURCES.md)).
 
 Existing `ExactNumber`, pre-factored divisors and count bounds supply numeric
 semantics. One structural-equality algorithm adapts both source nodes and
@@ -77,10 +94,8 @@ queue attempts, state processing and range comparisons all consume the shared
 evaluation allowance; backtracking is not used.
 
 The generated TypeScript executor uses the same program and work accounting.
-All four actual OpenRouter chat pattern schemas have source-bound and owned
-coverage. Native tests compare admitted expressions with Node's Unicode RegExp;
-an independent review compared 411 admitted patterns against 19 strings without
-an accepted semantic mismatch. The complete official pattern file is not a
+The OpenRouter chat pattern schemas have source-bound and owned coverage.
+Native tests compare admitted expressions with Node's Unicode RegExp. The complete official pattern file is not a
 passing conformance claim: it includes unsupported Unicode property escapes.
 
 One representation boundary remains explicit: JavaScript strings and the
@@ -90,7 +105,7 @@ a source-located `evaluationFailure`; it does not report ordinary invalidity or
 throw outside validation. Full cross-language surrogate representation remains
 unresolved.
 
-## Acceptance evidence
+## Tests
 
 The public tests exercise source-lifetime independence, concurrent validation,
 strict root IDs, external recursive identity, exact arithmetic, scoped
@@ -100,17 +115,18 @@ dedicated OpenRouter test uses the tracked `ChatChoice.index` and
 instances. Unrelated upstream defects must not be hidden or rewritten to
 compile these selected closures.
 
-The owned test module also runs the 176 pinned official `enum`, `const`, and
+The owned test module also runs the pinned official `enum`, `const`, and
 `uniqueItems` cases through Contract and OwnedCompiler. Compilation failures
 and incomplete evaluation always fail those tests, including cases expected
 to be invalid. See `crates/suspect-schema/tests/conformance/README.md` for the
 official suite revision and license.
 
-The five native SDK profiles compile their selected codec closures through
-this owned boundary before emission. Model-only APIs retain explicit codec
-obligations. Native runtime details are documented for
-[TypeScript](SDK-TYPESCRIPT-CODECS.md), [Rust](SDK-RUST-MODEL-PLAN.md#validated-model-codecs),
-[Python](SDK-PYTHON-VALIDATION.md), [Go](SDK-GO-VALIDATION.md) and
+All twelve native SDK profiles compile their selected codec closures through
+this owned boundary before emission
+([ADR 0019](adr/0019-owned-validation-program.md)). Model-only APIs retain
+explicit codec obligations. Native runtime details are documented in each
+language guide, for example [TypeScript](SDK-TYPESCRIPT-HTTP.md),
+[Rust](SDK-RUST-HTTP.md), [Python](SDK-PYTHON-HTTP.md), [Go](SDK-GO-HTTP.md) and
 [Swift](SDK-SWIFT.md#portable-validation-and-resource-policy).
 
 ## Experimental portable program
@@ -208,15 +224,24 @@ numeric-work allowance equal to `max_evaluation_steps`. Codec conversion uses
 private `validate_at`/`equal_at` sessions so branch/literal trials share counters
 and carry their own source/instance locations, not the last evaluated root.
 
-Native stress verification found and repaired recursive debug-frame growth.
 Scalar formatting/arithmetic/pattern work and individual recursive opcode work
-now live outside the shared dispatch frame. All nine recursive instruction
+live outside the shared dispatch frame, so all nine recursive instruction
 families complete at the 512 ceiling and fail explicitly at 513 on default Rust
 threads, with `RUST_MIN_STACK` removed. This is not universal CPU/heap accounting
 or a guarantee for caller-selected undersized thread stacks.
 
-`tests/rust_validation.rs` contains checked-program admission, differential
+`crates/suspect-codegen/tests/rust_validation.rs` contains checked-program admission, differential
 numeric/applicator/pattern outcomes, logical resource failure, source/path and
-tracked OpenRouter closure consumers. Combined native Rust verification is
-recorded in `target/sdk-glm-rust-native-tests.log`. Rust string representation
-retains the existing lone-surrogate boundary described in [Rust JSON](SDK-RUST-JSON.md).
+tracked OpenRouter closure consumers. Tests that build the emitted runtime are
+`--ignored` and need native Cargo; the OpenRouter closure tests (here and in
+`suspect-schema`) also need `OPENROUTER_WEB_ROOT`:
+
+```sh
+cargo test -p suspect-schema --test owned
+cargo test -p suspect-codegen --test rust rust_validation:: -- --include-ignored
+```
+
+Rust string representation
+retains the existing lone-surrogate boundary described in
+[Rust HTTP](SDK-RUST-HTTP.md) and
+[ADR 0017](adr/0017-exact-json-in-generated-sdks.md).

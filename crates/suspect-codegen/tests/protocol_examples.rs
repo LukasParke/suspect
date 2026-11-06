@@ -1,4 +1,3 @@
-#![cfg(feature = "http-protocol")]
 //! Source examples use real protocol slots, without another narrow admission pass.
 
 use serde_json::{Value, json};

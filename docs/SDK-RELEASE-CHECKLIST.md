@@ -1,12 +1,9 @@
 # SDK release checklist
 
 The publication runbook for **one generated SDK package**, one backend at a
-time. Every command and file name below was verified against this tree on
-2026-09-15; package metadata claims come from an empirical twelve-backend
-generation run (methodology in [§7](#7-how-this-checklist-was-verified)). It
-complements the program plan
-([SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) M9) and the
-capability evidence in [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
+time. Package metadata claims come from generating one small package per
+backend (§3). It complements the user guide in [SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md)
+and the capability evidence in [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md).
 
 One hard rule governs the program: the pinned byte fixtures across all twelve
 backends must stay valid — publishable packages may only change through
@@ -21,13 +18,14 @@ release.
 ### Source spec
 
 - An OpenAPI 3.0/3.1/3.2 document (2.0 is detected but is not an SDK frontend
-  yet — see [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md)), loaded through
+  yet — see [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md)), loaded through
   the source-addressed `Contract` with its full reference closure.
-- The single-target CLI takes `--spec FILE` or a pinned-source `--pins`
-  manifest. A frozen-source release must pin (`suspect gen api.yaml
-  --manifest FILE` captures pins) so regeneration reproduces the same
-  contract bytes; `crates/suspect-codegen/tests/pinned_generation.rs` gates
-  pin-driven sessions.
+- The single-target CLI takes a positional `SPEC` or a pinned-source `--pins`
+  manifest (populate its cache with `suspect acquire`; see
+  [ADR 0013](adr/0013-remote-references-are-pinned.md)). A frozen-source
+  release must pin so regeneration reproduces the same contract bytes;
+  `crates/suspect-codegen/tests/pinned_generation.rs` gates pin-driven
+  sessions.
 - Session-based generation (`suspect codegen-session --config session.json`)
   takes a JSON configuration with `spec` **or** `pins`, plus `targets`,
   `operation_ids`, `credential_env`, and `sdk_defaults`
@@ -35,13 +33,15 @@ release.
 
 ### `sdk_defaults` (the golden-defaults policy)
 
-- **Available through the session JSON `sdk_defaults` field and the library
-  `GenerationOptions.sdk_defaults` — not through `suspect codegen` flags.**
-  The single-target `codegen` command forwards only compatibility profiles
-  today (`crates/suspect-cli/src/commands/codegen_cmd.rs`); a package with
-  pagination helpers, the automatic `<ENV_PREFIX>_API_KEY` convention, or
-  OAuth lifecycle code must be generated via a session JSON (or the library
-  API `suspect_codegen::backend::generate_with_options`).
+- **Available through the session JSON `sdk_defaults` field, the
+  single-target `suspect codegen --defaults FILE` options file (a JSON
+  document holding `compatibility_profiles`, `credential_env` and
+  `sdk_defaults`, the same schema `codegen-session` accepts;
+  `crates/suspect-cli/src/commands/codegen_cmd.rs`), and the library
+  `GenerationOptions.sdk_defaults`
+  (`suspect_codegen::backend::generate_with_options`).** Without one of these,
+  a package has no pagination helpers, `<ENV_PREFIX>_API_KEY` convention, or
+  OAuth lifecycle code.
 - The policy is `sdk_defaults` v1: closed fields, unknown values are errors,
   every accepted value participates in the generation fingerprint. See the
   field reference in [SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md) §1.
@@ -60,7 +60,7 @@ Identity mistakes are the cheapest kind to catch: run
 resulting attribution identity (§2) before publishing, because it is visible
 on the wire in every request.
 
-## 2. Pre-publish gates (all exist today)
+## 2. Pre-publish gates
 
 Run from the repository root. Everything is `cargo test --locked --offline`
 unless a gate needs its native toolchain; suites degrade to skipped/ignored
@@ -68,20 +68,18 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### Attribution (`ua/v1`)
 
-- `cargo test -p suspect-codegen --test sdk_attribution` — compiles the
+- `cargo test -p suspect-codegen --test shared` — compiles the
   attribution descriptor and runtime for TypeScript, Python, Go and Rust
   packages (suspect version, SDK identity, spec version, language tag).
-- `cargo test -p suspect-codegen --test swift_attribution --test java_attribution
-  --test kotlin_attribution --test csharp_attribution --test ruby_attribution
-  --test php_attribution --test dart_attribution --test cpp_attribution` —
+- `cargo test -p suspect-codegen _attribution::` —
   the eight remaining per-language attribution suites (options, sentinel
   packages without a descriptor, runtime resolution).
-- `cargo test -p suspect-codegen --test sdk_compatibility_attribution` —
+- `cargo test -p suspect-codegen --test shared` —
   attribution and `sdk_defaults` participate in compatibility capture.
 
 ### Pagination (zero-config detection + native behavioral gates)
 
-- Planner/explanations: `cargo test -p suspect-codegen --test sdk_pagination`.
+- Planner/explanations: `cargo test -p suspect-codegen --test shared`.
 - One native suite per backend, each with behavioral tests that execute the
   emitted helpers where a toolchain exists on the host:
   `typescript_pagination.rs`, `python_pagination.rs`, `go_pagination.rs`,
@@ -92,7 +90,7 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### OAuth lifecycle
 
-- Planner: `cargo test -p suspect-codegen --test sdk_oauth_plan`.
+- Planner: `cargo test -p suspect-codegen --test shared`.
 - Native suites: `typescript_oauth.rs`, `python_oauth.rs`, `go_oauth.rs`,
   `rust_oauth.rs`, `swift_oauth.rs`, `java_oauth.rs`, `kotlin_oauth.rs`,
   `csharp_oauth.rs`, `ruby_oauth.rs`, `php_oauth.rs`, `dart_oauth.rs`,
@@ -101,7 +99,7 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### Typed SSE
 
-- Plan compilation: `cargo test -p suspect-codegen --test sdk_stream_plan`.
+- Plan compilation: `cargo test -p suspect-codegen --test shared`.
 - Native suites: `typescript_stream_typed.rs`, `python_stream_typed.rs`,
   `go_stream_typed.rs`, `rust_stream_typed.rs`, `swift_stream_typed.rs`,
   `java_stream_typed.rs`, `kotlin_stream_typed.rs`, `csharp_stream_typed.rs`,
@@ -110,7 +108,7 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### Credential environment (byte-pinned)
 
-- Shared policy suite: `cargo test -p suspect-codegen --test credential_env`.
+- Shared policy suite: `cargo test -p suspect-codegen --test shared`.
 - One suite per backend, each pinning or recording emitted artifact bytes
   (SHA-256) with explicit no-policy byte-stability tests:
   `typescript_credential_env.rs`, `python_credential_env.rs`,
@@ -128,28 +126,45 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### Elimination gates
 
-Per [SDK-ELIMINATION-AUDIT.md](SDK-ELIMINATION-AUDIT.md) (which records the
-measured numbers and the honest defeats):
+Each backend is structured so an unused operation costs a consumer zero bytes
+([ADR 0029](adr/0029-unused-operations-cost-zero-bytes.md)). The gates build
+real consumers with the native toolchain and pin known retention as measured
+outcomes:
+
+| Backend | Mechanism | What is gated |
+| --- | --- | --- |
+| TypeScript | ESM subpath exports, conditional emission, pure-annotated lazy bindings | esbuild bundler, module-graph and launcher byte-identity gates |
+| Go | link-time dead-code elimination | `go build` consumer sizes and byte-identical additivity |
+| Rust | cargo feature gates (`http`), model-only default | `cargo build` consumer builds (zero-dependency model-only) |
+| Swift | AOT + linker `-dead_strip` | `swift build` debug/release consumers; per-operation retention is a recorded defeat |
+| Kotlin | per-operation classes + R8/JVM | `javap` consumer-unit byte identity and pom dependency set |
+| Java | per-operation classes + R8/JVM | `javap` consumer-unit byte identity and zero-dependency pom |
+| C# | IL trimming | `PublishTrimmed` removes unrelated operations; consumer references; zero `PackageReference` |
+| Dart | AOT tree shaking + zero-dependency pubspec | structural launcher byte identity and offline resolution; the AOT consumer gate is `#[ignore]`d |
+| C++ | `--gc-sections` / `-dead_strip` | `cmake`/`clang++` consumers: codec-only and unrelated-operation code shed; schema codec-data retention recorded |
+| PHP | conditional emission + autoload | Composer classmap and `get_included_files()` reachability |
+| Ruby | conditional emission + require | gemspec dependency set and `$LOADED_FEATURES` reachability |
 
 ```sh
-cargo test -p suspect-codegen --test typescript_elimination -- --nocapture
-cargo test -p suspect-codegen --test swift_elimination     -- --nocapture
-cargo test -p suspect-codegen --test cpp_elimination       -- --nocapture
-cargo test -p suspect-codegen --test java_elimination      -- --nocapture
-cargo test -p suspect-codegen --test kotlin_elimination    -- --nocapture
-cargo test -p suspect-codegen --test csharp_elimination    -- --nocapture
-cargo test -p suspect-codegen --test ruby_elimination      -- --nocapture
-cargo test -p suspect-codegen --test php_elimination       -- --nocapture
+cargo test -p suspect-codegen --test typescript typescript_elimination:: -- --nocapture
+cargo test -p suspect-codegen --test swift swift_elimination::     -- --nocapture
+cargo test -p suspect-codegen --test cpp cpp_elimination::       -- --nocapture
+cargo test -p suspect-codegen --test java java_elimination::      -- --nocapture
+cargo test -p suspect-codegen --test kotlin kotlin_elimination::    -- --nocapture
+cargo test -p suspect-codegen --test csharp csharp_elimination::    -- --nocapture
+cargo test -p suspect-codegen --test ruby ruby_elimination::      -- --nocapture
+cargo test -p suspect-codegen --test php php_elimination::       -- --nocapture
+cargo test -p suspect-codegen --test dart dart_elimination::      -- --nocapture
 ```
 
-Go and Rust are gated by the real `go build`/`cargo build` consumer
-measurements recorded in the audit; Dart's gate is mechanism-only pending a
-CI toolchain. Every per-language gate writes its machine-readable record to
-`target/tmp/<language>-elimination-report.json`.
+Go and Rust have no dedicated `*_elimination` suite; their rows are consumer
+build measurements. Every per-language gate writes its machine-readable record
+to `target/tmp/<language>-elimination-report.json` and keeps native artifacts
+under `target/sdk-<language>-elimination/`.
 
 ### Native costs
 
-- `cargo test --locked --offline -p suspect-codegen --test sdk_native_measurements`
+- `cargo test --locked --offline -p suspect-codegen --test shared`
   — the host/adversarial checks for the `repeated-v1` methodology. The
   actual native collection is the ignored entrypoint, run only with all six
   `SUSPECT_SDK_FULL_*` variables exported by the `sdk-full` runner (see
@@ -158,8 +173,8 @@ CI toolchain. Every per-language gate writes its machine-readable record to
 
 ### Determinism and drift
 
-- `cargo test -p suspect-codegen --test artifact_safety` and
-  `--test pinned_generation` — output sets are deterministic and
+- `cargo test -p suspect-codegen --test shared` and
+  `--test shared` — output sets are deterministic and
   source-pin-driven.
 - Regenerate the candidate and run the same generation with
   `suspect codegen --check --format json` (or `codegen-session --check`):
@@ -194,11 +209,9 @@ toolchain execution, or publishing
 
 ## 4. License and provenance in the emitted manifests
 
-Verified against the §3 generation run:
-
 - **License:** the only emitted license declaration is PHP's
   `"license": "proprietary"` in `composer.json`. No other backend's manifest
-  or README carries a license field today. Choosing and configuring the
+  or README carries a license field. Choosing and configuring the
   package license is a manual sign-off (§6); adding license metadata to the
   other eleven emitters is emitter work outside this checklist.
 - **Generator version** (`ua/v1` first token): compiled into every package's
@@ -260,24 +273,24 @@ by `tests/sdk_compatibility.rs`, `tests/sdk_compatibility_attribution.rs`,
 
 ## 6. Manual sign-offs that remain
 
-These are not automatable from this repository today; each is a human
+These are not automatable from this repository; each is a human
 check with a place to record the decision:
 
 1. **Toolchain pins.** Confirm the publishing host matches the maintained
    tiers in [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md) (Node 22/24,
    Python 3.11/3.14, Rust 1.88/stable, Go 1.23/1.27, Swift 6.0/6.3,
    JDK 21/25, .NET 8/10, Kotlin 2.4.20, Ruby 3.3/4.0, PHP 8.3/8.5,
-   Dart 3.9/3.13, Clang 21). CI-pending gates called out in
-   [SDK-ELIMINATION-AUDIT.md](SDK-ELIMINATION-AUDIT.md) (Rollup/Vite byte
-   gates, Java/Kotlin R8 shrink, Dart AOT, `sdk_defaults`-enabled Go/Rust
-   consumer gates) must either run in CI or be explicitly waived.
+   Dart 3.9/3.13, Clang 21). Elimination measurements not yet run in CI
+   (Rollup/Vite byte gates, Java/Kotlin R8 shrink, Dart AOT,
+   `sdk_defaults`-enabled Go/Rust consumer gates) must either run in CI or be
+   explicitly waived.
 2. **Registry accounts and publishing mechanics.** npm, PyPI, crates.io, Go
    module tagging, SwiftPM source hosting, RubyGems, NuGet, Maven Central,
    pub.dev, Packagist, and the C++ distribution choice each need an account,
    trusted publishing/2FA, and a first-publish path. Nothing in the repo
    performs publication — the generator emits packages only.
-3. **License decision.** Pick the license per package and record it; today
-   only PHP's manifest declares one (`proprietary`). This is an emitter
+3. **License decision.** Pick the license per package and record it; only
+   PHP's manifest declares one (`proprietary`). This is an emitter
    change if per-package licensing should be configurable.
 4. **Release-readiness promotion.** Manifests ship `releaseReady: false` /
    `status: "prototype"`; flipping to a release claim is a reviewed decision
@@ -290,32 +303,13 @@ check with a place to record the decision:
 7. **Reproducibility.** A second regeneration from the same frozen inputs
    (pinned source, same options) must be drift-free (`--check`).
 
-## 7. How this checklist was verified
-
-- Every gate command maps to an existing test file (listed with real paths);
-  `sdk_attribution`, `typescript_credential_env` (byte-pin test), and
-  `swift_attribution` were executed green during verification.
-- The §3/§4 inventory came from one throwaway Rust example under
-  `crates/suspect-codegen/examples/` that called
-  `backend::generate_with_options` for all twelve `Backend`s with a two-spec
-  fixture and `sdk_defaults`, writing every emitted file under
-  `target/sdk-release-packaging-verify/` (kept out of the tracked tree);
-  the example was deleted after the run and no generated byte outside
-  `target/` was touched.
-- Go module path / Maven coordinates enforcement and `import_name` refusals
-  were read from `crates/suspect-codegen/src/backend.rs` (the same rules the
-  §3 table states).
-
 ## References
 
 - [SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md) — user guide.
-- [SDK-GOLDEN-DEFAULTS-PLAN.md](SDK-GOLDEN-DEFAULTS-PLAN.md) — program plan,
-  M9 definition.
 - [SDK-CREDENTIAL-ENV.md](SDK-CREDENTIAL-ENV.md) — credential runtime
   semantics.
-- [SDK-OPENAPI-MATRIX.md](SDK-OPENAPI-MATRIX.md) — normative feature matrix.
-- [SDK-ELIMINATION-AUDIT.md](SDK-ELIMINATION-AUDIT.md) — elimination gates
-  and their CI-pending remainder.
+- [ADR 0029](adr/0029-unused-operations-cost-zero-bytes.md) — why unused
+  operations must cost zero bytes.
 - [SDK-NATIVE-COSTS.md](SDK-NATIVE-COSTS.md) — `repeated-v1` methodology and
   maintained toolchain tiers.
 - [SDK-CAPABILITIES.md](SDK-CAPABILITIES.md) — capability evidence matrix.

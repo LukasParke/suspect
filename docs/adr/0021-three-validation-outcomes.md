@@ -1,0 +1,3 @@
+# Validation has three outcomes, and evaluation failure is never inverted
+
+Validation returns `Valid`, `Invalid(findings)` or `EvaluationFailure(finding)`. `EvaluationFailure` means validity could not be decided: a numeric-byte, equality-step, evaluation-step or depth budget ran out, a cycle made no progress, or an unknown root was requested. It propagates unchanged through `not`, `if`, `anyOf`, `oneOf`, error caps and cached references; it never becomes a pass or a mismatch. With a boolean result, `not` over an exhausted check would report a valid instance, and a budget limit would look like a proven schema violation. Budgets are explicit and shared across trial branches. A zero budget allows no work, except `maxErrors`, where 0 means unlimited.

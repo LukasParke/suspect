@@ -7,55 +7,96 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Capability {
+    /// Operations without a (non-empty) `operationId`.
     UnnamedOperations,
+    /// Fixed methods beyond GET/POST/PUT/PATCH/DELETE (HEAD, OPTIONS, TRACE, QUERY).
     AdditionalMethods,
     /// Case-preserved `additionalOperations` tokens, including lowercase fixed
     /// spellings which transports such as Fetch might otherwise normalize.
     CustomMethods,
+    /// Plain `http://` server URLs; the default profile accepts only HTTPS.
     HttpServers,
+    /// Relative server URLs, including the implicit `/` default server.
     RelativeServers,
     /// Resolve relative server URLs using their declaring document's effective
     /// retrieval URL (or an explicit caller override), never its `$self`/`$id`.
     DocumentRelativeServers,
+    /// More than one server candidate for an operation.
     MultipleServers,
+    /// Server URL templates with `variables`.
     ServerVariables,
+    /// Undeclared, empty, or optional (`{}`) security requirements.
     AnonymousSecurity,
+    /// More than one security requirement alternative.
     SecurityAlternatives,
+    /// Requirement objects that combine several schemes at once.
     ConjunctiveSecurity,
+    /// HTTP `basic` authentication.
     HttpBasic,
+    /// `apiKey` schemes in a header, query, or cookie.
     ApiKeys,
+    /// `oauth2` schemes and their flows.
     OAuth2,
+    /// `openIdConnect` schemes.
     OpenIdConnect,
+    /// Role lists on non-OAuth security requirements (OAS 3.1+).
     SecurityRoles,
+    /// Parameter serializations other than simple path or form query values.
     ParameterStyles,
+    /// `in: header` parameters.
     HeaderParameters,
+    /// `in: cookie` parameters.
     CookieParameters,
+    /// `allowReserved` expansion of parameter values.
     ReservedParameters,
+    /// Parameters serialized through `content` instead of `schema`.
     ContentParameters,
+    /// `in: querystring` parameters (OAS 3.2).
     QuerystringParameters,
+    /// Form-encoded `in: querystring` parameters.
     QuerystringForm,
+    /// Status range keys such as `4XX`.
     RangeResponses,
+    /// `default` response keys.
     DefaultResponses,
     /// Valid absence of Operation.responses (OAS 3.1+). All actual statuses
     /// remain undeclared; no default success/body type is invented.
     UndeclaredResponses,
+    /// Bodies that declare more than one media type.
     MultipleMediaTypes,
+    /// Wildcard media ranges such as `text/*`.
     MediaRanges,
+    /// Media types with parameters such as `charset`.
     MediaTypeParameters,
+    /// JSON media other than exactly `application/json` (`+json` suffixes).
     StructuredJsonMedia,
+    /// JSON media without a schema.
     SchemaFreeJson,
+    /// Text bodies decoded as UTF-8 strings.
     TextBodies,
+    /// Opaque byte bodies.
     BinaryBodies,
+    /// Responses with no or empty `content`.
     UndeclaredResponseBody,
+    /// Declared response headers.
     ResponseHeaders,
+    /// Declared response links.
     ResponseLinks,
+    /// `application/x-www-form-urlencoded` bodies.
     FormBodies,
+    /// `multipart/*` bodies.
     MultipartBodies,
+    /// Per-part `encoding` objects, including part headers.
     PartEncodings,
+    /// Multipart bodies using `prefixEncoding`/`itemEncoding` (OAS 3.2).
     PositionalMultipart,
+    /// `text/event-stream` response streams.
     ServerSentEvents,
+    /// Line-delimited JSON streams.
     JsonLines,
+    /// OAS 3.0 documents; 3.1 is the baseline.
     OpenApi30,
+    /// OAS 3.2 documents.
     OpenApi32,
     /// The native codec profile understands canonical schema resource identity.
     SchemaResources,
@@ -164,6 +205,7 @@ impl CompatibilityProfile {
         Self::AllOfScopedModeV1,
     ];
 
+    /// Stable configuration name, identical to the serialized form.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -186,6 +228,7 @@ pub struct ByteLimits {
 }
 
 impl ByteLimits {
+    /// Limits for a whole body, one multipart part, and one stream item, in bytes.
     #[must_use]
     pub const fn new(body: u64, part: u64, stream_item: u64) -> Self {
         Self {
@@ -194,14 +237,17 @@ impl ByteLimits {
             stream_item,
         }
     }
+    /// Maximum bytes in one whole request or response body.
     #[must_use]
     pub const fn body(self) -> u64 {
         self.body
     }
+    /// Maximum bytes in one multipart part.
     #[must_use]
     pub const fn part(self) -> u64 {
         self.part
     }
+    /// Maximum bytes in one stream frame or line.
     #[must_use]
     pub const fn stream_item(self) -> u64 {
         self.stream_item
@@ -226,6 +272,7 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
+    /// Named adapter profile with exactly `enabled`, default limits and no profiles.
     #[must_use]
     pub fn for_adapter(
         adapter: impl Into<String>,
@@ -238,37 +285,45 @@ impl Capabilities {
             profiles: BTreeSet::new(),
         }
     }
+    /// Enable one more capability.
     #[must_use]
     pub fn with(mut self, capability: Capability) -> Self {
         self.enabled.insert(capability);
         self
     }
+    /// Replace the transport byte limits.
     #[must_use]
     pub fn with_limits(mut self, limits: ByteLimits) -> Self {
         self.limits = limits;
         self
     }
+    /// Opt in to one compatibility profile.
     #[must_use]
     pub fn with_profile(mut self, profile: CompatibilityProfile) -> Self {
         self.profiles.insert(profile);
         self
     }
+    /// Whether the adapter asserts `capability`.
     #[must_use]
     pub fn supports(&self, capability: Capability) -> bool {
         self.enabled.contains(&capability)
     }
+    /// Adapter profile name recorded in plans and captures.
     #[must_use]
     pub fn adapter(&self) -> &str {
         &self.adapter
     }
+    /// Every capability the adapter asserts.
     #[must_use]
     pub fn enabled(&self) -> &BTreeSet<Capability> {
         &self.enabled
     }
+    /// Transport byte limits.
     #[must_use]
     pub fn limits(&self) -> ByteLimits {
         self.limits
     }
+    /// Compatibility profiles the adapter opted in to.
     #[must_use]
     pub fn profiles(&self) -> &BTreeSet<CompatibilityProfile> {
         &self.profiles

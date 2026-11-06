@@ -1,6 +1,6 @@
 //! Native consumers of the exact JSON runtime emitted for generated codecs.
 
-use std::{path::Path, process::Command, sync::Arc};
+use std::{process::Command, sync::Arc};
 
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
@@ -198,17 +198,19 @@ assert.equal(stringifyJson(parseJson('null', {maxDepth:0}), {maxDepth:0}), 'null
 }
 
 #[test]
-#[ignore = "requires OPENROUTER_WEB_ROOT, native TypeScript and Node.js; missing inputs fail"]
+#[ignore = "requires the pinned OpenRouter spec inside its openrouter-web checkout, native TypeScript and Node.js"]
 fn tracked_openrouter_contract_documents_roundtrip_through_native_json_runtime() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .expect("set OPENROUTER_WEB_ROOT to the source checkout");
-    for relative in [
+    const DOCUMENTS: [&str; 4] = [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",
         "projects/docs/assets/provider-monitor-schema-v2.openapi.json",
         "packages/temporal/benchmarks.openapi.json",
-    ] {
-        let path = Path::new(&root).join(relative);
+    ];
+    let Some(root) = suspect_codegen::toolchain::openrouter_checkout(&DOCUMENTS[1..]) else {
+        return;
+    };
+    for relative in DOCUMENTS {
+        let path = root.join(relative);
         let workspace = Arc::new(
             WorkspaceBuilder::new()
                 .root(path.parent().unwrap())

@@ -80,31 +80,46 @@ pub struct Accessor {
 pub struct PaginationOperation {
     /// Source identity of the paginated operation.
     pub operation: String,
+    /// Source location of the paginated operation.
     pub source: SourceId,
     /// The generated client method this walk extends.
     pub method: String,
+    /// Generated input type of the operation.
     pub input_type: String,
+    /// Generated success result type of the operation.
     pub success_type: String,
+    /// Generated error result type of the operation.
     pub error_type: String,
     /// Concrete success response case the walk reads.
     pub response: String,
     /// Allocated pager type and client method names.
     pub pager: String,
+    /// Allocated pager error type (`<Method>PagerError`).
     pub pager_error: String,
+    /// Allocated item-flattening pager type, when an items accessor exists.
     pub items_pager: Option<String>,
+    /// Allocated client method returning the page pager (`<method>_pages`).
     pub pages: String,
+    /// Allocated client method returning the items pager, when an items accessor exists.
     pub items: Option<String>,
+    /// Allocated next-input builder (`<method>_next_page`).
     pub next_page: String,
+    /// How the continuation is computed and applied.
     pub advance: Advance,
+    /// The request control rewritten between pages.
     pub control: Control,
     /// The limit control and the documented SDK fallback page size it carries
     /// on the first request, when the operation has one.
     pub limit: Option<(Control, u32)>,
+    /// Offset seeded into an absent optional control on the first request, when configured.
     pub initial_offset: Option<u32>,
     /// The element type of the items collection.
     pub element: Option<String>,
+    /// Accessor for the page's items collection.
     pub items_accessor: Option<Accessor>,
+    /// Accessor for the next-cursor or next-offset pointer.
     pub continuation_accessor: Option<Accessor>,
+    /// Accessor for the has-more mark.
     pub has_more_accessor: Option<Accessor>,
 }
 
@@ -113,6 +128,7 @@ pub struct PaginationOperation {
 pub struct PaginationPlan {
     /// The shared selection this emission follows.
     pub outcome: wire::PaginationOutcome,
+    /// Operations that received walkers.
     pub operations: Vec<PaginationOperation>,
 }
 

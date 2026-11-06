@@ -89,19 +89,33 @@ pub fn source_assets() -> &'static [(&'static str, &'static [u8])] {
 /// Finite per-exchange and per-codec resource policy, independent of API semantics.
 #[derive(Debug, Clone)]
 pub struct RubyConfig {
+    /// Combined URL, header and body bytes of one request.
     pub max_request_bytes: usize,
+    /// Maximum response-body bytes.
     pub max_response_bytes: usize,
+    /// Bounded raw body prefix retained by SDK failures; at most `max_response_bytes`.
     pub max_capture_bytes: usize,
+    /// Aggregate header bytes, also bounding single credentials and part headers.
     pub max_header_bytes: usize,
+    /// Maximum assembled URL and serialized parameter bytes.
     pub max_url_bytes: usize,
+    /// Maximum transport chunks read for one response body.
     pub max_response_chunks: usize,
+    /// JSON parse/serialize nesting ceiling, at most 128.
     pub max_json_depth: usize,
+    /// JSON parse/serialize work units per document.
     pub max_json_work: usize,
+    /// Shared native conversion visits per codec session.
     pub max_conversion_steps: usize,
+    /// Independent ceiling for each form/multipart part.
     pub max_part_bytes: usize,
+    /// Maximum form/multipart parts per body.
     pub max_parts: usize,
+    /// Maximum framed SSE event or JSON-lines item before decoding.
     pub max_stream_item_bytes: usize,
+    /// Maximum items per request or response stream.
     pub max_stream_items: usize,
+    /// Opt into the `legacy-binary-string-v1` compatibility profile.
     pub legacy_binary_strings: bool,
     /// Admission of source-document-relative server URLs after native witnessing.
     pub document_relative_servers: bool,
@@ -115,6 +129,7 @@ pub struct RubyConfig {
     pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
     /// `ua/v1` attribution constants compiled from package identity and source.
     pub attribution: Option<crate::attribution::AttributionDescriptor>,
+    /// Shared owned-schema compiler/executor policy; depth at most 128.
     pub schema: Config,
 }
 
@@ -152,9 +167,13 @@ impl Default for RubyConfig {
 /// Gem identity and presentation. These options never change wire semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageConfig {
+    /// Gem name: lowercase ASCII letters, digits, `_` and `-`, at most 64 bytes.
     pub name: String,
+    /// Exact `MAJOR.MINOR.PATCH` release version.
     pub version: String,
+    /// snake_case `require` path; must not shadow a default/bundled gem.
     pub require_name: String,
+    /// UpperCamel root module name.
     pub namespace: String,
 }
 
@@ -199,6 +218,7 @@ pub struct SdkPlan {
 }
 
 impl SdkPlan {
+    /// Environment-variable bindings for credentials, when configured.
     #[must_use]
     pub fn credential_env(&self) -> Option<&credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
@@ -208,6 +228,7 @@ impl SdkPlan {
     pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
         self.config.attribution.as_ref()
     }
+    /// Admitted protocol plan for the selected operations.
     pub fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
     }
@@ -239,32 +260,40 @@ impl SdkPlan {
     pub fn incoming(&self) -> Option<&incoming::IncomingEmission> {
         self.incoming.as_ref()
     }
+    /// Generated form/multipart field and header record classes.
     pub fn records(&self) -> &[NativeRecord] {
         &self.records
     }
+    /// Validation-program node index of a compiled root schema.
     pub fn schema_index(&self, id: &SchemaId) -> Option<usize> {
         self.models.source_symbol(id).map(|s| s.schema_index)
     }
+    /// Canonical contract the plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// Configuration the plan was admitted under.
     #[must_use]
     pub fn config(&self) -> &RubyConfig {
         &self.config
     }
+    /// Checked validation program executed by the generated runtime.
     #[must_use]
     pub fn program(&self) -> &OwnedProgram {
         &self.program
     }
+    /// Native model symbols for every compiled codec schema.
     #[must_use]
     pub fn models(&self) -> &ModelPlan {
         &self.models
     }
+    /// Selected operations, in protocol order.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Per-operation source examples used by generated docs.
     #[must_use]
     pub fn examples(&self) -> &examples::ExamplePlan {
         &self.examples

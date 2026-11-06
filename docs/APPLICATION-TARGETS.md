@@ -1300,9 +1300,9 @@ all corpus-dependent ignored tests.
 
 | Job | Command | Needs |
 | --- | --- | --- |
-| `planning` | `cargo test -p suspect-codegen --test application --test api_cli --test mcp` | Rust only |
-| `native-go-cli` | `cargo test -p suspect-codegen --test api_cli -- --include-ignored` | Go stable, python3 |
-| `native-mcp-server` | `cargo test -p suspect-codegen --test mcp -- --include-ignored` | Node 22 and Node 26 (matrix), npm registry access, python3 |
+| `planning` | `cargo test -p suspect-codegen --test shared -- application:: api_cli:: mcp::` | Rust only |
+| `native-go-cli` | `cargo test -p suspect-codegen --test shared -- --include-ignored` | Go stable, python3 |
+| `native-mcp-server` | `cargo test -p suspect-codegen --test shared -- --include-ignored` | Node 22 and Node 26 (matrix), npm registry access, python3 |
 | `commands` | `cargo test -p suspect-cli --test application_codegen` | Rust only |
 
 The two native jobs build real artifacts. `native-go-cli` runs
@@ -1325,13 +1325,3 @@ never drift into an application declaring a floor it cannot honour. CI
 therefore builds and runs at the declared floor (22) and at the current
 release (26). Both python steps pin `3.12.12` exactly: the loopback fixtures
 are the exactness oracle for both native suites.
-
-Observed locally on darwin/arm64 with go1.27.1, Node v26.8.1, npm 11.19.0 and
-Python 3.14.7:
-
-```
-tests/api_cli.rs      20 passed (including native_cli_builds_and_drives_a_loopback_api)
-tests/application.rs   7 passed
-tests/mcp.rs          24 passed (including native_mcp_server_builds_and_serves_the_official_client)
-suspect-cli tests/application_codegen.rs  9 passed
-```

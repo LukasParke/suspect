@@ -1,4 +1,5 @@
-#![cfg(all(feature = "kotlin-sdk", feature = "http-protocol"))]
+#![cfg(feature = "kotlin-sdk")]
+use crate::kotlin_support as support;
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -9,9 +10,6 @@ use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_schema::{Config, OwnedProgram};
 use suspect_source::Uri;
-#[path = "kotlin_support/mod.rs"]
-#[allow(dead_code)]
-mod support;
 
 const ENTRY: &str = "https://physical.test/api.json";
 fn root() -> PathBuf {

@@ -36,8 +36,8 @@
 
 use super::Plan;
 use crate::http_protocol::{
-    CredentialHook, OAuthClientAuth, OAuthFlowDescriptorKind, OAuthPlan, OAuthSchemeKind,
-    OAuthSchemePlan, Representation,
+    OAuthClientAuth, OAuthFlowDescriptorKind, OAuthPlan, OAuthSchemeKind, OAuthSchemePlan,
+    oauth_stream_protected_requirements,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -92,24 +92,15 @@ const EXPORTED_NAMES: &[&str] = &[
     "completeAuthorization",
 ];
 
-/// The usable subset: schemes carrying at least one executable (non-deprecated)
-/// flow or a discovery URL. Deprecated implicit/password flows are represented
-/// in their scheme's frozen descriptor but never execute; a scheme with only
-/// those flows and no discovery URL contributes nothing, while a
-/// discovery-defined scheme — an OpenID Connect scheme, for instance — has its
-/// endpoints defined by the discovery document at runtime.
+/// The usable subset (see [`OAuthSchemePlan::is_usable`]): schemes carrying
+/// at least one executable flow or a discovery URL. Deprecated
+/// implicit/password flows, and flows missing an endpoint their grant needs,
+/// are represented in their scheme's frozen descriptor but never execute; a
+/// scheme with only those flows and no discovery URL contributes nothing,
+/// while a discovery-defined scheme — an OpenID Connect scheme, for instance
+/// — has its endpoints defined by the discovery document at runtime.
 pub(super) fn usable(plan: &OAuthPlan) -> Vec<&OAuthSchemePlan> {
-    plan.schemes
-        .iter()
-        .filter(|scheme| {
-            scheme.discovery.is_some()
-                || scheme.flows.iter().any(|flow| !flow.deprecated_flow)
-        })
-        .collect()
-}
-
-fn has_discovery_among(schemes: &[&OAuthSchemePlan]) -> bool {
-    schemes.iter().any(|scheme| scheme.discovery.is_some())
+    plan.usable_schemes().collect()
 }
 
 fn has_revocation(schemes: &[&OAuthSchemePlan]) -> bool {
@@ -120,66 +111,24 @@ fn has_introspection(schemes: &[&OAuthSchemePlan]) -> bool {
     schemes.iter().any(|scheme| scheme.introspection_endpoint.is_some())
 }
 
-fn has_device(schemes: &[&OAuthSchemePlan]) -> bool {
-    schemes
-        .iter()
-        .any(|scheme| scheme.flows.iter().any(|flow| flow.kind == OAuthFlowDescriptorKind::DeviceAuthorization && !flow.deprecated_flow))
-}
-
-/// Whether at least one compiled scheme carries an executable
-/// client-credentials flow, so the replaying credential wrapper participates.
-/// The wrapper serves exactly that provider, so schemes without one compile
-/// exactly the pre-replay bytes.
-fn has_client_credentials(plan: &OAuthPlan) -> bool {
-    plan.schemes.iter().any(|scheme| {
-        scheme
-            .flows
-            .iter()
-            .any(|flow| flow.kind == OAuthFlowDescriptorKind::ClientCredentials && !flow.deprecated_flow)
-    })
-}
-
-/// The security-requirement source pointers whose attaches must never be
-/// replayed: requirements that name a compiled scheme on an operation whose
-/// responses carry a stream representation. Delivered stream data prevents a
-/// transparent restart, so those operations are excluded from the replay
-/// wrapper's one-replay budget. The attach request carries the operation's
-/// source (document and pointer) rather than the requirement's, so the
-/// compiled values carry the requirement's full document-and-pointer source
-/// and the generated runtime resolves the attach by its operation prefix.
+/// The security-requirement source addresses whose attaches must never be
+/// replayed (see [`crate::http_protocol::oauth_stream_protected_requirements`]).
+/// The attach request carries the operation's source (document and pointer)
+/// rather than the requirement's, so the compiled values carry the
+/// requirement's full document-and-pointer source and the generated runtime
+/// resolves the attach by its operation prefix.
 fn no_replay_requirements(
     operations: &[super::PlannedOperation],
     plan: &OAuthPlan,
 ) -> BTreeMap<String, BTreeSet<String>> {
     let names: BTreeSet<&str> = plan.schemes.iter().map(|s| s.name.as_str()).collect();
     let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.wire.responses().iter().any(|response| {
-            response
-                .media()
-                .iter()
-                .any(|media| matches!(media.representation(), Representation::Stream { .. }))
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.wire.security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    CredentialHook::OAuth2 { .. } | CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if names.contains(requirement.name()) {
-                    let source = requirement.source().source();
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(format!("{}#{}", source.document().as_str(), source.pointer()));
-                }
-            }
-        }
+    for found in oauth_stream_protected_requirements(operations, |op| &op.wire, &names) {
+        let source = found.requirement.source().source();
+        pointers
+            .entry(found.scheme.to_owned())
+            .or_default()
+            .insert(format!("{}#{}", source.document().as_str(), source.pointer()));
     }
     pointers
 }
@@ -205,8 +154,9 @@ pub(super) fn emission(plan: &Plan) -> Option<Emission> {
     if schemes.is_empty() {
         return None;
     }
-    let discovery = has_discovery_among(&schemes);
-    let replay = has_client_credentials(oauth_plan);
+    let discovery = oauth_plan.has_discovery();
+    let device = oauth_plan.executes(OAuthFlowDescriptorKind::DeviceAuthorization);
+    let replay = oauth_plan.executes(OAuthFlowDescriptorKind::ClientCredentials);
     let used = plan.models().used_names();
     let collision = EXPORTED_NAMES
         .iter()
@@ -215,7 +165,7 @@ pub(super) fn emission(plan: &Plan) -> Option<Emission> {
         } else {
             &[][..]
         })
-        .chain(if has_device(&schemes) {
+        .chain(if device {
             &["beginDeviceAuthorization"][..]
         } else {
             &[][..]
@@ -281,7 +231,7 @@ pub(super) fn emission(plan: &Plan) -> Option<Emission> {
             INTROSPECT
         });
     }
-    if has_device(&schemes) {
+    if device {
         part.push_str(DEVICE);
     }
     if discovery {

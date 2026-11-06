@@ -70,7 +70,9 @@ pub struct StreamOperationPlan {
     /// Declared event kinds in declaration order; a single default event when
     /// no discrimination evidence exists.
     pub events: Vec<StreamEventPlan>,
+    /// Evidence-gated terminal sentinel handling.
     pub sentinel: SentinelPolicy,
+    /// How the stream completes.
     pub terminal: TerminalPolicy,
     /// Future event types surface through a typed unknown-event alternative;
     /// invalid payloads of recognized kinds remain decoding failures.
@@ -95,6 +97,7 @@ pub struct StreamEventPlan {
     /// The declared event kind value, or [`StreamEventPlan::DEFAULT_EVENT_NAME`]
     /// for the single default kind compiled without discrimination evidence.
     pub event_name: String,
+    /// How this kind's frame data decodes.
     pub payload: EventPayload,
     /// Protocol-declared fatal events versus ordinary application events. The
     /// v1 rule: undeclared unless an `x-` fatal annotation or a description
@@ -124,7 +127,10 @@ impl StreamEventPlan {
 pub enum EventPayload {
     /// The item schema declares the structure; frames decode with the
     /// referenced codec (the item schema, or a discriminated variant).
-    Json { codec: CodecRef },
+    Json {
+        /// Codec for the item schema or the discriminated variant.
+        codec: CodecRef,
+    },
     /// No item schema is declared; the frame data stays raw UTF-8 text.
     Text,
     /// The declared item schema admits no item, so frames carry no data.
@@ -141,6 +147,7 @@ pub struct SentinelPolicy {
     /// The exact wire token compared against the frame data before JSON
     /// decoding; empty while disabled.
     pub token: String,
+    /// When the token is compared.
     pub stage: SentinelStage,
     /// Where the enabling evidence was found.
     pub evidence: Option<SentinelEvidence>,
@@ -150,6 +157,7 @@ pub struct SentinelPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SentinelStage {
+    /// Compare the raw frame data before any JSON decoding.
     BeforeJsonDecode,
 }
 
@@ -158,10 +166,16 @@ pub enum SentinelStage {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SentinelEvidence {
     /// An `x-` annotation whose key names a sentinel carried the token.
-    Annotation { source: SourceLocation },
+    Annotation {
+        /// Location of the annotation.
+        source: SourceLocation,
+    },
     /// A description sentence declares the token next to stream-termination
     /// wording.
-    Description { source: SourceLocation },
+    Description {
+        /// Location of the description.
+        source: SourceLocation,
+    },
 }
 
 /// How the stream completes, and which final frames are preserved.
@@ -177,9 +191,11 @@ pub struct TerminalPolicy {
     pub keep_final_usage: bool,
 }
 
+/// What a terminal condition does to the stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TerminalAction {
+    /// End the stream successfully.
     Complete,
 }
 
@@ -187,19 +203,25 @@ pub enum TerminalAction {
 /// invalid payloads of recognized kinds remain decoding failures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct UnknownEventPolicy {
+    /// How undeclared event kinds surface.
     pub representation: UnknownEventRepresentation,
+    /// What an invalid payload of a declared kind does.
     pub invalid_payload: InvalidPayloadPolicy,
 }
 
+/// How an undeclared event kind reaches callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UnknownEventRepresentation {
+    /// A typed unknown-event alternative in the native event type.
     TypedUnknown,
 }
 
+/// What happens when a declared event kind's payload fails to decode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum InvalidPayloadPolicy {
+    /// Surface a decoding failure.
     DecodingFailure,
 }
 
@@ -249,8 +271,11 @@ impl FrameRules {
 /// the last-event id, the reconnection hint in milliseconds).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct StreamItemMetadata {
+    /// Item property carrying the SSE `event` kind name.
     pub event_field: Option<String>,
+    /// Item property carrying the SSE last-event `id`.
     pub id_field: Option<String>,
+    /// Item property carrying the SSE `retry` hint in milliseconds.
     pub retry_field: Option<String>,
 }
 

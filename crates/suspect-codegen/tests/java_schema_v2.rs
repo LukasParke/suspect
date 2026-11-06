@@ -69,10 +69,13 @@ fn checked(command: &mut Command, root: &Path) {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+/// `false` (after printing why) when the JDK or Maven is unavailable.
+fn native_tools() -> bool {
+    suspect_codegen::toolchain::require_home("jdk").is_some()
+        && suspect_codegen::toolchain::require("maven").is_some()
+}
 fn java() -> PathBuf {
-    std::env::var_os("JAVA_HOME")
-        .map(PathBuf::from)
-        .expect("select JDK 21 or 25 with JAVA_HOME")
+    suspect_codegen::toolchain::resolve_home("jdk").expect("gated by native_tools()")
 }
 fn maven_repository() -> PathBuf {
     crate_root().join("../../target/sdk-java-maven-cache/java/repository")
@@ -83,9 +86,7 @@ fn install(plan: &SdkPlan, root: &Path) -> PathBuf {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -282,6 +283,9 @@ fn source_driven_v2_programs_keep_base_v1_bytes() {
 #[test]
 #[ignore = "source-driven scoped v2 executor, JDK21/25 and installed Maven jar"]
 fn native_schema_v2_vectors() {
+    if !native_tools() {
+        return;
+    }
     let root = attempt();
     let plan = baseline(&root, "java-schema-v2-runtime");
     let jar = install(&plan, &root);
@@ -478,6 +482,9 @@ fn resource_and_dynamic_profiles_remain_explicitly_refused() {
 #[test]
 #[ignore = "actual scoped SDK operations, positive/negative consumers, examples and Javadoc on JDK21/25"]
 fn native_schema_v2_sdk_operations() {
+    if !native_tools() {
+        return;
+    }
     let root = attempt();
     let plan = sdk_plan(&root);
     let jar = install(&plan, &root);

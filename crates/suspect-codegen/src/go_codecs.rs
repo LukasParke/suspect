@@ -9,6 +9,8 @@ use std::{collections::BTreeMap, sync::Arc};
 use suspect_ir::contract::{Contract, SchemaId};
 use suspect_schema::{OwnedCompiler, OwnedProgram};
 mod emit;
+/// Planned Go models together with the codec and validation sources that
+/// discharge their obligations.
 #[derive(Debug)]
 pub struct CodecPlan {
     models: ModelPlan,
@@ -16,9 +18,11 @@ pub struct CodecPlan {
     validation: OwnedProgram,
 }
 impl CodecPlan {
+    /// Original model-only plan; its obligations are discharged by these codecs.
     pub fn models(&self) -> &ModelPlan {
         &self.models
     }
+    /// Generated Go codec and validation files.
     pub fn render(&self) -> Vec<OutFile> {
         self.files.clone()
     }
@@ -27,6 +31,12 @@ impl CodecPlan {
         &self.validation
     }
 }
+/// Plan Go models for `roots` and their source-aware codecs.
+///
+/// # Errors
+/// Model diagnostics when model planning fails, the configured conversion or
+/// JSON depth exceeds 256, or the validation program cannot be compiled or
+/// emitted for Go.
 pub fn plan_codecs(
     contract: Arc<Contract>,
     roots: &[SchemaId],

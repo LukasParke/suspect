@@ -6,9 +6,14 @@ use suspect_ref::WorkspaceBuilder;
 use suspect_schema::{Config, OwnedCompiler};
 use suspect_source::Uri;
 
+use crate::python_support;
+
 #[test]
 #[ignore = "requires native Python"]
 fn portable_program_matches_independent_runtime_vectors() {
+    let Some(interpreter) = python_support::python() else {
+        return;
+    };
     let vectors: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
     let directory = tempfile::tempdir().unwrap().keep();
@@ -54,13 +59,11 @@ for expected in ('valid','invalid'):
             ),
         )
         .unwrap();
-        let output = Command::new(
-            std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()),
-        )
-        .arg("consumer.py")
-        .current_dir(&python)
-        .output()
-        .unwrap();
+        let output = Command::new(&interpreter)
+            .arg("consumer.py")
+            .current_dir(&python)
+            .output()
+            .unwrap();
         assert!(
             output.status.success(),
             "{} {}\n{}",

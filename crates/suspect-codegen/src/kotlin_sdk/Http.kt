@@ -108,6 +108,7 @@ public class ResponseInfo(
 
 /** Client runtime policy, independent of source semantics.
  * @property serverUrl Explicit HTTPS environment or loopback HTTP fixture override.
+ * @property allowInsecureHttp Opt in to a plain-HTTP [serverUrl] on a non-loopback host.
  * @property timeout Total deadline, positive and at most one day.
  * @property maxResponseBytes Response-body ceiling, from 1 byte through 4 MiB.
  * @property captureBytes Preview ceiling, from zero through maxResponseBytes.
@@ -136,13 +137,15 @@ public data class ClientOptions(
     public val userAgent: String? = null,
     /** Replaces the SDK identity token in the automatic ua/v1 attribution header: `name` or `name/version` of RFC 9110 tokens; an invalid identifier suppresses the header. */
     public val applicationId: String? = null,
+    /** Allow a plain-HTTP [serverUrl] to a non-loopback host (default false). Source-declared servers keep their scheme regardless. */
+    public val allowInsecureHttp: Boolean = false,
 ) {
     init {
         require(maxResponseBytes in 1..Json.MAX_BYTES && maxRequestBytes in 1..Json.MAX_BYTES) { "HTTP byte ceilings must be in 1..4194304" }
         require(captureBytes in 0..maxResponseBytes) { "captureBytes must be in 0..maxResponseBytes" }
         timeoutMillis(timeout)
         require(serverIndex >= 0 && maxChunkBytes in 1..65536 && maxStreamItemBytes in 1..Json.MAX_BYTES)
-        serverUrl?.let(::validateServer)
+        serverUrl?.let { validateServer(it, loopbackOnly = !allowInsecureHttp) }
     }
 }
 
@@ -340,15 +343,19 @@ internal fun timeoutMillis(timeout: Duration): Long {
     return (timeout.toNanos() + 999999) / 1000000
 }
 
-internal fun validateServer(server: URI) {
-    val loopback = server.host in setOf("127.0.0.1", "[::1]", "::1", "localhost")
+/** One server URL policy (ADR 0035): a source-declared server keeps its scheme; a caller
+ * override is https, or plain http only to loopback unless the caller opted in;
+ * no userinfo, query or fragment; a valid port; literal `.`/`..` segments refused,
+ * never resolved; percent-encoded octets are opaque path data sent verbatim;
+ * non-ASCII, controls and backslashes refused. */
+internal fun validateServer(server: URI, loopbackOnly: Boolean = false) {
+    val loopback = server.host?.lowercase() in setOf("127.0.0.1", "[::1]", "localhost")
     require(server.isAbsolute && server.host != null && server.rawUserInfo == null && server.rawQuery == null && server.rawFragment == null
-        && server.port in -1..65535 && (server.scheme.equals("https", true) || server.scheme.equals("http", true) && loopback)) {
+        && (server.port == -1 || server.port in 1..65535) && (server.scheme.equals("https", true) || server.scheme.equals("http", true) && (loopback || !loopbackOnly))) {
         "server must be absolute HTTPS or loopback HTTP without userinfo, query or fragment"
     }
-    val decoded = server.path ?: ""
-    require(!decoded.contains('\\') && decoded.none { it < ' ' || it == '\u007f' }
-        && decoded.split('/').none { it == "." || it == ".." }) { "server path must not contain decoded dot segments, controls or backslashes" }
+    require(server.toString().none { it <= ' ' || it >= '\u007f' || it == '\\' }
+        && (server.rawPath ?: "").split('/').none { it == "." || it == ".." }) { "server path must be ASCII without literal dot segments, controls or backslashes" }
 }
 
 internal fun bearer(token: String?): String {
@@ -370,7 +377,7 @@ internal class WireUrl(server: URI, path: String, parameters: Map<String, String
     private var hasQuery = false
     init {
         validateServer(server)
-        append(server.toASCIIString().trimEnd('/'))
+        append(server.toASCIIString().removeSuffix("/"))
         var position = 0
         while (position < path.length) {
             val open = path.indexOf('{', position)
@@ -510,8 +517,11 @@ private fun jsonMedia(value: String): Boolean {
         val raw = pair[1].trim()
         val parameter = if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) raw.substring(1, raw.length - 1) else raw
         if (parameter.isEmpty() || parameter.any { it <= ' ' || it in "\"\\,;" }) return false
+        // RFC 8259: JSON is UTF-8 and defines no charset parameter, so its
+        // value never selects a decoder (as in the shared protocol plan); only
+        // a duplicated parameter is malformed.
         if (pair[0].trim().equals("charset", true)) {
-            if (charset || !parameter.equals("utf-8", true)) return false
+            if (charset) return false
             charset = true
         }
     }
@@ -522,7 +532,7 @@ internal fun <T> responseValue(codec: ModelCodec<T>, response: HttpResponse, inf
     val types = response.headers.entries.filter { it.key.equals("content-type", true) }.flatMap { it.value }
     val encodings = response.headers.entries.filter { it.key.equals("content-encoding", true) }.flatMap { it.value }
     if (types.size != 1 || !jsonMedia(types.single()) || encodings.size > 1 || encodings.any { !it.trim().equals("identity", true) }) {
-        throw SdkException(FailureKind.CONTENT_TYPE, "response is not UTF-8 unencoded application/json", info)
+        throw SdkException(FailureKind.CONTENT_TYPE, "response is not unencoded application/json", info)
     }
     try {
         val value = Json.parseChecked(response.body, limits.json, checkpoint)

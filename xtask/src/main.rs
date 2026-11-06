@@ -761,20 +761,17 @@ fn yaml_node(node: &Node, indent: usize) -> String {
         Node::Seq(items) => {
             let mut out = String::new();
             for item in items {
-                match item {
-                    item if let Some(s) = yaml_scalar(item) => {
-                        out.push_str(&format!("{pad}- {s}\n"));
-                    }
-                    _ => {
-                        let compact = json_compact(item);
-                        if compact.len() <= FLOW_MAX_BYTES {
-                            out.push_str(&format!("{pad}- {compact}\n"));
-                        } else {
-                            // Render the child at indent+1 and splice `- ` onto
-                            // its first line; later lines keep indent+1 spaces.
-                            let inner = yaml_node(item, indent + 1);
-                            out.push_str(&format!("{pad}- {}", &inner[indent * 2 + 2..]));
-                        }
+                if let Some(s) = yaml_scalar(item) {
+                    out.push_str(&format!("{pad}- {s}\n"));
+                } else {
+                    let compact = json_compact(item);
+                    if compact.len() <= FLOW_MAX_BYTES {
+                        out.push_str(&format!("{pad}- {compact}\n"));
+                    } else {
+                        // Render the child at indent+1 and splice `- ` onto
+                        // its first line; later lines keep indent+1 spaces.
+                        let inner = yaml_node(item, indent + 1);
+                        out.push_str(&format!("{pad}- {}", &inner[indent * 2 + 2..]));
                     }
                 }
             }

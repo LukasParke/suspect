@@ -18,6 +18,8 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+use crate::python_support;
+
 const IMPORT: &str = "documented_python_sdk";
 const PROSE: &str = "Source guidance: `value` </pre><img src=x onerror=alert(1)>\n\n.. include:: must-not-read\n\n:ref:`must-not-resolve`\u{2028}.. raw:: html\n\n   <script>must-not-run</script>";
 
@@ -58,10 +60,6 @@ fn checked(command: &mut Command, root: &Path, label: &str) -> Output {
         String::from_utf8_lossy(&output.stderr)
     );
     output
-}
-
-fn tools() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-native-python-tools/bin/python")
 }
 
 fn generated(
@@ -253,6 +251,9 @@ fn unrepresentable_integer_examples_are_explicitly_unavailable() {
 #[test]
 #[ignore = "requires pinned Python build/httpx/mypy/Sphinx tools and installed 3.11/3.14 interpreters"]
 fn installed_m2_and_edge_quickstarts_are_public_native_and_typechecked() {
+    let Some(native) = python_support::installed() else {
+        return;
+    };
     for edge in [false, true] {
         let root = directory(if edge { "edge" } else { "m2" });
         let document = if edge {
@@ -278,19 +279,19 @@ fn installed_m2_and_edge_quickstarts_are_public_native_and_typechecked() {
         } else {
             json!({"scenario":"m2","scheme":"apiKey","count":4})
         };
-        native_gate(&root, &plan, &files, config);
+        native_gate(&native, &root, &plan, &files, config);
     }
 }
 
 #[test]
-#[ignore = "requires tracked OpenRouter source plus native Python 3.11/3.14 build/docs tools"]
+#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) plus native Python 3.11/3.14 build/docs tools"]
 fn installed_tracked_five_operation_quickstart_uses_real_constructors() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let (Some(native), Some(path)) = (
+        python_support::installed(),
+        suspect_codegen::toolchain::openrouter_spec(),
+    ) else {
+        return;
+    };
     let contract = contract(&path);
     let wanted = [
         "getCredits",
@@ -308,6 +309,7 @@ fn installed_tracked_five_operation_quickstart_uses_real_constructors() {
     let (plan, files) = generated(contract, &selected, Default::default());
     let root = directory("openrouter");
     native_gate(
+        &native,
         &root,
         &plan,
         &files,
@@ -315,7 +317,14 @@ fn installed_tracked_five_operation_quickstart_uses_real_constructors() {
     );
 }
 
-fn native_gate(root: &Path, plan: &HttpPlan, files: &[OutFile], config: Value) {
+fn native_gate(
+    native: &python_support::Installed,
+    root: &Path,
+    plan: &HttpPlan,
+    files: &[OutFile],
+    config: Value,
+) {
+    let tools = || &native.tools;
     suspect_codegen::write_files(files, root).unwrap();
     let package = root.join("python");
     let bindings: Value =
@@ -365,18 +374,20 @@ fn native_gate(root: &Path, plan: &HttpPlan, files: &[OutFile], config: Value) {
         .map(|entry| entry.unwrap().path())
         .find(|path| path.extension().is_some_and(|extension| extension == "whl"))
         .unwrap();
-    for version in ["3.11", "3.14"] {
+    for (version, interpreter) in &native.interpreters {
+        let version = *version;
         let environment = root.join(format!("venv-{version}"));
         checked(
-            Command::new("uv")
-                .args(["venv", "--offline", "--python", version])
+            Command::new(&native.uv)
+                .args(["venv", "--offline", "--python"])
+                .arg(interpreter)
                 .arg(&environment),
             root,
             &format!("venv-{version}"),
         );
         let python = environment.join("bin/python");
         checked(
-            Command::new("uv")
+            Command::new(&native.uv)
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&python)
                 .arg(&wheel),

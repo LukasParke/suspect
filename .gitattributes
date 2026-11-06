@@ -1,0 +1,3 @@
+# Generated output and golden fixtures are compared byte for byte; keep LF
+# on every checkout, including Windows (core.autocrlf).
+* text=auto eol=lf

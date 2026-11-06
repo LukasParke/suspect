@@ -1,13 +1,11 @@
 //! Native installed-wheel gate for source-selected sync/async Python clients.
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, process::Command, sync::Arc};
 use suspect_codegen::python_http::{HttpConfig, PackageConfig, emit_http, plan_http};
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
+
+use crate::python_support;
 
 fn plan() -> suspect_codegen::python_http::HttpPlan {
     let path =
@@ -113,6 +111,13 @@ fn wheel_identity_is_configuration_and_invalid_names_fail_before_emission() {
 #[test]
 #[ignore = "requires Python build/httpx/mypy tools and a native Python interpreter"]
 fn installed_wheel_sync_async_types_and_wire_contract() {
+    let (Some(tools), Some(uv), Some(interpreter)) = (
+        python_support::tools(),
+        python_support::uv(),
+        python_support::python(),
+    ) else {
+        return;
+    };
     let root = tempfile::tempdir().unwrap().keep();
     let config = PackageConfig {
         name: "m3-native-sdk".into(),
@@ -120,12 +125,6 @@ fn installed_wheel_sync_async_types_and_wire_contract() {
         import_name: "m3_native_sdk".into(),
     };
     suspect_codegen::write_files(&emit_http(&plan(), &config).unwrap(), &root).unwrap();
-    let tools = std::env::var_os("SUSPECT_PYTHON_TOOLS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/sdk-native-python-tools/bin/python")
-        });
     checked(
         Command::new(&tools)
             .args(["-m", "build", "--wheel", "--no-isolation"])
@@ -137,9 +136,8 @@ fn installed_wheel_sync_async_types_and_wire_contract() {
         .map(|entry| entry.unwrap().path())
         .find(|path| path.extension().is_some_and(|ext| ext == "whl"))
         .unwrap();
-    let interpreter = std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into());
     checked(
-        Command::new("uv")
+        Command::new(&uv)
             .args(["venv", "--python"])
             .arg(&interpreter)
             .arg(root.join("venv")),
@@ -147,7 +145,7 @@ fn installed_wheel_sync_async_types_and_wire_contract() {
     );
     let python = root.join("venv/bin/python");
     checked(
-        Command::new("uv")
+        Command::new(&uv)
             .args(["pip", "install", "--offline", "--python"])
             .arg(&python)
             .arg(&wheel),
@@ -214,12 +212,9 @@ fn installed_wheel_sync_async_types_and_wire_contract() {
 #[test]
 #[ignore = "requires the native Python wheel build tools"]
 fn admitted_python_versions_produce_native_wheel_metadata() {
-    let tools = std::env::var_os("SUSPECT_PYTHON_TOOLS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/sdk-native-python-tools/bin/python")
-        });
+    let Some(tools) = python_support::tools() else {
+        return;
+    };
     for (version, normalized) in [
         ("1.2.3-rc.1", "1.2.3rc1"),
         ("1.2.3+build.7", "1.2.3+build.7"),

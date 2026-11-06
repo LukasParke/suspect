@@ -1,7 +1,8 @@
-# Python HTTP SDK — current M3 slice
+# Python SDK — HTTP client
 
-`suspect_codegen::python_http` consumes the shared strict HTTP admission and
-the native Python codec plan. Selection is by canonical operation source.
+`suspect_codegen::python_http` consumes the shared
+[`http_protocol::ProtocolPlan`](SDK-HTTP-PROTOCOL.md) (adapter identity
+`python-http-protocol-v1`) and the native Python codec plan. Selection is by canonical operation source.
 Package configuration supplies identity; it does not supply API semantics.
 
 ## Generate
@@ -51,19 +52,56 @@ assembler, including the configured import name in every source binding.
 
 ## Actual native surface
 
-Import `Client`, `AsyncClient`, `models`, `codecs`, `UNSET`, `Unset`, `SdkError`
-and `ApiError` from the configured package. Concrete status classes and
-operation success/error aliases live in `<import>._client`; model codec
-instances are available through `codecs.<Model>Codec`.
+The configured package root has an explicit `__all__` and exports:
 
-Clients take explicit `auth={source_scheme_name: token}`, an optional
-`server_url` and an optional httpx `BaseTransport`/`AsyncBaseTransport`.
+- `Client`, `AsyncClient`, `models`, `codecs` and `operations`.
+- `UNSET`, `Unset`, `JsonNumber` and `JsonValue`.
+- `ApiError`, `SdkError`, `CodecError`, `JsonError` and `ValidationError`.
+- `BasicAuth`, `Authorization`, `CredentialRequest`, `OAuthFlow`, `AuthValue`,
+  `Credential`, `CredentialProvider`, `Part`, `Link`, `SyncStream` and
+  `AsyncStream`.
+
+Concrete status classes and operation success/API-error aliases are defined in
+`<import>.operations`, which is their `__module__`; former `_client` imports
+remain object-identical aliases. Model codec instances are available through
+`codecs.<Model>Codec`. A success/API-error alias is a type union, not an
+`except` target: catch a concrete non-2xx status class or `ApiError`.
+
+Integer schemas construct Python `int`, including mathematical-integer JSON
+spellings such as `1.20e2`. General `number` schemas retain `JsonNumber`, even
+for integer-looking tokens. Unconstrained JSON literals use `int` for integer
+tokens and `JsonNumber` for decimal/exponent/negative-zero tokens.
+`Decimal(value.token)` is an explicit interoperability step that avoids binary
+floating point.
+
+Clients accept explicit `auth: Mapping[str, Credential]`, keyed by source
+scheme name and interpreted by the selected scheme:
+
+- Bearer: token string, with the declared HTTP scheme matched case-insensitively.
+- Basic: `BasicAuth(username=..., password=..., encoding="utf-8")`; Latin-1 is an
+  explicit alternative. Controls and username colons are refused.
+- API key: string attached at the declared header/query/cookie name.
+- OAuth/OIDC: `Authorization("<scheme> <credentials>")`, or a caller callback
+  returning that explicit value; callbacks may be async on `AsyncClient` and run
+  on the caller task. The SDK does not infer bearer from OAuth. An `sdk_defaults`
+  OAuth policy opts in to a generated token lifecycle
+  ([golden defaults](SDK-GOLDEN-DEFAULTS.md#5-oauth-lifecycle)).
+
+`CredentialRequest` carries operation/use/definition sources, roles versus
+scopes, OAuth flow URLs/scope metadata, OIDC/authorization-server metadata URLs
+and the `effective_server_url` against which literal endpoint URLs resolve.
+Clients also take an optional `server_url` and an optional httpx
+`BaseTransport`/`AsyncBaseTransport`.
 Operations use required keyword-only arguments and optional `UNSET` arguments.
 Declared null is `None`; absence does not apply a source default. Every input
 uses its source codec, including revalidation of mutable model values.
 
 Successful declared statuses return immutable status classes with validated
-`data`, a header tuple and exact `Literal` status. Declared non-2xx responses
+`data`, a header tuple and exact `Literal` status. Response dispatch selects
+**exact status > class range > default**, then **concrete media > type wildcard >
+any wildcard**, with declared parameter specificity breaking ties; a media
+mismatch cannot fall back across statuses, and actual status determines return
+versus API exception. Declared non-2xx responses
 raise concrete `ApiError` subclasses with validated data. Unexpected statuses,
 media, malformed responses, transport failures and response limits become
 `SdkError`; input codec errors can propagate directly. Ordinary HTTP error
@@ -74,6 +112,13 @@ redirect handling, cookie persistence or decompression. Custom transports own
 their policy. SDK-created transports close on client/context-manager exit;
 injected transports remain caller-owned. Responses always close. Async calls
 and body reads stay on the caller task so cancellation propagates normally.
+
+Standard OAS 3.2 `itemSchema` responses return `SyncStream[T]` or
+`AsyncStream[T]`. Use `with response.data` / `async with response.data` around
+an early-stoppable loop, or call `close` / `aclose`; a plain loop `break` does not
+notify an arbitrary iterator. Exhaustion, errors and cancellation close the
+response, and client exit closes outstanding responses. Primary failures and
+cancellation survive cleanup errors.
 
 Request URL/body and response capture have finite budgets. Response limits are
 independent of Content-Length and may be lowered by callers. Path values and
@@ -134,7 +179,7 @@ sync/async sample execution against an independent create/update/list/get
 recording server. Run the Python native gate with:
 
 ```sh
-SUSPECT_PYTHON_BIN=python3.11 cargo test -p suspect-codegen --test m3_native_docs installed_python_docs_and_generated_samples_are_native_executable_artifacts -- --ignored
+SUSPECT_PYTHON_BIN=python3.11 cargo test -p suspect-codegen --test shared installed_python_docs_and_generated_samples_are_native_executable_artifacts -- --ignored
 ```
 
 `SUSPECT_PYTHON_TOOLS` selects the build/mypy/Sphinx interpreter; the default is
@@ -149,7 +194,7 @@ the Python sample and executes both native codec samples. Select that source
 with `OPENROUTER_WEB_ROOT` or `SUSPECT_OPENROUTER_YAML` and invoke the gate with
 `--ignored`. Its HTTP wire acceptance remains in `tests/wave_a_openrouter.rs`.
 
-This documents the admitted M3 slice. Directional annotations and other
-unproved HTTP/schema profiles remain source-linked planner rejections. Sample
-availability and native gate results are separate from a complete SDK release
-claim.
+Directional `readOnly`/`writeOnly` annotations in the codec closure and other
+unsupported HTTP/schema shapes are source-linked planner rejections
+(`http-directional-codec-unsupported`;
+[ADR 0010](adr/0010-refuse-what-cannot-be-represented.md)).

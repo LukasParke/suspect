@@ -7,9 +7,8 @@ parser core, everything observable through structured journals.
 SDK generation has one contract pipeline with Python, Go, Swift, Rust and
 TypeScript/JavaScript profiles. Native models, checked codecs, HTTP clients,
 packages and docs share typed language plans. See
-[SDK capabilities](docs/SDK-CAPABILITIES.md) and
-[current verification](docs/SDK-PROGRESS.md) for the experimental profiles and
-pending post-cleanup acceptance.
+[SDK capabilities](docs/SDK-CAPABILITIES.md) for the supported scope and
+[docs/adr/](docs/adr/) for the design decisions.
 
 ## Crates
 
@@ -75,19 +74,8 @@ contracts. Add `--check --format json` for read-only ownership/drift inspection.
 multiple targets and supports watch/preview. [`codegen-compare`](docs/SDK-COMPATIBILITY-REPORTS.md)
 reports native-interface and wire changes between snapshots.
 
-## Feature roadmap
-
-The next ten platform features — traffic-to-contract synthesis, stateful
-property-based testing, server scaffolding with progressive mock→real
-handoff, webhooks/events first-class support, an OWASP API security ruleset,
-an auth-flow execution engine, environment parity monitoring, release
-engineering, and transactional spec codemods — are documented in
-[docs/FEATURE-ROADMAP.md](docs/FEATURE-ROADMAP.md).
-
 ## Historical performance measurements
 
-See [docs/PERFORMANCE.md](docs/PERFORMANCE.md) for the full profiling report,
-phase-by-phase cost attribution, and the ranked plan of attack.
 These measurements are fixture-specific; they do not establish OpenRouter
 end-to-end SDK generation or emitted-SDK performance.
 Current session measurements and pending Mac calibration are documented in

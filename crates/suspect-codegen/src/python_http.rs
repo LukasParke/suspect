@@ -22,13 +22,20 @@ pub use planning::{
     PlannedParameter, PlannedResponse,
 };
 
+/// Finite transport and codec policy embedded in the generated package.
 #[derive(Debug, Clone)]
 pub struct HttpConfig {
+    /// Shared model validation and exact JSON conversion policy.
     pub codecs: python_codecs::CodecConfig,
+    /// Generated response ceiling, 1..=`u32::MAX`.
     pub max_response_bytes: usize,
+    /// Ceiling for a serialized request, 1..=`u32::MAX`.
     pub max_request_bytes: usize,
+    /// Ceiling for each finite form/multipart part, at most `u32::MAX`.
     pub max_part_bytes: usize,
+    /// Ceiling for one buffered stream item, at most `u32::MAX`.
     pub max_stream_item_bytes: usize,
+    /// Finite number of form fields / multipart parts, 1..=65_536.
     pub max_parts: usize,
     /// An explicit, source-backed protocol policy. Unsupported adapter features
     /// remain located refusals even if requested by a caller's capability set.
@@ -56,6 +63,7 @@ impl Default for HttpConfig {
         }
     }
 }
+/// Immutable complete selected-operation plan. It does not certify a whole SDK.
 #[derive(Debug)]
 pub struct HttpPlan {
     contract: Arc<Contract>,
@@ -74,27 +82,35 @@ pub struct HttpPlan {
     incoming_receipts: Vec<incoming::IncomingReceipt>,
 }
 impl HttpPlan {
+    /// The source contract this plan was built from.
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// Selected operations with their allocated native names.
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Model codecs and validation for every schema the operations reach.
     pub fn codecs(&self) -> &python_codecs::CodecPlan {
         &self.codecs
     }
+    /// Native model symbol names keyed by schema source.
     pub fn symbols(&self) -> &BTreeMap<SchemaId, String> {
         &self.symbols
     }
+    /// Validated examples for the selected operations.
     pub fn examples(&self) -> &ExamplePlan {
         &self.examples
     }
+    /// The single admitted shared protocol plan.
     pub fn protocol(&self) -> &protocol::ProtocolPlan {
         &self.protocol
     }
-    pub fn groups(&self) -> &[PlannedGroup] {
+    /// Resource groups exposed as client namespaces.
+    pub(crate) fn groups(&self) -> &[PlannedGroup] {
         &self.groups
     }
+    /// Source-bound runtime environment policy; generation never reads values.
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
     }
@@ -131,14 +147,21 @@ impl HttpPlan {
     pub fn incoming(&self) -> &protocol::IncomingPlan {
         &self.incoming
     }
+    /// Render a wheel package using the default package identity.
     pub fn render(&self) -> Vec<OutFile> {
         emit_http(self, &PackageConfig::default()).expect("default package identity")
     }
 }
+/// Python distribution identity, independent of every API semantic.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageConfig {
+    /// Distribution name: lowercase ASCII, digits, `-` or `_`, up to 64 bytes,
+    /// beginning with a letter and ending alphanumeric.
     pub name: String,
+    /// Exact SemVer that is also a valid PEP 440 version.
     pub version: String,
+    /// Importable package name: a lowercase identifier up to 64 bytes that
+    /// shadows no runtime dependency or standard module the SDK imports.
     pub import_name: String,
 }
 impl Default for PackageConfig {
@@ -150,6 +173,7 @@ impl Default for PackageConfig {
         }
     }
 }
+/// Rejected [`PackageConfig`], with the reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageError(pub &'static str);
 impl std::fmt::Display for PackageError {
@@ -158,6 +182,11 @@ impl std::fmt::Display for PackageError {
     }
 }
 impl std::error::Error for PackageError {}
+/// Emit the Python package: sync and async clients, codecs, docs, examples
+/// and wheel metadata.
+///
+/// # Errors
+/// The package name, version or import name is invalid.
 pub fn emit_http(plan: &HttpPlan, package: &PackageConfig) -> Result<Vec<OutFile>, PackageError> {
     if package.name.is_empty()
         || package.name.len() > 64
@@ -221,6 +250,13 @@ fn diagnostic(
         message: message.into(),
     }
 }
+/// Plan native Python clients for the `selected` operations.
+///
+/// # Errors
+/// Source-linked diagnostics for an empty selection, out-of-range limits or
+/// unsupported capabilities, and for every rejected protocol, credential,
+/// directional (`readOnly`/`writeOnly`) schema, pagination, OAuth, incoming
+/// or codec declaration.
 pub fn plan_http(
     contract: Arc<Contract>,
     selected: &[SourceId],
@@ -238,6 +274,8 @@ pub fn plan_http(
     }
     if config.max_request_bytes == 0
         || config.max_response_bytes == 0
+        || config.max_part_bytes == 0
+        || config.max_stream_item_bytes == 0
         || config.max_request_bytes > u32::MAX as usize
         || config.max_response_bytes > u32::MAX as usize
         || config.max_part_bytes > u32::MAX as usize

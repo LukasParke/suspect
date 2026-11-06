@@ -15,7 +15,7 @@ internal static class ServerRuntime
     private static SdkException Invalid() => new(SdkErrorKind.RequestRepresentation);
     internal static string Select(JsonElement operation, ClientOptions options, RequestOptions? request)
     {
-        if ((request?.ServerUrl ?? options.ServerUrl) is { } direct) return Absolute(direct);
+        if ((request?.ServerUrl ?? options.ServerUrl) is { } direct) return Explicit(direct, options.AllowInsecureHttp);
         var candidates = operation.GetProperty("servers").GetProperty("candidates");
         var index = request?.ServerIndex ?? options.ServerIndex ?? 0;
         if (index < 0 || index >= candidates.GetArrayLength()) throw Invalid();
@@ -51,26 +51,18 @@ internal static class ServerRuntime
         return Resolve(result.ToString(), document);
     }
     internal static string Absolute(string value) => Resolve(value, null);
-    // A caller-supplied client-wide server override must state its final base.
-    // Literal or percent-encoded dot segments could traverse outside that base
-    // in processors that decode before path matching, so they are refused
-    // here instead of being canonicalized away.
-    internal static string Explicit(string value)
+    // One server URL policy (ADR 0035): a source-declared server keeps its
+    // scheme; a caller override is https, or plain http only to loopback unless
+    // the caller opted in (AllowInsecureHttp); no userinfo, query or fragment; a
+    // valid port; a literal `.`/`..` segment of an absolute URL is refused rather
+    // than resolved; percent-encoded octets stay opaque path data; non-ASCII,
+    // controls and backslashes are refused.
+    internal static string Explicit(string value, bool allowInsecureHttp)
     {
-        Check(value, document: false);
-        var schemeEnd = SchemeEnd(value);
-        if (schemeEnd < 0) throw Invalid();
-        var (authority, path) = Authority(value[(schemeEnd + 1)..]);
-        ValidateAuthority(value[..schemeEnd], authority);
-        var decoded = new StringBuilder(path.Length);
-        for (var i = 0; i < path.Length; i++)
-        {
-            if (path[i] == '%' && i + 2 < path.Length && Uri.IsHexDigit(path[i + 1]) && Uri.IsHexDigit(path[i + 2]))
-            { decoded.Append((char)(Uri.FromHex(path[i + 1]) << 4 | Uri.FromHex(path[i + 2]))); i += 2; }
-            else decoded.Append(path[i]);
-        }
-        if (decoded.ToString().Split('/').Any(segment => segment is "." or "..")) throw Invalid();
-        return Absolute(value);
+        var result = Absolute(value);
+        if (!allowInsecureHttp && result.StartsWith("http:", StringComparison.OrdinalIgnoreCase) &&
+            new Uri(result).Host.ToLowerInvariant() is not ("localhost" or "127.0.0.1" or "[::1]")) throw Invalid();
+        return result;
     }
     internal static string Resolve(string reference, string? document)
     {
@@ -81,7 +73,8 @@ internal static class ServerRuntime
             var (authority, path) = Authority(reference[(schemeEnd + 1)..]);
             var scheme = reference[..schemeEnd];
             ValidateAuthority(scheme, authority);
-            return scheme + "://" + authority + RemoveDots(path);
+            if (path.IndexOfAny(new[] {'[', ']'}) >= 0 || path.Split('/').Any(segment => segment is "." or "..")) throw Invalid();
+            return scheme + "://" + authority + path;
         }
         if (document is null) throw Invalid();
         Check(document, document: true);

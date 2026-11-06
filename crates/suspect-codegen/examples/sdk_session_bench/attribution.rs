@@ -47,6 +47,7 @@ impl Snapshot {
             "getrusage failed: {}",
             std::io::Error::last_os_error()
         );
+        // SAFETY: the call above succeeded, so `usage` is fully initialized.
         let usage = unsafe { usage.assume_init() };
         let micros = |value: libc::timeval| -> Result<u64> {
             let seconds = u64::try_from(value.tv_sec).context("negative CPU seconds")?;

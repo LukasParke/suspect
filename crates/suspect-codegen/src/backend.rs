@@ -13,20 +13,24 @@ macro_rules! backends {
         /// Independently verified profiles. Registration requires native acceptance.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
         pub enum Backend {
-            $( $(#[$attribute])* #[serde(rename = $name)] $variant, )+
+            $( $(#[$attribute])* #[doc = $description] #[serde(rename = $name)] $variant, )+
         }
         impl Backend {
             /// The same registry drives configuration, CLI choices and inventories.
             pub const ALL: &'static [Self] = &[$( $(#[$attribute])* Self::$variant, )+];
+            /// Stable configuration and CLI name, such as `typescript-http`.
             pub const fn name(self) -> &'static str {
                 match self { $( $(#[$attribute])* Self::$variant => $name, )+ }
             }
+            /// Per-backend subdirectory that receives the generated package.
             pub const fn artifact_directory(self) -> &'static str {
                 match self { $( $(#[$attribute])* Self::$variant => $directory, )+ }
             }
+            /// One-line summary shown in backend inventories and CLI help.
             pub const fn description(self) -> &'static str {
                 match self { $( $(#[$attribute])* Self::$variant => $description, )+ }
             }
+            /// Artifact ownership tag (`suspect-sdk:<name>`) recorded for generated files.
             pub const fn owner(self) -> &'static str {
                 match self { $( $(#[$attribute])* Self::$variant => concat!("suspect-sdk:", $name), )+ }
             }
@@ -63,19 +67,27 @@ backends! {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetConfig {
+    /// Backend that generates this target.
     pub backend: Backend,
+    /// Native package or module name published by the target.
     pub package_name: String,
+    /// Version written into the native package manifest.
     pub package_version: String,
     /// Python import name, Swift module, JVM package, or Ruby/C#/PHP/C++ namespace.
     /// Omission uses the backend's default. Profiles without an independent
     /// native identity reject this option rather than silently ignoring it.
     pub import_name: Option<String>,
 }
+/// Error raised while planning or packaging one backend target.
 #[derive(Debug, Clone)]
 pub struct BackendDiagnostic {
+    /// Source document the diagnostic points into, when it has a location.
     pub source: Option<SourceId>,
+    /// Byte range within `source`.
     pub at: Option<std::ops::Range<usize>>,
+    /// Stable machine-readable diagnostic code.
     pub code: &'static str,
+    /// Human-readable explanation.
     pub message: String,
 }
 impl From<HttpDiagnostic> for BackendDiagnostic {
@@ -286,7 +298,31 @@ pub fn generate(
 
 /// Plan with explicit versioned interpretation choices through the same native
 /// adapter used by generation, sessions and compatibility. No source is rewritten.
+///
+/// A panic inside a backend is a generator bug, never the caller's fault; it
+/// is caught here and returned as one `sdk-internal-error` diagnostic naming
+/// the backend, so a CLI run reports it and a language server keeps serving.
 pub fn generate_with_options(
+    contract: Arc<Contract>,
+    operations: &[SourceId],
+    config: &TargetConfig,
+    options: &GenerationOptions,
+) -> Result<Vec<OutFile>, Vec<BackendDiagnostic>> {
+    let backend = config.backend;
+    crate::guard::catch(backend.name(), || {
+        generate_unguarded(contract, operations, config, options)
+    })
+    .unwrap_or_else(|message| {
+        Err(vec![BackendDiagnostic {
+            source: None,
+            at: None,
+            code: "sdk-internal-error",
+            message,
+        }])
+    })
+}
+
+fn generate_unguarded(
     contract: Arc<Contract>,
     operations: &[SourceId],
     config: &TargetConfig,

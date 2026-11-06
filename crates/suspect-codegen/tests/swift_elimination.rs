@@ -24,8 +24,8 @@
 //! Swift nominal-type and reflective metadata records appear to root the
 //! module's public API; the emitter-side fix (per-operation SwiftPM targets
 //! or products, mirroring the Go per-operation functions) is out of scope
-//! for this measurement task and is documented in
-//! `docs/SDK-ELIMINATION-AUDIT.md`.
+//! for this measurement task. The zero-byte goal this defeat falls short of
+//! is recorded in `docs/adr/0029-unused-operations-cost-zero-bytes.md`.
 //!
 //! Retained artifacts live under `target/sdk-swift-elimination/` and a
 //! machine-readable record of the last run is written to
@@ -63,8 +63,8 @@ const EXTENDED_LABEL: &str = "extd";
 /// property (≤64 B, the TypeScript slack) does NOT hold for Swift; this gate
 /// records the measured defeat: the unrelated operation costs 64–128 KB in
 /// every consumer artifact. If an emitter/toolchain change ever achieves
-/// link-level elimination, this assertion fails loudly and forces an audit
-/// update.
+/// link-level elimination, this assertion fails loudly and forces the pin
+/// to be re-measured.
 const MEASURED_GROWTH_FLOOR_BYTES: u64 = 64_000;
 const MEASURED_GROWTH_CEILING_BYTES: u64 = 128_000;
 
@@ -308,21 +308,18 @@ const MARKER_OTHER_OPERATIONS: &[&str] = &[
 ];
 
 fn swift() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/usr/bin/swift".into())
+    suspect_codegen::toolchain::resolve_path("swift")
+        .expect("gated by toolchain::require(\"swift\")")
 }
 
 fn swift_compiler() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFTC_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| swift().with_file_name("swiftc"))
+    suspect_codegen::toolchain::swift_tool("swiftc").expect("the Swift toolchain has no swiftc")
 }
 
 fn swift_command(action: &str) -> Command {
     let mut command = Command::new(swift());
     command.arg(action).env("SWIFT_EXEC", swift_compiler());
-    if let Some(sdk) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+    if let Some(sdk) = suspect_codegen::toolchain::swift_sdk_root() {
         command.arg("--sdk").arg(&sdk).env("SDKROOT", sdk);
     }
     command
@@ -489,6 +486,9 @@ fn write_report(report: &Value) {
 #[test]
 fn swift_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-swift-elimination");
     std::fs::create_dir_all(&root).unwrap();
 
@@ -572,7 +572,7 @@ fn swift_consumers_eliminate_unrelated_operations() {
             for marker in MARKER_OTHER_OPERATIONS {
                 assert!(
                     base["markers"][*marker].as_bool().unwrap(),
-                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains unrelated operations; update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement",
+                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains unrelated operations; re-measure and update the pinned expectation in this test with the improved measurement",
                     consumer.label
                 );
             }
@@ -583,7 +583,7 @@ fn swift_consumers_eliminate_unrelated_operations() {
             for marker in MARKER_UNRELATED_OPERATION {
                 assert!(
                     extended["markers"][*marker].as_bool().unwrap(),
-                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains the unrelated operation; update docs/SDK-ELIMINATION-AUDIT.md with the improved measurement",
+                    "{}/{configuration}: measured retention of {marker} regressed — the linked artifact no longer retains the unrelated operation; re-measure and update the pinned expectation in this test with the improved measurement",
                     consumer.label
                 );
             }
@@ -591,7 +591,7 @@ fn swift_consumers_eliminate_unrelated_operations() {
                 extended["binary_bytes"].as_u64().unwrap() - base["binary_bytes"].as_u64().unwrap();
             assert!(
                 (MEASURED_GROWTH_FLOOR_BYTES..=MEASURED_GROWTH_CEILING_BYTES).contains(&delta),
-                "{}/{configuration}: the unrelated operation moved the artifact by {delta} B; update docs/SDK-ELIMINATION-AUDIT.md with the new measurement",
+                "{}/{configuration}: the unrelated operation moved the artifact by {delta} B; re-measure and update the pinned expectation in this test with the new measurement",
                 consumer.label
             );
         }

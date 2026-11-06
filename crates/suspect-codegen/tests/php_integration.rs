@@ -419,7 +419,6 @@ fn interface_no_input_concrete_results_and_error_body_members_are_preserved() {
 }
 
 #[test]
-#[cfg(feature = "http-protocol")]
 fn rich_capture_preserves_iterable_direction_parts_headers_and_security_metadata() {
     let mut value = api();
     value["openapi"] = json!("3.2.0");
@@ -538,7 +537,6 @@ fn rich_capture_preserves_iterable_direction_parts_headers_and_security_metadata
 }
 
 #[test]
-#[cfg(feature = "http-protocol")]
 fn portable_v2_and_v3_admission_preserve_checked_profiles() {
     let mut value = api();
     value["components"]["schemas"]["Payload"]["dependentRequired"] = json!({"label":["note"]});
@@ -587,7 +585,6 @@ fn portable_v2_and_v3_admission_preserve_checked_profiles() {
 }
 
 #[test]
-#[cfg(feature = "http-protocol")]
 fn scoped_capture_retains_fields_pattern_maps_and_checked_json_carriers() {
     let mut value = api();
     value["components"]["schemas"]["Payload"]["patternProperties"] =

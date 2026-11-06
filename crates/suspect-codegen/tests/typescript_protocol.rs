@@ -1,8 +1,6 @@
 //! Native witnesses at Contract -> TypeScript HTTP package -> installed Fetch
 //! consumer. Wire expectations are literal normative examples, not emitter snapshots.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::{path::Path, process::Command, sync::Arc};
 use suspect_codegen::typescript::{
@@ -298,6 +296,11 @@ try {
     const fake=new Response(body,{status:200});Object.defineProperty(fake,'status',{value:204});
     const before=pulled;const empty=createClient({serverURL:'https://example.test',fetch:async()=>fake});
     assert.equal((await empty.empty()).data,undefined);assert.equal(cancelled,true);assert.ok(pulled<=before+1,'204 bytes are never decoded');
+    // ADR 0035: one server URL policy; encoded octets reach an explicit transport verbatim.
+    let target;const capture=createClient({serverURL:'https://example.test/a/%2e%2E/%2f//b',fetch:async(input)=>{target=String(input);return new Response(null,{status:204});}});
+    await capture.empty();assert.ok(target.startsWith('https://example.test/a/%2e%2E/%2f//b/'),target);
+    let plainTarget;await createClient({serverURL:'http://example.test/api',allowInsecureHttp:true,fetch:async(input)=>{plainTarget=String(input);return new Response(null,{status:204});}}).empty();assert.equal(plainTarget,'http://example.test/api/empty');
+    for (const bad of ['http://example.test/api','https://example.test/a/../b','https://example.test/./b','https://example.test:0/a']) await assert.rejects(createClient({serverURL:bad,fetch:async()=>{throw new Error('sent');}}).empty(),error=>isSdkError(error)&&error.kind==='request-representation');
 } finally {await new Promise(resolve=>server.close(resolve));}
 "#,
     );
@@ -924,8 +927,9 @@ fn unverified_and_ambiguous_protocols_are_source_located_refusals() {
 #[test]
 #[ignore = "requires the tracked OpenRouter description"]
 fn real_extra_openrouter_operations_use_native_json_and_explicit_legacy_byte_profile() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT");
-    let path = Path::new(&root).join("projects/docs/openapi/openapi.yaml");
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())
@@ -1305,7 +1309,9 @@ fn native_impl(plan: &HttpPlan, types: &str, consumer: &str, execute_types: bool
         &root,
     );
     std::fs::write(root.join("consumer.mjs"), consumer).unwrap();
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     checked(
         Command::new(&node)
             .current_dir(&root)
@@ -1346,7 +1352,7 @@ fn native_impl(plan: &HttpPlan, types: &str, consumer: &str, execute_types: bool
     }
     if std::env::var_os("SUSPECT_PROTOCOL_INSTALL").is_some() {
         installed(
-            &node,
+            node.as_os_str(),
             &root,
             directory.path(),
             types,

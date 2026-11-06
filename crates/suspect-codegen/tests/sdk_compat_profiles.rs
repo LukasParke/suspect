@@ -3,9 +3,9 @@
 //! refusal and emitted byte stays exactly as before (the pinned fixtures and
 //! no-policy tests are the byte-identity gate).
 
-#![cfg(feature = "http-protocol")]
-
 use std::{process::Command, sync::Arc};
+
+use crate::python_support;
 
 use serde_json::{Value, json};
 use suspect_codegen::{
@@ -336,14 +336,9 @@ fn emitted_field_types_for(
 
 #[test]
 fn the_nullable_profile_decodes_null_in_the_emitted_python_codecs() {
-    if !tool_available(
-        &std::env::var_os("SUSPECT_PYTHON_BIN")
-            .unwrap_or_else(|| "python3".into())
-            .to_string_lossy(),
-    ) {
-        eprintln!("python3 is not on PATH; skipping the native codec check");
+    let Some(python_bin) = python_support::python_at_least("SUSPECT_PYTHON_BIN", (3, 10)) else {
         return;
-    }
+    };
     let contract = contract_with_document(nullable_document());
     for (policy, accepts_null) in [
         (
@@ -388,13 +383,11 @@ print("OK")
 "#,
         )
         .unwrap();
-        let output = Command::new(
-            std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()),
-        )
-        .arg("consumer.py")
-        .current_dir(&python)
-        .output()
-        .unwrap();
+        let output = Command::new(&python_bin)
+            .arg("consumer.py")
+            .current_dir(&python)
+            .output()
+            .unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         if accepts_null {
             assert!(

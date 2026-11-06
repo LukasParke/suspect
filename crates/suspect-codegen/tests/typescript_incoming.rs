@@ -3,8 +3,6 @@
 //! against a fake webhook POST through the generated decoder. Plans without
 //! incoming declarations emit no file at all.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::process::Command;
 use std::sync::Arc;

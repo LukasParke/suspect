@@ -1,5 +1,5 @@
 //! Bounded source-policy, native environment snapshot and installed OpenRouter checks.
-use super::validation_tests::{Native, write};
+use super::validation_tests::{Native, dotnet_available, write};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -111,6 +111,9 @@ fn package(native: &Native, plan: &super::SdkPlan, consumer: &str) {
 #[test]
 #[ignore = "bounded installed .NET8/10 environment snapshot, explicit credentials and auth alternatives"]
 fn native_environment_credentials() {
+    if !dotnet_available() {
+        return;
+    }
     let root = directory("native-");
     let plan = plan(Some(policy()));
     let mut consumer = include_str!("testdata/CredentialEnvironmentConsumer.cs").to_owned();
@@ -136,11 +139,13 @@ fn native_environment_credentials() {
 #[test]
 #[ignore = "actual OpenRouter getCurrentKey/getCredits schemas and source-default HTTPS through controlled .NET8/10 handlers"]
 fn native_openrouter_environment_client() {
+    let Some(path) = crate::toolchain::openrouter_spec() else {
+        return;
+    };
+    if !dotnet_available() {
+        return;
+    }
     let root = directory("openrouter-");
-    let corpus = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/Users/luke/github/openrouter-web"));
-    let path = corpus.join("projects/docs/openapi/openapi.yaml");
     let original = fs::read(&path).unwrap();
     let workspace = Arc::new(
         WorkspaceBuilder::new()

@@ -97,7 +97,7 @@ static class Probe
         using(var zip=ZipFile.OpenRead(args[0]))
         {
             string Read(string path){using var reader=new StreamReader(zip.GetEntry(path)!.Open());return reader.ReadToEnd();}
-            var xml=XDocument.Parse(Read("lib/net8.0/Positional.Csharp.xml")).Descendants("member").Select(m=>(string)m.Attribute("name")!).ToHashSet();using var reference=JsonDocument.Parse(Read("docs/reference.json"));var html=Read("docs/index.html");
+            var xml=XDocument.Parse(Read("lib/net8.0/Positional.Csharp.xml")).Descendants("member").Select(m=>(string)m.Attribute("name")!).ToHashSet();using var reference=JsonDocument.Parse(Read("docs/reference.json"));var html=string.Concat(zip.Entries.Where(e=>e.FullName.StartsWith("docs/",StringComparison.Ordinal)&&e.FullName.EndsWith(".html",StringComparison.Ordinal)).OrderBy(e=>e.FullName,StringComparer.Ordinal).Select(e=>Read(e.FullName)));
             foreach(var symbol in reference.RootElement.GetProperty("symbols").EnumerateArray()){Check(xml.Contains(symbol.GetProperty("xmlId").GetString()!),"Native XML member "+symbol.GetProperty("xmlId"));Check(html.Contains("id=\""+symbol.GetProperty("id").GetString()+"\""),"Browsable native symbol anchor");}
             Check(Read("README.md").Contains("Finite positional multipart"),"Positional native guide");
         }

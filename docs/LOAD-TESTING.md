@@ -6,7 +6,8 @@ request rate, latency percentiles, status codes, user lifecycle and
 error classes. Every response is still checked against the workflow's
 `successCriteria`, so the headline number is *contract* failure rate
 under load, not just HTTP errors. SLO gates (`ensure`) decide the exit
-code. Design and rationale: [LOAD-TESTING-PLAN.md](LOAD-TESTING-PLAN.md).
+code. Design rationale:
+[ADR 0006](adr/0006-load-testing-runs-the-arazzo-executor.md).
 
 ## Quick start
 

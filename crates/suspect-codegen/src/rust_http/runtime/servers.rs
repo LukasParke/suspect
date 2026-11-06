@@ -13,7 +13,13 @@ pub(super) fn resolve(op: &Operation, options: &ClientOptions) -> Result<Url, Sd
                 "absolute server override cannot also select a declared candidate or variables",
             ));
         }
-        return validate(op.source, op.source, value, true, op.limits.request);
+        return validate(
+            op.source,
+            op.source,
+            value,
+            !options.allow_insecure_http,
+            op.limits.request,
+        );
     }
     let server = op
         .servers
@@ -58,13 +64,7 @@ pub(super) fn resolve(op: &Operation, options: &ClientOptions) -> Result<Url, Sd
                     "relative server URL could not be resolved",
                 )
             })?;
-            validate(
-                op.source,
-                server.source,
-                resolved.as_str(),
-                false,
-                op.limits.request,
-            )
+            validate(op.source, server.source, resolved.as_str(), false, op.limits.request)
         }
         _ => Err(representation_error(
             op.source,
@@ -139,10 +139,11 @@ fn expand(op: &Operation, server: &Server, options: &ClientOptions) -> Result<St
     check_encoded_dot_segments(op.source, server.source, &out.value)?;
     Ok(out.value)
 }
-// RFC3986 does not treat encoded dots as path-navigation operators. The pinned
-// URL/reqwest stack does, so refuse this representation before it can join or
-// normalize the route. Encoded slashes and ordinary relative dot segments retain
-// their normal, separately tested behavior.
+// RFC3986 does not treat encoded dots as path-navigation operators, and ADR 0035
+// keeps them as opaque path data. The pinned WHATWG URL/reqwest stack decodes
+// and resolves them, so this one representation is refused as unsendable
+// before it can join or normalize the route. Encoded slashes and other encoded
+// octets are preserved verbatim.
 fn check_encoded_dot_segments(
     operation: Source,
     source: Source,
@@ -161,11 +162,16 @@ fn check_encoded_dot_segments(
     }
     Ok(())
 }
+/// One server URL policy (ADR 0035): a declared server keeps its scheme; a
+/// caller override (`loopback_only`) is https, or plain http only to loopback
+/// unless `allow_insecure_http` is set; no userinfo, query or fragment; a
+/// valid port; literal `.`/`..` segments refused, never resolved; non-ASCII,
+/// controls, backslashes and malformed escapes refused.
 fn validate(
     operation: Source,
     source: Source,
     value: &str,
-    override_url: bool,
+    loopback_only: bool,
     limit: usize,
 ) -> Result<Url, SdkError> {
     if value.len() > limit {
@@ -176,6 +182,7 @@ fn validate(
         ));
     }
     if value.is_empty()
+        || !value.is_ascii()
         || value.chars().any(|c| c.is_control() || c.is_whitespace())
         || value.contains(['\\', '{', '}'])
         || !percent_triples(value)
@@ -196,26 +203,27 @@ fn validate(
         || url.password().is_some()
         || url.query().is_some()
         || url.fragment().is_some()
+        || url.port() == Some(0)
     {
         return Err(representation_error(
             operation,
             source,
-            "server URL requires HTTP(S), a host, and no credentials, query or fragment",
+            "server URL requires HTTP(S), a host, a valid port, and no credentials, query or fragment",
         ));
     }
-    if override_url
+    if loopback_only
         && url.scheme() == "http"
         && !match url.host() {
             Some(url::Host::Domain("localhost")) => true,
-            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv4(ip)) => ip == std::net::Ipv4Addr::LOCALHOST,
+            Some(url::Host::Ipv6(ip)) => ip == std::net::Ipv6Addr::LOCALHOST,
             _ => false,
         }
     {
         return Err(representation_error(
             operation,
             source,
-            "an HTTP server override must target loopback",
+            "a plain HTTP server override must target loopback unless allow_insecure_http is set",
         ));
     }
     let after_authority = value.find("://").map_or(0, |at| at + 3);

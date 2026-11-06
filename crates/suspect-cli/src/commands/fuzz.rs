@@ -523,7 +523,9 @@ mod tests {
         );
         assert_eq!(req.method, "POST");
         let body: Value = serde_json::from_slice(&req.body).unwrap();
-        assert_eq!(body["name"], Value::String("sample text".into()));
+        // Field names are JSON pointers; the faker reads their words, so a
+        // `name` field gets a realistic name rather than filler text.
+        assert_eq!(body["name"], Value::String("Ada Lovelace".into()));
         assert_eq!(body["tag"], Value::String("sample text".into()));
 
         // A body-targeted null mutant lands null inside the JSON payload.

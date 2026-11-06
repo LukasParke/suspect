@@ -86,12 +86,19 @@ pub(super) fn package(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile> 
     }
     // OAuth lifecycle helpers are emitted only for a configured policy with at
     // least one usable scheme; no-policy output stays byte-identical.
-    if let Some(oauth) = plan.oauth.as_ref().filter(|plan| super::oauth::emits(plan)) {
+    if let Some(oauth) = plan.oauth.as_ref().filter(|plan| plan.emits()) {
         files.insert(
             "go/oauth.go".into(),
             super::oauth::emit(
                 oauth,
-                &super::oauth::no_replay_requirements(oauth, plan.operations()),
+                &crate::http_protocol::oauth_no_replay_requirements(
+                    plan.operations().iter().map(|operation| operation.wire()),
+                    &oauth
+                        .schemes
+                        .iter()
+                        .map(|scheme| scheme.name.as_str())
+                        .collect(),
+                ),
             ),
         );
     }

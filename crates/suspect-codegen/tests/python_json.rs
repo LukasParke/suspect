@@ -3,11 +3,14 @@
 
 use std::process::Command;
 
+use crate::python_support;
+
 fn run_python(
     files: &[suspect_codegen::OutFile],
     consumer: &str,
     input: Option<&str>,
-) -> tempfile::TempDir {
+) -> Option<tempfile::TempDir> {
+    let python = python_support::python()?;
     let directory = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(files, directory.path()).unwrap();
     let root = directory.path().join("python");
@@ -15,12 +18,11 @@ fn run_python(
     if let Some(input) = input {
         std::fs::write(root.join("input.json"), input).unwrap();
     }
-    let output =
-        Command::new(std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()))
-            .current_dir(&root)
-            .arg("consumer.py")
-            .output()
-            .expect("requires native Python 3");
+    let output = Command::new(python)
+        .current_dir(&root)
+        .arg("consumer.py")
+        .output()
+        .expect("requires native Python 3");
     if !output.status.success() {
         let retained = directory.keep();
         panic!(
@@ -30,10 +32,10 @@ fn run_python(
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    directory
+    Some(directory)
 }
 
-fn execute(consumer: &str, input: Option<&str>) -> tempfile::TempDir {
+fn execute(consumer: &str, input: Option<&str>) -> Option<tempfile::TempDir> {
     run_python(&suspect_codegen::python_json::emit(), consumer, input)
 }
 
@@ -375,16 +377,18 @@ print('number type contract ok')
 }
 
 #[test]
-#[ignore = "requires OPENROUTER_WEB_ROOT and native Python 3; missing inputs fail"]
+#[ignore = "requires the pinned OpenRouter checkout (SUSPECT_OPENROUTER_YAML) and native Python 3"]
 fn tracked_openrouter_contract_documents_roundtrip_through_python_runtime() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .expect("set OPENROUTER_WEB_ROOT to the source checkout");
-    for relative in [
+    let companions = [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",
         "projects/docs/assets/provider-monitor-schema-v2.openapi.json",
         "packages/temporal/benchmarks.openapi.json",
-    ] {
+    ];
+    let Some(root) = suspect_codegen::toolchain::openrouter_checkout(&companions) else {
+        return;
+    };
+    for relative in companions {
         let path = std::path::Path::new(&root).join(relative);
         let workspace = std::sync::Arc::new(
             suspect_ref::WorkspaceBuilder::new()
@@ -399,7 +403,7 @@ fn tracked_openrouter_contract_documents_roundtrip_through_python_runtime() {
         .expect("tracked OpenRouter contract input must load");
         let original = contract.document(contract.entry()).unwrap();
         let text = serde_json::to_string(original).unwrap();
-        let directory = execute(
+        let Some(directory) = execute(
             r##"import json_runtime as _json
 with open('input.json', 'rb') as handle:
     document = _json.parse_json(handle.read())
@@ -407,7 +411,9 @@ with open('output.json', 'wb') as handle:
     handle.write(_json.stringify_json(document).encode('utf-8'))
 "##,
             Some(&text),
-        );
+        ) else {
+            return;
+        };
         let encoded = std::fs::read(directory.path().join("python/output.json")).unwrap();
         // Normalization oracle: serde_json::Value equality ignores object key
         // order (the Python writer keeps insertion order, the Rust writer

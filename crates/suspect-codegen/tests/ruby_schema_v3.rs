@@ -94,18 +94,32 @@ fn add(
         .target;
     cases.push(json!({"id":label,"program":p,"rootTarget":target,"instanceJson":instance,"expected":expected,"source":source}));
 }
+/// The Ruby prefix resolved by `suspect_codegen::toolchain`
+/// (`SUSPECT_RUBY_HOME`, the mise install, or `ruby` on `PATH`); test
+/// entries gate on [`native_ready`] first.
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
 }
+/// Ruby and the provisioned gems are available (skip message, or a panic
+/// under `SUSPECT_REQUIRE_NATIVE`, otherwise).
+fn native_ready() -> bool {
+    suspect_codegen::toolchain::require_home("ruby").is_some()
+        && suspect_codegen::toolchain::require_provisioned(
+            "SUSPECT_RUBY_GEMS",
+            "sdk-ruby-tools/gems",
+            "ruby",
+        )
+        .is_some()
+}
+/// The RBS/Steep/YARD gems `tools/native-setup.sh ruby` provisions
+/// (`SUSPECT_RUBY_GEMS` overrides); test entries gate on [`native_ready`].
 fn tools() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_GEMS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| root().join("target/sdk-ruby-tools/gems"))
+    suspect_codegen::toolchain::require_provisioned(
+        "SUSPECT_RUBY_GEMS",
+        "sdk-ruby-tools/gems",
+        "ruby",
+    )
+    .expect("gated by native_ready()")
 }
 fn default_gems() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))
@@ -523,6 +537,9 @@ fn resource_native_descriptors_and_profile_selection_preserve_physical_identity(
 #[test]
 #[ignore = "requires Ruby, local gem installation, RBS/Steep/YARD; native resource-aware SDK, executable examples and real HTTP"]
 fn installed_resource_sdk_models_types_examples_and_wire() {
+    if !native_ready() {
+        return;
+    }
     let plan = resource_sdk();
     let dir = package(&plan, "sdk-");
     consumer(
@@ -656,6 +673,9 @@ fn consumer(dir: &Path, script: &str, name: &str) {
 #[test]
 #[ignore = "requires native Ruby; compiles all unmodified official source cases via compile_v3, no frozen target input"]
 fn source_driven_official_v3_resources_scopes_and_guards() {
+    if !native_ready() {
+        return;
+    }
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../suspect-schema/tests/fixtures/resource-conformance");
     let read = |name: &str| {

@@ -21,9 +21,11 @@ mod stream;
 #[path = "incoming.rs"]
 mod incoming;
 
+/// Immutable PHP SDK plan: model core plus the allocated protocol surface.
 #[derive(Debug)]
 pub struct SdkPlan {
     pub(super) core: super::ModelCore,
+    /// Allocated protocol symbols.
     pub surface: Surface,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
     pagination: Option<crate::http_protocol::PaginationOutcome>,
@@ -38,9 +40,11 @@ pub struct SdkPlan {
     incoming_receipts: Vec<incoming::Receipt>,
 }
 impl SdkPlan {
+    /// Configuration the plan was admitted under.
     pub fn config(&self) -> &PhpConfig {
         self.core.config()
     }
+    /// Environment-variable bindings for credentials, when configured.
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
     }
@@ -62,21 +66,27 @@ impl SdkPlan {
     pub fn incoming(&self) -> &crate::http_protocol::IncomingPlan {
         &self.incoming
     }
+    /// Canonical contract the plan was built from.
     pub fn contract(&self) -> &Arc<Contract> {
         self.core.contract()
     }
+    /// Native model symbols for every reachable codec schema.
     pub fn models(&self) -> &models::ModelPlan {
         self.core.models()
     }
+    /// Selected operations, in protocol order.
     pub fn operations(&self) -> &[Operation] {
         &self.surface.operations
     }
+    /// Checked validation program executed by the generated runtime.
     pub fn program(&self) -> &suspect_schema::OwnedProgram {
         self.core.program()
     }
+    /// Per-operation source examples used by generated docs.
     pub fn examples(&self) -> &crate::examples::ExamplePlan {
         self.core.examples()
     }
+    /// Render the complete Composer package.
     pub fn render(&self) -> Vec<crate::OutFile> {
         emit::package(self)
     }
@@ -111,6 +121,7 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
     scoped: bool,
     resources: bool,
 ) -> Result<SdkPlan, Vec<HttpDiagnostic>> {
+    let capabilities = crate::schema_view::oas30_capability_for(&contract, capabilities);
     let entry = SourceId::new(contract.entry().clone(), Default::default());
     let parts = config.package_name.split('/').collect::<Vec<_>>();
     let mut errors = Vec::new();
@@ -201,12 +212,12 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
     // class joins the reservation only while the replaying credential
     // wrapper participates, so non-replaying plans allocate unchanged.
     if let Some(oauth) = &oauth
-        && oauth::emittable(oauth)
+        && oauth.emits()
     {
         for name in oauth::CLASS_NAMES {
             used.insert(name.to_ascii_lowercase());
         }
-        if oauth::replaying(oauth) {
+        if oauth.executes(crate::http_protocol::OAuthFlowDescriptorKind::ClientCredentials) {
             used.insert("replaytransport".to_owned());
         }
     }
@@ -296,6 +307,14 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
         directional.dedup();
     }
     for source in &directional {
+        // OAS 3.0 Reference Object siblings (including readOnly/writeOnly)
+        // have no semantic effect, so they cannot activate a directional view.
+        if contract
+            .schema(source)
+            .is_some_and(crate::schema_view::reference_only)
+        {
+            continue;
+        }
         for keyword in ["readOnly", "writeOnly"] {
             if contract
                 .source(source)
@@ -384,7 +403,6 @@ pub(in crate::php_sdk) fn plan_sdk_mode(
             contract,
             config,
             models,
-            operations: Vec::new(),
             program,
             examples,
             samples,
@@ -408,6 +426,8 @@ pub fn capabilities() -> wire::Capabilities {
         [
             AdditionalMethods,
             CustomMethods,
+            // ADR 0035: a source-declared plain-HTTP server keeps its scheme.
+            HttpServers,
             RelativeServers,
             DocumentRelativeServers,
             MultipleServers,
@@ -445,6 +465,7 @@ pub fn capabilities() -> wire::Capabilities {
             PartEncodings,
             ServerSentEvents,
             JsonLines,
+            OpenApi30,
             OpenApi32,
             SchemaResources,
             DynamicSchemaReferences,
@@ -452,87 +473,153 @@ pub fn capabilities() -> wire::Capabilities {
     )
 }
 
+/// How a request, response or part body is carried in PHP.
 #[derive(Debug, Clone)]
 pub enum Payload {
+    /// JSON or text through this schema's generated codec.
     Schema(SchemaId),
+    /// Schema-free JSON as `JsonValue`; also items of a schemaless stream.
     Json,
+    /// Schema-free text as `string`.
     Text,
+    /// Opaque bytes as `string`.
     Bytes,
+    /// No body (forbidden by HTTP, or absent on a `2XX`/`3XX`/`default` status).
     NoBody,
+    /// Form or named-multipart body bound to this generated object class.
     Object(String),
+    /// SSE or JSON-lines stream whose items use this schema's codec.
     Stream(SchemaId),
 }
+/// A caller-supplied path, query, header or cookie parameter.
 #[derive(Debug, Clone)]
 pub struct Parameter {
+    /// PHP property name on the input class.
     pub name: String,
+    /// Codec root schema of the parameter value.
     pub schema: SchemaId,
+    /// Admitted wire serialization plan.
     pub wire: wire::ParameterPlan,
 }
+/// One admitted media type of a request body or response.
 #[derive(Debug, Clone)]
 pub struct Media {
+    /// Source media-type declaration.
     pub source: SourceId,
+    /// Naming stem for the payload's model and object classes.
     pub name: String,
+    /// Representation class, when the body offers several media or a media range.
     pub wrapper: Option<String>,
+    /// Payload carrier.
     pub payload: Payload,
+    /// Admitted media plan.
     pub wire: wire::MediaPlan,
 }
+/// One declared response or part header.
 #[derive(Debug, Clone)]
 pub struct Header {
+    /// PHP property name, unique within its header class.
     pub name: String,
+    /// Codec root schema of the header value.
     pub schema: SchemaId,
+    /// Admitted header parsing plan.
     pub wire: wire::HeaderPlan,
 }
+/// A generated header class; `fields` is empty when nothing is declared.
 #[derive(Debug, Clone)]
 pub struct HeaderObject {
+    /// Collision-free PHP class name.
     pub name: String,
+    /// Declared headers, in protocol order.
     pub fields: Vec<Header>,
 }
+/// One named field of a form/multipart object, or its `extra` slot.
 #[derive(Debug, Clone)]
 pub struct Part {
+    /// PHP property name (`extra` for the additional-parts slot).
     pub name: String,
+    /// Part value carrier: a schema codec or bytes.
     pub payload: Payload,
+    /// Multipart part wrapper class; `None` for URL-encoded forms.
     pub wrapper: Option<String>,
+    /// Declared part headers.
     pub headers: HeaderObject,
+    /// Admitted part encoding plan.
     pub wire: wire::PartPlan,
 }
+/// A generated class for a form or named-multipart body.
 #[derive(Debug, Clone)]
 pub struct BodyObject {
+    /// Schema the object rules were derived from.
     pub source: SourceId,
+    /// Collision-free PHP class name.
     pub name: String,
+    /// Declared named fields.
     pub parts: Vec<Part>,
+    /// Additional-fields slot, when the body admits undeclared parts.
     pub extra: Option<Part>,
+    /// `true` for multipart, `false` for URL-encoded forms.
     pub multipart: bool,
+    /// Object rules (required, bounds) the class enforces.
     pub rules: wire::ObjectRules,
 }
+/// One response class: a declared status in one success/error role and one media.
+///
+/// A `default` status yields both a success and an error entry; `2XX`, `3XX`
+/// and `default` statuses also yield a `NoBody` entry.
 #[derive(Debug, Clone)]
 pub struct Response {
+    /// Source response declaration.
     pub source: SourceId,
+    /// Status key as written in the source (`200`, `4XX`, `default`).
     pub status_key: String,
+    /// Whether this entry is returned (success) or thrown (error).
     pub success: bool,
+    /// Collision-free PHP class name.
     pub name: String,
+    /// Body carrier.
     pub payload: Payload,
+    /// The media this entry decodes; `None` for no-body and undeclared-bytes entries.
     pub media: Option<Media>,
+    /// Declared response headers, shared by every entry of the status.
     pub headers: HeaderObject,
+    /// Admitted response plan.
     pub wire: wire::ResponsePlan,
 }
+/// One selected outgoing operation and its PHP client method.
 #[derive(Debug, Clone)]
 pub struct Operation {
+    /// Source operation declaration.
     pub source: SourceId,
+    /// Source `operationId`.
     pub id: String,
+    /// Collision-free client method name.
     pub method: String,
+    /// Generated input class holding the operation's arguments.
     pub input: String,
+    /// Operation-wide API error class.
     pub error: String,
+    /// Caller parameters, in protocol order.
     pub parameters: Vec<Parameter>,
+    /// Request body media, in declaration order; empty when no body is declared.
     pub body: Vec<Media>,
+    /// Whether the source marks the request body required.
     pub body_required: bool,
+    /// Response classes, in protocol order.
     pub responses: Vec<Response>,
+    /// Admitted operation plan.
     pub wire: wire::OperationPlan,
 }
+/// Every allocated PHP protocol symbol over the admitted protocol plan.
 #[derive(Debug)]
 pub struct Surface {
+    /// Admitted protocol plan for the selected operations.
     pub protocol: wire::ProtocolPlan,
+    /// Selected operations, in protocol order.
     pub operations: Vec<Operation>,
+    /// Generated form/multipart body classes.
     pub objects: Vec<BodyObject>,
+    /// Model-name hints for codec schemas, keyed by schema.
     pub names: BTreeMap<SchemaId, String>,
 }
 

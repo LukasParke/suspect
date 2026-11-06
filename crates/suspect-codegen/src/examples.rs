@@ -12,22 +12,25 @@ use std::{
 use suspect_ir::contract::{Contract, Example, ParameterLocation, SchemaId, SourceId};
 use suspect_schema::{Config, OwnedCompileErrorKind, OwnedCompiler, OwnedOutcome, OwnedSchema};
 
-#[cfg(feature = "http-protocol")]
 mod aggregate;
-#[cfg(feature = "http-protocol")]
 mod protocol;
-#[cfg(feature = "http-protocol")]
 pub use protocol::{plan_protocol_examples, plan_protocol_examples_v2, plan_protocol_examples_v3};
 
 /// Finite example discovery, synthesis and validation policy.
 #[derive(Debug, Clone)]
 pub struct ExampleConfig {
+    /// Maximum synthesis recursion and copied JSON nesting depth, 1..=64.
     pub max_depth: usize,
+    /// Maximum candidates kept per schema node (e.g. `enum` values), 1..=64.
     pub max_candidates: usize,
-    /// Plan-wide schema visits, validation attempts and copied JSON bytes.
+    /// Plan-wide schema visits, validation attempts and copied JSON bytes,
+    /// 1..=10_000_000.
     pub max_work: usize,
+    /// Evaluation step budget of the owned schema validator, 1..=1_000_000.
     pub max_validation_steps: usize,
+    /// Upper bound on a synthesized string's length, 1..=65_536.
     pub max_string_length: usize,
+    /// Maximum declared examples considered per slot, 1..=128.
     pub max_declared: usize,
 }
 impl Default for ExampleConfig {
@@ -42,53 +45,87 @@ impl Default for ExampleConfig {
         }
     }
 }
+/// Where an example value came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExampleOrigin {
+    /// A source-declared `example`/`examples` value the validator accepted.
     Declared,
+    /// A value synthesized from the schema because no declared value was valid.
     Synthesized,
 }
+/// The wire slot an example value fills. `status` strings are source status
+/// keys such as `200`, `4XX` or `default`; `wire_name` is the exact
+/// parameter or header name; part names are `None` for positional parts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExampleRole {
+    /// A request body.
     RequestBody,
+    /// A response body under an exact status code.
     Response {
+        /// The exact status code.
         status: u16,
     },
     /// A declared status pattern, without inventing a concrete response code.
     ResponsePattern {
+        /// The declared status key, e.g. `2XX` or `default`.
         status: String,
     },
+    /// A response header.
     ResponseHeader {
+        /// Status key of the declaring response.
         status: String,
+        /// Header name.
         wire_name: String,
     },
+    /// A form field or multipart part of the request body.
     RequestPart {
+        /// Field or part name.
         name: Option<String>,
+        /// Whether the part repeats once per array item.
         repeated: bool,
     },
+    /// A header of a request multipart part.
     RequestPartHeader {
+        /// Name of the containing part.
         part: Option<String>,
+        /// Header name.
         wire_name: String,
     },
+    /// A form field or multipart part of a response body.
     ResponsePart {
+        /// Status key of the declaring response.
         status: String,
+        /// Field or part name.
         name: Option<String>,
+        /// Whether the part repeats once per array item.
         repeated: bool,
     },
+    /// A header of a response multipart part.
     ResponsePartHeader {
+        /// Status key of the declaring response.
         status: String,
+        /// Name of the containing part.
         part: Option<String>,
+        /// Header name.
         wire_name: String,
     },
+    /// One item of a request stream.
     RequestItem,
+    /// One item of a response stream.
     ResponseItem {
+        /// Status key of the declaring response.
         status: String,
     },
+    /// A path, query, header or cookie parameter.
     Parameter {
+        /// Parameter name.
         wire_name: String,
+        /// Parameter location.
         location: ParameterLocation,
     },
 }
 impl ExampleRole {
+    /// Whether the slot belongs to a response rather than the request.
     pub fn is_response(&self) -> bool {
         matches!(
             self,
@@ -105,43 +142,64 @@ impl ExampleRole {
 /// A positional wire occurrence, independent of a reusable item schema's source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ExamplePartPosition {
+    /// The prefix part at this index.
     Prefix(usize),
+    /// The repeated remaining-item part.
     Items,
 }
 
 /// A schema-valid value. Source prose and names are inert metadata.
 #[derive(Debug, Clone)]
 pub struct ExampleEntry {
+    /// The wire slot this value fills.
     pub role: ExampleRole,
+    /// Declared media type of the slot; empty for parameters and headers.
     pub media_type: String,
+    /// Schema the value was validated against.
     pub schema: SchemaId,
     /// Real wire-slot container (parameter or media object), even through refs.
     pub container: SourceId,
     /// Positional prefixes and the remaining-item group can share a codec schema
     /// while requiring different encodings and independently absent values.
     pub part_position: Option<ExamplePartPosition>,
+    /// Whether the value was declared or synthesized.
     pub origin: ExampleOrigin,
+    /// Key of a named Example Object, when declared through one.
     pub name: Option<String>,
+    /// `summary` of that Example Object, when declared.
     pub summary: Option<String>,
+    /// Source of the declared value; `None` when synthesized.
     pub declared_source: Option<SourceId>,
+    /// The schema-valid JSON value.
     pub value: Value,
 }
+/// A source-linked example finding: a rejected declaration, an unavailable
+/// slot, or a planning failure.
 #[derive(Debug, Clone)]
 pub struct ExampleDiagnostic {
+    /// Source location the finding is attributed to.
     pub source: SourceId,
+    /// Byte span of `source` in its document, or `0..0` when unknown.
     pub at: Range<usize>,
+    /// Stable `examples-*` finding code.
     pub code: &'static str,
+    /// Human-readable explanation.
     pub message: String,
 }
+/// Validated examples of one selected operation.
 #[derive(Debug)]
 pub struct OperationExamples {
+    /// Source location of the operation declaration.
     pub source: SourceId,
+    /// Source operationId, or `METHOD /path` when none is declared.
     pub operation_id: String,
+    /// One entry per wire slot that has a valid value.
     pub entries: Vec<ExampleEntry>,
     /// Source-declared complete JSON aggregates, kept separate from the actual
     /// part codec inputs in `entries`. Byte aggregates remain unavailable.
     pub validated_aggregates: Vec<ExampleEntry>,
 }
+/// Validated examples for the selected operations and every finding.
 #[derive(Debug)]
 pub struct ExamplePlan {
     contract: Arc<Contract>,
@@ -150,17 +208,22 @@ pub struct ExamplePlan {
     format: &'static str,
 }
 impl ExamplePlan {
+    /// Version identifier of the planner that produced this plan, e.g.
+    /// `suspect-sdk-examples-v1`.
     pub fn format(&self) -> &'static str {
         self.format
     }
+    /// Per-operation examples in selection order.
     #[must_use]
     pub fn operations(&self) -> &[OperationExamples] {
         &self.operations
     }
+    /// Every source-linked finding produced while planning.
     #[must_use]
     pub fn diagnostics(&self) -> &[ExampleDiagnostic] {
         &self.diagnostics
     }
+    /// The source contract this plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract

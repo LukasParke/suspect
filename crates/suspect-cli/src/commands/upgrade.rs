@@ -40,12 +40,18 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     let doc: serde_json::Value = serde_json::from_str(&doc)?;
     let upgraded = suspect_upgrade::upgrade(&doc).map_err(anyhow::Error::msg)?;
 
-    let output_text = if absolute.to_string_lossy().ends_with(".json") {
-        serde_json::to_string_pretty(&upgraded)? + "\n"
+    // The output format follows the destination's extension (the input's
+    // when writing to stdout): YAML for `.yaml`/`.yml`, JSON otherwise.
+    let target = args.output.as_deref().unwrap_or(&absolute);
+    let yaml = target
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
+    let document = to_ordered(&upgraded, true);
+    let output_text = if yaml {
+        document.to_yaml()
     } else {
-        // JSON is valid YAML; serialize through the JSON string to keep
-        // key insertion order.
-        serde_json::to_string_pretty(&upgraded)? + "\n"
+        document.to_json_pretty() + "\n"
     };
     match &args.output {
         Some(path) => {
@@ -73,4 +79,54 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
         }
     }
     Ok(0)
+}
+
+/// Conventional OpenAPI top-level key order; other keys (extensions)
+/// follow in their existing order.
+const TOP_LEVEL_ORDER: [&str; 9] = [
+    "openapi",
+    "info",
+    "jsonSchemaDialect",
+    "servers",
+    "security",
+    "tags",
+    "externalDocs",
+    "paths",
+    "components",
+];
+
+/// Converts the upgraded JSON into the overlay value tree, which has
+/// ordered objects and a YAML emitter. The root's keys are put in
+/// conventional OpenAPI order.
+fn to_ordered(value: &serde_json::Value, root: bool) -> suspect_overlay::Value {
+    use suspect_overlay::Value as V;
+    match value {
+        serde_json::Value::Null => V::Null,
+        serde_json::Value::Bool(b) => V::Bool(*b),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(V::Int)
+            .or_else(|| n.as_f64().map(V::Float))
+            .unwrap_or_else(|| V::Str(n.to_string().into())),
+        serde_json::Value::String(s) => V::Str(s.as_str().into()),
+        serde_json::Value::Array(items) => {
+            V::Array(items.iter().map(|item| to_ordered(item, false)).collect())
+        }
+        serde_json::Value::Object(map) => {
+            let mut entries: Vec<(Box<str>, V)> = map
+                .iter()
+                .map(|(k, v)| (k.as_str().into(), to_ordered(v, false)))
+                .collect();
+            if root {
+                let rank = |key: &str| {
+                    TOP_LEVEL_ORDER
+                        .iter()
+                        .position(|known| *known == key)
+                        .unwrap_or(TOP_LEVEL_ORDER.len())
+                };
+                entries.sort_by_key(|(key, _)| rank(key));
+            }
+            V::Object(entries)
+        }
+    }
 }

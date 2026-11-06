@@ -60,11 +60,13 @@ impl CliPlan {
         &self.sdk
     }
 
+    /// Closed mapping profile this plan was admitted against.
     #[must_use]
     pub fn mapping(&self) -> &MappingProfile {
         &self.mapping
     }
 
+    /// Target configuration this plan was built with.
     #[must_use]
     pub fn config(&self) -> &CliTargetConfig {
         &self.config

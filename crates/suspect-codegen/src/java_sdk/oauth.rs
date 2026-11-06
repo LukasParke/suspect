@@ -35,8 +35,8 @@
 use super::models::q;
 use super::{http::JavaOperation, SdkPlan};
 use crate::http_protocol::{
-    CredentialHook, OAuthClientAuth, OAuthFlowDescriptor, OAuthFlowDescriptorKind, OAuthPlan,
-    OAuthSchemeKind, OAuthSchemePlan, Representation,
+    OAuthClientAuth, OAuthFlowDescriptor, OAuthFlowDescriptorKind, OAuthPlan, OAuthSchemeKind,
+    OAuthSchemePlan, oauth_stream_protected_requirements,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -45,91 +45,28 @@ use std::collections::{BTreeMap, BTreeSet};
 /// behavior is unchanged; every other emitted type is nested inside `OAuth`.
 pub(crate) const TOP_LEVEL_NAMES: &[&str] = &["OAuth"];
 
-/// Whether one compiled flow can be executed by the emitted runtime.
-fn executable(flow: &OAuthFlowDescriptor) -> bool {
-    if flow.deprecated_flow {
-        return false;
-    }
-    match flow.kind {
-        OAuthFlowDescriptorKind::ClientCredentials => flow.token_url.is_some(),
-        OAuthFlowDescriptorKind::AuthorizationCode => {
-            flow.authorization_url.is_some() && flow.token_url.is_some()
-        }
-        OAuthFlowDescriptorKind::DeviceAuthorization => {
-            flow.device_authorization_url.is_some() && flow.token_url.is_some()
-        }
-        // Implicit and password flows are never executed by generated code.
-        OAuthFlowDescriptorKind::Implicit | OAuthFlowDescriptorKind::Password => false,
-    }
-}
-
-/// Whether one compiled scheme contributes anything executable. A discovery
-/// URL makes a scheme usable even with no declared flows: OpenID Connect
-/// schemes have their endpoints defined by the discovery document at runtime.
-fn usable_scheme(scheme: &OAuthSchemePlan) -> bool {
-    scheme.discovery.is_some() || scheme.flows.iter().any(executable)
-}
-
 /// Whether the compiled plan justifies emitting `OAuth.java` at all.
 pub(crate) fn emittable(plan: &OAuthPlan) -> bool {
-    plan.schemes.iter().any(usable_scheme)
-}
-
-/// Whether at least one compiled scheme carries an executable
-/// client-credentials flow, so the replaying credential wrapper participates.
-/// The wrapper serves exactly that provider, so plans without one compile
-/// exactly the pre-replay bytes.
-fn replaying(plan: &OAuthPlan) -> bool {
-    plan.schemes.iter().any(|scheme| {
-        scheme
-            .flows
-            .iter()
-            .any(|flow| executable(flow) && flow.kind == OAuthFlowDescriptorKind::ClientCredentials)
-    })
+    plan.usable_schemes().next().is_some()
 }
 
 /// The security-requirement source addresses whose attaches must never be
-/// replayed: requirements that name a compiled scheme on an operation whose
-/// responses carry a stream representation. Delivered stream data prevents a
-/// transparent restart, so those operations are excluded from the replay
-/// wrapper's one-replay budget. Java credential hooks receive the address as
-/// the requirement's document URI plus RFC 6901 pointer, exactly the value
-/// the runtime's `Protocol.source` serves.
+/// replayed (see [`crate::http_protocol::oauth_stream_protected_requirements`]).
+/// Java credential hooks receive the address as the requirement's document
+/// URI plus RFC 6901 pointer, exactly the value the runtime's
+/// `Protocol.source` serves.
 fn no_replay_requirements(
     oauth: &OAuthPlan,
     operations: &[JavaOperation],
 ) -> BTreeMap<String, BTreeSet<String>> {
     let names: BTreeSet<&str> = oauth.schemes.iter().map(|s| s.name.as_str()).collect();
     let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.wire.responses().iter().any(|response| {
-            response
-                .media()
-                .iter()
-                .any(|media| matches!(media.representation(), Representation::Stream { .. }))
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.wire.security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    CredentialHook::OAuth2 { .. } | CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if names.contains(requirement.name()) {
-                    let source = requirement.source().source();
-                    let address =
-                        format!("{}#{}", source.document().as_str(), source.pointer());
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(address);
-                }
-            }
-        }
+    for found in oauth_stream_protected_requirements(operations, |op| &op.wire, &names) {
+        let source = found.requirement.source().source();
+        pointers
+            .entry(found.scheme.to_owned())
+            .or_default()
+            .insert(format!("{}#{}", source.document().as_str(), source.pointer()));
     }
     pointers
 }
@@ -225,22 +162,6 @@ fn scheme_arguments(scheme: &OAuthSchemePlan, discovery: bool) -> String {
     }
 }
 
-fn has_authorization_code(schemes: &[&OAuthSchemePlan]) -> bool {
-    schemes.iter().any(|scheme| {
-        scheme.flows.iter().any(|flow| {
-            executable(flow) && flow.kind == OAuthFlowDescriptorKind::AuthorizationCode
-        })
-    })
-}
-
-fn has_device(schemes: &[&OAuthSchemePlan]) -> bool {
-    schemes.iter().any(|scheme| {
-        scheme.flows.iter().any(|flow| {
-            executable(flow) && flow.kind == OAuthFlowDescriptorKind::DeviceAuthorization
-        })
-    })
-}
-
 fn has_revocation(schemes: &[&OAuthSchemePlan]) -> bool {
     schemes
         .iter()
@@ -259,21 +180,17 @@ fn has_introspection(schemes: &[&OAuthSchemePlan]) -> bool {
 /// discovery-aware credential methods and the discovery engine.
 pub(crate) fn source(plan: &SdkPlan) -> Option<String> {
     let oauth = plan.oauth()?;
-    let schemes: Vec<&OAuthSchemePlan> = oauth
-        .schemes
-        .iter()
-        .filter(|scheme| usable_scheme(scheme))
-        .collect();
+    let schemes: Vec<&OAuthSchemePlan> = oauth.usable_schemes().collect();
     if schemes.is_empty() {
         return None;
     }
-    let authorization_code = has_authorization_code(&schemes);
-    let device = has_device(&schemes);
-    let discovery = schemes.iter().any(|scheme| scheme.discovery.is_some());
+    let authorization_code = oauth.executes(OAuthFlowDescriptorKind::AuthorizationCode);
+    let device = oauth.executes(OAuthFlowDescriptorKind::DeviceAuthorization);
+    let discovery = oauth.has_discovery();
     // The replaying credential wrapper joins only when a compiled scheme
     // carries an executable client-credentials flow, and compiles the
     // stream-protected requirement addresses of that plan's operations.
-    let replay = replaying(oauth);
+    let replay = oauth.executes(OAuthFlowDescriptorKind::ClientCredentials);
     let no_replay = if replay {
         no_replay_requirements(oauth, plan.operations())
     } else {

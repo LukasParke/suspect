@@ -26,10 +26,26 @@ fn base() -> PathBuf {
 fn tools() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools")
 }
-fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| tools().join("php-8.3.32/php"))
+/// PHP plus the provisioned Composer/PHPStan phars (`tools/native-setup.sh php`),
+/// or `false` after the skip message (a panic under `SUSPECT_REQUIRE_NATIVE`).
+fn native_php() -> bool {
+    suspect_codegen::toolchain::require("php").is_some()
+        && suspect_codegen::toolchain::require_provisioned(
+            "SUSPECT_COMPOSER_PHAR",
+            "sdk-php-tools/composer-2.10.3.phar",
+            "php",
+        )
+        .is_some()
+        && suspect_codegen::toolchain::require_provisioned(
+            "SUSPECT_PHPSTAN_PHAR",
+            "sdk-php-tools/phpstan-2.2.13.phar",
+            "php",
+        )
+        .is_some()
+}
+/// The resolved PHP with `-n` plus the ini-enabled shared extensions.
+fn php_command() -> Command {
+    suspect_codegen::toolchain::php_command().expect("PHP is gated by native_php()")
 }
 fn phpstan() -> PathBuf {
     std::env::var_os("SUSPECT_PHPSTAN_PHAR")
@@ -156,9 +172,8 @@ fn write_files(files: Vec<suspect_codegen::OutFile>, root: &Path) {
     }
 }
 fn composer(root: &Path) -> Command {
-    let mut cmd = Command::new(php());
-    cmd.arg("-n")
-        .arg(tools().join("composer-2.10.3.phar"))
+    let mut cmd = php_command();
+    cmd.arg(tools().join("composer-2.10.3.phar"))
         .env("COMPOSER_HOME", root.join("composer-home"))
         .env("COMPOSER_CACHE_DIR", tools().join("composer-cache"))
         .env("COMPOSER_NO_INTERACTION", "1");
@@ -168,7 +183,7 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
     let root = root(label);
     write_files(plan.render(), &root);
     checked(
-        Command::new(php()).args(["-n", "-r", "echo PHP_VERSION, PHP_EOL;"]),
+        php_command().args(["-r", "echo PHP_VERSION, PHP_EOL;"]),
         &root,
         "php-version",
     );
@@ -221,8 +236,7 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
         );
     }
     checked(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -237,8 +251,8 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
     );
     for name in ["codecs", "client", "quickstart"] {
         checked(
-            Command::new(php())
-                .args(["-n", "-d", "error_reporting=-1"])
+            php_command()
+                .args(["-d", "error_reporting=-1"])
                 .arg(installed.join(format!("examples/{name}.php")))
                 .env("SUSPECT_SDK_AUTOLOAD", consumer.join("vendor/autoload.php"))
                 .current_dir(&consumer),
@@ -252,8 +266,8 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
     )
     .unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "docs.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "docs.php"])
             .arg(&installed)
             .current_dir(&consumer),
         &root,
@@ -389,6 +403,9 @@ fn native_type_graphs_memoize_shared_unions_and_reject_excessive_alias_depth() {
 #[test]
 #[ignore = "requires verified PHP 8.3+, Composer and PHPStan; real installed archive and native consumer"]
 fn composer_installed_m2_native_package() {
+    if !native_php() {
+        return;
+    }
     let plan = canonical();
     let root = install(&plan, "m2-");
     let consumer = root.join("consumer");
@@ -399,8 +416,7 @@ fn composer_installed_m2_native_package() {
     .unwrap();
     fs::write(consumer.join("phpstan.neon"),"parameters:\n    level: max\n    phpVersion: 80300\n    paths: [positive.php]\n    tmpDir: build/phpstan\n").unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -413,8 +429,8 @@ fn composer_installed_m2_native_package() {
         "positive-types",
     );
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .current_dir(&consumer),
         &root,
         "native-models",
@@ -453,8 +469,7 @@ fn composer_installed_m2_native_package() {
             format!("<?php\ndeclare(strict_types=1);\n{statement}\n"),
         )
         .unwrap();
-        let output = Command::new(php())
-            .arg("-n")
+        let output = php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -482,8 +497,7 @@ fn composer_installed_m2_native_package() {
     )
     .unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -497,9 +511,8 @@ fn composer_installed_m2_native_package() {
         "http-positive-types",
     );
     checked(
-        Command::new(php())
+        php_command()
             .args([
-                "-n",
                 "-d",
                 "error_reporting=-1",
                 "-d",
@@ -798,6 +811,9 @@ fn response(
 #[test]
 #[ignore = "requires verified PHP; all 17 independently specified OwnedProgram vectors"]
 fn native_shared_owned_program_vectors() {
+    if !native_php() {
+        return;
+    }
     let vectors: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
     let cases = vectors["cases"].as_array().unwrap();
@@ -842,8 +858,8 @@ fn native_shared_owned_program_vectors() {
     ));
     fs::write(root.join("consumer.php"), script).unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "consumer.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "consumer.php"])
             .current_dir(&root),
         &root,
         "native-vectors",
@@ -859,11 +875,12 @@ fn php_literal(text: &str) -> String {
 #[ignore = "requires original tracked OpenRouter source and verified native Composer/PHPStan tools"]
 fn composer_installed_actual_openrouter_five_operations() {
     use sha2::{Digest, Sha256};
-    let path = PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT")
-            .expect("set OPENROUTER_WEB_ROOT to the read-only original source"),
-    )
-    .join("projects/docs/openapi/openapi.yaml");
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
+    if !native_php() {
+        return;
+    }
     let before = fs::read(&path).unwrap();
     let contract = load(&path);
     let wanted = [
@@ -901,8 +918,7 @@ fn composer_installed_actual_openrouter_five_operations() {
     fs::write(consumer.join("positive.php"), script).unwrap();
     fs::write(consumer.join("phpstan.neon"),"parameters:\n    level: max\n    phpVersion: 80300\n    paths: [positive.php]\n    tmpDir: build/phpstan\n").unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -916,8 +932,8 @@ fn composer_installed_actual_openrouter_five_operations() {
     );
     let server = RecordingServer::new(true);
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .arg(&server.url)
             .current_dir(&consumer),
         &root,
@@ -1086,9 +1102,22 @@ fn unsupported_native_shapes_and_dialects_never_become_json_fallbacks() {
     assert_eq!(target.source.pointer, pattern.pointer());
     assert!(target.checks.iter().any(|check| matches!(&check.instruction, ProgramInstruction::Type { types } if types == &[ProgramType::String])));
 
+    // OAS 3.0 is lowered (ADR 0016); its direction-dependent required stays a
+    // located refusal rather than an unconditional or dropped requirement.
     let mut value = api_document(json!({"Root":{"type":"object"}}), "Root");
     value["openapi"] = json!("3.0.3");
-    assert!(plan_document(&value, config()).is_err());
+    assert!(plan_document(&value, config()).is_ok());
+    let mut value = api_document(
+        json!({"Root":{"type":"object","required":["id"],"properties":{"id":{"type":"string","readOnly":true}}}}),
+        "Root",
+    );
+    value["openapi"] = json!("3.0.3");
+    assert!(
+        plan_document(&value, config())
+            .unwrap_err()
+            .iter()
+            .any(|e| e.source.pointer() == "/components/schemas/Root/properties/id/readOnly")
+    );
     for namespace in [
         "__NAMESPACE__",
         "class",
@@ -1112,6 +1141,9 @@ fn unsupported_native_shapes_and_dialects_never_become_json_fallbacks() {
 #[test]
 #[ignore = "requires verified PHP/Composer/PHPStan; mixed unions, parent assertions, four-state presence and source prose"]
 fn installed_adversarial_models_names_docs_and_union_codecs() {
+    if !native_php() {
+        return;
+    }
     let schemas = json!({
         "AdverseRoot":{"type":"object","required":["required_value"],"properties":{
             "required_value":{"type":["string","null"]},"optional_nonnull":{"type":"string"},"optional_nullable":{"type":["string","null"]},
@@ -1159,8 +1191,7 @@ fn installed_adversarial_models_names_docs_and_union_codecs() {
     .unwrap();
     fs::write(consumer.join("phpstan.neon"),"parameters:\n    level: max\n    phpVersion: 80300\n    paths: [positive.php]\n    tmpDir: build/phpstan\n").unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -1173,15 +1204,14 @@ fn installed_adversarial_models_names_docs_and_union_codecs() {
         "positive-types",
     );
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .current_dir(&consumer),
         &root,
         "native-adversarial",
     );
     fs::write(consumer.join("negative.php"),"<?php\ndeclare(strict_types=1);\nnew FixtureSdk\\AdverseRoot();\nnew FixtureSdk\\AdverseRoot(requiredValue: FixtureSdk\\Absent::Value);\nnew FixtureSdk\\AdverseRoot(requiredValue: null, optionalNonnull: null);\n").unwrap();
-    let output = Command::new(php())
-        .arg("-n")
+    let output = php_command()
         .arg(phpstan())
         .args([
             "analyse",
@@ -1202,6 +1232,9 @@ fn installed_adversarial_models_names_docs_and_union_codecs() {
 #[test]
 #[ignore = "requires verified PHP; independent exact rational arithmetic and symbolic exponent cases"]
 fn native_exact_numeric_math_and_json_boundaries() {
+    if !native_php() {
+        return;
+    }
     let contract = schema_document(json!({"Root":true}));
     let compiled = suspect_schema::OwnedCompiler::new(config().validation)
         .compile(contract.clone(), contract.schema_roots())
@@ -1280,8 +1313,8 @@ echo '10000 independent exact rational comparisons/integrality/divisibility case
 "#);
     fs::write(root.join("consumer.php"), script).unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "consumer.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "consumer.php"])
             .current_dir(&root),
         &root,
         "native-exact-math",
@@ -1291,6 +1324,9 @@ echo '10000 independent exact rational comparisons/integrality/divisibility case
 #[test]
 #[ignore = "requires verified PHP; source-compiled hostile composition and shared codec resource budgets"]
 fn native_resource_failures_survive_branches_and_conversion_trials() {
+    if !native_php() {
+        return;
+    }
     let root = root("budgets-");
     let mut script = String::from("<?php\ndeclare(strict_types=1);\n");
     for (index, schema, mut limits, input) in [
@@ -1417,10 +1453,207 @@ echo 'shared schema/numeric/equality/recursion and native conversion budget case
 "#);
     fs::write(root.join("consumer.php"), script).unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "consumer.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "consumer.php"])
             .current_dir(&root),
         &root,
         "native-budgets",
+    );
+}
+
+/// OAS 3.0 witness shared with the Dart backend (ADR 0016 lowering).
+fn oas30() -> Plan {
+    let contract = load(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/oas30/nullable-bounds-refs.openapi.yaml"),
+    );
+    let selected = contract
+        .operations()
+        .map(|o| o.source().clone())
+        .collect::<Vec<_>>();
+    plan_sdk(contract, &selected, config())
+        .unwrap_or_else(|errors| panic!("OAS 3.0 must be admitted: {errors:#?}"))
+}
+
+#[test]
+fn oas30_nullable_exclusive_bounds_and_reference_siblings_lower_to_native_models() {
+    use suspect_codegen::http_protocol::Capability;
+    use suspect_codegen::php_sdk::models::Shape;
+    use suspect_schema::ProgramInstruction;
+
+    let plan = oas30();
+    assert!(
+        plan.surface
+            .protocol
+            .capabilities()
+            .supports(Capability::OpenApi30)
+    );
+    // The opt-in is recorded only for OAS 3.0 sources: 3.1 protocol records
+    // (docs/protocol.json) keep their capability set.
+    assert!(
+        !canonical()
+            .surface
+            .protocol
+            .capabilities()
+            .supports(Capability::OpenApi30)
+    );
+    let models = plan.models();
+    let id = |pointer: &str| {
+        models
+            .nodes
+            .keys()
+            .find(|id| id.pointer() == pointer)
+            .unwrap_or_else(|| panic!("no model for {pointer}"))
+            .clone()
+    };
+    let node = |pointer: &str| &models.nodes[&id(pointer)];
+    let ty = |pointer: &str| models.type_name(&id(pointer), true);
+    let property = |name: &str| format!("/components/schemas/Pet/properties/{name}");
+    // Scalar nullable widens only the same-object type.
+    assert!(node(&property("tag")).nullable);
+    assert_eq!(ty(&property("tag")), "null|string");
+    assert_eq!(ty(&property("name")), "string");
+    // Object nullable.
+    let owner = node("/components/schemas/Owner");
+    assert!(owner.nullable && matches!(owner.shape, Shape::Object { .. }));
+    assert_eq!(ty("/components/schemas/Owner"), "Owner|null");
+    // Reference Object: type/readOnly/description siblings are ignored. The
+    // readOnly sibling does not activate the directional-codec refusal.
+    let reference = node(&property("owner"));
+    assert!(
+        matches!(&reference.shape, Shape::Ref(target) if target.pointer() == "/components/schemas/Owner")
+    );
+    assert!(!reference.nullable);
+    assert_eq!(ty(&property("owner")), "Owner|null");
+    let pet = node("/components/schemas/Pet");
+    let Shape::Object { fields, .. } = &pet.shape else {
+        panic!("Pet is an object")
+    };
+    let field = |wire: &str| fields.iter().find(|f| f.wire == wire).unwrap();
+    assert_eq!(field("owner").description, "");
+    assert!(field("owner").required);
+    assert_eq!(field("anything").description, "Arbitrary JSON.");
+    // A $ref'd nullable scalar is nullable through its target.
+    assert_eq!(ty("/components/schemas/Nickname"), "null|string");
+    assert_eq!(ty(&property("nickname")), "null|string");
+    assert_eq!(
+        node("/components/schemas/Nickname").description,
+        "A nullable scalar."
+    );
+    // nullable cannot bypass an enum without null; an enum listing null can.
+    assert!(!node(&property("status")).nullable);
+    assert!(matches!(&node(&property("status")).shape, Shape::Enum { cases } if cases.len() == 2));
+    assert_eq!(ty(&property("status")), node(&property("status")).name);
+    assert!(node(&property("mood")).nullable);
+    assert_eq!(
+        ty(&property("mood")),
+        format!("{}|null", node(&property("mood")).name)
+    );
+    // nullable without a same-object type changes nothing: arbitrary JSON.
+    assert!(matches!(node(&property("anything")).shape, Shape::Json));
+    assert!(!node(&property("anything")).nullable);
+    // Boolean exclusive flags modify the adjacent numeric bound.
+    let mut bounds = plan
+        .program()
+        .nodes
+        .iter()
+        .flat_map(|node| &node.checks)
+        .filter_map(|check| match &check.instruction {
+            ProgramInstruction::Bound {
+                value,
+                maximum,
+                exclusive,
+            } => Some((
+                check.source.pointer.clone(),
+                *maximum,
+                *exclusive,
+                value.clone(),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    bounds.sort();
+    bounds.dedup();
+    assert_eq!(
+        bounds,
+        [
+            (property("id/maximum"), true, true, "100".to_owned()),
+            (property("id/minimum"), false, true, "0".to_owned()),
+            (property("weight/maximum"), true, false, "50".to_owned()),
+            (property("weight/minimum"), false, true, "0".to_owned()),
+            (
+                "/paths/~1pets/get/parameters/0/schema/maximum".to_owned(),
+                true,
+                false,
+                "100".to_owned()
+            ),
+            (
+                "/paths/~1pets/get/parameters/0/schema/minimum".to_owned(),
+                false,
+                true,
+                "0".to_owned()
+            ),
+        ]
+    );
+    let files = plan.render();
+    let text = |path: &str| {
+        &files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap_or_else(|| panic!("missing {path}"))
+            .content
+    };
+    let source = text("php/src/Models.php");
+    for declaration in [
+        "final class Pet implements Model",
+        "final class Owner implements Model",
+        "public Owner|null $owner,",
+        "public null|string $tag,",
+        "public Absent|null|string $nickname = Absent::Value,",
+        "public Absent|JsonValue $anything = Absent::Value,",
+    ] {
+        assert!(source.contains(declaration), "missing {declaration}");
+    }
+    assert!(!source.contains("Ignored Reference Object sibling"));
+    let program = text("php/src/ValidationProgram.php");
+    assert!(program.contains("/components/schemas/Pet/properties/id/minimum\", number: JsonNumber::fromString(\"0\"), maximum: false, exclusive: true)"));
+    assert!(program.contains("/components/schemas/Pet/properties/weight/maximum\", number: JsonNumber::fromString(\"50\"), maximum: true, exclusive: false)"));
+    assert!(text("php/src/Client.php").contains("$decoded = new Bytes($response->body);"));
+}
+
+#[test]
+#[ignore = "requires verified PHP 8.3+, Composer and PHPStan; OpenAPI 3.0 installed native consumer"]
+fn composer_installed_oas30_native_package() {
+    if !native_php() {
+        return;
+    }
+    let plan = oas30();
+    let root = install(&plan, "oas30-");
+    let consumer = root.join("consumer");
+    fs::write(
+        consumer.join("positive.php"),
+        include_str!("../src/php_sdk/native_oas30.php"),
+    )
+    .unwrap();
+    fs::write(consumer.join("phpstan.neon"),"parameters:\n    level: max\n    phpVersion: 80300\n    paths: [positive.php]\n    tmpDir: build/phpstan\n").unwrap();
+    checked(
+        php_command()
+            .arg(phpstan())
+            .args([
+                "analyse",
+                "--no-progress",
+                "--memory-limit=1G",
+                "--autoload-file=vendor/autoload.php",
+            ])
+            .current_dir(&consumer),
+        &root,
+        "positive-types",
+    );
+    checked(
+        php_command()
+            .args(["-d", "error_reporting=-1", "positive.php"])
+            .current_dir(&consumer),
+        &root,
+        "native-oas30",
     );
 }

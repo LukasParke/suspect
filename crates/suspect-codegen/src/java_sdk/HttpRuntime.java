@@ -55,15 +55,17 @@ public final class HttpRuntime implements AutoCloseable {
         final ModelCodec.Limits codecLimits;
         /** Explicit ua/v1 policy: null keeps the automatic attribution header and an empty string suppresses it. */
         final String userAgent, applicationId;
+        /** Explicit caller opt-in: a plain-HTTP server override may target a non-loopback host. */
+        final boolean allowInsecureHttp;
         private Options(Builder b){
             credentials=Map.copyOf(b.credentials);choices=b.choices.build();timeout=b.timeout;
             maxResponseBytes=b.maxResponseBytes;maxRequestBytes=b.maxRequestBytes;maxCaptureBytes=b.maxCaptureBytes;maxUrlBytes=b.maxUrlBytes;
             maxHeaderBytes=b.maxHeaderBytes;maxStreamBufferBytes=b.maxStreamBufferBytes;httpClient=b.httpClient;codecLimits=b.codecLimits;
-            userAgent=b.userAgent;applicationId=b.applicationId;
-            if(timeout.isZero()||timeout.isNegative()||timeout.compareTo(Duration.ofDays(1))>0||maxResponseBytes<0||maxResponseBytes>MAX_BYTES||maxRequestBytes<0||maxRequestBytes>MAX_BYTES
+            userAgent=b.userAgent;applicationId=b.applicationId;allowInsecureHttp=b.allowInsecureHttp;
+            if(timeout.isZero()||timeout.isNegative()||timeout.compareTo(Duration.ofDays(1))>0||maxResponseBytes<0||maxResponseBytes>MAX_BYTES||maxRequestBytes<1||maxRequestBytes>MAX_BYTES
                     ||maxCaptureBytes<0||maxCaptureBytes>MAX_BYTES||maxUrlBytes<1||maxUrlBytes>65536||maxHeaderBytes<1||maxHeaderBytes>MAX_BYTES||maxStreamBufferBytes<1||maxStreamBufferBytes>MAX_BYTES)
                 throw new IllegalArgumentException("invalid HTTP resource policy");
-            if(choices.server!=null)serverUri(choices.server);
+            if(choices.server!=null)serverUri(choices.server,!allowInsecureHttp);
             if(httpClient!=null&&(httpClient.followRedirects()!=HttpClient.Redirect.NEVER||httpClient.cookieHandler().isPresent()||httpClient.authenticator().isPresent()))throw new IllegalArgumentException("injected HttpClient must disable redirects, cookies and implicit authentication");
         }
         /** Begin finite options. @return builder */
@@ -77,6 +79,7 @@ public final class HttpRuntime implements AutoCloseable {
             private HttpClient httpClient;
             private ModelCodec.Limits codecLimits=ModelCodec.Limits.defaults();
             private String userAgent, applicationId;
+            private boolean allowInsecureHttp;
             private Builder(){}
             /** Supply a bearer credential for the exact source name. @param scheme source scheme @param token token @return builder */
             public Builder credential(String scheme,String token){Objects.requireNonNull(token);if(token.length()>16384||!token.matches("[A-Za-z0-9._~+/-]+=*"))throw new IllegalArgumentException("invalid bearer token");credentials.put(scheme(scheme),new Bearer(token));return this;}
@@ -89,6 +92,8 @@ public final class HttpRuntime implements AutoCloseable {
             private static String scheme(String value){JsonRuntime.unicode(value);if(value.isEmpty()||value.length()>4096)throw new IllegalArgumentException("invalid source scheme name");return value;}
             /** Override the server explicitly. @param value URI @return builder */
             public Builder serverUrl(URI value){choices.serverUrl(value);return this;}
+            /** Allow a plain-HTTP {@link #serverUrl} override to a non-loopback host (default false: overrides use HTTPS or loopback HTTP). Source-declared servers keep their scheme regardless. @param value opt-in @return builder */
+            public Builder allowInsecureHttp(boolean value){allowInsecureHttp=value;return this;}
             /** Retrieval URL for relative servers in file-based specs. @param value HTTP URL @return builder */
             public Builder documentUrl(URI value){choices.documentUrl(value);return this;}
             /** Source server candidate. @param value index @return builder */
@@ -267,8 +272,17 @@ public final class HttpRuntime implements AutoCloseable {
     private static void cancel(Future<?> value){if(value!=null)try{if(!value.isDone())value.cancel(true);}catch(RuntimeException ignored){}}
 
     private static Map<String,List<String>> immutableHeaders(Map<String,List<String>> headers){var copy=new TreeMap<String,List<String>>(String.CASE_INSENSITIVE_ORDER);headers.forEach((k,v)->copy.put(k,List.copyOf(v)));return Collections.unmodifiableMap(copy);}
-    private static URI serverUri(URI uri){
+    // One server URL policy (ADR 0035): a source-declared server keeps its
+    // scheme; a caller override is https, or plain http only to loopback unless
+    // the caller opted in (allowInsecureHttp); no userinfo, query or fragment; a valid port; literal `.`/`..`
+    // segments refused, never resolved; percent-encoded octets are opaque path
+    // data sent verbatim; non-ASCII, controls and backslashes refused.
+    private static URI serverUri(URI uri,boolean loopbackOnly){
+        String raw=uri.toString();
+        if(raw.chars().anyMatch(ch->ch<=0x20||ch>=0x7f||ch=='\\'))throw new IllegalArgumentException("server URL must be ASCII without controls or backslashes");
         if(!uri.isAbsolute()||!("http".equalsIgnoreCase(uri.getScheme())||"https".equalsIgnoreCase(uri.getScheme()))||uri.getRawAuthority()==null||uri.getRawAuthority().contains("@")||uri.getRawQuery()!=null||uri.getRawFragment()!=null)throw new IllegalArgumentException("invalid HTTP server URI");
+        String rawPath=uri.getRawPath()==null?"":uri.getRawPath();
+        if(Arrays.stream(rawPath.split("/",-1)).anyMatch(s->s.equals(".")||s.equals("..")))throw new IllegalArgumentException("server path must not contain literal dot segments");
         if(uri.getHost()==null){
             String authority=uri.getRawAuthority(),port="";int colon=authority.lastIndexOf(':');
             if(colon>=0){port=authority.substring(colon);authority=authority.substring(0,colon);if(!port.matches(":[0-9]+"))throw new IllegalArgumentException("invalid server port");}
@@ -277,13 +291,42 @@ public final class HttpRuntime implements AutoCloseable {
             // mappings where modern HTTP URL host processing differs.
             if(host.codePoints().anyMatch(c->c==0x00df||c==0x1e9e||c==0x03c2||c==0x200c||c==0x200d))throw new IllegalArgumentException("server host needs explicit ASCII IDNA spelling");
             String ascii=IDN.toASCII(host,IDN.USE_STD3_ASCII_RULES).toLowerCase(Locale.ROOT);
-            uri=URI.create(uri.getScheme()+"://"+ascii+port+(uri.getRawPath()==null?"":uri.getRawPath()));
+            uri=URI.create(uri.getScheme()+"://"+ascii+port+rawPath);
         }
         if(uri.getHost()==null||uri.getPort()==0||uri.getPort()>65535)throw new IllegalArgumentException("invalid HTTP server authority");
-        return uri.normalize();
+        String host=uri.getHost().toLowerCase(Locale.ROOT);
+        if(loopbackOnly&&"http".equalsIgnoreCase(uri.getScheme())&&!(host.equals("localhost")||host.equals("127.0.0.1")||host.equals("[::1]")))throw new IllegalArgumentException("plain HTTP servers must be loopback");
+        // No URI.normalize(): it resolves dot segments and collapses repeated
+        // slashes, rewriting the request path.
+        return uri;
+    }
+    /** RFC 3986 section 5.2 resolution of a relative server against its document. Only literal dot segments are removed; encoded octets and empty segments stay. */
+    private static URI resolveServer(URI document,URI reference){
+        String authority=document.getRawAuthority(),base=document.getRawPath()==null?"":document.getRawPath(),relative=reference.getRawPath()==null?"":reference.getRawPath(),path,query=null;
+        if(reference.getRawAuthority()!=null){authority=reference.getRawAuthority();path=removeDots(relative);}
+        else if(relative.isEmpty()){path=base;query=document.getRawQuery();}
+        else if(relative.startsWith("/"))path=removeDots(relative);
+        else path=removeDots((authority!=null&&base.isEmpty()?"/":base.substring(0,base.lastIndexOf('/')+1))+relative);
+        return URI.create(document.getScheme()+"://"+authority+path+(query==null?"":"?"+query));
+    }
+    private static String removeDots(String input){
+        StringBuilder output=new StringBuilder();int i=0;
+        while(i<input.length()){
+            int remaining=input.length()-i;
+            if(input.startsWith("../",i))i+=3;
+            else if(input.startsWith("./",i))i+=2;
+            else if(input.startsWith("/./",i))i+=2;
+            else if(remaining==2&&input.startsWith("/.",i)){output.append('/');break;}
+            else if(input.startsWith("/../",i)||remaining==3&&input.startsWith("/..",i)){
+                output.setLength(Math.max(0,output.lastIndexOf("/")));
+                if(remaining==3){output.append('/');break;}i+=3;
+            }else if(remaining==1&&input.charAt(i)=='.'||remaining==2&&input.startsWith("..",i))break;
+            else{int end=input.indexOf('/',i+(input.charAt(i)=='/'?1:0));if(end<0)end=input.length();output.append(input,i,end);i=end;}
+        }
+        return output.toString();
     }
     private URI server(Operation op,RequestOptions request){
-        if(request.server!=null)return serverUri(request.server);if(options.choices.server!=null)return serverUri(options.choices.server);
+        if(request.server!=null)return serverUri(request.server,!options.allowInsecureHttp);if(options.choices.server!=null)return serverUri(options.choices.server,!options.allowInsecureHttp);
         List<JsonValue> candidates=array(get(get(op.wire(),"servers"),"candidates"));
         boolean overridden=request.serverName!=null||request.serverIndex!=null;
         String name=overridden?request.serverName:options.choices.serverName;Integer index=overridden?request.serverIndex:options.choices.serverIndex;int selected=index==null?0:index;
@@ -300,9 +343,9 @@ public final class HttpRuntime implements AutoCloseable {
             URI document=request.documentUrl!=null?request.documentUrl:options.choices.documentUrl;
             if(document==null){String declared=Protocol.document(definition);if(declared.isEmpty())declared=op.source().split("#",2)[0];document=URI.create(declared);}
             if(!document.isAbsolute()||!("http".equalsIgnoreCase(document.getScheme())||"https".equalsIgnoreCase(document.getScheme())))throw new IllegalArgumentException("relative server needs an HTTP retrieval URL");
-            result=document.resolve(result);
+            result=resolveServer(document,result);
         }
-        return serverUri(result);
+        return serverUri(result,false);
     }
     private HttpRequest request(Operation op,Prepared prepared,RequestOptions request,ModelCodec.Context c,Duration timeout){
         JsonValue wire=op.wire();HttpWire.Buffer url=new HttpWire.Buffer(Math.min(options.maxUrlBytes,options.maxRequestBytes),c,wire);

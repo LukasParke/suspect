@@ -208,9 +208,15 @@ module __NAMESPACE__
     end
     def valid_percent?(value) = !/%(?![0-9a-fA-F]{2})/.match?(value)
     def dot_segment?(value) = ['.', '..'].include?(value.gsub(/%2e/i, '.'))
-    def server_url(value)
+    # One server URL policy (ADR 0035): a source-declared server keeps its
+    # scheme; a caller override is https, or plain http only to loopback unless
+    # the caller opted in (allow_insecure_http:); no userinfo, query or
+    # fragment; a valid port; literal dot segments refused, never resolved;
+    # percent-encoded octets are opaque path data sent verbatim.
+    def server_url(value, loopback_only: false)
       uri = Wire.absolute_url(value)
-      raise ArgumentError, 'dot segments are not allowed in an explicit override' if uri.path.split('/').any? { |s| dot_segment?(s) }
+      raise ArgumentError, 'plain HTTP server overrides must be loopback unless allow_insecure_http: is set' if loopback_only && uri.scheme == 'http' && !%w[localhost 127.0.0.1 [::1]].include?(uri.host.downcase)
+      raise ArgumentError, 'literal dot segments are not allowed in a server URL' if Wire.uri_parts(value)['path'].split('/', -1).any? { |s| s == '.' || s == '..' }
       value.dup.freeze
     end
     def response_headers(raw)
@@ -244,7 +250,9 @@ module __NAMESPACE__
     # ua/v1 attribution from the generated constants.
     # `application_id:` replaces the SDK identity token in the automatic
     # attribution header with a caller identity (RFC 9110 token or token/version).
-    def initialize(auth: {}, credential_provider: nil, security: UNSET, transport: nil, server_url: nil,
+    # `allow_insecure_http: true` permits a plain-HTTP `server_url:` to a
+    # non-loopback host; source-declared servers keep their scheme regardless.
+    def initialize(auth: {}, credential_provider: nil, security: UNSET, transport: nil, server_url: nil, allow_insecure_http: false,
                    server: UNSET, server_variables: {}, document_url: nil, timeout: 30.0,
                    max_response_bytes: Internal::POLICY[:max_response_bytes], max_capture_bytes: Internal::POLICY[:max_capture_bytes],
                    user_agent: UNSET, application_id: nil)
@@ -258,7 +266,8 @@ module __NAMESPACE__
       end
       @credential_provider, @security = credential_provider, security
       raise ArgumentError, 'credential_provider must implement call(context)' if credential_provider && !credential_provider.respond_to?(:call)
-      @server_url = server_url && Internal.server_url(server_url)
+      raise ArgumentError, 'allow_insecure_http must be true or false' unless [true, false].include?(allow_insecure_http)
+      @server_url = server_url && Internal.server_url(server_url, loopback_only: !allow_insecure_http)
       @server, @server_variables, @document_url = server, server_variables.dup.freeze, document_url&.dup&.freeze
       @timeout = timeout; ExchangeContext.new(timeout: timeout, cancellation: nil, operation_id: '', source: '')
       @max_response_bytes = Internal.bounded_limit(max_response_bytes, Internal::POLICY[:max_response_bytes], 'max_response_bytes')

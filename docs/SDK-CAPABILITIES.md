@@ -1,50 +1,41 @@
 # SDK generation capabilities
 
-Matrix version: **`suspect-sdk-capabilities-v5`**, 2026-09-10.
+Matrix version: **`suspect-sdk-capabilities-v5`**.
 
 SDK generation uses one pipeline: source-addressed `Contract` → typed native
 plans → models, checked codecs, HTTP clients, packages and documentation →
 ownership-aware artifacts. `codegen`, `codegen-session`, editor generation and
 `codegen-compare` use the same twelve-backend registry. All twelve language
-features are now enabled by default; `codegen-profiles --format json` reports the
+features are enabled by default; `codegen-profiles --format json` reports the
 exact profiles compiled into the selected binary.
 
-All profiles are **experimental and bounded**. Each has native base-profile
-package/type/wire/docs evidence. Expanded protocol and scoped-schema capabilities
-require their own native witnesses. [The live integration checkpoint](SDK-FULL-PLAN-STATUS.md)
-records those results and the outstanding full-plan gates.
-
-The earlier sealed five-language matrix verified all 208 criteria in its
-[demo scope](SDK-DEMO.md). It remains a historical regression baseline. Fresh
-twelve-language integrated acceptance, native costs and strict numerical M6
-qualification are still required for the full plan.
+All profiles are **experimental and bounded**. Each has native
+package/type/wire/docs tests. Expanded protocol and scoped-schema capabilities
+require their own native tests before a backend admits them.
 
 ## Native profiles
 
-| Language | `codegen --profile` | Package/docs | Verified native scope |
+| Language | `codegen --profile` | Package/docs | Native test scope |
 | --- | --- | --- | --- |
-| Python | `python-http` | Wheel-source package, `py.typed`, docstrings and Sphinx | Installed M2/five-operation sync/async consumers, strict package/consumer mypy, examples and docs; 12 runtime-review regressions on Python 3.11/3.14 |
-| Go | `go-http` | Standard-library module, Go doc and Sphinx | Independent M2/five-operation consumers, native type controls, examples and docs; nine runtime-review groups on Go 1.23.12/1.27.1 |
-| Swift | `swift-http` | Swift Package Manager, native comments and DocC | M2/five-operation HTTP, exact codecs, cancellation, types, docs and shared vectors on Swift 6.3.3 and 6.0.3 + macOS SDK 15.4; two additional review regressions on both tiers |
-| Rust | `rust-http` | Cargo package, Rustdoc and doctests | Installed M2/five-operation consumers, codecs, native types, wire/security/docs gates on Rust 1.88 and current; dependency-free model defaults, opt-in custom HTTP and reqwest/rustls |
+| Python | `python-http` | Wheel-source package, `py.typed`, docstrings and Sphinx | Installed sync/async consumers of the canonical fixture and real-source operations, strict package/consumer mypy, examples and docs on Python 3.11/3.14 |
+| Go | `go-http` | Standard-library module, Go doc and Sphinx | Independent consumers of the canonical fixture and real-source operations, native type controls, examples and docs on Go 1.23.12/1.27.1 |
+| Swift | `swift-http` | Swift Package Manager, native comments and DocC | Canonical-fixture and real-source HTTP, exact codecs, cancellation, types, docs and shared vectors on Swift 6.3.3 and 6.0.3 + macOS SDK 15.4 |
+| Rust | `rust-http` | Cargo package, Rustdoc and doctests | Installed consumers of the canonical fixture and real-source operations, codecs, native types, wire/security/docs tests on Rust 1.88 and current; dependency-free model defaults, opt-in custom HTTP and reqwest/rustls |
 | TypeScript / JavaScript | `typescript-http` | ESM package with declarations, TSDoc and TypeDoc | Installed TS/JS consumers, strict positive/negative types, Node/browser and native docs; exact codecs and bounded request/response views |
 | Java | `java-http` | Maven packages and Javadoc | Installed JDK21/25 consumers, immutable models, sync/CompletableFuture calls, exact codecs, native types/docs and source metadata |
-| C# | `csharp-http` | NuGet, compiler XML documentation and native reference pages | .NET8/10 consumers, Task/cancellation, exact codecs, wire/resource controls, protocol and finite positional multipart witnesses |
+| C# | `csharp-http` | NuGet, compiler XML documentation and native reference pages | .NET8/10 consumers, Task/cancellation, exact codecs, wire/resource controls, protocol and finite positional multipart tests |
 | Kotlin | `kotlin-http` | Maven and Dokka | JDK21/25, Kotlin2.4.20/coroutines1.11/Dokka2.2; installed typed coroutine consumers and rich protocol matrices |
 | Ruby | `ruby-http` | Gems, YARD, RBS and Steep | Ruby3.3.12/4.0.6 installed keyword-model consumers, exact codecs, expanded protocols and native docs/types |
-| PHP | `php-http` | Composer, PHPStan and PHPDoc/reference | PHP8.3.32/8.5.8 installed typed consumers; nine expanded native protocol gates per tier and thirteen canonical integration checks |
+| PHP | `php-http` | Composer, PHPStan and PHPDoc/reference | PHP8.3.32/8.5.8 installed typed consumers, expanded native protocol tests per tier and canonical integration checks |
 | Dart | `dart-http` | pub packages and dartdoc | Dart3.9.4/3.13.3 VM and compiled JavaScript, strict analysis, native docs, hosted-pub installation and a real Chrome consumer |
 | C++ | `cpp-http` | CMake, libcurl and Doxygen | Declared C++20/libcurl profile; installed CMake consumers, RAII/resource controls, exact codecs and independent protocol exchanges |
 
-The real-source HTTP slice selects `getCredits`, `createKeys`, `updateKeys`,
+The real-source HTTP tests select `getCredits`, `createKeys`, `updateKeys`,
 `listContainerFiles` and `getContainerFile` from the pinned OpenRouter public
-specification. The independent shared M2 fixture exercises create/update/list/get,
+specification. The independent shared canonical fixture
+(`crates/suspect-codegen/tests/fixtures/m2/`) exercises create/update/list/get,
 presence/null, exact numbers, unions, recursion and strict wire behavior.
-
-The seven additional language base reports and subsequent protocol reports are
-indexed in [the live checkpoint](SDK-FULL-PLAN-STATUS.md). Their profile promotion
-does not claim completion of active schema-v2/native-dynamic work. Source-linked
-admission remains specific to each adapter and executable profile.
+Source-linked admission remains specific to each adapter and executable profile.
 
 ## Contract and runtime scope
 
@@ -56,12 +47,12 @@ diagnostics before artifacts are written.
 | --- | --- |
 | Input | Source-addressed local/split and explicitly acquired pinned/offline closures, exact values, stable physical URI/pointer identities and source spans; independent Lossless/Fast value parity checks |
 | Dialects | Canonical OAS3.0/3.1/3.2 context and dialect-aware owned compilation; native acceptance is recorded per target. Ignored3.0 reference siblings cannot change the effective closure. OpenAPI2.0 family detection is not an SDK frontend |
-| Values and models | Explicit absence/null, exact integer/decimal representations, source wire names, typed extras, finite recursive graphs, bounded native unions/intersections and encode-time validation of mutable models |
-| Validation | Checked owned programs retain exact operands, source identity and finite evaluation policies. The v1 compiler remains available; explicit `compile_v2` adds nine scoped applicators with32 maintained independent vectors and395 in-scope official cases. Native v2 adoption is tracked separately; incomplete evaluation cannot become successful validation |
-| Resources | Contract indexes `$self`, `$id`, resource-local anchors and dynamic candidates without acquisition authority. Physical SourceIds remain separate from logical URIs. Runtime dynamic binding requires its own executable/native admission profile |
+| Values and models | Explicit absence/null, exact integer/decimal representations, source wire names, typed extras, finite recursive graphs, bounded native unions/intersections and encode-time validation of mutable models. `xml` annotations are retained as source provenance but never interpreted: they do not rename JSON properties or change codecs (`tests/sdk_xml_media.rs`) |
+| Validation | Checked owned programs retain exact operands, source identity and finite evaluation policies. Three frozen, additive program envelopes ([ADR 0020](adr/0020-validation-programs-are-versioned-and-frozen.md)): v1 static subset (`compile`), v2 scoped applicators (`compile_v2`) and v3 resources/dynamic references (`compile_v3`); a newer envelope is emitted only when the closure needs it. Incomplete evaluation cannot become successful validation |
+| Resources | Contract indexes `$self`, `$id`, resource-local anchors and dynamic candidates without acquisition authority. Physical SourceIds remain separate from logical URIs. Runtime dynamic binding executes only through the explicit v3 program ([SDK-SCHEMA-RESOURCES.md](SDK-SCHEMA-RESOURCES.md)) |
 | Directions | TS/JS supports `oas31-required-applicability-v1` request/response views. Supplied fields remain validated and retained. Other HTTP profiles reject active directional projections explicitly |
-| HTTP | Shared source-backed descriptors cover standard/custom methods, server choices, OR/AND security and explicit credential hooks, parameter encodings, exact/range/default dispatch, bodyless/binary/text/JSON media, headers/links, forms, multipart and item streams. Native adapters enumerate witnessed capabilities and refuse the remainder |
-| Interpretation | Ordinary declarations use standard semantics. `legacy-binary-string-v1` is an explicit versioned opt-in carried through generation, sessions, CLI/editor and comparisons; JSON strings keep their JSON meaning |
+| HTTP | Shared source-backed descriptors cover standard/custom methods, server choices, OR/AND security and explicit credential hooks, opt-in `sdk_defaults` OAuth token lifecycle and pagination ([SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md)), parameter encodings, exact/range/default dispatch, bodyless/binary/text/JSON media, headers/links, forms, multipart and item streams. Native adapters enumerate tested capabilities and refuse the remainder. XML media with a declared structure is refused with a source-linked diagnostic; XML media without a representable schema is carried only as bounded raw bytes. No XML codec is emitted |
+| Interpretation | Ordinary declarations use standard semantics. Departures are explicit, versioned [compatibility profiles](#interpretation-profiles) carried through generation, sessions, CLI/editor and comparisons |
 | Examples | Shared source/synthesized provenance, located invalid-example findings and schema-valid values lowered through the actual native symbol/codec plan. Missing required examples have explicit reasons |
 | Artifacts | Deterministic complete file sets, owner conflicts, read-only drift checks, zero unchanged rewrites and removal of unchanged obsolete owned files; atomic replacement is per file |
 | Iteration | One shared Contract per accepted snapshot, SHA-256 source/configuration identity, finite in-process caching, target-specific config reuse, missing-reference recovery, watch/check/preview |
@@ -71,6 +62,29 @@ Schema fidelity includes runtime behavior. Model-only library plans deliberately
 retain codec obligations; the profile's codec/HTTP plan supplies checked runtime
 conversion. A supported neutral model does not imply every directional or HTTP
 use is supported.
+
+## Interpretation profiles
+
+Ordinary OpenAPI semantics are the default. A non-standard idiom is accepted
+only through a named, versioned compatibility profile
+([ADR 0012](adr/0012-dialect-quirks-need-a-compatibility-profile.md)). The set
+is closed; an unknown name fails configuration before emission:
+
+| Profile | Meaning |
+| --- | --- |
+| `legacy-binary-string-v1` | In OAS 3.1/3.2 binary media or parts, `type: string, format: binary` means raw bytes. JSON media keep their string models. |
+| `oas30-nullable-in-3.1-v1` | The OAS 3.0 `nullable` keyword on 3.1/3.2 schemas adds or removes `"null"` from the same-object type. |
+| `colon-path-parameters-v1` | A `/keys/:hash` segment becomes `/keys/{hash}` when a required path parameter of that name is declared; otherwise it is still refused. |
+| `schemaless-stream-events-v1` | A `text/event-stream` response with no event structure is admitted as an untyped frame stream. |
+| `all-of-scoped-mode-v1` | Schemas with `allOf` intersections use the scoped (checked) model/codec path instead of the unscoped projection. |
+
+Select profiles with the repeatable `codegen --compatibility-profile NAME` flag
+or a top-level `compatibility_profiles` array in a `codegen-session`
+configuration (omitted means none). `codegen-profiles --format json` lists them
+under `compatibilityProfiles`; discovery does not activate them. Profiles
+participate in revision and cache keys, and a profile change between two
+compared snapshots is reported as `wire-interpretation-profile-changed` and
+`native-interpretation-profile-changed` unknowns even when native types match.
 
 ## Commands
 
@@ -96,24 +110,22 @@ for snapshot comparison. `suspect gen` renders the `docs-md` preset or custom
 manifests using the platform `IrSpec`; SDK packages and native docs consume
 `Contract` through the native backends.
 
-## Evidence and detailed boundaries
+## Detailed boundaries
 
-- [Current progress](SDK-PROGRESS.md), [generation plan](SDK-GENERATION-PLAN.md)
-  and [full-plan exit gate](SDK-FULL-EXIT.md).
 - Native HTTP: [Python](SDK-PYTHON-HTTP.md), [Go](SDK-GO-HTTP.md),
   [Swift](SDK-SWIFT.md), [Rust](SDK-RUST-HTTP.md),
   [TypeScript/JavaScript](SDK-TYPESCRIPT-HTTP.md).
 - Additional native profiles: [Java](SDK-JAVA.md), [C#](SDK-CSHARP.md),
   [Kotlin](SDK-KOTLIN.md), [Ruby](SDK-RUBY.md), [PHP](SDK-PHP.md),
   [Dart](SDK-DART.md) and [C++](SDK-CPP.md).
-- [Native schema adoption](SDK-SCHEMA-NATIVE-ADOPTION.md),
-  [canonical resources](SDK-CONTRACT-RESOURCES.md) and
-  [explicit interpretation profiles](SDK-INTERPRETATION-PROFILES.md).
-- [Contract readers](SDK-CONTRACT-READERS.md), [owned validation](SDK-OWNED-VALIDATION.md),
+- [Native schema adoption](SDK-SCHEMA-NATIVE-ADOPTION.md) and the
+  [source-addressed Contract](adr/0008-sdks-generate-from-the-source-addressed-contract.md).
+- [Owned validation](SDK-OWNED-VALIDATION.md),
+  [scoped applicators](SDK-SCHEMA-APPLICATORS.md),
+  [resources and dynamic references](SDK-SCHEMA-RESOURCES.md),
   [examples](SDK-EXAMPLES.md) and [artifact ownership](SDK-ARTIFACT-OWNERSHIP.md).
+- [Golden SDK defaults](SDK-GOLDEN-DEFAULTS.md) and
+  [environment credentials](SDK-CREDENTIAL-ENV.md).
 - [Editor preview](SDK-EDITOR-PREVIEW.md) and
-  [session performance](SDK-SESSION-PERFORMANCE.md). The completed Mac baseline
-  remains observational after timing-noise qualification failed.
-- [Historical M0–M2 evidence](SDK-M0-M2-EXIT.md) and
-  [OpenRouter acceptance](OPENROUTER-ACCEPTANCE.md). Archived counts describe
-  their pinned binaries and inputs, not current acceptance.
+  [session performance](SDK-SESSION-PERFORMANCE.md). Performance numbers are
+  observations, not gates ([ADR 0033](adr/0033-performance-numbers-are-observations.md)).

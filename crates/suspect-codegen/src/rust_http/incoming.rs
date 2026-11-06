@@ -76,10 +76,13 @@ impl ConstructedBody {
 /// One declared reply the construct helper builds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstructedResponse {
+    /// The declared exact 2xx status.
     pub status: u16,
+    /// How the reply body is encoded; `None` for a body-less reply.
     pub body: Option<ConstructedBody>,
     /// Declared reply header wire names, in declaration order.
     pub headers: Vec<String>,
+    /// The subset of `headers` declared required, in declaration order.
     pub required_headers: Vec<String>,
 }
 
@@ -93,25 +96,32 @@ pub struct IncomingReceipt {
     pub kind: &'static str,
     /// The verb the provider sends.
     pub method: String,
+    /// Webhook key or callback route expression, as declared.
     pub route: String,
+    /// Whether `route` is a runtime callback expression rather than a fixed key.
     pub expression: bool,
     /// The receipt declaration's use-site source.
     pub source: SourceId,
     /// Allocated `decode_<x>_webhook` function name.
     pub decode: String,
-    /// Allocated `construct_<x>_response` function name, present exactly when
-    /// an exact 2xx reply is declared.
-    pub construct: Option<String>,
+    /// Allocated `construct_<x>_response` function name. Always reserved; the
+    /// function is emitted only when `response` is present.
+    pub construct: String,
     /// Allocated route-constant name.
     pub route_const: String,
     /// Allocated descriptor-constant name.
     pub descriptor_const: String,
     /// Allocated source-constant name (the receipt declaration's use site).
     pub source_const: String,
+    /// How the decoder interprets the received body.
     pub payload: IncomingPayload,
+    /// Whether the declared request body is required.
     pub required_body: bool,
+    /// Wire names of the required request headers the decoder checks.
     pub required_headers: Vec<String>,
+    /// The reply the construct helper builds: the first declared exact 2xx.
     pub response: Option<ConstructedResponse>,
+    /// Plan explanations plus every v1 receipt approximation made here.
     pub explanations: Vec<String>,
 }
 
@@ -326,7 +336,7 @@ pub(super) fn prepare(
             expression: operation.route().expression(),
             source,
             decode,
-            construct: Some(construct),
+            construct,
             route_const,
             descriptor_const,
             source_const,

@@ -417,15 +417,12 @@ fn native_root(name: &str) -> PathBuf {
 }
 
 fn swift() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/usr/bin/swift".into())
+    suspect_codegen::toolchain::resolve_path("swift")
+        .expect("gated by toolchain::require(\"swift\")")
 }
 
 fn swift_compiler() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFTC_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| swift().with_file_name("swiftc"))
+    suspect_codegen::toolchain::swift_tool("swiftc").expect("the Swift toolchain has no swiftc")
 }
 
 fn swift_command(action: &str) -> Command {
@@ -437,7 +434,7 @@ fn swift_command(action: &str) -> Command {
         // Testing helper against a newer Xcode's private test frameworks.
         command.arg("--disable-swift-testing");
     }
-    if let Some(sdk) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+    if let Some(sdk) = suspect_codegen::toolchain::swift_sdk_root() {
         command.arg("--sdk").arg(&sdk).env("SDKROOT", sdk);
     }
     command
@@ -445,7 +442,7 @@ fn swift_command(action: &str) -> Command {
 
 fn swift_compiler_command() -> Command {
     let mut command = Command::new(swift_compiler());
-    if let Some(sdk) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+    if let Some(sdk) = suspect_codegen::toolchain::swift_sdk_root() {
         command.arg("-sdk").arg(&sdk).env("SDKROOT", sdk);
     }
     command
@@ -503,6 +500,9 @@ fn review_package(plan: &suspect_codegen::swift_sdk::SdkPlan, root: &Path, sourc
 #[test]
 #[ignore = "native package regression: source parameter names must not shadow example locals"]
 fn native_review_example_local_names() {
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
     let root = review_root("example-names");
     let parameters = [
         ("client", "path", "account"),
@@ -545,6 +545,9 @@ fn native_review_example_local_names() {
 #[test]
 #[ignore = "native public-client resource regression with Darwin peak-allocation evidence"]
 fn native_review_query_expansion_budget() {
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
     let root = review_root("query-budget");
     let plan = review_plan(
         &root,
@@ -616,6 +619,9 @@ fn native_package(
 #[test]
 #[ignore = "requires Swift 6 and DocC; generates and consumes the unchanged original M2 fixture"]
 fn native_m2_swift_spm_codecs_http_and_docs() {
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
     let path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/m2/canonical.openapi.yaml");
     let contract = load(&path);
@@ -656,13 +662,9 @@ fn native_docs(root: &Path) {
     );
     let graph = find_directory(&root.join("build/sdk"), "symbolgraph")
         .expect("SwiftPM public symbol graphs missing");
-    let mut docc = if let Some(binary) = std::env::var_os("SUSPECT_SWIFT_DOCC_BIN") {
-        Command::new(binary)
-    } else {
-        let mut command = Command::new("xcrun");
-        command.arg("docc");
-        command
-    };
+    let mut docc = Command::new(
+        suspect_codegen::toolchain::swift_tool("docc").expect("the Swift toolchain has no docc"),
+    );
     checked(
         docc.arg("convert")
             .arg(sdk.join("Sources/GeneratedSDK/GeneratedSDK.docc"))
@@ -696,7 +698,8 @@ fn find_directory(root: &Path, name: &str) -> Option<PathBuf> {
 
 fn native_negative_types(root: &Path) {
     let build =
-        find_directory(&root.join("build/sdk"), "Modules").expect("built Swift module missing");
+        suspect_codegen::toolchain::swift_module_dir(&root.join("build/sdk"), "GeneratedSDK")
+            .expect("built Swift module missing");
     let positive = root.join("positive.swift");
     std::fs::write(&positive, "import GeneratedSDK\nlet _ = WidgetInput(name: \"valid\")\nlet _ = WidgetPayload.standardPayload(StandardPayload(text: \"valid\"))\n").unwrap();
     checked(
@@ -743,10 +746,12 @@ fn native_negative_types(root: &Path) {
 #[test]
 #[ignore = "requires the actual OpenRouter checkout, Swift 6 and DocC"]
 fn native_five_actual_openrouter_operations() {
-    let checkout = std::env::var_os("OPENROUTER_WEB_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/Users/luke/github/openrouter-web".into());
-    let path = checkout.join("projects/docs/openapi/openapi.yaml");
+    if suspect_codegen::toolchain::require("swift").is_none() {
+        return;
+    }
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     assert!(
         path.is_file(),
         "actual OpenRouter corpus is required: {}",
@@ -832,6 +837,10 @@ impl NativeHTTPServer {
             while !stopped.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        // Accepted sockets inherit O_NONBLOCK on macOS/BSD;
+                        // a nonblocking read before the request arrives would
+                        // drop the exchange as a transport error.
+                        stream.set_nonblocking(false).unwrap();
                         let (records, credits, root, base) = (
                             recorded.clone(),
                             credits.clone(),

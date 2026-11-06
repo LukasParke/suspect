@@ -131,7 +131,9 @@ fn native(label: &str, programs: &[OwnedProgram], cases: &Value, extra: &str) {
             .join(","),
         cases
     );
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let matrix = std::env::var_os("SUSPECT_TYPESCRIPT_V2_MATRIX").is_some();
     let compilers = if matrix {
         let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools");
@@ -203,7 +205,9 @@ fn native(label: &str, programs: &[OwnedProgram], cases: &Value, extra: &str) {
             script.replace("'./dist/", &format!("'./{dist}/")),
         )
         .unwrap();
-        for node in std::iter::once(node.clone()).chain(std::env::var_os("SUSPECT_NODE24_BIN")) {
+        for node in std::iter::once(node.clone().into_os_string())
+            .chain(std::env::var_os("SUSPECT_NODE24_BIN"))
+        {
             let result = checked(
                 Command::new(node).current_dir(&generated).arg(&consumer),
                 &generated,
@@ -693,7 +697,9 @@ fn installed_scoped_sdk_preserves_models_values_examples_and_docs() {
         serde_json::to_vec_pretty(&document).unwrap(),
     )
     .unwrap();
-    let selected_node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(selected_node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let node = checked(
         Command::new(&selected_node).args(["--print", "process.execPath"]),
         &package,
@@ -752,8 +758,9 @@ fn installed_scoped_sdk_preserves_models_values_examples_and_docs() {
         ]),
         &floor,
     );
-    let node24 = std::env::var_os("SUSPECT_NODE24_BIN")
-        .expect("set SUSPECT_NODE24_BIN for the required second runtime");
+    let Some(node24) = suspect_codegen::toolchain::pinned_node(24) else {
+        return;
+    };
     for (label, compiler) in [
         ("5.9.3", package.join("node_modules/typescript/bin/tsc")),
         ("5.5.4", floor.join("node_modules/typescript/bin/tsc")),
@@ -830,7 +837,10 @@ fn installed_scoped_sdk_preserves_models_values_examples_and_docs() {
             "scoped installed declarations: {}",
             String::from_utf8_lossy(&version.stdout).trim()
         );
-        for node in [node.clone().into_os_string(), node24.clone()] {
+        for node in [
+            node.clone().into_os_string(),
+            node24.clone().into_os_string(),
+        ] {
             let output = checked(
                 Command::new(&node)
                     .current_dir(&consumer)
@@ -901,7 +911,9 @@ fn browser_scoped_sdk_executes_source_vectors_and_native_http_controls() {
         include_str!("fixtures/typescript-v2-browser.mjs"),
     )
     .unwrap();
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let compiler = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tools/typescript-docs/node_modules/typescript/bin/tsc");
     let version = checked(

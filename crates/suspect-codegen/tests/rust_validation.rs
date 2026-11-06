@@ -11,7 +11,7 @@ use suspect_schema::{
 use suspect_source::Uri;
 
 fn native_cargo() -> Command {
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     if let Some(toolchain) = std::env::var_os("SUSPECT_NATIVE_RUST_TOOLCHAIN") {
         command.env("RUSTUP_TOOLCHAIN", toolchain);
     }
@@ -627,13 +627,17 @@ fn native_finite_reference_chain_honors_the_admitted_depth_ceiling() {
 }
 
 #[test]
-#[ignore = "requires native Cargo and OPENROUTER_WEB_ROOT"]
+#[ignore = "requires native Cargo and the pinned OpenRouter spec"]
 fn tracked_openrouter_nullable_caller_image_and_index_closures_match_owned_schema() {
-    let root_dir = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
+    let workspace = Arc::new(
+        WorkspaceBuilder::new()
+            .root(path.parent().unwrap())
+            .build()
+            .unwrap(),
     );
-    let path = root_dir.join("projects/docs/openapi/openapi.yaml");
-    let workspace = Arc::new(WorkspaceBuilder::new().root(&root_dir).build().unwrap());
     let contract =
         Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(&path).unwrap()).unwrap());
     let pointers = [

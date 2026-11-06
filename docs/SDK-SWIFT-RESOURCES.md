@@ -32,9 +32,9 @@ V3 examples use `plan_protocol_examples_v3`. The native renderer constructs valu
 from that bounded plan and does not substitute fallback annotations or retry a
 failed shared example evaluation as ordinary invalidity.
 
-`SchemaResources` and `DynamicSchemaReferences` are now promoted after the native
-runtime, installed SDK/type/wire/example and documentation gates passed on both
-toolchains. `DocumentRelativeServers` has its separate native proof below.
+`SchemaResources` and `DynamicSchemaReferences` are admitted capabilities, with
+native runtime, installed SDK/type/wire/example and documentation tests on both
+toolchains. `DocumentRelativeServers` has its separate native test below.
 
 ## Native dynamic scope
 
@@ -58,9 +58,9 @@ resource/binding costs one shared evaluation visit. Numeric, equality, depth and
 v2 annotation budgets keep their existing meanings. Evaluation failures remain
 noninvertible through anyOf, oneOf, not and conditionals.
 
-The default core depth ceiling of 512 is verified on a **2 MiB native thread**
-against a 550-resource chain. It reports an explicit depth failure at the original
-`N512` source on both toolchains. No limit or compiler check was disabled.
+The default core depth ceiling of 512 holds on a **2 MiB native thread**
+against a 550-resource chain: it reports an explicit depth failure at the original
+`N512` source on both toolchains.
 
 ## Models and source codecs
 
@@ -85,7 +85,7 @@ number tokens remain distinct. SourceCodable uses SDKJSONEncoder/SDKJSONDecoder.
 
 A layout can be shared by multiple source-bound codecs. A direct call to a nested
 source codec starts a fresh resource context, which can differ from the context
-entered through an owning reference. The installed witness makes this observable:
+entered through an owning reference. The installed SDK test makes this observable:
 the owning detached-entry codec accepts an integer selected by the outer resource,
 while the directly exposed nested codec accepts its string fallback. HTTP calls
 always retain the owning source codec, including its reference path and resource
@@ -93,8 +93,8 @@ entries. Their conversion never substitutes the nested codec's isolated result.
 
 ## Physical-document server adoption
 
-`DocumentRelativeServers` is verified on current and floor. Native `HTTPServer`
-now exposes `documentBase` and `urlBase`. Its default base is the effective
+`DocumentRelativeServers` is tested on the current and floor toolchains. Native
+`HTTPServer` exposes `documentBase` and `urlBase`. Its default base is the effective
 **physical retrieval document** of the actual declaration, including inherited
 servers, external Path Item declarations, defaults and Link servers. An explicit
 client/request `documentURL` can override that base. A local file has no invented
@@ -115,36 +115,37 @@ fields grant no acquisition authority.
 New `HTTPURLBase` values distinguish `.serverDocument` from `.effectiveServer`.
 OAuth/OIDC providers receive the selected `HTTPCredentialContext.serverURL` and
 the explicit effective-server URL base; flow, metadata and discovery strings keep
-their original sources. The SDK performs no token acquisition or URL fetching.
+their original sources. Outside the opt-in `sdk_defaults` OAuth lifecycle
+([SDK-GOLDEN-DEFAULTS.md](SDK-GOLDEN-DEFAULTS.md#5-oauth-lifecycle)), the SDK
+performs no token acquisition or URL fetching.
 
-## Maintained native evidence
+## Native tests
 
 The runtime test compiles the unmodified pinned source groups in
 `crates/suspect-schema/tests/fixtures/resource-conformance/dynamicRef.json` and
-the three original supplied remote documents through a closed DocumentProvider
-and real `compile_v3`. It has no dependency on the one-off executable file under
-`target/`. Expected outcomes come from the official test booleans and independent
-literal controls, never from the Rust evaluator.
+the original supplied remote documents through a closed DocumentProvider and real
+`compile_v3`; it does not load a precompiled program file. Expected outcomes come
+from the official test booleans and independent literal controls, never from the
+Rust evaluator. Native tests run on Swift 6.3.3 / SDK 26.5 and Swift 6.0.3 /
+SDK 15.4.
 
-| Gate | Swift 6.3.3 / SDK 26.5 | Swift 6.0.3 / SDK 15.4 |
-| --- | --- | --- |
-| V3 evaluator | **93 passed** | **93 passed** |
-| Installed V3 SDK | **7 consumer tests + 7 actual wire calls** | **7 consumer tests + 7 actual wire calls** |
-| V3 typing | Positive control + **9 required failures** | Positive control + **9 required failures** |
-| V3 generated examples / SwiftPM / DocC | Passed, warnings as errors | Passed, warnings as errors |
-| Physical servers | **6 consumer tests + 12 exact wire calls** | **6 consumer tests + 12 exact wire calls** |
-| Server metadata typing | Positive control + **2 required failures** | Positive control + **2 required failures** |
-| Physical-server SwiftPM / DocC | Passed, warnings as errors | Passed, warnings as errors |
-| Declared aggregate follow-up | **4 consumer tests**, generated examples and DocC | **4 consumer tests**, generated examples and DocC |
+| Test area | Scope |
+| --- | --- |
+| V3 evaluator | Official dynamicRef cases, the dynamic/unevaluated cases v2 defers, and independent controls |
+| Installed V3 SDK | Consumer tests and actual wire calls |
+| V3 typing | A positive control plus required compile failures |
+| V3 generated examples / SwiftPM / DocC | Warnings as errors |
+| Physical servers | Consumer tests and exact wire calls |
+| Server metadata typing | A positive control plus required compile failures |
+| Physical-server SwiftPM / DocC | Warnings as errors |
+| Declared aggregates | Consumer tests, generated examples and DocC |
 
-The 93 runtime cases comprise 44 official dynamicRef cases, four formerly deferred
-dynamic/unevaluated cases and 45 independent controls. Controls cover fresh target
-scopes, outermost precedence, unentered candidates, changed-context cycles,
-successful/failed/thrown scope restoration, detached entry, fallback modes,
-retrieval aliases, escaped physical pointers, exact budgets, noninvertible numeric
-failures and normal-stack depth failure. Checked-emission mutations cover old or
-unknown envelopes, missing/misaligned metadata, invalid scopes, aliases, bindings,
-sources and initial-resource targets.
+Runtime controls cover fresh target scopes, outermost precedence, unentered
+candidates, changed-context cycles, successful/failed/thrown scope restoration,
+detached entry, fallback modes, retrieval aliases, escaped physical pointers,
+exact budgets, noninvertible numeric failures and normal-stack depth failure.
+Checked-emission mutations cover old or unknown envelopes, missing/misaligned
+metadata, invalid scopes, aliases, bindings, sources and initial-resource targets.
 
 The installed V3 fixture includes recursive strict trees, context-sensitive
 nullability and unions, detached parent-resource binding, typed static resources,
@@ -155,11 +156,11 @@ examples. The socket fixture verifies exact numeric request bytes.
 The physical-server fixture verifies inherited and external declaration bases,
 explicit document/server/variable overrides, local-file rejection and explicit
 base adoption, encoded path identity, defaults, Link server metadata and the
-effective OAuth/OIDC server. The Rustdoc `APIResponse<T>` quoting fix is included.
+effective OAuth/OIDC server.
 
 ### Complete declared aggregates
 
-The native constructor renderer now consumes
+The native constructor renderer consumes
 `OperationExamples.validated_aggregates` for form and multipart grouping. It
 retains distinct repeated values, empty arrays, declared dynamic extra names,
 optional missing members, and positional prefixes/tails. A declared optional
@@ -171,32 +172,13 @@ Aggregate declarations remain example-only inputs: no aggregate JSON codec or
 placeholder for native bytes is added. Each constructed part still uses its real
 source codec. The coverage file adds `validatedAggregates` only when nonempty and
 retains original declarations plus invalid/unavailable findings. Ordinary JSON
-coverage keeps its existing shape. Four focused installed tests exercise exact
-form bytes, named repeated/extras grouping, ordered tails and an empty positional
-array through the public Client and a capturing transport on both toolchains.
+coverage keeps its existing shape. Installed tests exercise exact form bytes,
+named repeated/extras grouping, ordered tails and an empty positional array
+through the public Client and a capturing transport on both toolchains.
 
-### Host and quality checks
+### Running the native tests
 
-- **19** Swift SDK/protocol/v2 integration checks and **6** Swift unit checks pass.
-- The **4** Swift compatibility checks pass.
-- Aggregate default-feature Cargo check and warnings-denied Rustdoc pass.
-- The three requested Clippy fixes are complete. The scoped Clippy receipt
-  records **zero Swift warning/error diagnostics**, including the maintained
-  Swift tests. Other owners' diagnostics remain in the common log.
-- Scoped rustfmt checks pass. `compatibility/native.rs` was patched only inside
-  its Swift capture: form-field/hook matches, planner call and media-schema
-  closure. A read-only rustfmt comparison verifies that function's formatting;
-  its descriptor values and configuration forwarding are preserved.
-
-Host and quality receipts are in `target/sdk-swift-resources-20260910/`, notably
-`host-tests-02.log`, `host-unit-03.log`, `compatibility-01.log`,
-`aggregate-check-01.log`, `rustdoc-01.log`, `swift-quality-02.json` and
-`swift-capture-format.json`.
-
-### Exact native selectors
-
-Use `cargo test --locked --offline -p suspect-codegen --no-default-features
---features http-protocol` with:
+Use `cargo test --locked --offline -p suspect-codegen --no-default-features` with:
 
 ```text
 --lib swift_sdk::validation::v3_tests::native_resource_dynamic_source_vectors
@@ -208,33 +190,13 @@ Use `cargo test --locked --offline -p suspect-codegen --no-default-features
 Append `-- --ignored --nocapture`. `SUSPECT_SWIFT_V3_ROOT` chooses a fresh artifact
 parent. Toolchain selection uses the existing `SUSPECT_SWIFT_BIN`,
 `SUSPECT_SWIFTC_BIN`, `SUSPECT_SWIFT_DOCC_BIN` and `SUSPECT_SWIFT_SDKROOT` variables
-documented in [SDK-SWIFT.md](SDK-SWIFT.md).
+documented in [SDK-SWIFT.md](SDK-SWIFT.md). Each artifact root retains generated
+sources, checked programs, command logs, independent consumer builds, typing
+diagnostics, DocC output and applicable literal wire captures.
 
-Retained roots under `${TMPDIR%/}/opencode`:
+## Source files
 
-- `swift-v3-gates/runtime-v3-mrdCsA` — current 93-case runtime proof.
-- `swift-v3-floor/runtime-v3-N4OIHL` — floor 93-case runtime proof.
-- `swift-v3-gates/sdk-v3-oupATH` — current installed V3 SDK/type/wire/DocC.
-- `swift-v3-floor/sdk-v3-JkJpv7` — floor installed V3 SDK/type/wire/DocC.
-- `swift-v3-gates/document-servers-qUcvHF` — current physical-server gate.
-- `swift-v3-floor/document-servers-Q5DRHQ` — floor physical-server gate.
-- `swift-v3-public-current/sdk-v3-MxqnYF` and
-  `swift-v3-public-current/document-servers-yhXtqL` — final public-entry current proofs.
-- `swift-v3-public-floor/sdk-v3-ShZp6X` and
-  `swift-v3-public-floor/document-servers-l7n107` — final public-entry floor proofs.
-- `swift-aggregate-current/aggregate-examples-4Re9UR` — current aggregate follow-up.
-- `swift-aggregate-floor/aggregate-examples-OXAhJd` — floor aggregate follow-up.
-- `swift-v3-gates/sdk-v3-ooY2F8` — retained red consumer constructor-order attempt.
-- `swift-v3-gates/document-servers-gApNMg` — retained red socket harness attempt;
-  accepted Darwin sockets inherited O_NONBLOCK, corrected with bounded blocking reads.
-
-Each root retains generated sources, checked programs, command logs, independent
-consumer builds, typing diagnostics, DocC output and applicable literal wire
-captures. Completed v1/v2 and protocol matrices retain their previous evidence.
-
-## Production asset handoff
-
-Changed production paths relative to `crates/suspect-codegen/src/`:
+Production paths relative to `crates/suspect-codegen/src/`:
 
 ```text
 swift_sdk.rs
@@ -249,14 +211,11 @@ swift_sdk/protocol_runtime.swift
 swift_sdk/protocol_examples.rs
 ```
 
-These are existing registered production assets. New test-only sources are
-`swift_sdk/validation_v3.rs`, `swift_sdk/validation_v3_support.rs`,
-`swift_sdk/resources_tests.rs`, `swift_sdk/validation_v3_native.swift` and
-`swift_sdk/protocol_resources_native.swift`, `swift_sdk/aggregate_examples_tests.rs`
-and `swift_sdk/aggregate_examples_native.swift`. They are not runtime assets.
-`compatibility/native.rs` has the separately requested Swift-capture rustfmt-only
-hunks. Existing Swift test support/imports and the protocol test harness received
-lint-only cleanup.
+Test-only sources are `swift_sdk/validation_v3.rs`,
+`swift_sdk/validation_v3_support.rs`, `swift_sdk/resources_tests.rs`,
+`swift_sdk/validation_v3_native.swift`, `swift_sdk/protocol_resources_native.swift`,
+`swift_sdk/aggregate_examples_tests.rs` and
+`swift_sdk/aggregate_examples_native.swift`. They are not runtime assets.
 
 ## Boundaries
 

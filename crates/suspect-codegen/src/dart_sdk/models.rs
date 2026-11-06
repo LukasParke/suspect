@@ -12,8 +12,11 @@ use super::{HttpDiagnostic, diag};
 /// One model member's independently retained wire and native names.
 #[derive(Debug, Clone)]
 pub struct DartField {
+    /// Dart member name, unique within the class.
     pub name: String,
+    /// JSON property name.
     pub wire_name: String,
+    /// Whether the property is listed in `required`.
     pub required: bool,
     /// Program node for the field; absent only for unconstrained undeclared keys.
     pub target: Option<usize>,
@@ -24,26 +27,43 @@ pub struct DartField {
 /// Native representation, with finite program indices for child model links.
 #[derive(Debug, Clone)]
 pub enum Shape {
+    /// Unconstrained JSON, carried as `JsonValue`.
     Any,
     /// Dynamic binding depends on the entered parent resources. Native fields
     /// carry exact JSON and are checked by the complete enclosing codec.
     Contextual,
+    /// Schema that admits no value (`false`).
     Never,
+    /// Only JSON `null`.
     Null,
+    /// Dart `bool`.
     Boolean,
+    /// Dart `String`.
     String,
+    /// Exact JSON number, carried as `JsonNumber`.
     Number,
+    /// Exact JSON integer, carried as `JsonInteger`.
     Integer,
+    /// A sole `$ref` to another program node; emitted as a typedef.
     Alias(usize),
+    /// `List` of the item node, or of `JsonValue` when items are unconstrained.
     Array(Option<usize>),
+    /// A generated class with declared members.
     Object {
+        /// Declared properties, in program order.
         fields: Vec<DartField>,
+        /// Policy for undeclared members.
         extras: Extras,
     },
+    /// String enum as `(wire value, Dart member)` pairs; `null` is carried by nullability.
     Enum(Vec<(String, String)>),
+    /// A single `oneOf`/`anyOf` over program nodes.
     Union {
+        /// Alternative program nodes, in source order.
         targets: Vec<usize>,
+        /// Branch classes implement the sealed union directly (proven tagged).
         direct: bool,
+        /// Wrapper variant class names, one per target; empty when `direct`.
         variants: Vec<String>,
     },
     /// A validated, exact JSON value wrapper for non-native intersections,
@@ -51,10 +71,14 @@ pub enum Shape {
     Checked,
 }
 
+/// Policy for an object's undeclared members, carried in `extraFields`.
 #[derive(Debug, Clone, Copy)]
 pub enum Extras {
+    /// Unconstrained undeclared members, kept as `JsonValue`.
     Any,
+    /// `additionalProperties: false`; no `extraFields` member.
     Closed,
+    /// Undeclared members typed by this program node.
     Typed(usize),
     /// Pattern/scoped constraints need complete-object validation. Values stay
     /// exact JSON; neither a pattern nor additionalProperties is a global type.
@@ -64,14 +88,23 @@ pub enum Extras {
 /// Public native identity for one reachable canonical schema.
 #[derive(Debug, Clone)]
 pub struct DartModel {
+    /// Canonical schema this model lowers.
     pub source: SchemaId,
+    /// Collision-free Dart type name.
     pub name: String,
+    /// Collision-free name of the generated codec value.
     pub codec_name: String,
+    /// Whether the schema accepts JSON `null`.
     pub nullable: bool,
+    /// Source `description`; empty when absent or on a 3.0 Reference Object.
     pub description: String,
+    /// Source `deprecated` flag.
     pub deprecated: bool,
+    /// Index of this model's node in the validation program.
     pub index: usize,
+    /// Native representation.
     pub shape: Shape,
+    /// Sealed union interfaces this class implements directly.
     pub parents: Vec<String>,
 }
 
@@ -95,14 +128,17 @@ pub struct ModelPlan {
 }
 
 impl ModelPlan {
+    /// Every model, indexed by program node.
     #[must_use]
     pub fn symbols(&self) -> &[DartModel] {
         &self.models
     }
+    /// Model lowered from `source`, if it is a compiled root.
     #[must_use]
     pub fn model(&self, source: &SchemaId) -> Option<&DartModel> {
         self.by_source.get(source).map(|&index| &self.models[index])
     }
+    /// Dart type expression for `source`, if it is a compiled root.
     #[must_use]
     pub fn native_type(&self, source: &SchemaId) -> Option<String> {
         self.by_source.get(source).map(|&index| self.ty(index))
@@ -124,6 +160,11 @@ impl ModelPlan {
                     Shape::Any | Shape::Contextual | Shape::Null | Shape::Never | Shape::Checked
                 ))
     }
+    /// Dart type expression for program node `index`, `?`-suffixed when natively nullable.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is not a program node.
     #[must_use]
     pub fn ty(&self, index: usize) -> String {
         let m = &self.models[index];
@@ -203,7 +244,13 @@ pub(super) fn plan(
                 false
             }
         };
-        let raw = contract.source(&source);
+        // An OAS 3.0 Reference Object applies only its `$ref`: sibling
+        // description/deprecated annotations are not this model's documentation.
+        let raw = contract.source(&source).filter(|_| {
+            !contract
+                .schema(&source)
+                .is_some_and(crate::schema_view::reference_only)
+        });
         let mut representation = shape(program, index);
         if let Shape::Object { fields, .. } = &mut representation {
             for field in fields {

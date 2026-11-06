@@ -1404,15 +1404,15 @@ fn native_canonical_package_and_compatibility_metadata_match_public_jvm_types() 
         serde_json::to_vec_pretty(&native).unwrap(),
     )
     .unwrap();
-    let home = std::env::var_os("SUSPECT_JAVA_HOME")
-        .or_else(|| std::env::var_os("JAVA_HOME"))
+    let Some(home) = std::env::var_os("SUSPECT_JAVA_HOME")
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            "/Users/luke/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS".into()
-        });
-    let maven = std::env::var_os("SUSPECT_MAVEN_BIN").unwrap_or_else(|| {
-        "/Users/luke/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn".into()
-    });
+        .or_else(|| suspect_codegen::toolchain::require_home("jdk"))
+    else {
+        return;
+    };
+    let Some(maven) = suspect_codegen::toolchain::require("maven") else {
+        return;
+    };
     let repository = crate_root().join("../../target/sdk-java-maven-cache/java/repository");
     checked_native(
         std::process::Command::new(&maven)

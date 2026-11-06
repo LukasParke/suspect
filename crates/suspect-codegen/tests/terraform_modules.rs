@@ -1,9 +1,5 @@
 //! Native Go import-path collisions at the separate Terraform package boundary.
-#![cfg(feature = "http-protocol")]
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::{go_http, terraform::*};
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
@@ -63,24 +59,11 @@ fn sdk_modules_cannot_shadow_generated_provider_packages() {
 #[test]
 #[ignore = "native pinned Go package lookup; no SDK replacement or lifecycle replay"]
 fn native_pinned_module_import_boundaries() {
-    let evidence =
-        PathBuf::from(std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE").expect("fresh evidence root"));
-    std::fs::create_dir(&evidence).unwrap();
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        evidence.join("generator-test.bin"),
-    )
-    .unwrap();
-    let root = tempfile::Builder::new()
-        .prefix("sdk-terraform-modules-")
-        .tempdir_in("/private/var/folders/cp/c0_kzhh92pngpr3xyxx0h9w00000gn/T/opencode")
-        .unwrap()
-        .keep();
-    std::fs::write(
-        evidence.join("native-root.txt"),
-        format!("{}\n", root.display()),
-    )
-    .unwrap();
+    let Some(native) = crate::terraform_support::native() else {
+        return;
+    };
+    let evidence = crate::terraform_support::evidence_dir("sdk-terraform-modules-evidence-");
+    let root = crate::terraform_support::native_root("sdk-terraform-modules-", &evidence);
     let (contract, mapping, base) = inputs();
     for (label, sdk) in [
         ("separate", "example.com/separate-sdk"),
@@ -149,21 +132,11 @@ fn native_pinned_module_import_boundaries() {
         .unwrap(),
     )
     .unwrap();
-    let output = std::process::Command::new("python3")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/sdk-terraform-modules.py"))
-        .arg("--root")
-        .arg(&root)
-        .arg("--evidence")
-        .arg(&evidence)
-        .output()
-        .unwrap();
-    std::fs::write(evidence.join("runner.stdout.log"), &output.stdout).unwrap();
-    std::fs::write(evidence.join("runner.stderr.log"), &output.stderr).unwrap();
-    assert!(
-        output.status.success(),
-        "{}\n{}\n{}",
-        evidence.display(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+    crate::terraform_support::run_runner(
+        &native,
+        "sdk-terraform-modules.py",
+        &root,
+        &evidence,
+        None,
     );
 }

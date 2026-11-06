@@ -35,10 +35,10 @@ fn fixture() -> HttpPlan {
         .collect::<Vec<_>>();
     plan_http(c, &selected, HttpConfig::default()).unwrap()
 }
-fn build(root: &Path) -> Output {
+fn build(root: &Path) -> Option<Output> {
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/typescript-docs/build.mjs");
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
-    Command::new(node).arg(tool).arg(root).output().unwrap()
+    let node = suspect_codegen::toolchain::pinned_node(22)?;
+    Some(Command::new(node).arg(tool).arg(root).output().unwrap())
 }
 fn text(o: &Output) -> String {
     format!(
@@ -47,11 +47,11 @@ fn text(o: &Output) -> String {
         String::from_utf8_lossy(&o.stderr)
     )
 }
-fn native(files: &[OutFile]) -> (tempfile::TempDir, Output) {
+fn native(files: &[OutFile]) -> Option<(tempfile::TempDir, Output)> {
     let d = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(files, d.path()).unwrap();
-    let o = build(&d.path().join("typescript"));
-    (d, o)
+    let o = build(&d.path().join("typescript"))?;
+    Some((d, o))
 }
 
 #[test]
@@ -59,7 +59,9 @@ fn native(files: &[OutFile]) -> (tempfile::TempDir, Output) {
 fn native_http_docs_preserve_hostile_prose_names_and_actual_bindings() {
     let plan = fixture();
     let planned = plan.operations()[0].clone();
-    let (directory, output) = native(&plan.render());
+    let Some((directory, output)) = native(&plan.render()) else {
+        return;
+    };
     assert!(output.status.success(), "{}", text(&output));
     let coverage: Value = serde_json::from_slice(
         &std::fs::read(directory.path().join("typescript/docs/coverage.json")).unwrap(),
@@ -245,7 +247,9 @@ fn native_http_gate_rejects_manifest_export_prose_and_type_binding_mutations() {
             }
             _ => unreachable!(),
         };
-        let (_d, o) = native(&files);
+        let Some((_d, o)) = native(&files) else {
+            return;
+        };
         assert!(
             !o.status.success(),
             "{mutation} mutation unexpectedly passed"
@@ -256,12 +260,9 @@ fn native_http_gate_rejects_manifest_export_prose_and_type_binding_mutations() {
 #[test]
 #[ignore = "requires pinned Node 22.23.1, TypeDoc, TypeScript and tracked OpenRouter YAML"]
 fn native_http_docs_cover_tracked_openrouter_operations_and_query_inputs() {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
+    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let c = contract(&path);
     let ids = [
         "getCredits",
@@ -277,7 +278,9 @@ fn native_http_docs_cover_tracked_openrouter_operations_and_query_inputs() {
         .collect::<Vec<_>>();
     assert_eq!(selected.len(), ids.len());
     let plan = plan_http(c, &selected, HttpConfig::default()).unwrap();
-    let (d, o) = native(&plan.render());
+    let Some((d, o)) = native(&plan.render()) else {
+        return;
+    };
     assert!(o.status.success(), "{}", text(&o));
     let coverage: Value = serde_json::from_slice(
         &std::fs::read(d.path().join("typescript/docs/coverage.json")).unwrap(),

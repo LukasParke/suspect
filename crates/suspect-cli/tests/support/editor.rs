@@ -316,37 +316,6 @@ impl Editor {
         self.await_until(id, method, Instant::now() + BUDGET)
     }
 
-    #[allow(dead_code)]
-    fn await_one_unused(&self, id: i64, method: &str) -> Result<serde_json::Value, NoReply> {
-        let deadline = Instant::now() + BUDGET;
-        let (lock, condvar) = &*self.inbox;
-        let mut inbox = lock.lock().expect("inbox");
-        loop {
-            if let Some(value) = inbox.answers.get(&id) {
-                return Ok(value.clone());
-            }
-            if let Some(message) = inbox.errors.get(&id) {
-                // An error is still an answer: the server replied.
-                return Err(NoReply(format!(
-                    "{method} answered with an error: {message}"
-                )));
-            }
-            if inbox.closed {
-                return Err(NoReply(format!(
-                    "{method} never answered: the server closed its output"
-                )));
-            }
-            let now = Instant::now();
-            if now >= deadline {
-                return Err(NoReply(method.to_owned()));
-            }
-            let (guard, _) = condvar
-                .wait_timeout(inbox, deadline - now)
-                .expect("condvar");
-            inbox = guard;
-        }
-    }
-
     /// Issues one request and waits for it.
     pub fn request(
         &self,

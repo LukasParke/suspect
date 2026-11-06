@@ -7,6 +7,8 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+use crate::python_support;
+
 fn checked(command: &mut Command, root: &Path, label: &str, success: bool) {
     let output = command
         .env("PYTHONDONTWRITEBYTECODE", "1")
@@ -125,13 +127,9 @@ print('NULL_ONLY_MODELS_CHECKED')
     )
     .unwrap();
     std::fs::write(root.join("negative.py"),"from python import models as m\nm.NullFields(required=1)\nm.NullFields(required=None, flag='not null')\nm.NullFields(required=None, items=[False])\n").unwrap();
-    let python = std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into());
-    let tools = std::env::var_os("SUSPECT_PYTHON_TOOLS")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/sdk-native-python-tools/bin/python")
-        });
+    let (Some(python), Some(tools)) = (python_support::python(), python_support::tools()) else {
+        return;
+    };
     let mut mypy = Command::new(&tools);
     mypy.current_dir(&root)
         .args([

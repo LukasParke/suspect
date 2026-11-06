@@ -4,51 +4,80 @@ use super::{HttpDiagnostic, allocate, diagnostic, exported};
 pub use crate::rust_models::RepresentationRole;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use suspect_ir::contract::{Contract, SchemaId};
+use suspect_ir::contract::{Contract, SchemaDialect, SchemaId};
+/// Identity of one planned declaration: its source schema and representation role.
 pub type Key = (SchemaId, RepresentationRole);
 
 /// Native type expression. Optional presence is a property concern, separate
 /// from `Nullable`, which represents a value-domain state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CsType {
+    /// A built-in C# type spelled verbatim (`string`, `bool`, `Never`, ...).
     Native(&'static str),
+    /// Exact JSON number (`JsonNumber`).
     Number,
+    /// Exact JSON integer (`JsonInteger`).
     Integer,
+    /// Untyped JSON (`System.Text.Json.JsonElement`).
     Json,
+    /// A planned declaration; aliases are erased to their target when rendered.
     Named(Key),
+    /// A value-domain `null` state, rendered as `T?`.
     Nullable(Box<CsType>),
+    /// A JSON array.
     List(Box<CsType>),
+    /// A JSON object with string keys.
     Dict(Box<CsType>),
 }
+/// A planned C# declaration for one [`Key`].
 #[derive(Debug, Clone)]
 pub enum CsDecl {
+    /// A record with declared properties.
     Record {
+        /// Declared properties in order.
         fields: Vec<CsField>,
+        /// Type of undeclared members; `None` when `additionalProperties: false`.
         extras: Option<CsType>,
     },
     /// Erased C# aliases retain a distinct source-aware codec, not a wrapper object.
     Alias(CsType),
+    /// A closed set of string/boolean literals, as an enum.
     Literals {
+        /// `(allocated member name, JSON token)` pairs in declaration order.
         values: Vec<(String, String)>,
     },
+    /// A sealed `oneOf`/`anyOf` union.
     Union {
+        /// Non-null branches in declaration order.
         branches: Vec<CsBranch>,
     },
 }
+/// One branch of a [`CsDecl::Union`].
 #[derive(Debug, Clone)]
 pub struct CsBranch {
+    /// Allocated branch name (from the `$ref` name, else `VariantN`).
     pub name: String,
+    /// Branch schema.
     pub source: SchemaId,
+    /// Branch value type.
     pub ty: CsType,
 }
+/// One declared property of a [`CsDecl::Record`].
 #[derive(Debug, Clone)]
 pub struct CsField {
+    /// Allocated C# property name.
     pub name: String,
+    /// Wire property name.
     pub wire: String,
+    /// Property value type.
     pub ty: CsType,
+    /// Whether the property is required on the wire.
     pub required: bool,
+    /// Whether the property schema admits `null`.
     pub nullable: bool,
+    /// Property schema.
     pub source: SchemaId,
+    /// Property schema description; empty when absent.
     pub description: String,
 }
 /// Actual C# object-initializer obligation, independently of wire requiredness.
@@ -60,15 +89,21 @@ pub enum FieldInitialization {
     Absent,
     /// A source-required singleton tag is initialized to this allocated enum member.
     Singleton {
+        /// The literals declaration.
         symbol: Key,
+        /// Allocated enum member name.
         member: String,
+        /// JSON token of the tag.
         token: String,
     },
 }
+/// Native names and declarations for every planned [`Key`].
 #[derive(Debug)]
 pub struct ModelPlan {
-    pub names: BTreeMap<Key, String>,
-    pub declarations: BTreeMap<Key, CsDecl>,
+    /// Allocated codec/declaration name per key.
+    pub(crate) names: BTreeMap<Key, String>,
+    /// Planned declaration per key.
+    pub(crate) declarations: BTreeMap<Key, CsDecl>,
     pub(crate) nullable: BTreeMap<SchemaId, bool>,
     deprecated: BTreeSet<Key>,
 }
@@ -148,6 +183,7 @@ impl ModelPlan {
         }
         carrier(self, &CsType::Named(key(id)))
     }
+    /// Spell `ty` as an unqualified C# type expression, erasing aliases.
     #[must_use]
     pub fn render_type(&self, ty: &CsType) -> String {
         self.render_in(ty, None)
@@ -207,7 +243,9 @@ pub(crate) fn plan(
     let mut declared: BTreeSet<_> = roots.iter().cloned().collect();
     for id in &reachable {
         let schema = contract.schema(id).expect("compiled schema");
-        if schema.raw().as_object().is_some_and(|r| {
+        // OAS 3.0 Reference Objects expose only `$ref`: ignored siblings
+        // cannot allocate a declaration.
+        if crate::schema_view::raw(schema).as_object().is_some_and(|r| {
             types(r).iter().any(|t| t == "object")
                 || ["oneOf", "anyOf", "enum", "const"]
                     .iter()
@@ -289,15 +327,22 @@ impl Planner<'_> {
         if self.scoped {
             return;
         }
-        let Some(raw) = self.contract.schema(id).and_then(|s| s.raw().as_object()) else {
+        let Some(schema) = self.contract.schema(id) else {
             return;
         };
+        // Through the dialect view: ignored OAS 3.0 `$ref` siblings are not
+        // assertions and need no intersection representation.
+        let view = crate::schema_view::raw(schema);
+        let Some(raw) = view.as_object() else {
+            return;
+        };
+        let inert = |k: &str| inert(k, schema.dialect());
         for keyword in ["allOf", "not", "prefixItems"] {
             if raw.contains_key(keyword) {
                 self.report(&id.child(keyword), "csharp-representation-unsupported", &format!("{keyword} has portable validation, but its native C# intersection/tuple representation is not implemented"));
             }
         }
-        if raw.contains_key("$ref") && raw.keys().any(|k| k != "$ref" && !annotation(k)) {
+        if raw.contains_key("$ref") && raw.keys().any(|k| k != "$ref" && !inert(k)) {
             self.report(
                 id,
                 "csharp-ref-sibling-unsupported",
@@ -307,7 +352,7 @@ impl Planner<'_> {
         if (raw.contains_key("oneOf") || raw.contains_key("anyOf"))
             && (raw
                 .keys()
-                .any(|k| !matches!(k.as_str(), "oneOf" | "anyOf") && !annotation(k))
+                .any(|k| !matches!(k.as_str(), "oneOf" | "anyOf") && !inert(k))
                 || (raw.contains_key("oneOf") && raw.contains_key("anyOf")))
         {
             self.report(
@@ -320,7 +365,7 @@ impl Planner<'_> {
             && !["$ref", "oneOf", "anyOf", "enum", "const"]
                 .iter()
                 .any(|k| raw.contains_key(*k))
-            && raw.keys().any(|k| !annotation(k))
+            && raw.keys().any(|k| !inert(k))
         {
             self.report(id, "csharp-untyped-constraints-unsupported", "untyped assertions do not imply a native type; conditional-domain model lowering is not implemented");
         }
@@ -350,7 +395,8 @@ impl Planner<'_> {
     }
     fn lower(&mut self, id: &SchemaId) -> CsDecl {
         let schema = self.contract.schema(id).expect("compiled schema");
-        let raw = match schema.raw() {
+        let view = crate::schema_view::raw(schema);
+        let raw = match &*view {
             Value::Bool(true) => return CsDecl::Alias(CsType::Json),
             Value::Bool(false) => return CsDecl::Alias(CsType::Native("Never")),
             Value::Object(raw) => raw,
@@ -374,7 +420,7 @@ impl Planner<'_> {
             // membership trials would also discard the enclosing dynamic scope.
             return CsDecl::Alias(CsType::Json);
         }
-        if self.scoped && carrier_shape(raw) {
+        if self.scoped && carrier_shape(raw, schema.dialect()) {
             return CsDecl::Alias(CsType::Json);
         }
         if raw.contains_key("$ref") {
@@ -544,8 +590,14 @@ impl Planner<'_> {
         let fields = properties
             .into_iter()
             .flatten()
-            .map(|(wire, value)| {
+            .map(|(wire, _)| {
                 let source = id.child("properties").child(wire);
+                // An OAS 3.0 Reference Object's description sibling is ignored.
+                let description = self
+                    .contract
+                    .schema(&source)
+                    .map_or("", crate::schema_view::description)
+                    .into();
                 CsField {
                     name: allocate(&exported(wire), &mut used),
                     wire: wire.clone(),
@@ -553,11 +605,7 @@ impl Planner<'_> {
                     required: required.contains(wire.as_str()),
                     nullable: self.nullable[&source],
                     source,
-                    description: value
-                        .get("description")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .into(),
+                    description,
                 }
             })
             .collect();
@@ -581,14 +629,14 @@ impl Planner<'_> {
         CsDecl::Record { fields, extras }
     }
 }
-fn carrier_shape(raw: &Map<String, Value>) -> bool {
-    if raw.contains_key("$ref") && raw.keys().any(|k| k != "$ref" && !annotation(k)) {
+fn carrier_shape(raw: &Map<String, Value>, dialect: &SchemaDialect) -> bool {
+    if raw.contains_key("$ref") && raw.keys().any(|k| k != "$ref" && !inert(k, dialect)) {
         return true;
     }
     if (raw.contains_key("oneOf") || raw.contains_key("anyOf"))
         && (raw
             .keys()
-            .any(|k| !matches!(k.as_str(), "oneOf" | "anyOf") && !annotation(k))
+            .any(|k| !matches!(k.as_str(), "oneOf" | "anyOf") && !inert(k, dialect))
             || (raw.contains_key("oneOf") && raw.contains_key("anyOf")))
     {
         return true;
@@ -659,6 +707,12 @@ fn only_null(value: &Value) -> bool {
             .get("enum")
             .and_then(Value::as_array)
             .is_some_and(|vs| !vs.is_empty() && vs.iter().all(Value::is_null))
+}
+/// Keywords with no native representation consequence. OAS 3.0 `nullable`
+/// only modifies a same-object `type` (already reflected by the compiled null
+/// domain); beside a union or without `type` it is inert.
+fn inert(key: &str, dialect: &SchemaDialect) -> bool {
+    annotation(key) || matches!(dialect, SchemaDialect::OpenApi30) && key == "nullable"
 }
 fn annotation(key: &str) -> bool {
     key.starts_with("x-")

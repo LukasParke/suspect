@@ -198,7 +198,7 @@ fn native_rustdoc_documents_manifest_surface_with_inert_hostile_prose() {
     ] {
         checked(
             native_env(
-                Command::new("cargo")
+                suspect_codegen::toolchain::nested_cargo()
                     .args([mode, "--offline", "--quiet", "--manifest-path"])
                     .arg(package.join("Cargo.toml")),
             )

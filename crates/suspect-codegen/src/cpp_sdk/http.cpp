@@ -63,7 +63,7 @@ Settings settings(const ClientOptions& client,const CallOptions& call,const Sour
     result.control().check(source);
     if(client.server_url && client.server_url->size()>result.max_request_bytes)http_fail(SdkError::Kind::ResourceLimit,source,"server URL exceeds request ceiling");
     if(client.document_url && client.document_url->size()>result.max_request_bytes)http_fail(SdkError::Kind::ResourceLimit,source,"document URL exceeds request ceiling");
-    result.server_url=client.server_url;result.document_url=client.document_url;result.server_index=call.server_index.value_or(client.server_index);
+    result.server_url=client.server_url;result.allow_insecure_http=client.allow_insecure_http;result.document_url=client.document_url;result.server_index=call.server_index.value_or(client.server_index);
     const auto& variables=call.server_variables?*call.server_variables:client.server_variables;
     std::size_t bytes=0;for(const auto& [key,value]:variables){if(key.size()>result.max_request_bytes-bytes)http_fail(SdkError::Kind::ResourceLimit,source,"server variable names exceed request ceiling");bytes+=key.size();if(value.size()>result.max_request_bytes-bytes)http_fail(SdkError::Kind::ResourceLimit,source,"server variables exceed request ceiling");bytes+=value.size();}
     result.variables=variables;result.security_alternative=call.security_alternative?call.security_alternative:client.security_alternative;

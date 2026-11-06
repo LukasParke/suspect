@@ -126,7 +126,6 @@ fn emit_package(
     if http.is_some() {
         exports.insert("./operations", entry("operations"));
     }
-    #[cfg(feature = "http-protocol")]
     if http.is_some_and(crate::typescript::http::HttpPlan::oauth_emitted) {
         exports.insert("./oauth", entry("oauth"));
     }
@@ -196,14 +195,11 @@ fn emit_package(
                 INDEX_VIEWS
             };
             if http.is_some() {
-                #[cfg(feature = "http-protocol")]
                 let oauth = if http.is_some_and(crate::typescript::http::HttpPlan::oauth_emitted) {
                     "\nexport * as oauth from '../oauth.js';\n"
                 } else {
                     ""
                 };
-                #[cfg(not(feature = "http-protocol"))]
-                let oauth = "";
                 format!(
                     "{index}\nexport * as operations from '../operations.js';\nexport {{ createClient }} from '../operations.js';\n{oauth}"
                 )
@@ -225,7 +221,6 @@ fn emit_package(
     if http.is_some() {
         files.get_mut("typescript/README.md").expect("package guide").content.push_str("\n## Validated examples\n\n[Example values and provenance](examples.md) retain declared and explicitly synthesized origins. `examples.json` includes source-linked findings for invalid or unavailable examples. `npm run build` compiles the typed inputs; `node dist/examples/validated.js` executes their model-codec checks without making HTTP calls.\n");
     }
-    #[cfg(feature = "http-protocol")]
     if let Some(policy) = http.and_then(HttpPlan::credential_env) {
         files
             .get_mut("typescript/README.md")
@@ -251,18 +246,9 @@ fn emit_package(
 }
 
 fn http_readme(plan: &HttpPlan, config: &PackageConfig) -> String {
-    #[cfg(feature = "http-protocol")]
     let example = plan.first_request().map_or_else(
         || "No operations were selected.\n".into(),
         |recipe| format!("```ts\n{}```\n", recipe.source(&config.name)),
-    );
-    #[cfg(not(feature = "http-protocol"))]
-    let example = plan.operations().first().map_or_else(
-        || "No operations were selected.\n".into(),
-        |operation| format!(
-            "```ts\nimport {{ operations }} from '{}';\n\nexport function callOperation(client: operations.ClientOptions, input: operations.{}): Promise<operations.{}> {{\n  return operations.{}(client, input);\n}}\n```\n",
-            config.name, operation.input_type, operation.success_type, operation.function_name,
-        ),
     );
     let label = view_label(plan.codecs());
     let views = if label == "Neutral" {

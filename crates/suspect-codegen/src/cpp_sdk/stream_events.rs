@@ -36,10 +36,13 @@ use suspect_ir::contract::SourceId;
 pub struct StreamEventsEntry {
     /// Source identity of the streamed operation.
     pub operation: String,
+    /// Source location of the streamed operation.
     pub source: SourceId,
     /// The generated client method this pager extends.
     pub method: String,
+    /// Generated input type of the operation.
     pub input_type: String,
+    /// Generated error result type of the operation.
     pub error_type: String,
     /// The declared model every recognized kind's envelope decodes into.
     pub item_type: String,
@@ -60,14 +63,18 @@ pub struct StreamEventsEntry {
     pub retry_metadata: bool,
     /// Allocated, collision-free public type names.
     pub event: String,
+    /// Completion type (`<Stem>Completion`) reported when the stream ends.
     pub completion: String,
+    /// Typed event pager type (`<Stem>EventsPager`).
     pub pager: String,
     /// Allocated client method names: the pager factory and the exchange
     /// opener the pager consumes.
     pub events_method: String,
+    /// Exchange opener method (`<method>_events_stream`).
     pub open_method: String,
     /// The per-kind decoded payload struct names, in declaration order.
     pub kind_types: Vec<String>,
+    /// Payload struct for events of an undeclared kind (`<Stem>UnknownEventData`).
     pub unknown_type: String,
 }
 
@@ -76,6 +83,7 @@ pub struct StreamEventsEntry {
 pub struct StreamEventsPlan {
     /// The shared, infallible stream-semantics selection this emission follows.
     pub semantics: wire::StreamSemanticsPlan,
+    /// Discriminated SSE stream operations that receive typed pagers.
     pub operations: Vec<StreamEventsEntry>,
 }
 

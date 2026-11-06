@@ -1,5 +1,4 @@
-use suspect_low::{NodeRef, ValueKind};
-use suspect_ref::DocId;
+use suspect_low::NodeRef;
 
 use crate::components::Components;
 use crate::model::{ExternalDocumentation, Info, SecurityRequirement, Server, Tag};
@@ -24,11 +23,6 @@ impl<'s> OpenApi<'s> {
     #[must_use]
     pub fn root(&self) -> NodeRef<'s> {
         self.root
-    }
-
-    #[allow(dead_code)] // part of the view API surface
-    pub(crate) fn doc_id(&self) -> DocId {
-        self.doc
     }
 
     fn get(&self, key: &str) -> Option<NodeRef<'s>> {
@@ -200,11 +194,4 @@ pub(crate) fn security_list<'s>(
             .collect()
     })
     .unwrap_or_default()
-}
-
-/// Validates that a root node looks like an OpenAPI document (diagnostics).
-#[must_use]
-#[allow(dead_code)] // diagnostic helper retained for tooling
-pub fn looks_like_openapi(root: NodeRef<'_>) -> bool {
-    root.kind() == ValueKind::Object && root.get("openapi").is_some()
 }

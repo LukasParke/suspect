@@ -6,6 +6,8 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+use crate::python_support;
+
 fn load(path: &Path) -> Arc<Contract> {
     let workspace = Arc::new(
         WorkspaceBuilder::new()
@@ -37,12 +39,14 @@ fn native(plan: &CodecPlan, consumer: &str) {
     suspect_codegen::write_files(&plan.render(), &root).unwrap();
     let python = root.join("python");
     std::fs::write(python.join("consumer.py"), consumer).unwrap();
-    let output =
-        Command::new(std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into()))
-            .arg("consumer.py")
-            .current_dir(&python)
-            .output()
-            .unwrap();
+    let Some(interpreter) = python_support::python() else {
+        return;
+    };
+    let output = Command::new(interpreter)
+        .arg("consumer.py")
+        .current_dir(&python)
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}{}",
@@ -175,10 +179,9 @@ else: raise AssertionError('native cycle accepted')
 #[test]
 #[ignore = "requires native Python and tracked OpenRouter public source"]
 fn tracked_credits_codec_preserves_real_exact_fields() {
-    let source = std::path::PathBuf::from(
-        std::env::var_os("OPENROUTER_WEB_ROOT").expect("set OPENROUTER_WEB_ROOT"),
-    )
-    .join("projects/docs/openapi/openapi.yaml");
+    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
+        return;
+    };
     let c = load(&source);
     let op = c
         .operations()

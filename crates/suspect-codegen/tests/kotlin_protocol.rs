@@ -1,5 +1,4 @@
-#![cfg(all(feature = "kotlin-sdk", feature = "http-protocol"))]
-#![recursion_limit = "512"]
+#![cfg(feature = "kotlin-sdk")]
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -10,8 +9,7 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
-#[path = "kotlin_support/mod.rs"]
-mod support;
+use crate::kotlin_support as support;
 
 fn root() -> PathBuf {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-kotlin-protocol");
@@ -80,7 +78,7 @@ fn fixture() -> Value {
             "/post-lines":{"post":{"operationId":"postLines","requestBody":{"required":true,"content":{"application/x-ndjson":{"itemSchema":{"$ref":"#/components/schemas/Reply"}}}},"responses":{"200":reply()}}},
             "/structured":{"patch":{"operationId":"structured","requestBody":{"required":true,"content":{"application/merge-patch+json":{"schema":{"$ref":"#/components/schemas/Input"}}}},"responses":{"200":response("application/problem+json",json!({"$ref":"#/components/schemas/Reply"}))}}},
             "/schema-free":{"post":{"operationId":"schemaFree","requestBody":{"required":true,"content":{"application/json":{}}},"responses":{"200":{"description":"JSON without schema","content":{"application/json":{}}}}}},
-            "/servers":{"get":{"operationId":"servers","servers":[{"url":"https://unused.example/{version}","variables":{"version":{"default":"api"}}},{"url":"../{version}","variables":{"version":{"default":"api","enum":["api","other"]}}}],"responses":{"200":reply()}}},
+            "/servers":{"get":{"operationId":"servers","servers":[{"url":"https://unused.example/{version}","variables":{"version":{"default":"api"}}},{"url":"../{version}","variables":{"version":{"default":"api","enum":["api","other"]}}},{"url":"http://plain.example.test/{version}","variables":{"version":{"default":"api"}}}],"responses":{"200":reply()}}},
             "/custom":{"additionalOperations":{"REPORT":{"operationId":"custom","responses":{"200":reply()}}}},
             "/search":{"get":{"operationId":"search","parameters":[{"name":"query","in":"querystring","required":true,"content":{"application/x-www-form-urlencoded":{"schema":{"type":"object","additionalProperties":false,"required":["a","z"],"properties":{"a":{"type":"integer","example":1},"z":{"type":"string","example":"z"}}}}}}],"responses":{"200":reply()}}}
         }

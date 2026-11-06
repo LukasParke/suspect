@@ -182,17 +182,16 @@ struct Toolchain {
     npm: PathBuf,
 }
 
-fn toolchain() -> Toolchain {
-    let selected = std::env::var_os("SUSPECT_PACKAGE_NODE")
-        .or_else(|| std::env::var_os("SUSPECT_DOCS_NODE"))
-        .unwrap_or_else(|| "node".into());
+fn toolchain() -> Option<Toolchain> {
+    let selected = suspect_codegen::toolchain::pinned_node(22)?;
     let output = Command::new(&selected)
         .args(["--print", "process.execPath"])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "pinned Node is required: select it with SUSPECT_PACKAGE_NODE"
+        "pinned Node 22 at {} did not run",
+        selected.display()
     );
     let node = PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
     let npm = node
@@ -229,7 +228,7 @@ fn toolchain() -> Toolchain {
     )
     .unwrap();
     assert_eq!(version.trim(), "10.9.8");
-    Toolchain { node, npm }
+    Some(Toolchain { node, npm })
 }
 
 impl Toolchain {
@@ -422,7 +421,7 @@ fn rust_gate(plan: &RustHttpPlan, root: &Path, create_body: &str, update_body: &
 
     checked(
         native_env(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args([
                     "package",
                     "--offline",
@@ -477,7 +476,7 @@ fn rust_gate(plan: &RustHttpPlan, root: &Path, create_body: &str, update_body: &
     .unwrap();
     checked(
         native_env(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args(["test", "--offline", "--quiet", "--manifest-path"])
                 .arg(consumer.join("Cargo.toml"))
                 .arg("--target-dir")
@@ -493,7 +492,7 @@ fn rust_gate(plan: &RustHttpPlan, root: &Path, create_body: &str, update_body: &
     ] {
         checked(
             native_env(
-                Command::new("cargo")
+                suspect_codegen::toolchain::nested_cargo()
                     .args([mode, "--offline", "--quiet", "--manifest-path"])
                     .arg(generation.join("Cargo.toml"))
                     .arg("--target-dir")
@@ -538,7 +537,9 @@ fn m2_vertical_canonical_contract_drives_both_native_packages() {
 
     let temporary = tempfile::tempdir().unwrap();
     let root = temporary.keep();
-    let tools = toolchain();
+    let Some(tools) = toolchain() else {
+        return;
+    };
     ts_gate(&ts_plan, &tools, &root);
     rust_gate(&rust_plan, &root, &create_body, &update_body);
     std::fs::remove_dir_all(&root).unwrap();

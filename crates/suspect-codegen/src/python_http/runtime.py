@@ -22,7 +22,10 @@ from . import _auth as auth_runtime, _media as media, _parts as parts, _registry
 from ._wire import Budget, TOKEN, header_value, location, parse_scalar, percent, scalar, serialize, text_bytes
 
 _MANAGED = {'host', 'content-length', 'transfer-encoding', 'connection', 'trailer', 'upgrade', 'accept-encoding'}
-_AUTO = object()
+# Identity sentinel for "assemble the attribution User-Agent". Typed as
+# ``str`` so the public ``user_agent: str | None`` parameters stay precise;
+# it is only ever compared by identity, never used as text.
+_AUTO: str = cast(str, object())
 _APPLICATION_ID = re.compile(r"[A-Za-z0-9!#$%&'*+.^`|~-]+(?:/[A-Za-z0-9!#$%&'*+.^`|~-]+)?")
 
 
@@ -35,7 +38,7 @@ def _validate_application_id(value: str | None) -> str | None:
     return value
 
 
-def server_url(op: Operation, override: str | None, selected: int | str, variables: Mapping[str, str], document_url: str | None) -> str:
+def server_url(op: Operation, override: str | None, selected: int | str, variables: Mapping[str, str], document_url: str | None, allow_insecure_http: bool = False) -> str:
     base: str | None = None
     if override is not None:
         result = override
@@ -65,7 +68,7 @@ def server_url(op: Operation, override: str | None, selected: int | str, variabl
     if base is not None:
         text_bytes(base, op.max_request_bytes, op.source)
     try:
-        result = resolve_server(result, base)
+        result = resolve_server(result, base, loopback_only=override is not None and not allow_insecure_http)
     except (ValueError, TypeError) as error:
         raise SdkError('request-representation', op.source, cause=error, code='http-server-url') from None
     text_bytes(result, op.max_request_bytes, op.source)
@@ -377,7 +380,10 @@ class _Base:
     def _configure(self, auth: Mapping[str, Credential] | None, override: str | None, selected: int | str,
                    variables: Mapping[str, str] | None, document: str | None, security: int | None,
                    maximum: int | None, capture: int, timeout: float | None,
-                   user_agent: str | None = _AUTO, application_id: str | None = None) -> None:
+                   user_agent: str | None = _AUTO, application_id: str | None = None, allow_insecure_http: bool = False) -> None:
+        if type(allow_insecure_http) is not bool:
+            raise ValueError('allow_insecure_http must be a bool')
+        self._allow_insecure_http = allow_insecure_http
         if maximum is not None and (type(maximum) is not int or maximum <= 0):
             raise ValueError('max_response_bytes must be positive')
         if type(capture) is not int or capture < 0:
@@ -396,7 +402,7 @@ class _Base:
         """ua/v1 attribution: explicit override wins, ``None`` suppresses, ``_AUTO`` assembles."""
         if self._user_agent is not _AUTO:
             return self._user_agent or None
-        plan = getattr(type(self), '_ATTRIBUTION', None)
+        plan = cast('dict[str, str] | None', getattr(type(self), '_ATTRIBUTION', None))
         if not plan:
             return None
         identity = plan['sdk_name'] + '/' + plan['sdk_version']
@@ -494,8 +500,9 @@ class SyncClient(_Base):
                  document_url: str | None = None, auth_alternative: int | None = None,
                  transport: httpx.BaseTransport | None = None, max_response_bytes: int | None = None,
                  max_capture_bytes: int = 4096, timeout: float | None = 30,
-                 user_agent: str | None = _AUTO, application_id: str | None = None) -> None:
-        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout, user_agent, application_id)
+                 user_agent: str | None = _AUTO, application_id: str | None = None,
+                 allow_insecure_http: bool = False) -> None:
+        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout, user_agent, application_id, allow_insecure_http)
         self._owned = transport is None
         self._transport = httpx.HTTPTransport(trust_env=False, retries=0) if transport is None else transport
         self._responses: set[SyncResponse] = set()
@@ -532,7 +539,7 @@ class SyncClient(_Base):
     def _call(self, op: Operation, arguments: Mapping[str, object], body: object = UNSET, content_type: str | Unset = UNSET) -> object:
         params = parameters(op, arguments)
         payload, content = encode_body(op, body, body_media(op, body, content_type))
-        base = server_url(op, self._server_url, self._server, self._variables, self._document_url)
+        base = server_url(op, self._server_url, self._server, self._variables, self._document_url, self._allow_insecure_http)
         attachments = auth_runtime.resolve(self._auth, op.wire['security'], self._security, op.source, op.max_request_bytes, effective_server_url=base)
         request, maximum = self._prepare(op, params, payload, content, attachments, base)
         try:
@@ -578,8 +585,9 @@ class AsyncClientBase(_Base):
                  document_url: str | None = None, auth_alternative: int | None = None,
                  transport: httpx.AsyncBaseTransport | None = None, max_response_bytes: int | None = None,
                  max_capture_bytes: int = 4096, timeout: float | None = 30,
-                 user_agent: str | None = _AUTO, application_id: str | None = None) -> None:
-        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout, user_agent, application_id)
+                 user_agent: str | None = _AUTO, application_id: str | None = None,
+                 allow_insecure_http: bool = False) -> None:
+        self._configure(auth, server_url, server, server_variables, document_url, auth_alternative, max_response_bytes, max_capture_bytes, timeout, user_agent, application_id, allow_insecure_http)
         self._owned = transport is None
         self._transport = httpx.AsyncHTTPTransport(trust_env=False, retries=0) if transport is None else transport
         self._responses: set[AsyncResponse] = set()
@@ -616,7 +624,7 @@ class AsyncClientBase(_Base):
     async def _call(self, op: Operation, arguments: Mapping[str, object], body: object = UNSET, content_type: str | Unset = UNSET) -> object:
         params = parameters(op, arguments)
         payload, content = await encode_body_async(op, body, body_media(op, body, content_type))
-        base = server_url(op, self._server_url, self._server, self._variables, self._document_url)
+        base = server_url(op, self._server_url, self._server, self._variables, self._document_url, self._allow_insecure_http)
         attachments = await auth_runtime.resolve_async(self._auth, op.wire['security'], self._security, op.source, op.max_request_bytes, effective_server_url=base)
         request, maximum = self._prepare(op, params, payload, content, attachments, base)
         try:

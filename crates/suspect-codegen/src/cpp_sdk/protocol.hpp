@@ -82,6 +82,7 @@ struct Settings {
     std::size_t max_parts = @PARTS@;
     std::size_t max_item_bytes = @STREAM_ITEM_BYTES@;
     Presence<std::string> server_url, document_url, response_media;
+    bool allow_insecure_http = false;
     /** ua/v1 attribution: the caller override/suppression and application identity. */
     Presence<std::string> user_agent, application_id;
     std::size_t server_index = 0;

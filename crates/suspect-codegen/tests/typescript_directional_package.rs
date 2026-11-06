@@ -160,7 +160,9 @@ assert.throws(() => codecs.RecordResponseCodec.decode('{"name":"n"}'), invalid);
 "#,
     )
     .unwrap();
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
+        return;
+    };
     let output = Command::new(&node)
         .arg(consumer.join("consumer.mjs"))
         .output()

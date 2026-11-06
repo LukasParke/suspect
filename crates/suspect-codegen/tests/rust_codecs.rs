@@ -1,10 +1,6 @@
 //! Consumer behavior through Contract -> complete native Rust codec package.
 use serde_json::{Value, json};
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::rust_codecs::{CodecConfig, CodecPlan, plan_codecs};
 use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::WorkspaceBuilder;
@@ -47,7 +43,7 @@ fn native(plan: &CodecPlan, source: &str) {
         ("test", generated.as_path(), Some("--doc")),
         ("doc", generated.as_path(), Some("--no-deps")),
     ] {
-        let mut command = Command::new("cargo");
+        let mut command = suspect_codegen::toolchain::nested_cargo();
         command
             .args([mode, "--offline", "--quiet", "--manifest-path"])
             .arg(package.join("Cargo.toml"))
@@ -159,14 +155,9 @@ fn finite_conversion_and_evaluation_failures_are_not_schema_mismatches() {
         );
     });
 }
-fn corpus() -> Arc<Contract> {
-    let path = std::env::var_os("SUSPECT_OPENROUTER_YAML")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web/projects/docs/openapi/openapi.yaml")
-        });
-    contract(&path)
+/// The pinned OpenRouter contract, or `None` after a skip message.
+fn corpus() -> Option<Arc<Contract>> {
+    suspect_codegen::toolchain::openrouter_spec().map(|path| contract(&path))
 }
 fn select(contract: &Contract, pointers: &[&str]) -> Vec<SchemaId> {
     pointers
@@ -182,7 +173,9 @@ fn select(contract: &Contract, pointers: &[&str]) -> Vec<SchemaId> {
 #[test]
 #[ignore = "requires native Cargo and tracked OpenRouter corpus"]
 fn tracked_caller_image_integer_and_typed_extras_are_native_codecs() {
-    let contract = corpus();
+    let Some(contract) = corpus() else {
+        return;
+    };
     let roots = select(
         &contract,
         &[
@@ -216,7 +209,9 @@ use generated_models::{models::*,codecs::*,Nullable};
 #[test]
 #[ignore = "requires native Cargo and tracked OpenRouter corpus"]
 fn tracked_chat_result_transparent_intersections_preserve_native_fields() {
-    let contract = corpus();
+    let Some(contract) = corpus() else {
+        return;
+    };
     let roots = select(&contract, &["/components/schemas/ChatResult"]);
     let plan = plan_codecs(contract, &roots, CodecConfig::default()).unwrap();
     native(
@@ -231,7 +226,9 @@ use generated_models::codecs::*;
 #[test]
 #[ignore = "requires native Cargo and tracked OpenRouter corpus"]
 fn tracked_request_intersections_keep_named_fields_and_enforce_presence() {
-    let contract = corpus();
+    let Some(contract) = corpus() else {
+        return;
+    };
     let roots = select(&contract, &["/components/schemas/ChatRequest"]);
     let plan = plan_codecs(contract, &roots, CodecConfig::default()).unwrap();
     native(

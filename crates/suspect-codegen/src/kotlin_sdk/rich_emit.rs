@@ -827,6 +827,10 @@ fn reference(plan: &Plan) -> String {
     }
     out
 }
+/// The shared guide.
+fn guide(_plan: &Plan) -> String {
+    include_str!("guide.md").to_owned()
+}
 fn readme(plan: &Plan, samples: &samples::Samples<'_>) -> String {
     let mut out = format!(
         "# {} — Kotlin/JVM SDK\n\nKotlin {KOTLIN_VERSION}, coroutines {COROUTINES_VERSION}, JVM 21+.\n\n```sh\nmvn verify\nmvn install\n```\n\nMaven dependency: `{}:{}:{}`.\n\n",
@@ -840,8 +844,9 @@ fn readme(plan: &Plan, samples: &samples::Samples<'_>) -> String {
         )
         .unwrap();
     }
+    let guide = guide(plan);
     if plan.program.version != OwnedProgram::V1_VERSION {
-        out.push_str(&include_str!("guide.md").replace("Native intersections, positional tuples, active directional views, OpenAPI 3.0,\nimplicit extension profiles", "Active directional views, OpenAPI 3.0,\nimplicit extension profiles"));
+        out.push_str(&guide.replace("Native intersections, positional tuples, active directional views", "Active directional views"));
         if plan.program.version == OwnedProgram::V2_VERSION {
             out.push_str(include_str!("guide-v2.md"));
         } else {
@@ -849,7 +854,7 @@ fn readme(plan: &Plan, samples: &samples::Samples<'_>) -> String {
             out.push_str(include_str!("guide-v3.md"));
         }
     } else {
-        out.push_str(include_str!("guide.md"));
+        out.push_str(&guide);
     }
     if plan.credential_env().is_some() {
         out.push_str(include_str!("guide-env.md"));

@@ -4,14 +4,9 @@
 //! stubbed transport. Static runtime files are never modified; the walks live
 //! entirely inside the generated `Client.php`, and no-policy generation stays
 //! byte-identical.
-#![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
+#![cfg(feature = "php-sdk")]
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{fs, path::PathBuf, process::Command, sync::Arc};
 
 use serde_json::{Value, json};
 use suspect_codegen::{
@@ -321,16 +316,9 @@ fn cursor_without_items_emits_the_page_walk_only() {
 
 /// The repository's verified PHP 8.3 interpreter, when available.
 fn php() -> Option<PathBuf> {
-    let candidate = std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools/php-8.3.32/php")
-        });
-    Command::new(&candidate)
-        .arg("-v")
-        .output()
-        .is_ok()
-        .then_some(candidate)
+    // `SUSPECT_PHP_BIN`, the source-built target-dir PHP, then `PATH`;
+    // a hard failure under `SUSPECT_REQUIRE_NATIVE`.
+    suspect_codegen::toolchain::require("php")
 }
 
 #[ignore = "requires the PHP CLI on the test host"]
