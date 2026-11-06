@@ -3869,10 +3869,13 @@ mod burst_tests {
         let text = spec_with_refs(2000);
         std::fs::write(dir.path().join("openapi.yaml"), &text).expect("write");
         let path = dir.path().join("openapi.yaml");
-        let uri = Uri::parse(&format!("file://{}", path.display())).expect("uri");
+        let uri = Uri::parse(suspect_source::Uri::from_path(&path).unwrap().as_str()).expect("uri");
 
         let (mut service, socket) = service().await;
-        let root = format!("file://{}", dir.path().display());
+        let root = suspect_source::Uri::from_path(dir.path())
+            .unwrap()
+            .as_str()
+            .to_owned();
 
         // Answer the server's own requests, as an editor does. Without
         // this the server waits forever on `workspace/configuration`
@@ -4151,7 +4154,7 @@ mod burst_tests {
         let text = spec_with_refs(2000);
         std::fs::write(dir.path().join("openapi.yaml"), &text).expect("write");
         let path = dir.path().join("openapi.yaml");
-        let uri = Uri::parse(&format!("file://{}", path.display())).expect("uri");
+        let uri = Uri::parse(suspect_source::Uri::from_path(&path).unwrap().as_str()).expect("uri");
         let (mut service, socket) = service().await;
         let answering = tokio::spawn(async move {
             use futures::{SinkExt, StreamExt};
@@ -4183,7 +4186,7 @@ mod burst_tests {
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {"workspace": {"configuration": true}},
             }),
         )
@@ -4282,8 +4285,14 @@ components:
             "lint:\n  min_severity: warning\n",
         )
         .expect("write");
-        let spec_uri = format!("file://{}", dir.path().join("openapi.yaml").display());
-        let conf_uri = format!("file://{}", dir.path().join(".suspect.yaml").display());
+        let spec_uri = suspect_source::Uri::from_path(&dir.path().join("openapi.yaml"))
+            .unwrap()
+            .as_str()
+            .to_owned();
+        let conf_uri = suspect_source::Uri::from_path(&dir.path().join(".suspect.yaml"))
+            .unwrap()
+            .as_str()
+            .to_owned();
 
         let (mut service, socket) = service().await;
         let answering = tokio::spawn(async move {
@@ -4316,7 +4325,7 @@ components:
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {"workspace": {"configuration": true}},
             }),
         )
@@ -4449,7 +4458,7 @@ components:
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {},
             }),
         )
@@ -4548,7 +4557,7 @@ components:
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {"workspace": {
                     "configuration": true,
                     "didChangeWatchedFiles": {"dynamicRegistration": true},
@@ -4589,7 +4598,7 @@ components:
             0,
             "workspace/didChangeWatchedFiles",
             serde_json::json!({"changes": [
-                {"uri": format!("file://{}", conf.display()), "type": 2},
+                {"uri": suspect_source::Uri::from_path(&conf).unwrap().as_str().to_owned(), "type": 2},
             ]}),
         )
         .await;
@@ -4622,7 +4631,7 @@ components:
             0,
             "workspace/didChangeWatchedFiles",
             serde_json::json!({"changes": [
-                {"uri": format!("file://{}", conf.display()), "type": 2},
+                {"uri": suspect_source::Uri::from_path(&conf).unwrap().as_str().to_owned(), "type": 2},
             ]}),
         )
         .await;
