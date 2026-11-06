@@ -579,7 +579,7 @@
 		"@vscode/vsce": "4.1.0",
 		"esbuild": "0.28.2",
 		"ovsx": "1.3.0",
-		"typescript": "^5.4.0"
+		"typescript": "^7.0.2"
 	},
 	"overrides": {
 		"@vscode/vsce": {
