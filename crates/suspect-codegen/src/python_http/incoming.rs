@@ -121,7 +121,7 @@ pub(super) struct IncomingReceipt {
     pub route_const: String,
     pub source_const: String,
     pub decode: String,
-    pub construct: Option<String>,
+    pub construct: String,
     pub payload: Payload,
     pub required_body: bool,
     pub required_headers: Vec<String>,
@@ -337,7 +337,7 @@ pub(super) fn prepare(
             route_const,
             source_const,
             decode,
-            construct: Some(construct),
+            construct,
             payload,
             required_body: operation
                 .request()
@@ -361,27 +361,39 @@ fn decode_body(receipt: &IncomingReceipt) -> String {
             source = receipt.source_const,
         ));
     }
+    // JSON, codec and scalar failures of a received body are the branded
+    // incoming-request failure, like a missing header or empty body.
+    let guarded = |statements: String| {
+        format!(
+            "    try:\n{}    except (CodecError, J.JsonError, ValueError, TypeError) as error:\n        raise SdkError('incoming-request', {source}, cause=error, code='incoming-request') from None\n",
+            statements
+                .lines()
+                .map(|line| format!("    {line}\n"))
+                .collect::<String>(),
+            source = receipt.source_const,
+        )
+    };
     match &receipt.payload {
         Payload::None => code.push_str("    return None\n"),
-        Payload::Json { codec } => code.push_str(&format!(
+        Payload::Json { codec } => code.push_str(&guarded(format!(
             "    return codecs.{codec}Codec.decode(body_text(body, {source}))\n",
             source = receipt.source_const,
-        )),
-        Payload::SchemaFreeJson => code.push_str(&format!(
+        ))),
+        Payload::SchemaFreeJson => code.push_str(&guarded(format!(
             "    return J.parse_json(body_text(body, {source}))\n",
             source = receipt.source_const,
-        )),
+        ))),
         Payload::Text { scalar, codec } => match codec {
-            Some(codec) => code.push_str(&format!(
+            Some(codec) => code.push_str(&guarded(format!(
                 "    wire = parse_scalar(body_text(body, {source}), {scalar_kind}, {source})\n    return codecs.{codec}Codec.decode_value(wire)\n",
                 source = receipt.source_const,
                 scalar_kind = q(scalar),
-            )),
-            None => code.push_str(&format!(
+            ))),
+            None => code.push_str(&guarded(format!(
                 "    return parse_scalar(body_text(body, {source}), {scalar_kind}, {source})\n",
                 source = receipt.source_const,
                 scalar_kind = q(scalar),
-            )),
+            ))),
         },
         Payload::Binary => code.push_str(&format!(
             "    if not isinstance(body, bytes):\n        raise SdkError('incoming-request', {source}, code='incoming-request')\n    return body\n",
@@ -421,9 +433,7 @@ fn decoder(receipt: &IncomingReceipt) -> String {
 
 /// One receipt's reply constructor, when an exact 2xx response is declared.
 fn constructor(receipt: &IncomingReceipt, response: &ConstructedResponse) -> String {
-    let Some(construct) = &receipt.construct else {
-        return String::new();
-    };
+    let construct = &receipt.construct;
     let has_body = response.body.is_some();
     let has_headers = !response.headers.is_empty();
     let mut parameters = String::new();
@@ -647,6 +657,7 @@ from typing import Any, Mapping
 
 from . import json_runtime as J, model_codecs as codecs, models
 from ._types import Source, SdkError
+from .codec_runtime import CodecError
 from ._wire import parse_scalar
 
 

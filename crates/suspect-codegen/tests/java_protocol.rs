@@ -74,7 +74,7 @@ fn fixture() -> Value {
         paths.insert(path.into(), json!({"get":value}));
     }
     let mut servers = op("serverChoice");
-    servers["servers"] = json!([{"url":"../{version}","name":"relative","variables":{"version":{"default":"v1","enum":["v1","v2"]}}},{"url":"https://{region}.example.test/{version}","name":"regional","variables":{"region":{"default":"eu","enum":["eu","us"]},"version":{"default":"v1"}}}]);
+    servers["servers"] = json!([{"url":"../{version}","name":"relative","variables":{"version":{"default":"v1","enum":["v1","v2"]}}},{"url":"https://{region}.example.test/{version}","name":"regional","variables":{"region":{"default":"eu","enum":["eu","us"]},"version":{"default":"v1"}}},{"url":"http://plain.example.test/v1","name":"plain"}]);
     paths.insert("/server".into(), json!({"get":servers}));
     let mut default = op("defaultServer");
     default["servers"] = json!([]);

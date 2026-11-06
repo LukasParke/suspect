@@ -4,24 +4,19 @@
 //! package contains native models/enums/unions, explicit omission, exact JSON
 //! codecs, a bounded portable validator, an injectable HTTP client and PHPDoc.
 
-#[cfg(not(feature = "http-protocol"))]
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use suspect_ir::contract::{Contract, SchemaId, SourceId};
-#[cfg(not(feature = "http-protocol"))]
-use suspect_schema::OwnedCompiler;
+use suspect_ir::contract::{Contract, SourceId};
 use suspect_schema::OwnedProgram;
 
 pub use crate::http_contract::HttpDiagnostic;
-use crate::{OutFile, http_contract};
+use crate::OutFile;
 
 #[path = "php_sdk/emit.rs"]
 mod emit;
 #[path = "php_sdk/models.rs"]
 pub mod models;
 #[path = "php_sdk/protocol.rs"]
-#[cfg(feature = "http-protocol")]
 pub mod protocol;
 #[path = "php_sdk/samples.rs"]
 mod samples;
@@ -91,111 +86,47 @@ impl Default for PhpConfig {
     }
 }
 
-/// Native operation symbols retain the exact source-selected wire declaration.
-#[derive(Debug, Clone)]
-pub struct PlannedOperation {
-    pub source: SourceId,
-    pub operation_id: String,
-    pub method_name: String,
-    pub input_type: String,
-    pub input_constructor: String,
-    pub error_type: String,
-    pub success_types: Vec<(u16, String)>,
-    pub error_types: Vec<(u16, String)>,
-    pub(crate) wire: http_contract::Operation,
-    pub parameters: Vec<PlannedParameter>,
-    pub body: Option<PlannedBody>,
-    pub responses: Vec<PlannedResponse>,
-}
-
-/// Allocated operation argument; the canonical schema and wire identities remain public.
-#[derive(Debug, Clone)]
-pub struct PlannedParameter {
-    pub name: String,
-    pub source: SourceId,
-    pub schema: SchemaId,
-    pub wire_name: String,
-    pub required: bool,
-    pub location: suspect_ir::contract::ParameterLocation,
-    pub style: suspect_ir::contract::ParameterStyle,
-    pub explode: bool,
-    pub array: bool,
-    pub description: String,
-}
-
-/// Native request body member.
-#[derive(Debug, Clone)]
-pub struct PlannedBody {
-    pub name: String,
-    pub source: SourceId,
-    pub schema: SchemaId,
-    pub required: bool,
-    pub media_type: String,
-    pub description: String,
-}
-
-/// Allocated success wrapper or typed exception, suitable for compatibility records.
-#[derive(Debug, Clone)]
-pub struct PlannedResponse {
-    pub type_name: String,
-    pub source: SourceId,
-    pub schema: SchemaId,
-    pub status: u16,
-    pub media_type: String,
-    pub success: bool,
-    pub body_member: String,
-    pub metadata_member: String,
-    pub description: String,
-}
-
 /// Immutable admitted plan. Rendering cannot introduce new schema decisions.
 #[derive(Debug)]
-pub struct ModelCore {
+pub(crate) struct ModelCore {
     contract: Arc<Contract>,
     config: PhpConfig,
     models: models::ModelPlan,
-    operations: Vec<PlannedOperation>,
     program: OwnedProgram,
     examples: crate::examples::ExamplePlan,
     samples: Vec<samples::NativeExample>,
 }
 
 /// Descriptive alias for callers using the other native SDK backends.
-#[cfg(feature = "http-protocol")]
 pub type Plan = protocol::SdkPlan;
-#[cfg(not(feature = "http-protocol"))]
-pub type Plan = ModelCore;
+/// Backend-neutral alias for [`Plan`].
 pub type SdkPlan = Plan;
 
 impl ModelCore {
+    /// Canonical contract the plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// Configuration the plan was admitted under.
     #[must_use]
     pub fn config(&self) -> &PhpConfig {
         &self.config
     }
+    /// Native model symbols for every reachable codec schema.
     #[must_use]
     pub fn models(&self) -> &models::ModelPlan {
         &self.models
     }
-    #[must_use]
-    pub fn operations(&self) -> &[PlannedOperation] {
-        &self.operations
-    }
+    /// Checked validation program executed by the generated runtime.
     #[must_use]
     pub fn program(&self) -> &OwnedProgram {
         &self.program
     }
+    /// Per-operation source examples used by generated docs.
     #[must_use]
     pub fn examples(&self) -> &crate::examples::ExamplePlan {
         &self.examples
-    }
-    /// Complete deterministic artifact set under `php/`, ready for the shared writer.
-    #[must_use]
-    pub fn render(&self) -> Vec<OutFile> {
-        emit::package(self)
     }
 }
 
@@ -426,274 +357,7 @@ pub(crate) fn diagnostic(
     }
 }
 
-/// Plan exactly the selected outgoing operations and their schema closure.
-///
-/// # Errors
-/// Source-linked HTTP, native representation, dialect, opcode and resource-policy
-/// diagnostics. Unsupported constructs never become releasable fallback artifacts.
-#[cfg(not(feature = "http-protocol"))]
-pub fn plan_sdk(
-    contract: Arc<Contract>,
-    selected: &[SourceId],
-    config: PhpConfig,
-) -> Result<Plan, Vec<HttpDiagnostic>> {
-    let mut errors = Vec::new();
-    let entry = SourceId::new(contract.entry().clone(), Default::default());
-    if !contract.openapi_version().starts_with("3.1.") {
-        errors.push(diagnostic(&contract, entry.child("openapi"), "php-dialect-unsupported", "the verified PHP profile requires OpenAPI 3.1; other dialects need native codec admission"));
-    }
-    if selected.is_empty() {
-        errors.push(diagnostic(
-            &contract,
-            entry.clone(),
-            "http-no-operations",
-            "select at least one outgoing operation",
-        ));
-    }
-    let parts: Vec<_> = config.package_name.split('/').collect();
-    if parts.len() != 2
-        || !composer_part(parts[0], false)
-        || !composer_part(parts[1], true)
-        || config.package_name.len() > 128
-    {
-        errors.push(diagnostic(
-            &contract,
-            entry.clone(),
-            "php-package-name",
-            "Composer identity must be lowercase vendor/package",
-        ));
-    }
-    if semver::Version::parse(&config.package_version).is_err() {
-        errors.push(diagnostic(
-            &contract,
-            entry.clone(),
-            "php-package-version",
-            "package version must be exact SemVer",
-        ));
-    }
-    if config.namespace.len() > 128 || !config.namespace.split('\\').all(models::identifier) {
-        errors.push(diagnostic(
-            &contract,
-            entry.clone(),
-            "php-namespace",
-            "namespace must consist of non-reserved ASCII PHP identifiers",
-        ));
-    }
-    if !valid_policy(&config) {
-        errors.push(diagnostic(&contract, entry.clone(), "php-resource-policy", "byte/node budgets must be positive portable 32-bit integers; depth <=128 and numeric tokens <=65536 bytes"));
-    }
-    let wire = match http_contract::plan(&contract, selected) {
-        Ok(wire) => Some(wire),
-        Err(mut more) => {
-            errors.append(&mut more);
-            None
-        }
-    };
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    let wire = wire.expect("checked HTTP admission");
-    let reachable = contract.reachable_from(&wire.roots);
-    for id in &reachable {
-        if contract
-            .schema(id)
-            .is_some_and(|s| matches!(s.dialect(), suspect_ir::contract::SchemaDialect::OpenApi30))
-        {
-            errors.push(diagnostic(&contract, id.clone(), "php-dialect-unsupported", "OpenAPI 3.0 nullable/exclusive-bound projection is not admitted by the PHP model profile"));
-        }
-        for keyword in ["readOnly", "writeOnly"] {
-            if contract
-                .source(id)
-                .and_then(|raw| raw.get(keyword))
-                .is_some_and(|v| v != &serde_json::Value::Bool(false))
-            {
-                errors.push(diagnostic(
-                    &contract,
-                    id.child(keyword),
-                    "http-directional-codec-unsupported",
-                    "PHP neutral codecs require directional annotations to be absent or false",
-                ));
-            }
-        }
-    }
-    if !errors.is_empty() {
-        return Err(errors);
-    }
-    // Every reachable public codec is an explicit root of the same checked program.
-    let validation = OwnedCompiler::new(config.validation.clone())
-        .compile(contract.clone(), &reachable)
-        .map_err(|more| {
-            more.into_iter()
-                .map(|e| HttpDiagnostic {
-                    source: e.source,
-                    at: e.span.unwrap_or(0..0),
-                    code: "php-schema-compilation",
-                    message: e.message,
-                })
-                .collect::<Vec<_>>()
-        })?;
-    let program = validation.program();
-    native_program_check(&program).map_err(|e| {
-        vec![diagnostic(
-            &contract,
-            entry.clone(),
-            "php-validation-program",
-            e.to_string(),
-        )]
-    })?;
-    // The PHP executor implements this entire version, including the portable
-    // pattern NFA; new Rust instruction variants require an explicit match arm.
-    for node in &program.nodes {
-        for check in &node.checks {
-            use suspect_schema::ProgramInstruction::*;
-            match &check.instruction {
-                Always { .. }
-                | Type { .. }
-                | Ref { .. }
-                | Properties { .. }
-                | AdditionalProperties { .. }
-                | Required { .. }
-                | Items { .. }
-                | PrefixItems { .. }
-                | AllOf { .. }
-                | AnyOf { .. }
-                | OneOf { .. }
-                | Not { .. }
-                | Bound { .. }
-                | MultipleOf { .. }
-                | Count { .. }
-                | Enum { .. }
-                | Const { .. }
-                | UniqueItems
-                | Pattern { .. } => {}
-            }
-        }
-    }
-    let mut used = models::reserved_symbols();
-    let models = models::plan(&contract, &reachable, &wire.operations, &mut used)?;
-    let mut methods = BTreeSet::from(["__construct".into(), "exchange".into()]);
-    let mut operations = Vec::new();
-    for op in wire.operations {
-        let declaration = contract
-            .operations()
-            .find(|item| item.source() == &op.source)
-            .expect("admitted operation");
-        let declared_parameters = declaration.parameters();
-        let declared_responses = declaration.responses();
-        let stem = models::pascal(&op.operation_id);
-        let mut fields = BTreeSet::from(["body".into(), "options".into()]);
-        let parameters = op
-            .parameters
-            .iter()
-            .map(|p| PlannedParameter {
-                name: models::allocate(&models::member(&p.wire_name), &mut fields),
-                source: p.source.clone(),
-                schema: p.schema.clone(),
-                wire_name: p.wire_name.clone(),
-                required: p.required,
-                location: p.location,
-                style: p.style,
-                explode: p.explode,
-                array: p.array,
-                description: declared_parameters
-                    .iter()
-                    .find(|d| {
-                        d.name() == Some(p.wire_name.as_str()) && d.location() == Some(p.location)
-                    })
-                    .and_then(|d| d.description())
-                    .unwrap_or_default()
-                    .into(),
-            })
-            .collect();
-        let mut success_types = Vec::new();
-        let mut error_types = Vec::new();
-        for response in &op.responses {
-            if (200..300).contains(&response.status) {
-                success_types.push((
-                    response.status,
-                    models::allocate(&format!("{stem}Status{}", response.status), &mut used),
-                ));
-            } else {
-                error_types.push((
-                    response.status,
-                    models::allocate(&format!("{stem}Status{}Error", response.status), &mut used),
-                ));
-            }
-        }
-        let responses = op
-            .responses
-            .iter()
-            .map(|r| {
-                let success = (200..300).contains(&r.status);
-                PlannedResponse {
-                    type_name: if success {
-                        &success_types
-                    } else {
-                        &error_types
-                    }
-                    .iter()
-                    .find(|(s, _)| *s == r.status)
-                    .expect("allocated status")
-                    .1
-                    .clone(),
-                    source: r.source.clone(),
-                    schema: r.schema.clone(),
-                    status: r.status,
-                    media_type: r.media_type.clone(),
-                    success,
-                    body_member: "body".into(),
-                    metadata_member: "response".into(),
-                    description: declared_responses
-                        .iter()
-                        .find(|d| d.status_key() == r.status.to_string())
-                        .and_then(|d| d.description())
-                        .unwrap_or_default()
-                        .into(),
-                }
-            })
-            .collect();
-        let body = op.body.as_ref().map(|b| PlannedBody {
-            name: "body".into(),
-            source: b.source.clone(),
-            schema: b.schema.clone(),
-            required: b.required,
-            media_type: b.media_type.clone(),
-            description: declaration
-                .request_body()
-                .and_then(|b| b.description())
-                .unwrap_or_default()
-                .into(),
-        });
-        operations.push(PlannedOperation {
-            source: op.source.clone(),
-            operation_id: op.operation_id.clone(),
-            method_name: models::allocate(&models::member(&op.operation_id), &mut methods),
-            input_type: models::allocate(&format!("{stem}Input"), &mut used),
-            input_constructor: "__construct".into(),
-            error_type: models::allocate(&format!("{stem}ApiError"), &mut used),
-            success_types,
-            error_types,
-            parameters,
-            body,
-            responses,
-            wire: op,
-        });
-    }
-    let examples = crate::examples::plan_examples(contract.clone(), selected, Default::default());
-    let samples = samples::plan(&models, &validation, &examples);
-    Ok(ModelCore {
-        contract,
-        config,
-        models,
-        operations,
-        program,
-        examples,
-        samples,
-    })
-}
-
 /// Source-selected PHP SDK over the shared rich protocol plan.
-#[cfg(feature = "http-protocol")]
 pub fn plan_sdk(
     contract: Arc<Contract>,
     selected: &[SourceId],

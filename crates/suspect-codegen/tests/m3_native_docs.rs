@@ -405,7 +405,20 @@ fn html_coverage(package: &Path, language: &str, hostile_prose: bool) {
     let bindings: Value =
         serde_json::from_slice(&std::fs::read(package.join("docs/source-bindings.json")).unwrap())
             .unwrap();
-    let html = std::fs::read_to_string(package.join("docs/_build/html/api.html")).unwrap();
+    // The API reference is `api.html` plus the bounded per-group pages under
+    // `api/` (doc_split); a symbol's anchor lives on its group page.
+    let built = package.join("docs/_build/html");
+    let mut html = std::fs::read_to_string(built.join("api.html")).unwrap();
+    if let Ok(pages) = std::fs::read_dir(built.join("api")) {
+        let mut pages: Vec<_> = pages.map(|entry| entry.unwrap().path()).collect();
+        pages.sort();
+        for page in pages
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "html"))
+        {
+            html.push_str(&std::fs::read_to_string(page).unwrap());
+        }
+    }
     let coverage: Value = serde_json::from_slice(
         &std::fs::read(package.join("docs/_build/html/coverage.json")).unwrap(),
     )

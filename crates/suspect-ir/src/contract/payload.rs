@@ -89,9 +89,11 @@ pub struct RequestBody<'a> {
     object: Object<'a>,
 }
 impl<'a> RequestBody<'a> {
+    /// Source of the `requestBody` declaration (the `$ref` site when referenced).
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The declaration as written, which may be a `$ref` object.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
@@ -99,12 +101,15 @@ impl<'a> RequestBody<'a> {
     pub fn resolved_source(&self) -> Option<SourceId> {
         self.object.resolved_source()
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }
+    /// Declared `required` flag; `None` when absent (OpenAPI default `false`).
     pub fn required(&self) -> Option<bool> {
         self.object.boolean("required")
     }
+    /// Entries of the `content` map, in document order.
     pub fn content(&self) -> Vec<MediaType<'a>> {
         content(&self.object)
     }
@@ -117,9 +122,11 @@ pub struct Response<'a> {
     object: Object<'a>,
 }
 impl<'a> Response<'a> {
+    /// Source of the response map entry.
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The response map entry as written, which may be a `$ref` object.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
@@ -127,12 +134,15 @@ impl<'a> Response<'a> {
     pub fn resolved_source(&self) -> Option<SourceId> {
         self.object.resolved_source()
     }
+    /// The status key as written (`200`, `4XX`, `default`, ...).
     pub fn status_key(&self) -> &'a str {
         self.key
     }
+    /// Parsed status key; `None` when the key is not a valid status.
     pub fn status(&self) -> Option<ResponseStatus> {
         ResponseStatus::parse(self.key)
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }
@@ -140,9 +150,11 @@ impl<'a> Response<'a> {
     pub fn summary(&self) -> Option<&'a str> {
         self.object.field_32("summary")?.1.as_str()
     }
+    /// Entries of the `content` map, in document order.
     pub fn content(&self) -> Vec<MediaType<'a>> {
         content(&self.object)
     }
+    /// Entries of the `headers` map, in document order.
     pub fn headers(&self) -> Vec<Header<'a>> {
         headers(&self.object)
     }
@@ -164,12 +176,16 @@ pub struct MediaType<'a> {
     object: Object<'a>,
 }
 impl<'a> MediaType<'a> {
+    /// Media type key (`application/json`), or the component key for
+    /// [`Contract::media_types`].
     pub fn name(&self) -> &'a str {
         self.name
     }
+    /// Source of the content-map entry (the `$ref` site when referenced).
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The content-map entry as written.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
@@ -178,6 +194,7 @@ impl<'a> MediaType<'a> {
     pub fn resolved_source(&self) -> Option<SourceId> {
         self.object.resolved_source()
     }
+    /// The complete-content `schema`, following references.
     pub fn schema(&self) -> Option<Schema<'a>> {
         self.object.schema()
     }
@@ -196,12 +213,15 @@ impl<'a> MediaType<'a> {
             .map(|schema| schema.id().clone())
             .collect()
     }
+    /// Inline `example`, including explicit `null`.
     pub fn example(&self) -> Option<&'a Value> {
         self.object.field("example").map(|(_, v)| v)
     }
+    /// Named Example Objects under `examples`.
     pub fn examples(&self) -> Vec<Example<'a>> {
         examples(&self.object)
     }
+    /// Named `encoding` entries keyed by schema property name.
     pub fn encoding(&self) -> Vec<Encoding<'a>> {
         encodings(&self.object)
     }
@@ -241,33 +261,43 @@ pub struct Header<'a> {
     object: Object<'a>,
 }
 impl<'a> Header<'a> {
+    /// Header name (the map key).
     pub fn name(&self) -> &'a str {
         self.name
     }
+    /// Source of the header map entry (the `$ref` site when referenced).
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The header declaration as written, which may be a `$ref` object.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Terminal reference target; `None` if a reference is cyclic or dangling.
     pub fn resolved_source(&self) -> Option<SourceId> {
         self.object.resolved_source()
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }
+    /// Declared `required` flag; `None` when absent.
     pub fn required(&self) -> Option<bool> {
         self.object.boolean("required")
     }
+    /// Declared `deprecated` flag; `None` when absent.
     pub fn deprecated(&self) -> Option<bool> {
         self.object.boolean("deprecated")
     }
+    /// Declared `style`, if any.
     pub fn style(&self) -> Option<ParameterStyle> {
         self.object.style()
     }
+    /// Declared `explode` flag; `None` when absent.
     pub fn explode(&self) -> Option<bool> {
         self.object.boolean("explode")
     }
+    /// Declared style, defaulting to `simple`; `None` for `content` headers.
     pub fn effective_style(&self) -> Option<ParameterStyle> {
         if self.object.field("content").is_some() {
             return None;
@@ -278,6 +308,7 @@ impl<'a> Header<'a> {
             Some(ParameterStyle::Simple)
         }
     }
+    /// Declared explode, defaulting to `false`; `None` for `content` headers.
     pub fn effective_explode(&self) -> Option<bool> {
         if self.object.field("content").is_some() {
             return None;
@@ -288,15 +319,19 @@ impl<'a> Header<'a> {
             self.effective_style().map(|_| false)
         }
     }
+    /// The header's `schema`, following references; `None` for `content` headers.
     pub fn schema(&self) -> Option<Schema<'a>> {
         self.object.schema()
     }
+    /// Entries of the `content` map, in document order.
     pub fn content(&self) -> Vec<MediaType<'a>> {
         content(&self.object)
     }
+    /// Inline `example`, including explicit `null`.
     pub fn example(&self) -> Option<&'a Value> {
         self.object.field("example").map(|(_, v)| v)
     }
+    /// Named Example Objects under `examples`.
     pub fn examples(&self) -> Vec<Example<'a>> {
         examples(&self.object)
     }
@@ -309,33 +344,44 @@ pub struct Encoding<'a> {
     object: Object<'a>,
 }
 impl<'a> Encoding<'a> {
+    /// Schema property name this encoding applies to (the map key).
     pub fn name(&self) -> &'a str {
         self.name
     }
+    /// Source of the encoding entry.
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The encoding entry as written.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Declared `contentType` for the part.
     pub fn content_type(&self) -> Option<&'a str> {
         self.object.string("contentType")
     }
+    /// Part headers declared under `headers`.
     pub fn headers(&self) -> Vec<Header<'a>> {
         headers(&self.object)
     }
+    /// Declared `style`, if any.
     pub fn style(&self) -> Option<ParameterStyle> {
         self.object.style()
     }
+    /// Declared `explode` flag; `None` when absent.
     pub fn explode(&self) -> Option<bool> {
         self.object.boolean("explode")
     }
+    /// Declared `allowReserved` flag; `None` when absent.
     pub fn allow_reserved(&self) -> Option<bool> {
         self.object.boolean("allowReserved")
     }
+    /// `form` when any of `style`/`explode`/`allowReserved` is present;
+    /// otherwise `None`, meaning the part is serialized by `contentType`.
     pub fn effective_style(&self) -> Option<ParameterStyle> {
         self.object.encoding_style()
     }
+    /// Declared explode, defaulting to `true` for `form` style.
     pub fn effective_explode(&self) -> Option<bool> {
         if self.object.field("explode").is_some() {
             self.explode()
@@ -351,9 +397,11 @@ impl<'a> Encoding<'a> {
         }
         encodings(&self.object)
     }
+    /// Positional `prefixEncoding` entries (3.2).
     pub fn prefix_encoding(&self) -> Vec<EncodingObject<'a>> {
         prefix_encodings(&self.object)
     }
+    /// `itemEncoding` for remaining positional parts (3.2).
     pub fn item_encoding(&self) -> Option<EncodingObject<'a>> {
         item_encoding(&self.object)
     }
@@ -367,30 +415,40 @@ pub struct EncodingObject<'a> {
 }
 
 impl<'a> EncodingObject<'a> {
+    /// Source of the Encoding Object.
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The Encoding Object as written.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Declared `contentType` for the part.
     pub fn content_type(&self) -> Option<&'a str> {
         self.object.string("contentType")
     }
+    /// Part headers declared under `headers`.
     pub fn headers(&self) -> Vec<Header<'a>> {
         headers(&self.object)
     }
+    /// Declared `style`, if any.
     pub fn style(&self) -> Option<ParameterStyle> {
         self.object.style()
     }
+    /// Declared `explode` flag; `None` when absent.
     pub fn explode(&self) -> Option<bool> {
         self.object.boolean("explode")
     }
+    /// Declared `allowReserved` flag; `None` when absent.
     pub fn allow_reserved(&self) -> Option<bool> {
         self.object.boolean("allowReserved")
     }
+    /// `form` when any of `style`/`explode`/`allowReserved` is present;
+    /// otherwise `None`, meaning the part is serialized by `contentType`.
     pub fn effective_style(&self) -> Option<ParameterStyle> {
         self.object.encoding_style()
     }
+    /// Declared explode, defaulting to `true` for `form` style.
     pub fn effective_explode(&self) -> Option<bool> {
         if self.object.field("explode").is_some() {
             self.explode()
@@ -399,15 +457,18 @@ impl<'a> EncodingObject<'a> {
                 .map(|style| style == ParameterStyle::Form)
         }
     }
+    /// Nested named encodings (3.2).
     pub fn encoding(&self) -> Vec<Encoding<'a>> {
         if self.object.field_32("encoding").is_none() {
             return Vec::new();
         }
         encodings(&self.object)
     }
+    /// Positional `prefixEncoding` entries (3.2).
     pub fn prefix_encoding(&self) -> Vec<EncodingObject<'a>> {
         prefix_encodings(&self.object)
     }
+    /// `itemEncoding` for remaining positional parts (3.2).
     pub fn item_encoding(&self) -> Option<EncodingObject<'a>> {
         item_encoding(&self.object)
     }
@@ -420,21 +481,27 @@ pub struct Example<'a> {
     object: Object<'a>,
 }
 impl<'a> Example<'a> {
+    /// Example name (the map key).
     pub fn name(&self) -> &'a str {
         self.name
     }
+    /// Source of the examples map entry (the `$ref` site when referenced).
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The entry as written, which may be a `$ref` object.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Declared `summary`, if any.
     pub fn summary(&self) -> Option<&'a str> {
         self.object.string("summary")
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }
+    /// Inline `value`, including explicit `null`.
     pub fn value(&self) -> Option<&'a Value> {
         self.object.field("value").map(|(_, v)| v)
     }
@@ -446,6 +513,7 @@ impl<'a> Example<'a> {
     pub fn resolved_source(&self) -> Option<SourceId> {
         self.object.resolved_source()
     }
+    /// Declared `externalValue` URI.
     pub fn external_value(&self) -> Option<&'a str> {
         self.object.string("externalValue")
     }
@@ -453,12 +521,15 @@ impl<'a> Example<'a> {
     pub fn data_value(&self) -> Option<&'a Value> {
         self.object.field_32("dataValue").map(|(_, value)| value)
     }
+    /// Location of `dataValue` (3.2).
     pub fn data_value_source(&self) -> Option<SourceId> {
         self.object.field_32("dataValue").map(|(source, _)| source)
     }
+    /// Declared `serializedValue` (3.2).
     pub fn serialized_value(&self) -> Option<&'a str> {
         self.object.field_32("serializedValue")?.1.as_str()
     }
+    /// Location of `serializedValue` (3.2).
     pub fn serialized_value_source(&self) -> Option<SourceId> {
         self.object
             .field_32("serializedValue")
@@ -473,30 +544,39 @@ pub struct Link<'a> {
     object: Object<'a>,
 }
 impl<'a> Link<'a> {
+    /// Link name (the map key).
     pub fn name(&self) -> &'a str {
         self.name
     }
+    /// Source of the links map entry.
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The Link Object as written.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }
+    /// Target `operationId`; mutually exclusive with `operationRef`.
     pub fn operation_id(&self) -> Option<&'a str> {
         self.object.string("operationId")
     }
+    /// Target `operationRef` URI; mutually exclusive with `operationId`.
     pub fn operation_ref(&self) -> Option<&'a str> {
         self.object.string("operationRef")
     }
+    /// Parameter name → runtime expression or constant map.
     pub fn parameters(&self) -> Option<&'a serde_json::Map<String, Value>> {
         self.object.field("parameters")?.1.as_object()
     }
+    /// Request body runtime expression or constant, as written.
     pub fn request_body(&self) -> Option<&'a Value> {
         self.object.field("requestBody").map(|(_, v)| v)
     }
+    /// Server override for the linked operation.
     pub fn server(&self) -> Option<Server<'a>> {
         Some(Server {
             object: Some(Object::new(

@@ -591,6 +591,9 @@ fn checked_resource_emission_rejects_corrupt_envelopes_scopes_and_bindings() {
 #[test]
 #[ignore = "Swift v3 official source fixtures, dynamic-scope controls and normal-stack budgets on selected installed toolchain"]
 fn native_resource_dynamic_source_vectors() {
+    if !support::available() {
+        return;
+    }
     let root = support::root("runtime-v3-");
     let mut groups = official();
     groups.extend(deferred());

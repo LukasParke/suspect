@@ -50,7 +50,9 @@ escaping; API-key cookies require valid, already escaped cookie octets.
 for relative server resolution. The base is the retrieval URL, not `$self` or
 schema `$id`; locally loaded descriptions need an explicit HTTP document URL.
 Server enum/default/unknown-variable rules are enforced. The explicit
-`serverUrl` convenience override accepts HTTPS or loopback HTTP.
+`serverUrl` override must be HTTPS, or HTTP to a loopback host unless
+`allowInsecureHttp = true`; source-declared servers keep their scheme. Both
+refuse literal dot segments and send encoded octets verbatim (ADR 0035).
 
 ## Parameters and representations
 
@@ -166,7 +168,12 @@ from declared JSON/text examples. Invalid declarations remain source findings.
 
 This package's declared capability set is recorded in `docs/protocol.json`.
 OpenAPI 3.1/3.2 JSON Schema models use the checked static 2020-12 profile.
-Native intersections, positional tuples, active directional views, OpenAPI 3.0,
-implicit extension profiles and undefined protocol shapes have located admission
-diagnostics. Format remains annotation-only. JDK-restricted request headers and
-CONNECT tunnel behavior are outside the native transport profile.
+OpenAPI 3.0 Schema Objects are lowered onto the same checked instructions:
+`nullable: true` adds null to the same-object `type` only (an `enum` must
+still list null), Boolean `exclusiveMinimum`/`exclusiveMaximum` make the
+adjacent bound exclusive, and a Reference Object applies only its `$ref`.
+Native intersections, positional tuples, active directional views (including
+OpenAPI 3.0 direction-dependent `required`), implicit extension profiles and
+undefined protocol shapes have located admission diagnostics. Format remains
+annotation-only. JDK-restricted request headers and CONNECT tunnel behavior are
+outside the native transport profile.

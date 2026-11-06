@@ -14,17 +14,32 @@ use suspect_ir::contract::{Contract, SchemaId, SourceId};
 /// An actual native wire value, separate from JSON model representations.
 #[derive(Debug, Clone)]
 pub enum JavaValue {
+    /// A generated choice type, referenced by class name.
     Named(String),
+    /// A planned model, decoded by its checked codec.
     Model(SchemaId),
+    /// Schemaless JSON as `JsonValue`.
     Json,
+    /// Schemaless text as `String`.
     Text,
+    /// Raw octets as `Bytes`.
     Bytes,
+    /// A body-forbidden response as `NoContent`.
     NoContent,
+    /// A response body that may be empty, as `ResponseBody<T>`.
     ResponseBody(Box<JavaValue>),
+    /// A form or multipart aggregate class.
     Aggregate(Box<JavaAggregate>),
-    Stream { schema: SchemaId, request: bool },
+    /// Typed stream items.
+    Stream {
+        /// Item codec schema.
+        schema: SchemaId,
+        /// Request streams are a `java.util.List`; response streams an `EventStream`.
+        request: bool,
+    },
 }
 impl JavaValue {
+    /// Rendered Java type of this value.
     #[must_use]
     pub fn native_type(&self, models: &JavaModelPlan) -> String {
         match self {
@@ -47,6 +62,7 @@ impl JavaValue {
             ),
         }
     }
+    /// Model or stream-item schema, when the value has one.
     #[must_use]
     pub fn schema(&self) -> Option<&SchemaId> {
         match self {
@@ -56,35 +72,53 @@ impl JavaValue {
     }
 }
 
+/// One typed header field of a [`JavaHeaders`] class.
 #[derive(Debug, Clone)]
 pub struct JavaHeader {
+    /// Java member name, unique within the headers class.
     pub name: String,
+    /// Shared wire decisions for the header.
     pub wire: wire::HeaderPlan,
+    /// Header codec schema.
     pub schema: SchemaId,
 }
+/// Generated typed-headers class for a response or multipart part.
 #[derive(Debug, Clone)]
 pub struct JavaHeaders {
+    /// Generated class name.
     pub name: String,
+    /// Response or part use site declaring the headers.
     pub source: SourceId,
+    /// Header fields in declaration order.
     pub fields: Vec<JavaHeader>,
+    /// JSON Pointer to the headers within the protocol plan.
     pub descriptor: String,
 }
+/// One field or part of a [`JavaAggregate`].
 #[derive(Debug, Clone)]
 pub struct JavaPart {
+    /// Java member name, unique within the aggregate.
     pub name: String,
     /// Multipart parts have native metadata-bearing wrapper classes.
     pub wrapper: Option<String>,
+    /// Part value.
     pub value: JavaValue,
+    /// Typed part headers class, when headers are declared.
     pub headers: Option<JavaHeaders>,
+    /// Shared wire decisions for the part.
     pub wire: wire::PartPlan,
+    /// JSON Pointer to the part within the protocol plan.
     pub descriptor: String,
 }
 impl JavaPart {
+    /// Java type of one occurrence: the wrapper class, else the value type.
     pub fn item_type(&self, models: &JavaModelPlan) -> String {
         self.wrapper
             .clone()
             .unwrap_or_else(|| self.value.native_type(models))
     }
+    /// Java member type: `java.util.List` of [`Self::item_type`] for repeated
+    /// array items, otherwise the item type.
     pub fn native_type(&self, models: &JavaModelPlan) -> String {
         let ty = self.item_type(models);
         if self.wire.multiplicity() == wire::PartMultiplicity::RepeatedArrayItems {
@@ -94,33 +128,53 @@ impl JavaPart {
         }
     }
 }
+/// Shape constraints an aggregate enforces over its parts.
 #[derive(Debug, Clone)]
 pub enum AggregateRules {
+    /// Object rules over named form fields or multipart parts.
     Named(wire::ObjectRules),
+    /// Array rules over positional multipart parts.
     Positional {
+        /// Array schema the parts are drawn from.
         schema: wire::SchemaUse,
+        /// Source `minItems`, when declared.
         min_items: Option<wire::Located<u64>>,
+        /// Source `maxItems`, when declared.
         max_items: Option<wire::Located<u64>>,
     },
 }
+/// Generated form or multipart aggregate class.
 #[derive(Debug, Clone)]
 pub struct JavaAggregate {
+    /// Generated class name.
     pub name: String,
+    /// Media use site.
     pub source: SourceId,
+    /// Multipart rather than URL-encoded form.
     pub multipart: bool,
+    /// Named or positional shape constraints.
     pub rules: AggregateRules,
+    /// Named fields/parts, or positional prefix parts.
     pub parts: Vec<JavaPart>,
+    /// Additional named parts, or the remaining positional items; `None` when forbidden.
     pub additional: Option<JavaPart>,
+    /// JSON Pointer to the aggregate representation within the protocol plan.
     pub descriptor: String,
 }
+/// One request or response media type and its native value.
 #[derive(Debug, Clone)]
 pub struct JavaMedia {
+    /// Member name derived from the media type, unique within its body or response.
     pub name: String,
+    /// Native value for this media.
     pub value: JavaValue,
+    /// Shared wire decisions for the media.
     pub wire: wire::MediaPlan,
+    /// JSON Pointer to the media within the protocol plan.
     pub descriptor: String,
 }
 
+/// Protocol capabilities the Java adapter admits under `config`.
 #[must_use]
 pub fn capabilities(config: &ProtocolConfig) -> wire::Capabilities {
     use Capability::*;
@@ -666,7 +720,7 @@ pub(crate) fn media_name(media: &wire::MediaType) -> String {
         wire::MediaRange::Type { type_name } => {
             format!("{}Range", crate::rust_models::pascal(type_name))
         }
-        wire::MediaRange::Concrete { type_name, subtype } if media.is_json() => {
+        wire::MediaRange::Concrete { subtype, .. } if media.is_json() => {
             if subtype == "json" {
                 "Json".into()
             } else {

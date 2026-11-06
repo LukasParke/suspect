@@ -101,7 +101,6 @@ fn native_type(plan: &Plan, ty: &NativeType) -> Value {
             "kotlinx.coroutines.flow.Flow",
             vec![native_type(plan, inner)],
         ),
-        NativeType::Presence(inner) => presence(package, native_type(plan, inner)),
     }
 }
 

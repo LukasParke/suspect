@@ -83,7 +83,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
         "both languages must use the same values and source provenance"
     );
     let manifest: Value = serde_json::from_str(content(&ts, "typescript/examples.json")).unwrap();
-    assert_eq!(manifest["format"], "suspect-sdk-examples-v1");
+    assert_eq!(manifest["format"], "suspect-sdk-examples-v2");
     let count: usize = manifest["operations"]
         .as_array()
         .unwrap()
@@ -97,7 +97,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
     suspect_codegen::write_files(&ts, &root).unwrap();
     suspect_codegen::write_files(&rs, &root.join("rs")).unwrap();
 
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let output = checked(
         Command::new(&node).args(["--print", "process.execPath"]),
         &root,
@@ -175,7 +175,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
     let generated = root.join("rs/rust");
     checked(
         cargo(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args([
                     "package",
                     "--offline",
@@ -209,7 +209,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
     );
     let executed = checked(
         cargo(
-            Command::new("cargo")
+            suspect_codegen::toolchain::nested_cargo()
                 .args([
                     "run",
                     "--offline",

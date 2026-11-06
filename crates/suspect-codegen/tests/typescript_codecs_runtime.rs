@@ -228,7 +228,7 @@ error('limit',()=>codec<unknown>('Bad',any).decode('null',{maxNodes:0}));
 }
 
 #[test]
-#[ignore = "requires native TypeScript/Node.js and OPENROUTER_WEB_ROOT"]
+#[ignore = "requires native TypeScript/Node.js and OPENROUTER_WEB_ROOT (the OpenRouter checkout)"]
 fn tracked_openrouter_caller_and_index_decode_and_encode_in_native_runtime() {
     let root_dir = suspect_codegen::test_inputs::openrouter_root();
     let path = root_dir.join("projects/docs/openapi/openapi.yaml");

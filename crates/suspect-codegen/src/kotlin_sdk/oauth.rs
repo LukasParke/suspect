@@ -92,46 +92,16 @@ const RESERVED_TYPES: &[&str] = &[
 /// against operation method allocation while the file is emitted.
 pub(super) const RESERVED_MEMBER: &str = "oauth";
 
-/// Whether one compiled flow can be executed by the generated runtime.
-fn executable(flow: &wire::OAuthFlowDescriptor) -> bool {
-    if flow.deprecated_flow {
-        return false;
-    }
-    match flow.kind {
-        wire::OAuthFlowDescriptorKind::ClientCredentials => flow.token_url.is_some(),
-        wire::OAuthFlowDescriptorKind::AuthorizationCode => {
-            flow.authorization_url.is_some() && flow.token_url.is_some()
-        }
-        wire::OAuthFlowDescriptorKind::DeviceAuthorization => {
-            flow.device_authorization_url.is_some() && flow.token_url.is_some()
-        }
-        // Implicit and password flows are never executed by generated code.
-        wire::OAuthFlowDescriptorKind::Implicit | wire::OAuthFlowDescriptorKind::Password => false,
-    }
-}
-
 /// Whether the compiled plan admits at least one usable scheme, so `OAuth.kt`
-/// carries content. A discovery URL makes a scheme usable even with no
-/// declared flows: OpenID Connect schemes have their endpoints defined by the
-/// discovery document at runtime.
+/// carries content (see [`wire::OAuthPlan::emits`]).
 pub(super) fn emittable(plan: &wire::OAuthPlan) -> bool {
-    plan.mode != wire::OAuthMode::Off
-        && plan
-            .schemes
-            .iter()
-            .any(|scheme| has_discovery(scheme) || scheme.flows.iter().any(executable))
-}
-
-/// Whether one compiled scheme carries a discovery/metadata URL, which the
-/// generated runtime resolves at call time.
-pub(super) fn has_discovery(scheme: &wire::OAuthSchemePlan) -> bool {
-    scheme.discovery.is_some()
+    plan.emits()
 }
 
 /// Whether any compiled scheme carries a discovery URL, so the emitted module
 /// carries the discovery engine and the conditional reserved names.
 pub(super) fn has_discovery_among(plan: &wire::OAuthPlan) -> bool {
-    plan.schemes.iter().any(has_discovery)
+    plan.has_discovery()
 }
 
 /// Whether at least one compiled scheme carries an executable
@@ -139,13 +109,7 @@ pub(super) fn has_discovery_among(plan: &wire::OAuthPlan) -> bool {
 /// The wrapper serves exactly that provider, so schemes without one compile
 /// exactly the pre-replay bytes.
 pub(super) fn has_client_credentials(plan: &wire::OAuthPlan) -> bool {
-    plan.schemes.iter().any(|scheme| {
-        scheme.flows.iter().any(|flow| {
-            flow.kind == wire::OAuthFlowDescriptorKind::ClientCredentials
-                && !flow.deprecated_flow
-                && flow.token_url.is_some()
-        })
-    })
+    plan.executes(wire::OAuthFlowDescriptorKind::ClientCredentials)
 }
 
 /// One source scheme compiled down to executable endpoints.
@@ -194,11 +158,7 @@ fn origin(url: &str) -> String {
 fn lower(oauth: &wire::OAuthPlan) -> Vec<Lowered> {
     let mut lowered = Vec::new();
     for scheme in &oauth.schemes {
-        let flows: Vec<&wire::OAuthFlowDescriptor> = scheme
-            .flows
-            .iter()
-            .filter(|flow| executable(flow))
-            .collect();
+        let flows: Vec<&wire::OAuthFlowDescriptor> = scheme.executable_flows().collect();
         let discovery = scheme.discovery.clone();
         if flows.is_empty() && discovery.is_none() {
             continue;
@@ -279,12 +239,10 @@ pub(super) fn client_member() -> &'static str {
 pub(super) fn runtime(plan: &Plan, oauth: &wire::OAuthPlan) -> String {
     let lowered = lower(oauth);
     debug_assert!(!lowered.is_empty(), "emission is gated on usable schemes");
-    let discovery = lowered.iter().any(|scheme| scheme.discovery.is_some());
+    let discovery = oauth.has_discovery();
     // The replaying credential wrapper joins only when a compiled scheme
     // carries an executable client-credentials flow, the provider it wraps.
-    let replay = lowered
-        .iter()
-        .any(|scheme| scheme.client_credentials_url.is_some());
+    let replay = has_client_credentials(oauth);
     let credentials = has(&lowered, |scheme| {
         scheme.client_credentials_url.is_some() || scheme.discovery.is_some()
     });
@@ -295,12 +253,8 @@ pub(super) fn runtime(plan: &Plan, oauth: &wire::OAuthPlan) -> String {
                 .as_deref()
                 .is_some_and(|url| !url.is_empty())
     });
-    let device = has(&lowered, |scheme| {
-        scheme.device_url.is_some() && scheme.device_token_url.is_some()
-    });
-    let authorization = has(&lowered, |scheme| {
-        scheme.authorization_url.is_some() && scheme.code_token_url.is_some()
-    });
+    let device = oauth.executes(wire::OAuthFlowDescriptorKind::DeviceAuthorization);
+    let authorization = oauth.executes(wire::OAuthFlowDescriptorKind::AuthorizationCode);
     let revocation = has(&lowered, |scheme| scheme.revocation_url.is_some());
     let introspection = has(&lowered, |scheme| scheme.introspection_url.is_some());
 
@@ -919,46 +873,21 @@ const HEAD_REPLAY: &str = "/** The opt-in replaying credential wrapper [OAuthRep
 const REPLAY_STORE_KEY: &str = "\n    /** The store key the opt-in replaying credential wrapper shares with this\n     * session's partitioning: it derives the same key from the same compiled\n     * inputs, so a replay refresh coordinates over the exact partition the\n     * plain lifecycle serves. */\n    internal fun replayStoreKey(\n        descriptor: OAuthSchemeDescriptor,\n        clientID: String?,\n        clientSecret: String?,\n    ): String = storeKey(descriptor, resolveCredentials(descriptor, clientID, clientSecret).first)\n";
 
 /// The stream-protected operations whose attaches must never be replayed, per
-/// lowered scheme: security requirements that name a lowered scheme on an
-/// operation whose responses carry a stream representation. Delivered stream
-/// data prevents a transparent restart, so those operations are excluded from
-/// the replay wrapper's one-replay budget. The attach context carries the
-/// operation ID (the requirement's source pointer is not exposed to credential
-/// hooks), so the compiled set names the stream-protected operations per
-/// scheme.
+/// lowered scheme (see [`wire::oauth_stream_protected_requirements`]). The
+/// attach context carries the operation ID (the requirement's source pointer
+/// is not exposed to credential hooks), so the compiled set names the
+/// stream-protected operations per scheme.
 fn no_replay_requirements(
     lowered: &[Lowered],
     operations: &[super::PlannedOperation],
 ) -> BTreeMap<String, BTreeSet<String>> {
     let names: BTreeSet<&str> = lowered.iter().map(|s| s.name.as_str()).collect();
     let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.wire.responses().iter().any(|response| {
-            response
-                .media()
-                .iter()
-                .any(|media| matches!(media.representation(), wire::Representation::Stream { .. }))
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.wire.security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    wire::CredentialHook::OAuth2 { .. }
-                        | wire::CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if names.contains(requirement.name()) {
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(operation.operation_id.clone());
-                }
-            }
-        }
+    for found in wire::oauth_stream_protected_requirements(operations, |op| &op.wire, &names) {
+        pointers
+            .entry(found.scheme.to_owned())
+            .or_default()
+            .insert(found.operation.operation_id.clone());
     }
     pointers
 }

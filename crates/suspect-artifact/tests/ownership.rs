@@ -428,3 +428,24 @@ fn manifest_and_obsolete_symlinks_are_never_followed_or_deleted() {
         );
     }
 }
+
+#[test]
+fn nested_targets_are_recorded_with_forward_slashes_and_recheck_cleanly() {
+    // The manifest must hold the portable `/` form on every platform: a
+    // native `\` path written on Windows used to fail re-validation on the
+    // very next `--check` ("invalid artifact target").
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let files = [("cmd/tool/main.go", "package main\n")];
+    owned(root, "app", &files, Adoption::Refuse)
+        .commit()
+        .unwrap();
+    let manifest = std::fs::read_to_string(root.join(OWNERSHIP_MANIFEST)).unwrap();
+    assert!(manifest.contains("\"cmd/tool/main.go\""), "{manifest}");
+    assert!(!manifest.contains('\\'), "{manifest}");
+    assert!(
+        owned(root, "app", &files, Adoption::Refuse)
+            .report()
+            .is_current()
+    );
+}

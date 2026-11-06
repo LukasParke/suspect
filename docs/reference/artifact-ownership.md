@@ -1,6 +1,6 @@
 # Generated artifact ownership
 
-The shared `suspect-artifact` writer now supports a version 1 ownership registry
+The shared `suspect-artifact` writer supports a version 1 ownership registry
 at `.suspect-artifacts.json` inside the output root. Compiler generation and
 template generation use it. This is file lifecycle tracking, not evidence that
 the generated SDK implements its source contract correctly.

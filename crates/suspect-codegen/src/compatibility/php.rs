@@ -11,8 +11,6 @@ use serde_json::{Value, json};
 use suspect_ir::contract::{Contract, SchemaId, SourceId};
 
 use super::{Location, NativeModel, NativeOperation, NativeSnapshot, PlanFinding};
-#[cfg(not(feature = "http-protocol"))]
-use crate::php_sdk::PlannedOperation;
 use crate::{
     backend,
     php_sdk::{
@@ -294,148 +292,6 @@ fn codec_records(plan: &Plan, types: &mut Types<'_>, node: &Node) -> Vec<NativeM
     }).collect()
 }
 
-#[cfg(not(feature = "http-protocol"))]
-fn operation(plan: &Plan, types: &mut Types<'_>, op: &PlannedOperation) -> NativeOperation {
-    let namespace = types.namespace;
-    let mut inputs = op
-        .parameters
-        .iter()
-        .map(|p| (p.name.as_str(), &p.schema, p.required))
-        .chain(
-            op.body
-                .iter()
-                .map(|b| (b.name.as_str(), &b.schema, b.required)),
-        )
-        .collect::<Vec<_>>();
-    // This stable required-first ordering is the actual input-constructor rule.
-    inputs.sort_by_key(|(_, _, required)| !*required);
-    let input_parameters = inputs
-        .iter()
-        .map(|(name, id, required)| {
-            parameter(
-                name,
-                types.signature(id, *required),
-                (!required).then(|| absent(namespace)),
-            )
-        })
-        .collect::<Vec<_>>();
-    let no_input = input_parameters.iter().all(|p| p["hasDefault"] == true);
-    let result_names = op
-        .success_types
-        .iter()
-        .map(|(_, n)| n.clone())
-        .collect::<Vec<_>>();
-    let result_native = if result_names.is_empty() {
-        "never".into()
-    } else {
-        php_sdk::models::union(result_names.clone())
-    };
-    let result = json!({"kind":"php-type","native":result_native,"phpdoc":result_native,"phpNullAllowed":false,
-        "shape":if result_names.is_empty() {primitive("never")} else {Type::union(result_names.iter().map(|name|named(namespace,name)))}});
-    let method = |owner: &str| {
-        json!({"kind":"instance-method","access":"public","owner":qualified(namespace,owner),"name":op.method_name,
-        "parameters":[parameter("input",support_type(namespace,&op.input_type,false),no_input.then(||construct(namespace,&op.input_type))),
-            parameter("options",support_type(namespace,"RequestOptions",true),Some(null()))],
-        "returns":result,"canCallWithoutInput":no_input,
-        "throws":op.error_types.iter().map(|(_,name)|qualified(namespace,name)).chain(std::iter::once(qualified(namespace,"SdkError"))).collect::<Vec<_>>()})
-    };
-    let slot = |types: &mut Types<'_>,
-                name: &str,
-                wire: &str,
-                schema: &SchemaId,
-                required: bool| {
-        json!({"member":name,"wire":wire,"model":types.signature(schema,true),"type":types.signature(schema,required),
-            "required":required,"mutable":true,"readonly":false,"hasDefault":!required,
-            "initialization":if required {json!({"kind":"argument"})} else {absent(namespace)},
-            "codec":format!("{}::{}",qualified(namespace,"Codecs"),plan.models().nodes[schema].codecs.to_value)})
-    };
-    let parameters = op
-        .parameters
-        .iter()
-        .map(|p| {
-            let mut value = slot(types, &p.name, &p.wire_name, &p.schema, p.required);
-            value["location"] = json!(format!("{:?}", p.location));
-            value
-        })
-        .collect::<Vec<_>>();
-    let body = op
-        .body
-        .as_ref()
-        .map(|b| slot(types, &b.name, "body", &b.schema, b.required));
-    let fields = inputs
-        .iter()
-        .map(|(name, id, required)| {
-            json!({"kind":"property","name":name,"type":types.signature(id,*required),
-        "access":"public","mutable":true,"readonly":false,"promoted":true})
-        })
-        .collect::<Vec<_>>();
-    let responses = op.responses.iter().map(|r| {
-        let ty = types.signature(&r.schema,true);
-        json!({"type":qualified(namespace,&r.type_name),"status":r.status,"mediaType":r.media_type,"success":r.success,
-            "kind":"class","final":true,"readonlyClass":r.success,"base":(!r.success).then(||qualified(namespace,&op.error_type)),
-            "bodyMember":r.body_member,"metadataMember":r.metadata_member,
-            "fields":[{"name":r.body_member,"type":ty,"access":"public","readonly":true,"inherited":false},
-                {"name":r.metadata_member,"type":support_type(namespace,"HttpResponse",false),"access":"public","readonly":true,"inherited":!r.success}],
-            "constructor":constructor(namespace,&r.type_name,"__construct",vec![parameter(&r.body_member,ty,None),parameter(&r.metadata_member,support_type(namespace,"HttpResponse",false),None)]),
-            "constants":[{"kind":"literal","name":"STATUS","value":r.status}],
-            "codec":format!("{}::{}",qualified(namespace,"Codecs"),plan.models().nodes[&r.schema].codecs.decode)})
-    }).collect::<Vec<_>>();
-    let symbols = BTreeMap::from([
-        ("client".into(), qualified(namespace, "Client")),
-        ("interface".into(), qualified(namespace, "ClientInterface")),
-        ("method".into(), op.method_name.clone()),
-        ("input".into(), qualified(namespace, &op.input_type)),
-        (
-            "input-constructor".into(),
-            format!(
-                "{}::{}",
-                qualified(namespace, &op.input_type),
-                op.input_constructor
-            ),
-        ),
-        (
-            "success".into(),
-            if result_names.is_empty() {
-                "never".into()
-            } else {
-                php_sdk::models::union(
-                    result_names
-                        .iter()
-                        .map(|name| qualified(namespace, name))
-                        .collect(),
-                )
-            },
-        ),
-        ("api-error".into(), qualified(namespace, &op.error_type)),
-    ]);
-    NativeOperation {
-        source: Location::at(plan.contract(), &op.source),
-        operation_id: op.operation_id.clone(),
-        symbols,
-        descriptor: json!({
-            "package":{"composerName":plan.config().package_name,"version":plan.config().package_version,"namespace":namespace},
-            "constructor":{"input":constructor(namespace,&op.input_type,&op.input_constructor,input_parameters),
-                "inputDeclaration":{"kind":"class","final":true,"fields":fields},
-                "client":{"kind":"class","final":true,"implements":[qualified(namespace,"ClientInterface")],
-                    "signature":constructor(namespace,"Client","__construct",vec![
-                        parameter("credentials",support_type(namespace,"Credentials",false),None),
-                        parameter("transport",support_type(namespace,"Transport",false),Some(construct(namespace,"CurlTransport"))),
-                        parameter("options",support_type(namespace,"ClientOptions",false),Some(construct(namespace,"ClientOptions")))])}},
-            "parameters":{"members":parameters,"method":method("Client"),"interfaceMethod":method("ClientInterface")},
-            "body":body,
-            "responseUnions":{"success":{"kind":if result_names.len()==1 {"concrete-result"} else if result_names.is_empty() {"never"} else {"native-union"},
-                    "directResult":result_names.len()==1,"type":result},
-                "apiError":{"kind":"abstract-class","type":qualified(namespace,&op.error_type),"base":qualified(namespace,"ApiError"),"sealed":false,
-                    "constructor":constructor(namespace,&op.error_type,"__construct",vec![parameter("response",support_type(namespace,"HttpResponse",false),None)])}},
-            "responses":responses,
-            "credential":{"kind":"bearer","class":qualified(namespace,"Credentials"),"sourceSchemeKey":op.wire.security_scheme_name,
-                "keyType":"array-key","valueType":"string","requiredAtCall":true,"lookup":"explicit-map",
-                "constructorMember":"__construct","parameter":"tokens"},
-        }),
-    }
-}
-
-#[cfg(feature = "http-protocol")]
 fn payload_type(types: &mut Types<'_>, payload: &php_sdk::protocol::Payload) -> Value {
     use php_sdk::protocol::Payload;
     match payload {
@@ -452,7 +308,6 @@ fn payload_type(types: &mut Types<'_>, payload: &php_sdk::protocol::Payload) -> 
     }
 }
 
-#[cfg(feature = "http-protocol")]
 fn request_payload_type(types: &mut Types<'_>, payload: &php_sdk::protocol::Payload) -> Value {
     if let php_sdk::protocol::Payload::Stream(id) = payload {
         json!({"kind":"php-type","native":"iterable","phpdoc":format!("iterable<{}>",types.models.type_name(id,true)),"phpNullAllowed":false,
@@ -462,7 +317,6 @@ fn request_payload_type(types: &mut Types<'_>, payload: &php_sdk::protocol::Payl
     }
 }
 
-#[cfg(feature = "http-protocol")]
 fn payload_codecs(plan: &Plan, payload: &php_sdk::protocol::Payload) -> Value {
     use php_sdk::protocol::Payload;
     let namespace = &plan.config().namespace;
@@ -491,7 +345,6 @@ fn payload_codecs(plan: &Plan, payload: &php_sdk::protocol::Payload) -> Value {
     }
 }
 
-#[cfg(feature = "http-protocol")]
 fn optional_signature(mut ty: Value, required: bool, namespace: &str) -> Value {
     if !required {
         ty["native"] = json!(php_sdk::models::union(vec![
@@ -507,7 +360,6 @@ fn optional_signature(mut ty: Value, required: bool, namespace: &str) -> Value {
     ty
 }
 
-#[cfg(feature = "http-protocol")]
 fn operation(
     plan: &Plan,
     types: &mut Types<'_>,
@@ -642,7 +494,6 @@ fn operation(
     }
 }
 
-#[cfg(feature = "http-protocol")]
 fn security_identity(security: &crate::http_protocol::SecurityPlan) -> Value {
     use crate::http_protocol::{CredentialHook, Permissions, SecurityPlan};
     match security {
@@ -654,7 +505,6 @@ fn security_identity(security: &crate::http_protocol::SecurityPlan) -> Value {
     }
 }
 
-#[cfg(feature = "http-protocol")]
 fn credential_metadata(hook: &crate::http_protocol::CredentialHook) -> Value {
     use crate::http_protocol::CredentialHook;
     match hook {
@@ -678,7 +528,6 @@ fn credential_metadata(hook: &crate::http_protocol::CredentialHook) -> Value {
     }
 }
 
-#[cfg(feature = "http-protocol")]
 fn single_scheme(security: &crate::http_protocol::SecurityPlan) -> Option<&str> {
     let [alternative] = security.alternatives() else {
         return None;
@@ -689,7 +538,6 @@ fn single_scheme(security: &crate::http_protocol::SecurityPlan) -> Option<&str> 
     Some(requirement.name())
 }
 
-#[cfg(feature = "http-protocol")]
 fn protocol_models(plan: &Plan, types: &mut Types<'_>) -> Vec<NativeModel> {
     use crate::php_sdk::protocol::{HeaderObject, Part};
     let namespace = types.namespace;
@@ -879,7 +727,6 @@ pub(super) fn capture(
             .models
             .extend(codec_records(&plan, &mut types, node));
     }
-    #[cfg(feature = "http-protocol")]
     snapshot.models.extend(protocol_models(&plan, &mut types));
     Ok(())
 }

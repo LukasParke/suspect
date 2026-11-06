@@ -74,26 +74,16 @@ pub fn source_assets() -> &'static [(&'static str, &'static [u8])] {
         ),
     ]
 }
-#[cfg(feature = "http-protocol")]
 use crate::http_protocol as protocol;
-#[cfg(feature = "http-protocol")]
 mod incoming_emit;
-#[cfg(feature = "http-protocol")]
 mod interface;
-#[cfg(feature = "http-protocol")]
 mod native_examples;
-#[cfg(feature = "http-protocol")]
 mod oauth_emit;
-#[cfg(feature = "http-protocol")]
 mod pagination_emit;
-#[cfg(feature = "http-protocol")]
 pub(crate) mod protocol_emit;
-#[cfg(feature = "http-protocol")]
 mod stream_emit;
-#[cfg(feature = "http-protocol")]
 pub use native_examples::FirstRequest;
 
-#[cfg(feature = "http-protocol")]
 pub(super) fn credential_env_documentation(
     policy: &crate::credential_env::CredentialEnvPlan,
 ) -> String {
@@ -127,11 +117,11 @@ pub struct HttpConfig {
     pub max_stream_buffer_bytes: usize,
     /// Maximum number of yielded items per response.
     pub max_stream_items: usize,
+    /// Native capability profile the plan is admitted under.
     pub profile: HttpProfile,
     /// Explicit OAS 3.1+ string/binary-marker compatibility; off by default.
     pub legacy_binary_string: bool,
     /// Explicit versioned source-interpretation profiles; off by default.
-    #[cfg(feature = "http-protocol")]
     pub compatibility_profiles: std::collections::BTreeSet<protocol::CompatibilityProfile>,
     /// Explicit source-scheme to runtime environment-variable names; no values are read during generation.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
@@ -153,7 +143,6 @@ impl Default for HttpConfig {
             max_stream_items: 100_000,
             profile: HttpProfile::StrictJson,
             legacy_binary_string: false,
-            #[cfg(feature = "http-protocol")]
             compatibility_profiles: std::collections::BTreeSet::new(),
             credential_env: None,
             sdk_defaults: None,
@@ -173,7 +162,6 @@ impl HttpConfig {
     }
 
     /// Enumerated native capabilities and explicit compatibility profiles used by this configuration.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn capabilities(&self) -> protocol::Capabilities {
         use protocol::Capability::*;
@@ -257,7 +245,6 @@ impl HttpConfig {
     }
 
     /// Explicitly enable a versioned protocol compatibility departure.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn with_compatibility_profile(mut self, profile: protocol::CompatibilityProfile) -> Self {
         if profile == protocol::CompatibilityProfile::LegacyBinaryStringV1 {
@@ -270,6 +257,7 @@ impl HttpConfig {
 
 pub use crate::http_contract::HttpDiagnostic;
 
+/// Immutable complete selected-operation plan with its rendered package files.
 pub struct HttpPlan {
     contract: Arc<Contract>,
     operations: Vec<PlannedOperation>,
@@ -278,21 +266,15 @@ pub struct HttpPlan {
     examples: crate::examples::ExamplePlan,
     credential_env: Option<crate::credential_env::CredentialEnvPlan>,
     config: HttpConfig,
-    #[cfg(feature = "http-protocol")]
     protocol: protocol::ProtocolPlan,
     /// Compiled pagination policy, present exactly when SDK defaults were configured.
-    #[cfg(feature = "http-protocol")]
     pagination: Option<protocol::PaginationOutcome>,
     /// Compiled OAuth lifecycle policy, present exactly when SDK defaults were configured.
-    #[cfg(feature = "http-protocol")]
     oauth: Option<protocol::OAuthPlan>,
     /// Compiled typed-stream semantics for every declared operation stream media.
-    #[cfg(feature = "http-protocol")]
     stream_semantics: protocol::StreamSemanticsPlan,
     /// Compiled incoming webhook/callback receipts over the whole contract.
-    #[cfg(feature = "http-protocol")]
     incoming: protocol::IncomingPlan,
-    #[cfg(feature = "http-protocol")]
     first_request: Option<FirstRequest>,
 }
 
@@ -327,25 +309,21 @@ impl HttpPlan {
     }
 
     /// Original immutable, admitted wire descriptors, including provenance.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn protocol(&self) -> &protocol::ProtocolPlan {
         &self.protocol
     }
     /// A native first-call recipe, lowered from the same typed plan and examples.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn first_request(&self) -> Option<&FirstRequest> {
         self.first_request.as_ref()
     }
     /// Compiled pagination policy for this plan, when SDK defaults were configured.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn pagination(&self) -> Option<&protocol::PaginationOutcome> {
         self.pagination.as_ref()
     }
     /// Compiled OAuth lifecycle policy for this plan, when SDK defaults were configured.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn oauth(&self) -> Option<&protocol::OAuthPlan> {
         self.oauth.as_ref()
@@ -354,33 +332,33 @@ impl HttpPlan {
     /// sentinel and completion policies) for every operation stream media, in
     /// protocol-plan operation order. Emission consumes only the discriminated
     /// subset; every other operation keeps its existing untyped stream path.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn stream_semantics(&self) -> &protocol::StreamSemanticsPlan {
         &self.stream_semantics
     }
     /// Compiled incoming webhook/callback receipts for the whole contract,
     /// independent of operation selection. Empty when the source declares none.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn incoming(&self) -> &protocol::IncomingPlan {
         &self.incoming
     }
     /// Whether this plan emits the generated `typescript/oauth.ts` module:
     /// exactly when a compiled scheme carries an executable flow.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn oauth_emitted(&self) -> bool {
-        self.oauth.as_ref().is_some_and(oauth_emit::has_usable)
+        self.oauth.as_ref().is_some_and(protocol::OAuthPlan::emits)
     }
+    /// Selected operations with their allocated native names.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Model codecs and validation for every schema the operations reach.
     #[must_use]
     pub fn codecs(&self) -> &CodecPlan {
         &self.codecs
     }
+    /// The source contract this plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
@@ -390,41 +368,59 @@ impl HttpPlan {
     pub fn examples(&self) -> &crate::examples::ExamplePlan {
         &self.examples
     }
+    /// The generated TypeScript source files planned with this plan.
     #[must_use]
     pub fn render(&self) -> Vec<OutFile> {
         self.files.clone()
     }
 }
 
+/// Allocated native operation names plus a baseline JSON projection of the
+/// operation; [`Self::protocol`] is the complete view.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Source location of the operation declaration.
     pub source: SourceId,
+    /// Source operationId, or `METHOD /path` when none is declared.
     pub operation_id: String,
+    /// Source description, falling back to the summary; empty when neither is declared.
     pub description: String,
+    /// Client method name.
     pub function_name: String,
+    /// `<Stem>Input` type name.
     pub input_type: String,
+    /// `<Stem>Success` type name.
     pub success_type: String,
+    /// `<Stem>ApiError` type name.
     pub error_type: String,
+    /// `is<Stem>ApiError` type guard name.
     pub error_guard: String,
+    /// HTTP method.
     pub method: String,
+    /// Path template.
     pub path: String,
+    /// URL template of the first server candidate.
     pub server: String,
+    /// Name of the first security requirement's scheme; empty when none.
     pub security_scheme_name: String,
+    /// Source of the effective security declaration.
     pub security_source: SourceId,
+    /// Use site of the first security requirement, or the operation source.
     pub security_use_source: SourceId,
+    /// Definition of the first requirement's scheme, or the operation source.
     pub security_definition_source: SourceId,
+    /// Parameters with location-qualified member names on collision.
     pub parameters: Vec<PlannedParameter>,
+    /// The request body, when it is a single JSON media with a codec.
     pub body: Option<PlannedBody>,
+    /// Exact-status responses that carry a single JSON media with a codec.
     pub responses: Vec<PlannedResponse>,
-    #[cfg(feature = "http-protocol")]
     protocol: protocol::OperationPlan,
-    #[cfg(feature = "http-protocol")]
     interface: Value,
 }
 
 impl PlannedOperation {
     /// Complete protocol view. Legacy JSON fields are only a baseline projection.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn protocol(&self) -> &protocol::OperationPlan {
         &self.protocol
@@ -432,66 +428,79 @@ impl PlannedOperation {
 
     /// Source-location/prose-free native interface emitted from this exact plan.
     /// Model bindings, multipart/stream shapes and default-call signatures remain explicit.
-    #[cfg(feature = "http-protocol")]
     #[must_use]
     pub fn interface(&self) -> &Value {
         &self.interface
     }
 
+    /// Whether no parameter and no request body is required.
     #[must_use]
-    pub fn input_optional(&self) -> bool {
-        #[cfg(feature = "http-protocol")]
-        {
-            !self
-                .protocol
-                .parameters()
-                .iter()
-                .any(protocol::ParameterPlan::required)
-                && self.protocol.body().is_none_or(|body| !body.required())
-        }
-        #[cfg(not(feature = "http-protocol"))]
-        {
-            !self.parameters.iter().any(|p| p.required)
-                && self.body.as_ref().is_none_or(|b| !b.required)
-        }
+    pub(crate) fn input_optional(&self) -> bool {
+        !self
+            .protocol
+            .parameters()
+            .iter()
+            .any(protocol::ParameterPlan::required)
+            && self.protocol.body().is_none_or(|body| !body.required())
     }
 }
 
+/// One source parameter's input member.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
+    /// Use-site source of the parameter declaration.
     pub source: SourceId,
+    /// Exact parameter name on the wire.
     pub wire_name: String,
+    /// Input member name, prefixed with its location on collision.
     pub native_name: String,
+    /// Parameter location.
     pub location: ParameterLocation,
+    /// Whether the source declares the parameter required.
     pub required: bool,
+    /// Codec schema of the parameter value.
     pub schema: SchemaId,
+    /// Serialization style.
     pub style: ParameterStyle,
+    /// Whether the serialization explodes.
     pub explode: bool,
+    /// Whether the serialized value is an array.
     pub array: bool,
-    #[cfg(feature = "http-protocol")]
     protocol: protocol::ParameterPlan,
 }
 impl PlannedParameter {
-    #[cfg(feature = "http-protocol")]
+    /// Shared wire plan of the source parameter.
     #[must_use]
     pub fn protocol(&self) -> &protocol::ParameterPlan {
         &self.protocol
     }
 }
+/// A single-media JSON request body.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
+    /// Use-site source of the request body declaration.
     pub source: SourceId,
+    /// Use-site source of the media declaration.
     pub media_source: SourceId,
+    /// Whether the source declares the body required.
     pub required: bool,
+    /// Canonical media type.
     pub media_type: String,
+    /// Codec schema of the body.
     pub schema: SchemaId,
 }
+/// A single-media JSON response under an exact status.
 #[derive(Debug, Clone)]
 pub struct PlannedResponse {
+    /// Use-site source of the response declaration.
     pub source: SourceId,
+    /// Use-site source of the media declaration.
     pub media_source: SourceId,
+    /// Exact status code.
     pub status: u16,
+    /// Canonical media type.
     pub media_type: String,
+    /// Codec schema of the body.
     pub schema: SchemaId,
 }
 
@@ -502,7 +511,6 @@ struct HttpSymbols {
 }
 
 /// Plan a complete immutable HTTP artifact set from exactly the selected operation IDs.
-#[cfg(feature = "http-protocol")]
 pub fn plan_http(
     contract: Arc<Contract>,
     selected: &[SourceId],
@@ -803,7 +811,7 @@ pub fn plan_http(
     // (non-deprecated) flow participate.
     let oauth_schemes = oauth
         .as_ref()
-        .map_or_else(Vec::new, |plan| oauth_emit::usable(plan));
+        .map_or_else(Vec::new, |plan| plan.usable_schemes().collect());
     // Preserve neutral names for equivalent closures; annotated contracts use
     // explicitly bound request/response models and validation programs.
     let mut directional = false;
@@ -1120,7 +1128,13 @@ pub fn plan_http(
             path: "typescript/oauth.ts".into(),
             content: oauth_emit::emit(
                 &oauth_schemes,
-                &oauth_emit::no_replay_requirements(&oauth_schemes, &operations),
+                &protocol::oauth_no_replay_requirements(
+                    operations.iter().map(PlannedOperation::protocol),
+                    &oauth_schemes
+                        .iter()
+                        .map(|scheme| scheme.name.as_str())
+                        .collect(),
+                ),
             ),
         });
     }
@@ -1231,24 +1245,6 @@ pub fn plan_http(
     })
 }
 
-#[cfg(not(feature = "http-protocol"))]
-pub fn plan_http(
-    contract: Arc<Contract>,
-    selected: &[SourceId],
-    _config: HttpConfig,
-) -> Result<HttpPlan, Vec<HttpDiagnostic>> {
-    Err(vec![diag(
-        &contract,
-        selected
-            .first()
-            .cloned()
-            .unwrap_or_else(|| SourceId::new(contract.entry().clone(), Default::default())),
-        "http-protocol-feature-required",
-        "TypeScript HTTP planning requires the http-protocol feature",
-    )])
-}
-
-#[cfg(feature = "http-protocol")]
 fn native_location(location: protocol::ParameterLocation) -> ParameterLocation {
     match location {
         protocol::ParameterLocation::Path => ParameterLocation::Path,
@@ -1259,7 +1255,6 @@ fn native_location(location: protocol::ParameterLocation) -> ParameterLocation {
     }
 }
 
-#[cfg(feature = "http-protocol")]
 fn unnamed_function(operation: &protocol::OperationPlan) -> String {
     let mut name = operation.method().as_str().to_ascii_lowercase();
     for segment in operation
@@ -1280,7 +1275,6 @@ fn unnamed_function(operation: &protocol::OperationPlan) -> String {
     ts_identifier(&name)
 }
 
-#[cfg(feature = "http-protocol")]
 fn native_style(serialization: &protocol::ParameterSerialization) -> ParameterStyle {
     let protocol::ParameterSerialization::Style { style, .. } = serialization else {
         return ParameterStyle::Form;

@@ -3009,10 +3009,15 @@ impl Backend {
                 // An explicit directory, else the workspace the document is in.
                 let dir = match params.arguments.first().and_then(|value| value.as_str()) {
                     Some(dir) => dir.to_owned(),
-                    None => self.state.read().await.workspace_root().map_or_else(
-                        || ".".to_owned(),
-                        |root| root.to_string_lossy().into_owned(),
-                    ),
+                    // The cached workspace is dropped on every save; the
+                    // client's root still names the project.
+                    None => {
+                        let st = self.state.read().await;
+                        st.workspace_root().or_else(|| st.root.clone()).map_or_else(
+                            || ".".to_owned(),
+                            |root| root.to_string_lossy().into_owned(),
+                        )
+                    }
                 };
                 self.progress_begin("suspect.service", "Running the service gate")
                     .await;
@@ -3346,11 +3351,11 @@ impl Backend {
         #[cfg(not(feature = "live-run"))]
         {
             let _ = wf;
-            return Err(RpcError {
+            Err(RpcError {
                 code: tower_lsp::jsonrpc::ErrorCode::InternalError,
                 message: "suspect-lsp was built without the live-run feature".into(),
                 data: None,
-            });
+            })
         }
         #[cfg(feature = "live-run")]
         {
@@ -3864,10 +3869,13 @@ mod burst_tests {
         let text = spec_with_refs(2000);
         std::fs::write(dir.path().join("openapi.yaml"), &text).expect("write");
         let path = dir.path().join("openapi.yaml");
-        let uri = Uri::parse(&format!("file://{}", path.display())).expect("uri");
+        let uri = Uri::parse(suspect_source::Uri::from_path(&path).unwrap().as_str()).expect("uri");
 
         let (mut service, socket) = service().await;
-        let root = format!("file://{}", dir.path().display());
+        let root = suspect_source::Uri::from_path(dir.path())
+            .unwrap()
+            .as_str()
+            .to_owned();
 
         // Answer the server's own requests, as an editor does. Without
         // this the server waits forever on `workspace/configuration`
@@ -4146,7 +4154,7 @@ mod burst_tests {
         let text = spec_with_refs(2000);
         std::fs::write(dir.path().join("openapi.yaml"), &text).expect("write");
         let path = dir.path().join("openapi.yaml");
-        let uri = Uri::parse(&format!("file://{}", path.display())).expect("uri");
+        let uri = Uri::parse(suspect_source::Uri::from_path(&path).unwrap().as_str()).expect("uri");
         let (mut service, socket) = service().await;
         let answering = tokio::spawn(async move {
             use futures::{SinkExt, StreamExt};
@@ -4178,7 +4186,7 @@ mod burst_tests {
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {"workspace": {"configuration": true}},
             }),
         )
@@ -4277,8 +4285,14 @@ components:
             "lint:\n  min_severity: warning\n",
         )
         .expect("write");
-        let spec_uri = format!("file://{}", dir.path().join("openapi.yaml").display());
-        let conf_uri = format!("file://{}", dir.path().join(".suspect.yaml").display());
+        let spec_uri = suspect_source::Uri::from_path(&dir.path().join("openapi.yaml"))
+            .unwrap()
+            .as_str()
+            .to_owned();
+        let conf_uri = suspect_source::Uri::from_path(&dir.path().join(".suspect.yaml"))
+            .unwrap()
+            .as_str()
+            .to_owned();
 
         let (mut service, socket) = service().await;
         let answering = tokio::spawn(async move {
@@ -4311,7 +4325,7 @@ components:
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {"workspace": {"configuration": true}},
             }),
         )
@@ -4444,7 +4458,7 @@ components:
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {},
             }),
         )
@@ -4543,7 +4557,7 @@ components:
             "initialize",
             serde_json::json!({
                 "processId": null,
-                "rootUri": format!("file://{}", dir.path().display()),
+                "rootUri": suspect_source::Uri::from_path(dir.path()).unwrap().as_str().to_owned(),
                 "capabilities": {"workspace": {
                     "configuration": true,
                     "didChangeWatchedFiles": {"dynamicRegistration": true},
@@ -4584,7 +4598,7 @@ components:
             0,
             "workspace/didChangeWatchedFiles",
             serde_json::json!({"changes": [
-                {"uri": format!("file://{}", conf.display()), "type": 2},
+                {"uri": suspect_source::Uri::from_path(&conf).unwrap().as_str().to_owned(), "type": 2},
             ]}),
         )
         .await;
@@ -4617,7 +4631,7 @@ components:
             0,
             "workspace/didChangeWatchedFiles",
             serde_json::json!({"changes": [
-                {"uri": format!("file://{}", conf.display()), "type": 2},
+                {"uri": suspect_source::Uri::from_path(&conf).unwrap().as_str().to_owned(), "type": 2},
             ]}),
         )
         .await;

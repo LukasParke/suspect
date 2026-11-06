@@ -53,11 +53,7 @@ fn root(label: &str) -> PathBuf {
         .canonicalize()
         .unwrap()
 }
-fn cxx() -> PathBuf {
-    std::env::var_os("SUSPECT_CPP_CXX")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "clang++".into())
-}
+use super::v2_tests::{cxx, native_tools};
 fn checked(command: &mut Command, root: &Path) -> std::process::Output {
     let output = command.output().unwrap();
     let mut file = std::fs::OpenOptions::new()
@@ -116,6 +112,9 @@ fn compile_native(root: &Path, extra: &str) {
 #[test]
 #[ignore = "C++20 44 unmodified official dynamicRef cases compiled through compile_v3 and a closed provider"]
 fn native_v3_official_dynamic_ref_44() {
+    if !native_tools(&["cxx"]) {
+        return;
+    }
     let groups: Vec<Value> = serde_json::from_str(include_str!(
         "../../../suspect-schema/tests/fixtures/resource-conformance/dynamicRef.json"
     ))
@@ -281,6 +280,9 @@ fn controls() -> Arc<Contract> {
 #[test]
 #[ignore = "native dynamic scope/branch/context-cycle/budget/control and normal-stack resource depth witnesses"]
 fn native_v3_scope_and_resource_controls() {
+    if !native_tools(&["cxx"]) {
+        return;
+    }
     let root = root("controls-");
     let contract = controls();
     let selected = [
@@ -542,6 +544,9 @@ fn v3_resource_metadata_mutations_are_source_linked_refusals() {
 #[test]
 #[ignore = "installed C++ checked resource/dynamic SDK, native models/examples/docs/types and live operations"]
 fn native_v3_sdk_operations() {
+    if !native_tools(&["cmake", "cxx", "doxygen"]) {
+        return;
+    }
     use std::io::Read;
     let root = root("sdk-");
     let document: Value =
@@ -564,9 +569,7 @@ fn native_v3_sdk_operations() {
     )
     .unwrap();
     std::fs::write(directory.join("CMakeLists.txt"),"cmake_minimum_required(VERSION 3.24)\nproject(ResourceConsumer LANGUAGES CXX)\nfind_package(generated_sdk CONFIG REQUIRED)\nadd_executable(consumer main.cpp)\ntarget_link_libraries(consumer PRIVATE generated_sdk::generated_sdk)\ntarget_compile_options(consumer PRIVATE -Wall -Wextra -Wpedantic -Werror)\n").unwrap();
-    let cmake = std::env::var_os("SUSPECT_CPP_CMAKE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "cmake".into());
+    let cmake = super::v2_tests::cmake();
     checked(
         Command::new(&cmake)
             .arg("-S")

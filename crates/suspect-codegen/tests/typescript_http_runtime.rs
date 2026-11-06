@@ -20,6 +20,11 @@ fn fetch_runtime_preserves_wire_contract_and_failure_identity() {
             include_str!("../src/typescript/validation.ts"),
         ),
         ("pattern.ts", include_str!("../src/typescript/pattern.ts")),
+        (
+            "validation-resources.ts",
+            include_str!("../src/typescript/validation-resources.ts"),
+        ),
+        ("uri.ts", include_str!("../src/typescript/uri.ts")),
     ] {
         std::fs::write(root.join(name), content).unwrap();
     }
@@ -141,6 +146,23 @@ async function main(): Promise<void> {
     await assert.rejects(executeOperation(descriptor,{path:{hash:''},body:{limit:null}},client),(error:unknown)=>isSdkError(error,operation)&&error.kind==='request-validation');
     await assert.rejects(executeOperation(descriptor,{path:{hash:'key'},body:{limit:null}},{...client,serverURL:`${serverURL}?unsafe=1`}),
       (error:unknown)=>isSdkError(error,operation)&&error.kind==='request-representation');
+    // ADR 0035: a non-loopback plain-HTTP override needs the explicit opt-in.
+    let insecureTarget='';
+    await assert.rejects(executeOperation(descriptor,{path:{hash:'key'},body:{limit:null}},{...client,serverURL:'http://example.test/api/v1',allowInsecureHttp:true,fetch:async(input:unknown)=>{insecureTarget=String(input);throw new Error('stop');}}),
+      (error:unknown)=>isSdkError(error,operation));
+    assert.equal(insecureTarget,'http://example.test/api/v1/keys/key');
+    // ADR 0035: a declared plain-HTTP server keeps its scheme.
+    let declaredTarget='';
+    await assert.rejects(executeOperation({...descriptor,serverURL:'http://example.test/api/v1'},{path:{hash:'key'},body:{limit:null}},{auth:client.auth,fetch:async(input:unknown)=>{declaredTarget=String(input);throw new Error('stop');}}),
+      (error:unknown)=>isSdkError(error,operation));
+    assert.equal(declaredTarget,'http://example.test/api/v1/keys/key');
+    await assert.rejects(executeOperation(descriptor,{path:{hash:'key'},body:{limit:null}},{...client,serverURL:'http://example.test/api/v1',fetch:async()=>{throw new Error('sent');}}),
+      (error:unknown)=>isSdkError(error,operation)&&error.kind==='request-representation');
+    // ADR 0035: cleartext only to loopback; literal dot segments, port 0 and non-ASCII refused.
+    for (const bad of ['http://example.test/api','https://example.test/a/../b','https://example.test/./b','https://example.test:0/a','https://example.test/caf\u00e9']) {
+      await assert.rejects(executeOperation(descriptor,{path:{hash:'key'},body:{limit:null}},{...client,serverURL:bad}),
+        (error:unknown)=>isSdkError(error,operation)&&error.kind==='request-representation');
+    }
     await assert.rejects(executeOperation({...descriptor,maxResponseBytes:8},{path:{hash:'key'},body:{limit:null}},{...client,maxResponseBytes:9}),
       (error:unknown)=>isSdkError(error,operation)&&error.kind==='request-representation');
     const inherited=Object.create({apiKey:'prototype-secret'}) as {apiKey:string};

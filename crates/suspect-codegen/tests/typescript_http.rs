@@ -381,7 +381,7 @@ void run().catch((error: unknown) => { console.error(error); throw error; });
 }
 
 #[test]
-#[ignore = "requires the tracked openrouter-web checkout"]
+#[ignore = "requires OPENROUTER_WEB_ROOT (the OpenRouter checkout)"]
 fn tracked_openrouter_operations_and_query_inputs_plan_together() {
     let root = suspect_codegen::test_inputs::openrouter_root();
     let path = std::path::Path::new(&root).join("projects/docs/openapi/openapi.yaml");

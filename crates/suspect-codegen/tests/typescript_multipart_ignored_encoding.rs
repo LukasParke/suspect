@@ -1,7 +1,5 @@
 //! Literal MIME witnesses for ignored multipart/mixed Encoding Object styles.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
@@ -203,14 +201,13 @@ fn ignored_multipart_styles_preserve_content_in_installed_requests_and_responses
     .unwrap();
     suspect_codegen::write_files(&files, &root).unwrap();
     let package = root.join("typescript");
-    let selected_node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let selected_node = suspect_codegen::toolchain::pinned_node(22);
     let executable = checked(
         Command::new(&selected_node).args(["--print", "process.execPath"]),
         &root,
     );
     let node = PathBuf::from(String::from_utf8(executable.stdout).unwrap().trim());
-    let node24 = std::env::var_os("SUSPECT_NODE24_BIN")
-        .expect("set SUSPECT_NODE24_BIN for the second native runtime");
+    let node24 = suspect_codegen::toolchain::pinned_node(24);
     for (executable, major) in [(node.as_os_str(), "22"), (node24.as_os_str(), "24")] {
         let version = checked(
             Command::new(executable).args(["--print", "process.versions.node.split('.')[0]"]),

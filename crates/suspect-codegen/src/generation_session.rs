@@ -23,12 +23,19 @@ use suspect_source::Uri;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum Input {
+    /// A local entry document; references resolve beside it.
     File {
+        /// Entry document path.
         path: PathBuf,
     },
+    /// A pin manifest whose complete closure is read from a local cache and
+    /// reverified, never fetched.
     Pinned {
+        /// Pin manifest path.
         manifest: PathBuf,
+        /// Content-addressed cache holding every pinned document.
         cache_dir: PathBuf,
+        /// Plain-http origins admitted for test fixtures only.
         #[serde(default)]
         insecure_test_origins: Vec<String>,
     },
@@ -44,6 +51,9 @@ impl Input {
     }
 
     /// Resolve lexical paths without following symlinks or changing retrieval bases.
+    ///
+    /// # Errors
+    /// [`SessionError::Input`] when a path cannot be expressed as a file URI.
     pub fn normalized(self) -> Result<Self, SessionError> {
         let path = |path: PathBuf| {
             Uri::from_path(&path)
@@ -112,21 +122,32 @@ impl Input {
 
     /// Open local sources or reverify the complete pinned cache. This interface
     /// never acquires missing documents or performs network requests.
+    ///
+    /// # Errors
+    /// [`SessionError::Acquisition`] when the pinned cache fails verification,
+    /// or [`SessionError::Input`] when the workspace cannot be built.
     pub fn open(&self) -> Result<(Arc<Workspace>, Uri), SessionError> {
         self.open_verified(self.pins()?.as_ref())
     }
 }
 
+/// What a [`Session`] generates and how much it caches.
 #[derive(Debug, Clone)]
 pub struct SessionConfig {
+    /// Backends to generate, each selected at most once; must be nonempty.
     pub targets: Vec<TargetConfig>,
+    /// Operations to generate, by operationId or `METHOD /path` for unnamed
+    /// operations; empty selects every operation. A nonempty selection also
+    /// scopes the compile to the operations' closure.
     pub operation_ids: Vec<String>,
     /// Versioned interpretation shared by selected targets; native capability
     /// fences remain per adapter. Included in complete and target cache keys.
     pub generation: GenerationOptions,
+    /// Maximum retained snapshots; must be nonzero.
     pub cache_entries: usize,
     /// Retained input/artifact bytes; graph overhead is additionally bounded by entries.
     pub cache_bytes: usize,
+    /// Ownership label recorded when [`Session::write`] writes artifacts; must be nonempty.
     pub owner: String,
 }
 impl Default for SessionConfig {
@@ -141,29 +162,46 @@ impl Default for SessionConfig {
         }
     }
 }
+/// Work counters of a session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Stats {
+    /// Contracts compiled from source.
     pub compiles: usize,
+    /// Targets rendered by a backend.
     pub renders: usize,
+    /// Whole-output or per-target results served from the cache.
     pub cache_hits: usize,
 }
+/// The result of one [`Session::generate`].
 #[derive(Debug, Clone)]
 pub struct SessionOutput {
     /// Content identity of the loaded source closure and generation configuration.
     pub revision: String,
+    /// The compiled contract the artifacts were generated from.
     pub contract: Arc<Contract>,
+    /// Every target's artifacts, sorted by path.
     pub files: Arc<Vec<OutFile>>,
+    /// Artifact paths added, removed or changed since the previous generation.
     pub changed_paths: Vec<String>,
+    /// Source documents loaded now that the previous generation did not load.
     pub new_documents: Vec<String>,
+    /// Work done by this generation alone.
     pub delta: Stats,
+    /// Cumulative work over the session's lifetime.
     pub stats: Stats,
 }
+/// Why a session could not be created, generate, or write.
 #[derive(Debug)]
 pub enum SessionError {
+    /// A source input is unreadable, oversized, invalid, or changed during planning.
     Input(String),
+    /// The pinned input's manifest or cache failed verification.
     Acquisition(suspect_ref::acquire::AcquireError),
+    /// The session configuration or operation selection is invalid.
     Configuration(String),
+    /// A backend refused generation.
     Backend(Vec<BackendDiagnostic>),
+    /// Artifacts could not be written.
     Write(String),
 }
 impl std::fmt::Display for SessionError {
@@ -201,6 +239,8 @@ struct Snapshot {
     /// by an identical selection — a whole contract serves any selection.
     selection: Option<String>,
 }
+/// An incremental, content-addressed generation session over one input.
+/// Unchanged sources and configuration reuse cached contracts and artifacts.
 pub struct Session {
     entry: PathBuf,
     input: Input,
@@ -242,6 +282,10 @@ fn configuration(config: &SessionConfig) -> String {
     hash(&serde_json::to_vec(&value).expect("session identity"))
 }
 impl Session {
+    /// Create a session over a local entry document.
+    ///
+    /// # Errors
+    /// As [`Self::with_input`].
     pub fn new(entry: impl AsRef<Path>, config: SessionConfig) -> Result<Self, SessionError> {
         Self::with_input(
             Input::File {
@@ -252,6 +296,11 @@ impl Session {
     }
 
     /// Create a session over an explicit local or cache-only pinned input.
+    ///
+    /// # Errors
+    /// [`SessionError::Input`] for an unnormalizable path, or
+    /// [`SessionError::Configuration`] for empty targets, zero cache budgets,
+    /// an empty owner, or a backend selected twice.
     pub fn with_input(input: Input, config: SessionConfig) -> Result<Self, SessionError> {
         let input = input.normalized()?;
         let entry = input.path().to_owned();
@@ -288,12 +337,18 @@ impl Session {
         }
         Ok(())
     }
+    /// Replace the configuration, evicting snapshots beyond the new budgets.
+    ///
+    /// # Errors
+    /// [`SessionError::Configuration`] as in [`Self::with_input`]; the
+    /// current configuration is kept.
     pub fn set_config(&mut self, config: SessionConfig) -> Result<(), SessionError> {
         Self::valid(&config)?;
         self.config = config;
         self.evict();
         Ok(())
     }
+    /// Cumulative work counters.
     pub fn stats(&self) -> Stats {
         self.stats
     }
@@ -327,6 +382,14 @@ impl Session {
                 .iter()
                 .all(|path| path.try_exists().is_ok_and(|exists| !exists))
     }
+    /// Generate every configured target from the current input bytes,
+    /// reusing a cached contract or artifacts when their identity matches.
+    ///
+    /// # Errors
+    /// Any [`SessionError`] other than `Write`: unreadable or concurrently
+    /// changed input, failed pin verification, an operation selector that
+    /// matches no unique operation, colliding artifact roots, or a backend
+    /// refusal.
     pub fn generate(&mut self) -> Result<SessionOutput, SessionError> {
         let pins = self.input.pins()?;
         let pinned_identity=pins.as_ref().map(|pins|hash(&serde_json::to_vec(&serde_json::json!({
@@ -652,6 +715,12 @@ impl Session {
             self.cache.pop_back();
         }
     }
+    /// Write `output`'s artifacts under `directory` as the configured owner,
+    /// never adopting preexisting files.
+    ///
+    /// # Errors
+    /// [`SessionError::Write`] for ownership conflicts, unsafe paths,
+    /// malformed metadata and I/O failures.
     pub fn write(
         &self,
         output: &SessionOutput,

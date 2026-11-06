@@ -3,7 +3,7 @@
 //! mutated-model rejection, ambiguous oneOf rejection, and dependency-free
 //! builds with the feature off.
 use serde_json::json;
-use std::{path::Path, process::Command, sync::Arc};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::rust_codecs::{CodecConfig, CodecPlan, plan_codecs};
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
@@ -43,7 +43,7 @@ fn fixture(f: impl FnOnce(Arc<Contract>)) {
 }
 
 fn cargo(dir: &Path, manifest: &Path, args: &[&str]) {
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     command
         .arg(args[0])
         .args(["--offline", "--quiet", "--manifest-path"])
@@ -76,7 +76,7 @@ fn native(plan: &CodecPlan, consumer_lib: &str) {
     let dir = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&plan.render(), dir.path()).unwrap();
     let generated = dir.path().join("rust");
-    let mut tree = Command::new("cargo");
+    let mut tree = suspect_codegen::toolchain::nested_cargo();
     tree.args(["tree", "--offline", "--edges", "normal", "--manifest-path"])
         .arg(generated.join("Cargo.toml"));
     if let Some(toolchain) = std::env::var_os("SUSPECT_NATIVE_RUST_TOOLCHAIN") {

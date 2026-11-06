@@ -5,7 +5,6 @@
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::Command,
     sync::Arc,
 };
 use suspect_codegen::{
@@ -444,7 +443,7 @@ fn cargo_target() -> PathBuf {
 }
 
 fn cargo(command: &str, manifest: &Path, args: &[&str]) -> (bool, String) {
-    let output = Command::new("cargo")
+    let output = suspect_codegen::toolchain::nested_cargo()
         .arg(command)
         .arg("--offline")
         .arg("--quiet")

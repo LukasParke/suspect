@@ -10,52 +10,75 @@ use suspect_schema::{OwnedProgram, ProgramInstruction as Op, ProgramType};
 
 use super::{HttpDiagnostic, diagnostic};
 
+/// One JSON scalar kind admitted by a [`ModelShape::Scalar`] union.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ScalarKind {
+    /// `nil`.
     Null,
+    /// `true`/`false`.
     Boolean,
+    /// Ruby `Integer`.
     Integer,
+    /// Exact `JsonNumber`.
     Number,
+    /// UTF-8 `String`.
     String,
 }
 
 /// Extra members are closed, unconstrained JSON, or converted through a schema.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExtraFields {
+    /// `additionalProperties: false`; undeclared members are rejected.
     Closed,
+    /// Undeclared members kept as unconstrained JSON values.
     Json,
+    /// Undeclared members converted through this program node.
     Typed(usize),
     /// Exact JSON extra values selected by source applicators. Pattern overlaps
     /// and unevaluated membership are validated by the complete scoped program;
     /// they are not flattened into one additional-properties type.
     Scoped {
+        /// `patternProperties` entries, in source order.
         patterns: Vec<PatternExtra>,
+        /// `additionalProperties` program node, if declared.
         additional: Option<usize>,
+        /// `unevaluatedProperties` program node, if declared.
         unevaluated: Option<usize>,
     },
 }
 
+/// One `patternProperties` entry of a scoped object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatternExtra {
+    /// Schema applied to matching member values.
     pub source: SchemaId,
+    /// Source regular expression.
     pub pattern: String,
+    /// Program node of `source`.
     pub schema_index: usize,
 }
 
 /// A named native member with a distinct wire name and absence policy.
 #[derive(Debug, Clone)]
 pub struct ModelField {
+    /// JSON property name.
     pub wire_name: String,
+    /// Ruby keyword/attribute name, unique within the class.
     pub name: String,
+    /// Program node of the property value.
     pub schema_index: usize,
+    /// Whether the property is listed in `required`.
     pub required: bool,
+    /// Schema of the property value.
     pub source: SchemaId,
+    /// Source `description` of the property schema; empty when absent.
     pub description: String,
     /// A required source literal can be supplied by the keyword constructor.
     /// This is not a JSON Schema `default`, and optional fields remain UNSET.
     pub literal: Option<Value>,
 }
 
+/// Native Ruby representation of one validation-program node.
 #[derive(Debug, Clone)]
 pub enum ModelShape {
     /// Only genuinely unconstrained source schemas use the JSON value domain.
@@ -65,30 +88,47 @@ pub enum ModelShape {
     RefinedJson,
     /// Exact source literals, including heterogeneous and structural values.
     Literal(Vec<Value>),
+    /// Schema that admits no value (`false`).
     Never,
+    /// Union of JSON scalar kinds (`type` without array/object).
     Scalar(Vec<ScalarKind>),
+    /// A sole `$ref` to this program node.
     Alias(usize),
     /// Context-sensitive JSON carrier. Candidates are dependencies, not a
     /// generation-time selection of the dynamic fallback or override.
     Dynamic {
+        /// Statically resolved `$dynamicRef` target, used when no override applies.
         initial_target: usize,
+        /// Resource containing `initial_target`.
         initial_resource: usize,
+        /// Dynamic anchor name, if the reference names one.
         anchor: Option<String>,
+        /// Program nodes of every resource anchor with the same name.
         candidates: Vec<usize>,
     },
+    /// A generated `Models` class.
     Object {
+        /// Declared properties, in program order.
         fields: Vec<ModelField>,
+        /// Policy for undeclared members.
         extras: ExtraFields,
+        /// Whether `null` is also admitted.
         nullable: bool,
     },
+    /// Ruby `Array`.
     Array {
+        /// Program node for items after `prefix`; `None` when unconstrained.
         items: Option<usize>,
+        /// `prefixItems` program nodes, in position order.
         prefix: Vec<usize>,
+        /// Whether `null` is also admitted.
         nullable: bool,
     },
     /// Native branch values; the entire source union is always revalidated.
     Union {
+        /// Branch program nodes, in source order.
         branches: Vec<usize>,
+        /// `true` for `oneOf`, `false` for `anyOf`.
         exclusive: bool,
     },
 }
@@ -129,31 +169,40 @@ impl ModelShape {
 /// One codec symbol. Object shapes additionally emit a native Models class.
 #[derive(Debug, Clone)]
 pub struct ModelSymbol {
+    /// Canonical schema this symbol lowers.
     pub source: SchemaId,
+    /// Validation-program node index.
     pub schema_index: usize,
+    /// Collision-free Ruby constant name.
     pub name: String,
     /// Allocated RBS type alias under the generated Types module.
     pub type_name: String,
     /// An in-place validation cycle cannot produce a completed valid value.
     /// RBS uses bottom; codecs retain distinct evaluation-failure semantics.
     pub signature_uninhabited: bool,
+    /// Source `description`; empty when absent.
     pub description: String,
+    /// Native representation.
     pub shape: ModelShape,
 }
 
+/// Codec symbols for every program node reachable from the protocol's codec roots.
 #[derive(Debug)]
 pub struct ModelPlan {
     symbols: BTreeMap<usize, ModelSymbol>,
 }
 
 impl ModelPlan {
+    /// Every symbol, in program-node order.
     pub fn symbols(&self) -> impl Iterator<Item = &ModelSymbol> {
         self.symbols.values()
     }
+    /// Symbol for program node `schema_index`, if it is reachable.
     #[must_use]
     pub fn symbol(&self, schema_index: usize) -> Option<&ModelSymbol> {
         self.symbols.get(&schema_index)
     }
+    /// Symbol lowered from `source`, if any.
     #[must_use]
     pub fn source_symbol(&self, source: &SchemaId) -> Option<&ModelSymbol> {
         self.symbols

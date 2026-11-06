@@ -1,11 +1,16 @@
 # Explicit runtime environment credentials — v1
 
-User-directed DX work, 2026-09-11. Main integration owner:
-`ses_f72dcea72ffe3CL9Uf6IC2rP9u`. Work stays local and uncommitted.
+Generated SDKs read credentials from the environment only when generation
+opts in; the rationale is [ADR 0026](../adr/0026-environment-credentials-are-opt-in.md).
+There are two opt-ins: an explicit `credential_env` mapping (below) or the
+`sdk_defaults.env_prefix` convention described in
+[SDK-GOLDEN-DEFAULTS.md](../guide/sdk-generation.md), which binds `<ENV_PREFIX>_API_KEY`
+when exactly one bearer/API-key scheme is used. An explicit `credential_env`
+mapping takes precedence over `env_prefix`.
 
 ## Generation configuration
 
-The SDK session JSON has a new optional top-level field:
+The SDK session JSON has an optional top-level field:
 
 ```json
 {
@@ -58,9 +63,9 @@ interface equality. The module performs no environment access or I/O.
 Each native planning configuration adds
 `credential_env: Option<credential_env::CredentialEnv>` (default `None`), retains
 the bound plan, and exposes `credential_env() -> Option<&CredentialEnvPlan>`.
-Main owns canonical option forwarding and CLI/session/capture integration. Native
-owners call the shared binder after their real protocol admission and consume its
-typed result in their existing emitter. No generated-source post-processing or
+Canonical generation options forward the policy to every adapter; each adapter
+calls the shared binder after its real protocol admission and consumes its
+typed result in its existing emitter. No generated-source post-processing or
 duplicate binder is introduced.
 
 ## Runtime semantics
@@ -110,14 +115,12 @@ Environment values are absent from every generated artifact and fingerprint.
 
 ### Qualified native forms
 
-All twelve registered adapters have completed native proof and pass Main's
-configured generation/capture/Session bridge
-(`target/sdk-credential-env-integration-20260911-01/all-twelve-bridge-01/`).
-The real CLI also reports the explicit names-only policy, produces identical
-files/revisions under two controlled generator environments, and restores every
-ordinary output byte when the policy is disabled (`cli-defaults-process-01/`).
+All twelve registered adapters emit a configured environment client form. The
+real CLI reports the explicit names-only policy, produces identical
+files/revisions under different generator environments, and restores every
+ordinary output byte when the policy is disabled.
 
-| Adapter | Actual configured API | Platform/ownership detail |
+| Adapter | Actual configured API | Toolchains and notes |
 | --- | --- | --- |
 | TS / JS | `createClient(options: ClientOptions = {})` | TS5.5.4/5.9.3, Node22.23.1/24.21.0 and Chrome153; own `auth` property truly omitted; explicit undefined/null retain their native behavior |
 | Python | `Client()` / `AsyncClient()` | Python 3.11.15/3.14.7; omitted `auth` only; existing httpx transport keywords remain |
@@ -132,27 +135,12 @@ ordinary output byte when the policy is disabled (`cli-defaults-process-01/`).
 | C# | `Client.FromEnvironment(ClientOptions? options = null, HttpClient? httpClient = null)` | SDK8.0.424/10.0.400; injected HttpClient is caller-owned; parameterless ordinary constructor remains anonymous |
 | C++ | `Client::from_env(ClientOptions = {}, CurlOptions = {})`; `Client::from_env_with_transport(shared_ptr<const Transport>, ClientOptions = {})` | C++20/libcurl factory returns `Result<Client, TransportError>`; supplied-transport factory returns `Client` and works in core-only builds |
 
-The completed native receipts include source-default `/key` and optional `/credits`
-checks through controlled transports. These APIs require newly generated packages
-with the explicit policy; the frozen live demo CLI `5d3cecd1…` predates them.
-The first frozen env review CLI is
-`target/sdk-main-env-candidate-20260911-01/bin/suspect`, SHA-256
-`f971ead49e99a15e205325b186b2a7effb640e412da31f8c24e100983c59f496`.
-It pins 1,157 workspace inputs. New live-package/consumer preparation has its own
-evidence and delivery; the existing staged live edition remains separately sealed.
+These APIs exist only in packages generated with an environment policy.
+Configured empty-selection capture follows actual native admission rather than
+skipping planning: it reports a located refusal, and retains the ordinary
+`EmptySelection` meaning without a policy.
 
-Independent review found two issues in this first candidate. Dart's configured
-parameter had been widened to nullable; its corrected, independently rechecked
-source retains non-nullable `Credentials`, the private omission sentinel, static
-literal-null rejection and dynamic `TypeError` before environment lookup. The old
-candidate packages retain the earlier behavior until replaced. Go's completed
-capture repair records the actual allocated factory symbol and its native
-signature; the original additive-collision witness now reports a located breaking
-rename while generated Go bytes remain equal. Its owner proof is at
-`target/sdk-go-env-factory-capture-20260911-01/`. Both combined independent rechecks
-are now clean in
-`target/sdk-credential-env-integration-20260911-01/review-env-01/fixes-01/`;
-the original review reports remain pinned.
+## Verification
 
 Configured empty-selection capture also follows actual native admission rather
 than skipping planning. The ninth shared host control verifies its located
@@ -219,26 +207,9 @@ Each affected native runtime needs a bounded positive environment read; absent a
 empty values; explicit value/empty/null/missing-member precedence; OR/AND/anonymous
 controls; creation-time snapshot; source-default server capture; and appropriate
 browser/portable checks. Native commands use controlled test processes/transports,
-not real account credentials. Existing full matrices remain their own evidence.
+not real account credentials.
 
-## Live-demo priority and paths
-
-The sole docs/demo owner remains `ses_f72144e30ffeca1RzXZzDgjbw3`. New DX paths are
-`DEMO-DX-README.md`, `examples/sdk-demo-branded.json`,
-`examples/sdk-demo-branded/**`, and `target/sdk-demo-dx-20260911-01/**`.
-New live paths are `LIVE-DEMO-README.md`, `demo-live.sh`,
-`tools/sdk-demo-live/**`, `examples/sdk-demo-live/**`, and
-`target/sdk-demo-live-20260911-01/**`.
-
-The live default is the source-declared **`getCurrentKey` GET `/key`**, suitable for
-a normal user token. `getCredits` is an explicit management-key mode. All programs
-use the source HTTPS server, print actual status/decoded confirmation, and perform
-read-only requests. Runtime environment or secure prompt supplies the token;
-staging uses explicit controlled test mode and cannot claim live success.
-
-The accepted automatic-env entry is `LIVE-ENV-DEMO-README.md` /
-`demo-live-env.sh`, backed by `environment-01/candidate-02/` and its explicit
-references to byte-identical provisional preparations. The original `5d3cecd1…`
-live edition retains its documented wrapper-supplied credentials. Existing
-README/package/delivery-01/delivery-02, F10 and Terraform reviewed artifacts remain
-sealed at their original paths.
+The shared binder tests are `cargo test -p suspect-codegen --test shared`.
+Each backend has `--test <lang>_credential_env` (C# uses the
+`csharp_sdk::credential_env_tests` library module); generation-only cases run by
+default, and the native-toolchain cases are `#[ignore]` and run with `--ignored`.

@@ -3,11 +3,10 @@
 //! Seams: emitted JSON functions, source-bound codecs configured through
 //! `CodecConfig`, and installed HTTP packages configured through `HttpConfig`.
 //! Consumers never modify generated metadata or monkey-patch generated code.
-//! Select Python 3.11 or 3.14 with `SUSPECT_PYTHON_BIN`. Each invocation retains
+//! Runs the pinned Python 3.11; select another (e.g. 3.14) with `SUSPECT_PYTHON_BIN`. Each invocation retains
 //! a fresh candidate directory and command logs for diagnosis.
 
 use std::{
-    ffi::OsString,
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -24,22 +23,23 @@ use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
+use crate::python_support;
+
 fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/python-runtime-regressions")
         .join(name)
 }
 
-fn python() -> OsString {
-    std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into())
-}
-
 struct Native {
     root: PathBuf,
+    python: PathBuf,
 }
 
 impl Native {
-    fn new(label: &str, files: &[OutFile]) -> Self {
+    /// `None` (after the skip message) when no interpreter is available.
+    fn new(label: &str, files: &[OutFile]) -> Option<Self> {
+        let python = python_support::python()?;
         let parent = std::env::var_os("SUSPECT_PYTHON_REGRESSION_ARTIFACTS")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
@@ -54,7 +54,7 @@ impl Native {
             .unwrap()
             .keep();
         suspect_codegen::write_files(files, &root).unwrap();
-        Self { root }
+        Some(Self { root, python })
     }
 
     fn checked(&self, command: &mut Command, label: &str) -> Output {
@@ -100,7 +100,7 @@ impl Native {
     fn flat(&self, script: &str, selector: &str, data: Value) {
         let consumer = self.consumer(script, data);
         self.checked(
-            Command::new(python())
+            Command::new(&self.python)
                 .arg("-B")
                 .arg(consumer)
                 .arg(selector)
@@ -110,13 +110,10 @@ impl Native {
         );
     }
 
-    fn install_wheel(&self) -> PathBuf {
-        let tools = std::env::var_os("SUSPECT_PYTHON_TOOLS")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../target/sdk-native-python-tools/bin/python")
-            });
+    fn install_wheel(&self) -> Option<PathBuf> {
+        let (Some(tools), Some(uv)) = (python_support::tools(), python_support::uv()) else {
+            return None;
+        };
         self.checked(
             Command::new(tools)
                 .args(["-m", "build", "--wheel", "--no-isolation"])
@@ -130,27 +127,29 @@ impl Native {
             .find(|path| path.extension().is_some_and(|extension| extension == "whl"))
             .expect("the emitted HTTP package must build a wheel");
         self.checked(
-            Command::new("uv")
+            Command::new(&uv)
                 .args(["venv", "--offline", "--python"])
-                .arg(python())
+                .arg(&self.python)
                 .arg(self.root.join("venv"))
                 .current_dir(&self.root),
             "venv",
         );
         let executable = self.root.join("venv/bin/python");
         self.checked(
-            Command::new("uv")
+            Command::new(&uv)
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&executable)
                 .arg(wheel)
                 .current_dir(&self.root),
             "wheel-install",
         );
-        executable
+        Some(executable)
     }
 
     fn installed(&self, script: &str, selectors: &[&str], data: Value) {
-        let executable = self.install_wheel();
+        let Some(executable) = self.install_wheel() else {
+            return;
+        };
         let consumer = self.consumer(script, data);
         self.checked(
             Command::new(executable)
@@ -165,11 +164,10 @@ impl Native {
 }
 
 fn json_consumer(label: &str, selector: &str) {
-    Native::new(label, &suspect_codegen::python_json::emit()).flat(
-        "json_cases.py",
-        selector,
-        json!({}),
-    );
+    let Some(native) = Native::new(label, &suspect_codegen::python_json::emit()) else {
+        return;
+    };
+    native.flat("json_cases.py", selector, json!({}));
 }
 
 fn load(path: &Path) -> Arc<Contract> {
@@ -197,7 +195,10 @@ fn codec_consumer(label: &str, roots: &[&str], config: CodecConfig, selector: &s
     let roots: Vec<_> = roots.iter().map(|name| schema(&contract, name)).collect();
     let data = json!({"document": contract.entry().as_str()});
     let plan = plan_codecs(contract, &roots, config).unwrap();
-    Native::new(label, &plan.render()).flat("codec_cases.py", selector, data);
+    let Some(native) = Native::new(label, &plan.render()) else {
+        return;
+    };
+    native.flat("codec_cases.py", selector, data);
 }
 
 fn http_consumer(label: &str, selectors: &[&str]) {
@@ -226,7 +227,10 @@ fn http_consumer(label: &str, selectors: &[&str]) {
         import_name: "python_runtime_regression_sdk".into(),
     };
     let files = emit_http(&plan, &package).unwrap();
-    Native::new(label, &files).installed(
+    let Some(native) = Native::new(label, &files) else {
+        return;
+    };
+    native.installed(
         "http_cases.py",
         selectors,
         json!({
@@ -350,7 +354,7 @@ fn installed_http_rejects_invalid_ports_at_the_sdk_boundary() {
 }
 
 #[test]
-#[ignore = "separate opt-in: requires OPENROUTER_WEB_ROOT and native Python"]
+#[ignore = "separate opt-in: requires OPENROUTER_WEB_ROOT (the OpenRouter checkout) and native Python"]
 fn original_openrouter_container_file_accepts_zero_padded_integer_exponents() {
     let source =
         suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
@@ -368,7 +372,10 @@ fn original_openrouter_container_file_accepts_zero_padded_integer_exponents() {
         .iter()
         .find(|symbol| symbol.source() == &root)
         .expect("ContainerFile must retain a source-bound codec");
-    Native::new("r2-original-container-file", &plan.render()).flat(
+    let Some(native) = Native::new("r2-original-container-file", &plan.render()) else {
+        return;
+    };
+    native.flat(
         "codec_cases.py",
         "OriginalContainerFile",
         json!({"container_file_codec": format!("{}Codec", symbol.name())}),

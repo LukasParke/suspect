@@ -73,9 +73,11 @@ pub struct McpRuntime {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct McpLogs {
+    /// Which call outcomes are logged to standard error.
     pub policy: LogPolicy,
 }
 
+/// Which call outcomes the emitted server logs to standard error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LogPolicy {
@@ -102,6 +104,7 @@ impl LogPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MappingProfile {
+    /// Profile version identifier; must be exactly [`super::PROFILE`].
     pub format: String,
     /// Prose describing the exposed surface, used by the generated guide.
     pub description: String,
@@ -121,7 +124,9 @@ pub struct ToolMapping {
     pub title: String,
     /// Tool description shown during discovery.
     pub description: String,
+    /// Advisory discovery hints published with the tool.
     pub annotations: ToolAdvisory,
+    /// How the tool's arguments carry the operation's inputs.
     pub input: InputBinding,
 }
 
@@ -130,9 +135,13 @@ pub struct ToolMapping {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ToolAdvisory {
+    /// Published as `readOnlyHint`.
     pub read_only: bool,
+    /// Published as `destructiveHint`.
     pub destructive: bool,
+    /// Published as `idempotentHint`.
     pub idempotent: bool,
+    /// Published as `openWorldHint`.
     pub open_world: bool,
 }
 
@@ -144,9 +153,11 @@ pub struct InputBinding {
     /// Public property names keyed by exact source parameter name. Every source
     /// parameter needs exactly one entry; unknown names are refused.
     pub parameters: BTreeMap<String, PropertyMapping>,
+    /// How the operation's request body is supplied, if it has one.
     pub body: BodyBinding,
 }
 
+/// The tool input property that carries one source parameter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PropertyMapping {
@@ -156,6 +167,7 @@ pub struct PropertyMapping {
     pub description: String,
 }
 
+/// How a tool accepts its operation's request body.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BodyBinding {
@@ -164,7 +176,9 @@ pub enum BodyBinding {
     /// One finite JSON value supplied under `property`, projected from the
     /// declared body schema and decoded by the generated codec.
     JsonValue {
+        /// Public tool input property name carrying the body.
         property: String,
+        /// Property description projected into the tool input schema.
         description: String,
     },
 }

@@ -8,26 +8,39 @@ use crate::examples::ExamplePlan;
 /// A native constructor expression; the emitter supplies only Ruby syntax.
 #[derive(Debug, Clone)]
 pub enum SampleValue {
+    /// A literal JSON value with no native constructor.
     Json(Value),
+    /// A Ruby array of lowered items.
     Array(Vec<SampleValue>),
+    /// A `Models` keyword-constructor call.
     Object {
+        /// Program node of the object model.
         schema_index: usize,
+        /// Declared members present in the example, as `(native name, value)`.
         fields: Vec<(String, SampleValue)>,
+        /// Undeclared members, as `(wire name, value)`.
         extras: Vec<(String, SampleValue)>,
     },
     /// Union dispatch is performed by its checked source codec, keeping branch
     /// selection and the parent assertions on the ordinary runtime path.
     Decoded {
+        /// Program node of the decoding codec.
         schema_index: usize,
+        /// Exact example JSON passed to the codec.
         value: Value,
     },
 }
 
+/// One validated source example lowered to a native construction tree.
 #[derive(Debug, Clone)]
 pub struct NativeExample {
+    /// Operation the example belongs to.
     pub operation_source: SourceId,
+    /// Index into that operation's `ExamplePlan` entries.
     pub entry_index: usize,
+    /// Program node of the example's schema.
     pub schema_index: usize,
+    /// Native construction tree.
     pub value: SampleValue,
 }
 

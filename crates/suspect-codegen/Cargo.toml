@@ -9,6 +9,8 @@ repository.workspace = true
 homepage.workspace = true
 publish = false
 authors.workspace = true
+# Integration tests are grouped one binary per backend (tests/groups/).
+autotests = false
 
 [features]
 default = ["ruby-sdk", "csharp-sdk", "java-sdk", "kotlin-sdk", "php-sdk", "dart-sdk", "cpp-sdk", "http-protocol"]
@@ -50,3 +52,72 @@ suspect-source.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2.189"
+
+[[test]]
+name = "cpp"
+path = "tests/groups/cpp.rs"
+required-features = ["cpp-sdk"]
+
+[[test]]
+name = "csharp"
+path = "tests/groups/csharp.rs"
+required-features = ["csharp-sdk"]
+
+[[test]]
+name = "dart"
+path = "tests/groups/dart.rs"
+required-features = ["dart-sdk"]
+
+[[test]]
+name = "go"
+path = "tests/groups/go.rs"
+
+[[test]]
+name = "java"
+path = "tests/groups/java.rs"
+required-features = ["java-sdk"]
+
+[[test]]
+name = "kotlin"
+path = "tests/groups/kotlin.rs"
+required-features = ["kotlin-sdk"]
+
+[[test]]
+name = "php"
+path = "tests/groups/php.rs"
+required-features = ["php-sdk"]
+
+[[test]]
+name = "python"
+path = "tests/groups/python.rs"
+
+[[test]]
+name = "ruby"
+path = "tests/groups/ruby.rs"
+required-features = ["ruby-sdk"]
+
+[[test]]
+name = "rust"
+path = "tests/groups/rust.rs"
+
+[[test]]
+name = "shared"
+path = "tests/groups/shared.rs"
+
+[[test]]
+name = "swift"
+path = "tests/groups/swift.rs"
+
+[[test]]
+name = "terraform"
+path = "tests/groups/terraform.rs"
+
+[[test]]
+name = "typescript"
+path = "tests/groups/typescript.rs"
+
+# Includes the generated Rust JSON runtime verbatim, which addresses its
+# sibling types as `crate::…`, so it must be its own crate root.
+[[test]]
+name = "rust_codecs_json"
+path = "tests/rust_codecs_json.rs"

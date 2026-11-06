@@ -260,6 +260,16 @@ impl<'a> ArtifactBatch<'a> {
     }
 }
 
+/// The portable form of a normalized artifact target: its components
+/// joined with `/` on every platform. Ownership manifests store this form,
+/// so a manifest written on Windows reads back on Unix and vice versa.
+pub(crate) fn portable_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn normalize_target(path: &Path) -> Result<PathBuf, ArtifactError> {
     let text = path
         .to_str()

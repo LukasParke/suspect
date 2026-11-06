@@ -296,3 +296,42 @@ fn discovery_scans_sorted_without_bun() {
         .collect();
     assert_eq!(names, ["a.ts", "b.ts"], "deterministic order");
 }
+
+const FACTS_TARGET_RULE: &str = r#"
+import { defineRule, r } from "@suspect/rules-sdk";
+
+export default defineRule({
+  meta: { id: "facts-only", description: "unsupported target", targets: ["facts"] },
+  given: r.operation,
+  check() {},
+});
+"#;
+
+#[tokio::test]
+async fn non_spec_target_is_rejected_at_load() {
+    if !bun_available() {
+        eprintln!("skipping: bun not on PATH");
+        return;
+    }
+    let ws = workspace();
+    let rules_dir = write_rules(
+        &ws.join(".rules-it/targets"),
+        &[("facts.ts", FACTS_TARGET_RULE)],
+    );
+
+    let result = RuleHost::start(StartOptions {
+        workspace_root: ws.clone(),
+        rule_files: vec![rules_dir.join("facts.ts")],
+        timeout_ms: Some(10_000),
+        ..Default::default()
+    })
+    .await;
+    let message = match result {
+        Err(error) => error.to_string(),
+        Ok(_) => panic!("a rule targeting \"facts\" must not load"),
+    };
+    assert!(
+        message.contains("unsupported targets") && message.contains("facts"),
+        "load error names the bad target: {message}"
+    );
+}

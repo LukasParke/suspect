@@ -3,8 +3,6 @@
 //! refusal and emitted byte stays exactly as before (the pinned fixtures and
 //! no-policy tests are the byte-identity gate).
 
-#![cfg(feature = "http-protocol")]
-
 use std::{process::Command, sync::Arc};
 
 use serde_json::{Value, json};

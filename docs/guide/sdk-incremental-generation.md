@@ -44,6 +44,22 @@ preview includes generated artifact contents. `--watch` retains one process and
 checks source/configuration/disk content on a configurable polling interval
 (`--interval-ms`, default 250). Stop the CLI with normal process cancellation.
 
+## Pinned inputs
+
+Remote references are acquired explicitly and pinned; compilation never fetches
+([ADR 0013](../adr/0013-remote-references-are-pinned.md),
+[ADR 0014](../adr/0014-acquisition-uses-a-sandboxed-curl.md)).
+`suspect acquire api.pins.json --cache-dir .suspect-cache` fills the
+content-addressed cache from a versioned manifest of exact retrieval URIs and
+SHA-256 pins. `--refresh` or `--stale-before` refetch and reject byte or
+redirect drift, and `--offline` only verifies the cache; the manifest is never
+rewritten. `suspect codegen --pins api.pins.json --cache-dir .suspect-cache`
+then generates offline from the verified cache instead of a positional source
+file. A session configuration chooses `spec` **or** a `pins` block
+(`{"manifest": "...", "cache_dir": "..."}`, paths relative to the
+configuration, `cache_dir` defaulting to `.suspect-cache`); every cached
+document is re-verified before a pinned session reuses a snapshot.
+
 ## Library interface
 
 `crates/suspect-codegen/src/generation_session.rs` exposes:
@@ -163,7 +179,7 @@ finite eviction, obsolete target removal, read-only previews, ownership conflict
 source diagnostics, source/native comparison and real editor-helper execution.
 
 ```sh
-cargo test --locked -p suspect-codegen --test generation_session
+cargo test --locked -p suspect-codegen --test shared generation_session::
 cargo test --locked -p suspect-cli --test codegen_session --test codegen_compare
 ```
 

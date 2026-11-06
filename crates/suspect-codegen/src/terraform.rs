@@ -26,10 +26,15 @@ pub const PROFILE: &str = "suspect.terraform.lifecycle.v1";
 /// source/span address the actual canonical OpenAPI/Go binding where available.
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
+    /// Stable refusal code (`terraform-*`, or the SDK's own code).
     pub code: &'static str,
+    /// Human-readable explanation.
     pub message: String,
+    /// JSON Pointer into the mapping document; empty when the refusal is not mapping-located.
     pub mapping_pointer: String,
+    /// Canonical OpenAPI/Go binding source the refusal concerns.
     pub source: SourceId,
+    /// Byte span of `source` in its document; `0..0` when unknown.
     pub at: Range<usize>,
 }
 
@@ -52,11 +57,13 @@ impl ProviderPlan {
         &self.sdk
     }
 
+    /// The admitted lifecycle mapping profile.
     #[must_use]
     pub fn mapping(&self) -> &MappingProfile {
         &self.profile
     }
 
+    /// The build identity the provider was planned with.
     #[must_use]
     pub fn config(&self) -> &TargetConfig {
         &self.config

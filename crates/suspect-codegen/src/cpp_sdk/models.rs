@@ -10,13 +10,20 @@ use suspect_schema::OwnedProgram;
 /// Original schema identity, native type/codec names and representation.
 #[derive(Debug, Clone)]
 pub struct ModelSymbol {
+    /// The schema this symbol represents.
     pub source: SchemaId,
+    /// Allocated public alias name.
     pub name: String,
+    /// Fully spelled C++ type, including `Nullable<..>`/`Box<..>` wrapping.
     pub cpp_type: String,
+    /// Allocated name of the codec type for this symbol.
     pub codec_name: String,
     pub(crate) index: usize,
+    /// Native representation of the schema.
     pub shape: Shape,
+    /// Whether `null` is admitted alongside the shape.
     pub nullable: bool,
+    /// Name of the struct/enum/variant declaration; a separate `..Value` name when nullable.
     pub definition: String,
     /// Actual constructor, including argument order and source-backed tag defaults.
     pub constructor: Option<Constructor>,
@@ -25,18 +32,26 @@ pub struct ModelSymbol {
 /// The fixed native codec member names used by the C++ emitter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CodecMethods {
+    /// Name of the strict decode-from-bytes member.
     pub decode: &'static str,
+    /// Name of the revalidating encode-to-JSON-text member.
     pub encode: &'static str,
+    /// Name of the revalidating encode-to-`JsonValue` member.
     pub to_json: &'static str,
 }
 
 /// A codec's actual allocated owner and full public value domain.
 #[derive(Debug, Clone, Copy)]
 pub struct CodecDescriptor<'a> {
+    /// Allocated codec type that owns the methods.
     pub owner: &'a str,
+    /// Member alias of the codec's value type.
     pub value_alias: &'static str,
+    /// Fully spelled value type the codec accepts and produces.
     pub cpp_type: &'a str,
+    /// Error type returned by decoding.
     pub error_type: &'static str,
+    /// Codec member names.
     pub methods: CodecMethods,
 }
 
@@ -51,6 +66,7 @@ impl ModelSymbol {
         )
     }
 
+    /// The codec descriptor for this symbol.
     #[must_use]
     pub fn codec(&self) -> CodecDescriptor<'_> {
         CodecDescriptor {
@@ -70,67 +86,107 @@ impl ModelSymbol {
 /// One emitted required-member constructor. Names are native C++ symbols.
 #[derive(Debug, Clone)]
 pub struct Constructor {
+    /// Constructor (definition) type name.
     pub name: String,
+    /// Positional parameters, in required-field order.
     pub parameters: Vec<ConstructorParameter>,
 }
+/// One positional constructor parameter.
 #[derive(Debug, Clone)]
 pub struct ConstructorParameter {
+    /// Parameter name (`argN`).
     pub name: String,
+    /// Member initialized from this parameter.
     pub member_name: String,
+    /// Schema of the member.
     pub source: SchemaId,
+    /// Spelled C++ parameter type.
     pub cpp_type: String,
 }
 /// A source-proved singleton string tag, never an invented business default.
 #[derive(Debug, Clone)]
 pub struct TagInitializer {
+    /// Enum definition type name.
     pub type_name: String,
+    /// Enum case name.
     pub case_name: String,
+    /// Wire string of the tag.
     pub wire_value: String,
 }
 
+/// One declared object property.
 #[derive(Debug, Clone)]
 pub struct Field {
+    /// Wire property name.
     pub wire: String,
+    /// Allocated C++ member name.
     pub name: String,
+    /// Property schema.
     pub schema: SchemaId,
+    /// Whether the property is required.
     pub required: bool,
+    /// Member type: the child's type, wrapped in `Presence<..>` when optional.
     pub cpp_type: String,
+    /// Singleton tag initializer for a required single-value enum property.
     pub initializer: Option<TagInitializer>,
 }
 
+/// Policy for object members beyond the declared properties.
 #[derive(Debug, Clone)]
 pub enum Extras {
+    /// `additionalProperties: false`: undeclared members are refused.
     Closed,
+    /// Undeclared members are kept as untyped JSON.
     Any,
+    /// Undeclared members are decoded with the given schema.
     Typed(SchemaId),
     /// Names may match several pattern schemas or the additional policy.
     /// Values stay exact JSON until the whole-object codec checks every rule.
     Patterned,
 }
 
+/// Native representation shape of one schema.
 #[derive(Debug, Clone)]
 pub enum Shape {
+    /// Unconstrained JSON value.
     Json,
     /// A checked JSON carrier for constraints with no faithful static layout.
     ValidatedJson,
+    /// Unsatisfiable schema (`false`, or an empty string enum).
     Never,
+    /// `type: null`.
     Null,
+    /// `type: boolean`.
     Boolean,
+    /// `type: number`, kept as an exact decimal.
     Number,
+    /// `type: integer`, kept as an exact integer.
     Integer,
+    /// `type: string`.
     String,
+    /// String enum as `(wire value, case name)` pairs in declaration order.
     Enum(Vec<(String, String)>),
+    /// An object with declared properties.
     Object {
+        /// Declared properties in order.
         fields: Vec<Field>,
+        /// Handling of undeclared members.
         extras: Extras,
     },
+    /// An array; `None` items are untyped JSON.
     Array(Option<SchemaId>),
+    /// A `$ref` alias to another symbol.
     Ref {
+        /// Referenced schema.
         target: SchemaId,
+        /// Whether the reference closes a cycle and is held in `Box<..>`.
         boxed: bool,
     },
+    /// A `oneOf`/`anyOf` variant.
     Union {
+        /// Branch schemas in declaration order.
         branches: Vec<SchemaId>,
+        /// `true` for `oneOf` (exactly one branch must match).
         exactly_one: bool,
     },
 }
@@ -142,9 +198,11 @@ pub struct ModelPlan {
     pub(crate) order: Vec<SchemaId>,
 }
 impl ModelPlan {
+    /// All symbols, ordered by schema id.
     pub fn symbols(&self) -> impl Iterator<Item = &ModelSymbol> {
         self.symbols.values()
     }
+    /// The symbol planned for `source`, if it is in the model closure.
     #[must_use]
     pub fn symbol(&self, source: &SchemaId) -> Option<&ModelSymbol> {
         self.symbols.get(source)

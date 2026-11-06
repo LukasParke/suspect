@@ -313,9 +313,7 @@ fn decoder(receipt: &IncomingReceipt) -> String {
 
 /// One receipt's reply constructor, when an exact 2xx response is declared.
 fn constructor(receipt: &IncomingReceipt, response: &ConstructedResponse) -> String {
-    let Some(construct) = &receipt.construct else {
-        return String::new();
-    };
+    let construct = &receipt.construct;
     let has_body = response.body.is_some();
     let has_headers = !response.headers.is_empty();
     let mut parameters = String::new();

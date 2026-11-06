@@ -734,7 +734,7 @@ fn docs(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
             );
         }
     }
-    getting.push_str("## Calling operations\n\nInputs with no required fields can be omitted: `try await client.operation()`.\nA sole successful result exposes `.data`, `.status`, `.headers`, `.links`, and\nraw-body capture directly; its declared status case remains available. Multiple\nstatuses/media are explicit enums. Success uses the actual 200–299 HTTP status,\nincluding a status matched by `default`. Exact status beats range, then default;\nmedia mismatch never falls through to a different response declaration.\n\n## Servers and credentials\n\nEach operation's generated HTTP metadata lists effective servers and security\nrequirements with original sources. ClientOptions and RequestOptions select a\nserver index and literal variable overrides. Relative servers use documentURL\nor the actual HTTP retrieval document URL. Local files have no invented origin.\nDeclared HTTP servers are honored; serverURL overrides use HTTPS or loopback\nHTTP unless the caller explicitly sets allowHTTP. Security alternatives are OR,\nmember schemes are AND. Selection defaults to the first fully configured\nalternative, including anonymous, or uses an explicit securityAlternative index.\nBasic/bearer/API-key attachment is source-defined. OAuth/OIDC hooks receive\nsource, flow, discovery and scope metadata and return a complete Authorization\nfield. No token type, acquisition, refresh or retry is inferred.\n\n## Transport and errors\n\nTimeouts are finite (1 day maximum). Per-call response ceilings may only lower\nthe client/generated ceiling. URLSession uses ephemeral storage without cookie,\ncache or credential persistence, rejects redirects and bounds received bytes.\nCustom method tokens preserve exact case. For tokens URLRequest would normalize,\nthe Apple Network transport uses bounded HTTP/1.1 with system TLS trust, no\nredirects/retries and a whole-transfer deadline. This exact-method path supports\nidentity content encoding and finite or incremental response consumption.\nTask cancellation aborts I/O and remains CancellationError. Custom transports\nimplement the same policy; returned status, headers and body are checked again.\nAPIError enums carry typed declared failures; SDKError covers request validation,\nrepresentation, response decoding and transport faults. Captures are bounded\nand error descriptions omit credentials and payloads.\n\n## Whole-query parameters\n\nAn OAS 3.2 querystring parameter supplies the complete URL query, without a name\nprefix. JSON/text receive one URI-component encoding pass. Forms use native\nobject inputs and source-bound aggregate/field codecs; their form-urlencoded\noutput receives no second encoding pass. Ordinary query parameters and query\nAPI keys cannot be implicitly merged with complete query content.\n\n## Forms, ordered parts and streams\n\nForms/multipart use native field structs, repeated arrays and in-memory Data\nparts. Required fields, extras, cardinality, part codecs and separate byte\nceilings are enforced. Positional multipart uses typed part1/part2 prefix slots\nand typed remaining items. Optional missing slots must be a trailing suffix;\nfalse prefixes forbid all later positions. Names/filenames are not inferred for\nunnamed parts; positional form-data uses declared Content-Disposition headers.\nMIME style names belong in Content-Disposition and values in the part body.\nMixed byte bodies never enter a JSON codec as null. Source-typed response headers\nenforce requiredness; repeated ambiguous fields are rejected. URLSession's\ncoalesced Set-Cookie declarations are declined. Links trigger no implicit calls.\n\nHTTPEventStream is a single-consumer AsyncSequence. `for try await` pulls parsed\nSSE envelopes or JSON-lines values through the exact itemSchema codec. Breaking\niteration, cancellation, close(), exhaustion and decoding failure close I/O.\nSSE data remains a string, including `[DONE]`; neither nested JSON nor sentinels\nare inferred. Transport queues, individual items and total received bytes have\nindependent finite ceilings. Streaming requests, nested/streamed multipart,\nexpansive MIME style grouping, composite-style form response grouping and vendor\nstream conventions retain source-linked refusals. Profiles require explicit opt-in.\n");
+    getting.push_str("## Calling operations\n\nInputs with no required fields can be omitted: `try await client.operation()`.\nA sole successful result exposes `.data`, `.status`, `.headers`, `.links`, and\nraw-body capture directly; its declared status case remains available. Multiple\nstatuses/media are explicit enums. Success uses the actual 200–299 HTTP status,\nincluding a status matched by `default`. Exact status beats range, then default;\nmedia mismatch never falls through to a different response declaration.\n\n## Servers and credentials\n\nEach operation's generated HTTP metadata lists effective servers and security\nrequirements with original sources. ClientOptions and RequestOptions select a\nserver index and literal variable overrides. Relative servers use documentURL\nor the actual HTTP retrieval document URL. Local files have no invented origin.\nDeclared HTTP servers are honored; serverURL overrides use HTTPS or loopback\nHTTP unless the caller explicitly sets allowHTTP (ADR 0035). Security alternatives are OR,\nmember schemes are AND. Selection defaults to the first fully configured\nalternative, including anonymous, or uses an explicit securityAlternative index.\nBasic/bearer/API-key attachment is source-defined. OAuth/OIDC hooks receive\nsource, flow, discovery and scope metadata and return a complete Authorization\nfield. No token type, acquisition, refresh or retry is inferred.\n\n## Transport and errors\n\nTimeouts are finite (1 day maximum). Per-call response ceilings may only lower\nthe client/generated ceiling. URLSession uses ephemeral storage without cookie,\ncache or credential persistence, rejects redirects and bounds received bytes.\nCustom method tokens preserve exact case. For tokens URLRequest would normalize,\nthe Apple Network transport uses bounded HTTP/1.1 with system TLS trust, no\nredirects/retries and a whole-transfer deadline. This exact-method path supports\nidentity content encoding and finite or incremental response consumption.\nTask cancellation aborts I/O and remains CancellationError. Custom transports\nimplement the same policy; returned status, headers and body are checked again.\nAPIError enums carry typed declared failures; SDKError covers request validation,\nrepresentation, response decoding and transport faults. Captures are bounded\nand error descriptions omit credentials and payloads.\n\n## Whole-query parameters\n\nAn OAS 3.2 querystring parameter supplies the complete URL query, without a name\nprefix. JSON/text receive one URI-component encoding pass. Forms use native\nobject inputs and source-bound aggregate/field codecs; their form-urlencoded\noutput receives no second encoding pass. Ordinary query parameters and query\nAPI keys cannot be implicitly merged with complete query content.\n\n## Forms, ordered parts and streams\n\nForms/multipart use native field structs, repeated arrays and in-memory Data\nparts. Required fields, extras, cardinality, part codecs and separate byte\nceilings are enforced. Positional multipart uses typed part1/part2 prefix slots\nand typed remaining items. Optional missing slots must be a trailing suffix;\nfalse prefixes forbid all later positions. Names/filenames are not inferred for\nunnamed parts; positional form-data uses declared Content-Disposition headers.\nMIME style names belong in Content-Disposition and values in the part body.\nMixed byte bodies never enter a JSON codec as null. Source-typed response headers\nenforce requiredness; repeated ambiguous fields are rejected. URLSession's\ncoalesced Set-Cookie declarations are declined. Links trigger no implicit calls.\n\nHTTPEventStream is a single-consumer AsyncSequence. `for try await` pulls parsed\nSSE envelopes or JSON-lines values through the exact itemSchema codec. Breaking\niteration, cancellation, close(), exhaustion and decoding failure close I/O.\nSSE data remains a string, including `[DONE]`; neither nested JSON nor sentinels\nare inferred. Transport queues, individual items and total received bytes have\nindependent finite ceilings. Streaming requests, nested/streamed multipart,\nexpansive MIME style grouping, composite-style form response grouping and vendor\nstream conventions retain source-linked refusals. Profiles require explicit opt-in.\n");
     getting.push_str("## Physical and logical URL metadata\n\n`HTTPServer.documentBase` is the physical retrieval document which owns the\nserver declaration. Relative server URLs use that base unless an explicit\n`documentURL` override is supplied; `$self` and schema `$id` never move the API.\n`HTTPProvenance` retains separate use-site, terminal and reference-hop\n`HTTPResourceContext` values for logical addresses, alongside physical sources.\nEncoded dot/slash segments remain data. Local-file sources need an explicit HTTP\ndocument base. Link server metadata uses the link's own physical document.\n\nOAuth/OIDC providers receive `HTTPCredentialContext.serverURL` after server\nselection and `urlBase == .effectiveServer`. Flow/discovery URL strings and their\noriginal sources remain intact; resolving them never starts token acquisition.\n\n");
     // One operation-reference article per spec tag; the index article links
     // them so no single page carries the whole API surface.
@@ -897,4 +897,54 @@ fn docs(plan: &SdkPlan, package: &PackageConfig) -> Vec<OutFile> {
             }),
     )
     .collect()
+}
+
+#[cfg(test)]
+mod foundation_qualification_tests {
+    /// Generated models share the SDK module's namespace, so a schema named
+    /// `ProcessInfo` shadows Foundation's type for every unqualified use in
+    /// emitted runtime code. Runtime text must spell it `Foundation.ProcessInfo`.
+    #[test]
+    fn emitted_runtime_qualifies_process_info() {
+        for (name, text) in [
+            (
+                "protocol_runtime.swift",
+                include_str!("protocol_runtime.swift"),
+            ),
+            ("transport.swift", include_str!("transport.swift")),
+            (
+                "protocol_stream.swift",
+                include_str!("protocol_stream.swift"),
+            ),
+            ("protocol_exact.swift", include_str!("protocol_exact.swift")),
+            ("oauth.rs", include_str!("oauth.rs")),
+            ("protocol_emit.rs", include_str!("protocol_emit.rs")),
+        ] {
+            for (index, _) in text.match_indices("ProcessInfo.processInfo") {
+                assert!(
+                    text[..index].ends_with("Foundation."),
+                    "{name}: unqualified ProcessInfo at byte {index}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod server_variable_tests {
+    /// Server variable values are validated data: a value whose `..`
+    /// segments climb out of the value into the template's literal path must
+    /// be rejected before dot-segment normalization can retarget the request
+    /// (newer Foundation releases no longer refuse it).
+    #[test]
+    fn server_variable_values_cannot_escape_their_position() {
+        let runtime = include_str!("protocol_runtime.swift");
+        let check = runtime
+            .find("server variable value escapes its template position")
+            .expect("dot-segment guard missing");
+        let normalize = runtime
+            .find("Self.literalDotSegments(normalized.percentEncodedPath)")
+            .expect("normalization step missing");
+        assert!(check < normalize, "the guard must run before normalization");
+    }
 }

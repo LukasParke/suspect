@@ -1,4 +1,4 @@
-#![cfg(all(feature = "kotlin-sdk", feature = "http-protocol"))]
+#![cfg(feature = "kotlin-sdk")]
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -134,7 +134,7 @@ fn adding_patterns_to_a_closed_native_object_reports_its_new_carrier_field() {
 }
 
 #[test]
-fn verified_default_sdk_adoption_matches_the_explicit_v2_entrypoint() {
+fn verified_default_sdk_adoption_matches_the_backend_registry() {
     let doc: Value = serde_json::from_str(include_str!("kotlin_support/scoped-sdk.json")).unwrap();
     let (_, contract) = fixture(&doc);
     let selected = contract
@@ -156,10 +156,7 @@ fn verified_default_sdk_adoption_matches_the_explicit_v2_entrypoint() {
             Backend::KotlinHttp.language_tag(),
         )),
     };
-    let explicit = kotlin_sdk::plan_sdk_v2(contract.clone(), &selected, config.clone()).unwrap();
     let default = kotlin_sdk::plan_sdk(contract.clone(), &selected, config).unwrap();
-    assert_eq!(explicit.program(), default.program());
-    assert_eq!(explicit.render().unwrap(), default.render().unwrap());
     assert_eq!(
         backend::generate(contract, &selected, &target()).unwrap(),
         default.render().unwrap()

@@ -1,10 +1,10 @@
 # Owned applicators: additive v2 executable contract
 
-Status: the bounded nine-op implementation and Rust verification are complete,
-2026-09-10. Native owners may implement the stable descriptors below. Twelve
-focused tests, 32 independent execution vectors, 395 in-scope official cases,
-normal-stack depth failure and warnings-denied Clippy pass. Six official cases
-have explicit capability deferrals listed below. This is not full conformance.
+Normative contract of the v2 `static-applicators` program: nine additive
+operations that native runtimes implement from the stable descriptors below.
+Program versioning rules are in
+[ADR 0020](../adr/0020-validation-programs-are-versioned-and-frozen.md). This is not
+full dialect conformance.
 
 ## Migration and frozen v1
 
@@ -186,51 +186,32 @@ runtime uses bitsets instead of ordered sets.
 - [Core §11](https://json-schema.org/draft/2020-12/json-schema-core#section-11): unevaluated locations and successful annotation propagation.
 - [Validation §6](https://json-schema.org/draft/2020-12/json-schema-validation#section-6): exact counts, contains bounds and dependentRequired.
 - Official JSON Schema Test Suite cases, with pinned provenance, supplement the
-  independent Valid/Invalid/EvaluationFailure fixtures in this tranche.
+  independent Valid/Invalid/EvaluationFailure fixtures.
 
-This does not claim full dialect conformance. Canonical `$id`/`$self` resource
-and dynamic-scope metadata remain coordinated with the IR/resource owner; no
-static reference or flattened property list substitutes for those semantics.
+This does not claim full dialect conformance. Canonical `$id`/`$self` resources
+and dynamic scope are refused by `compile_v2` and belong to the v3 program
+([SDK-SCHEMA-RESOURCES.md](schema-resources.md)); no static reference or
+flattened property list substitutes for those semantics. Unicode property
+escapes in patterns remain outside the portable pattern subset
+([ADR 0023](../adr/0023-portable-regex-subset.md)) and are refused with a located
+`Unsupported` error.
 
-## Landed fixtures and verification
+## Fixtures and tests
 
 - Maintained cross-language source fixture:
-  `crates/suspect-schema/tests/fixtures/owned-applicators-v2.json` — **32 cases**,
-  with exact schemaJson/instanceJson strings, limits, independently specified
+  `crates/suspect-schema/tests/fixtures/owned-applicators-v2.json`, with exact
+  schemaJson/instanceJson strings, limits, independently specified
   Valid/Invalid/EvaluationFailure outcomes and responsible source pointers.
-- Ready-to-execute portable descriptors:
-  `target/sdk-schema-applicators-executable-v2.json` — the same **32 cases** with
-  their actual checked OwnedProgram values. Source document URIs are the original
-  test inputs, retained by Contract even after their loader lifetimes end.
-- `target/sdk-schema-applicators-verified-02.log`: **12 focused tests passed**,
-  including all 32 vectors, v1 byte equality/inert behavior, v1 rejection of new
-  forms, malformed v2 program admission, exact counts, pattern exclusions,
-  property-name paths/equality, short circuit, recursion and shared failures.
-- `target/sdk-schema-applicators-verified-01.log`: the new official-file runner's
-  **11 tests passed, 395 original cases executed**. The exact deferred cases are
-  two dynamic/$id groups (four cases) and the Unicode-property-escape pattern
-  group (two cases), each checked for its concrete located Unsupported result.
-  They are not counted as successful validation. Original expectations and files
-  were not patched; fixture provenance is in the new applicator-conformance README.
-- `target/sdk-schema-applicators-clippy-02.log`: library and both new test targets
-  pass warnings-denied Clippy. Scoped formatting/whitespace checks pass.
+  Native tests must compile it through the real `compile_v2` API.
+- Official-suite cases for the new applicators, with provenance and license, are
+  in `crates/suspect-schema/tests/fixtures/applicator-conformance/`. The
+  dynamic/`$id` groups and the Unicode-property-escape pattern group are checked
+  for their concrete located `Unsupported` result; they never count as
+  successful validation. Original expectations are not patched.
+- The default 512 depth limit reports EvaluationFailure cleanly on a 2 MiB thread
+  stack in both v1 and v2: opcode rules have isolated call frames behind a small
+  dispatcher.
 
-The new depth stress initially reproduced a debug-build stack overflow. Opcode
-rules now have isolated call frames behind a small dispatcher. The default 512
-depth limit reports EvaluationFailure cleanly on a 2 MiB thread stack in **both
-v1 and v2**; see `sdk-schema-applicators-depth-01.log` (red), `depth-02.log` and
-the final focused suite (green). No depth/work limit was lowered to hide the bug.
-
-The affected existing owned suite recorded **23 passed, 1 integration assertion
-failed, 2 existing ignored**. Its failing
-`selected_nested_roots_cannot_bypass_an_unsupported_enclosing_schema_resource`
-test expects the old Contract `unsupported-schema-resource` diagnostic at the
-parent schema. The concurrent IR resource work removed that diagnostic; Owned
-still refuses the resource at its real `$id` keyword. Main/resource ownership
-must migrate that old expectation with resource admission. This task did not
-restore an obsolete IR diagnostic or edit that existing test.
-
-The prior shared native fixture
-`crates/suspect-codegen/tests/fixtures/runtime-contract-v1.json` remains untouched:
-SHA-256 `49fd80574c704a397d3f513ab886ecfdd90aa93b6f67c1af938935cf99a3a646`.
-Earlier native/dialect matrices were not rerun merely for this tranche or recovery.
+```sh
+cargo test -p suspect-schema --test owned_applicators --test owned_applicator_conformance
+```

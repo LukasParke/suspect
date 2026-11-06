@@ -13,7 +13,6 @@ Configure **variable names** in the SDK session:
 policy with `credential_env::plan` after HTTP admission and retains it behind
 `SdkPlan::credential_env()`. Ruby's compatibility capture records the bound
 `semantic_descriptor()`, keeping physical provenance out of interface equality.
-Canonical readiness, option forwarding and Session integration are owned by Main.
 
 For the verified `openrouter` gem/require and `OpenRouter` namespace:
 
@@ -56,77 +55,38 @@ private binding/sentinel constants. It adds only the already-reserved
 retain their names. The JSON support file contains bound variable names and
 physical provenance. No new public factory or signature is required.
 
-### Focused native proof
+### Credential-env tests
 
-All four `tests/ruby_credential_env.rs` selectors passed on **Ruby 3.3.12** and
-**4.0.6**:
+`tests/ruby_credential_env.rs` selectors run on Ruby 3.3.12 and 4.0.6:
 
-- `bound_policy_uses_admitted_source_names_and_keeps_no_policy_bytes`
+- `bound_policy_uses_admitted_source_names_and_keeps_no_policy_bytes` — runs
+  real Sessions through no policy → configured → disabled, restoring the exact
+  original files/revision after disabling. Configured output adds exactly
+  `credential_env.rb` and `credential-env.json`; only the entrypoint require and
+  README may change among existing files. Two physical fixture locations retain
+  their actual URIs, pointers and spans. Two separate controlled Rust generator
+  processes run the Session sequence under different ambient credential values;
+  output bytes/revisions must agree and neither value may appear in an artifact.
+  This needs no Ruby installation.
 - `credential_env_refusals_are_shared_and_follow_protocol_admission`
+- `canonical_credential_env_capture_is_semantic_and_keeps_credential_surface` —
+  source relocation preserves equality, absent policy is omitted, and a
+  variable-name change is a native client-default change with no wire delta.
 - `installed_credential_env_omission_precedence_choices_and_snapshot`
-- `installed_openrouter_env_uses_source_default_https_and_real_key_schemas`
+- `installed_openrouter_env_uses_source_default_https_and_real_key_schemas` —
+  compares no-policy/configured artifacts from one loaded Contract, then runs
+  controlled synthetic and actual-source OpenRouter exchanges, explicit
+  precedence, OR/AND/anonymous, unavailable `ENV`, creation snapshots, gem
+  installation, RBS, Steep and YARD. It needs `OPENROUTER_WEB_ROOT` containing
+  `projects/docs/openapi/openapi.yaml`, plus the selected Ruby installation and
+  tool gems. The `SUSPECT_RUBY_ENV_HOST_PROBE_*` variables are internal to the
+  host test, not runner inputs.
 
-The native gates cover 29 controlled synthetic exchanges and four actual-source
-OpenRouter exchanges per tier, import/request read counts, explicit precedence,
-OR/AND/anonymous, unavailable `ENV`, creation snapshots, gem installation, RBS,
-Steep and YARD. No account requests were made. A controlled generator-process
-canary was absent from all emitted artifacts. **56 unconfigured artifacts** per
-tier matched fresh output from the sealed pre-policy CLI byte-for-byte. The six
-finalized typed-credential/literal-scope comparison controls also passed.
+The installed selectors are `#[ignore]`; no account requests are made.
 
-### Isolated-runner contract
+## Resource/dynamic v3
 
-The sealed **56-file pre-policy parity proof is historical receipt-only**. It
-records exact output at its original physical source URIs. Those URIs legitimately
-change in an execution copy and staged OpenRouter input, so copying the old
-baseline is not a portable rerun of that proof. Its expected bytes, hashes and
-native receipts remain at `target/sdk-ruby-credential-env-20260911-01/`.
-
-The five maintained `ruby_credential_env` selectors retain their names. They no
-longer read `SUSPECT_RUBY_CREDENTIAL_ENV_BASELINE`. The mandatory current gate is
-`bound_policy_uses_admitted_source_names_and_keeps_no_policy_bytes`:
-
-- It runs real current Sessions through no policy → configured → disabled,
-  restoring the exact original current files/revision after disabling.
-- Configured output must add exactly `credential_env.rb` and
-  `credential-env.json`; only the entrypoint require and README may change among
-  existing files. Unconfigured and disabled output must contain no env support.
-- Two physical fixture locations retain their actual URIs, pointers and spans;
-  their provenance bytes are expected to differ. Artifact comparisons are within
-  each source identity, with no source-key or literal-value stripping.
-- Two separate controlled **Rust generator processes** run the Session sequence
-  under different ambient credential values. Output bytes/revisions must agree,
-  and neither ambient value may appear in an artifact. This runs without Ruby or
-  an old CLI and is mandatory in the current host gate.
-
-The installed OpenRouter selector also compares current no-policy/configured
-artifacts from one loaded Contract before its existing native controls. The
-runner supplies `OPENROUTER_WEB_ROOT={out}/inputs`, containing
-`projects/docs/openapi/openapi.yaml`, plus the selected Ruby installation and
-tool gems. It does not stage a historical artifact baseline. The private
-`SUSPECT_RUBY_ENV_HOST_PROBE_INPUT` / `SUSPECT_RUBY_ENV_HOST_PROBE_OUTPUT` variables
-are internal to the host test, not runner inputs.
-
-Portability-only contract and host/source-delta receipts:
-`target/sdk-ruby-credential-env-runner-20260911-01/`. The prior two-tier native
-completion remains its own accepted evidence.
-
-After Main opened canonical readiness, the additional ordinary selector
-`canonical_credential_env_capture_is_semantic_and_keeps_credential_surface`
-passed: source relocation preserves equality, absent policy is omitted, and a
-variable-name change produces a native client-default change with no wire delta.
-
-Results: `target/sdk-ruby-credential-env-20260911-01/report.json`. Successful
-OpenRouter SDKs: `target/sdk-ruby-credential-env-native/openrouter-C4GUW4/`
-(3.3.12) and `openrouter-ACM8ni/` (4.0.6). The new production asset is
-`ruby_sdk/credential_env.rb`, registered in `source_assets()` and emitted only
-with a bound policy. Existing changed production files are `ruby_sdk.rs`,
-`ruby_sdk/emit.rs`, and `compatibility/ruby.rs`.
-
-## Resource/dynamic v3 adoption
-
-`SchemaResources` and `DynamicSchemaReferences` are enabled after the maintained
-native runtime and installed-SDK witnesses passed on Ruby **3.3.12** and **4.0.6**.
+`SchemaResources` and `DynamicSchemaReferences` are enabled by default.
 The existing `ruby_sdk::plan_sdk` selects `OwnedCompiler::compile_v3` from indexed
 Contract resource/scope/dynamic metadata. Its exact pair is:
 
@@ -136,7 +96,7 @@ Contract resource/scope/dynamic metadata. Its exact pair is:
 Ordinary closures continue through `compile_v2`, retaining their established
 v1/v2 envelopes and byte identity. There is no separate public SDK dispatcher.
 `RubyConfig::{schema_resources,dynamic_schema_references}` default to true; explicit
-false values retain source-linked capability refusals. The independently witnessed
+false values retain source-linked capability refusals. The
 `document_relative_servers` option also defaults to true.
 
 ### Checked resources, evaluation and native values
@@ -173,7 +133,7 @@ document acquisition or raw-schema interpretation. Legacy recursive references,
 custom dialects/vocabularies, directional-codec constraints and the established
 format/regex limits retain their explicit refusals.
 
-### Focused v3 verification
+### v3 tests
 
 `tests/ruby_schema_v3.rs` provides these exact selectors:
 
@@ -183,7 +143,7 @@ format/regex limits retain their explicit refusals.
   It also executes the four official dynamic/unevaluated cases, 32 independent
   scope/branch/fallback/annotation/budget/depth controls and two v1/v2 compatibility
   controls: **82 outcomes total**, plus **38 malformed programs through two
-  entrypoints**. It has no maintained dependency on a generated target fixture.
+  entrypoints**. It does not depend on a generated witness file.
 - `resource_native_descriptors_and_profile_selection_preserve_physical_identity`
   — named/dynamic carriers, candidate dependencies, physical/logical provenance,
   source-linked capability and unsupported-profile refusals, default-versus-opt-in
@@ -197,49 +157,36 @@ format/regex limits retain their explicit refusals.
 
 ```sh
 cargo test --locked -p suspect-codegen --no-default-features --features ruby-sdk \
-  --test ruby_schema_v3 --target-dir target/sdk-ruby-schema-v3-cargo -- \
+  --test ruby --target-dir target/sdk-ruby-schema-v3-cargo -- \
   --include-ignored --test-threads=1
 
 SUSPECT_RUBY_HOME="$HOME/.local/share/mise/installs/ruby/4.0.6" \
 SUSPECT_RUBY_GEMS="$PWD/target/sdk-ruby-tools/gems-ruby4" \
 cargo test --locked -p suspect-codegen --no-default-features --features ruby-sdk \
-  --test ruby_schema_v3 --target-dir target/sdk-ruby-schema-v3-cargo -- \
+  --test ruby --target-dir target/sdk-ruby-schema-v3-cargo -- \
   --include-ignored --test-threads=1
 ```
 
-Native runtime and installed-SDK checks passed on both tiers. Packages under
-`target/sdk-ruby-schema-v3-native/` are `vectors-6C4htX` and `sdk-A76LRu` (3.3.12),
-and `vectors-jujw3u` and `sdk-vo4XVC` (4.0.6). Default capability promotion was
-separately checked against those installed SDK bytes. The immutable results and
-per-command logs are indexed by `target/sdk-ruby-schema-v3-verification/report.json`.
-Completed base, protocol and schema-v2 matrices were reused.
+The compatibility adapter retains typed dynamic metadata and the existing
+`ruby-http-protocol-v1` identity. The v3 runtime assets are
+`ruby_sdk/resource_guard.rb` and `ruby_sdk/validation_v3.rb`, both in
+`ruby_sdk::source_assets()`.
 
-Scoped formatting, whitespace and Ruby syntax checks pass. Final Clippy reports
-zero Ruby-owned findings; warnings-denied is blocked by 23 shared/other-language
-findings, located in `clippy-denied-03-summary.json` beside the report.
+## Physical server documents
 
-The two new production assets are `ruby_sdk/resource_guard.rb` and
-`ruby_sdk/validation_v3.rb`, both in `ruby_sdk::source_assets()`. Existing changes
-are in `ruby_sdk.rs`, `ruby_sdk/{protocol.rs,models.rs,samples.rs,emit.rs,codecs.rb,
-program_guard.rb,validation.rb,validation_v2.rb,GUIDE.md}` and
-`compatibility/ruby.rs`. The compatibility adapter retains typed dynamic metadata
-and the existing `ruby-http-protocol-v1` identity; canonical asset hashing consumes
-the complete source inventory.
-
-## Physical server-document adoption
-
-`DocumentRelativeServers` is enabled after the focused installed-gem witness
-passed on Ruby 3.3.12 and 4.0.6. `ServerPlan.document_base` supplies the effective
-physical retrieval document, including redirect identity. An absent inherited
+`DocumentRelativeServers` is enabled by default. `ServerPlan.document_base`
+supplies the effective physical retrieval document, including redirect
+identity. An absent inherited
 server array uses the entry document; an explicit empty override uses the
 overriding document. Neither an operation's unrelated physical file nor `$self`
 or `$id` is substituted as that server base. Caller `document_url:` remains an
 explicit override. Ruby's RFC3986 resolution preserves encoded dots/slashes,
 hex case, and non-dot path spelling through the actual HTTP request.
 
-Credential contexts and OAuth flows now expose `url_base` and `server_url`.
+Credential contexts and OAuth flows expose `url_base` and `server_url`.
 Relative OAuth/OIDC endpoint strings remain unchanged metadata with an
-`effective-server` base; the SDK performs no discovery or acquisition. Logical
+`effective-server` base; without an `sdk_defaults.oauth` policy the SDK performs
+no discovery or acquisition. Logical
 resource context stays beside physical provenance in the retained protocol plan.
 `codec_schema_closure()` supplies compilation dependencies while `codec_roots()`
 continues to describe actual codec inputs.
@@ -249,20 +196,17 @@ Focused target: `tests/ruby_document_servers.rs`:
 - `physical_base_metadata_is_separate_and_schema_resource_fences_stay_closed`
 - `installed_gem_uses_effective_physical_document_server_bases`
 
-Both tests passed on both tiers. Evidence is under
-`target/sdk-ruby-document-servers-native/`, indexed by
-`target/sdk-ruby-document-servers-verification/report.json`. The schema-resource
-fence checks use explicit false options after the separate v3 promotion above.
+The schema-resource fence checks use explicit false options.
 
-## Scoped schema-v2 adoption
+## Scoped schema v2
 
-Ruby now uses `OwnedCompiler::compile_v2` after source-driven native runtime
-witnesses passed on Ruby 3.3.12 and 4.0.6. Ordinary closures retain the exact
+Ruby uses `OwnedCompiler::compile_v2` for closures that need the scoped
+applicators. Ordinary closures retain the exact
 `suspect.validation.experimental.v1` / `oas31-jsonschema202012-static-subset`
 program bytes. Only closures requiring the scoped applicators emit
-`suspect.validation.experimental.v2` / `oas31-jsonschema202012-static-applicators`.
-This completed checkpoint admitted v1/v2; the independently verified v3 gate
-above extends the exact supported-pair list.
+`suspect.validation.experimental.v2` / `oas31-jsonschema202012-static-applicators`;
+the v3 section above extends the supported pairs
+([ADR 0020](../../adr/0020-validation-programs-are-versioned-and-frozen.md)).
 
 All nine instructions are implemented: `if`, `dependentRequired`,
 `dependentSchemas`, `contains`, `patternProperties`,
@@ -299,24 +243,18 @@ through `plan_protocol_examples`. No secondary HTTP admission or schema rewrite
 is used. The compatibility adapter records scoped extra rules and actual codec
 methods plus the program version/profile.
 
-New production assets, already included in `ruby_sdk::source_assets()`:
+The v2 runtime assets are `ruby_sdk/program_guard.rb` and
+`ruby_sdk/validation_v2.rb`, both in `ruby_sdk::source_assets()`.
 
-- `ruby_sdk/program_guard.rb`
-- `ruby_sdk/validation_v2.rb`
-
-The affected existing assets are `ruby_sdk.rs`, `models.rs`, `validation.rb`,
-`emit.rs`, `samples.rs`, and `compatibility/ruby.rs`. The exact-value JSON runtime,
-HTTP protocol behavior and historical reports retain their earlier scope.
-
-### Focused native selectors
+### v2 tests
 
 `tests/ruby_schema_v2.rs` compiles the maintained
 `suspect-schema/tests/fixtures/owned-applicators-v2.json` source fixture through
-the real `compile_v2` API. It never depends on the frozen target witness report.
+the real `compile_v2` API.
 
 - `source_driven_v2_instructions_scopes_budgets_and_program_guards` — 32 maintained
   cases plus 13 additional merge-cost, source/path, recursion, failure and v1
-  byte-parity witnesses; malformed-program mutation gates.
+  byte-parity checks; malformed-program mutation gates.
 - `scoped_native_descriptors_retain_fields_patterns_and_real_program_identity` —
   typed fields/extras, declared invalid-example findings and exact v1 program bytes.
 - `installed_scoped_sdk_models_types_examples_and_wire` — real gem build/local
@@ -325,52 +263,38 @@ the real `compile_v2` API. It never depends on the frozen target witness report.
   generated executable examples and YARD HTML.
 
 ```sh
-cargo test --locked -p suspect-codegen --test ruby_schema_v2 \
+cargo test --locked -p suspect-codegen --test ruby \
   --target-dir target/sdk-ruby-schema-v2-cargo -- \
   --include-ignored --test-threads=1
 
 SUSPECT_RUBY_HOME="$HOME/.local/share/mise/installs/ruby/4.0.6" \
 SUSPECT_RUBY_GEMS="$PWD/target/sdk-ruby-tools/gems-ruby4" \
-cargo test --locked -p suspect-codegen --test ruby_schema_v2 \
+cargo test --locked -p suspect-codegen --test ruby \
   --target-dir target/sdk-ruby-schema-v2-cargo -- \
   --include-ignored --test-threads=1
 ```
 
-Fresh source inputs and native packages/logs are retained in
-`target/sdk-ruby-schema-v2-sources/` and `target/sdk-ruby-schema-v2-native/`.
-The frozen-program development probe is separate and is not a substitute for
-these maintained source-driven tests. Resource/dynamic-scope v3 is outside this
-nine-operation adoption; it is never guessed as static reference behavior.
+These source-driven tests do not depend on a frozen-program witness.
+Resource/dynamic-scope v3 is outside this nine-operation set; it is never
+guessed as static reference behavior. The canonical provenance module consumes
+`source_assets()` for both empty and planned snapshots.
 
-**Verified 2026-09-10:** all three focused tests passed on both Ruby 3.3.12 and
-4.0.6. `target/sdk-ruby-schema-v2-verification/report.json` records four installed
-gems, source fixture hashes, per-command logs and emitted/installed byte identity.
-Representative SDKs are `sdk-2dous2` (3.3.12) and `sdk-PJJIwU` (4.0.6) under the
-native evidence directory. There are zero Ruby-owned Clippy findings; the
-warnings-denied crate check remains blocked by shared/other-language findings,
-listed in the new `clippy-summary.json`. Unaffected protocol matrices and their
-historical reports were reused.
+## HTTP protocol
 
-Main's canonical provenance module now consumes `source_assets()` for both empty
-and planned snapshots. Ruby's capture retains its runtime profile and typed
-descriptors and no longer performs a supplemental/double fingerprint hash.
-
-## Expanded HTTP protocol phase
-
-Ruby now consumes **`http_protocol::plan` directly**. The strict
-`http_contract::plan` admission is no longer used by this backend. Native
+Ruby consumes **`http_protocol::plan` directly**. Native
 `Models`, codecs, keyword calls, public exceptions, gems, YARD, RBS and examples
 remain one pipeline. `examples::plan_protocol_examples` supplies version-2
 response-pattern/header/part/item roles and actual source codec roots.
 
-The adapter identity is `ruby-http-protocol-v1`. Its independently executed
-native witnesses cover:
+The adapter identity is `ruby-http-protocol-v1`. Its native tests cover:
 
-- Anonymous/disabled security, explicit OR selection, AND attachments,
   case-insensitive bearer/Basic, header/query/cookie API keys, and caller-provided
   OAuth/OIDC attachment hooks. `CredentialContext` exposes source, permissions,
   scopes/roles, typed flow metadata and discovery/metadata URLs. No acquisition,
-  discovery, refresh, token-type selection or retry is automatic.
+  scopes/roles, typed flow metadata and discovery/metadata URLs. Without an
+  `sdk_defaults.oauth` policy no acquisition, discovery, refresh, token-type
+  selection or retry is automatic; the opt-in OAuth lifecycle is described in
+  [SDK-GOLDEN-DEFAULTS.md](../../guide/sdk-generation.md).
 - Multiple and relative servers, declared variable defaults/enums and explicit
   overrides. Local file inputs require a supplied HTTP `document_url` for relative
   resolution. Standard methods, QUERY and case-preserved custom method tokens.
@@ -397,7 +321,7 @@ native witnesses cover:
   Legacy OAS 3.1 binary-string markers require the explicit
   `RubyConfig::legacy_binary_strings` compatibility profile; they are never inferred.
 
-### Expanded native API
+### Native protocol API
 
 ```ruby
 api = ExampleSDK::Client.new(
@@ -418,12 +342,11 @@ after `next`, explicitly `close` in an ensure block. JSON numbers retain exact
 tokens through item codecs. Response data, `typed_headers` and `links` are public;
 operation errors remain public classes and range/default errors keep actual status.
 
-### Expanded immutable Rust descriptors
+### Immutable Rust descriptors
 
 - `SdkPlan::protocol()` retains the complete shared `ProtocolPlan`;
   `records()` exposes native form/part/header records and `schema_index(id)` looks
   up a real codec carrier. `source_assets()` publishes the complete native asset
-  closure for Main's canonical provenance hash.
 - `PlannedOperation::wire` retains servers, security, method and all provenance.
   `PlannedParameter::{value_type,wire,serialization(),schema_index()}` exposes the
   native type plus the canonical serialization; its codec index is optional for
@@ -437,44 +360,14 @@ operation errors remain public classes and range/default errors keep actual stat
   native names, requiredness, additional-field types and the actual media/header
   structural binding. The compatibility adapter consumes these descriptors.
 
-Expanded tests are in `tests/ruby_sdk.rs` and `src/ruby_sdk/tests/protocol*`,
-`streaming.rb`, and `openrouter_protocol.rb`. Extra actual OpenRouter witnesses
+Protocol tests are in `tests/ruby_sdk.rs` and `src/ruby_sdk/tests/protocol*`,
+`streaming.rb`, and `openrouter_protocol.rb`. Extra actual OpenRouter tests
 cover `downloadContainerFileContent`, `downloadFileContent` and `deleteKeys`, with
 all 256 octet values supplied by the independent byte fixture. The two download
 operations require the explicit legacy-binary compatibility profile in their
 unchanged tracked source.
 
-The accepted base-phase reports below are preserved historical evidence. New
-protocol verification is retained separately under `target/sdk-ruby-protocol-*`
-and fresh `target/sdk-ruby-native/protocol-*` / `openrouter-protocol-*` packages.
-
-### Expanded verification results — 2026-09-10
-
-| Gate | Ruby 3.3.12 | Ruby 4.0.6 |
-| --- | --- | --- |
-| Ruby SDK suites, including all native tests | 12 passed | 12 passed |
-| Main's canonical backend/session/compatibility tests | 3 passed | 3 passed |
-| Expanded installed gem, RBS, YARD, positive/8 negative protocol consumers | Passed | Passed |
-| Existing positive/7 negative M2 consumers | Passed | Passed |
-| 30 literal wire parameter vectors and 13 exact method spellings | Passed | Passed |
-| Forms, MIME response/request parts, typed headers, byte identities | Passed | Passed |
-| SSE/JSON-lines, resource limits, close/cancel/paused deadlines | Passed | Passed |
-| Five original plus three additional actual OpenRouter operations | Passed | Passed |
-| OAS3.0 nullable/ref-sibling/binary and 17 schemas / 81 JSON values | Passed | Passed |
-
-Inventory: **`target/sdk-ruby-protocol-verification/report.json`** indexes 22
-installed gems, their exact source/installed artifact hashes, and per-command
-logs. `runtime-identity.json` confirms the current Ruby runtime assets are
-byte-identical to those exercised under both runtimes. Representative expanded
-packages are `target/sdk-ruby-native/protocol-M1AoKI/` (3.3.12) and
-`target/sdk-ruby-native/protocol-ogbHxY/` (4.0.6).
-
-The current Clippy run reports **zero Ruby-owned findings**; shared protocol and
-other-language findings remain in `clippy-summary.json`. Warnings-denied Rustdoc
-was blocked by an unclosed generic HTML tag in `swift_sdk/protocol.rs`, recorded
-in `rustdoc.log`. Those shared/other-owned files were not edited for this gate.
-
-## Accepted base-phase checkpoint
+## Package overview
 
 The `ruby-sdk` feature enables `suspect_codegen::ruby_sdk`. Its complete package
 root is **`ruby/`**: keyword models and calls, checked codecs, native exceptions,
@@ -550,9 +443,14 @@ normal model references.
 
 Auth is an explicit string-keyed hash using the **declared security-scheme name**.
 The demonstrated OpenRouter `apiKey` scheme declares HTTP bearer authentication,
-so it produces an `Authorization: Bearer …` header. The SDK does not read
-environment credentials or acquire/refresh tokens. Source descriptions, including
-management-key requirements, remain documentation rather than invented key types.
+so it produces an `Authorization: Bearer …` header. Without a policy the SDK does
+not read environment credentials or acquire/refresh tokens; environment
+credentials are opt-in through `credential_env` or `sdk_defaults.env_prefix`
+([ADR 0026](../../adr/0026-environment-credentials-are-opt-in.md)), and token lifecycle
+and pagination helpers through `sdk_defaults`
+([ADR 0011](../../adr/0011-behavior-comes-only-from-the-spec.md)). Source descriptions,
+including management-key requirements, remain documentation rather than invented
+key types.
 
 Declared, validated API errors have public operation/status-specific classes,
 such as `CreateWidgetStatus422 < CreateWidgetApiError`. `RequestError`,
@@ -589,19 +487,16 @@ interrupts blocking Ruby I/O. Custom native extensions must permit Ruby thread
 interrupts during blocking operations. Per-call response/capture settings can
 only lower client ceilings.
 
-## Admitted base profile
-
-OpenAPI 3.1 / JSON Schema 2020-12 static instructions; JSON request/response media;
-exact response statuses; one static HTTPS server; one required bearer scheme;
-simple required string paths; and form scalar/scalar-array queries with either
-explode mode. Runtime server overrides accept HTTPS or loopback HTTP.
+## Refusals
 
 Other dialects, active directional annotations, unsupported instructions,
 unproved structural intersections, unsupported media/security/parameter shapes
 and invalid package identities fail with located diagnostics before artifacts.
 Runtime URI handling explicitly rejects unsafe spellings and dot-segment path
-arguments. Shared protocol expansion requires a separate Ruby admission/native
-gate. No pagination, retry or business behavior is inferred from names.
+arguments. Runtime server overrides accept HTTPS or loopback HTTP unless
+`allow_insecure_http: true` is passed; declared servers keep their scheme
+([ADR 0035](../../adr/0035-one-server-url-policy.md)). No retry or
+business behavior is inferred from operation names.
 
 ## Native verification
 
@@ -614,25 +509,25 @@ Toolchains installed without activation:
 
 - Ruby 3.3.12: `~/.local/share/mise/installs/ruby/3.3.12`
 - Ruby 4.0.6: `~/.local/share/mise/installs/ruby/4.0.6`
-- Isolated tools: `target/sdk-ruby-tools/gems` and
-  `target/sdk-ruby-tools/gems-ruby4`
+- Isolated tools (the tests' default `SUSPECT_RUBY_GEMS`):
+  `target/sdk-ruby-tools/gems`, and `target/sdk-ruby-tools/gems-ruby4` for Ruby 4
 - YARD 0.9.37, Redcarpet 3.6.1, RBS 3.9.5, Steep 1.10.0.
 
 ```sh
 OPENROUTER_WEB_ROOT=/path/to/openrouter-web \
   cargo test --locked -p suspect-codegen --features ruby-sdk \
-  --test ruby_sdk --target-dir target/sdk-ruby-cargo -- \
+  --test ruby --target-dir target/sdk-ruby-cargo -- \
   --include-ignored --test-threads=1
 
 SUSPECT_RUBY_HOME="$HOME/.local/share/mise/installs/ruby/4.0.6" \
 SUSPECT_RUBY_GEMS="$PWD/target/sdk-ruby-tools/gems-ruby4" \
 OPENROUTER_WEB_ROOT=/path/to/openrouter-web \
   cargo test --locked -p suspect-codegen --features ruby-sdk \
-  --test ruby_sdk --target-dir target/sdk-ruby-cargo -- \
+  --test ruby --target-dir target/sdk-ruby-cargo -- \
   --include-ignored --test-threads=1
 ```
 
-The matrix covers unchanged M2's four operations; `getCredits`, `createKeys`,
+The matrix covers four baseline operations; `getCredits`, `createKeys`,
 `updateKeys`, `listContainerFiles`, `getContainerFile` from the actual tracked
 OpenRouter source; all 17 shared `runtime-contract-v1.json` schemas; seven negative
 Steep consumers; exact-value/presence/mutation/recursion/name/prose adversaries;
@@ -640,30 +535,7 @@ shared branch/copy/equality/numeric budgets; and real/injected transport securit
 framing, timeout, cancellation and cleanup failures. OpenRouter wire responses
 come from the hand-authored `openrouter-five-responses.json` fixture.
 
-Fresh package, install, signature, docs, consumer and command logs are retained
-under `target/sdk-ruby-native/`; synthetic source fixtures are retained under
-`target/sdk-ruby-fixtures/`. Final run inventory is recorded in
-`target/sdk-ruby-verification/`.
-
-Verified **2026-09-10**:
-
-| Gate | Ruby 3.3.12 | Ruby 4.0.6 |
-| --- | --- | --- |
-| Native suite | All 7 tests passed | All 7 covered: 4 prior passes plus 3 affected suites rerun successfully after tool-path repair |
-| Gem build/local install | Passed | Passed |
-| Steep positive / 7 negative consumers | Passed | Passed |
-| YARD HTML / RBS validation / native quickstart | Passed | Passed |
-| M2 and 5 actual OpenRouter operations | Passed | Passed |
-| 17 shared schemas / 81 values and adversarial gates | Passed | Passed |
-
-Sixteen installed gems (including five independent resource-policy packages per
-runtime) are retained. Their emitted and installed artifact bytes were compared
-without modification. `target/sdk-ruby-verification/report.json` records paths,
-tool versions, fixture hashes, gem hashes and individual command-log hashes.
-Targeted warnings-denied Clippy and Rustdoc passed; repository-wide integration
-and shared registration remain with Main.
-
-## Base-phase Rust adapter accessors (historical)
+## Rust adapter accessors
 
 ```rust,ignore
 let plan = ruby_sdk::plan_sdk(contract, &selected_sources, RubyConfig::default())?;

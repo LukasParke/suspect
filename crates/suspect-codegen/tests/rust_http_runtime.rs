@@ -1,6 +1,6 @@
 //! Generated-client resource, media, transport failure and cancellation boundaries.
 
-use std::{path::Path, process::Command, sync::Arc};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::rust_http::{HttpConfig, PackageConfig, emit_http, plan_http};
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
@@ -49,7 +49,7 @@ fn native(config: HttpConfig, consumer: &str) {
         format!("#![cfg(test)]\n{SUPPORT}\n{consumer}"),
     )
     .unwrap();
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     command
         .args(["test", "--offline", "--quiet", "--manifest-path"])
         .arg(root.join("Cargo.toml"))

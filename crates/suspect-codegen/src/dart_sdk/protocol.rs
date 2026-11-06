@@ -8,81 +8,136 @@ use std::{
 use suspect_ir::contract::{Contract, SchemaId, SourceId};
 use suspect_schema::OwnedCompiler;
 
+/// One client credential slot, shared by every operation that names the same source scheme.
 #[derive(Debug, Clone)]
 pub struct PlannedCredential {
+    /// Source security-scheme declaration this credential satisfies.
     pub source: SourceId,
+    /// Security-scheme name as declared in the source document.
     pub wire_name: String,
+    /// Collision-free Dart constructor parameter and member name.
     pub name: String,
+    /// Nullable Dart carrier: `BasicCredentials?`, `CredentialProvider?` or `String?`.
     pub native_type: String,
+    /// How the credential is attached to outgoing requests.
     pub hook: wire::CredentialHook,
 }
+/// A caller-supplied path, query, header or cookie parameter of one operation.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
+    /// Source parameter declaration.
     pub source: SourceId,
+    /// Codec root schema of the parameter value.
     pub schema: SchemaId,
+    /// Parameter name on the wire.
     pub wire_name: String,
+    /// Dart method parameter name, unique within the operation's locals.
     pub name: String,
+    /// Whether the source marks the parameter required.
     pub required: bool,
+    /// Dart type of the parameter value.
     pub native_type: String,
+    /// Generated codec that converts the value to and from JSON.
     pub codec_name: String,
+    /// Admitted wire serialization plan.
     pub wire: wire::ParameterPlan,
 }
+/// One typed header field of a response or part header record.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
+    /// Dart member name, unique within its header record.
     pub name: String,
+    /// Dart type of the header value.
     pub native_type: String,
+    /// Generated codec that converts the decoded value.
     pub codec_name: String,
+    /// Codec root schema of the header value.
     pub schema: SchemaId,
+    /// Admitted header parsing plan.
     pub wire: wire::HeaderPlan,
 }
+/// A generated Dart class grouping the declared headers of a response or part.
 #[derive(Debug, Clone)]
 pub struct PlannedHeaders {
+    /// Collision-free Dart class name.
     pub name: String,
+    /// Declared header fields, in protocol order.
     pub fields: Vec<PlannedHeader>,
 }
+/// One named field of a form or multipart aggregate, or its additional-fields slot.
 #[derive(Debug, Clone)]
 pub struct PlannedPart {
+    /// Dart member name; `extraFields` for the additional-parts slot.
     pub name: String,
+    /// Dart type of a single part value (`Uint8List` for binary parts).
     pub value_type: String,
+    /// Member type after wrapping and repetition, e.g. `List<Wrapper>`.
     pub native_type: String,
+    /// Value codec; `None` for binary parts.
     pub codec_name: Option<String>,
+    /// Wrapper class carrying per-part headers or content type, when one is needed.
     pub wrapper_name: Option<String>,
+    /// Declared part headers.
     pub headers: Option<PlannedHeaders>,
+    /// Admitted part encoding plan.
     pub wire: wire::PartPlan,
 }
+/// A generated fields class for a form or named-multipart body.
 #[derive(Debug, Clone)]
 pub struct PlannedAggregate {
+    /// Collision-free Dart class name.
     pub name: String,
+    /// Object rules (required, bounds) the aggregate enforces.
     pub rules: wire::ObjectRules,
+    /// Declared named fields.
     pub fields: Vec<PlannedPart>,
+    /// Additional-fields slot, when the body admits undeclared parts.
     pub extra: Option<Box<PlannedPart>>,
+    /// `true` for multipart, `false` for URL-encoded forms.
     pub multipart: bool,
 }
+/// The Dart representation of one request or response media type.
 // The public typed plan retains inline aggregate descriptors for its capture API.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PlannedPayload {
+    /// JSON body; schema-free when `schema` is `None` (surfaced as `JsonValue`).
     Json {
+        /// Codec root schema, if the media declares one.
         schema: Option<SchemaId>,
+        /// Generated codec for `schema`.
         codec: Option<String>,
     },
+    /// Text body, decoded as `String` unless a schema codec applies.
     Text {
+        /// Codec root schema, if the media declares one.
         schema: Option<SchemaId>,
+        /// Generated codec for `schema`.
         codec: Option<String>,
+        /// Scalar interpretation of the text.
         scalar: wire::ScalarType,
     },
+    /// Opaque binary body carried as `Uint8List`.
     Bytes {
+        /// Byte ceiling for this body.
         max_bytes: u64,
     },
+    /// Form or multipart body bound to a generated fields class.
     Aggregate(PlannedAggregate),
+    /// SSE or JSON-lines item stream; items are `JsonValue` when schema-free.
     Stream {
+        /// Item codec root schema, if the stream declares one.
         schema: Option<SchemaId>,
+        /// Generated codec for `schema`.
         codec: Option<String>,
+        /// Item framing on the wire.
         framing: wire::StreamFraming,
+        /// Byte ceiling for one framed item.
         max_item_bytes: u64,
     },
 }
 impl PlannedPayload {
+    /// Generated codec of a JSON, text or stream payload, if it is schema-bound.
     pub fn codec_name(&self) -> Option<&str> {
         match self {
             Self::Json { codec, .. } | Self::Text { codec, .. } => codec.as_deref(),
@@ -90,6 +145,7 @@ impl PlannedPayload {
             _ => None,
         }
     }
+    /// Codec root schema of a JSON, text or stream payload, if it declares one.
     pub fn schema(&self) -> Option<&SchemaId> {
         match self {
             Self::Json { schema, .. } | Self::Text { schema, .. } => schema.as_ref(),
@@ -98,46 +154,80 @@ impl PlannedPayload {
         }
     }
 }
+/// One admitted media type of a request body or response status.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
+    /// Admitted media plan.
     pub wire: wire::MediaPlan,
+    /// Dart type of the decoded or encoded payload.
     pub native_type: String,
+    /// Variant class name used when the body or status is a choice.
     pub variant_name: String,
+    /// Payload representation.
     pub payload: PlannedPayload,
 }
+/// The request body of one operation.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
+    /// Source request-body declaration.
     pub source: SourceId,
+    /// Whether the source marks the body required.
     pub required: bool,
+    /// Dart type of the `body` parameter: the choice class or the single media type.
     pub native_type: String,
+    /// Sealed choice class, present for multiple media or a media range.
     pub choice_name: Option<String>,
+    /// Admitted media types.
     pub media: Vec<PlannedMedia>,
 }
+/// One declared response status (exact, range or `default`) of an operation.
 #[derive(Debug, Clone)]
 pub struct PlannedStatus {
+    /// Source response declaration.
     pub source: SourceId,
+    /// Admitted response plan.
     pub wire: wire::ResponsePlan,
+    /// Success class, when the status can be a 2xx outcome.
     pub success_name: Option<String>,
+    /// Exception class, when the status can be a non-2xx outcome.
     pub error_name: Option<String>,
+    /// Dart content type: the choice class, a single media type, `NoBody` or `Uint8List`.
     pub native_type: String,
+    /// Sealed content choice class, when several media or an optional body apply.
     pub choice_name: Option<String>,
+    /// Choice variant for an absent body on range and `default` statuses.
     pub none_variant: Option<String>,
+    /// Choice variant for raw bytes when no media is declared.
     pub bytes_variant: Option<String>,
+    /// Admitted media types; empty when the status never carries a body.
     pub media: Vec<PlannedMedia>,
+    /// Declared response headers.
     pub headers: Option<PlannedHeaders>,
 }
+/// One selected outgoing operation and its Dart client method.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Source operation declaration.
     pub source: SourceId,
+    /// Source `operationId`.
     pub operation_id: String,
+    /// Collision-free `Client` method name.
     pub method_name: String,
+    /// Sealed success class across all success statuses.
     pub success_type: String,
+    /// Sealed exception class across all error statuses.
     pub error_type: String,
+    /// `Future<T>` or `Stream<T>`; `T` is the sole success class or `success_type`.
     pub return_type: String,
+    /// Whether any status carries a stream payload.
     pub stream: bool,
+    /// Admitted operation plan.
     pub wire: wire::OperationPlan,
+    /// Caller parameters, in protocol order.
     pub parameters: Vec<PlannedParameter>,
+    /// Request body, if declared.
     pub body: Option<PlannedBody>,
+    /// Declared response statuses, in protocol order.
     pub statuses: Vec<PlannedStatus>,
 }
 
@@ -187,6 +277,7 @@ pub fn capabilities(config: &DartConfig) -> wire::Capabilities {
             C::PartEncodings,
             C::ServerSentEvents,
             C::JsonLines,
+            C::OpenApi30,
             C::OpenApi32,
             C::SchemaResources,
             C::DynamicSchemaReferences,
@@ -199,6 +290,12 @@ pub fn capabilities(config: &DartConfig) -> wire::Capabilities {
     ))
 }
 
+/// Plan a Dart SDK for the selected operations with no compatibility profiles.
+///
+/// # Errors
+///
+/// Returns every package, resource-policy, protocol-admission, schema and
+/// naming diagnostic found; see [`plan_sdk_with_profiles`].
 pub fn plan_sdk(
     contract: Arc<Contract>,
     selected: &[SourceId],
@@ -278,7 +375,7 @@ pub fn plan_sdk_with_profiles(
     if !errors.is_empty() {
         return Err(errors);
     }
-    let mut admitted = capabilities(&config);
+    let mut admitted = crate::schema_view::oas30_capability_for(&contract, capabilities(&config));
     for profile in profiles {
         admitted = admitted.with_profile(*profile);
     }
@@ -328,6 +425,14 @@ pub fn plan_sdk_with_profiles(
         roots.dedup();
     }
     for id in &roots {
+        // OAS 3.0 Reference Object siblings (including readOnly/writeOnly)
+        // have no semantic effect, so they cannot activate a directional view.
+        if contract
+            .schema(id)
+            .is_some_and(crate::schema_view::reference_only)
+        {
+            continue;
+        }
         for key in ["readOnly", "writeOnly"] {
             if contract
                 .source(id)
@@ -483,12 +588,20 @@ pub fn plan_sdk_with_profiles(
     for op in protocol.operations() {
         let id = op.operation_id().expect("admitted operation id").value();
         let stem = models::exported(id);
+        // The fixed call-option parameters plus every local the emitted
+        // method body declares (`http_emit::client`): Dart scopes a local over
+        // its whole block, so a parameter sharing a local's name is either a
+        // `referenced_before_declaration` error or silently shadowed.
         let mut members = BTreeSet::from([
             "body".into(),
             "cancellation".into(),
             "timeout".into(),
             "server".into(),
             "securityAlternative".into(),
+            "prepare".into(),
+            "inputs".into(),
+            "selected".into(),
+            "response".into(),
         ]);
         let parameters = op
             .parameters()

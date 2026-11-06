@@ -1,6 +1,6 @@
 //! Per-phase profiler for the stripe corpus validation.
 //!
-//! Run: `SUSPECT_PROFILE=1 cargo run --release -p suspect-validate --example profile_stripe`
+//! Run: `SUSPECT_PROFILE=1 cargo run --release -p suspect-validate --example validate_profile_stripe`
 
 use std::path::PathBuf;
 use std::sync::Arc;

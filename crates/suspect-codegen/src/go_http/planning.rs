@@ -131,7 +131,9 @@ pub(super) fn plan(
     // pagination helpers; helpers are emitted only for usable schemes, so
     // no-policy output stays byte-identical.
     let oauth = super::oauth::plan(&contract, &wire, config.sdk_defaults.as_ref())?;
-    let oauth_emits = oauth.as_ref().is_some_and(super::oauth::emits);
+    let oauth_emits = oauth
+        .as_ref()
+        .is_some_and(crate::http_protocol::OAuthPlan::emits);
     let mut errors = Vec::new();
     for operation in wire.operations() {
         for parameter in operation.parameters() {
@@ -192,10 +194,9 @@ pub(super) fn plan(
         emitted.extend_from_slice(super::oauth::PACKAGE_NAMES);
         // The replaying credential wrapper joins only with an executable
         // client-credentials endpoint, mirroring its conditional emission.
-        if oauth
-            .as_ref()
-            .is_some_and(super::oauth::has_client_credentials)
-        {
+        if oauth.as_ref().is_some_and(|oauth| {
+            oauth.executes(crate::http_protocol::OAuthFlowDescriptorKind::ClientCredentials)
+        }) {
             emitted.extend_from_slice(super::oauth::REPLAY_PACKAGE_NAMES);
         }
     }

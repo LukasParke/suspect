@@ -195,9 +195,18 @@ fn compile_cases(root: &Path, fixture: &Value) -> Value {
     json!({"format":"suspect-csharp-scoped-source-vectors-v1","oracle":fixture["oracle"],"expectedCount":result.len(),"cases":result})
 }
 
+/// Gate for the native .NET tests: prints the skip message and returns
+/// `false` when no `dotnet` is available (see `crate::toolchain`).
+pub(super) fn dotnet_available() -> bool {
+    crate::toolchain::require("dotnet").exists()
+}
+
 #[test]
 #[ignore = "source-driven 32-case native v2 runtime proof on exact .NET 8/10 tiers"]
 fn native_scoped_source_vectors() {
+    if !dotnet_available() {
+        return;
+    }
     let root = directory("vectors-");
     let vectors = compiled_vectors(&root);
     run_vectors(&root, &vectors);
@@ -325,6 +334,9 @@ fn inactive_scoped_compiler_keeps_v1_package_bytes() {
 #[test]
 #[ignore = "focused v2 scope, exact budgets, native program admission and ownership controls"]
 fn native_scoped_limits_and_admission() {
+    if !dotnet_available() {
+        return;
+    }
     let root = directory("controls-");
     let fixture: Value =
         serde_json::from_str(include_str!("testdata/scoped-controls.json")).unwrap();
@@ -458,6 +470,9 @@ fn sdk_consumer(plan: &super::SdkPlan) -> String {
 #[test]
 #[ignore = "installed NuGet v2 models, codec mutation, SDK operations, CLR types and executable native docs"]
 fn native_scoped_sdk_packages() {
+    if !dotnet_available() {
+        return;
+    }
     let root = directory("sdk-");
     let plan = scoped_plan(&root);
     assert_eq!(

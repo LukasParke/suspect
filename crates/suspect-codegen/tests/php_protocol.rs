@@ -1,5 +1,5 @@
 //! Native evidence for PHP's rich protocol adapter. Emitted bytes are used unchanged.
-#![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
+#![cfg(feature = "php-sdk")]
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -190,6 +190,9 @@ fn read_request(socket: &mut TcpStream) -> Request {
 #[test]
 #[ignore = "requires native PHP/Composer/PHPStan and independent loopback sockets"]
 fn native_curl_protocol_bytes_auth_headers_and_stream_lifetime() {
+    if !native_php() {
+        return;
+    }
     let mut value = source();
     value["paths"]["/events"] = json!({"get":{"operationId":"events","security":[],"responses":{"200":{"description":"Events","content":{"text/event-stream":{"itemSchema":{"type":"object","required":["data"],"properties":{"data":{"type":"string"}}}}}}}}});
     let (root, plan) = package(&value, capabilities().with(Capability::ServerSentEvents));
@@ -252,6 +255,9 @@ echo 'independent cURL protocol and closable stream passed',PHP_EOL;
 #[test]
 #[ignore = "requires native PHP; explicit versioned binary interpretation"]
 fn explicit_legacy_binary_profile_preserves_native_bytes() {
+    if !native_php() {
+        return;
+    }
     use suspect_codegen::backend::GenerationOptions;
     use suspect_codegen::http_protocol::CompatibilityProfile;
     let mut value = source();
@@ -301,6 +307,9 @@ echo 'explicit LegacyBinaryStringV1 native byte witness passed',PHP_EOL;
 #[test]
 #[ignore = "requires native PHP/Composer/PHPStan; parameter/media/status matrix"]
 fn native_parameter_and_response_dispatch_matrix() {
+    if !native_php() {
+        return;
+    }
     let mut value = source();
     value["paths"] = json!({
         "/matrix/{point}":{"get":{"operationId":"matrix","security":[],"parameters":[
@@ -436,9 +445,38 @@ $wire->matrix($input);$wire->whole(new S\WholeInput(raw:new S\__WHOLE__(q:'a b+'
 echo 'native style, querystring, media specificity and actual-status matrix passed',PHP_EOL;
 "#;
 fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
+    suspect_codegen::toolchain::resolve_path("php").expect("PHP is gated by native_php()")
+}
+/// PHP plus the provisioned Composer/PHPStan phars (`tools/native-setup.sh php`),
+/// or a panic naming what is missing (an `#[ignore]` gate never passes by skipping).
+fn native_php() -> bool {
+    suspect_codegen::toolchain::require("php").exists()
+        && suspect_codegen::toolchain::require_provisioned(
+            "SUSPECT_COMPOSER_PHAR",
+            "sdk-php-tools/composer-2.10.3.phar",
+            "php",
+        )
+        .exists()
+        && suspect_codegen::toolchain::require_provisioned(
+            "SUSPECT_PHPSTAN_PHAR",
+            "sdk-php-tools/phpstan-2.2.13.phar",
+            "php",
+        )
+        .exists()
+}
+fn composer_phar() -> PathBuf {
+    std::env::var_os("SUSPECT_COMPOSER_PHAR")
         .map(PathBuf::from)
-        .unwrap_or_else(|| repo().join("target/sdk-php-tools/php-8.3.32/php"))
+        .unwrap_or_else(|| repo().join("target/sdk-php-tools/composer-2.10.3.phar"))
+}
+fn phpstan_phar() -> PathBuf {
+    std::env::var_os("SUSPECT_PHPSTAN_PHAR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo().join("target/sdk-php-tools/phpstan-2.2.13.phar"))
+}
+/// The resolved PHP with `-n` plus the ini-enabled shared extensions.
+fn php_command() -> Command {
+    suspect_codegen::toolchain::php_command().expect("PHP is gated by native_php()")
 }
 fn capabilities() -> Capabilities {
     php_sdk::protocol::capabilities()
@@ -521,9 +559,8 @@ fn package_contract(
     let package = root.join("php");
     let tools = repo().join("target/sdk-php-tools");
     command(
-        Command::new(php())
-            .arg("-n")
-            .arg(tools.join("composer-2.10.3.phar"))
+        php_command()
+            .arg(composer_phar())
             .args([
                 "archive",
                 "--format=zip",
@@ -544,9 +581,8 @@ fn package_contract(
     fs::create_dir(&installed).unwrap();
     fs::write(installed.join("composer.json"),json!({"name":"fixture/consumer","require":{"fixture/php-protocol":"0.1.0"},"repositories":[{"type":"package","package":manifest},{"packagist.org":false}],"config":{"allow-plugins":false}}).to_string()).unwrap();
     command(
-        Command::new(php())
-            .arg("-n")
-            .arg(tools.join("composer-2.10.3.phar"))
+        php_command()
+            .arg(composer_phar())
             .args([
                 "install",
                 "--no-dev",
@@ -568,9 +604,8 @@ fn package_contract(
         );
     }
     command(
-        Command::new(php())
-            .arg("-n")
-            .arg(tools.join("phpstan-2.2.13.phar"))
+        php_command()
+            .arg(phpstan_phar())
             .args([
                 "analyse",
                 "--no-progress",
@@ -584,8 +619,8 @@ fn package_contract(
     );
     for example in ["codecs", "quickstart", "client"] {
         command(
-            Command::new(php())
-                .args(["-n", "-d", "error_reporting=-1"])
+            php_command()
+                .args(["-d", "error_reporting=-1"])
                 .arg(package.join(format!("examples/{example}.php")))
                 .env(
                     "SUSPECT_SDK_AUTOLOAD",
@@ -602,8 +637,8 @@ fn package_contract(
     )
     .unwrap();
     command(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "docs.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "docs.php"])
             .arg(&package)
             .current_dir(&installed),
         &root,
@@ -614,12 +649,10 @@ fn package_contract(
 
 fn consumer(root: &Path, source: &str, label: &str) {
     let package = root.join("consumer");
-    let tools = repo().join("target/sdk-php-tools");
     fs::write(package.join("consumer.php"), source).unwrap();
     command(
-        Command::new(php())
-            .arg("-n")
-            .arg(tools.join("phpstan-2.2.13.phar"))
+        php_command()
+            .arg(phpstan_phar())
             .args([
                 "analyse",
                 "--no-progress",
@@ -633,8 +666,8 @@ fn consumer(root: &Path, source: &str, label: &str) {
         &format!("{label}-types"),
     );
     command(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "consumer.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "consumer.php"])
             .current_dir(&package),
         root,
         label,
@@ -645,10 +678,9 @@ fn consumer(root: &Path, source: &str, label: &str) {
 fn rejected_consumer(root: &Path, source: &str, minimum_type_errors: usize) {
     let installed = root.join("consumer");
     fs::write(installed.join("negative.php"), source).unwrap();
-    let mut command = Command::new(php());
+    let mut command = php_command();
     command
-        .arg("-n")
-        .arg(repo().join("target/sdk-php-tools/phpstan-2.2.13.phar"))
+        .arg(phpstan_phar())
         .args([
             "analyse",
             "--no-progress",
@@ -685,6 +717,9 @@ fn rejected_consumer(root: &Path, source: &str, minimum_type_errors: usize) {
 #[test]
 #[ignore = "requires isolated PHP, Composer and PHPStan"]
 fn native_protocol_package_types_and_injected_wire() {
+    if !native_php() {
+        return;
+    }
     let (root, plan) = package(&source(), capabilities());
     let input = plan
         .operations()
@@ -742,6 +777,9 @@ echo 'native rich protocol calls passed',PHP_EOL;
 #[test]
 #[ignore = "requires isolated PHP, Composer and PHPStan"]
 fn native_form_and_named_multipart_use_typed_parts_and_real_bytes() {
+    if !native_php() {
+        return;
+    }
     let mut value = source();
     value["paths"] = json!({
         "/form":{"post":{"operationId":"sendForm","security":[],"requestBody":{"required":true,"content":{"application/x-www-form-urlencoded":{"schema":{"type":"object","required":["name"],"properties":{"name":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"settings":{"type":"object","properties":{"enabled":{"type":"boolean"}},"additionalProperties":false}},"additionalProperties":false}}}},"responses":{"200":{"description":"Echo","content":{"text/plain":{"schema":{"type":"string"}}}}}}},
@@ -816,6 +854,9 @@ echo 'native form and binary multipart part checks passed',PHP_EOL;
 #[test]
 #[ignore = "requires isolated PHP, Composer and PHPStan"]
 fn native_stream_items_preserve_frames_and_close_on_break_and_failure() {
+    if !native_php() {
+        return;
+    }
     let mut value = source();
     value["paths"] = json!({
         "/events":{"get":{"operationId":"events","security":[],"responses":{"200":{"description":"Events","content":{"text/event-stream":{"itemSchema":{"type":"object","required":["data"],"properties":{"data":{"type":"string"},"event":{"type":"string"},"id":{"type":"string"},"retry":{"type":"integer"}},"additionalProperties":false}}}}}}},
@@ -890,6 +931,9 @@ echo 'native chunked SSE envelopes and JSON-lines items passed',PHP_EOL;
 #[test]
 #[ignore = "requires native PHP/Composer/PHPStan and independent request-item wire checks"]
 fn native_request_iterables_are_typed_bounded_and_single_pass() {
+    if !native_php() {
+        return;
+    }
     let mut value = source();
     value["components"]["schemas"]["Event"] = json!({"type":"object","required":["data"],"properties":{"data":{"type":"string"},"id":{"type":"string"},"event":{"type":"string"},"retry":{"type":"integer","minimum":0}},"additionalProperties":false});
     value["paths"] = json!({
@@ -957,8 +1001,16 @@ echo 'native request iterable wire, finite preparation and cancellation passed',
 #[test]
 #[ignore = "requires native PHP/Composer/PHPStan; auth, source metadata and server choices"]
 fn native_security_alternatives_hooks_servers_and_links() {
+    if !native_php() {
+        return;
+    }
     let mut value = source();
     value["servers"][1] = json!({"url":"../a//b/{region}","variables":{"region":{"default":"us","enum":["us","eu"]}}});
+    // ADR 0035: a source-declared plain-HTTP server keeps its scheme (HttpServers).
+    value["servers"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"url":"http://plain.example.test/v1"}));
     value["components"]["securitySchemes"]["oidc"] = json!({"type":"openIdConnect","openIdConnectUrl":"https://issuer.test/.well-known/openid-configuration"});
     value["components"]["securitySchemes"]["oauth"]["oauth2MetadataUrl"] =
         json!("https://issuer.test/.well-known/oauth-authorization-server");
@@ -1022,6 +1074,9 @@ $client->allKeys();check($transport->last()->url==='https://fixture.test/api/v2/
 $client->useOauth();check($transport->last()->headers['authorization']==='Bearer oauth-key');$client->useOidc();check($transport->last()->headers['authorization']==='Bearer oidc-key'&&$hooks===2);
 $client->role();check($transport->last()->headers['authorization']==='Bearer bearer-key');
 $relative=new S\Client($credentials,$transport,new S\ClientOptions(serverBaseUrl:'https://fixture.test/directory/spec.json',serverIndex:1,serverVariables:['region'=>'eu']));$relative->anonymous();check($transport->last()->url==='https://fixture.test/a//b/eu/anonymous');
+(new S\Client($credentials,$transport,new S\ClientOptions(serverIndex:2)))->anonymous();check($transport->last()->url==='http://plain.example.test/v1/anonymous');
+try{new S\ClientOptions(serverUrl:'http://plain.example.test/v1');throw new RuntimeException('plain HTTP override accepted without opt-in');}catch(S\SdkError $error){check($error->kind==='configuration');}
+(new S\Client($credentials,$transport,new S\ClientOptions(serverUrl:'http://plain.example.test/v1',allowInsecureHttp:true)))->anonymous();check($transport->last()->url==='http://plain.example.test/v1/anonymous');
 $sent=count($transport->requests);
 try{$client->anonymous(options:new S\RequestOptions(securityAlternative:99));throw new RuntimeException('invalid auth alternative accepted');}catch(S\SdkError $error){check($error->kind==='credentials');}
 $partial=new S\Client(new S\Credentials(['head'=>new S\ApiKeyCredential('incomplete')]),$transport,new S\ClientOptions(serverUrl:'https://fixture.test'));
@@ -1040,6 +1095,9 @@ echo 'native anonymous/OR/AND, OAuth/OIDC metadata, roles, links and server choi
 #[test]
 #[ignore = "requires native PHP/Composer/PHPStan; independent form/MIME response bytes"]
 fn native_response_forms_and_multipart_validate_structure_and_metadata() {
+    if !native_php() {
+        return;
+    }
     let mut value = source();
     value["paths"] = json!({
         "/parts":{"get":{"operationId":"parts","security":[],"responses":{"200":{"description":"Named parts","content":{"multipart/form-data":{"schema":{"type":"object","required":["file","metadata","tags","styled"],"minProperties":4,"maxProperties":4,"properties":{"file":{},"metadata":{"type":"object","required":["id"],"properties":{"id":{"type":"string"}},"additionalProperties":false},"tags":{"type":"array","minItems":2,"maxItems":2,"items":{"type":"string"}},"styled":{"type":"string"}},"additionalProperties":false},"encoding":{"file":{"contentType":"application/octet-stream","headers":{"X-Part":{"required":true,"schema":{"type":"integer"}}}},"styled":{"style":"form"}}}}}}}},
@@ -1073,6 +1131,9 @@ echo 'native independent MIME/form bytes, structural bounds and typed part heade
 #[test]
 #[ignore = "native physical document/redirect/encoded server-base witness; Composer and PHP required"]
 fn native_document_relative_servers_keep_physical_bases() {
+    if !native_php() {
+        return;
+    }
     use suspect_ref::{DocumentProvider, ProvidedDocument};
     let first = Server::start(false);
     let second = Server::start(false);

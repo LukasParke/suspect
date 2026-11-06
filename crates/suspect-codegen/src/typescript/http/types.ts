@@ -53,7 +53,10 @@ export interface ServerChoice {
 /** Reusable transport policy; generated ClientOptions supplies precise credential types. */
 export interface ClientOptions<Auth extends object = Readonly<Record<string, CredentialValue>>> {
     readonly auth?: Auth;
+    /** Explicit override: HTTPS, or plain HTTP to a loopback host unless allowInsecureHttp is set (ADR 0035). Declared servers keep their scheme. */
     readonly serverURL?: string;
+    /** Opt in to a plain-HTTP serverURL on a non-loopback host. Defaults to false. */
+    readonly allowInsecureHttp?: boolean;
     readonly server?: ServerChoice;
     readonly fetch?: Fetch;
     readonly maxResponseBytes?: number;

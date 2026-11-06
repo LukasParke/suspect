@@ -459,7 +459,8 @@ pub(super) fn installed(plan: &SdkPlan, root: &Path, native: &str, base: &str) {
 }
 
 fn typing(root: &Path, positive: &str, probes: &[(&str, &str)]) {
-    let modules = support::directory(&root.join("build/sdk"), "Modules").unwrap();
+    let modules =
+        crate::toolchain::swift_module_dir(&root.join("build/sdk"), "GeneratedSDK").unwrap();
     let path = root.join("positive.swift");
     std::fs::write(
         &path,
@@ -508,6 +509,9 @@ fn typing(root: &Path, positive: &str, probes: &[(&str, &str)]) {
 #[test]
 #[ignore = "installed V3 source-bound carriers, actual HTTP wire calls, executable examples, positive-controlled types and DocC"]
 fn native_installed_v3_resources_codecs_types_wire_and_docs() {
+    if !support::available() {
+        return;
+    }
     let root = support::root("sdk-v3-");
     let server = WireServer::start();
     let plan = proof_plan(sdk_contract(&format!(
@@ -581,6 +585,9 @@ fn native_installed_v3_resources_codecs_types_wire_and_docs() {
 #[test]
 #[ignore = "focused installed physical-document server witness, exact native wire URLs, OAuth/OIDC metadata and DocC"]
 fn native_installed_physical_document_servers() {
+    if !support::available() {
+        return;
+    }
     let root = support::root("document-servers-");
     let server = WireServer::start();
     let plan = proof_plan(document_contract(&server.base));

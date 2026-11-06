@@ -73,14 +73,16 @@ pub fn check(command: &mut Command, root: &Path, name: &str) {
         String::from_utf8_lossy(&result.stderr)
     );
 }
+/// The Dart toolchain resolved by `suspect_codegen::toolchain`; callers gate
+/// on `toolchain::require("dart")` first.
 pub fn dart(root: &Path) -> Command {
-    let binary = std::env::var_os("SUSPECT_DART_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repository().join("target/sdk-dart-tools/dart-sdk/bin/dart"));
-    let mut command = Command::new(binary);
+    let mut command =
+        suspect_codegen::toolchain::command("dart").expect("gated by toolchain::require(\"dart\")");
+    let home = repository().join("target/sdk-dart-tools/home");
+    std::fs::create_dir_all(&home).unwrap();
     command
         .current_dir(root)
-        .env("HOME", repository().join("target/sdk-dart-tools/home"))
+        .env("HOME", home)
         .env("PUB_CACHE", root.join("pub-cache"))
         .env("CI", "true")
         .env("DART_SUPPRESS_ANALYTICS", "true");

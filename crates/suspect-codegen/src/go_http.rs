@@ -72,7 +72,9 @@ pub use crate::http_contract::HttpDiagnostic;
 /// Allocated native operation names shared by code, examples and documentation.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Source location of the operation declaration.
     pub source: SourceId,
+    /// Source operationId, or `METHOD /path` when none is declared.
     pub operation_id: String,
     /// Exported Go method name on the Client, e.g. `GetCredits`.
     pub method_name: String,
@@ -110,12 +112,14 @@ impl PlannedOperation {
     pub fn responses(&self) -> &[PlannedResponse] {
         &self.responses
     }
+    /// Shared wire plan this operation lowers.
     #[must_use]
     pub const fn wire(&self) -> &protocol::OperationPlan {
         &self.wire
     }
 }
 
+/// One source parameter's allocated input struct member.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
     wire: protocol::ParameterPlan,
@@ -131,6 +135,7 @@ impl PlannedParameter {
     pub fn schema(&self) -> &SchemaId {
         self.wire.codec().schema().id()
     }
+    /// Shared wire plan of the source parameter.
     #[must_use]
     pub const fn wire(&self) -> &protocol::ParameterPlan {
         &self.wire
@@ -151,23 +156,27 @@ pub struct PlannedBody {
 }
 
 impl PlannedBody {
-    /// Canonical schema identity for the body member's native model.
+    /// Canonical schema identity for the body member's native model; `None`
+    /// for a media choice or a representation without a codec.
     #[must_use]
     pub fn schema(&self) -> Option<&SchemaId> {
         (self.media.len() == 1)
             .then(|| self.media[0].schema())
             .flatten()
     }
+    /// Shared wire plan of the request body.
     #[must_use]
     pub const fn wire(&self) -> &protocol::BodyPlan {
         &self.wire
     }
+    /// Native representations in source media order.
     #[must_use]
     pub fn media(&self) -> &[PlannedMedia] {
         &self.media
     }
+    /// Whether the body is a closed choice over several declared media.
     #[must_use]
-    pub fn is_choice(&self) -> bool {
+    pub(crate) fn is_choice(&self) -> bool {
         self.media.len() > 1
     }
 }
@@ -177,12 +186,20 @@ impl PlannedBody {
 pub struct PlannedResponse {
     /// Concrete exported response wrapper, shared by code, docs and consumers.
     pub type_name: String,
+    /// Go type of the decoded payload: a model, `Value`, `string`, `[]byte`,
+    /// `*Stream[T]`, an aggregate, or `NoContent`.
     pub native_type: String,
+    /// Allocated struct name for the declared response headers, shared by
+    /// every representation of one response.
     pub headers_type: String,
+    /// Declared response headers with their allocated field names.
     pub headers: Vec<PlannedHeader>,
     /// Response index in the shared operation descriptor.
     pub response_index: usize,
+    /// Media index within the response, `None` for a body-less representation.
     pub media_index: Option<usize>,
+    /// Whether HTTP forbids or the status admits no body (HEAD, 1xx, 204,
+    /// 205, 304, or the body-less alternative of a range/default response).
     pub forbidden_body: bool,
     wire: protocol::ResponsePlan,
     media: Option<PlannedMedia>,
@@ -199,14 +216,17 @@ impl PlannedResponse {
     pub fn schema(&self) -> Option<&SchemaId> {
         self.media.as_ref().and_then(PlannedMedia::schema)
     }
+    /// Shared wire plan of the source response.
     #[must_use]
     pub const fn wire(&self) -> &protocol::ResponsePlan {
         &self.wire
     }
+    /// The decoded media, `None` for a body-less representation.
     #[must_use]
     pub fn media(&self) -> Option<&PlannedMedia> {
         self.media.as_ref()
     }
+    /// Whether the status selector admits a success: 2xx, `2XX` or `default`.
     #[must_use]
     pub fn can_succeed(&self) -> bool {
         matches!(
@@ -216,6 +236,7 @@ impl PlannedResponse {
                 | protocol::ResponseStatus::Default
         )
     }
+    /// Whether the status selector admits a failure: anything but 2xx or `2XX`.
     #[must_use]
     pub fn can_fail(&self) -> bool {
         !matches!(
@@ -228,15 +249,19 @@ impl PlannedResponse {
 /// Native representation of one actual shared MediaPlan.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
+    /// Go type of the value: a model, `Value`, `string`, `[]byte`, a stream
+    /// (`[]T` for requests, `*Stream[T]` for responses), or an aggregate.
     pub native_type: String,
     /// Allocated only for a member of a closed request-body media choice.
     pub choice_type: String,
     /// Allocated only for that closed request-body media choice.
     pub constructor: String,
+    /// Form or multipart structure, when the representation is one.
     pub aggregate: Option<PlannedAggregate>,
     wire: protocol::MediaPlan,
 }
 impl PlannedMedia {
+    /// Shared wire plan of the source media.
     #[must_use]
     pub const fn wire(&self) -> &protocol::MediaPlan {
         &self.wire
@@ -255,6 +280,8 @@ impl PlannedMedia {
             _ => None,
         }
     }
+    /// Whether the declared media type is a range (e.g. `image/*`), so the
+    /// caller must supply the concrete `Content-Type`.
     #[must_use]
     pub fn requires_content_type(&self) -> bool {
         !matches!(
@@ -267,24 +294,40 @@ impl PlannedMedia {
 /// Structurally validated form or finite multipart input/output, never a JSON aggregate.
 #[derive(Debug, Clone)]
 pub struct PlannedAggregate {
+    /// Allocated struct name, e.g. `UploadStatus200MultipartParts`.
     pub type_name: String,
+    /// Allocated `New<TypeName>` constructor for the required members.
     pub constructor: String,
+    /// Multipart rather than URL-encoded form.
     pub multipart: bool,
+    /// Positional multipart (prefix parts then repeated items) rather than named parts.
     pub positional: bool,
+    /// Named fields, or positional prefix parts, in source order.
     pub parts: Vec<PlannedPart>,
+    /// Admitted additional parts: the `Extras` map, or the positional `Items` slice.
     pub additional: Option<PlannedPart>,
 }
+/// One form field or multipart part with its allocated Go member.
 #[derive(Debug, Clone)]
 pub struct PlannedPart {
+    /// Exported Go field name inside the aggregate struct.
     pub field_name: String,
+    /// Allocated `With<Field>` setter, present only for optional parts.
     pub setter_name: Option<String>,
+    /// Go type of one part's value: a model or `[]byte`.
     pub data_type: String,
+    /// Go type of the member, wrapping `data_type` in `Part[...]` for
+    /// multipart and in a slice or map for repeated or additional parts.
     pub native_type: String,
+    /// Shared wire plan of the source part.
     pub wire: protocol::PartPlan,
 }
+/// One declared response header with its allocated Go field name.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
+    /// Exported Go field name inside the headers struct.
     pub field_name: String,
+    /// Shared wire plan of the source header.
     pub wire: protocol::HeaderPlan,
 }
 
@@ -314,18 +357,22 @@ impl HttpPlan {
     pub const fn config(&self) -> &HttpConfig {
         &self.config
     }
+    /// Selected operations with their allocated native names.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Model codecs and validation for every schema the operations reach.
     #[must_use]
     pub fn codecs(&self) -> &crate::go_codecs::CodecPlan {
         &self.codecs
     }
+    /// The source contract this plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// Validated examples for the selected operations.
     #[must_use]
     pub fn examples(&self) -> &crate::examples::ExamplePlan {
         &self.examples

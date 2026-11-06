@@ -167,7 +167,14 @@ static std::string normalize_path(std::string_view path,const Source& source,Con
     if(result.empty())append_bounded(result,"/",limit,source,context);return result;
 }
 struct Url {std::string authority,path;};
-static Url absolute_url(std::string_view text,const Source& source,Context& context,std::size_t limit){
+// One server URL policy (ADR 0035): a source-declared server keeps its
+// scheme; a caller override (UrlRole::Override) is https, or plain http only to
+// loopback unless allow_insecure_http is set; no userinfo, query or fragment; a valid port; a literal `.`/`..`
+// segment of an absolute URL is refused (only a relative reference is resolved);
+// percent-encoded octets stay opaque path data; non-ASCII, controls and
+// backslashes are refused. A document URL (server=false) only anchors resolution.
+enum class UrlRole {Override,Server,Resolved,Document};
+static Url absolute_url(std::string_view text,const Source& source,Context& context,std::size_t limit,UrlRole role=UrlRole::Server){
     if(text.size()>limit)http_fail(SdkError::Kind::ResourceLimit,source,"URL exceeds byte ceiling");
     auto sep=text.find("://");if(sep==std::string_view::npos)http_fail(SdkError::Kind::Configuration,source,"relative server requires an HTTP document URL");
     auto scheme=lower_ascii(text.substr(0,sep));if(scheme!="https"&&scheme!="http")http_fail(SdkError::Kind::RequestRepresentation,source,"server URL requires HTTP or HTTPS");
@@ -179,16 +186,21 @@ static Url absolute_url(std::string_view text,const Source& source,Context& cont
     std::string_view port;
     if(authority.front()=='['){auto end=authority.find(']');if(end==std::string::npos)http_fail(SdkError::Kind::RequestRepresentation,source,"unclosed IPv6 host");if(end+1<authority.size()){if(authority[end+1]!=':')http_fail(SdkError::Kind::RequestRepresentation,source,"invalid IPv6 authority");port=std::string_view(authority).substr(end+2);}}
     else if(auto colon=authority.find(':');colon!=std::string::npos)port=std::string_view(authority).substr(colon+1);
-    if(!port.empty()){unsigned n=0;auto parsed=std::from_chars(port.data(),port.data()+port.size(),n);if(parsed.ec!=std::errc{}||parsed.ptr!=port.data()+port.size()||n>65535)http_fail(SdkError::Kind::RequestRepresentation,source,"invalid server port");authority.resize(authority.size()-port.size()-1);if(!((scheme=="http"&&n==80)||(scheme=="https"&&n==443)))authority+=":"+std::to_string(n);}
+    if(!port.empty()){unsigned n=0;auto parsed=std::from_chars(port.data(),port.data()+port.size(),n);if(parsed.ec!=std::errc{}||parsed.ptr!=port.data()+port.size()||n==0||n>65535)http_fail(SdkError::Kind::RequestRepresentation,source,"invalid server port");authority.resize(authority.size()-port.size()-1);if(!((scheme=="http"&&n==80)||(scheme=="https"&&n==443)))authority+=":"+std::to_string(n);}
     else if(authority.ends_with(':'))authority.pop_back();
     if(authority.empty()||authority.front()==':')http_fail(SdkError::Kind::RequestRepresentation,source,"empty server host");
     std::string path=slash==std::string_view::npos?"/":std::string(rest.substr(slash));
     for(unsigned char c:path)if(!alnum(c)&&std::string_view("/-._~!$&'()*+,;=:@%").find(static_cast<char>(c))==std::string_view::npos)http_fail(SdkError::Kind::RequestRepresentation,source,"server path requires an RFC3986 URI spelling");
     for(std::size_t at=0;at<path.size();++at)if(path[at]=='%'){if(at+2>=path.size()||hex(path[at+1])<0||hex(path[at+2])<0)http_fail(SdkError::Kind::RequestRepresentation,source,"invalid server percent escape");at+=2;}
+    if(role==UrlRole::Override&&scheme=="http"&&authority!="localhost"&&authority.rfind("localhost:",0)!=0&&authority!="127.0.0.1"&&authority.rfind("127.0.0.1:",0)!=0&&authority!="[::1]"&&authority.rfind("[::1]:",0)!=0)http_fail(SdkError::Kind::RequestRepresentation,source,"plain HTTP servers must be loopback");
+    if(role==UrlRole::Server||role==UrlRole::Override){
+        for(std::size_t at=0;at<=path.size();){auto next=path.find('/',at);if(next==std::string::npos)next=path.size();auto segment=std::string_view(path).substr(at,next-at);if(segment=="."||segment=="..")http_fail(SdkError::Kind::RequestRepresentation,source,"server path contains a literal dot segment");at=next+1;}
+        return {scheme+"://"+authority,path};
+    }
     return {scheme+"://"+authority,normalize_path(path,source,context,limit)};
 }
 static std::string server_url(const Operation& operation,const Settings& settings,Context& context){
-    if(settings.server_url){auto url=absolute_url(*settings.server_url,operation.source,context,settings.max_request_bytes);return url.authority+url.path;}
+    if(settings.server_url){auto url=absolute_url(*settings.server_url,operation.source,context,settings.max_request_bytes,settings.allow_insecure_http?UrlRole::Server:UrlRole::Override);return url.authority+url.path;}
     if(settings.server_index>=operation.servers.size())http_fail(SdkError::Kind::Configuration,operation.source,"selected server is not declared");
     const auto& server=operation.servers[settings.server_index];
     for(const auto& [key,value]:settings.variables){(void)value;if(std::none_of(server.variables.begin(),server.variables.end(),[&](const auto& variable){return variable.name==key;}))http_fail(SdkError::Kind::Configuration,server.source,"unknown server variable");}
@@ -204,10 +216,10 @@ static std::string server_url(const Operation& operation,const Settings& setting
     if(expanded.substr(0,expanded.find('/')).find(':')!=std::string::npos)http_fail(SdkError::Kind::RequestRepresentation,server.source,"HTTP server requires an authority or a relative URL reference");
     std::string_view document=settings.document_url?*settings.document_url:server.document_url;
     document=document.substr(0,document.find_first_of("?#"));
-    auto base=absolute_url(document,server.source,context,settings.max_request_bytes);
-    if(expanded.starts_with("//")){auto scheme=base.authority.substr(0,base.authority.find(':'));auto url=absolute_url(scheme+":"+expanded,server.source,context,settings.max_request_bytes);return url.authority+url.path;}
+    auto base=absolute_url(document,server.source,context,settings.max_request_bytes,UrlRole::Document);
+    if(expanded.starts_with("//")){auto scheme=base.authority.substr(0,base.authority.find(':'));auto url=absolute_url(scheme+":"+expanded,server.source,context,settings.max_request_bytes,UrlRole::Resolved);return url.authority+url.path;}
     auto path=expanded.starts_with('/')?expanded:base.path.substr(0,base.path.rfind('/')+1)+expanded;
-    auto url=absolute_url(base.authority+path,server.source,context,settings.max_request_bytes);return url.authority+url.path;
+    auto url=absolute_url(base.authority+path,server.source,context,settings.max_request_bytes,UrlRole::Resolved);return url.authority+url.path;
 }
 static bool bearer(std::string_view token){if(token.size()>8192)return false;while(!token.empty()&&token.back()=='=')token.remove_suffix(1);if(token.empty())return false;for(unsigned char c:token)if(!unreserved(c)&&c!='+'&&c!='/')return false;return true;}
 static std::string base64(std::string_view bytes){static constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";std::string out;

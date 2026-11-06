@@ -250,6 +250,7 @@ fn symbols(plan: &HttpPlan) -> Vec<Symbol> {
             &[
                 "Transport",
                 "ServerURL",
+                "AllowInsecureHTTP",
                 "MaxResponseBytes",
                 "MaxCaptureBytes",
                 "Timeout",

@@ -61,17 +61,28 @@ fn collector_unit_and_adversarial_evidence_checks() {
 #[test]
 #[ignore = "requires verify-sdk's immutable twelve-target packages, installed native consumers, explicit identities, fresh output and all declared tools"]
 fn native_build_import_codec_request_costs() {
-    for key in [
+    const INPUTS: [&str; 6] = [
         "SUSPECT_SDK_FULL_PACKAGES",
         "SUSPECT_SDK_FULL_NATIVE_ROOT",
         "SUSPECT_SDK_FULL_TARGETS",
         "SUSPECT_SDK_FULL_SOURCE_SHA256",
         "SUSPECT_SDK_FULL_BINARY_SHA256",
         "SUSPECT_SDK_FULL_MEASUREMENTS",
-    ] {
+    ];
+    let set = |key: &str| std::env::var_os(key).is_some_and(|value| !value.is_empty());
+    // `cargo xtask sdk-full` supplies every input; a plain `--ignored` run of
+    // the shared group supplies none and skips. A partial set is a broken
+    // driver and fails.
+    if !INPUTS.iter().any(|key| set(key)) {
+        eprintln!(
+            "skipping: run through `cargo xtask sdk-full`, which supplies the measured packages"
+        );
+        return;
+    }
+    for key in INPUTS {
         assert!(
-            std::env::var_os(key).is_some_and(|value| !value.is_empty()),
-            "{key} is required when native_build_import_codec_request_costs is explicitly run"
+            set(key),
+            "{key} is required when the sdk-full measurement inputs are supplied"
         );
     }
     let status = Command::new(python().unwrap_or_else(|skip| panic!("{skip}")))

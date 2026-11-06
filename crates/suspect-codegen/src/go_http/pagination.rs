@@ -91,25 +91,39 @@ pub struct PaginationOperation {
     pub pagination: protocol::OperationPagination,
     /// The client method this walk extends, e.g. `ListWidgets`.
     pub method: String,
+    /// The operation's exported input struct name.
     pub input_type: String,
+    /// The operation's exported exact-status success payload type.
     pub success_type: String,
     /// Concrete success response wrapper the walk reads.
     pub response: String,
-    /// Allocated walk entry points and iterator types.
+    /// Allocated `<Method>Pages` page-walk method name.
     pub pages: String,
+    /// Allocated `<Method>Items` item-walk method name, present exactly when an
+    /// items pointer resolves.
     pub items: Option<String>,
+    /// Allocated `<Method>NextPage` next-input builder name.
     pub next_page: String,
+    /// Allocated `<Method>PageIterator` type name.
     pub page_iterator: String,
+    /// Allocated `<Method>ItemIterator` type name, present exactly with `items`.
     pub item_iterator: Option<String>,
     /// Request controls by role.
     pub controls: BTreeMap<PaginationRequestRole, Control>,
     /// The control the continuation writes between pages.
     pub continuation_control: Control,
+    /// How the walk rebuilds its input between pages.
     pub advance: EmittedAdvance,
+    /// Mapped first offset or page number, written when the caller leaves an
+    /// optional continuation control unset.
     pub initial_offset: Option<u32>,
+    /// Reader of the mapped items pointer, when it resolves.
     pub items_accessor: Option<Accessor>,
+    /// Reader of the mapped next-cursor pointer, when it resolves.
     pub cursor_accessor: Option<Accessor>,
+    /// Reader of the mapped next-offset pointer, when it resolves.
     pub offset_accessor: Option<Accessor>,
+    /// Reader of the mapped has-more pointer, when it resolves.
     pub has_more_accessor: Option<Accessor>,
 }
 
@@ -120,6 +134,7 @@ pub struct PaginationPlan {
     pub outcome: protocol::PaginationOutcome,
     /// Allocated typed pagination error, present only when helpers are emitted.
     pub error_type: Option<String>,
+    /// Paginated operations that emit walk helpers.
     pub operations: Vec<PaginationOperation>,
 }
 

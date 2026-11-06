@@ -1,5 +1,5 @@
 //! Bounded source-policy, native environment snapshot and installed OpenRouter checks.
-use super::validation_tests::{Native, write};
+use super::validation_tests::{Native, dotnet_available, write};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -111,6 +111,9 @@ fn package(native: &Native, plan: &super::SdkPlan, consumer: &str) {
 #[test]
 #[ignore = "bounded installed .NET8/10 environment snapshot, explicit credentials and auth alternatives"]
 fn native_environment_credentials() {
+    if !dotnet_available() {
+        return;
+    }
     let root = directory("native-");
     let plan = plan(Some(policy()));
     let mut consumer = include_str!("testdata/CredentialEnvironmentConsumer.cs").to_owned();
@@ -136,6 +139,9 @@ fn native_environment_credentials() {
 #[test]
 #[ignore = "actual OpenRouter getCurrentKey/getCredits schemas and source-default HTTPS through controlled .NET8/10 handlers"]
 fn native_openrouter_environment_client() {
+    if !dotnet_available() {
+        return;
+    }
     let root = directory("openrouter-");
     let corpus = crate::test_inputs::openrouter_root();
     let path = corpus.join("projects/docs/openapi/openapi.yaml");

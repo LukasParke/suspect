@@ -36,12 +36,17 @@ pub enum Payload {
     /// No declared request body: the decoder validates headers and returns void.
     None,
     /// JSON through the package's own compiled model codec.
-    Json { codec: String },
+    Json {
+        /// Generated codec value name.
+        codec: String,
+    },
     /// Schema-free JSON: the decoded value is the parsed JSON value.
     SchemaFreeJson,
     /// Declared text: scalar wire conversion, optionally through a codec.
     Text {
+        /// Scalar kind: `string`, `boolean`, `integer` or `number`.
         scalar: &'static str,
+        /// Generated codec value name, when the text is schema-bound.
         codec: Option<String>,
     },
     /// Opaque declared bytes, passed through unchanged.
@@ -65,7 +70,10 @@ impl Payload {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConstructedBody {
     /// JSON through the package's own compiled model codec.
-    Json { codec: String },
+    Json {
+        /// Generated codec value name.
+        codec: String,
+    },
     /// Schema-free JSON: the reply value is encoded as the JSON value.
     SchemaFreeJson,
     /// Opaque declared bytes, passed through unchanged.
@@ -76,12 +84,15 @@ pub enum ConstructedBody {
 /// 2xx response.
 #[derive(Debug, Clone)]
 pub struct ConstructedResponse {
+    /// Exact 2xx status code.
     pub status: u16,
+    /// Reply body encoding; `None` for a body-less reply.
     pub body: Option<ConstructedBody>,
     /// The result parameter's exact native type.
     pub result_type: String,
     /// Declared reply header wire names, in declaration order.
     pub headers: Vec<String>,
+    /// Required reply header wire names, presence-checked by the constructor.
     pub required_headers: Vec<String>,
 }
 
@@ -91,10 +102,13 @@ pub struct ConstructedResponse {
 pub struct Receipt {
     /// Webhook key, or `parentOperationId.callbackName`.
     pub name: String,
+    /// `webhook` or `callback`.
     pub kind: &'static str,
     /// The verb the provider sends.
     pub method: String,
+    /// Declared receipt route, carried verbatim.
     pub route: String,
+    /// Whether `route` is a runtime expression (`{$request...}`).
     pub expression: bool,
     /// Source location for documentation.
     pub location: String,
@@ -104,12 +118,19 @@ pub struct Receipt {
     pub payload_annotation: String,
     /// The route constant's allocated name.
     pub route_const: String,
+    /// The `decode*Webhook` function's allocated name.
     pub decode: String,
-    pub construct: Option<String>,
+    /// The `construct*Response` function's allocated name.
+    pub construct: String,
+    /// How the received body is decoded.
     pub payload: Payload,
+    /// Whether the declared request body is required.
     pub required_body: bool,
+    /// Required request header wire names, presence-checked by the decoder.
     pub required_headers: Vec<String>,
+    /// The constructed reply; `None` when no exact 2xx response is declared.
     pub response: Option<ConstructedResponse>,
+    /// Planner and v1-helper notes emitted as documentation.
     pub explanations: Vec<String>,
 }
 
@@ -119,6 +140,7 @@ pub struct Receipt {
 pub struct Prepared {
     /// The allocated exception class name, usually `IncomingException`.
     pub exception_type: String,
+    /// One receipt per compiled incoming operation, in plan order.
     pub receipts: Vec<Receipt>,
 }
 
@@ -351,7 +373,7 @@ pub(super) fn prepare(
             payload_annotation,
             route_const,
             decode,
-            construct: Some(construct),
+            construct,
             payload,
             required_body: operation
                 .request()
@@ -550,9 +572,7 @@ fn decoder(receipt: &Receipt, exceptions: &str) -> String {
 
 /// One receipt's reply constructor, when an exact 2xx response is declared.
 fn constructor(receipt: &Receipt, response: &ConstructedResponse, exceptions: &str) -> String {
-    let Some(construct) = &receipt.construct else {
-        return String::new();
-    };
+    let construct = &receipt.construct;
     let has_body = response.body.is_some();
     let has_headers = !response.headers.is_empty();
     let mut code = String::new();

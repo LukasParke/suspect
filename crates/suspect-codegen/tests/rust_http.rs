@@ -113,7 +113,7 @@ fn native(plan: &HttpPlan, source: &str) {
             vec!["--no-deps", "--features", "http"],
         ),
     ] {
-        let mut command = Command::new("cargo");
+        let mut command = suspect_codegen::toolchain::nested_cargo();
         command
             .args([mode, "--offline", "--quiet", "--manifest-path"])
             .arg(package.join("Cargo.toml"))

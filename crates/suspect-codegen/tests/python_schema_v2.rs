@@ -16,6 +16,8 @@ use suspect_ref::WorkspaceBuilder;
 use suspect_schema::OwnedProgram;
 use suspect_source::Uri;
 
+use crate::python_support;
+
 const IMPORT: &str = "scoped_python_sdk";
 
 fn root(label: &str) -> PathBuf {
@@ -193,10 +195,6 @@ fn scoped_python_http_plan_preserves_carriers_examples_and_typed_capture() {
     println!("Scoped Python SDK plan: {}", root.display());
 }
 
-fn tools() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-native-python-tools/bin/python")
-}
-
 fn checked(command: &mut Command, root: &Path, label: &str) {
     let output = command
         .env("PYTHONDONTWRITEBYTECODE", "1")
@@ -216,6 +214,24 @@ fn checked(command: &mut Command, root: &Path, label: &str) {
 #[test]
 #[ignore = "requires Python 3.11/3.14, uv and cached wheel/mypy/Sphinx dependencies"]
 fn installed_scoped_python_sdk_operations_mutations_examples_types_and_sphinx() {
+    let tiers =
+        std::env::var("SUSPECT_PYTHON_SCOPED_VERSIONS").unwrap_or_else(|_| "3.11,3.14".into());
+    let versions = tiers.split(',').collect::<Vec<_>>();
+    assert!(
+        versions
+            .iter()
+            .all(|version| matches!(*version, "3.11" | "3.14"))
+    );
+    let (Some(tools), Some(uv), Some(interpreters)) = (
+        python_support::tools(),
+        python_support::uv(),
+        versions
+            .iter()
+            .map(|version| python_support::pinned(version))
+            .collect::<Option<Vec<_>>>(),
+    ) else {
+        return;
+    };
     let root = root("sdk-native");
     let (plan, files) = emit(&root);
     let package = root.join("generated/python");
@@ -246,7 +262,7 @@ fn installed_scoped_python_sdk_operations_mutations_examples_types_and_sphinx() 
         fs::write(snippets.join(format!("snippet_{index}.py")), code).unwrap();
     }
     checked(
-        Command::new(tools())
+        Command::new(&tools)
             .args(["-m", "build", "--wheel", "--no-isolation"])
             .current_dir(&package),
         &root,
@@ -257,26 +273,19 @@ fn installed_scoped_python_sdk_operations_mutations_examples_types_and_sphinx() 
         .map(|entry| entry.unwrap().path())
         .find(|path| path.extension().is_some_and(|ext| ext == "whl"))
         .unwrap();
-    let tiers =
-        std::env::var("SUSPECT_PYTHON_SCOPED_VERSIONS").unwrap_or_else(|_| "3.11,3.14".into());
-    let versions = tiers.split(',').collect::<Vec<_>>();
-    assert!(
-        versions
-            .iter()
-            .all(|version| matches!(*version, "3.11" | "3.14"))
-    );
-    for &version in &versions {
+    for (&version, interpreter) in versions.iter().zip(&interpreters) {
         let environment = root.join(format!("venv-{version}"));
         checked(
-            Command::new("uv")
-                .args(["venv", "--offline", "--python", version])
+            Command::new(&uv)
+                .args(["venv", "--offline", "--python"])
+                .arg(interpreter)
                 .arg(&environment),
             &root,
             &format!("venv-{version}"),
         );
         let python = environment.join("bin/python");
         checked(
-            Command::new("uv")
+            Command::new(&uv)
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&python)
                 .arg(&wheel)
@@ -290,7 +299,7 @@ fn installed_scoped_python_sdk_operations_mutations_examples_types_and_sphinx() 
             &format!("native-{version}"),
         );
         checked(
-            Command::new(tools())
+            Command::new(&tools)
                 .args([
                     "-m",
                     "mypy",
@@ -310,7 +319,7 @@ fn installed_scoped_python_sdk_operations_mutations_examples_types_and_sphinx() 
             &format!("mypy-{version}"),
         );
         checked(
-            Command::new(tools())
+            Command::new(&tools)
                 .args([
                     "-m",
                     "mypy",
@@ -327,7 +336,7 @@ fn installed_scoped_python_sdk_operations_mutations_examples_types_and_sphinx() 
             &root,
             &format!("package-mypy-{version}"),
         );
-        let negative = Command::new(tools())
+        let negative = Command::new(&tools)
             .args([
                 "-m",
                 "mypy",

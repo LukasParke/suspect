@@ -4,7 +4,6 @@
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -261,10 +260,6 @@ paths:
         "the JSON report carries the mismatches: {parsed}"
     );
 }
-
-/// Silence the unused warning when Path is only used in cfg(unix) tests.
-#[allow(dead_code)]
-fn _path_used(_: &Path) {}
 
 #[test]
 fn bridge_emits_regeneration_plans_when_the_spec_changes() {

@@ -544,16 +544,14 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("Tests/Vectors/Vectors.swift"), tests).unwrap();
         std::fs::write(root.join("Package.swift"),"// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(name: \"PortableValidation\", targets: [.target(name: \"PortableValidation\", swiftSettings: [.swiftLanguageMode(.v6)]), .testTarget(name: \"Vectors\", dependencies: [\"PortableValidation\"], swiftSettings: [.swiftLanguageMode(.v6)])])\n").unwrap();
-        let swift =
-            std::env::var_os("SUSPECT_SWIFT_BIN").unwrap_or_else(|| "/usr/bin/swift".into());
-        let swiftc = std::env::var_os("SUSPECT_SWIFTC_BIN")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| std::path::PathBuf::from(&swift).with_file_name("swiftc"));
+        let swift = crate::toolchain::require("swift");
+        let swiftc =
+            crate::toolchain::swift_tool("swiftc").expect("the Swift toolchain has no swiftc");
         let mut command = Command::new(swift);
         command
             .args(["test", "--disable-swift-testing"])
             .env("SWIFT_EXEC", swiftc);
-        if let Some(sdk) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+        if let Some(sdk) = crate::toolchain::swift_sdk_root() {
             command.arg("--sdk").arg(&sdk).env("SDKROOT", sdk);
         }
         let output = command

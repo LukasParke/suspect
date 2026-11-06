@@ -20,7 +20,7 @@ use suspect_source::Uri;
 const IMPORT: &str = "credential_python_sdk";
 // Captured after the split documentation emission (docs/api/*.rst and
 // docs/operations/*.rst pages replace the single-page api/operations bodies).
-const NO_POLICY_SHA256: &str = "ce899150ba3083146f3662848e40eeec3979e7b68201c21c63dae70d1a7f7dc0";
+const NO_POLICY_SHA256: &str = "b68bc1e74ee4badb3a64c417dc4eb22b5d31a74618d27ea683344f7da858d59c";
 
 fn root(label: &str) -> PathBuf {
     tempfile::Builder::new()

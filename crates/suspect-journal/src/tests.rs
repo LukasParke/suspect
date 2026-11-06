@@ -379,3 +379,75 @@ fn cassette_rejects_zero_version_and_out_of_range_entry_values() {
     bad_duration["duration_ms"] = serde_json::Value::Null;
     assert!(read_cassette(cassette_with_entries(&[bad_duration]).as_slice()).is_err());
 }
+
+#[test]
+fn secret_names_match_by_normalized_suffix_not_substring() {
+    let r = Redactor::default();
+    for secret in [
+        "access_token",
+        "X-Auth-Token",
+        "client_secret",
+        "apiKey",
+        "x-api-key",
+        "password",
+    ] {
+        assert!(r.is_secret_name(secret), "{secret} must be redacted");
+    }
+    // Model-serving payloads are full of token counts; they are not secrets.
+    for public in [
+        "max_tokens",
+        "prompt_tokens",
+        "token_type",
+        "secretary_name",
+    ] {
+        assert!(!r.is_secret_name(public), "{public} must be kept");
+    }
+}
+
+#[test]
+fn urls_lose_query_secrets_and_userinfo_passwords() {
+    let r = Redactor::new();
+    assert_eq!(
+        r.url(
+            "https://u:hunter2@api.example.com/v1/chat?api_key=abc&model=gpt&access_token=x#frag"
+        ),
+        "https://u:[redacted]@api.example.com/v1/chat?api_key=[redacted]&model=gpt&access_token=[redacted]#frag"
+    );
+    assert_eq!(
+        r.url("https://api.example.com/v1?q=1"),
+        "https://api.example.com/v1?q=1"
+    );
+    assert_eq!(
+        r.url("https://api.example.com/v1?api%5Fkey=s"),
+        "https://api.example.com/v1?api%5Fkey=[redacted]"
+    );
+}
+
+#[test]
+fn journal_traffic_records_have_redacted_urls_and_sequence_ids() {
+    let sink = VecSink::default();
+    let mut journal = crate::Journal::new(Box::new(sink.clone()));
+    for _ in 0..2 {
+        journal.traffic(TrafficRecord {
+            ts_ms: 0,
+            id: 0,
+            correlation: "c".into(),
+            method: "GET".into(),
+            url: "https://h/x?token=t".into(),
+            status: Some(200),
+            request_headers: vec![("Authorization".into(), "Bearer t".into())],
+            response_headers: vec![],
+            duration_ms: 1.0,
+            verdict: Verdict::Pass,
+        });
+    }
+    let records: Vec<serde_json::Value> = sink
+        .lines()
+        .iter()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(records[0]["id"], 0);
+    assert_eq!(records[1]["id"], 1);
+    assert_eq!(records[0]["url"], "https://h/x?token=[redacted]");
+    assert_eq!(records[0]["request_headers"][0][1], REDACTED);
+}

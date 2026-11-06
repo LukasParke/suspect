@@ -206,13 +206,20 @@ pub(super) fn package(plan: &HttpPlan, package: &PackageConfig) -> Vec<OutFile> 
     // with an executable (non-deprecated) flow; plans without one emit no
     // new file and keep their pre-OAuth bytes.
     if let Some(oauth) = plan.oauth()
-        && super::oauth::emittable(oauth)
+        && oauth.emits()
     {
         files.insert(
             format!("{prefix}_oauth.py"),
             super::oauth::runtime(
                 oauth,
-                &super::oauth::no_replay_requirements(oauth, plan.operations()),
+                &crate::http_protocol::oauth_no_replay_requirements(
+                    plan.operations().iter().map(|operation| &operation.wire),
+                    &oauth
+                        .schemes
+                        .iter()
+                        .map(|scheme| scheme.name.as_str())
+                        .collect(),
+                ),
             ),
         );
     }

@@ -63,8 +63,8 @@ const EXTENDED_LABEL: &str = "extd";
 /// property (≤64 B, the TypeScript slack) does NOT hold for Swift; this gate
 /// records the measured defeat: the unrelated operation costs 64–128 KB in
 /// every consumer artifact. If an emitter/toolchain change ever achieves
-/// link-level elimination, this assertion fails loudly and forces an audit
-/// update.
+/// link-level elimination, this assertion fails loudly and forces the pin
+/// to be re-measured.
 const MEASURED_GROWTH_FLOOR_BYTES: u64 = 64_000;
 const MEASURED_GROWTH_CEILING_BYTES: u64 = 128_000;
 
@@ -308,21 +308,18 @@ const MARKER_OTHER_OPERATIONS: &[&str] = &[
 ];
 
 fn swift() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/usr/bin/swift".into())
+    suspect_codegen::toolchain::resolve_path("swift")
+        .expect("gated by toolchain::require(\"swift\")")
 }
 
 fn swift_compiler() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFTC_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| swift().with_file_name("swiftc"))
+    suspect_codegen::toolchain::swift_tool("swiftc").expect("the Swift toolchain has no swiftc")
 }
 
 fn swift_command(action: &str) -> Command {
     let mut command = Command::new(swift());
     command.arg(action).env("SWIFT_EXEC", swift_compiler());
-    if let Some(sdk) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+    if let Some(sdk) = suspect_codegen::toolchain::swift_sdk_root() {
         command.arg("--sdk").arg(&sdk).env("SDKROOT", sdk);
     }
     command
@@ -489,6 +486,9 @@ fn write_report(report: &Value) {
 #[test]
 fn swift_consumers_eliminate_unrelated_operations() {
     let _gate = NATIVE_GATE.lock().unwrap();
+    if !suspect_codegen::toolchain::require("swift").exists() {
+        return;
+    }
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-swift-elimination");
     std::fs::create_dir_all(&root).unwrap();
 
@@ -542,7 +542,16 @@ fn swift_consumers_eliminate_unrelated_operations() {
         &base_root,
         &CODEC_ONLY_CONSUMER,
         "release",
-        &["-Xlinker", "-dead_strip"],
+        &[
+            "-Xlinker",
+            // Darwin ld64 spells the pass `-dead_strip`; GNU ld / lld on
+            // Linux `--gc-sections`.
+            if cfg!(target_os = "macos") {
+                "-dead_strip"
+            } else {
+                "--gc-sections"
+            },
+        ],
     );
     println!(
         "release codec-only with -Xlinker -dead_strip: {dead_strip_bytes} B, {dead_strip_symbols} nm symbols, listWidgets={}",
@@ -589,8 +598,13 @@ fn swift_consumers_eliminate_unrelated_operations() {
             }
             let delta =
                 extended["binary_bytes"].as_u64().unwrap() - base["binary_bytes"].as_u64().unwrap();
+            // The growth range is the Darwin (Mach-O, ld64) measurement; ELF
+            // builds retain the operation too (asserted above) but by a
+            // different byte count.
             assert!(
-                (MEASURED_GROWTH_FLOOR_BYTES..=MEASURED_GROWTH_CEILING_BYTES).contains(&delta),
+                !cfg!(target_os = "macos")
+                    || (MEASURED_GROWTH_FLOOR_BYTES..=MEASURED_GROWTH_CEILING_BYTES)
+                        .contains(&delta),
                 "{}/{configuration}: the unrelated operation moved the artifact by {delta} B; update docs/design/elimination-audit.md with the new measurement",
                 consumer.label
             );

@@ -674,7 +674,12 @@ fn client_answer(method: &str, params: &serde_json::Value) -> serde_json::Value 
 /// A `file://` URI for a path, as an editor would send.
 #[must_use]
 pub fn url_of(path: &Path) -> String {
-    format!("file://{}", path.display())
+    // `file://` + `display()` is not a URI on Windows (`C:\…`, or the
+    // `\\?\C:\…` form `canonicalize` returns); build a real one.
+    suspect_source::Uri::from_path(path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+        .as_str()
+        .to_owned()
 }
 
 /// The language id VS Code assigns by extension.

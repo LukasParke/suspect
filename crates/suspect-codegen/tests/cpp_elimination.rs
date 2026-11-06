@@ -14,7 +14,7 @@
 //!   codec pair (`decode_4`/`encode_4`), never touching the client.
 //! - `release`: plain CMake Release.
 //! - `dead-strip`: Release plus `-ffunction-sections -fdata-sections` and the
-//!   Darwin linker `-dead_strip` pass — the mechanism the emitted package's
+//!   linker's dead-section pass (Darwin `-dead_strip`, GNU `--gc-sections`) — the mechanism the emitted package's
 //!   audit entry claims.
 //!
 //! Static-library member granularity plus function-section dead stripping can
@@ -504,7 +504,13 @@ fn cpp_consumers_eliminate_unrelated_operations() {
     const PLAIN_FLAGS: &[&str] = &[];
     const DEAD_STRIP_FLAGS: &[&str] = &[
         "-DCMAKE_CXX_FLAGS=-ffunction-sections -fdata-sections",
-        "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-dead_strip",
+        // The platform linker's unreferenced-section pass: Darwin ld64
+        // spells it `-dead_strip`, GNU ld / lld `--gc-sections`.
+        if cfg!(target_os = "macos") {
+            "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-dead_strip"
+        } else {
+            "-DCMAKE_EXE_LINKER_FLAGS=-Wl,--gc-sections"
+        },
     ];
 
     let mut measurements = BTreeMap::new();
@@ -572,7 +578,11 @@ fn cpp_consumers_eliminate_unrelated_operations() {
                     base["markers"][MARKER_OWN_OPERATION].as_bool().unwrap(),
                     "{configuration}: the referenced operation's symbols must survive in the one-operation consumer"
                 );
-                if configuration == "dead-strip" {
+                if !cfg!(target_os = "macos") {
+                    // The exact elimination profile below is the Darwin
+                    // (ld64) measurement in docs/design/elimination-audit.md;
+                    // other linkers are recorded, not asserted.
+                } else if configuration == "dead-strip" {
                     // Measured code elimination: with function sections and
                     // linker dead stripping, every unreferenced operation's code
                     // sheds — including the unrelated operation's own symbols.

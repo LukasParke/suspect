@@ -134,6 +134,40 @@ fn no_policy_output_bytes_are_preserved() {
         // (final-field initialization), which this IO asset also contains.
         Some("04bd75a2e2f31d1e40cc25ca4a5401076b9899a755509acdc5fdb91fd161c58f".into())
     );
+    // The shared transport runtime validates response framing (Content-Length
+    // / Transfer-Encoding) before media selection; only this asset changes.
+    assert_eq!(
+        expected.insert(
+            "dart/lib/src/transport.dart".into(),
+            "d868f12f7cc6141a876f9fdeccba47f9f0e81797b9f82db13b3f80d6fcb4514a".into()
+        ),
+        Some("9fc65305de06159b00cf04bd2328fdbe7ee70ca7f62cc2ecd5300cb07156809e".into())
+    );
+    // The README states how OpenAPI 3.0 sources are lowered (they are now
+    // admitted) instead of listing 3.0 among the refused inputs.
+    assert_eq!(
+        expected.insert(
+            "dart/README.md".into(),
+            "dc24243c74f1115ffcdf2a4d00566c80412c4fb16b8d625d81f3316552fa4895".into()
+        ),
+        Some("70899b25d02b895ac9f65f11f4dbec93b66cfc760b3b128c52403ff3d60cae91".into())
+    );
+    // auth.dart and client.dart apply the ADR 0035 server URL policy (override
+    // loopback/allowInsecureHttp opt-in, literal dot refusal).
+    assert_eq!(
+        expected.insert(
+            "dart/lib/src/auth.dart".into(),
+            "86ea3bc5c3fc1c5cfbce3ec319d53e9bb3fecb67dd5e53e9ecc31646fbd46236".into()
+        ),
+        Some("2fa2065c1e0ef6280f9336d64e35f125dce10436b278ce36c0939ef398c39ff3".into())
+    );
+    assert_eq!(
+        expected.insert(
+            "dart/lib/src/client.dart".into(),
+            "2741ad1ea7a17f7695763c3f9dc426b4d6cbdad36ed05530caa9aa7c0d89d3c4".into()
+        ),
+        Some("5d2c75a029ec03f184227336804dc4d77230cad2c6655ca0951fe9b8cd91f74a".into())
+    );
     assert_eq!(hashes, expected);
     if let Some(path) = std::env::var_os("SUSPECT_DART_ENV_RECORD_NO_POLICY") {
         let path = PathBuf::from(path);
@@ -360,6 +394,7 @@ fn installed(root: &Path, p: &dart_sdk::Plan) {
 #[test]
 #[ignore = "actual SDK HTTPS, trust/hostname rejection and cancellation; local fixture credentials only"]
 fn native_transport_uses_verified_https() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("transport-tls-");
     let c = contract(&document(), "https://credential.example/tls-control.json");
     let selected = c
@@ -412,6 +447,7 @@ fn native_transport_uses_verified_https() {
 #[test]
 #[ignore = "focused real SDK HttpClient authority-header regression; loopback only"]
 fn native_transport_preserves_required_host_header() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("transport-host-");
     let server = support::Server::start(|stream, request, url| {
         let authority = url.strip_prefix("http://").unwrap();
@@ -463,6 +499,7 @@ fn native_transport_preserves_required_host_header() {
 #[test]
 #[ignore = "configured installed VM/JS/browser credential-env controls on Dart floor/current"]
 fn native_credential_env_controls() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("credential-env-controls-");
     let p = plan(
         contract(&document(), "https://credential.example/openapi.json"),
@@ -582,6 +619,7 @@ fn native_credential_env_controls() {
 #[test]
 #[ignore = "targeted installed credential constructor null/type compatibility on VM/JS; separate browser receipt"]
 fn native_credential_env_constructor_compatibility() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("credential-env-constructor-");
     let p = plan(
         contract(&document(), "https://credential.example/openapi.json"),
@@ -683,6 +721,7 @@ fn native_credential_env_constructor_compatibility() {
 #[test]
 #[ignore = "actual OpenRouter getCurrentKey/getCredits source with installed runtime env and source-default HTTPS capture"]
 fn native_openrouter_credential_env() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("credential-env-openrouter-");
     let checkout = suspect_codegen::test_inputs::openrouter_root();
     let path = checkout.join("projects/docs/openapi/openapi.yaml");

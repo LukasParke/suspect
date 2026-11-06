@@ -66,7 +66,8 @@ type BlessTest = (
 );
 const BLESS_TESTS: &[BlessTest] = &[
     ("suspect-cli", "reference_docs", &[]),
-    ("suspect-codegen", "feature_manifest", &[]),
+    // `feature_manifest` lives in the grouped `shared` test binary.
+    ("suspect-codegen", "shared", &[]),
     ("suspect-config", "json_schema", &[]),
     ("suspect-cli", "finding_output", &[]),
     ("suspect-cli", "lsp_diagnostics_golden", &[]),
@@ -846,20 +847,17 @@ fn yaml_node(node: &Node, indent: usize) -> String {
         Node::Seq(items) => {
             let mut out = String::new();
             for item in items {
-                match item {
-                    item if let Some(s) = yaml_scalar(item) => {
-                        out.push_str(&format!("{pad}- {s}\n"));
-                    }
-                    _ => {
-                        let compact = json_compact(item);
-                        if compact.len() <= FLOW_MAX_BYTES {
-                            out.push_str(&format!("{pad}- {compact}\n"));
-                        } else {
-                            // Render the child at indent+1 and splice `- ` onto
-                            // its first line; later lines keep indent+1 spaces.
-                            let inner = yaml_node(item, indent + 1);
-                            out.push_str(&format!("{pad}- {}", &inner[indent * 2 + 2..]));
-                        }
+                if let Some(s) = yaml_scalar(item) {
+                    out.push_str(&format!("{pad}- {s}\n"));
+                } else {
+                    let compact = json_compact(item);
+                    if compact.len() <= FLOW_MAX_BYTES {
+                        out.push_str(&format!("{pad}- {compact}\n"));
+                    } else {
+                        // Render the child at indent+1 and splice `- ` onto
+                        // its first line; later lines keep indent+1 spaces.
+                        let inner = yaml_node(item, indent + 1);
+                        out.push_str(&format!("{pad}- {}", &inner[indent * 2 + 2..]));
                     }
                 }
             }
@@ -1110,8 +1108,15 @@ mod tests {
     fn every_bless_test_target_exists() {
         let root = repo_root();
         for (package, test, _) in BLESS_TESTS {
+            // A test target is one file, or a grouped binary under
+            // `tests/groups/` (suspect-codegen).
             let path = root.join(format!("crates/{package}/tests/{test}.rs"));
-            assert!(path.is_file(), "bless test {} is missing", path.display());
+            let grouped = root.join(format!("crates/{package}/tests/groups/{test}.rs"));
+            assert!(
+                path.is_file() || grouped.is_file(),
+                "bless test {} is missing",
+                path.display()
+            );
         }
     }
 

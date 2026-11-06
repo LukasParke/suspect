@@ -5,12 +5,11 @@ PHP 8.3+ with typed mutable models, string enums, explicit omission, exact JSON
 numbers, checked codecs, typed media/part/header carriers and injectable buffered
 and pull-streaming HTTP adapters. Native tests
 exercise PHP **8.3.32 / 8.5.8**, Composer **2.10.3** and PHPStan **2.2.13** on
-macOS arm64. Tool origins and hashes are recorded in
-`target/sdk-php-tools/provenance.json`.
+macOS arm64.
 
 ## Generate and integrate
 
-The protocol backend uses the `php-sdk` and `http-protocol` features:
+The protocol backend uses the `php-sdk` feature:
 
 ```rust
 use suspect_codegen::php_sdk::{PhpConfig, plan_sdk};
@@ -128,15 +127,6 @@ clients. No `.env` file is loaded, and later environment edits affect new client
 only. Unconfigured packages retain their ordinary bytes and constructor behavior;
 factory names are reserved only when a policy is configured.
 
-The credential-env native receipt is sealed at
-`target/sdk-php-credential-env-20260911-01/native-receipt.json`: both PHP tiers passed
-the installed environment-control and real-source OpenRouter gates, including
-disabled `getenv`, explicit precedence and controlled source-default HTTPS calls.
-All 27 no-policy artifacts matched their pre-change bytes. The opened canonical
-generation/capture and policy-reversion check is recorded separately in
-`target/sdk-php-credential-env-canonical-20260911-01/report.json`; native matrices
-were reused for that host-only integration follow-up.
-
 ## Ordinary PHP calls
 
 These names are generated for the five tracked public OpenRouter operations.
@@ -170,8 +160,10 @@ echo $created->response->status, PHP_EOL; // source-declared 201
 
 `apiKey` is the **source scheme name**. Its declaration is HTTP bearer, producing
 `Authorization: Bearer …`. The client uses only explicit credentials. Management
-key guidance remains source prose; the SDK does not claim to verify key privileges
-or acquire/refresh credentials.
+key guidance remains source prose; the SDK does not claim to verify key privileges.
+It acquires or refreshes credentials only when an `sdk_defaults` OAuth policy opts
+in to the generated token lifecycle
+([SDK-GOLDEN-DEFAULTS.md](../../guide/sdk-generation.md)).
 
 No-required-input operations allow an omitted input. A sole success status returns
 its concrete wrapper directly; several successful statuses produce a native union.
@@ -203,7 +195,7 @@ $patch->toJson();                         // {}
 ```
 
 String enums are native PHP enums. Source-required single-value string tags are
-readonly properties initialized by the constructor: M2 uses
+readonly properties initialized by the constructor: the base fixture uses
 `new StandardPayload(text: 'plain')`, whose codec emits `kind: "standard"`.
 Other model fields are mutable. Every encoder validates the current model again,
 including nested values, integer constraints, extras, the chosen native union
@@ -324,7 +316,8 @@ The default adapter:
   decoding; generated work observes a cooperative `CancellationToken`.
 
 `ClientOptions` sets client-wide limits and an explicit server override (HTTPS or
-HTTP loopback fixtures), or a source `serverIndex`, `serverVariables` and relative
+HTTP loopback fixtures, or any plain HTTP host with `allowInsecureHttp: true`; declared
+servers keep their scheme, [ADR 0035](../../adr/0035-one-server-url-policy.md)), or a source `serverIndex`, `serverVariables` and relative
 `serverBaseUrl`. `RequestOptions` can lower timeout/response/capture limits and
 select a security alternative explicitly.
 Documented API statuses throw generated operation-specific subclasses of
@@ -344,8 +337,8 @@ default formatting omits payloads and causes.
 - Credential strings keep their bearer-token meaning. Other mechanisms use
   `BasicCredential`, `ApiKeyCredential`, `AuthorizationCredential`, or an
   OAuth/OIDC closure receiving `CredentialRequest` with operation, scheme,
-  permissions and immutable source metadata. Acquisition and refresh stay with
-  the caller. Conflicting source credential/parameter bindings are located
+  permissions and immutable source metadata. Without an `sdk_defaults` OAuth
+  policy, acquisition and refresh stay with the caller. Conflicting source credential/parameter bindings are located
   admission failures.
 - Relative/multiple/variable servers preserve source defaults, enums and selection
   order. Relative file fixtures need an explicit absolute base. Resolved relative
@@ -445,132 +438,30 @@ labeled. Source prose is inert in PHP comments/literals and escaped in HTML.
 | Schema numeric operands | OwnedProgram policy (4,096 bytes by default) |
 | Schema visits, equality, numeric work | Shared finite OwnedProgram-derived policy |
 
-The default protocol adapter supports the verified OpenAPI **3.1 / 3.2** surfaces
-above. OpenAPI 3.0, active directional model projections, unnamed operations,
+The default protocol adapter supports the verified OpenAPI **3.0 / 3.1 / 3.2**
+surfaces above. Active directional model projections (including OAS 3.0
+direction-dependent `required`), unnamed operations, cleartext `http://` servers,
 positional multipart, and ambiguous composite response form/part styles remain
-source refusals. Portable v3 resource/dynamic execution is separately verified. Native
-capabilities come from the PHP adapter; a versioned compatibility profile cannot
-enable unwitnessed native features.
+source refusals.
 
-## Reproduce native verification
+OAS 3.0 Schema Objects are lowered onto the same checked program and native
+models ([ADR 0016](../../adr/0016-closed-dialect-set.md)). `nullable: true` widens only
+a same-object `type` (`type: string, nullable: true` is `null|string`; a nullable
+object is `Owner|null`) and only when the complete schema still accepts null, so
+it cannot bypass an `enum` without `null`; without a same-object `type` it changes
+nothing (`JsonValue`). Boolean `exclusiveMinimum`/`exclusiveMaximum` make the
+adjacent bound exclusive. A Reference Object applies only its `$ref`: sibling
+`type`, `nullable`, `readOnly` or `description` neither shape nor document the
+carrier, and a `$ref` to a nullable schema is nullable through its target. 3.0
+`format: binary` octet bodies are `Bytes`. `OpenApi30` is recorded in
+`docs/protocol.json` only for sources that declare OAS 3.0, so 3.1/3.2 package
+bytes are unchanged. `php_sdk::composer_installed_oas30_native_package` installs
+and runs a PHPStan-checked consumer of
+`tests/fixtures/oas30/nullable-bounds-refs.openapi.yaml`. Portable v3 resource/dynamic execution is supported (below).
+Native capabilities come from the PHP adapter; a versioned compatibility profile
+cannot enable native features the adapter lacks.
 
-```sh
-SUSPECT_PHP_BIN=$PWD/target/sdk-php-tools/php-8.3.32/php \
-cargo test -p suspect-codegen --no-default-features \
-  --features php-sdk,http-protocol --test php_protocol -- \
-  --include-ignored --test-threads=1
-```
-
-Repeat with `php-8.5.8/php`. `SUSPECT_PHPSTAN_PHAR` can select the isolated PHPStan
-PHAR. Missing required tools/source fail these opt-in gates.
-
-Each advanced native case retains a new directory in `target/sdk-php-protocol/`, with emitted
-sources, Composer archives, a separate installed consumer, native logs and
-`commands.jsonl`. Installed source bytes are compared to the complete emitted
-artifact set. Independent advanced loopback records cover parameter styles,
-whole-query forms, standard/custom methods, auth, real bytes, request items and
-early stream close. The historical base evidence in `target/sdk-php-native/`
-covers M2 and the five original
-OpenRouter operations (`getCredits`, `createKeys`, `updateKeys`,
-`listContainerFiles`, `getContainerFile`). Additional gates exercise negative
-PHPStan cases, reflection/PHPDoc/reference links, source prose, all 17 shared
-OwnedProgram schemas, 10,000 independent exact-rational cases and hostile shared
-resource budgets. No generated file is manually repaired.
-
-### Preserved base checkpoint — 2026-09-10
-
-Both PHP **8.3.32** and **8.5.8** completed **10 tests: 10 passed, 0 failed,
-0 ignored**. Native execution also requires clean runtime diagnostics. The
-preserved report, tool hashes, owned-source archive, commands and artifact paths
-are in **`target/sdk-php-verified-20260910-02/report.json`**.
-
-| Installed package | Operations | Source-indexed codecs | Object constructors | Status wrappers | Validated native examples |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| M2 | 4 | 46 | 8 | 9 | 17 |
-| Five actual OpenRouter operations | 5 | 189 | 39 | 31 | 39 |
-
-Each package contains 21 emitted artifacts. The shared validation gate covers
-17 schemas / 81 independently specified instances; each runtime also executes
-10,000 independent rational arithmetic cases. The adversarial gate covers
-nullable collection PHPDoc, mutable union carriers, parent constraints,
-source-prose injection and all four presence states. Resource checks include
-nonproductive references, branch budgets and unvisited enum/uniqueness operands.
-
-Warnings-denied Rustdoc and owned-file formatting/whitespace checks pass.
-Warnings-denied Clippy encountered concurrent shared-file findings in
-`suspect-ir/src/contract/{shape,walk}.rs` and
-`suspect-codegen/src/generation_session.rs`; their original output is retained
-in the report and those files remain with the main integration owner.
-
-### Expanded protocol checkpoint — 2026-09-10
-
-PHP **8.3.32** and **8.5.8** each passed **9/9 advanced native gates** using the
-actual codegen crate with `php-sdk,http-protocol`. Every case was archived with
-Composer, installed into an independent consumer, checked with PHPStan max, and
-exercised through native PHP. The new report is
-**`target/sdk-php-advanced-20260910-01/report.json`**. The base report remains the
-evidence for the completed base/numeric matrices.
-
-The nine advanced gates cover:
-
-1. Explicit `LegacyBinaryStringV1` native byte identity and ordinary-profile refusal.
-2. Independent cURL auth/header/byte requests and stream connection release.
-3. Form/named-multipart request bytes, typed part headers and negative PHPStan cases.
-4. Parameter/media/status precedence, QUERY/custom/standard wire methods and no-body rules.
-5. Installed package, native types and injected protocol exchanges.
-6. Single-pass request iterables, independent SSE/JSON-lines wire bytes and finite preparation.
-7. Independent form/MIME response bytes, structural bounds and typed metadata.
-8. Anonymous/OR/AND auth, caller OAuth/OIDC metadata, roles, links and server choices.
-9. Split-byte item framing, UTF-8 behavior, early close, faults, cancellation and deadlines.
-
-All generated codec/client/quickstart examples executed. Reflection checked
-protocol constructors, native field types, generic PHPDoc, concrete API-error
-documentation and local reference links. The PHP integration checks additionally
-verify iterable direction, body/part/header descriptors and located v2 refusal.
-The original credential descriptor and namespace diagnostic regressions are fixed.
-Main's completed all-12-target `GenerationOptions` checks remain recorded in
-`target/sdk-full-options-integrations-01.log`.
-
-### Native validator v2 checkpoint — 2026-09-10
-
-New evidence is retained under
-**`target/sdk-php-validation-v2-verified-20260910-01/report.json`**. PHP **8.3.32**
-and **8.5.8** each passed the three native v2 gates:
-
-| Gate | Evidence |
-| --- | --- |
-| `native_v2_source_vectors` | All 32 maintained source fixtures compiled through `compile_v2`; exact Valid/Invalid/EvaluationFailure, source and instance paths; installed Composer corpus; PHPStan max |
-| `native_v2_scope_resource_controls` | 12 independent merge-cost, duplicate-candidate, key-identity, equality, recursion/depth and failure vectors; cooperative stop/reuse and released instance ownership |
-| `native_v2_sdk_packages_models_codecs` | Three real generated operations, typed mutable/constant fields, null versus omission, overlapping pattern extras, checked JSON/positional carriers, positive/negative consumers, native examples and reflection/reference checks |
-
-The regular `v1_program_bytes_and_unwitnessed_v3_are_preserved` check verifies
-byte equality for base programs/emission through `compile` versus `compile_v2`,
-version/profile guards, and an original-source `$dynamicRef` refusal. Completed
-base, numeric, HTTP and all-12-options matrices were reused rather than restarted.
-
-```sh
-SUSPECT_PHP_BIN=$PWD/target/sdk-php-tools/php-8.3.32/php \
-cargo test -p suspect-codegen --no-default-features \
-  --features php-sdk,http-protocol --lib php_sdk::tests_v2:: -- \
-  --include-ignored --test-threads=1
-```
-
-Use `php-8.5.8/php` for the current tier. `SUSPECT_COMPOSER_PHAR` and
-`SUSPECT_PHPSTAN_PHAR` override the verified default PHAR paths. Maintained gates
-load `crates/suspect-schema/tests/fixtures/owned-applicators-v2.json` directly;
-they have no dependency on a historical `target/` witness report.
-
-The separately focused
-`php_protocol::native_document_relative_servers_keep_physical_bases` gate passed
-on both PHP tiers before `DocumentRelativeServers` was enabled. It uses supplied
-requested/effective/logical document identities and two independent loopback
-origins, checking raw encoded targets, an external server's physical base,
-explicit empty server overrides, caller document-base/full-URL overrides and the
-OAuth/OIDC effective-server metadata base. Its fresh logs are
-`target/sdk-php-integration-checks/document-base-83-04.log` and
-`target/sdk-php-integration-checks/document-base-85-05.log`.
-
-### Native resource/dynamic v3 checkpoint — 2026-09-10
+### Resource/dynamic v3
 
 The existing `plan_sdk`, backend and standalone `emit_validation` entrypoints
 support the checked v3 pair
@@ -580,7 +471,7 @@ v2 admission, retaining ordinary v1/v2 envelopes, and uses explicit `compile_v3`
 for source resources/dynamic semantics. No new target configuration field or
 special public entrypoint is required.
 
-`SchemaResources` and `DynamicSchemaReferences` are enabled after native proof.
+`SchemaResources` and `DynamicSchemaReferences` are enabled.
 The runtime enters the node's indexed resource even for a nested entry, searches
 actually entered resources outermost first, and never enters the initial fallback
 before lookup. Pointer/empty/static-anchor fallbacks stay static. Unentered
@@ -597,26 +488,79 @@ the caller's resource context would be unsound. Model-only users must call the
 codec for their intended source root; a base model's own codec cannot replace a
 stricter resource's codec.
 
-New immutable evidence is under
-**`target/sdk-php-validation-v3-verified-20260910-01/report.json`**. The maintained
-`php_sdk::tests_v3` suite compiles unmodified source fixtures through `compile_v3`:
-
-| Gate | Evidence on PHP 8.3.32 and 8.5.8 |
-| --- | --- |
-| `native_v3_source_fixtures` | All 44 official dynamic-reference cases and original supplied remotes from `resource-conformance/`; installed Composer corpus and PHPStan max |
-| `native_v3_scope_resource_controls` | 19 independent outermost/unentered/nested-entry/fallback/context-cycle/visit/depth/failure controls, cancellation/ownership checks, 8 malformed programs and old-envelope refusals |
-| `native_v3_sdk_packages_models_codecs` | Resource-aware operations, deep strict-tree override, nested-root binding, dynamic union carrier, exact numeric wire bytes, positive/negative types, native examples and reference/reflection |
-
-`ordinary_v1_v2_programs_and_entrypoints_keep_their_bytes` compares ordinary v1/v2
-program and full artifact bytes across the v3-capable path. The original base,
-10,000-case arithmetic, v2 and HTTP reports keep their original scope and bytes.
+## Reproduce native verification
 
 ```sh
 SUSPECT_PHP_BIN=$PWD/target/sdk-php-tools/php-8.3.32/php \
 cargo test -p suspect-codegen --no-default-features \
-  --features php-sdk,http-protocol --lib php_sdk::tests_v3:: -- \
+  --features php-sdk --test php -- \
   --include-ignored --test-threads=1
 ```
 
-The same PHP/Composer/PHPStan selectors apply. Native tests do not depend on
-`target/sdk-schema-resources-executable-v3.json`; it remains a historical export.
+Repeat with `php-8.5.8/php`. Without overrides, native tests use the PHP,
+Composer and PHPStan builds installed under `target/sdk-php-tools/`;
+`SUSPECT_PHP_BIN`, `SUSPECT_COMPOSER_PHAR` and `SUSPECT_PHPSTAN_PHAR` select
+others. Missing required tools/source fail these opt-in gates.
+
+Each advanced native case builds emitted sources, Composer archives and a separate
+installed consumer, and compares installed source bytes to the complete emitted
+artifact set. Independent advanced loopback records cover parameter styles,
+whole-query forms, standard/custom methods, auth, real bytes, request items and
+early stream close. Base gates cover the base fixture and the five original
+OpenRouter operations (`getCredits`, `createKeys`, `updateKeys`,
+`listContainerFiles`, `getContainerFile`). Additional gates exercise negative
+PHPStan cases, reflection/PHPDoc/reference links, source prose, all 17 shared
+OwnedProgram schemas, 10,000 independent exact-rational cases and hostile shared
+resource budgets. No generated file is manually repaired.
+
+The advanced gates cover:
+
+1. Explicit `LegacyBinaryStringV1` native byte identity and ordinary-profile refusal.
+2. Independent cURL auth/header/byte requests and stream connection release.
+3. Form/named-multipart request bytes, typed part headers and negative PHPStan cases.
+4. Parameter/media/status precedence, QUERY/custom/standard wire methods and no-body rules.
+5. Installed package, native types and injected protocol exchanges.
+6. Single-pass request iterables, independent SSE/JSON-lines wire bytes and finite preparation.
+7. Independent form/MIME response bytes, structural bounds and typed metadata.
+8. Anonymous/OR/AND auth, caller OAuth/OIDC metadata, roles, links and server choices.
+9. Split-byte item framing, UTF-8 behavior, early close, faults, cancellation and deadlines.
+
+`php_protocol::native_document_relative_servers_keep_physical_bases` uses supplied
+requested/effective/logical document identities and two independent loopback
+origins, checking raw encoded targets, an external server's physical base,
+explicit empty server overrides, caller document-base/full-URL overrides and the
+OAuth/OIDC effective-server metadata base.
+
+### Validation v2 and v3 gates
+
+| Gate | Coverage |
+| --- | --- |
+| `native_v2_source_vectors` | All 32 maintained source fixtures compiled through `compile_v2`; exact Valid/Invalid/EvaluationFailure, source and instance paths; installed Composer corpus; PHPStan max |
+| `native_v2_scope_resource_controls` | Independent merge-cost, duplicate-candidate, key-identity, equality, recursion/depth and failure vectors; cooperative stop/reuse and released instance ownership |
+| `native_v2_sdk_packages_models_codecs` | Real generated operations, typed mutable/constant fields, null versus omission, overlapping pattern extras, checked JSON/positional carriers, positive/negative consumers, native examples and reflection/reference checks |
+| `native_v3_source_fixtures` | All 44 official dynamic-reference cases and original supplied remotes from `resource-conformance/`; installed Composer corpus and PHPStan max |
+| `native_v3_scope_resource_controls` | Independent outermost/unentered/nested-entry/fallback/context-cycle/visit/depth/failure controls, cancellation/ownership checks, malformed programs and old-envelope refusals |
+| `native_v3_sdk_packages_models_codecs` | Resource-aware operations, deep strict-tree override, nested-root binding, dynamic union carrier, exact numeric wire bytes, positive/negative types, native examples and reference/reflection |
+
+The host checks `v1_program_bytes_and_explicit_profile_guards_are_preserved` and
+`ordinary_v1_v2_programs_and_entrypoints_keep_their_bytes` verify that base
+programs and full artifact bytes are unchanged across the `compile_v2`/`compile_v3`
+paths. Maintained gates load
+`crates/suspect-schema/tests/fixtures/owned-applicators-v2.json` and the
+`resource-conformance/` fixtures directly.
+
+```sh
+SUSPECT_PHP_BIN=$PWD/target/sdk-php-tools/php-8.3.32/php \
+cargo test -p suspect-codegen --no-default-features \
+  --features php-sdk --lib php_sdk::tests_v2:: -- \
+  --include-ignored --test-threads=1
+```
+
+```sh
+SUSPECT_PHP_BIN=$PWD/target/sdk-php-tools/php-8.3.32/php \
+cargo test -p suspect-codegen --no-default-features \
+  --features php-sdk --lib php_sdk::tests_v3:: -- \
+  --include-ignored --test-threads=1
+```
+
+Use `php-8.5.8/php` for the current tier.

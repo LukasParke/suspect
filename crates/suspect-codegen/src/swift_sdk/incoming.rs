@@ -35,7 +35,12 @@ pub enum Payload {
     /// void.
     None,
     /// JSON through the package's existing model codec.
-    Json { ty: String, codec: String },
+    Json {
+        /// Swift type of the decoded payload.
+        ty: String,
+        /// `Codecs` member that decodes the payload.
+        codec: String,
+    },
     /// Schema-free JSON: the decoded value is the parsed JSON value.
     SchemaFreeJson,
 }
@@ -63,7 +68,14 @@ impl Payload {
 /// How `construct` encodes the declared reply body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConstructedBody {
-    Json { ty: String, codec: String },
+    /// JSON through the package's existing model codec.
+    Json {
+        /// Swift type of the reply body.
+        ty: String,
+        /// `Codecs` member that encodes the reply body.
+        codec: String,
+    },
+    /// Schema-free JSON: the reply body is a `JsonValue`.
     SchemaFreeJson,
 }
 
@@ -80,10 +92,13 @@ impl ConstructedBody {
 /// One declared reply the construct helper builds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstructedResponse {
+    /// The first declared exact 2xx status.
     pub status: u16,
+    /// Encoding of the first declared reply media; `None` for a body-less reply.
     pub body: Option<ConstructedBody>,
     /// Declared reply header wire names, in declaration order.
     pub headers: Vec<String>,
+    /// Required subset of `headers`, in declaration order.
     pub required_headers: Vec<String>,
 }
 
@@ -93,12 +108,17 @@ pub struct ConstructedResponse {
 pub struct IncomingReceipt {
     /// Webhook key, or `parentOperationId.callbackName`.
     pub name: String,
+    /// `webhook` or `callback`.
     pub kind: &'static str,
     /// The verb the provider sends.
     pub method: String,
+    /// The webhook key, or the callback expression string, exactly as declared.
     pub route: String,
+    /// Whether `route` carries runtime expression syntax (`{...}`).
     pub expression: bool,
+    /// Source document of the receipt.
     pub document: String,
+    /// JSON Pointer of the receipt within `document`.
     pub pointer: String,
     /// The rendered `{document}#{pointer}` source identity.
     pub source: String,
@@ -113,11 +133,16 @@ pub struct IncomingReceipt {
     /// The allocated decoder function.
     pub decode: String,
     /// The allocated reply constructor function.
-    pub construct: Option<String>,
+    pub construct: String,
+    /// How the decoder interprets the received body.
     pub payload: Payload,
+    /// Whether the declared request body is required.
     pub required_body: bool,
+    /// Wire names of required request headers, in declaration order.
     pub required_headers: Vec<String>,
+    /// Reply the construct helper builds; `None` without an exact 2xx response.
     pub response: Option<ConstructedResponse>,
+    /// Shared-planner and v1-helper limitations surfaced in the generated docs.
     pub explanations: Vec<String>,
 }
 
@@ -323,7 +348,7 @@ pub(super) fn prepare(
             route_type,
             payload_type,
             decode,
-            construct: Some(construct),
+            construct,
             payload,
             required_body: operation
                 .request()
@@ -431,9 +456,7 @@ fn decoder(receipt: &IncomingReceipt) -> String {
 
 /// One receipt's reply constructor, when an exact 2xx response is declared.
 fn constructor(receipt: &IncomingReceipt, response: &ConstructedResponse) -> String {
-    let Some(construct) = receipt.construct.as_ref() else {
-        return String::new();
-    };
+    let construct = &receipt.construct;
     let has_body = response.body.is_some();
     let has_headers = !response.headers.is_empty();
     let result_type = match &response.body {

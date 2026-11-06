@@ -41,8 +41,8 @@ jobs:
 
       - name: Application planning tests
         run: >-
-          cargo test -p suspect-codegen
-          --test application --test api_cli --test mcp
+          cargo test -p suspect-codegen --test shared --
+          application:: api_cli:: mcp::
 
   # Portable native acceptance for the Go CLI: build the emitted module with
   # the real Go toolchain under the default -mod=readonly, run its own tests,
@@ -87,7 +87,7 @@ jobs:
       - name: Go CLI generation and native acceptance
         run: >-
           cargo test -p suspect-codegen
-          --test api_cli -- --include-ignored
+          --test shared api_cli:: -- --include-ignored
 
   # Portable native acceptance for the MCP server: install the emitted
   # lockfile, compile with the pinned TypeScript, then drive the built stdio
@@ -143,7 +143,7 @@ jobs:
       - name: MCP generation and native acceptance
         run: >-
           cargo test -p suspect-codegen
-          --test mcp -- --include-ignored
+          --test shared mcp:: -- --include-ignored
 
   # `suspect gen cli` / `suspect gen mcp`: argument handling, report
   # formats, check/current/drift, input failures, ownership conflicts and

@@ -14,11 +14,23 @@ use super::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum MediaRange {
+    /// `*/*`.
     Any,
-    Type { type_name: String },
-    Concrete { type_name: String, subtype: String },
+    /// `type/*`.
+    Type {
+        /// Lowercased top-level type.
+        type_name: String,
+    },
+    /// A concrete `type/subtype`.
+    Concrete {
+        /// Lowercased top-level type.
+        type_name: String,
+        /// Lowercased subtype, including any structured suffix such as `+json`.
+        subtype: String,
+    },
 }
 
+/// A parsed media type or range, keeping the declared spelling.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MediaType {
     pub(super) declared: String,
@@ -26,22 +38,27 @@ pub struct MediaType {
     pub(super) parameters: BTreeMap<String, String>,
 }
 impl MediaType {
+    /// The media type exactly as written in the source.
     #[must_use]
     pub fn declared(&self) -> &str {
         &self.declared
     }
+    /// Lowercased type/subtype range.
     #[must_use]
     pub fn range(&self) -> &MediaRange {
         &self.range
     }
+    /// Parameters keyed by lowercased name, with quoted values unescaped.
     #[must_use]
     pub fn parameters(&self) -> &BTreeMap<String, String> {
         &self.parameters
     }
+    /// `application/json` or any concrete `+json` subtype.
     #[must_use]
     pub fn is_json(&self) -> bool {
         matches!(&self.range, MediaRange::Concrete { type_name, subtype } if (type_name == "application" && subtype == "json") || subtype.ends_with("+json"))
     }
+    /// `text/*` (concrete or range), or an HLS playlist `application` subtype.
     #[must_use]
     pub fn is_text(&self) -> bool {
         match &self.range {
@@ -108,35 +125,47 @@ pub struct ResponseMatch<'a> {
     disposition: ResponseBodyDisposition,
 }
 impl<'a> ResponseMatch<'a> {
+    /// Declared response selected by status precedence.
     #[must_use]
     pub fn response(&self) -> &'a ResponsePlan {
         self.response
     }
+    /// Selected media declaration; `None` unless the disposition is `Declared`.
     #[must_use]
     pub fn media(&self) -> Option<&'a MediaPlan> {
         self.media
     }
+    /// Actual response status code.
     #[must_use]
     pub fn status(&self) -> u16 {
         self.status
     }
+    /// Whether the actual status is 2xx.
     #[must_use]
     pub fn is_success(&self) -> bool {
         (200..300).contains(&self.status)
     }
+    /// How the response body must be handled.
     #[must_use]
     pub fn body_disposition(&self) -> ResponseBodyDisposition {
         self.disposition
     }
 }
 
+/// Why an actual response does not match its operation's declarations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseMatchError {
+    /// Status outside 100..=599.
     InvalidStatus(u16),
+    /// No exact, range, or `default` response covers the status.
     UndeclaredStatus(u16),
+    /// The matched response declares media but no Content-Type was received.
     MissingContentType,
+    /// The received Content-Type does not parse.
     InvalidContentType(String),
+    /// No declared media range covers the received Content-Type.
     UndeclaredMediaType(String),
+    /// A text, stream, or form body declares a charset other than UTF-8.
     UnsupportedCharset(String),
 }
 impl std::fmt::Display for ResponseMatchError {
@@ -146,10 +175,14 @@ impl std::fmt::Display for ResponseMatchError {
 }
 impl std::error::Error for ResponseMatchError {}
 
+/// Why a Content-Type does not select one of a body's media declarations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MediaMatchError {
+    /// The Content-Type does not parse.
     InvalidContentType(String),
+    /// No declared media range covers the Content-Type.
     UndeclaredMediaType(String),
+    /// A text, stream, or form body declares a charset other than UTF-8.
     UnsupportedCharset(String),
 }
 impl std::fmt::Display for MediaMatchError {

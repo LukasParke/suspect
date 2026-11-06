@@ -63,19 +63,17 @@ impl Tools {
 }
 
 #[test]
-#[ignore = "requires pinned Node 22/npm/TS caches, explicit SUSPECT_NODE24_BIN and tracked OpenRouter corpus"]
+#[ignore = "requires pinned Node 22/npm/TS caches, pinned Node 24 and the pinned OpenRouter spec"]
 fn installed_sdk_checks_floor_current_types_and_executes_both_node_runtimes() {
     let temporary = tempfile::tempdir().unwrap();
     let retained = temporary.keep();
-    let selected = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let selected = suspect_codegen::toolchain::pinned_node(22);
     let output = checked(
         Command::new(&selected).args(["--print", "process.execPath"]),
         &retained,
     );
     let node = PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
-    let node24 = PathBuf::from(
-        std::env::var_os("SUSPECT_NODE24_BIN").expect("set SUSPECT_NODE24_BIN to Node 24"),
-    );
+    let node24 = suspect_codegen::toolchain::pinned_node(24);
     let npm = node
         .parent()
         .unwrap()

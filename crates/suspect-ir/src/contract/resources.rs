@@ -26,7 +26,10 @@ pub enum ResourceKind {
 /// Whether a schema's plain-name identifier also declares a dynamic extension point.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnchorKind {
+    /// `$anchor`: a plain-name fragment that static references resolve to.
     Static,
+    /// `$dynamicAnchor`: also a plain-name fragment, and an extension point
+    /// `$dynamicRef` may rebind.
     Dynamic,
 }
 
@@ -41,6 +44,7 @@ pub struct SchemaAnchor {
 }
 
 impl SchemaAnchor {
+    /// Anchor name, without the `#`.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -48,12 +52,15 @@ impl SchemaAnchor {
     pub fn source(&self) -> &SourceId {
         &self.source
     }
+    /// The schema carrying the anchor keyword.
     pub fn target(&self) -> &SchemaId {
         &self.target
     }
+    /// The resource whose base URI the anchor is scoped to.
     pub fn resource(&self) -> &ResourceId {
         &self.resource
     }
+    /// Whether this is `$anchor` or `$dynamicAnchor`.
     pub fn kind(&self) -> AnchorKind {
         self.kind
     }
@@ -73,12 +80,15 @@ pub struct Resource {
 }
 
 impl Resource {
+    /// Physical source of the resource root.
     pub fn source(&self) -> &ResourceId {
         &self.source
     }
+    /// Whether the boundary is a plain document, an OpenAPI document, or a schema.
     pub fn kind(&self) -> ResourceKind {
         self.kind
     }
+    /// Canonical URI: the declared `$self`/`$id`, or the retrieval URI otherwise.
     pub fn canonical_uri(&self) -> &str {
         &self.canonical_uri
     }
@@ -94,6 +104,7 @@ impl Resource {
     pub fn aliases(&self) -> &[String] {
         &self.aliases
     }
+    /// `$anchor` and `$dynamicAnchor` declarations scoped to this resource.
     pub fn anchors(&self) -> &[SchemaAnchor] {
         &self.anchors
     }
@@ -110,6 +121,7 @@ pub struct ResourceScope {
 }
 
 impl ResourceScope {
+    /// The innermost resource enclosing the source.
     pub fn resource(&self) -> &ResourceId {
         &self.resource
     }
@@ -118,9 +130,12 @@ impl ResourceScope {
     pub fn schema_root(&self) -> Option<&SchemaId> {
         self.schema_root.as_ref()
     }
+    /// Fragment-free base URI that relative references in this scope resolve against.
     pub fn base_uri(&self) -> &str {
         &self.base_uri
     }
+    /// Source of the `$id`/`$self` that set [`ResourceScope::base_uri`]; `None`
+    /// when the base comes from the retrieval URI.
     pub fn base_source(&self) -> Option<&SourceId> {
         self.base_source.as_ref()
     }
@@ -153,9 +168,11 @@ impl DynamicReference {
     pub fn source(&self) -> &SourceId {
         &self.source
     }
+    /// Schema the `$dynamicRef` URI resolves to statically; `None` if unresolved.
     pub fn initial_target(&self) -> Option<&SchemaId> {
         self.initial_target.as_ref()
     }
+    /// Resource containing [`DynamicReference::initial_target`].
     pub fn initial_resource(&self) -> Option<&ResourceId> {
         self.initial_resource.as_ref()
     }
@@ -164,6 +181,8 @@ impl DynamicReference {
     pub fn dynamic_anchor(&self) -> Option<&str> {
         self.dynamic_anchor.as_deref()
     }
+    /// Active `$dynamicAnchor` declarations with the same name, sorted by source;
+    /// empty when [`DynamicReference::dynamic_anchor`] is `None`.
     pub fn candidates(&self) -> &[SchemaAnchor] {
         &self.candidates
     }
@@ -177,9 +196,12 @@ pub struct ResourceResolutionError {
 }
 
 impl ResourceResolutionError {
+    /// Stable machine-readable code (`unavailable-resource`,
+    /// `ambiguous-resource-anchor`, `invalid-reference-uri`, ...).
     pub fn code(&self) -> &'static str {
         self.code
     }
+    /// Human-readable description of the failure.
     pub fn message(&self) -> &str {
         &self.message
     }

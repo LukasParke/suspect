@@ -316,10 +316,7 @@ fn plan_carries_the_compiled_incoming_receipts() {
     assert_eq!(new_issue.route, "newIssue");
     assert!(!new_issue.expression);
     assert_eq!(new_issue.decode, "decodeNewIssueWebhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("constructNewIssueResponse")
-    );
+    assert_eq!(new_issue.construct, "constructNewIssueResponse");
     assert_eq!(new_issue.payload_type, "NewIssuePayload");
     assert_eq!(new_issue.payload_annotation, "IssueEvent");
     assert_eq!(new_issue.route_const, "newIssueWebhookRoute");

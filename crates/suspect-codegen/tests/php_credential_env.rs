@@ -42,11 +42,6 @@ fn load(path: &Path) -> Arc<Contract> {
     );
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(path).unwrap()).unwrap())
 }
-fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo().join("target/sdk-php-tools/php-8.3.32/php"))
-}
 fn tool(variable: &str, name: &str) -> PathBuf {
     std::env::var_os(variable)
         .map(PathBuf::from)
@@ -119,7 +114,7 @@ fn plan(contract: Arc<Contract>, config: PhpConfig) -> Result<Plan, Vec<php_sdk:
     ));
     php_sdk::plan_sdk(contract, &selected, config)
 }
-fn run(command: &mut Command, root: &Path, label: &str) {
+fn run(command: &mut Command, root: &Path, label: &str) -> std::process::Output {
     let output = command.output().unwrap();
     fs::write(
         root.join(format!("{label}.log")),
@@ -149,6 +144,7 @@ fn run(command: &mut Command, root: &Path, label: &str) {
             assert!(!String::from_utf8_lossy(&output.stdout).contains(word));
         }
     }
+    output
 }
 fn installed(root: &Path, plan: &Plan) -> PathBuf {
     let files = plan.render();
@@ -160,8 +156,8 @@ fn installed(root: &Path, plan: &Plan) -> PathBuf {
         fs::write(path, &file.content).unwrap();
     }
     run(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(tool("SUSPECT_COMPOSER_PHAR", "composer-2.10.3.phar"))
             .args([
                 "archive",
@@ -182,8 +178,8 @@ fn installed(root: &Path, plan: &Plan) -> PathBuf {
     fs::create_dir(&consumer).unwrap();
     fs::write(consumer.join("composer.json"),json!({"name":"fixture/credential-consumer","require":{"openrouter/sdk":"0.1.0"},"repositories":[{"type":"package","package":manifest},{"packagist.org":false}],"config":{"allow-plugins":false}}).to_string()).unwrap();
     run(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(tool("SUSPECT_COMPOSER_PHAR", "composer-2.10.3.phar"))
             .args([
                 "install",
@@ -206,8 +202,8 @@ fn installed(root: &Path, plan: &Plan) -> PathBuf {
     }
     fs::write(root.join("emitted-manifest.json"),serde_json::to_string_pretty(&files.iter().map(|file|json!({"path":file.path,"sha256":format!("{:x}",Sha256::digest(file.content.as_bytes()))})).collect::<Vec<_>>()).unwrap()).unwrap();
     run(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
             .args([
                 "analyse",
@@ -460,11 +456,11 @@ fn generation_does_not_capture_environment_values() {
         return;
     }
     let root = root("canary-");
-    run(
+    let output = run(
         Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "generation_does_not_capture_environment_values",
+                qualified("generation_does_not_capture_environment_values").as_str(),
                 "--test-threads=1",
             ])
             .env("SUSPECT_PHP_ENV_GENERATION_CHILD", "1")
@@ -472,6 +468,7 @@ fn generation_does_not_capture_environment_values() {
         &root,
         "generator-canary",
     );
+    assert_ran_one(&output.stdout);
 }
 
 #[test]
@@ -502,8 +499,8 @@ fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
     let consumer = installed(&root, &planned);
     fs::write(consumer.join("positive.php"), ENV_CONSUMER).unwrap();
     run(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
             .args([
                 "analyse",
@@ -517,8 +514,9 @@ fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
         "consumer-types",
     );
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .env("SUSPECT_PHP_ENV_TOKEN", "before-import-token")
             .current_dir(&consumer),
         &root,
@@ -526,9 +524,9 @@ fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
     );
     fs::write(consumer.join("unavailable.php"), UNAVAILABLE_CONSUMER).unwrap();
     run(
-        Command::new(php())
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .args([
-                "-n",
                 "-d",
                 "disable_functions=getenv",
                 "-d",
@@ -541,8 +539,8 @@ fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
         "native-unavailable",
     );
     fs::write(consumer.join("negative.php"),"<?php\nrequire __DIR__.'/vendor/autoload.php';\nnew OpenRouter\\Client(null);\nnew OpenRouter\\Client(OpenRouter\\Absent::Value);\nOpenRouter\\Client::fromEnv(transport: null);\n").unwrap();
-    let output = Command::new(php())
-        .arg("-n")
+    let output = suspect_codegen::toolchain::php_command()
+        .expect("PHP is gated by native_php()")
         .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
         .args([
             "analyse",
@@ -663,8 +661,8 @@ fn native_openrouter_current_key_factory_uses_source_https() {
     }
     fs::write(consumer.join("positive.php"), OPENROUTER_CONSUMER).unwrap();
     run(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
             .args([
                 "analyse",
@@ -678,8 +676,9 @@ fn native_openrouter_current_key_factory_uses_source_https() {
         "consumer-types",
     );
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .env("OPENROUTER_API_KEY", "controlled-user-token")
             .current_dir(&consumer),
         &root,
@@ -710,3 +709,23 @@ check(count($transport->requests)===3);check($transport->requests[0]->method==='
 putenv('OPENROUTER_API_KEY');$missing=S\Client::fromEnv(transport:$transport);try{$missing->getCurrentKey();throw new RuntimeException('missing key reached transport');}catch(S\SdkError $error){check($error->kind==='credentials');}check(count($transport->requests)===3);
 echo 'OpenRouter getCurrentKey/default HTTPS and explicit getCredits mode passed with controlled transport',PHP_EOL;
 "#;
+
+/// The `--exact` name of `test` inside this binary: the crate groups its
+/// suites into one binary per backend, so test paths carry this file's
+/// module (`php_credential_env::…`) there and none in a standalone build.
+fn qualified(test: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{test}"),
+        None => test.to_owned(),
+    }
+}
+
+/// Fails unless a self-invocation actually ran exactly one test: an
+/// `--exact` filter that matches nothing also exits successfully.
+fn assert_ran_one(stdout: &[u8]) {
+    let text = String::from_utf8_lossy(stdout);
+    assert!(
+        text.contains("running 1 test"),
+        "self-invocation selected no test (check the --exact name):\n{text}"
+    );
+}

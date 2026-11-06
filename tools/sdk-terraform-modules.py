@@ -14,7 +14,7 @@ def main():
     root=args.root.resolve();evidence=args.evidence.resolve();helpers.require_terraform();run=helpers.Runner(evidence)
     report={"format":"suspect.terraform.module-boundaries.v1","passed":False,"native_root":str(root),"scope":"native package lookup through pinned generated SDK ZIPs; no go.mod edits, SDK replacements, publishing or API requests"}
     try:
-        shared=helpers.APPROVED/"sdk-terraform-dependency-cache-20260910-01"
+        floor=json.loads((Path(__file__).resolve().parent.parent/"crates/suspect-codegen/tests/fixtures/terraform-v1/target.json").read_text())["go_toolchain"];go=helpers.go_binary()
         for label in ("separate","sibling","nested","collision"):
             directory=root/label;package=directory/"generated/terraform"
             config=json.loads((directory/"config.json").read_text()) if label=="collision" else json.loads((package/"source-bindings.json").read_text())["configuration"]
@@ -25,25 +25,18 @@ def main():
                 (package/"go.sum").write_text(f"{info['module']} {info['version']} {info['sum']}\n{info['module']} {info['version']}/go.mod {info['go_mod_sum']}\n")
             original=helpers.tree_hashes(directory/"generated");helpers.save_json(evidence/f"{label}-sources.json",original)
             helpers.save_json(evidence/f"{label}-sdk.json",info)
-            cache=directory/"module-cache";cache.mkdir();download=cache/"cache/download";download.mkdir(parents=True)
-            private=config["sdk"]["module_path"].split("/")[0]
-            for child in shared.iterdir():
-                if child.name not in ("cache",private): (cache/child.name).symlink_to(child,target_is_directory=child.is_dir())
-            for child in (shared/"cache/download").iterdir():
-                if child.name!=private: (download/child.name).symlink_to(child,target_is_directory=child.is_dir())
-            env={k:v for k,v in os.environ.items() if not k.startswith(("GO","TF_"))}
-            env.update(GOWORK="off",GOTOOLCHAIN="local",GOPROXY=f"file://{proxy},off",GOSUMDB="off",GOMODCACHE=str(cache),GOCACHE=str(helpers.APPROVED/"sdk-terraform-build-cache-20260910-01"))
-            tools={"go1.23.12":str(shared/"golang.org/toolchain@v0.0.1-go1.23.12.darwin-arm64/bin/go"),"go1.27.1":"go"}
-            for tier,go in tools.items():
-                version=run.run(f"{label}-{tier}-version",[go,"version"],package,env);run.claim(f"{label}-{tier}-pin",tier.encode() in version)
-                run.run(f"{label}-{tier}-lookup",[go,"list","-mod=readonly","./..."],package,env,expected=(1,) if label=="collision" else (0,))
+            env=helpers.focused_go_env(proxy,config["sdk"]["module_path"])
+            for tier,selection in helpers.go_tiers(floor).items():
+                tier_env={**env,**selection}
+                version=run.run(f"{label}-{tier}-version",[go,"env","GOVERSION"],package,tier_env,timeout=600).decode().strip();helpers.claim_go_tier(run,f"{label}-{tier}-pin",tier,floor,version)
+                run.run(f"{label}-{tier}-lookup",[go,"list","-mod=readonly","./..."],package,tier_env,expected=(1,) if label=="collision" else (0,),timeout=600)
                 if label=="collision":
                     text=(evidence/run.commands[-1]["stderr"]).read_text();run.claim(f"{label}-{tier}-native-ambiguity","ambiguous import" in text,text)
                 else:
-                    modules=list(helpers.json_stream(run.run(f"{label}-{tier}-linkage",[go,"list","-m","-json","all"],package,env)))
+                    modules=list(helpers.json_stream(run.run(f"{label}-{tier}-linkage",[go,"list","-m","-json","all"],package,tier_env)))
                     sdk=next(m for m in modules if m["Path"]==config["sdk"]["module_path"])
                     run.claim(f"{label}-{tier}-exact-sdk",sdk["Version"]==info["version"] and sdk["Sum"]==info["sum"] and "Replace" not in sdk,sdk)
-                    run.run(f"{label}-{tier}-compile",[go,"test","-mod=readonly","./..."],package,env)
+                    run.run(f"{label}-{tier}-compile",[go,"test","-mod=readonly","./..."],package,tier_env,timeout=900)
             run.claim(f"{label}-source-bytes",helpers.tree_hashes(directory/"generated")==original)
         report["passed"]=True
     except Exception:

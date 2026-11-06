@@ -15,10 +15,9 @@ use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_schema::{OwnedCompiler, OwnedProgram};
 use suspect_source::Uri;
 
+use crate::python_support;
+
 const IMPORT: &str = "resource_python_sdk";
-fn tools() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-native-python-tools/bin/python")
-}
 fn artifacts() -> PathBuf {
     tempfile::Builder::new()
         .prefix("sdk-python-resources-sdk-")
@@ -238,6 +237,9 @@ fn python_resource_admission_keeps_ordinary_programs_and_typed_capture() {
 #[test]
 #[ignore = "requires installed Python 3.11/3.14, uv and cached mypy/wheel/Sphinx dependencies"]
 fn installed_python_v3_dynamic_operations_native_examples_types_and_sphinx() {
+    let Some(native) = python_support::installed() else {
+        return;
+    };
     let root = artifacts();
     let (plan, files) = emit(&root);
     let package = root.join("generated/python");
@@ -271,7 +273,7 @@ fn installed_python_v3_dynamic_operations_native_examples_types_and_sphinx() {
         fs::write(snippets.join(format!("snippet_{index}.py")), code).unwrap();
     }
     checked(
-        Command::new(tools())
+        Command::new(&native.tools)
             .args(["-m", "build", "--wheel", "--no-isolation"])
             .current_dir(&package),
         &root,
@@ -282,18 +284,20 @@ fn installed_python_v3_dynamic_operations_native_examples_types_and_sphinx() {
         .map(|entry| entry.unwrap().path())
         .find(|file| file.extension().is_some_and(|ext| ext == "whl"))
         .unwrap();
-    for version in ["3.11", "3.14"] {
+    for (version, interpreter) in &native.interpreters {
+        let version = *version;
         let venv = root.join(format!("venv-{version}"));
         checked(
-            Command::new("uv")
-                .args(["venv", "--offline", "--python", version])
+            Command::new(&native.uv)
+                .args(["venv", "--offline", "--python"])
+                .arg(interpreter)
                 .arg(&venv),
             &root,
             &format!("venv-{version}"),
         );
         let python = venv.join("bin/python");
         checked(
-            Command::new("uv")
+            Command::new(&native.uv)
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&python)
                 .arg(&wheel)
@@ -307,7 +311,7 @@ fn installed_python_v3_dynamic_operations_native_examples_types_and_sphinx() {
             &format!("native-{version}"),
         );
         checked(
-            Command::new(tools())
+            Command::new(&native.tools)
                 .args([
                     "-m",
                     "mypy",
@@ -327,7 +331,7 @@ fn installed_python_v3_dynamic_operations_native_examples_types_and_sphinx() {
             &format!("mypy-{version}"),
         );
         checked(
-            Command::new(tools())
+            Command::new(&native.tools)
                 .args([
                     "-m",
                     "mypy",
@@ -344,7 +348,7 @@ fn installed_python_v3_dynamic_operations_native_examples_types_and_sphinx() {
             &root,
             &format!("package-mypy-{version}"),
         );
-        let negative = Command::new(tools())
+        let negative = Command::new(&native.tools)
             .args([
                 "-m",
                 "mypy",

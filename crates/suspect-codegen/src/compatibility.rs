@@ -56,6 +56,7 @@ pub use native::{
     NativeModel, NativeOperation, NativeSnapshot, PlanFinding, PlanStatus, RuntimeProvenance,
 };
 
+/// Format identifier of every [`CompatibilityReport`].
 pub const REPORT_FORMAT: &str = "suspect-sdk-compatibility-v1";
 
 /// `Compatible` is a proof within the explicitly recorded scope, not a promise
@@ -63,30 +64,43 @@ pub const REPORT_FORMAT: &str = "suspect-sdk-compatibility-v1";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Impact {
+    /// Proven compatible by a recorded rule.
     Compatible,
+    /// Proven to break existing callers or old clients.
     Breaking,
+    /// Breaks some plausible callers or values, but not provably all.
     PotentiallyBreaking,
+    /// No proof either way; never a green result.
     Unknown,
 }
 
+/// Which side of the wire a change affects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Direction {
+    /// Values the client sends: old requests must fit the new contract.
     Request,
+    /// Values the server returns: new responses must fit the old contract.
     Response,
 }
 
 /// An original source location. Spans are metadata, never matching keys.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Location {
+    /// Document URI.
     pub document: String,
+    /// JSON Pointer within the document.
     pub pointer: String,
+    /// Byte span in the document, when known.
     pub span: Option<SourceSpan>,
 }
 
+/// A half-open byte range in a source document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceSpan {
+    /// First byte offset.
     pub start: usize,
+    /// One past the last byte offset.
     pub end: usize,
 }
 
@@ -115,17 +129,29 @@ impl Location {
 /// descriptor. It is never a declaration extracted from emitted source text.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Change {
+    /// Stable kebab-case finding code, e.g. `wire-interpretation-profile-changed`.
     pub code: String,
+    /// Proven effect on existing callers.
     pub impact: Impact,
+    /// Human-readable thing that changed.
     pub subject: String,
+    /// Operation identity in the old contract, when the change is per operation.
     pub operation_id_before: Option<String>,
+    /// Operation identity in the new contract, when the change is per operation.
     pub operation_id_after: Option<String>,
+    /// Wire direction affected, when the change is directional.
     pub direction: Option<Direction>,
+    /// Old source location, when the subject existed before.
     pub source_before: Option<Location>,
+    /// New source location, when the subject exists after.
     pub source_after: Option<Location>,
+    /// Old structured evidence.
     pub before: Option<Value>,
+    /// New structured evidence.
     pub after: Option<Value>,
+    /// What changed and why it has this impact.
     pub message: String,
+    /// What a caller should do; empty when nothing is needed.
     pub migration: String,
     /// Why a proof did not succeed, or the sufficient rule that did prove it.
     pub reasoning: Vec<String>,
@@ -133,20 +159,32 @@ pub struct Change {
     pub schema_deltas: Vec<SchemaDelta>,
 }
 
+/// One schema keyword that differs between the old and new schema.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchemaDelta {
+    /// The differing keyword, `$schema` for a dialect change, or `schema`
+    /// for a whole-schema difference.
     pub keyword: String,
+    /// Old keyword location, when present.
     pub source_before: Option<Location>,
+    /// New keyword location, when present.
     pub source_after: Option<Location>,
+    /// Old keyword value, when present.
     pub before: Option<Value>,
+    /// New keyword value, when present.
     pub after: Option<Value>,
 }
 
+/// Counts of changes by [`Impact`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Summary {
+    /// [`Impact::Compatible`] changes.
     pub compatible_changes: usize,
+    /// [`Impact::Breaking`] changes.
     pub breaking_changes: usize,
+    /// [`Impact::PotentiallyBreaking`] changes.
     pub potentially_breaking_changes: usize,
+    /// [`Impact::Unknown`] changes.
     pub unknowns: usize,
 }
 
@@ -164,27 +202,37 @@ impl Summary {
         summary
     }
 
-    /// In particular, an unknown result is never a green compatibility result.
+    /// Whether no change is breaking, potentially breaking or unknown. In
+    /// particular, an unknown result is never a green compatibility result.
     #[must_use]
     pub fn is_proven_compatible(&self) -> bool {
         self.breaking_changes == 0 && self.potentially_breaking_changes == 0 && self.unknowns == 0
     }
 }
 
+/// Content identity of one loaded source document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentFingerprint {
+    /// Document URI.
     pub document: String,
     /// SHA-256 of owned normalized JSON, not of original formatting bytes.
     pub normalized_sha256: String,
 }
 
+/// What a snapshot was captured from and with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotMetadata {
+    /// Entry document URI.
     pub entry: String,
+    /// Declared `openapi` version.
     pub openapi_version: String,
+    /// Generator name, `suspect-codegen`.
     pub generator: String,
+    /// Generator crate version.
     pub generator_version: String,
+    /// Fingerprint of every loaded document.
     pub documents: Vec<DocumentFingerprint>,
+    /// Selected operations by operationId, or `METHOD /path` when unnamed.
     pub selected_operations: Vec<String>,
     /// Versioned interpretation is part of the captured semantic configuration.
     #[serde(default)]
@@ -198,38 +246,57 @@ pub struct SnapshotMetadata {
 pub struct CompatibilitySnapshot {
     contract: Arc<Contract>,
     selected: Vec<SourceId>,
+    /// Capture inputs and configuration.
     pub metadata: SnapshotMetadata,
+    /// One native descriptor per target, sorted by backend.
     pub native: Vec<NativeSnapshot>,
 }
 
 impl CompatibilitySnapshot {
+    /// The canonical contract kept for wire comparison.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
 }
 
+/// Native-package comparison of one backend.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NativeReport {
+    /// The compared backend.
     pub backend: Backend,
+    /// Old descriptor; `None` when the target was added.
     pub before: Option<NativeSnapshot>,
+    /// New descriptor; `None` when the target was removed.
     pub after: Option<NativeSnapshot>,
+    /// Native changes at existing call sites.
     pub changes: Vec<Change>,
+    /// Counts over `changes`.
     pub summary: Summary,
 }
 
+/// Wire and native comparison of two snapshots.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompatibilityReport {
+    /// Always [`REPORT_FORMAT`].
     pub format: String,
+    /// Old snapshot metadata.
     pub before: SnapshotMetadata,
+    /// New snapshot metadata.
     pub after: SnapshotMetadata,
+    /// Contract-level changes.
     pub wire: Vec<Change>,
+    /// Per-backend native changes.
     pub native: Vec<NativeReport>,
+    /// Counts over wire and native changes together.
     pub summary: Summary,
+    /// Statements of what the comparison does and does not establish.
     pub scope: Vec<String>,
 }
 
 impl CompatibilityReport {
+    /// Whether the combined summary is proven compatible; see
+    /// [`Summary::is_proven_compatible`].
     #[must_use]
     pub fn is_proven_compatible(&self) -> bool {
         self.summary.is_proven_compatible()

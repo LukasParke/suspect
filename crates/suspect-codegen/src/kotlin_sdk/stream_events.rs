@@ -41,11 +41,13 @@ pub struct StreamEventsEntry {
     pub index: usize,
     /// Source identity of the streamed operation.
     pub operation: String,
+    /// Terminal source operation.
     pub source: SourceId,
     /// The generated client method this flow extends.
     pub method: String,
     /// The allocated cold-flow member name.
     pub events_method: String,
+    /// Generated input class of the operation.
     pub input_type: String,
     /// The stream item model: the declared type every recognized kind's
     /// envelope decodes into (bound after model planning).
@@ -68,10 +70,15 @@ pub struct StreamEventsEntry {
     pub input_default: bool,
     /// Allocated public type names.
     pub event_type: String,
+    /// Typed alternative for undeclared event kinds (`<Op>UnknownEvent`).
     pub unknown_type: String,
+    /// Completion value carrying the reason and preserved final usage (`<Op>Completion`).
     pub completion_type: String,
+    /// Completion reason enum, `Sentinel` or `Eof` (`<Op>CompletionReason`).
     pub completion_reason_type: String,
+    /// Final flow element wrapping the completion (`<Op>CompletionEvent`).
     pub completion_event_type: String,
+    /// Throwable that carries the completion out of frame collection (`<Op>Terminal`).
     pub terminal_type: String,
     /// Per-kind event data class names, in declaration order.
     pub kind_types: Vec<String>,
@@ -84,6 +91,7 @@ pub struct StreamEventsEntry {
 pub struct StreamEventsPlan {
     /// The shared, infallible stream-semantics selection this emission follows.
     pub semantics: wire::StreamSemanticsPlan,
+    /// Discriminated SSE stream operations with typed event flows.
     pub operations: Vec<StreamEventsEntry>,
 }
 

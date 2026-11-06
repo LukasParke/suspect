@@ -273,10 +273,8 @@ struct Toolchain {
 }
 
 impl Toolchain {
-    fn pinned() -> Self {
-        let selected = std::env::var_os("SUSPECT_PACKAGE_NODE")
-            .or_else(|| std::env::var_os("SUSPECT_DOCS_NODE"))
-            .unwrap_or_else(|| "node".into());
+    fn pinned() -> Option<Self> {
+        let selected = suspect_codegen::toolchain::pinned_node(22);
         let output = checked(Command::new(selected).args(["--print", "process.execPath"]));
         let node = PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
         let bin = node.parent().unwrap();
@@ -297,7 +295,7 @@ impl Toolchain {
         );
         let version = checked(tools.npm(Path::new(".")).arg("--version"));
         assert_eq!(String::from_utf8(version.stdout).unwrap().trim(), "10.9.8");
-        tools
+        Some(tools)
     }
 
     fn node(&self) -> Command {
@@ -330,7 +328,9 @@ fn native_artifacts(
     typescript: &str,
     http: bool,
 ) {
-    let tools = Toolchain::pinned();
+    let Some(tools) = Toolchain::pinned() else {
+        return;
+    };
     let directory = tempfile::tempdir().unwrap();
     let generation = directory.path().join("generation");
     suspect_codegen::write_files(&files, &generation).unwrap();
@@ -580,7 +580,7 @@ try {
 "#,
         r#"
 import { operations, createClient } from '@suspect-fixtures/model-codecs';
-import { callOperation } from './readme-example.js';
+import { firstRequest } from './readme-example.js';
 const options: operations.ClientOptions = {
   auth: {apiKey:'fixture-key'},
   fetch: async (input, init) => {
@@ -588,7 +588,7 @@ const options: operations.ClientOptions = {
     return new Response('{"data":{"total_credits":1.0000000000000000001,"total_usage":0}}', {status:200,headers:{'content-type':'application/json'}});
   },
 };
-const result: operations.GetCreditsSuccess = await callOperation(options, {});
+const result: operations.GetCreditsSuccess = await firstRequest(options);
 const precise: string = result.data.data.total_credits.toString();
 if (precise !== '1.0000000000000000001') throw new Error('documented helper rounded the response');
 if (false) {

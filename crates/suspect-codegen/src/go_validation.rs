@@ -2,8 +2,11 @@
 use crate::OutFile;
 use suspect_schema::{OwnedProgram, ProgramSource};
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Why a checked validation program cannot be executed by the Go evaluator.
 pub struct ValidationEmissionError {
+    /// Program source the failure is attributed to, when one is known.
     pub source: Option<ProgramSource>,
+    /// Human-readable reason; also the `Display` text.
     pub message: String,
 }
 impl std::fmt::Display for ValidationEmissionError {
@@ -12,6 +15,12 @@ impl std::fmt::Display for ValidationEmissionError {
     }
 }
 impl std::error::Error for ValidationEmissionError {}
+/// Emit the checked program and its exact native Go evaluator.
+///
+/// # Errors
+/// The program fails its own check, is not a supported v1/v2/v3
+/// version/profile pair, or its resource limits exceed what the Go runtime
+/// can represent.
 pub fn emit(program: &OwnedProgram) -> Result<Vec<OutFile>, ValidationEmissionError> {
     program.check().map_err(|error| ValidationEmissionError {
         source: error.source,

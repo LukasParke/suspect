@@ -1,6 +1,5 @@
 //! Explicit Go/Cobra CLI mapping admission, source-linked refusals,
 //! deterministic emission and a portable native acceptance run.
-#![cfg(feature = "http-protocol")]
 
 use std::{
     collections::BTreeMap,

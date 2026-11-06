@@ -39,7 +39,8 @@ pub use model::*;
 pub use oauth::{
     OAuthClientAuth, OAuthDefaults, OAuthFlowDescriptor, OAuthFlowDescriptorKind, OAuthMode,
     OAuthPlan, OAuthRefresh, OAuthSchemeConfig, OAuthSchemeKind, OAuthSchemePlan, OAuthStorage,
-    plan as plan_oauth,
+    StreamProtectedRequirement, no_replay_requirements as oauth_no_replay_requirements,
+    plan as plan_oauth, stream_protected_requirements as oauth_stream_protected_requirements,
 };
 pub use pagination::plan as plan_pagination;
 pub use pagination::{OperationPagination, PaginationOutcome, SinglePageExplanation};

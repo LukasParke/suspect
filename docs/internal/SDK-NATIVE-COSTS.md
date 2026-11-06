@@ -1,8 +1,16 @@
 # Native SDK cost observations
 
 `crates/suspect-codegen/tests/sdk_native_measurements.rs` supplies the maintained
-native-cost entrypoint required by [SDK-FULL-EXIT.md](SDK-FULL-EXIT.md#native-cost-integration-contract).
-Its ignored `native_build_import_codec_request_costs` test dispatches
+native-cost entrypoint for the integrated `sdk-full` runner. Its contract: given
+the [six runner locations](#runner-api), execute real native build, import,
+codec and request work against the frozen packages and independent fixtures,
+and write one `complete: true` `suspect.sdk.native-costs.v1` report bound to the
+source-census and CLI fingerprints, with exactly one row per maintained
+language × toolchain tier × phase. Every sample's raw logs, executable bytes and
+package manifest must match their recorded digests
+([Evidence and sizes](#evidence-and-sizes)). Partial development observations
+never satisfy it, and the results are observations, not calibrated thresholds
+([ADR 0033](adr/0033-performance-numbers-are-observations.md)). Its ignored `native_build_import_codec_request_costs` test dispatches
 `tools/sdk-native-costs/run.py collect`. Explicit execution requires the full
 environment and fails on missing inputs, tools, measurements, or native witnesses.
 
@@ -195,8 +203,8 @@ native completion witnesses and request records. Stored summaries are never
 trusted: validation re-counts each row's retained run kinds against its declared
 `runs` policy and **recomputes the steady-state statistics from the retained raw
 samples**, rejecting any row whose `summary` disagrees with its own raw data. A
-row or report that declares a different `methodology` is refused. Historical
-single-sample receipts without a `methodology` field still verify and summarize
+row or report that declares a different `methodology` is refused. Older
+single-sample reports without a `methodology` field still verify and summarize
 as their own one-run set. Source/CLI fingerprints remain
 the full runner's frozen-census authority; the collector separately fingerprints
 its own sources, drivers and interpreter. A killed process without a final report
@@ -211,7 +219,7 @@ status or regression threshold.
 
 ```sh
 # Host/adversarial checks; the native integration entrypoint remains ignored.
-cargo test --locked --offline -p suspect-codegen --test sdk_native_measurements
+cargo test --locked --offline -p suspect-codegen --test shared sdk_native_measurements::
 
 # Direct stdlib checks.
 python3 -B -m unittest discover -s tools/sdk-native-costs -p 'test_*.py' -v

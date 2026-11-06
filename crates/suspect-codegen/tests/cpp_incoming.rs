@@ -308,10 +308,7 @@ fn plan_carries_the_compiled_receipts() {
     assert!(!new_issue.expression);
     assert_eq!(new_issue.payload_alias, "NewIssuePayload");
     assert_eq!(new_issue.decode, "decode_new_issue_webhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("construct_new_issue_response")
-    );
+    assert_eq!(new_issue.construct, "construct_new_issue_response");
     assert_eq!(new_issue.required_headers, vec!["x-signature".to_owned()]);
     assert!(new_issue.required_body);
     assert!(matches!(

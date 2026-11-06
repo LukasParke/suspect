@@ -8,8 +8,11 @@ pub const MMAP_THRESHOLD: u64 = 256 * 1024;
 /// Source text encoding as detected from the BOM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Encoding {
+    /// UTF-8, with or without a BOM (also the default when no BOM is found).
     Utf8,
+    /// UTF-16 little-endian (`FF FE` BOM); transcoded to UTF-8 at load.
     Utf16Le,
+    /// UTF-16 big-endian (`FE FF` BOM); transcoded to UTF-8 at load.
     Utf16Be,
 }
 
@@ -40,7 +43,7 @@ impl Source {
             // SAFETY: mapping a file opened read-only; no writes occur through
             // this mapping and the buffer is immutable for the process lifetime.
             let map = unsafe { memmap2::Mmap::map(&file)? };
-            return Ok(Self::finish(Data::Mapped(map), Encoding::Utf8));
+            return Ok(Self::finish(Data::Mapped(map)));
         }
         let mut buf = Vec::with_capacity(len as usize);
         (&file).read_to_end(&mut buf)?;
@@ -50,10 +53,10 @@ impl Source {
     /// Adopts an in-memory buffer.
     #[must_use]
     pub fn from_vec(bytes: Vec<u8>) -> Self {
-        Self::finish(Data::Owned(bytes.into()), Encoding::Utf8)
+        Self::finish(Data::Owned(bytes.into()))
     }
 
-    fn finish(data: Data, detected: Encoding) -> Self {
+    fn finish(data: Data) -> Self {
         let bytes: &[u8] = match &data {
             Data::Owned(b) => b,
             Data::Mapped(m) => m,
@@ -75,7 +78,7 @@ impl Source {
             }
             None => Source {
                 data,
-                encoding: detected,
+                encoding: Encoding::Utf8,
             },
         }
     }
@@ -95,16 +98,20 @@ impl Source {
         std::str::from_utf8(self.bytes()).ok()
     }
 
+    /// The on-disk encoding detected at load; [`Source::bytes`] is UTF-8
+    /// regardless.
     #[must_use]
     pub fn encoding(&self) -> Encoding {
         self.encoding
     }
 
+    /// Length of the decoded buffer in bytes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.bytes().len()
     }
 
+    /// True when the decoded buffer has no bytes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bytes().is_empty()
@@ -125,8 +132,8 @@ fn detect_bom(bytes: &[u8]) -> Option<(Encoding, usize)> {
 
 fn transcode_utf16(bytes: &[u8], enc: Encoding) -> Vec<u8> {
     let mut units = Vec::with_capacity(bytes.len() / 2);
-    #[allow(clippy::manual_slice_size_calculation)]
-    for pair in bytes.as_chunks::<2>().0 {
+    let (pairs, odd_tail) = bytes.as_chunks::<2>();
+    for pair in pairs {
         let u = match enc {
             Encoding::Utf16Le => u16::from_le_bytes(*pair),
             _ => u16::from_be_bytes(*pair),
@@ -148,6 +155,11 @@ fn transcode_utf16(bytes: &[u8], enc: Encoding) -> Vec<u8> {
         } else {
             out.push(char::from_u32(u32::from(u)).unwrap_or('\u{FFFD}'));
         }
+    }
+    // A truncated final code unit is malformed input, not nothing: keep a
+    // visible replacement character instead of silently dropping the byte.
+    if !odd_tail.is_empty() {
+        out.push('\u{FFFD}');
     }
     out.into_bytes()
 }

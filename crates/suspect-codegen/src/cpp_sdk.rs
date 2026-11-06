@@ -42,18 +42,31 @@ pub use oauth::{OAuthNames, OAuthPlan as OAuthEmission, OAuthScheme as CompiledO
 /// Package identity and finite native resource policy, independent of API semantics.
 #[derive(Debug, Clone)]
 pub struct SdkConfig {
+    /// C++ package (CMake target) name; must be a non-reserved ASCII identifier.
     pub name: String,
+    /// Package version, `MAJOR.MINOR.PATCH`.
     pub version: String,
+    /// `::`-separated C++ namespace for generated symbols; `std` is refused.
     pub namespace: String,
+    /// Default ceiling on an encoded request (and on built URLs/server templates).
     pub max_request_bytes: usize,
+    /// Default ceiling on a received response body.
     pub max_response_bytes: usize,
+    /// Bytes of an unexpected response body retained for diagnostics; at most `max_response_bytes`.
     pub max_capture_bytes: usize,
+    /// Ceiling on a received header block and on built `Cookie`/`Accept` values.
     pub max_header_bytes: usize,
+    /// Maximum JSON nesting depth accepted by the generated codec (1..=256).
     pub max_json_depth: usize,
+    /// Bound on JSON codec work units per document.
     pub max_json_work: usize,
+    /// Ceiling on one multipart part or form value.
     pub max_part_bytes: usize,
+    /// Maximum number of multipart parts or form fields (at most 100000).
     pub max_parts: usize,
+    /// Ceiling on one decoded stream item.
     pub max_stream_item_bytes: usize,
+    /// Transport receive window for streamed bodies (16 KiB..=1 MiB).
     pub max_stream_buffer_bytes: usize,
     /// Explicit, versioned interpretation of 3.1/3.2 binary string markers.
     /// Ordinary JSON strings and event-stream declarations are unaffected.
@@ -64,6 +77,7 @@ pub struct SdkConfig {
     pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
     /// `ua/v1` attribution constants compiled from package identity and source.
     pub attribution: Option<crate::attribution::AttributionDescriptor>,
+    /// Limits for the generated schema validator compiled into the package.
     pub validation: Config,
 }
 impl Default for SdkConfig {
@@ -117,26 +131,32 @@ pub struct SdkPlan {
     incoming: Option<incoming::IncomingEmission>,
 }
 impl SdkPlan {
+    /// The admitted contract this plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// The configuration the plan was admitted under.
     #[must_use]
     pub fn config(&self) -> &SdkConfig {
         &self.config
     }
+    /// Planned C++ model types for the selected operations.
     #[must_use]
     pub fn models(&self) -> &ModelPlan {
         &self.models
     }
+    /// Planned operations in emission order.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Planned credential per security-scheme source.
     #[must_use]
     pub fn credentials(&self) -> &BTreeMap<SourceId, PlannedCredential> {
         &self.credentials
     }
+    /// The compiled runtime credential environment policy, when configured.
     #[must_use]
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
@@ -151,18 +171,22 @@ impl SdkPlan {
             requirement.scheme().terminal().source()
         }]
     }
+    /// Planned form and multipart aggregate types, in allocation order.
     #[must_use]
     pub fn aggregates(&self) -> &[PlannedAggregate] {
         &self.aggregates
     }
+    /// The compiled schema validation program embedded in the package.
     #[must_use]
     pub fn validation_program(&self) -> &OwnedProgram {
         &self.program
     }
+    /// Compiled request/response examples for documentation and samples.
     #[must_use]
     pub fn examples(&self) -> &examples::ExamplePlan {
         &self.examples
     }
+    /// The canonical HTTP protocol plan the operations were lowered from.
     #[must_use]
     pub fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
@@ -210,6 +234,11 @@ pub fn plan_sdk(
 ) -> Result<SdkPlan, Vec<HttpDiagnostic>> {
     protocol::plan(contract, selected, config)
 }
+/// Render the package files for `plan`; equivalent to [`SdkPlan::render`].
+///
+/// # Errors
+/// Returns source-located diagnostics when the validation program does not
+/// match the contract or emission refuses; no partial file set is produced.
 pub fn emit_sdk(plan: &SdkPlan) -> Result<Vec<OutFile>, Vec<HttpDiagnostic>> {
     plan.render()
 }

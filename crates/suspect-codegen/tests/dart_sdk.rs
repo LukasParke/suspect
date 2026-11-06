@@ -246,16 +246,25 @@ fn unsupported_uri_spelling_is_located_before_emission() {
 #[test]
 fn protocol_profile_does_not_inherit_unverified_dialects_or_encodings() {
     {
-        let mut document = schema_api(json!({"type":"string"}));
+        // OAS 3.0 is an explicit adapter opt-in, recorded only for sources
+        // that declare it, so 3.1/3.2 manifests keep their capability set.
+        use suspect_codegen::http_protocol::Capability;
+        let mut document = schema_api(json!({"type":"string","nullable":true}));
+        let modern = plan_document(&document, DartConfig::default());
+        assert!(
+            !modern
+                .protocol()
+                .capabilities()
+                .supports(Capability::OpenApi30)
+        );
         document["openapi"] = json!("3.0.3");
-        let contract = fixture(&document);
-        let errors = plan_sdk(
-            contract.clone(),
-            &selected(&contract),
-            DartConfig::default(),
-        )
-        .unwrap_err();
-        assert!(errors.iter().any(|d| d.source.pointer() == "/openapi"));
+        let old = plan_document(&document, DartConfig::default());
+        assert!(
+            old.protocol()
+                .capabilities()
+                .supports(Capability::OpenApi30)
+        );
+        assert_eq!(old.operations()[0].statuses[0].native_type, "String?");
     }
     for status in [101, 204, 205, 304] {
         let mut document = schema_api(json!({"type":"string"}));
@@ -360,10 +369,10 @@ fn repository() -> PathBuf {
         .unwrap()
 }
 
+/// The Dart toolchain resolved by `suspect_codegen::toolchain`; each native
+/// test gates on `toolchain::require("dart")` first.
 fn dart() -> PathBuf {
-    std::env::var_os("SUSPECT_DART_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repository().join("target/sdk-dart-tools/dart-sdk/bin/dart"))
+    suspect_codegen::toolchain::resolve_path("dart").expect("gated by toolchain::require(\"dart\")")
 }
 
 fn gate_root(name: &str) -> PathBuf {
@@ -419,6 +428,7 @@ fn checked(command: &mut Command, root: &Path, name: &str) -> Output {
 #[test]
 #[ignore = "required native Dart floor/current package, installed-consumer and wire gate"]
 fn native_m2_installed_consumer() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let contract = m2();
     let plan = plan_sdk(
         contract.clone(),
@@ -454,10 +464,13 @@ fn native_m2_installed_consumer() {
     {
         let records = server.records.lock().unwrap();
         let request = records.last().unwrap();
+        // The README quickstart is the first planned operation (source
+        // order) whose required inputs all have validated source examples:
+        // listWidgets, with its four example query values.
         assert_eq!(records.len(), 14);
-        assert_eq!(request.method, "POST");
-        assert_eq!(request.target, "/api/v1/widgets");
-        assert_eq!(request.body, br#"{"name":"alpha"}"#);
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.target, "/api/v1/widgets?tag=x&limit=1");
+        assert!(request.body.is_empty());
     }
     native_negative_types(&root);
     native_docs(&plan, &root);
@@ -1054,6 +1067,7 @@ fn dart_quote(value: &str) -> String {
 #[test]
 #[ignore = "required Dart checked-program, shared-vector, reference and resource gate"]
 fn native_runtime_vectors_refs_and_resource_classification() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = gate_root("runtime-");
     let vectors: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
@@ -1359,10 +1373,20 @@ fn native_five_actual_openrouter_operations() {
     {
         let records = server.records.lock().unwrap();
         let request = records.last().unwrap();
+        // The README quickstart is the first planned operation (source
+        // order) whose required inputs all have validated source examples:
+        // listContainerFiles at the pinned OpenRouter revision.
         assert_eq!(records.len(), 8);
-        assert_eq!(request.method, "POST");
-        assert_eq!(request.target, "/api/v1/keys");
-        assert_eq!(request.body, br#"{"expires_at":"2027-12-31T23:59:59Z","include_byok_in_limit":true,"limit":50,"limit_reset":"monthly","name":"My New API Key"}"#);
+        assert_eq!(request.method, "GET");
+        assert_eq!(
+            request.target,
+            "/api/v1/containers/sess_abc123/files?limit=100&after=cfile_b3V0L3JlcG9ydC5jc3Y"
+        );
+        assert!(request.body.is_empty());
+        assert_eq!(
+            request.header("authorization"),
+            "Bearer test-management-token"
+        );
     }
     native_docs(&plan, &root);
     assert_eq!(
@@ -1376,6 +1400,7 @@ fn native_five_actual_openrouter_operations() {
 #[test]
 #[ignore = "required installed Dart naming, nullable-body, query-work and source-escaping gate"]
 fn native_adversarial_names_and_optional_body() {
+    let _dart = suspect_codegen::toolchain::require("dart");
     let reserved = [
         "Client",
         "JsonNumber",
@@ -1550,4 +1575,172 @@ fn native_adversarial_names_and_optional_body() {
     native_consumer(&root, &unused, true);
     native_docs(&plan, &root);
     println!("DART_NAMES_GATE_ROOT={}", root.display());
+}
+
+/// OAS 3.0 witness shared with the PHP backend (ADR 0016 lowering).
+fn oas30() -> Arc<Contract> {
+    load(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/oas30/nullable-bounds-refs.openapi.yaml"),
+    )
+}
+
+/// `(keyword pointer, maximum, exclusive, operand)` for every compiled bound.
+fn oas30_bounds(program: &suspect_schema::OwnedProgram) -> Vec<(String, bool, bool, String)> {
+    let mut bounds = program
+        .nodes
+        .iter()
+        .flat_map(|node| &node.checks)
+        .filter_map(|check| match &check.instruction {
+            suspect_schema::ProgramInstruction::Bound {
+                value,
+                maximum,
+                exclusive,
+            } => Some((
+                check.source.pointer.clone(),
+                *maximum,
+                *exclusive,
+                value.clone(),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    bounds.sort();
+    bounds.dedup();
+    bounds
+}
+
+#[test]
+fn oas30_nullable_exclusive_bounds_and_reference_siblings_lower_to_native_models() {
+    let contract = oas30();
+    let plan = plan_sdk(
+        contract.clone(),
+        &selected(&contract),
+        DartConfig::default(),
+    )
+    .unwrap_or_else(|errors| panic!("OAS 3.0 must be admitted: {errors:#?}"));
+    let model = |pointer: &str| {
+        plan.models()
+            .symbols()
+            .iter()
+            .find(|m| m.source.pointer() == pointer)
+            .unwrap_or_else(|| panic!("no model for {pointer}"))
+    };
+    let ty = |pointer: &str| plan.models().ty(model(pointer).index);
+    let property = |name: &str| format!("/components/schemas/Pet/properties/{name}");
+    // Scalar nullable widens only the same-object type.
+    assert_eq!(ty(&property("tag")), "String?");
+    assert_eq!(ty(&property("name")), "String");
+    // Object nullable.
+    let owner = model("/components/schemas/Owner");
+    assert!(owner.nullable);
+    assert!(matches!(owner.shape, DartShape::Object { .. }));
+    assert_eq!(ty("/components/schemas/Owner"), "Owner?");
+    // Reference Object: siblings (type, readOnly, description) are ignored.
+    let reference = model(&property("owner"));
+    assert!(matches!(reference.shape, DartShape::Alias(_)));
+    assert_eq!(ty(&property("owner")), "Owner?");
+    assert_eq!(reference.description, "");
+    // A $ref'd nullable scalar is nullable through its target.
+    assert_eq!(ty("/components/schemas/Nickname"), "String?");
+    assert_eq!(ty(&property("nickname")), "String?");
+    assert_eq!(
+        model("/components/schemas/Nickname").description,
+        "A nullable scalar."
+    );
+    // nullable cannot bypass an enum without null; an enum listing null can.
+    assert_eq!(ty(&property("status")), model(&property("status")).name);
+    assert!(!model(&property("status")).nullable);
+    assert!(
+        matches!(&model(&property("status")).shape, DartShape::Enum(cases) if cases.len() == 2)
+    );
+    assert!(model(&property("mood")).nullable);
+    assert_eq!(
+        ty(&property("mood")),
+        format!("{}?", model(&property("mood")).name)
+    );
+    // nullable without a same-object type changes nothing: arbitrary JSON.
+    assert!(matches!(model(&property("anything")).shape, DartShape::Any));
+    assert_eq!(ty(&property("anything")), "JsonValue");
+    assert!(matches!(model(&property("id")).shape, DartShape::Integer));
+    // Boolean exclusive flags modify the adjacent numeric bound.
+    assert_eq!(
+        oas30_bounds(plan.program()),
+        [
+            (property("id/maximum"), true, true, "100".into()),
+            (property("id/minimum"), false, true, "0".into()),
+            (property("weight/maximum"), true, false, "50".into()),
+            (property("weight/minimum"), false, true, "0".into()),
+            (
+                "/paths/~1pets/get/parameters/0/schema/maximum".into(),
+                true,
+                false,
+                "100".into()
+            ),
+            (
+                "/paths/~1pets/get/parameters/0/schema/minimum".into(),
+                false,
+                true,
+                "0".into()
+            ),
+        ]
+    );
+    let photo = plan
+        .operations()
+        .iter()
+        .find(|op| op.operation_id == "getPhoto")
+        .unwrap();
+    assert_eq!(photo.statuses[0].native_type, "Uint8List");
+    let files = plan.render();
+    let text = |path: &str| {
+        &files
+            .iter()
+            .find(|file| file.path == path)
+            .unwrap_or_else(|| panic!("missing {path}"))
+            .content
+    };
+    let models = text("dart/lib/src/models.dart");
+    for declaration in [
+        "final class Pet ",
+        "final class Owner ",
+        "String? tag",
+        "Owner? owner",
+    ] {
+        assert!(models.contains(declaration), "missing {declaration}");
+    }
+    assert!(!models.contains("Ignored Reference Object sibling"));
+    let readme = text("dart/README.md");
+    assert!(readme.contains("generated from OpenAPI 3.0.3"));
+    assert!(readme.contains("OpenAPI 3.0 Schema Objects are lowered"));
+    assert!(!readme.contains("diagnostics:\nOpenAPI 3.0,"));
+}
+
+#[test]
+#[ignore = "required installed Dart OpenAPI 3.0 nullable, exclusive-bound and reference-sibling gate"]
+fn native_oas30_nullable_bounds_and_reference_siblings() {
+    let _dart = suspect_codegen::toolchain::require("dart");
+    let contract = oas30();
+    let plan = plan_sdk(
+        contract.clone(),
+        &selected(&contract),
+        DartConfig::default(),
+    )
+    .unwrap();
+    let root = gate_root("oas30-");
+    native_package(&plan, &root);
+    std::fs::write(
+        root.join("consumer/bin/main.dart"),
+        include_str!("../src/dart_sdk/native_oas30.dart"),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("consumer/bin/support.dart"),
+        include_str!("../src/dart_sdk/native_support.dart"),
+    )
+    .unwrap();
+    let unused = LocalServer::start(|mut stream, _, _| {
+        respond(&mut stream, 500, "text/plain", b"no socket expected", &[])
+    });
+    native_consumer(&root, &unused, false);
+    println!("DART_OAS30_GATE_ROOT={}", root.display());
 }

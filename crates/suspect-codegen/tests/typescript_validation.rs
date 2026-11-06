@@ -609,7 +609,7 @@ assert.deepEqual(incomplete,[tight.pointer+'/anyOf/0']);
 }
 
 #[test]
-#[ignore = "requires native TypeScript/Node.js and OPENROUTER_WEB_ROOT"]
+#[ignore = "requires native TypeScript/Node.js and OPENROUTER_WEB_ROOT (the OpenRouter checkout)"]
 fn tracked_openrouter_index_and_messages_run_in_native_typescript() {
     let root_dir = suspect_codegen::test_inputs::openrouter_root();
     let path = root_dir.join("projects/docs/openapi/openapi.yaml");

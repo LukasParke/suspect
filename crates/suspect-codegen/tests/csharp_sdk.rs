@@ -89,7 +89,7 @@ fn plan_admits_object_records_with_presence_and_extras() {
     assert_eq!(plan.operations()[0].method_name, "ListThingsAsync");
     let record = plan
         .models()
-        .declarations
+        .declarations()
         .values()
         .find_map(|decl| match decl {
             CsDecl::Record { fields, extras } => Some((fields, extras)),
@@ -131,7 +131,7 @@ fn one_of_ref_branches_plan_as_sealed_unions() {
         .expect("ref unions are representable");
     assert!(
         plan.models()
-            .declarations
+            .declarations()
             .values()
             .any(|decl| matches!(decl, CsDecl::Union { branches } if branches.len() == 2))
     );
@@ -202,7 +202,7 @@ fn retained_native_descriptors_and_source_bound_onboarding_are_deterministic() {
         namespace: "Example.Widgets".into(),
     };
     let plan = plan_sdk(contract.clone(), &selected(&contract), config.clone()).unwrap();
-    assert_eq!(plan.package(), &config);
+    assert_eq!(plan.config(), &config);
     assert!(Arc::ptr_eq(plan.contract(), &contract));
     let create = plan
         .operations()
@@ -384,14 +384,14 @@ fn native_package_builds_and_consumes_negative_types() {
     for (sdk, framework) in TOOLCHAINS {
         let native = Native::new("m2", sdk, framework, &plan.render().unwrap());
         native.write("source.openapi.yaml", &original);
-        let package = native.package(plan.package());
+        let package = native.package(plan.config());
         native.consumer(
-            plan.package(),
+            plan.config(),
             include_str!("../src/csharp_sdk/testdata/M2Consumer.cs"),
             &package,
         );
         native.examples();
-        native.negative(plan.package(), &[
+        native.negative(plan.config(), &[
             ("body-required", "_ = new CreateWidgetInput();", "CS9035"),
             ("name-required", "_ = new WidgetInput();", "CS9035"),
             ("nonnull-body", "_ = new CreateWidgetInput { Body = null };", "CS8625"),
@@ -463,8 +463,8 @@ fn native_openrouter_expanded_anonymous_operation() {
             framework,
             &plan.render().unwrap(),
         );
-        let package = native.package(plan.package());
-        native.consumer(plan.package(),r#"
+        let package = native.package(plan.config());
+        native.consumer(plan.config(),r#"
 using Suspect.Csharp.Coinbase;
 using System.Net;
 using System.Text;
@@ -813,8 +813,8 @@ fn native_actual_openrouter_five_operations() {
             "consumer/responses.json",
             include_bytes!("fixtures/openrouter-five-responses.json"),
         );
-        let package = native.package(plan.package());
-        native.consumer(plan.package(), &source, &package);
+        let package = native.package(plan.config());
+        native.consumer(plan.config(), &source, &package);
         native.examples();
         native.finish("actual-openrouter-five", &snapshots[0]);
     }
@@ -956,14 +956,14 @@ fn native_nullable_union_and_name_adversarial_contract() {
     for (sdk, framework) in TOOLCHAINS {
         let native = Native::new("adversarial", sdk, framework, &plan.render().unwrap());
         native.write("source.openapi.json", &original);
-        let package = native.package(plan.package());
+        let package = native.package(plan.config());
         native.consumer(
-            plan.package(),
+            plan.config(),
             include_str!("../src/csharp_sdk/testdata/AdversarialConsumer.cs"),
             &package,
         );
         native.examples();
-        native.negative(plan.package(), &[
+        native.negative(plan.config(), &[
             ("required-nullable", "_ = new Thing { Name = \"x\", Choice = new Choice.Variant2(\"x\") };", "CS9035"),
             ("optional-nonnull", "_ = new Thing { Name = \"x\", RequiredNullable = null, Choice = new Choice.Variant2(\"x\"), Optional = Optional<string>.Present(null) };", "CS8625"),
             ("nullable-type", "NullableEnum value = Codecs.DecodeNullableEnum(\"null\"); _ = value;", "CS0266"),

@@ -8,10 +8,12 @@
 //! inputs are transcoded once at load; all downstream byte offsets refer to
 //! the decoded buffer, not the on-disk bytes.
 
+#![deny(missing_docs)]
+
 mod line_index;
 mod source;
 mod uri;
 
 pub use line_index::LineIndex;
 pub use source::{Encoding, MMAP_THRESHOLD, Source};
-pub use uri::Uri;
+pub use uri::{Uri, UriError};

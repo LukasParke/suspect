@@ -12,3 +12,4 @@ __pycache__/
 .suspect-cache/
 crates/suspect-cli/target/
 editors/zed/target/
+*.log

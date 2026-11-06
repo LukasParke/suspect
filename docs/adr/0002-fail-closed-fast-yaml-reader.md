@@ -1,0 +1,3 @@
+# A fail-closed fast YAML reader sits in front of the lossless CST
+
+`IrSpec::from_file` first tries `suspect_syntax::try_parse_fast`, an allocation-lean reader for the block-style YAML subset that real OpenAPI documents use. For anything else it falls back to the tree-sitter CST. The reader fails closed: tabs, CRLF, anchors, aliases, tags, multi-line flow or plain scalars, directives and deep nesting all make it decline rather than guess. Both paths must produce identical IR. We accept two parsers that must stay in agreement because the CST path took about 1,000 ms on a 6 MB spec against 7–9 ms for the fast path, and IR-only consumers such as gateway startup do not need losslessness.

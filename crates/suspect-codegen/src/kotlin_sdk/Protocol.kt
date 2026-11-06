@@ -117,7 +117,7 @@ internal fun selectMedia(media: List<JsonValue>, actual: String): Int {
     val selected = media.indices.filter { protocolMedia((media[it] as JsonObject).obj("media_type").text("declared"),true).accepts(value) }
         .maxByOrNull { protocolMedia((media[it] as JsonObject).obj("media_type").text("declared"),true).specificity }
         ?: throw SdkException(FailureKind.CONTENT_TYPE,"media type is not declared")
-    if ((media[selected] as JsonObject).obj("representation").text("kind") in listOf("json","text","stream","form") && value.parameters["charset"]?.let { !it.equals("utf-8",true) } == true) throw SdkException(FailureKind.CONTENT_TYPE,"unsupported response charset")
+    if ((media[selected] as JsonObject).obj("representation").text("kind") in listOf("text","stream","form") && value.parameters["charset"]?.let { !it.equals("utf-8",true) } == true) throw SdkException(FailureKind.CONTENT_TYPE,"unsupported response charset")
     return selected
 }
 internal fun concreteMedia(media: JsonObject, override: String?): String {
@@ -239,7 +239,7 @@ internal fun resolveUserAgent(options: ClientOptions): String? {
     return "suspect/$ATTRIBUTION_SUSPECT_VERSION $identity (kotlin/${System.getProperty("java.version") ?: "unknown"}; openapi/$ATTRIBUTION_SPEC_VERSION)"
 }
 internal fun protocolServer(op:JsonObject, options:ClientOptions, call:RequestOptions, budget:ProtocolBudget):URI {
-    options.serverUrl?.let { return it }
+    options.serverUrl?.let { validateServer(it, loopbackOnly = !options.allowInsecureHttp); return it }
     val servers=op.obj("servers").array("candidates");val index=call.serverIndex?:options.serverIndex
     if(index !in servers.indices)throw SdkException(FailureKind.REQUEST_REPRESENTATION,"server choice is out of range")
     val server=servers[index] as JsonObject;val variables=server.list("variables").map{it as JsonObject};val overrides=call.serverVariables?:options.serverVariables
@@ -257,7 +257,7 @@ internal fun protocolServer(op:JsonObject, options:ClientOptions, call:RequestOp
         budget.text(base.toASCIIString())
         resolveDocumentServer(base,uri)
     }
-    if(resolved.scheme?.lowercase() !in listOf("http","https")||resolved.host==null||resolved.rawUserInfo!=null||resolved.rawQuery!=null||resolved.rawFragment!=null||resolved.port !in -1..65535)throw SdkException(FailureKind.REQUEST_REPRESENTATION,"server must be an HTTP URI without userinfo, query or fragment")
+    try{validateServer(resolved)}catch(e:IllegalArgumentException){throw SdkException(FailureKind.REQUEST_REPRESENTATION,"server URL violates the server policy",cause=e)}
     return resolved
 }
 

@@ -29,9 +29,13 @@ pub(crate) struct HttpContract {
 /// A planner rejection tied to the precise source construct.
 #[derive(Debug, Clone)]
 pub struct HttpDiagnostic {
+    /// Source document containing the rejected construct.
     pub source: SourceId,
+    /// Byte range of the construct within `source`.
     pub at: Range<usize>,
+    /// Stable machine-readable diagnostic code.
     pub code: &'static str,
+    /// Human-readable explanation.
     pub message: String,
 }
 
@@ -40,11 +44,8 @@ pub struct HttpDiagnostic {
 pub(crate) struct Operation {
     pub source: SourceId,
     pub operation_id: String,
-    pub description: String,
     pub method: String,
     pub path: String,
-    pub server: String,
-    pub security_scheme_name: String,
     pub parameters: Vec<Parameter>,
     pub body: Option<Body>,
     pub responses: Vec<Response>,
@@ -64,7 +65,6 @@ pub(crate) struct Parameter {
 pub(crate) struct Body {
     /// Terminal media container, including through a Request Body reference.
     pub media_source: SourceId,
-    pub required: bool,
     pub media_type: String,
     pub schema: SchemaId,
 }
@@ -72,7 +72,6 @@ pub(crate) struct Body {
 /// One admitted response.
 #[derive(Debug, Clone)]
 pub(crate) struct Response {
-    pub source: SourceId,
     /// Terminal media container, including through a Response reference.
     pub media_source: SourceId,
     pub status: u16,
@@ -207,15 +206,10 @@ pub(crate) fn plan(
             }
         }
         let servers = op.effective_servers();
-        let server = if servers.len() == 1 && servers[0].variables().is_empty() {
-            servers[0]
-                .url()
-                .filter(|u| valid_server(u))
-                .map(str::to_owned)
-        } else {
-            None
-        };
-        let Some(server) = server else {
+        let static_server = servers.len() == 1
+            && servers[0].variables().is_empty()
+            && servers[0].url().is_some_and(valid_server);
+        if !static_server {
             errors.push(diag(
                 contract,
                 op.server_source()
@@ -225,7 +219,7 @@ pub(crate) fn plan(
                 "exactly one static absolute HTTPS server is supported",
             ));
             continue;
-        };
+        }
         let security_source = op
             .security_source()
             .cloned()
@@ -293,18 +287,13 @@ pub(crate) fn plan(
                 }
             }
         }
-        let mut security_scheme_name = None;
         let security_ok = requirements.len() == 1 && !requirements[0].is_anonymous() && {
             let uses = requirements[0].requirements();
-            let ok = uses.len() == 1
+            uses.len() == 1
                 && uses[0].scopes().is_some_and(|s| s.is_empty())
                 && uses[0].scheme().is_some_and(|s| {
                     s.kind() == Some(SecuritySchemeKind::Http) && s.http_scheme() == Some("bearer")
-                });
-            if ok {
-                security_scheme_name = Some(uses[0].name().to_owned());
-            }
-            ok
+                })
         };
         if !security_ok {
             errors.push(diag(contract, security_source.clone(), "http-security-unsupported", "the implemented profile requires one HTTP bearer scheme and no alternative or conjunctive schemes"));
@@ -507,7 +496,6 @@ pub(crate) fn plan(
             roots.push(schema.id().clone());
             Some(Body {
                 media_source: content[0].source().clone(),
-                required: b.required().unwrap_or(false),
                 media_type: "application/json".into(),
                 schema: schema.id().clone(),
             })
@@ -561,7 +549,6 @@ pub(crate) fn plan(
             };
             roots.push(schema.id().clone());
             responses.push(Response {
-                source: r.source().clone(),
                 media_source: content[0].source().clone(),
                 status,
                 media_type: "application/json".into(),
@@ -579,14 +566,11 @@ pub(crate) fn plan(
         operations.push(Operation {
             source: source.clone(),
             operation_id: operation_id.into(),
-            description: op.description().unwrap_or("").to_owned(),
             method: op.method().as_str().into(),
             path: op
                 .path_template()
                 .expect("client operation has a path")
                 .into(),
-            server,
-            security_scheme_name: security_scheme_name.expect("bearer requirement checked"),
             parameters,
             body,
             responses,

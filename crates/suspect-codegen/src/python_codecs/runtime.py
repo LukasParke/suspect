@@ -131,7 +131,7 @@ class _Context:
             try:
                 if kind == 'list': return [self.expression(ty['inner'],v,_child(path,str(i)),depth + 1,encode) for i,v in enumerate(value)]
                 output = {}
-                for key,item in value.items():
+                for key,item in cast(dict[Any, Any],value).items():
                     if type(key) is not str: return self.fail(path,'object key is not a string')
                     self.text(key,path,depth)
                     output[key] = self.expression(ty['inner'],item,_child(path,key),depth + 1,encode)
@@ -162,7 +162,7 @@ class _Context:
                             continue
                         converted = self.expression(field['type'],item,_child(path,field['wire']),depth + 1,encode)
                         if encode or not field['fixed']: output[field['wire'] if encode else field['name']] = converted
-                    extras = value._extra_fields if encode and descriptor['extras'] is not None else {} if encode else {key:item for key,item in value.items() if key not in known}
+                    extras = cast(Any,value)._extra_fields if encode and descriptor['extras'] is not None else {} if encode else {key:item for key,item in value.items() if key not in known}
                     extra_values = {}
                     for key,item in extras.items():
                         if type(key) is not str or key in known: return self.fail(path,'invalid or colliding extra key')

@@ -29,7 +29,6 @@
 //! shedding: dead pager-descriptor data in non-pager bundles, dead OAuth
 //! scheme data in non-OAuth bundles, and dead stream descriptor data in
 //! non-stream bundles.
-#![cfg(feature = "http-protocol")]
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -885,15 +884,7 @@ impl Esbuild {
 }
 
 fn node_program() -> Option<PathBuf> {
-    let selected = std::env::var_os("SUSPECT_PACKAGE_NODE")
-        .or_else(|| std::env::var_os("SUSPECT_DOCS_NODE"))
-        .unwrap_or_else(|| "node".into());
-    let program = PathBuf::from(selected);
-    let ok = Command::new(&program)
-        .arg("--version")
-        .output()
-        .is_ok_and(|output| output.status.success());
-    ok.then_some(program)
+    Some(suspect_codegen::toolchain::pinned_node(22))
 }
 
 struct Bundle {

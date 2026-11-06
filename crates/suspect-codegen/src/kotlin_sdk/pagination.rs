@@ -68,27 +68,41 @@ pub struct PaginationOperation {
     pub index: usize,
     /// Source identity of the paginated operation.
     pub operation: String,
+    /// Terminal source operation.
     pub source: SourceId,
     /// The generated client method this walk extends.
     pub method: String,
+    /// Generated input class of the operation.
     pub input_type: String,
+    /// Sealed result type of the operation.
     pub result_type: String,
     /// Shared native success payload type; absent when the success responses
     /// have no single payload type and the walk cannot read pages.
     pub data_type: Option<String>,
+    /// Public cold page-flow member (`<method>Pages`).
     pub pages: String,
+    /// Public item-flattening flow member (`<method>Items`), when the items
+    /// pointer resolves.
     pub items: Option<String>,
+    /// Public suspending next-input builder (`<method>NextPage`).
     pub next_page: String,
     /// Private helper names shared by the flows and the next-input builder.
     pub advance_helper: String,
+    /// Private page-items accessor, when the items pointer resolves.
     pub items_helper: Option<String>,
+    /// Private continuation accessor, for pointer-driven advances.
     pub continuation_helper: Option<String>,
+    /// Private has-more accessor, when the has-more pointer resolves to a boolean.
     pub has_more_helper: Option<String>,
+    /// How the walk computes its continuation.
     pub advance: Advance,
+    /// The request control the walk rewrites between pages.
     pub control: Control,
     /// The limit control and the documented SDK fallback page size it carries
     /// on the first request, when the operation has one.
     pub limit: Option<(Control, u32)>,
+    /// Configured first offset or page number; when absent, an unset optional
+    /// control reads as `0` (offset) or `1` (page).
     pub initial_offset: Option<u32>,
     /// The element type of the items collection.
     pub item_type: Option<String>,
@@ -106,6 +120,7 @@ pub struct PaginationOperation {
 pub struct PaginationPlan {
     /// The shared selection this emission follows.
     pub outcome: wire::PaginationOutcome,
+    /// Emittable paginated operations in planned-operation order.
     pub operations: Vec<PaginationOperation>,
 }
 

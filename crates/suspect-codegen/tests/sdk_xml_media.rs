@@ -25,8 +25,6 @@
 //!
 //! These are intentional refusals, not gaps to fill silently.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::sync::Arc;
 use suspect_codegen::backend::{Backend, GenerationOptions, TargetConfig, generate_with_options};

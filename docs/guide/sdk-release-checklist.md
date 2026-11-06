@@ -60,7 +60,7 @@ Identity mistakes are the cheapest kind to catch: run
 resulting attribution identity (§2) before publishing, because it is visible
 on the wire in every request.
 
-## 2. Pre-publish gates (all exist today)
+## 2. Pre-publish gates
 
 Run from the repository root. Everything is `cargo test --locked --offline`
 unless a gate needs its native toolchain; suites degrade to skipped/ignored
@@ -68,20 +68,18 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### Attribution (`ua/v1`)
 
-- `cargo test -p suspect-codegen --test sdk_attribution` — compiles the
+- `cargo test -p suspect-codegen --test shared` — compiles the
   attribution descriptor and runtime for TypeScript, Python, Go and Rust
   packages (suspect version, SDK identity, spec version, language tag).
-- `cargo test -p suspect-codegen --test swift_attribution --test java_attribution
-  --test kotlin_attribution --test csharp_attribution --test ruby_attribution
-  --test php_attribution --test dart_attribution --test cpp_attribution` —
+- `cargo test -p suspect-codegen _attribution::` —
   the eight remaining per-language attribution suites (options, sentinel
   packages without a descriptor, runtime resolution).
-- `cargo test -p suspect-codegen --test sdk_compatibility_attribution` —
+- `cargo test -p suspect-codegen --test shared` —
   attribution and `sdk_defaults` participate in compatibility capture.
 
 ### Pagination (zero-config detection + native behavioral gates)
 
-- Planner/explanations: `cargo test -p suspect-codegen --test sdk_pagination`.
+- Planner/explanations: `cargo test -p suspect-codegen --test shared`.
 - One native suite per backend, each with behavioral tests that execute the
   emitted helpers where a toolchain exists on the host:
   `typescript_pagination.rs`, `python_pagination.rs`, `go_pagination.rs`,
@@ -92,7 +90,7 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### OAuth lifecycle
 
-- Planner: `cargo test -p suspect-codegen --test sdk_oauth_plan`.
+- Planner: `cargo test -p suspect-codegen --test shared`.
 - Native suites: `typescript_oauth.rs`, `python_oauth.rs`, `go_oauth.rs`,
   `rust_oauth.rs`, `swift_oauth.rs`, `java_oauth.rs`, `kotlin_oauth.rs`,
   `csharp_oauth.rs`, `ruby_oauth.rs`, `php_oauth.rs`, `dart_oauth.rs`,
@@ -101,7 +99,7 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### Typed SSE
 
-- Plan compilation: `cargo test -p suspect-codegen --test sdk_stream_plan`.
+- Plan compilation: `cargo test -p suspect-codegen --test shared`.
 - Native suites: `typescript_stream_typed.rs`, `python_stream_typed.rs`,
   `go_stream_typed.rs`, `rust_stream_typed.rs`, `swift_stream_typed.rs`,
   `java_stream_typed.rs`, `kotlin_stream_typed.rs`, `csharp_stream_typed.rs`,
@@ -110,7 +108,7 @@ tests when a toolchain is absent, so a green run always states what ran.
 
 ### Credential environment (byte-pinned)
 
-- Shared policy suite: `cargo test -p suspect-codegen --test credential_env`.
+- Shared policy suite: `cargo test -p suspect-codegen --test shared`.
 - One suite per backend, each pinning or recording emitted artifact bytes
   (SHA-256) with explicit no-policy byte-stability tests:
   `typescript_credential_env.rs`, `python_credential_env.rs`,
@@ -132,24 +130,25 @@ Per [SDK-ELIMINATION-AUDIT.md](../design/elimination-audit.md) (which records th
 measured numbers and the honest defeats):
 
 ```sh
-cargo test -p suspect-codegen --test typescript_elimination -- --nocapture
-cargo test -p suspect-codegen --test swift_elimination     -- --nocapture
-cargo test -p suspect-codegen --test cpp_elimination       -- --nocapture
-cargo test -p suspect-codegen --test java_elimination      -- --nocapture
-cargo test -p suspect-codegen --test kotlin_elimination    -- --nocapture
-cargo test -p suspect-codegen --test csharp_elimination    -- --nocapture
-cargo test -p suspect-codegen --test ruby_elimination      -- --nocapture
-cargo test -p suspect-codegen --test php_elimination       -- --nocapture
+cargo test -p suspect-codegen --test typescript typescript_elimination:: -- --nocapture
+cargo test -p suspect-codegen --test swift swift_elimination::     -- --nocapture
+cargo test -p suspect-codegen --test cpp cpp_elimination::       -- --nocapture
+cargo test -p suspect-codegen --test java java_elimination::      -- --nocapture
+cargo test -p suspect-codegen --test kotlin kotlin_elimination::    -- --nocapture
+cargo test -p suspect-codegen --test csharp csharp_elimination::    -- --nocapture
+cargo test -p suspect-codegen --test ruby ruby_elimination::      -- --nocapture
+cargo test -p suspect-codegen --test php php_elimination::       -- --nocapture
+cargo test -p suspect-codegen --test dart dart_elimination::      -- --nocapture
 ```
 
-Go and Rust are gated by the real `go build`/`cargo build` consumer
-measurements recorded in the audit; Dart's gate is mechanism-only pending a
-CI toolchain. Every per-language gate writes its machine-readable record to
-`target/tmp/<language>-elimination-report.json`.
+Go and Rust have no dedicated `*_elimination` suite; their rows are consumer
+build measurements. Every per-language gate writes its machine-readable record
+to `target/tmp/<language>-elimination-report.json` and keeps native artifacts
+under `target/sdk-<language>-elimination/`.
 
 ### Native costs
 
-- `cargo test --locked --offline -p suspect-codegen --test sdk_native_measurements`
+- `cargo test --locked --offline -p suspect-codegen --test shared`
   — the host/adversarial checks for the `repeated-v1` methodology. The
   actual native collection is the ignored entrypoint, run only with all six
   `SUSPECT_SDK_FULL_*` variables exported by the `cargo xtask verify-sdk` runner (see
@@ -158,8 +157,8 @@ CI toolchain. Every per-language gate writes its machine-readable record to
 
 ### Determinism and drift
 
-- `cargo test -p suspect-codegen --test artifact_safety` and
-  `--test pinned_generation` — output sets are deterministic and
+- `cargo test -p suspect-codegen --test shared` and
+  `--test shared` — output sets are deterministic and
   source-pin-driven.
 - Regenerate the candidate and run the same generation with
   `suspect gen sdk --check --format json` (or `gen session --check`):
@@ -194,11 +193,9 @@ toolchain execution, or publishing
 
 ## 4. License and provenance in the emitted manifests
 
-Verified against the §3 generation run:
-
 - **License:** the only emitted license declaration is PHP's
   `"license": "proprietary"` in `composer.json`. No other backend's manifest
-  or README carries a license field today. Choosing and configuring the
+  or README carries a license field. Choosing and configuring the
   package license is a manual sign-off (§6); adding license metadata to the
   other eleven emitters is emitter work outside this checklist.
 - **Generator version** (`ua/v1` first token): compiled into every package's
@@ -260,7 +257,7 @@ by `tests/sdk_compatibility.rs`, `tests/sdk_compatibility_attribution.rs`,
 
 ## 6. Manual sign-offs that remain
 
-These are not automatable from this repository today; each is a human
+These are not automatable from this repository; each is a human
 check with a place to record the decision:
 
 1. **Toolchain pins.** Confirm the publishing host matches the maintained
@@ -276,8 +273,8 @@ check with a place to record the decision:
    pub.dev, Packagist, and the C++ distribution choice each need an account,
    trusted publishing/2FA, and a first-publish path. Nothing in the repo
    performs publication — the generator emits packages only.
-3. **License decision.** Pick the license per package and record it; today
-   only PHP's manifest declares one (`proprietary`). This is an emitter
+3. **License decision.** Pick the license per package and record it; only
+   PHP's manifest declares one (`proprietary`). This is an emitter
    change if per-package licensing should be configurable.
 4. **Release-readiness promotion.** Manifests ship `releaseReady: false` /
    `status: "prototype"`; flipping to a release claim is a reviewed decision

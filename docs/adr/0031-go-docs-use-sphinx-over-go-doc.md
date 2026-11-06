@@ -1,0 +1,3 @@
+# Go SDK reference docs are built with Sphinx over `go doc` output
+
+Generated Go packages ship a Sphinx project that runs the selected Go toolchain's `go doc` at build time (`crates/suspect-codegen/src/go_http/docs.rs`), rather than relying only on pkg.go.dev. Sphinx gives cross-links from every model, field, operation and status wrapper to its OpenAPI source location, and a warnings-as-errors build that fails on missing symbols or broken links. Python SDKs use the same pipeline. `go doc` is the only source of signatures: the generator never parses emitted Go or keeps a parallel signature table. Native `go doc` and pkg.go.dev keep working unchanged.

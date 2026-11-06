@@ -269,6 +269,10 @@ abstract class _ClientBase {
     capture.headers=_responseHeaders(response.headers,_maxHeaderBytes,capture);
     final index=op.response(response.status);
     final forbidden=op.method=='HEAD'||response.status<200||const[204,205,304].contains(response.status);
+    // Message framing (RFC 9112 section 6.3) is validated before the
+    // representation: an invalid or over-budget length is an invalid or
+    // oversized response whatever its media type.
+    if(!forbidden){_contentLength(capture);}
     var media=-1;
     if(index>=0&&!forbidden&&op.responses[index].media.isNotEmpty){
       final types=capture.headers['content-type'];final encoding=capture.headers['content-encoding'];

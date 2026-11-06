@@ -25,14 +25,17 @@ impl WireError {
             message: message.into(),
         }
     }
+    /// Declaration the refused value was checked against.
     #[must_use]
     pub fn source(&self) -> &SourceLocation {
         &self.source
     }
+    /// Stable machine-readable refusal code.
     #[must_use]
     pub fn code(&self) -> &'static str {
         self.code
     }
+    /// Human-readable explanation.
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
@@ -52,6 +55,7 @@ pub struct SerializedParameter {
     pub(super) value: String,
 }
 impl SerializedParameter {
+    /// Serialized wire text.
     #[must_use]
     pub fn value(&self) -> &str {
         &self.value

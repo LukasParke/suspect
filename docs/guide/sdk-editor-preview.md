@@ -28,9 +28,9 @@ CLI:
 | Dart HTTP SDK | `dart-http` | Lowercase pub package name |
 | C++ HTTP SDK | `cpp-http` | CMake target/include identifier |
 
-The verified default CLI inventory includes TypeScript, Rust, Python, Go, Swift,
-Ruby, C#, and Java. Additional profiles appear when advertised by a matching CLI
-build. The action uses the same executable for discovery and generation, even
+A default CLI build advertises all twelve profiles. A build compiled with fewer
+backend features advertises only those, and the picker shows only advertised
+profiles. The action uses the same executable for discovery and generation, even
 if the binary setting changes while a picker is open.
 
 The picker prompts for package identity, exact package SemVer, and operation IDs
@@ -324,98 +324,37 @@ built matching binary and Node 22.23.1 on `PATH`:
 SUSPECT_TEST_BINARY=/absolute/path/to/suspect npm --prefix editors/vscode run test:generation
 ```
 
-The earlier **52-check** integration and **49-check** protocol/UI runs remain
-historical evidence. The accepted process/mocked-UI verification (2026-09-10),
-with Node **22.23.1**,
-passed compilation, **101 protocol/UI checks**, and **122 full checks** with
-zero failures or skips. The full run covers all eight profiles advertised by
-the fresh default CLI, including Ruby, C#, and Java; UI-seam coverage exercises
-all twelve recognized profiles. The fixtures inspect generated packages without
-executing their SDK source.
+The fixtures inspect generated packages without executing their SDK source.
 
-Fresh local evidence:
+### Graphical VSIX / extension-host tests
 
-- `target/sdk-editor-protocol-compile-01.log`
-- `target/sdk-editor-protocol-mocked-01.log`
-- `target/sdk-editor-protocol-full-02.log`
-- `target/sdk-editor-protocol-inventory-01.json`
-- `target/sdk-editor-protocol-cli-identity-01.json` records the verified CLI
-  copy and SHA-256; the copy is `target/sdk-editor-protocol-suspect-01`.
+The native-host gate runs a locally packaged and installed VSIX in isolated
+user-data/extensions/home/workspace directories. Its runner imports the real
+`vscode` API, invokes production registered commands, reads actual
+provider-backed documents and diff tabs, and observes the real CLI child
+processes. Renderer automation operates actual Quick Picks, Input Boxes and the
+progress Cancel button, and captures the native Electron workbench through its
+loopback CDP endpoint.
 
-The fresh binary came from the successful public CLI test build recorded in
-`target/sdk-cli-options-integration-01.log`. Reproduction records for the fixed
-discovery deadline/binary-selection bugs and earlier failures are retained under
-`target/sdk-editor-protocol-*`.
-
-### Graphical VSIX / extension-host verification
-
-The real graphical gate passed on **VS Code 1.137.0**, official macOS arm64 build
-`645f29cc3176500b4b5762ba887cf2a7f0ffdf2c`, using a locally packaged and installed
-VSIX in isolated user-data/extensions/home/workspace directories. The archive
-SHA-256 was
-`16ee5cddb1ea19234e1f2516da07d57e07d7cab6ab45a5515dab077656cbc65e`;
-the app's code signature also verified. The host used Electron **42.10.0** and
-Node **24.18.1**. The launcher/tools used Node **22.23.1**.
-
-The test runner imports the real `vscode` API, invokes production registered
-commands, reads actual provider-backed documents and diff tabs, and observes
-the real CLI child processes. Renderer automation operates actual Quick Picks,
-Input Boxes and the progress Cancel button, and captures the native Electron
-workbench through its loopback CDP endpoint.
-
-- **15 lifecycle checks passed**, exit 0: installed activation and LSP startup;
-  the eight-profile discovery picker; a real read-only diff with lexical roots;
+- The `lifecycle` scenario covers installed activation and LSP startup; the
+  discovery picker; a real read-only diff with lexical roots;
   changed/reverted/removed/error/recovery snapshots through one canonical watch
-  PID; typing refusal; Stop and dialog/progress cancellation; Python generation
-  and its opened README; and final watch shutdown with the host.
-- **7 focused command checks passed**, exit 0: three startup prerequisites and
-  successful registered one-shot Preview, Show Latest, current Check and drift
-  Check actions. Both checks opened no generated diff.
-- All **63 baseline owned files** retained their bytes, size, mtime and inode in
-  each run. Fourteen rendered screenshots are retained. The frozen CLI still
-  advertises eight profiles; native host evidence does not expand that inventory.
+  process; typing refusal; Stop and dialog/progress cancellation; Python
+  generation and its opened README; and watch shutdown with the host.
+- The `commands` scenario covers registered one-shot Preview, Show Latest,
+  current Check and drift Check actions; neither check opens a generated diff.
+- Both require baseline owned output files to retain their bytes, size, mtime
+  and inode.
 
-Native startup reproduced and fixed three editor defects:
-
-1. An existing executable with a versioned/renamed filename was treated as a
-   directory by `suspect.basePath`. Existing regular executable files now retain
-   their selected path.
-2. Explicit `TransportKind.stdio` made the language client append `--stdio`,
-   which `suspect lsp` does not accept. Executable-default stdio uses exact argv.
-3. The LSP and editor both registered `suspect.runWorkflow`, aborting client
-   initialization. The editor owns that handler, accepts code-lens URI strings,
-   and allows the other server commands to register normally.
-
-Evidence root: `target/sdk-editor-protocol-native-host-01/`.
-
-- `result.json` — exact app/CLI/tool/VSIX/source/test pins and result index.
-- `native-run-05.log`, `attempt-tQ24xA/native-report.json` — lifecycle results.
-- `native-commands-02.log`, `attempt-ddXZy3/native-report.json` — focused command
-  results.
-- `attempt-tQ24xA/04-native-live-diff-B.png` — rendered A/B diff and read-only
-  typing refusal.
-- `attempt-tQ24xA/08-native-progress-cancellation.png` — actual progress Cancel
-  control.
-- `attempt-ddXZy3/commands-03-drift-check.png` — rendered native drift report.
-- `editor-compile-03.log` — compilation after the native startup fixes.
-
-Earlier attempts, including the macOS IPC-path limit, executable-resolution and
-LSP startup failures, are retained. The accepted **122** process/mocked-UI and
-**101** protocol/UI matrices were preserved without rerunning them during this
-native follow-up. See `editors/vscode/test/native-host/README.md` for exact commands,
-tool pins and fixture details.
-
-Remaining native coverage: OS file chooser selection, multi-root folder
-selection, remote workspaces, and Windows/Linux hosts. The macOS logs retain
+Native-host coverage does not include OS file chooser selection, multi-root
+folder selection, remote workspaces, or Windows/Linux hosts. Host logs may carry
 configuration-scope warnings and late teardown messages after the host's
-terminate notification; live Stop invalidation, process cleanup, disk preservation
-and exit-code checks passed. The native results make no warning-free-log claim.
+terminate notification; the gate makes no warning-free-log claim.
 
-### Maintained native-host invocation contract
+### Native-host invocation contract
 
-The reusable gate now takes explicit immutable inputs rather than consulting the
-historical evidence above. `editors/vscode/test/native-host/pins.schema.json`
-defines `suspect.editor.native-host.pins.v1`: CLI hash and exact expected backend
+The gate takes explicit immutable inputs.
+`editors/vscode/test/native-host/pins.schema.json` defines `suspect.editor.native-host.pins.v1`: CLI hash and exact expected backend
 IDs, VS Code executable/archive hashes and version/commit, installed tool directory
 and lock hash, editor source directory/digest, and an optional supplied VSIX/hash.
 
@@ -440,11 +379,8 @@ explicit Node/system `PATH`; profiles and HOME/XDG/TMP paths are isolated by the
 runner. Omitting the VSIX selects source packaging and requires npm dependency
 availability. See `test/native-host/README.md` for details.
 
-This contract update passed **53 new guard tests** and a single real
-`selection-probe` under `env -i`, using explicit fresh copies of the accepted
-eight-profile CLI/VSIX. It captured the actual native picker and exited 0 without
-SDK baseline generation. That explicit probe mode cannot satisfy either native
-acceptance scenario. The completed native and process/mock matrices were not
-rerun for this update. Integration instructions and probe evidence are in
-`target/sdk-editor-native-host-integration/HANDOFF.md` and
-`selection-probe-01/report.json`.
+The input/report guard tests run without VS Code:
+
+```sh
+npm --prefix editors/vscode run test:generation:host:inputs
+```

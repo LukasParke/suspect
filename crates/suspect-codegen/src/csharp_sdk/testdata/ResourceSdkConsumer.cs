@@ -25,7 +25,7 @@ internal static class Probe
     }
     internal static async Task Main(string[] args)
     {
-        const string entry="http://api.csharp.test/v1/spec/openapi.json#";
+        const string entry="https://api.csharp.test/v1/spec/openapi.json#";
         await using var server=new Server();var hosts=new ConcurrentQueue<string>();
         using var handler=new SocketsHttpHandler{AllowAutoRedirect=false,UseProxy=false,ConnectCallback=async(context,token)=>
         {
@@ -33,7 +33,8 @@ internal static class Probe
             var socket=new Socket(AddressFamily.InterNetwork,SocketType.Stream,ProtocolType.Tcp);
             await socket.ConnectAsync(IPAddress.Loopback,server.Port,token);return new NetworkStream(socket,true);
         }};
-        using var http=new HttpClient(handler);using var client=new Client(new Credentials(),httpClient:http);
+        // ADR 0035: cleartext only reaches loopback; the fixture downgrades its HTTPS origin to the local listener.
+        using var http=new HttpClient(new Downgrade(handler));using var client=new Client(new Credentials(),httpClient:http);
         var tree=new Tree{Name="root",Amount=new JsonNumber("9007199254740993.000000000000000001"),Children=new List<JsonElement>{Json("{\"name\":\"leaf\",\"amount\":9007199254740994e0}")}};
         await using(var result=await client.SendTreeAsync(new SendTreeInput{Body=tree}))
         {
@@ -75,11 +76,11 @@ internal static class Probe
         await using(var result=await client.SendNullableEnvelopeAsync(new SendNullableEnvelopeInput{Body=nullable}))
             Check(result.Data.Value.Value.GetRawText()=="2.0","Dynamic union conversion does not run standalone branch trials");
         nullable.Value=Json("\"wrong-in-parent\"");
-        Invalid(()=>Codecs.Encode__NULLABLEENVELOPE__(nullable),"http://storage.csharp.test/schema/choice.json#/anyOf","/value");
+        Invalid(()=>Codecs.Encode__NULLABLEENVELOPE__(nullable),"https://storage.csharp.test/schema/choice.json#/anyOf","/value");
         var choice=Codecs.Decode__CHOICE__("\"standalone\"");
         await using(var result=await client.SendChoiceAsync(new SendChoiceInput{Body=choice}))
             Check(result.Data.GetString()=="standalone","Standalone union uses initial string target after outer call scope restores");
-        Invalid(()=>Codecs.Decode__CHOICE__("null"),"http://storage.csharp.test/schema/choice.json#/anyOf","");
+        Invalid(()=>Codecs.Decode__CHOICE__("null"),"https://storage.csharp.test/schema/choice.json#/anyOf","");
         await using(var result=await client.SendFallbackAsync(new SendFallbackInput{Body=Json("\"fallback\"")}))
             Check(result.Data.GetString()=="fallback","Raw dynamicRef codec is a checked JSON carrier");
         var number=new JsonInteger("9007199254740993e0");
@@ -88,10 +89,10 @@ internal static class Probe
             Check(result.Data.Token==number.Token&&server.Requests.Last().Body==number.Token,"Static canonical resource retains exact integer native and wire types");
             Check(server.Requests.Last().Revision==number.Token,"Source-linked exact integer header codec");
         }
-        Invalid(()=>Codecs.Encode__INTEGER__(new JsonInteger("9007199254740992")),"http://storage.csharp.test/schema/catalog.json#/$defs/a~1b~0% #é/minimum","");
+        Invalid(()=>Codecs.Encode__INTEGER__(new JsonInteger("9007199254740992")),"https://storage.csharp.test/schema/catalog.json#/$defs/a~1b~0% #é/minimum","");
         await using(var result=await client.SendNestedAsync(new SendNestedInput{Body=Json("7.0")}))
             Check(result.Data.GetRawText()=="7.0","Detached nested entry enters indexed parent without executing false resource root");
-        Invalid(()=>Codecs.Encode__NESTED__(Json("\"fallback\"")),"http://storage.csharp.test/schema/detached.json#/$defs/Binding/type","");
+        Invalid(()=>Codecs.Encode__NESTED__(Json("\"fallback\"")),"https://storage.csharp.test/schema/detached.json#/$defs/Binding/type","");
         server.Responses.Enqueue((422,null));
         try {await client.SendStrictTreeAsync(new SendStrictTreeInput{Body=strict});throw new Exception("Expected typed API error");}
         catch(__STRICT_ERROR__ error){await using(error){Check(error.Data.GetProperty("name").GetString()=="strict"&&error.Response!.Status==422,"Installed typed error payload runs resource program");}}
@@ -114,12 +115,12 @@ internal static class Probe
         {
             string Read(string path){using var reader=new StreamReader(package.GetEntry(path)!.Open());return reader.ReadToEnd();}
             var xmlText=Read("lib/net8.0/Resources.Csharp.xml");var xml=XDocument.Parse(xmlText).Descendants("member").Select(m=>(string)m.Attribute("name")!).ToHashSet();
-            using var reference=JsonDocument.Parse(Read("docs/reference.json"));var html=Read("docs/index.html");
+            using var reference=JsonDocument.Parse(Read("docs/reference.json"));var html=string.Concat(package.Entries.Where(e=>e.FullName.StartsWith("docs/",StringComparison.Ordinal)&&e.FullName.EndsWith(".html",StringComparison.Ordinal)).OrderBy(e=>e.FullName,StringComparer.Ordinal).Select(e=>Read(e.FullName)));
             Check(reference.RootElement.GetProperty("validation").GetProperty("profile").GetString()=="oas31-jsonschema202012-resources-dynamic","Installed rendered reference records exact v3 profile");
             foreach(var symbol in reference.RootElement.GetProperty("symbols").EnumerateArray())
             {Check(xml.Contains(symbol.GetProperty("xmlId").GetString()!),"Installed XML native symbol");Check(html.Contains("id=\""+symbol.GetProperty("id").GetString()+"\"",StringComparison.Ordinal),"Rendered source/native anchor");}
             Check(Read("README.md").Contains("Resource-scoped source validation",StringComparison.Ordinal)&&html.Contains("Indexed schema resources",StringComparison.Ordinal),"Installed guide explains dynamic carrier and indexed scope obligations");
-            Check(xmlText.Contains("https://schemas.csharp.test/catalog",StringComparison.Ordinal)&&xmlText.Contains("http://storage.csharp.test/schema/catalog.json",StringComparison.Ordinal),"Compiler XML keeps logical metadata separate from physical ownership");
+            Check(xmlText.Contains("https://schemas.csharp.test/catalog",StringComparison.Ordinal)&&xmlText.Contains("https://storage.csharp.test/schema/catalog.json",StringComparison.Ordinal),"Compiler XML keeps logical metadata separate from physical ownership");
             using var examples=JsonDocument.Parse(Read("examples/examples.json"));Check(examples.RootElement.GetProperty("diagnostics").GetArrayLength()==0&&examples.RootElement.GetProperty("operations").GetArrayLength()==8,"Source-bound installed example coverage");
         }
         using(var stream=typeof(Codecs).Assembly.GetManifestResourceStream("Suspect.ValidationProgram.json")!)
@@ -127,15 +128,24 @@ internal static class Probe
         {
             var program=document.RootElement;var resources=program.GetProperty("resourceContext");
             Check(program.GetProperty("version").GetString()=="suspect.validation.experimental.v3"&&resources.GetProperty("nodeScopes").GetArrayLength()==program.GetProperty("nodes").GetArrayLength(),"Installed executable V3 has aligned node scopes");
-            Check(resources.GetProperty("resources").EnumerateArray().Any(r=>r.GetProperty("canonicalUri").GetString()=="https://schemas.csharp.test/catalog"&&r.GetProperty("source").GetProperty("document").GetString()=="http://storage.csharp.test/schema/catalog.json"&&r.GetProperty("aliases").EnumerateArray().Any(a=>a.GetString()=="http://requested.csharp.test/catalog.json")),"Indexed resource retains effective and requested physical aliases");
+            Check(resources.GetProperty("resources").EnumerateArray().Any(r=>r.GetProperty("canonicalUri").GetString()=="https://schemas.csharp.test/catalog"&&r.GetProperty("source").GetProperty("document").GetString()=="https://storage.csharp.test/schema/catalog.json"&&r.GetProperty("aliases").EnumerateArray().Any(a=>a.GetString()=="http://requested.csharp.test/catalog.json")),"Indexed resource retains effective and requested physical aliases");
             Check(resources.GetProperty("nodeScopes").EnumerateArray().Any(s=>s[2].GetString()=="https://schemas.csharp.test/catalog#/$defs/a~1b~0%25%20%23%C3%A9"),"Escaped resource-relative canonical address is copied exactly");
-            Check(!program.GetProperty("nodes").EnumerateArray().Any(n=>n.GetProperty("source").GetProperty("document").GetString()=="http://storage.csharp.test/schema/detached.json"&&n.GetProperty("source").GetProperty("pointer").GetString()==""),"Installed nested-entry program did not invent a root assertion");
+            Check(!program.GetProperty("nodes").EnumerateArray().Any(n=>n.GetProperty("source").GetProperty("document").GetString()=="https://storage.csharp.test/schema/detached.json"&&n.GetProperty("source").GetProperty("pointer").GetString()==""),"Installed nested-entry program did not invent a root assertion");
         }
         Check(server.Requests.Select(r=>r.Target).Distinct().Count()==8,"All eight actual source operation paths exercised");
         Check(server.Requests.All(r=>r.Method=="POST"&&r.Host=="api.csharp.test"&&r.Target.StartsWith("/v1/Api%2Fv3/",StringComparison.Ordinal)),"Physical server document stays independent of schema and logical IDs");
         Check(hosts.Count==server.Requests.Count&&hosts.All(h=>h=="api.csharp.test"),"No runtime schema acquisition occurred");
         File.WriteAllText("sdk-results.json",JsonSerializer.Serialize(new{checks,requests=server.Requests.ToArray(),hosts=hosts.ToArray(),framework=System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription},new JsonSerializerOptions{WriteIndented=true}));
         Console.WriteLine($"RESOURCE SDK PASS: {checks} checks; {server.Requests.Count} TCP requests; eight operations; {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+    }
+}
+internal sealed class Downgrade(HttpMessageHandler inner):DelegatingHandler(inner)
+{
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken token)
+    {
+        var uri=request.RequestUri!;
+        if(uri.Scheme=="https")request.RequestUri=new Uri("http"+uri.OriginalString[5..],new UriCreationOptions{DangerousDisablePathAndQueryCanonicalization=true});
+        return base.SendAsync(request,token);
     }
 }
 internal sealed record Seen(string Method,string Target,string Host,string Body,string? Revision);

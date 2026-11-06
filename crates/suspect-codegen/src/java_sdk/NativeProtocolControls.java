@@ -32,7 +32,8 @@ public final class NativeProtocolControls {
         try(var client=new Client(options(server).credential("oauth","opaque").build())){fails("invalid-request",client::oauthValue);}
         var deadlineScript=event("data: first\n\n");deadlineScript.stallBody=true;deadlineScript.throwCancel=true;
         var deadline=new NativeSupport.Mock(deadlineScript);
-        try(var client=new Client(options(deadline).timeout(Duration.ofMillis(150)).build());var response=client.events()){
+        // The deadline must outlast the first item's delivery on a slow host.
+        try(var client=new Client(options(deadline).timeout(Duration.ofMillis(1000)).build());var response=client.events()){
             check(response.data().nextAsync().get().value().data().equals("first"),"first streaming item");
             SdkException error=fails("timeout",()->response.data().nextAsync().join());check(error.status()==200,"stream timeout lost actual status");
             NativeSupport.eventually(()->deadline.subscriptionCancellations.get()==1,"deadline did not close subscription");

@@ -716,8 +716,6 @@ fn split_key_value(text: &[u8]) -> Option<(&[u8], &[u8])> {
     None
 }
 
-/// Slice-to-str for slices of an already-validated UTF-8 buffer.
-///
 /// Owned string for slices of an already-validated UTF-8 buffer.
 ///
 /// # Safety

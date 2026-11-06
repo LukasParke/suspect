@@ -104,7 +104,7 @@ pub(crate) enum FuncName {
 pub(crate) struct FunctionCall {
     pub name: FuncName,
     pub args: Vec<FArg>,
-    #[allow(dead_code)] // read via Debug/tests; evaluation reuses `name`
+    /// The `match()`/`search()` pattern, compiled once at parse time.
     pub regex: Option<regex::Regex>,
 }
 

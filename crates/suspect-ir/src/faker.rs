@@ -6,9 +6,15 @@
 //! timestamp. A pure function of `(schema, field_name)` — no RNG — so
 //! runs are reproducible and snapshots stable.
 //!
-//! Priority order: explicit `default`, explicit `example`, `enum`,
-//! `format`, field-name semantics, type fallback. String lengths respect
-//! `minLength`/`maxLength`; numbers respect `minimum`/`maximum`.
+//! Priority order: explicit `default`, explicit `example`, first of
+//! `examples`, first of `enum`, `format`, field-name semantics, type
+//! fallback. String lengths respect `minLength`/`maxLength`; numbers respect
+//! `minimum`/`maximum`.
+//!
+//! Consumed by the generator's template filters (`suspect-gen`) and
+//! the test executor's fuzzer (`suspect-test`, re-exported as `faker`).
+
+#![deny(missing_docs)]
 
 use serde_json::Value;
 
@@ -44,35 +50,110 @@ fn value_at_depth(schema: &Value, field_name: &str, depth: usize) -> Value {
     {
         return first.clone();
     }
+    if let Some(constant) = obj.get("const") {
+        return constant.clone();
+    }
     if let Some(enum_values) = obj.get("enum").and_then(Value::as_array)
         && let Some(first) = enum_values.first()
     {
         return first.clone();
     }
 
-    match obj.get("type").and_then(Value::as_str) {
-        Some("string") => string_value(obj, field_name),
-        Some("integer") | Some("number") => number_value(obj),
-        Some("boolean") => Value::Bool(true),
-        Some("array") if depth < MAX_DEPTH => {
-            let items = obj.get("items").cloned().unwrap_or(Value::Null);
-            Value::Array(vec![value_at_depth(
-                &items,
-                singular(field_name),
-                depth + 1,
-            )])
+    // Composition: an `allOf` value must satisfy every branch, so object
+    // branches are merged; `oneOf`/`anyOf` take the first non-null branch.
+    if let Some(branches) = obj.get("allOf").and_then(Value::as_array) {
+        let mut merged = serde_json::Map::new();
+        let mut scalar = None;
+        for branch in branches {
+            match value_at_depth(branch, field_name, depth + 1) {
+                Value::Object(fields) => merged.extend(fields),
+                other if scalar.is_none() => scalar = Some(other),
+                _ => {}
+            }
         }
-        Some("object") | Some(_) if depth < MAX_DEPTH => object_value(obj, depth),
-        _ => {
-            // Missing type: infer from keywords.
-            if obj.contains_key("properties") {
-                if depth < MAX_DEPTH {
-                    object_value(obj, depth)
-                } else {
-                    Value::Object(serde_json::Map::new())
-                }
+        if let Value::Object(own) = typed_value(obj, field_name, depth) {
+            merged.extend(own);
+        }
+        return if merged.is_empty() {
+            scalar.unwrap_or(Value::Object(merged))
+        } else {
+            Value::Object(merged)
+        };
+    }
+    for keyword in ["oneOf", "anyOf"] {
+        if let Some(branches) = obj.get(keyword).and_then(Value::as_array) {
+            let branch = branches
+                .iter()
+                .find(|b| b.get("type").and_then(Value::as_str) != Some("null"))
+                .or_else(|| branches.first());
+            if let Some(branch) = branch {
+                return value_at_depth(branch, field_name, depth + 1);
+            }
+        }
+    }
+    typed_value(obj, field_name, depth)
+}
+
+/// The value for a schema's own `type` (OAS 3.1 type arrays use their
+/// first non-`null` member), inferring the type from keywords when absent.
+fn typed_value(obj: &serde_json::Map<String, Value>, field_name: &str, depth: usize) -> Value {
+    let declared = match obj.get("type") {
+        Some(Value::String(t)) => Some(t.as_str()),
+        Some(Value::Array(types)) => {
+            let names: Vec<&str> = types.iter().filter_map(Value::as_str).collect();
+            names
+                .iter()
+                .copied()
+                .find(|t| *t != "null")
+                .or(names.first().copied())
+        }
+        _ => None,
+    };
+    let inferred = declared.or_else(|| {
+        if obj.contains_key("properties") || obj.contains_key("additionalProperties") {
+            Some("object")
+        } else if obj.contains_key("items") {
+            Some("array")
+        } else if [
+            "minimum",
+            "maximum",
+            "multipleOf",
+            "exclusiveMinimum",
+            "exclusiveMaximum",
+        ]
+        .iter()
+        .any(|k| obj.contains_key(*k))
+        {
+            Some("number")
+        } else {
+            None
+        }
+    });
+    match inferred {
+        Some("string") | None => string_value(obj, field_name),
+        Some("integer" | "number") => number_value(obj),
+        Some("boolean") => Value::Bool(true),
+        Some("null") => Value::Null,
+        Some("array") => {
+            let max_items = obj.get("maxItems").and_then(Value::as_u64);
+            if depth >= MAX_DEPTH || max_items == Some(0) {
+                return Value::Array(Vec::new());
+            }
+            let items = obj.get("items").cloned().unwrap_or(Value::Null);
+            let item = value_at_depth(&items, singular(field_name), depth + 1);
+            // Repeating one value cannot satisfy `uniqueItems` beyond one
+            // element, so only non-unique arrays are padded to `minItems`.
+            let unique = obj.get("uniqueItems") == Some(&Value::Bool(true));
+            let min_items = obj.get("minItems").and_then(Value::as_u64).unwrap_or(1);
+            let count = if unique { 1 } else { min_items.clamp(1, 8) };
+            Value::Array(vec![item; usize::try_from(count).unwrap_or(1)])
+        }
+        // "object" and unknown types.
+        Some(_) => {
+            if depth >= MAX_DEPTH {
+                Value::Object(serde_json::Map::new())
             } else {
-                string_value(obj, field_name)
+                object_value(obj, depth)
             }
         }
     }
@@ -113,24 +194,27 @@ fn string_value(obj: &serde_json::Map<String, Value>, field_name: &str) -> Value
         "binary" => "c3VzcGVjdA==".into(),
         _ => name_based_string(field_name),
     };
-    let _ = base;
     fit_length(base, obj)
 }
 
 /// Field-name semantics for strings without a `format`.
 #[must_use]
 fn name_based_string(field_name: &str) -> String {
-    let lower = field_name.to_ascii_lowercase();
-    let word = |needle: &str| lower.contains(needle);
+    // Match whole words of the name (`userId` → user, id; `hotel_name` →
+    // hotel, name), so `paid` is not an id and `hotel` is not a phone.
+    let words = name_words(field_name);
+    let lower = words.concat();
+    let has = |needle: &str| words.iter().any(|w| w == needle);
+    let word = |needle: &str| has(needle) || lower == needle;
     if word("email") {
         "ada@example.org".into()
     } else if word("url") || word("uri") || word("website") || word("homepage") || word("href") {
         "https://api.example.org/v1/resource".into()
-    } else if word("phone") || word("tel") {
+    } else if word("phone") || word("tel") || word("telephone") || word("mobile") {
         "+1-555-0100".into()
-    } else if word("first_name") || word("firstname") {
+    } else if (has("first") && has("name")) || word("firstname") {
         "Ada".into()
-    } else if word("last_name") || word("lastname") || word("surname") {
+    } else if (has("last") && has("name")) || word("lastname") || word("surname") {
         "Lovelace".into()
     } else if word("fullname") || lower == "name" || word("author") || word("owner") {
         "Ada Lovelace".into()
@@ -144,7 +228,7 @@ fn name_based_string(field_name: &str) -> String {
         "1600 Amphitheatre Parkway".into()
     } else if word("description") || word("summary") || word("bio") || word("comment") {
         "A concise, realistic sample description.".into()
-    } else if word("token") || word("secret") || word("api_key") || word("apikey") {
+    } else if word("token") || word("secret") || (has("api") && has("key")) || word("apikey") {
         "9f2c1a7e5b4d3c8a".into()
     } else if word("color") || word("colour") {
         "#4A6FA5".into()
@@ -156,7 +240,7 @@ fn name_based_string(field_name: &str) -> String {
         "en-US".into()
     } else if word("timezone") {
         "UTC".into()
-    } else if lower.ends_with("_id") || lower == "id" || lower.ends_with("id") {
+    } else if words.last().is_some_and(|w| w == "id" || w == "uuid") {
         // Identifier-ish: a short, readable id rather than a full UUID
         // (full UUIDs are the format's job).
         "1".into()
@@ -167,22 +251,76 @@ fn name_based_string(field_name: &str) -> String {
     }
 }
 
-/// Numbers honoring `minimum`/`maximum`; integers stay integers.
+/// Splits a field name into lowercase words at `_`, `-`, spaces, digits
+/// boundaries and camelCase humps.
+fn name_words(name: &str) -> Vec<String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut previous_lower = false;
+    for c in name.chars() {
+        if !c.is_ascii_alphanumeric() {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            previous_lower = false;
+            continue;
+        }
+        if c.is_ascii_uppercase() && previous_lower && !current.is_empty() {
+            words.push(std::mem::take(&mut current));
+        }
+        previous_lower = c.is_ascii_lowercase() || c.is_ascii_digit();
+        current.push(c.to_ascii_lowercase());
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+/// Numbers honoring `minimum`/`maximum`, numeric (OAS 3.1)
+/// `exclusiveMinimum`/`exclusiveMaximum` and `multipleOf`; integers stay
+/// integers.
 fn number_value(obj: &serde_json::Map<String, Value>) -> Value {
+    let integer = obj.get("type").and_then(Value::as_str) == Some("integer")
+        || obj
+            .get("type")
+            .and_then(Value::as_array)
+            .is_some_and(|types| types.iter().any(|t| t == "integer"));
+    let step = if integer { 1.0 } else { 0.5 };
     let minimum = obj.get("minimum").and_then(Value::as_f64);
     let maximum = obj.get("maximum").and_then(Value::as_f64);
+    let exclusive_minimum = obj.get("exclusiveMinimum").and_then(Value::as_f64);
+    let exclusive_maximum = obj.get("exclusiveMaximum").and_then(Value::as_f64);
     let mut n: f64 = 1.0;
     if let Some(min) = minimum
         && n < min
     {
         n = min;
     }
+    if let Some(min) = exclusive_minimum
+        && n <= min
+    {
+        n = min + step;
+    }
+    if let Some(multiple) = obj.get("multipleOf").and_then(Value::as_f64)
+        && multiple > 0.0
+    {
+        n = (n / multiple).ceil() * multiple;
+    }
     if let Some(max) = maximum
         && n > max
     {
         n = max;
     }
-    let is_integer = obj.get("type").and_then(Value::as_str) == Some("integer") || n.fract() == 0.0;
+    if let Some(max) = exclusive_maximum
+        && n >= max
+    {
+        n = max - step;
+    }
+    if integer {
+        n = n.ceil();
+    }
+    let is_integer = integer || n.fract() == 0.0;
     if is_integer {
         Value::from(n as i64)
     } else {
@@ -337,5 +475,123 @@ mod tests {
     fn synthesis_is_deterministic() {
         let schema = json!({"type": "object", "properties": {"name": {"type": "string"}}});
         assert_eq!(value(&schema, "pet"), value(&schema, "pet"));
+    }
+
+    #[test]
+    fn name_semantics_match_whole_words() {
+        assert_eq!(value(&json!({"type": "string"}), "userId"), json!("1"));
+        assert_eq!(value(&json!({"type": "string"}), "order_id"), json!("1"));
+        assert_eq!(
+            value(&json!({"type": "string"}), "paid"),
+            json!("sample text")
+        );
+        assert_eq!(
+            value(&json!({"type": "string"}), "valid"),
+            json!("sample text")
+        );
+        assert_eq!(
+            value(&json!({"type": "string"}), "hotel"),
+            json!("sample text")
+        );
+        assert_eq!(
+            value(&json!({"type": "string"}), "security"),
+            json!("sample text")
+        );
+        assert_eq!(
+            value(&json!({"type": "string"}), "phoneNumber"),
+            json!("+1-555-0100")
+        );
+        assert_eq!(
+            value(&json!({"type": "string"}), "avatarUrl"),
+            json!("https://api.example.org/v1/resource")
+        );
+        assert_eq!(value(&json!({"type": "string"}), "firstName"), json!("Ada"));
+    }
+
+    #[test]
+    fn type_arrays_null_and_composition() {
+        assert_eq!(
+            value(&json!({"type": ["integer", "null"]}), "count"),
+            json!(1)
+        );
+        assert_eq!(value(&json!({"type": "null"}), "nothing"), Value::Null);
+        assert_eq!(value(&json!({"const": "fixed"}), "x"), json!("fixed"));
+        let merged = value(
+            &json!({"allOf": [
+                {"type": "object", "properties": {"a": {"type": "integer"}}},
+                {"type": "object", "properties": {"b": {"type": "boolean"}}}
+            ]}),
+            "x",
+        );
+        assert_eq!(merged, json!({"a": 1, "b": true}));
+        assert_eq!(
+            value(
+                &json!({"oneOf": [{"type": "null"}, {"type": "string", "format": "email"}]}),
+                "x"
+            ),
+            json!("ada@example.org")
+        );
+    }
+
+    #[test]
+    fn depth_limit_keeps_container_types() {
+        let mut schema = json!({"type": "array", "items": {"type": "string"}});
+        for _ in 0..6 {
+            schema = json!({"type": "object", "properties": {"nested": schema}});
+        }
+        let mut current = &value(&schema, "root");
+        // Every level is still an object or array, never a placeholder string.
+        while let Some(next) = current.get("nested") {
+            current = next;
+        }
+        assert!(current.is_object() || current.is_array(), "{current}");
+    }
+
+    #[test]
+    fn numbers_honor_exclusive_bounds_and_multiples() {
+        assert_eq!(
+            value(&json!({"type": "integer", "exclusiveMinimum": 5}), "n"),
+            json!(6)
+        );
+        assert_eq!(
+            value(
+                &json!({"type": "integer", "minimum": 3, "multipleOf": 4}),
+                "n"
+            ),
+            json!(4)
+        );
+        assert_eq!(
+            value(&json!({"type": "integer", "exclusiveMaximum": 1}), "n"),
+            json!(0)
+        );
+        assert_eq!(
+            value(&json!({"type": "integer", "minimum": 0.5}), "n"),
+            json!(1)
+        );
+    }
+
+    #[test]
+    fn arrays_honor_min_and_max_items() {
+        assert_eq!(
+            value(
+                &json!({"type": "array", "items": {"type": "boolean"}, "minItems": 2}),
+                "flags"
+            ),
+            json!([true, true])
+        );
+        assert_eq!(
+            value(
+                &json!({"type": "array", "items": {"type": "boolean"}, "maxItems": 0}),
+                "flags"
+            ),
+            json!([])
+        );
+        assert_eq!(
+            value(
+                &json!({"type": "array", "items": {"type": "boolean"}, "minItems": 2, "uniqueItems": true}),
+                "flags"
+            ),
+            json!([true])
+        );
     }
 }

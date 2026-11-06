@@ -1,0 +1,3 @@
+# One contract runtime decides conformance for every surface
+
+Whether a request or response conforms to an operation is decided in one crate, `suspect-runtime`, which both the gateway and the Arazzo executor (`suspect-test`) call. Previously each had its own validator and its own `$ref` handling: a walker in the gateway, a depth-capped inliner in the executor. They disagreed on recursive schemas, `default` responses and numeric types. Component references now resolve through the schema compiler's document-root fallback, so recursive and cross-document schemas validate natively and no depth cap is needed.

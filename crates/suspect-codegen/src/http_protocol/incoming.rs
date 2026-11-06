@@ -100,14 +100,19 @@ pub struct IncomingPlan {
 }
 
 macro_rules! incoming_getters {
-    ($($name:ident : $ty:ty),* $(,)?) => { $(
+    ($($(#[$doc:meta])* $name:ident : $ty:ty),* $(,)?) => { $(
+        $(#[$doc])*
         #[must_use]
         pub fn $name(&self) -> &$ty { &self.$name }
     )* };
 }
 
 impl IncomingRoute {
-    incoming_getters!(route: String);
+    incoming_getters!(
+        /// The webhook key, or the callback expression string, exactly as declared.
+        route: String,
+    );
+    /// True when the route carries runtime expression syntax (`{...}`).
     #[must_use]
     pub fn expression(&self) -> bool {
         self.expression
@@ -115,11 +120,24 @@ impl IncomingRoute {
 }
 
 impl IncomingRequestPlan {
-    incoming_getters!(parameters: Vec<ParameterPlan>, body: Option<BodyPlan>);
+    incoming_getters!(
+        /// Parameters the provider sends.
+        parameters: Vec<ParameterPlan>,
+        /// Body the provider delivers, when one is declared.
+        body: Option<BodyPlan>,
+    );
 }
 
 impl IncomingResponsePlan {
-    incoming_getters!(status_key: String, media: Vec<MediaPlan>, headers: Vec<HeaderPlan>);
+    incoming_getters!(
+        /// Responses map key exactly as declared (`200`, `2XX`, `default`).
+        status_key: String,
+        /// Media the handler may construct the reply with.
+        media: Vec<MediaPlan>,
+        /// Headers the handler's reply declares.
+        headers: Vec<HeaderPlan>,
+    );
+    /// Parsed status selector.
     #[must_use]
     pub fn status(&self) -> ResponseStatus {
         self.status
@@ -128,13 +146,20 @@ impl IncomingResponsePlan {
 
 impl IncomingOperationPlan {
     incoming_getters!(
+        /// The webhook key, or `parentOperationId.callbackName`.
         name: String,
+        /// Declared receipt route.
         route: IncomingRoute,
+        /// What the provider sends.
         request: IncomingRequestPlan,
+        /// Replies the handler constructs.
         responses: Vec<IncomingResponsePlan>,
+        /// Source declaration of the webhook or callback operation.
         source: Provenance,
+        /// Every value-reducing v1 decision applied to this operation.
         explanations: Vec<String>,
     );
+    /// Declared collection that produced the operation.
     #[must_use]
     pub fn kind(&self) -> IncomingKind {
         self.kind
@@ -147,7 +172,11 @@ impl IncomingOperationPlan {
 }
 
 impl IncomingPlan {
-    incoming_getters!(operations: Vec<IncomingOperationPlan>);
+    incoming_getters!(
+        /// Every compiled webhook and callback operation.
+        operations: Vec<IncomingOperationPlan>,
+    );
+    /// Actual JSON/text codec inputs of the incoming declarations, sorted and deduplicated.
     #[must_use]
     pub fn codec_roots(&self) -> &[SchemaId] {
         &self.codec_roots
@@ -157,6 +186,7 @@ impl IncomingPlan {
     pub fn codec_schema_closure(&self) -> &[SchemaId] {
         &self.codec_schema_closure
     }
+    /// Whether the document declares no incoming operations.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()

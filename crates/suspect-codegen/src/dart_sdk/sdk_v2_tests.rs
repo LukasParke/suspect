@@ -400,3 +400,16 @@ fn native_v2_sdk_operations() {
         );
     }
 }
+
+/// Response framing is validated before media selection, so an invalid or
+/// over-budget `Content-Length` is an `InvalidResponseException` /
+/// `ResourceLimitException` even without a declared media type (the
+/// installed `native_portable.dart` budgets exercise the behavior).
+#[test]
+fn response_framing_is_checked_before_media_selection() {
+    let transport = include_str!("transport.dart");
+    let inspect = &transport[transport.find("_inspect(").unwrap()..];
+    let framing = inspect.find("_contentLength(capture)").unwrap();
+    let media = inspect.find("_selectMedia(").unwrap();
+    assert!(framing < media, "framing must be validated first");
+}

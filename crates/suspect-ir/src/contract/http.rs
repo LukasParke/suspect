@@ -9,11 +9,15 @@ use super::{Contract, HttpMethod, Schema, SourceId};
 /// Supported parameter locations. Unknown values remain raw and are diagnosed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ParameterLocation {
+    /// `in: query` — one serialized value per parameter in the query string.
     Query,
     /// The entire query string, serialized through `content` (OpenAPI 3.2).
     Querystring,
+    /// `in: header`.
     Header,
+    /// `in: path` — substitutes a `{name}` template segment.
     Path,
+    /// `in: cookie`.
     Cookie,
 }
 
@@ -33,14 +37,21 @@ impl ParameterLocation {
 /// OpenAPI parameter serialization styles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParameterStyle {
+    /// `form` — the default for query and cookie parameters.
     Form,
     /// Cookie header serialization introduced by OpenAPI 3.2.
     Cookie,
+    /// `simple` — the default for path and header parameters.
     Simple,
+    /// `matrix` — `;name=value` path prefixes.
     Matrix,
+    /// `label` — `.value` path prefixes.
     Label,
+    /// `spaceDelimited` — space-joined arrays in the query string.
     SpaceDelimited,
+    /// `pipeDelimited` — pipe-joined arrays in the query string.
     PipeDelimited,
+    /// `deepObject` — `name[key]=value` objects in the query string.
     DeepObject,
 }
 
@@ -63,8 +74,11 @@ impl ParameterStyle {
 /// The direction/context of an operation declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OperationKind {
+    /// An operation under `paths`, called by API clients.
     Client,
+    /// An operation under `webhooks`, initiated by the provider.
     Webhook,
+    /// An operation nested in another operation's `callbacks` map.
     Callback,
 }
 
@@ -270,26 +284,33 @@ impl<'a> Operation<'a> {
     pub(super) fn object(&self) -> Object<'a> {
         Object::new(self.contract, self.node.source.clone())
     }
+    /// Source of the operation object itself.
     pub fn source(&self) -> &'a SourceId {
         &self.node.source
     }
+    /// The operation object as written.
     pub fn raw(&self) -> &'a Value {
         self.contract
             .source(&self.node.source)
             .expect("operation exists")
     }
+    /// HTTP method, including OpenAPI 3.2 `query` and `additionalOperations`.
     pub fn method(&self) -> HttpMethod<'a> {
         HttpMethod::parse(&self.node.method).expect("indexed methods are valid HTTP tokens")
     }
+    /// Whether this is a client, webhook, or callback operation.
     pub fn kind(&self) -> OperationKind {
         self.node.kind
     }
+    /// Path template (`/pets/{id}`); `Some` only for client operations.
     pub fn path_template(&self) -> Option<&'a str> {
         (self.node.kind == OperationKind::Client).then_some(&self.node.route)
     }
+    /// Key under `webhooks`; `Some` only for webhook operations.
     pub fn webhook_name(&self) -> Option<&'a str> {
         (self.node.kind == OperationKind::Webhook).then_some(&self.node.route)
     }
+    /// Runtime expression keying the callback path item; `Some` only for callbacks.
     pub fn callback_expression(&self) -> Option<&'a str> {
         (self.node.kind == OperationKind::Callback).then_some(&self.node.route)
     }
@@ -301,18 +322,23 @@ impl<'a> Operation<'a> {
     pub fn callback_parent(&self) -> Option<&'a SourceId> {
         self.node.callback.as_ref().map(|(source, _)| source)
     }
+    /// Key under the parent operation's `callbacks` map; `Some` only for callbacks.
     pub fn callback_name(&self) -> Option<&'a str> {
         self.node.callback.as_ref().map(|(_, name)| name.as_str())
     }
+    /// Declared `operationId`, if any.
     pub fn operation_id(&self) -> Option<&'a str> {
         self.object().string("operationId")
     }
+    /// Declared `summary`, if any.
     pub fn summary(&self) -> Option<&'a str> {
         self.object().string("summary")
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object().string("description")
     }
+    /// Declared `deprecated` flag; `None` when absent.
     pub fn deprecated(&self) -> Option<bool> {
         self.object().boolean("deprecated")
     }
@@ -322,6 +348,7 @@ impl<'a> Operation<'a> {
             object: Object::new(self.contract, self.object().field("externalDocs")?.0),
         })
     }
+    /// String entries of the operation's own `tags` array; non-strings are skipped.
     pub fn tags(&self) -> Vec<&'a str> {
         self.raw()
             .get("tags")
@@ -359,6 +386,8 @@ impl<'a> Operation<'a> {
         .map(|(source, _)| source)
         .collect()
     }
+    /// Servers declared directly on the operation; `None` when it has no `servers`
+    /// field (inherited servers come from [`Operation::effective_servers`]).
     pub fn declared_servers(&self) -> Option<Vec<Server<'a>>> {
         self.raw().get("servers").map(|_| {
             servers(
@@ -368,6 +397,8 @@ impl<'a> Operation<'a> {
             )
         })
     }
+    /// Security declared directly on the operation; `None` when it has no
+    /// `security` field (inherited security comes from [`Operation::effective_security`]).
     pub fn declared_security(&self) -> Option<Vec<SecurityRequirement<'a>>> {
         self.raw()
             .get("security")
@@ -378,9 +409,12 @@ impl<'a> Operation<'a> {
     pub fn server_source(&self) -> Option<&'a SourceId> {
         self.node.servers.as_ref()
     }
+    /// The operation or root array providing effective security, if any.
     pub fn security_source(&self) -> Option<&'a SourceId> {
         self.node.security.as_ref()
     }
+    /// Servers that apply to the operation after operation → path item → root
+    /// inheritance, falling back to the OAS default `/` server.
     pub fn effective_servers(&self) -> Vec<Server<'a>> {
         servers(self.contract, self.node.servers.clone(), true)
     }
@@ -398,6 +432,7 @@ pub struct Parameter<'a> {
 }
 
 impl<'a> Parameter<'a> {
+    /// Source of the parameter declaration (the `$ref` site when referenced).
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
@@ -405,12 +440,15 @@ impl<'a> Parameter<'a> {
     pub fn resolved_source(&self) -> Option<SourceId> {
         self.object.resolved_source()
     }
+    /// The declaration as written, which may be a `$ref` object.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Parameter `name`, following references.
     pub fn name(&self) -> Option<&'a str> {
         self.object.string("name")
     }
+    /// Parameter `in`; `querystring` is only recognized in OpenAPI 3.2 documents.
     pub fn location(&self) -> Option<ParameterLocation> {
         let (source, value) = self.object.field("in")?;
         let location = ParameterLocation::parse(value.as_str()?)?;
@@ -422,27 +460,37 @@ impl<'a> Parameter<'a> {
                 .starts_with("3.2."))
         .then_some(location)
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }
+    /// Declared `required` flag; `None` when absent.
     pub fn required(&self) -> Option<bool> {
         self.object.boolean("required")
     }
+    /// Declared `deprecated` flag; `None` when absent.
     pub fn deprecated(&self) -> Option<bool> {
         self.object.boolean("deprecated")
     }
+    /// Declared `allowReserved` flag; `None` when absent.
     pub fn allow_reserved(&self) -> Option<bool> {
         self.object.boolean("allowReserved")
     }
+    /// Declared `allowEmptyValue` flag; `None` when absent.
     pub fn allow_empty_value(&self) -> Option<bool> {
         self.object.boolean("allowEmptyValue")
     }
+    /// Declared `style`; `cookie` is only recognized in OpenAPI 3.2 documents.
     pub fn style(&self) -> Option<ParameterStyle> {
         self.object.style()
     }
+    /// Declared `explode` flag; `None` when absent.
     pub fn explode(&self) -> Option<bool> {
         self.object.boolean("explode")
     }
+    /// Style after applying the location default (`form` for query/cookie,
+    /// `simple` for path/header). `None` for `content` and `querystring` parameters,
+    /// which serialize through a media type instead.
     pub fn effective_style(&self) -> Option<ParameterStyle> {
         if self.object.field("content").is_some()
             || self.location() == Some(ParameterLocation::Querystring)
@@ -458,6 +506,8 @@ impl<'a> Parameter<'a> {
             ParameterLocation::Querystring => None,
         }
     }
+    /// Explode after applying the style default (`true` for `form`/`cookie`).
+    /// `None` for `content` and `querystring` parameters.
     pub fn effective_explode(&self) -> Option<bool> {
         if self.object.field("content").is_some()
             || self.location() == Some(ParameterLocation::Querystring)
@@ -471,6 +521,7 @@ impl<'a> Parameter<'a> {
                 .map(|style| matches!(style, ParameterStyle::Form | ParameterStyle::Cookie))
         }
     }
+    /// The parameter's `schema`, following references; `None` for `content` parameters.
     pub fn schema(&self) -> Option<Schema<'a>> {
         self.object.schema()
     }
@@ -482,18 +533,23 @@ pub struct Server<'a> {
     pub(super) object: Option<Object<'a>>,
 }
 impl<'a> Server<'a> {
+    /// Source of the server object; `None` for the synthesized default server.
     pub fn source(&self) -> Option<&SourceId> {
         self.object.as_ref().map(|o| &o.source)
     }
+    /// The server object as written; `None` for the synthesized default server.
     pub fn raw(&self) -> Option<&'a Value> {
         self.object.as_ref().map(Object::raw)
     }
+    /// True for the synthesized OAS default (`url: /`) used when no servers apply.
     pub fn is_default(&self) -> bool {
         self.object.is_none()
     }
+    /// Server URL template; the synthesized default yields `/`.
     pub fn url(&self) -> Option<&'a str> {
         self.object.as_ref().map_or(Some("/"), |o| o.string("url"))
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.as_ref()?.string("description")
     }
@@ -501,6 +557,7 @@ impl<'a> Server<'a> {
     pub fn name(&self) -> Option<&'a str> {
         self.object.as_ref()?.field_32("name")?.1.as_str()
     }
+    /// Declared `variables`, in document order.
     pub fn variables(&self) -> Vec<(&'a str, ServerVariable<'a>)> {
         let Some((source, value)) = self.object.as_ref().and_then(|o| o.field("variables")) else {
             return Vec::new();
@@ -532,18 +589,23 @@ pub struct ServerVariable<'a> {
     object: Object<'a>,
 }
 impl<'a> ServerVariable<'a> {
+    /// Source of the server variable object.
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The server variable object as written.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Declared `default` substitution value.
     pub fn default(&self) -> Option<&'a str> {
         self.object.string("default")
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }
+    /// String entries of the declared `enum`; `None` when `enum` is absent.
     pub fn values(&self) -> Option<Vec<&'a str>> {
         self.object
             .field("enum")?
@@ -559,15 +621,19 @@ pub struct SecurityRequirement<'a> {
     object: Object<'a>,
 }
 impl<'a> SecurityRequirement<'a> {
+    /// Source of the requirement object within its security array.
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The requirement object as written.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// True for `{}` — the alternative that permits unauthenticated access.
     pub fn is_anonymous(&self) -> bool {
         self.raw().as_object().is_some_and(|o| o.is_empty())
     }
+    /// The schemes in this requirement, all of which apply together.
     pub fn requirements(&self) -> Vec<SecurityUse<'a>> {
         self.raw()
             .as_object()
@@ -594,12 +660,15 @@ pub struct SecurityUse<'a> {
     source: SourceId,
 }
 impl<'a> SecurityUse<'a> {
+    /// Source of this scheme's entry inside the requirement object.
     pub fn source(&self) -> &SourceId {
         &self.source
     }
+    /// Security scheme name as written in the requirement.
     pub fn name(&self) -> &'a str {
         self.name
     }
+    /// Required scope names; `None` when the value is not an array.
     pub fn scopes(&self) -> Option<Vec<&'a str>> {
         self.scopes
             .as_array()
@@ -614,15 +683,19 @@ pub struct ExternalDocumentation<'a> {
 }
 
 impl<'a> ExternalDocumentation<'a> {
+    /// Source of the External Documentation object.
     pub fn source(&self) -> &SourceId {
         &self.object.source
     }
+    /// The External Documentation object as written.
     pub fn raw(&self) -> &'a Value {
         self.object.raw()
     }
+    /// Declared `url`.
     pub fn url(&self) -> Option<&'a str> {
         self.object.string("url")
     }
+    /// Declared `description`, if any.
     pub fn description(&self) -> Option<&'a str> {
         self.object.string("description")
     }

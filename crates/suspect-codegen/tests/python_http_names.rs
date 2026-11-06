@@ -1,10 +1,12 @@
 //! Native naming collisions must not bind a call to another operation or value.
 use serde_json::json;
-use std::{path::Path, process::Command, sync::Arc};
+use std::{process::Command, sync::Arc};
 use suspect_codegen::python_http::{PackageConfig, emit_http, plan_http};
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
+
+use crate::python_support;
 
 #[test]
 #[ignore = "requires native Python with httpx/mypy tools"]
@@ -70,8 +72,9 @@ fn keyword_arguments_and_status_classes_survive_source_name_collisions() {
     )
     .unwrap();
     std::fs::write(root.join("consumer.py"), script).unwrap();
-    let python = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/sdk-native-python-tools/bin/python");
+    let Some(python) = python_support::tools() else {
+        return;
+    };
     for args in [
         vec!["consumer.py"],
         vec![

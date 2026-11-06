@@ -124,6 +124,9 @@ fn aggregate_recipes_preserve_source_grouping_and_do_not_invent_codec_roots() {
 #[test]
 #[ignore = "focused installed native declared aggregate examples and DocC; no base/protocol matrix replay"]
 fn native_installed_declared_aggregate_examples() {
+    if !support::available() {
+        return;
+    }
     let root = support::root("aggregate-examples-");
     let plan = plan();
     super::resources_tests::installed(

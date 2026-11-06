@@ -275,8 +275,17 @@ fn request(
     let remaining = budget.deadline.saturating_duration_since(Instant::now());
     let seconds = format!("{:.3}", remaining.as_secs_f64().max(0.001));
     let mut command = Command::new(&budget.options.curl_program);
+    command.env_clear();
+    // Windows cannot initialize Winsock in a process without `SystemRoot`
+    // (every connect then fails, curl exit 7). Pass through only the OS's
+    // own location variables: no proxy, credential, home or curlrc input.
+    #[cfg(windows)]
+    for key in ["SystemRoot", "windir"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
     command
-        .env_clear()
         // --disable MUST be the first argument: no .curlrc, even a user home file.
         .args([
             "--disable",

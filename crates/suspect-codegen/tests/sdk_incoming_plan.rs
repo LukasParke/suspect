@@ -2,8 +2,6 @@
 //! Contract independent of operation selection, carry their routes verbatim,
 //! and refuse broken declarations instead of skipping them.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::sync::Arc;
 use suspect_codegen::http_protocol as protocol;

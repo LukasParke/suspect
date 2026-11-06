@@ -6,10 +6,9 @@ publishes wire decisions, codec inputs, provenance, and diagnostics. Language
 adapters continue to allocate native names, compile the existing native codecs,
 and emit packages, clients, examples, and documentation.
 
-The `http-protocol` feature is included in the default compiler build after the
-initial 20 shared public-seam tests passed. Representing a feature here does
-**not** certify any of the twelve native adapters. Each adapter opts in after
-its own native acceptance tests.
+The protocol plan is always compiled. All twelve backends plan through it. Representing a feature here does **not**
+certify any native adapter: each adapter opts in to a capability only after its
+own native tests cover it.
 
 ### Protocol-aware examples
 
@@ -27,11 +26,11 @@ nodes or JSON-null stand-ins. Request-body/parameter binding remains distinct
 from part/item binding. OpenAPI3.2 `dataValue` and the OAS3.0 reference-sibling
 rules are preserved in source example discovery.
 
-Four source-subset tests passed for these examples, including status patterns,
-referenced `dataValue` provenance, multipart byte separation, SSE-envelope items
-and bodyless responses sharing a request codec. The retained check is
-`target/sdk-protocol-examples-check-05.log`; integrated native SDK tests remain
-the acceptance seam for language call sites.
+`crates/suspect-codegen/tests/protocol_examples.rs` covers status patterns,
+referenced `dataValue` provenance, multipart byte separation, SSE-envelope items,
+bodyless responses sharing a request codec, unavailable examples, ignored 3.0
+siblings, false positional prefixes and occurrence-aware positional projections.
+Native SDK tests remain the acceptance seam for language call sites.
 
 ## Public API
 
@@ -106,20 +105,16 @@ are structured descriptors, not parsed fragments of emitted source code.
 | `ExampleMetadata` | optional located `inline()`, `named()` Example Plans |
 | `ExamplePlan` | `source()`, `name()`, optional located `summary()`, `description()`, `value()`, `data_value()`, `serialized_value()`, `external_value()` |
 
-### Phase-2 API compatibility
+### API notes
 
-`Method` now owns custom tokens and is `Clone`, rather than `Copy`.
+`Method` owns custom tokens and is `Clone`, not `Copy`.
 `OperationPlan::method()` returns `&Method`, and `Method::as_str()` returns a
-borrowed `&str`. Existing calls such as `operation.method().as_str()`, enum
-pattern matches, and comparisons with `Method::Head` keep working. Both operand
-orders of borrowed/owned comparisons are covered by a behavioral witness.
-Consumers needing an owned method can clone it. Serialization remains a plain
+borrowed `&str`. Calls such as `operation.method().as_str()`, enum pattern
+matches, and comparisons with `Method::Head` work in both operand orders of
+borrowed/owned comparisons. Consumers needing an owned method can clone it. Serialization remains a plain
 token string for both fixed and custom methods.
 
-The remaining changes are additive: `ParameterLocation::Querystring`, the
-capabilities below, content-media/example accessors, credential deprecation, and
-response summary/description-presence accessors. For a 3.2 response with no
-description, the old display-oriented `description()` returns empty text
+For a 3.2 response with no description, the display-oriented `description()` returns empty text
 anchored at the actual Response Object; `declared_description()` returns `None`.
 No nonexistent `/description` source is created.
 
@@ -162,42 +157,37 @@ The feature vocabulary is:
 - Parts/streams: `FormBodies`, `MultipartBodies`, `PartEncodings`,
   `PositionalMultipart`, `ServerSentEvents`, `JsonLines`.
 - Executable schema semantics: `SchemaResources`, `DynamicSchemaReferences`.
-  These require verified resource/dynamic support in the selected native codec
-  profile; Contract indexing alone is not that evidence.
+  These require resource/dynamic support in the selected native codec profile
+  (the v3 validation program); Contract indexing alone is not enough.
 
 Unsupported capability errors carry `Diagnostic::capability()` and the precise
 source. `DiagnosticKind` distinguishes malformed source, currently unsupported
 semantics, adapter capability refusal, and uninterpreted annotation.
 
-### Baseline migration recommendation
+### Adapter guidance
 
-Make the first native migration a projection of an admitted
-`Capabilities::default()` plan into the existing language plan. Keep native
-naming, collision checks, directional-model policy, codec compilation, transport
-limits, documentation, and artifact ownership in that same pipeline. Then enable
-one additional capability after its native tests pass.
+An adapter projects an admitted plan into its language plan. Native naming,
+collision checks, directional-model policy, codec compilation, transport
+limits, documentation, and artifact ownership stay in that same pipeline. Each
+additional capability is enabled only after its native tests pass.
 
-The projection selects the single static HTTPS server and single bearer
-requirement, reads the original schema IDs from codec references, and maps the
-single JSON representation/exact response status to the current native binding.
-Use `operation_id().value()` for the existing source name and the native symbol
-allocator for the generated name. Use declaration and terminal provenance in
-docs/diagnostics rather than copying an arbitrary schema's span.
+Read the original schema IDs from codec references. Use
+`operation_id().value()` for the source name and the native symbol allocator for
+the generated name. Use declaration and terminal provenance in docs/diagnostics
+rather than copying an arbitrary schema's span.
 
-Do not rerun `http_contract::plan` as another admission stage after migration.
-During migration, the existing strict module continues serving unconverted
-adapters. Once an adapter has verified this projection, its admission can be
-replaced. Native adapters should consume the richer descriptors directly as they
-expand; there is no additional SDK pipeline or emitted-code compatibility parser.
+Do not rerun `http_contract::plan` as another admission stage for a
+protocol-planned operation. Adapters consume the descriptors directly; there is
+no additional SDK pipeline or emitted-code compatibility parser.
 
-The new planner applies ordinary OpenAPI rules where the old strict profile
-used narrower literal tests (for example case-insensitive media/auth names and
-ignored metadata fields). These corrections require native projection witnesses;
-“baseline” alone is not evidence that the old emitter implements them.
+The planner applies ordinary OpenAPI rules where the older strict profile used
+narrower literal tests (for example case-insensitive media/auth names and
+ignored metadata fields). Native tests must cover these rules; a baseline
+projection alone does not show that an emitter implements them.
 
 ## Semantics that adapters must preserve
 
-### Canonical resource and URL-base handoff
+### Canonical resources and URL bases
 
 Canonical references now use the public resource catalogue described in
 [SDK-CONTRACT-RESOURCES.md](contract-resources.md). A known `$self`, `$id`,
@@ -235,22 +225,21 @@ dots/slashes and path spelling rather than a browser URL parser's repairs.
 `DocumentRelativeServers` is a new, default-disabled native fence in addition to
 `RelativeServers`. Relative declarations and URL templates without a fixed
 literal HTTP(S) scheme require it, even when a template's default is absolute.
-Native owners must verify physical-document and explicit-override resolution,
-redirect provenance and encoded-path handling before opting in. An absolute
+An adapter opts in only after its native tests cover physical-document and
+explicit-override resolution, redirect provenance and encoded-path handling. An absolute
 server continues to be independent of the document's logical reference base.
 
 For JSON/text codec inputs, `SchemaResources` gates canonical resource semantics;
 `DynamicSchemaReferences` also gates `$dynamicRef`/`$dynamicAnchor`. Consumers must
-pair these assertions with the schema owner's explicit resource/dynamic
-executable profile. The shared planner supplies the actual `codec_roots()` and
+pair these assertions with the explicit v3 resource/dynamic validation program
+([SDK-SCHEMA-RESOURCES.md](schema-resources.md)). The shared planner supplies the actual `codec_roots()` and
 Contract's candidate-aware `codec_schema_closure()`. Candidate bindings are a
 finite planning superset, **not** generation-time target selections. The native
 codec retains dynamic-reference metadata and evaluates the resource stack; it
 must not compile the initial target as an unconditional static reference.
 
-These fences are evaluated on the effective codec closure, retaining the v3
-core fixes for ignored OAS 3.0 reference siblings and original dialect/context
-origins. Forbidden/bodyless response payloads do not become codec inputs or
+These fences are evaluated on the effective codec closure, which ignores OAS
+3.0 reference siblings and retains original dialect/context origins. Forbidden/bodyless response payloads do not become codec inputs or
 resource-profile requirements. Byte schemas keep their physical/logical metadata
 and finite byte bounds without entering a JSON codec or substituting null.
 Non-JSON wire-shape proof through a dynamic reference remains an explicit refusal.
@@ -264,7 +253,7 @@ Native consumer changes are limited and explicit:
 2. Feed `codec_roots()` to the selected codec planner and retain
    `codec_schema_closure()` / Contract dynamic-reference metadata for resource
    linking. Opt in to `SchemaResources` / `DynamicSchemaReferences` only with the
-   corresponding verified executable profile. Do not replace a dynamic use-site
+   v3 executable program. Do not replace a dynamic use-site
    with its fallback or expand candidate schemas into additional body inputs.
 3. Continue using physical `SourceLocation` for diagnostics, compatibility and
    ownership. Use the separate `ResourceContext` for logical reference addresses;
@@ -308,6 +297,16 @@ path-item servers, which override root servers. Variables require string default
 enums are nonempty strings and contain the default. Runtime substitutions validate
 override names/enum values and the resulting URL. Relative servers resolve against
 the URL serving the source document. A local file is not a guessed network origin.
+Every generated SDK checks caller overrides and source-declared servers with one
+policy ([ADR 0035](../adr/0035-one-server-url-policy.md)): a source-declared server keeps
+its scheme, so a declared plain `http` server is honored; a caller override is `https`,
+or plain `http` only to `localhost`, `127.0.0.1` or `[::1]` unless the caller opts in on
+that client (Swift `allowHTTP`; `allowInsecureHttp`/`allow_insecure_http`/
+`AllowInsecureHTTP`/`AllowInsecureHttp` elsewhere); no userinfo, query or fragment;
+a valid port; a literal `.`/`..` segment in an absolute server URL is refused (only
+a relative reference is resolved, removing literal dot segments); percent-encoded
+octets are opaque and sent verbatim; malformed escapes, non-ASCII, controls and
+backslashes are refused.
 
 Security arrays are OR, member schemes are AND, `{}` is an explicitly anonymous
 alternative, `[]` disables inherited security, and absence stays distinguishable.
@@ -320,6 +319,9 @@ OIDC discovery metadata are retained.
 Bearer/basic/API-key attachment is explicit. OAuth/OIDC hooks accept caller
 credentials; they do not acquire tokens, refresh them, perform discovery, select
 flows, infer bearer token types, retry requests, or infer business authorization.
+Token acquisition, refresh, discovery and the single 401 replay exist only in
+the opt-in `sdk_defaults` OAuth lifecycle, planned separately by
+`http_protocol::oauth` ([SDK-GOLDEN-DEFAULTS.md](../guide/sdk-generation.md#5-oauth-lifecycle)).
 Conflicting conjunctive attachments are refused rather than overwritten.
 
 ### Parameters and media
@@ -425,11 +427,10 @@ schema IDs, byte bounds and codec roots retain their original sources. For
 positional multipart, an array-valued part stays one JSON part; an ignored explode
 flag does not manufacture item grouping.
 
-This is a completed descriptor correction, with no public API or native guard
-removal. The literal `ignoredMultipartEncoding` fixture covers both request and
+The literal `ignoredMultipartEncoding` fixture covers both request and
 response `multipart/mixed`: explicit JSON string content, default integer text,
-whole-array JSON, opaque bytes and JSON-object `itemEncoding`. Negative witnesses
-prove ignored fields cannot bypass an incompatible actual content codec or malformed
+whole-array JSON, opaque bytes and JSON-object `itemEncoding`. Negative tests
+show ignored fields cannot bypass an incompatible actual content codec or malformed
 metadata. The paired 3.1/3.2 controls preserve active form-data/form-urlencoded
 behavior; 3.1 non-form-data multipart without supported correlation and 3.1
 positional encoding declarations retain their existing located refusals.
@@ -462,9 +463,9 @@ JSON-null conversion and no streaming convention.
 ## Native acceptance required before opting in
 
 Every capability needs tests through the public native SDK entry point. Planner
-fixtures alone do not replace the following adapter witnesses:
+fixtures alone do not replace the following adapter tests:
 
-| Capability family | Required native evidence |
+| Capability family | Required native tests |
 | --- | --- |
 | Baseline projection | Existing real selected-operation packages/codecs/docs/types/wire gates; declaration/terminal identity and unchanged owned artifacts; case-insensitive media/auth corrections |
 | Methods/servers | GET/PUT/POST/DELETE/OPTIONS/HEAD/PATCH/TRACE/QUERY, custom tokens preserving case without transport normalization, fixed-method duplicate refusal, explicit caller server choice, relative document base, variable defaults/enums/overrides, invalid overrides before transport |
@@ -476,22 +477,29 @@ fixtures alone do not replace the following adapter witnesses:
 | SSE/JSON lines | Arbitrarily split transport chunks, UTF-8 boundaries, SSE CR/LF/comment/field/multiline rules and numeric retry, item codec failures, `[DONE]` treated as ordinary data, cancellation/close/backpressure, per-item and total transport bounds, JSON-lines framing |
 | Every expansion | Native positive/negative consumer typing, checked codec/transport execution, package install/import, executable examples, accurate docs, ownership/compatibility reports, source-linked decline paths |
 
-## Evidence and IR integration
+## Tests and IR integration
 
-The preapproved test seam is **public source `Contract` → wire plan**, including
-the plan's parameter reference interpreter and response matcher. Fixtures are
-literal synthetic normative/adversarial examples in
-`crates/suspect-codegen/tests/fixtures/http-protocol-v1.json`. They are not
-generated snapshots and are not claimed to occur in the OpenRouter corpus.
+The test seam is **public source `Contract` → wire plan**, including the plan's
+parameter reference interpreter and response matcher. Fixtures are literal
+synthetic normative/adversarial examples in
+`crates/suspect-codegen/tests/fixtures/http-protocol-v1.json` (literal parameter
+vectors, complete-query vectors and located malformed-declaration cases). They
+are not generated snapshots and are not claimed to occur in the OpenRouter
+corpus. `crates/suspect-codegen/tests/http_protocol.rs` adds source-to-plan
+cases for custom methods, querystrings, media references, indexed stream/header
+roots, fragment-version context, redirects and canonical `$self`, split HTTP and
+media references, physical versus logical bases, canonical links, OAuth URL base
+classification, unresolved logical URI diagnostics, dynamic candidates reached
+through nested schemas, forbidden/binary codec-root separation and ignored
+multipart encoding fields.
 
 Run the module's tests with:
 
 ```sh
-cargo test -p suspect-codegen --features http-protocol --test http_protocol
+cargo test -p suspect-codegen --test shared http_protocol::
 ```
 
-The native language tests and adoption are owned by Main/language agents. This
-document does not change their verified capability status.
+Native language tests are separate and do not change by editing this document.
 
 Main's integrated baseline is **20 passed** in
 `target/sdk-http-protocol-integration-01.log`. Phase 2 is **31 passed, 0 failed**,
@@ -532,68 +540,25 @@ The planner now consumes these completed canonical IR interfaces (see
    `MediaType::item_schema()`, `schema_roots()`, and `resolved_source()`. An
    unindexed or malformed schema still receives a located error; none is forged.
 
-Known canonical `$self`/resource-URI references are now resolved by Contract.
+Known canonical `$self`/resource-URI references are resolved by Contract.
 URI-named security/connections requiring missing discovery remain source-linked
 refusals. `operationRef` uses canonical lookup
 but identifies only existing indexed operations. Nested or streamed multipart,
 aggregate-plus-stream validation, and CONNECT tunnels remain explicit refusals
 even with `Capability::ALL`.
 
-### Resource integration evidence
+### Native ignored-encoding test
 
-The resource tranche passes **42/42 shared HTTP tests** through ordinary Cargo,
-including the original 31. It also passes **14/14 protocol-example controls**,
-including unavailable examples, ignored 3.0 siblings, bodyless/request codec
-sharing, false positional prefixes, and referenced `dataValue` handling. No
-generated native SDK matrix was rerun for this tranche.
-
-Evidence is retained under `target/sdk-http-protocol-resources-20260910/`:
-
-- `seam-tests-01.log` — all 42 shared source-to-plan tests.
-- `example-controls-01.log` — all 14 example controls.
-- `description-uri-control-01.log` — relative example-description URI resolution
-  and unavailable-example warnings, with missing wire references still blocking.
-
-The owned Rust files pass `rustfmt --check`; the literal fixture passes JSON
-syntax and duplicate-key checks. The formerly unused documentation comment on
-`document_base()` is now attached to its explicit public getter.
-
-The new independent witnesses cover redirects plus canonical `$self`, split HTTP
-and media references, physical versus logical bases, canonical links, OAuth URL
-base classification, unresolved logical URI diagnostics, dynamic candidates
-reached through nested schemas, and forbidden/binary codec-root separation.
-The Main-owned example-unavailability warning policy and the earlier
-`target/sdk-core-review-20260910/fixes-v3/` proofs remain intact.
-
-### Ignored multipart serialization-field correction
-
-Evidence under `target/sdk-http-protocol-ignored-encoding-20260910/`:
-
-- `source-red-01.log` reproduces the incorrect Style selection/content loss.
-- `source-green-01.log` passes the complete source-backed part-content witness.
-- `shared-seam-01.log` passes **46/46** shared tests, preserving the prior 42 and
-  adding applicability, actual-codec refusal, and 3.1/3.2 controls.
-- `example-controls-01.log` passes **20/20** current protocol-example controls,
-  including occurrence-aware positional projections and the explicit v3 helper.
-- `clippy-01.log` passes warnings-denied library Clippy. Owned formatting and
-  literal-fixture syntax/duplicate-key checks also pass.
-
-The existing TypeScript owner `ses_f73d087bfffeFGg0Qfhsv2OQKL` completed the affected
-native request/response witness:
-`typescript_multipart_ignored_encoding::ignored_multipart_styles_preserve_content_in_installed_requests_and_responses`.
-It passes with separately packed/installed TypeScript 5.5.4 and 5.9.3 packages on
-Node 22.23.1 and 24.21.0. Each combination checks 11 exchanges, 11 pre-transport
-request controls, nine response controls, required headers, exact integers, and
-literal JSON/text/binary MIME payloads from the unchanged source fixture.
-
-Native evidence: `target/sdk-typescript-ignored-encoding-native-01.log` and
-`target/sdk-typescript-ignored-encoding-20260910/acceptance-01.json`. The owned
-native witness and retained package/wire assets are listed in that directory's
-`handoff.md`. The `http-typescript-multipart-content-plan-required` guard remains
-a defensive invariant; no TypeScript production asset/API changes were needed.
-The corrected descriptors do not enter the invalid Style-outside-form-data branch.
-This focused follow-up closes the earlier content-plan gap without replaying
-the completed native SDK matrix.
+The TypeScript native test
+`typescript_multipart_ignored_encoding::ignored_multipart_styles_preserve_content_in_installed_requests_and_responses`
+(`--ignored`; needs pinned Node 22/24 and offline npm with TypeScript 5.5/5.9)
+packs and installs the generated package and checks request and response
+exchanges, pre-transport request controls, response controls, required headers,
+exact integers, and literal JSON/text/binary MIME payloads from the source
+fixture. `SUSPECT_PROTOCOL_ARTIFACTS` chooses where its artifacts are retained.
+The `http-typescript-multipart-content-plan-required` guard remains a defensive
+invariant; the corrected descriptors do not enter the invalid
+Style-outside-form-data branch.
 
 ### Normative primary sources
 

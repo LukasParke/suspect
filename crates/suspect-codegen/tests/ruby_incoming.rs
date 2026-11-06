@@ -307,10 +307,7 @@ fn receipt_less_contracts_emit_no_new_bytes() {
         .find(|receipt| receipt.name == "newIssue")
         .unwrap();
     assert_eq!(new_issue.decode, "decode_new_issue_webhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("construct_new_issue_response")
-    );
+    assert_eq!(new_issue.construct, "construct_new_issue_response");
     assert_eq!(new_issue.route_const, "NEW_ISSUE_WEBHOOK_ROUTE");
     assert_eq!(new_issue.method, "POST");
     assert_eq!(new_issue.route, "newIssue");
@@ -427,12 +424,9 @@ puts 'incoming behavior verified'
 "#;
 
 fn ruby_home() -> std::path::PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    // SUSPECT_RUBY_HOME, the version-manager install, or the home of the
+    // `ruby` on PATH (setup-ruby on CI).
+    suspect_codegen::toolchain::require_home("ruby")
 }
 
 /// The gem requires Ruby >= 3.3; older interpreters cannot even parse the

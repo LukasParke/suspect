@@ -26,44 +26,22 @@ fn checked(c: &mut Command, root: &Path) {
     }
 }
 fn driver() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/usr/bin/swift".into())
+    suspect_codegen::toolchain::resolve_path("swift")
+        .expect("gated by toolchain::require(\"swift\")")
 }
 fn compiler() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFTC_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            if driver() != Path::new("/usr/bin/swift") {
-                return driver().with_file_name("swiftc");
-            }
-            let o = Command::new("xcrun")
-                .args(["--find", "swiftc"])
-                .output()
-                .unwrap();
-            assert!(o.status.success());
-            PathBuf::from(String::from_utf8(o.stdout).unwrap().trim())
-        })
+    suspect_codegen::toolchain::swift_tool("swiftc").expect("the Swift toolchain has no swiftc")
 }
-fn sdk() -> PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_SDKROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let o = Command::new("xcrun")
-                .args(["--sdk", "macosx", "--show-sdk-path"])
-                .output()
-                .unwrap();
-            assert!(o.status.success());
-            PathBuf::from(String::from_utf8(o.stdout).unwrap().trim())
-        })
+/// `-sdk`/`--sdk` and `SDKROOT` for the selected SDK, when the platform has one.
+fn with_sdk(c: &mut Command, flag: &str) {
+    if let Some(sdk) = suspect_codegen::toolchain::swift_sdk_root() {
+        c.arg(flag).arg(&sdk).env("SDKROOT", sdk);
+    }
 }
 fn swift(action: &str) -> Command {
     let mut c = Command::new(driver());
-    c.arg(action)
-        .env("SWIFT_EXEC", compiler())
-        .arg("--sdk")
-        .arg(sdk())
-        .env("SDKROOT", sdk());
+    c.arg(action).env("SWIFT_EXEC", compiler());
+    with_sdk(&mut c, "--sdk");
     if action == "test" {
         c.arg("--disable-swift-testing");
     }
@@ -232,13 +210,9 @@ fn docs(root: &Path) {
             .args(["dump-symbol-graph", "--minimum-access-level", "public"]),
         root,
     );
-    let mut docc = if let Some(binary) = std::env::var_os("SUSPECT_SWIFT_DOCC_BIN") {
-        Command::new(binary)
-    } else {
-        let mut c = Command::new("xcrun");
-        c.arg("docc");
-        c
-    };
+    let mut docc = Command::new(
+        suspect_codegen::toolchain::swift_tool("docc").expect("the Swift toolchain has no docc"),
+    );
     checked(
         docc.arg("convert")
             .arg(root.join("sdk/Sources/GeneratedSDK/GeneratedSDK.docc"))
@@ -252,12 +226,14 @@ fn docs(root: &Path) {
     assert!(root.join("GeneratedSDK.doccarchive/index.html").is_file());
 }
 fn typechecks(root: &Path) {
-    let modules = directory(&root.join("build/sdk"), "Modules").unwrap();
+    let modules =
+        suspect_codegen::toolchain::swift_module_dir(&root.join("build/sdk"), "GeneratedSDK")
+            .unwrap();
     let common = |path: &Path| {
         let mut c = Command::new(compiler());
-        c.args(["-typecheck", "-swift-version", "6", "-sdk"])
-            .arg(sdk())
-            .arg("-module-cache-path")
+        c.args(["-typecheck", "-swift-version", "6"]);
+        with_sdk(&mut c, "-sdk");
+        c.arg("-module-cache-path")
             .arg(root.join("frontend-cache"))
             .arg("-I")
             .arg(&modules)

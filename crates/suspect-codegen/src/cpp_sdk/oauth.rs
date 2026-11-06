@@ -42,57 +42,38 @@ use super::models::allocate;
 use super::{PlannedOperation, SdkPlan};
 use crate::http_protocol as wire;
 
-/// Whether one compiled flow can be executed by the generated runtime.
-fn executable(flow: &wire::OAuthFlowDescriptor) -> bool {
-    if flow.deprecated_flow {
-        return false;
-    }
-    match flow.kind {
-        wire::OAuthFlowDescriptorKind::ClientCredentials => flow.token_url.is_some(),
-        wire::OAuthFlowDescriptorKind::AuthorizationCode => {
-            flow.authorization_url.is_some() && flow.token_url.is_some()
-        }
-        wire::OAuthFlowDescriptorKind::DeviceAuthorization => {
-            flow.device_authorization_url.is_some() && flow.token_url.is_some()
-        }
-        // Implicit and password flows are never executed by generated code.
-        wire::OAuthFlowDescriptorKind::Implicit | wire::OAuthFlowDescriptorKind::Password => false,
-    }
-}
-
-/// The executable flow subset of one scheme, in declaration order.
-fn executable_flows(scheme: &wire::OAuthSchemePlan) -> Vec<&wire::OAuthFlowDescriptor> {
-    scheme
-        .flows
-        .iter()
-        .filter(|flow| executable(flow))
-        .collect()
-}
-
 /// One source scheme compiled down to executable endpoints.
 #[derive(Debug, Clone)]
 pub struct OAuthScheme {
+    /// Declared security-scheme name.
     pub name: String,
     /// Refresh-before-expiry clock skew in seconds.
     pub skew_seconds: u32,
     /// Token-endpoint requests authenticate with the configured secret
     /// variable; otherwise the client is public.
     pub client_secret_basic: bool,
+    /// Environment variable holding the client id, when configured.
     pub client_id_env: Option<String>,
+    /// Environment variable holding the client secret, when configured.
     pub client_secret_env: Option<String>,
     /// The issuing authority origin that store keys partition on.
     pub issuer: String,
     /// The declared refresh endpoint, else the token endpoint.
     pub refresh_url: Option<String>,
+    /// The client-credentials flow's token endpoint.
     pub client_credentials_url: Option<String>,
     /// The declared authorization-request URL, carried whole: it is rendered
     /// into the returned transaction, never sent through the transport.
     pub authorization_url: Option<String>,
     /// The authorization-code flow's token endpoint.
     pub code_token_url: Option<String>,
+    /// The device-authorization endpoint.
     pub device_url: Option<String>,
+    /// The device flow's token endpoint.
     pub device_token_url: Option<String>,
+    /// The declared token revocation endpoint.
     pub revocation_url: Option<String>,
+    /// The declared token introspection endpoint.
     pub introspection_url: Option<String>,
     /// The known discovery/metadata document. A scheme with no executable
     /// flow is lowered only when its discovery URL defines the endpoints at
@@ -104,19 +85,29 @@ pub struct OAuthScheme {
 /// The allocated native type names of one emitted lifecycle surface.
 #[derive(Debug, Clone)]
 pub struct OAuthNames {
+    /// Per-scheme session manager (`OAuthSessions`).
     pub sessions: String,
+    /// Issued token set (`OAuthTokenSet`).
     pub token_set: String,
+    /// Pluggable token store interface (`OAuthTokenStore`).
     pub token_store: String,
+    /// In-memory token store (`OAuthMemoryTokenStore`).
     pub memory_store: String,
+    /// Typed OAuth error (`OAuthError`).
     pub error: String,
+    /// Per-call token request options (`OAuthTokenOptions`).
     pub options: String,
+    /// Authorization-code transaction (`OAuthAuthorization`).
     pub authorization: String,
+    /// Device-authorization grant (`OAuthDeviceGrant`).
     pub device: String,
+    /// Token introspection result (`OAuthIntrospection`).
     pub introspection: String,
     /// The opt-in replaying credential wrapper and its transport, allocated
     /// only when a compiled scheme carries an executable client-credentials
     /// flow, the provider the wrapper wraps.
     pub replay_credentials: Option<String>,
+    /// Transport half of the replaying credential wrapper; allocated under the same condition.
     pub replay_transport: Option<String>,
 }
 
@@ -125,7 +116,9 @@ pub struct OAuthNames {
 pub struct OAuthPlan {
     /// The shared compiled selection this emission follows.
     pub outcome: wire::OAuthPlan,
+    /// Lowered schemes that have at least one executable flow or a discovery URL.
     pub schemes: Vec<OAuthScheme>,
+    /// Allocated native type names.
     pub names: OAuthNames,
 }
 
@@ -162,7 +155,7 @@ fn origin(url: &str) -> String {
 pub(super) fn lower(outcome: &wire::OAuthPlan, names: &mut BTreeSet<String>) -> Option<OAuthPlan> {
     let mut schemes = Vec::new();
     for scheme in &outcome.schemes {
-        let flows = executable_flows(scheme);
+        let flows: Vec<&wire::OAuthFlowDescriptor> = scheme.executable_flows().collect();
         let discovery_url = scheme.discovery.clone();
         let Some(first) = flows.first() else {
             // A scheme with no executable flow is lowered only when its
@@ -299,22 +292,6 @@ fn optional_sv(value: &Option<String>) -> String {
     value.as_deref().map_or_else(|| SV_NONE.to_owned(), sv)
 }
 
-/// Whether any compiled scheme carries the device grant, so the device
-/// sections join the emitted header.
-fn has_device(plan: &OAuthPlan) -> bool {
-    plan.schemes
-        .iter()
-        .any(|scheme| scheme.device_url.is_some() && scheme.device_token_url.is_some())
-}
-
-/// Whether any compiled scheme carries the authorization-code grant, so the
-/// PKCE sections join the emitted header.
-fn has_authorization(plan: &OAuthPlan) -> bool {
-    plan.schemes
-        .iter()
-        .any(|scheme| scheme.authorization_url.is_some() && scheme.code_token_url.is_some())
-}
-
 fn has_revocation(plan: &OAuthPlan) -> bool {
     plan.schemes
         .iter()
@@ -327,15 +304,6 @@ fn has_introspection(plan: &OAuthPlan) -> bool {
         .any(|scheme| scheme.introspection_url.is_some())
 }
 
-/// Whether any compiled scheme carries a discovery URL, so the discovery
-/// engine, its typed failure kind and the endpoint-resolution precedence join
-/// the emitted header. Plans without one assemble byte-identically to the
-/// pre-discovery emission.
-fn has_discovery(plan: &OAuthPlan) -> bool {
-    plan.schemes
-        .iter()
-        .any(|scheme| scheme.discovery_url.is_some())
-}
 
 /// Render `include/<package>/oauth.hpp`. Called only when at least one usable
 /// scheme exists.
@@ -394,7 +362,7 @@ fn prose_header(oauth: &OAuthPlan) -> String {
         .map(|scheme| scheme.name.as_str())
         .collect::<Vec<_>>()
         .join(", ");
-    let (never_paragraph, discovery_paragraph) = if has_discovery(oauth) {
+    let (never_paragraph, discovery_paragraph) = if oauth.outcome.has_discovery() {
         (
             "The runtime never parses OpenAPI\n\
              * and never invents an endpoint: endpoint URLs the compiled flows omit\n\
@@ -481,7 +449,7 @@ fn prose_header(oauth: &OAuthPlan) -> String {
 /// The compiled descriptor table and its JSON/form helpers, in the
 /// runtime-owned `detail` namespace so no model symbol can collide with them.
 fn descriptors(oauth: &OAuthPlan) -> String {
-    let discovery = has_discovery(oauth);
+    let discovery = oauth.outcome.has_discovery();
     let mut out = String::from("namespace detail {\n\n");
     out.push_str(if discovery {
         DESCRIPTOR_TYPE_DISCOVERY
@@ -956,7 +924,15 @@ inline std::optional<std::pair<std::string, std::string>> oauth_pkce() {
 /// pre-discovery bytes; plans with one emit the discovery-aware endpoint
 /// resolution and the discovery engine.
 fn core(oauth: &OAuthPlan) -> String {
-    let discovery = has_discovery(oauth);
+    let discovery = oauth.outcome.has_discovery();
+    // The PKCE and device sections join only when a compiled scheme executes
+    // that grant.
+    let authorization = oauth
+        .outcome
+        .executes(wire::OAuthFlowDescriptorKind::AuthorizationCode);
+    let device = oauth
+        .outcome
+        .executes(wire::OAuthFlowDescriptorKind::DeviceAuthorization);
     let mut out = String::from(CORE_VALUE_TYPES);
     out.push_str(if discovery {
         ERROR_TYPE_DISCOVERY
@@ -964,10 +940,10 @@ fn core(oauth: &OAuthPlan) -> String {
         ERROR_TYPE_PLAIN
     });
     out.push_str(CORE_OPTIONS);
-    if has_authorization(oauth) {
+    if authorization {
         out.push_str(AUTHORIZATION_TYPE);
     }
-    if has_device(oauth) {
+    if device {
         out.push_str(DEVICE_TYPE);
     }
     if has_introspection(oauth) || discovery {
@@ -1002,10 +978,10 @@ fn core(oauth: &OAuthPlan) -> String {
             out.push_str(REFRESH_METHOD);
         }
     }
-    if has_authorization(oauth) {
+    if authorization {
         out.push_str(AUTHORIZATION_METHODS);
     }
-    if has_device(oauth) {
+    if device {
         out.push_str(DEVICE_METHODS);
     }
     if discovery {
@@ -2559,46 +2535,22 @@ const REPLAY_STORE_KEY: &str = r#"
 "#;
 
 /// The stream-protected operations whose attaches must never be replayed, per
-/// compiled scheme: security requirements that name a compiled scheme on an
-/// operation whose responses carry a stream representation. Delivered stream
-/// data prevents a transparent restart, so those operations are excluded from
-/// the replay wrapper's one-replay budget. The C++ attach request carries the
-/// operation source (the requirement's own source pointer is not exposed to
-/// credential hooks), so the compiled set names the stream-protected
-/// operations per scheme.
+/// compiled scheme (see
+/// [`wire::oauth_stream_protected_requirements`]). The C++ attach request
+/// carries the operation source (the requirement's own source pointer is not
+/// exposed to credential hooks), so the compiled set names the
+/// stream-protected operations per scheme by their source pointer.
 pub(super) fn no_replay_requirements(
     schemes: &[OAuthScheme],
     operations: &[PlannedOperation],
 ) -> BTreeMap<String, BTreeSet<String>> {
     let names: BTreeSet<&str> = schemes.iter().map(|s| s.name.as_str()).collect();
     let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in operations {
-        let streams = operation.wire.responses().iter().any(|response| {
-            response
-                .media()
-                .iter()
-                .any(|media| matches!(media.representation(), wire::Representation::Stream { .. }))
-        });
-        if !streams {
-            continue;
-        }
-        for alternative in operation.wire.security().alternatives() {
-            for requirement in alternative.requirements() {
-                if !matches!(
-                    requirement.credential(),
-                    wire::CredentialHook::OAuth2 { .. }
-                        | wire::CredentialHook::OpenIdConnect { .. }
-                ) {
-                    continue;
-                }
-                if names.contains(requirement.name()) {
-                    pointers
-                        .entry(requirement.name().to_owned())
-                        .or_default()
-                        .insert(operation.source.pointer().to_owned());
-                }
-            }
-        }
+    for found in wire::oauth_stream_protected_requirements(operations, |op| &op.wire, &names) {
+        pointers
+            .entry(found.scheme.to_owned())
+            .or_default()
+            .insert(found.operation.source.pointer().to_owned());
     }
     pointers
 }
@@ -2611,7 +2563,7 @@ pub(super) fn no_replay_requirements(
 /// The plain and discovery variants resolve the lifecycle-endpoint exclusion
 /// through the same compiled precedence as the lifecycle they wrap.
 fn replay_section(plan: &SdkPlan, oauth: &OAuthPlan) -> String {
-    let discovery = has_discovery(oauth);
+    let discovery = oauth.outcome.has_discovery();
     let no_replay = no_replay_requirements(&oauth.schemes, plan.operations());
     let mut out = String::from("namespace detail {\n\n");
     out.push_str(REPLAY_PROTECTED_TABLE);

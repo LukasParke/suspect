@@ -12,10 +12,13 @@ use serde_json::Value;
 /// A native first-request recipe rendered from actual allocated operation types.
 #[derive(Debug, Clone)]
 pub struct FirstRequest {
+    /// Allocated client method name of the operation called.
     pub operation: String,
+    /// Allocated `operations.*` input type name of that operation.
     pub input_type: String,
     /// A validated native input literal, when the source examples establish one.
     pub input: Option<String>,
+    /// Whether the operation's input may be omitted entirely.
     pub input_optional: bool,
 }
 impl FirstRequest {

@@ -1,4 +1,4 @@
-# Go resource/dynamic schema-v3 adoption
+# Go resource/dynamic validation (schema v3)
 
 Completed native adoption of the stable contract in
 [SDK-SCHEMA-RESOURCES.md](../../design/schema-resources.md), after the
@@ -17,15 +17,15 @@ The existing public Go generation entrypoints remain the entrypoints:
   effective closure needs canonical-resource/dynamic semantics**. Other closures
   still use `compile_v2`, which preserves their existing v1 or v2 programs.
   Base programs do not acquire a `resourceContext` field.
-- `CodecPlan::validation_program()` (introduced in Go v2 adoption) remains the
+- `CodecPlan::validation_program()` remains the
   typed source for version/profile/resource metadata. No new public profile
   selector is required for canonical backend dispatch.
-- The Go HTTP planner admits `SchemaResources` and `DynamicSchemaReferences`
-  after the native profile witnesses. It uses `codec_schema_closure()` for
+- The Go HTTP planner admits `SchemaResources` and `DynamicSchemaReferences`.
+  It uses `codec_schema_closure()` for
   candidate-aware admission checks and keeps `codec_roots()` as the actual codec
   input identities. V3 examples use `plan_protocol_examples_v3`; v1/v2 examples
   retain their respective existing helpers.
-- `DocumentRelativeServers` has its independent physical-base witness in
+- `DocumentRelativeServers` has its independent physical-base test,
   `go_schema_v2::native_physical_document_base_redirect_and_encoded_path_witness`.
 
 Public native validation still uses `Validate`, `ValidationError` and
@@ -53,7 +53,7 @@ Context IDs are interned by the exact `(previous context, resource index)` pair;
 cycle detection includes that context alongside node and instance identity.
 Neither sibling trials nor subsequent calls inherit active resources.
 
-V3 reuses the verified v2 annotation evaluator. A selected dynamic target gets a
+V3 reuses the v2 annotation evaluator. A selected dynamic target gets a
 fresh annotation scope and contributes only successful sets. Evaluation failure
 is noninvertible. New resource entries and every inspected resource/binding are
 charged exactly as specified; scope restoration and context-cache lookup add no
@@ -73,70 +73,68 @@ incorrectly apply a narrower fallback. Independently invoking the child's public
 codec still establishes that child's own proper root context.
 
 Mutable encoding, exact numbers, native field checks, omission/null invariants,
-conversion budgets and JSON cycle protection remain active. The native witness
-explicitly proves that an integer accepted by an outer override can be decoded
+conversion budgets and JSON cycle protection remain active. A native test checks
+that an integer accepted by an outer override can be decoded
 and encoded in its record, while the same dynamic-use codec independently accepts
 its string fallback and rejects the integer.
 
 ## Source examples and documentation
 
-V3 examples come from Main's bounded source-driven helper. Native construction
+V3 examples come from the bounded source-driven helper (`plan_protocol_examples_v3`). Native construction
 continues to use retained Go model descriptors. Ordinary JSON/text input records
 have a single member binding with their validated entry index and container.
 
-`OperationExamples.validated_aggregates` now supplies complete grouping for
+`OperationExamples.validated_aggregates` supplies complete grouping for
 source-declared JSON forms and multipart. Go uses that grouping for repeated
 items, dynamic named extras, optional absence, empty arrays and positional tails.
 It never fabricates a whole-object codec or turns JSON values into file contents.
 A required empty repeated field can still fail the native wire representation;
 the example preserves that exact value rather than inventing a nonempty one.
 
-## Exact maintained selectors and results
+## Native tests
 
-All selectors below are in `crates/suspect-codegen/tests/go_schema_v3.rs` unless
-another target is shown. Each native selector passed on both supported Go tiers.
+All tests below are in `crates/suspect-codegen/tests/go_schema_v3.rs` unless
+another target is shown. Native tests are `--ignored` and run on both supported
+Go tiers.
 
-| Selector | Result / scope |
+| Test | Scope |
 | --- | --- |
-| `official_44_unmodified_resource_cases_execute_with_closed_supplied_documents` | **44 official cases passed** per tier. The maintained test compiles the original dynamicRef source file and all three supplied remote documents through `compile_v3`; no target report is loaded. |
-| `malformed_v3_contexts_never_emit_and_old_envelopes_reject_resources` | Eight context/binding/target/URI mutations refused, plus v1/v2 resource and dynamic-op fences. |
-| `independent_dynamic_scope_branch_cycle_budget_and_annotation_controls` | **16 independent controls passed** per tier: outermost precedence, inert candidates, fallback kinds, nested entry, restoration, changed-context reentry, exact resource/binding work, numeric failure and annotation isolation/propagation. |
-| `native_codec_boundaries_preserve_outer_dynamic_context_and_base_profile_selection` | Context-aware decode/mutable encode and independent-root fallback behavior passed; ordinary programs retain v1/v2 and absent resource metadata. |
-| `installed_resource_sdk_keeps_typed_fields_dynamic_wire_checks_and_examples` | Installed SDK, native constructors/types, request/response checks, strict recursive tree, exact integers, encoded wire paths, source examples and rendered docs passed. SDK consumer runs with `-race`; Sphinx runs with warnings as errors. |
-| `native_distinct_resource_depth_and_concurrent_contexts_are_bounded` | 550-resource chain reaches the explicit 512 depth failure on a normal native stack; later and concurrent contexts remain isolated. |
-| `go_examples_aggregate::declared_form_and_positional_groups_keep_items_extras_and_absence` | Grouped native form/MIME wire recipes preserve distinct repeated values, extras, optional absence, empty arrays and positional tails on both tiers. |
+| `official_44_unmodified_resource_cases_execute_with_closed_supplied_documents` | The original official dynamicRef source file and its supplied remote documents compile through `compile_v3` and execute natively; no target report is loaded. |
+| `malformed_v3_contexts_never_emit_and_old_envelopes_reject_resources` | Context/binding/target/URI mutations are refused, plus v1/v2 resource and dynamic-op fences. Host-only. |
+| `independent_dynamic_scope_branch_cycle_budget_and_annotation_controls` | Independent controls: outermost precedence, inert candidates, fallback kinds, nested entry, restoration, changed-context reentry, exact resource/binding work, numeric failure and annotation isolation/propagation. |
+| `native_codec_boundaries_preserve_outer_dynamic_context_and_base_profile_selection` | Context-aware decode/mutable encode and independent-root fallback behavior; ordinary programs retain v1/v2 and absent resource metadata. |
+| `installed_resource_sdk_keeps_typed_fields_dynamic_wire_checks_and_examples` | Installed SDK, native constructors/types, request/response checks, strict recursive tree, exact integers, encoded wire paths, source examples and rendered docs. The SDK consumer runs with `-race`; Sphinx (when `SUSPECT_SPHINX_PYTHON` is set) runs with warnings as errors. |
+| `native_distinct_resource_depth_and_concurrent_contexts_are_bounded` | A 550-resource chain reaches the explicit 512 depth failure on a normal native stack; later and concurrent contexts remain isolated. |
+| `go_examples_aggregate::declared_form_and_positional_groups_keep_items_extras_and_absence` | Grouped native form/MIME wire recipes preserve distinct repeated values, extras, optional absence, empty arrays and positional tails. |
 
-The original unchanged m3 host selector is
-`m3_native_docs::examples_bind_real_slots_and_report_missing_required_values`.
-The earlier Go v2 source/codec/context results and the v1/base/protocol evidence
-retain their completed scope; those matrices were not replayed for restarts or
-format/lint-only changes.
+The host docs test
+`m3_native_docs::examples_bind_real_slots_and_report_missing_required_values`
+also covers example slot binding.
 
 Reproduction:
 
 ```sh
 SUSPECT_SPHINX_PYTHON=/path/to/sphinx-python \
   cargo test --locked --offline -p suspect-codegen --no-default-features \
-  --features http-protocol --test go_schema_v3 -- --include-ignored --nocapture
+  --test go go_schema_v3:: -- --include-ignored --nocapture
 
 cargo test --locked --offline -p suspect-codegen --no-default-features \
-  --features http-protocol --test go_examples_aggregate -- --ignored --nocapture
+  --test go go_examples_aggregate:: -- --ignored --nocapture
 ```
 
-The default native test runs both toolchains. `SUSPECT_GO_TOOLCHAIN` can select
-one explicitly. The scoped quality command is:
+The default native test runs both toolchains (`go1.23.12`, `go1.27.1`).
+`SUSPECT_GO_TOOLCHAIN` can select one explicitly. The scoped lint command is:
 
 ```sh
 cargo clippy --locked --offline -p suspect-codegen --no-default-features \
-  --features http-protocol --lib -- -D warnings -A dead_code
+  --lib -- -D warnings -A dead_code
 ```
 
-It passed. The allowance is for the retained unrelated strict-adapter dead-code
-warnings; the owned map-keys iteration finding was repaired.
+The `-A dead_code` allowance covers unrelated dead code elsewhere in the crate.
 
-## Final production asset handoff
+## Generated assets
 
-New generated v3 production asset:
+Generated v3 asset:
 
 - **`go/validation_resources.go`**, from
   `crates/suspect-codegen/src/go_validation/resources.go`.
@@ -148,9 +146,8 @@ Existing generated assets whose v3 content/profile can change:
 - Go HTTP runtime, operation, manifest, source-binding, README and example/docs
   artifacts driven by those retained plans.
 
-The two v2 additions remain `go/validation_scoped.go` and
-`go/validation_scoped_pattern.go`. Shared registration/options/provenance files
-were not edited by this owner. The Go-only compatibility capture retains the
+The v2 assets are `go/validation_scoped.go` and
+`go/validation_scoped_pattern.go`. The Go-only compatibility capture retains the
 actual validation profile and native representations from typed plans.
 
 ## Remaining boundaries

@@ -26,11 +26,6 @@ fn base() -> PathBuf {
 fn tools() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools")
 }
-fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| tools().join("php-8.3.32/php"))
-}
 fn phpstan() -> PathBuf {
     std::env::var_os("SUSPECT_PHPSTAN_PHAR")
         .map(PathBuf::from)
@@ -156,9 +151,8 @@ fn write_files(files: Vec<suspect_codegen::OutFile>, root: &Path) {
     }
 }
 fn composer(root: &Path) -> Command {
-    let mut cmd = Command::new(php());
-    cmd.arg("-n")
-        .arg(tools().join("composer-2.10.3.phar"))
+    let mut cmd = suspect_codegen::toolchain::php_command().expect("PHP is gated by native_php()");
+    cmd.arg(tools().join("composer-2.10.3.phar"))
         .env("COMPOSER_HOME", root.join("composer-home"))
         .env("COMPOSER_CACHE_DIR", tools().join("composer-cache"))
         .env("COMPOSER_NO_INTERACTION", "1");
@@ -168,7 +162,9 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
     let root = root(label);
     write_files(plan.render(), &root);
     checked(
-        Command::new(php()).args(["-n", "-r", "echo PHP_VERSION, PHP_EOL;"]),
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-r", "echo PHP_VERSION, PHP_EOL;"]),
         &root,
         "php-version",
     );
@@ -221,8 +217,8 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
         );
     }
     checked(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(phpstan())
             .args([
                 "analyse",
@@ -237,8 +233,9 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
     );
     for name in ["codecs", "client", "quickstart"] {
         checked(
-            Command::new(php())
-                .args(["-n", "-d", "error_reporting=-1"])
+            suspect_codegen::toolchain::php_command()
+                .expect("PHP is gated by native_php()")
+                .args(["-d", "error_reporting=-1"])
                 .arg(installed.join(format!("examples/{name}.php")))
                 .env("SUSPECT_SDK_AUTOLOAD", consumer.join("vendor/autoload.php"))
                 .current_dir(&consumer),
@@ -252,8 +249,9 @@ fn install(plan: &Plan, label: &str) -> PathBuf {
     )
     .unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "docs.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "docs.php"])
             .arg(&installed)
             .current_dir(&consumer),
         &root,
@@ -399,8 +397,8 @@ fn composer_installed_m2_native_package() {
     .unwrap();
     fs::write(consumer.join("phpstan.neon"),"parameters:\n    level: max\n    phpVersion: 80300\n    paths: [positive.php]\n    tmpDir: build/phpstan\n").unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(phpstan())
             .args([
                 "analyse",
@@ -413,8 +411,9 @@ fn composer_installed_m2_native_package() {
         "positive-types",
     );
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .current_dir(&consumer),
         &root,
         "native-models",
@@ -453,8 +452,8 @@ fn composer_installed_m2_native_package() {
             format!("<?php\ndeclare(strict_types=1);\n{statement}\n"),
         )
         .unwrap();
-        let output = Command::new(php())
-            .arg("-n")
+        let output = suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(phpstan())
             .args([
                 "analyse",
@@ -482,8 +481,8 @@ fn composer_installed_m2_native_package() {
     )
     .unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(phpstan())
             .args([
                 "analyse",
@@ -497,9 +496,9 @@ fn composer_installed_m2_native_package() {
         "http-positive-types",
     );
     checked(
-        Command::new(php())
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .args([
-                "-n",
                 "-d",
                 "error_reporting=-1",
                 "-d",
@@ -842,8 +841,9 @@ fn native_shared_owned_program_vectors() {
     ));
     fs::write(root.join("consumer.php"), script).unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "consumer.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "consumer.php"])
             .current_dir(&root),
         &root,
         "native-vectors",
@@ -898,8 +898,8 @@ fn composer_installed_actual_openrouter_five_operations() {
     fs::write(consumer.join("positive.php"), script).unwrap();
     fs::write(consumer.join("phpstan.neon"),"parameters:\n    level: max\n    phpVersion: 80300\n    paths: [positive.php]\n    tmpDir: build/phpstan\n").unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(phpstan())
             .args([
                 "analyse",
@@ -913,8 +913,9 @@ fn composer_installed_actual_openrouter_five_operations() {
     );
     let server = RecordingServer::new(true);
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .arg(&server.url)
             .current_dir(&consumer),
         &root,
@@ -1083,9 +1084,6 @@ fn unsupported_native_shapes_and_dialects_never_become_json_fallbacks() {
     assert_eq!(target.source.pointer, pattern.pointer());
     assert!(target.checks.iter().any(|check| matches!(&check.instruction, ProgramInstruction::Type { types } if types == &[ProgramType::String])));
 
-    let mut value = api_document(json!({"Root":{"type":"object"}}), "Root");
-    value["openapi"] = json!("3.0.3");
-    assert!(plan_document(&value, config()).is_err());
     for namespace in [
         "__NAMESPACE__",
         "class",
@@ -1156,8 +1154,8 @@ fn installed_adversarial_models_names_docs_and_union_codecs() {
     .unwrap();
     fs::write(consumer.join("phpstan.neon"),"parameters:\n    level: max\n    phpVersion: 80300\n    paths: [positive.php]\n    tmpDir: build/phpstan\n").unwrap();
     checked(
-        Command::new(php())
-            .arg("-n")
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
             .arg(phpstan())
             .args([
                 "analyse",
@@ -1170,15 +1168,16 @@ fn installed_adversarial_models_names_docs_and_union_codecs() {
         "positive-types",
     );
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .current_dir(&consumer),
         &root,
         "native-adversarial",
     );
     fs::write(consumer.join("negative.php"),"<?php\ndeclare(strict_types=1);\nnew FixtureSdk\\AdverseRoot();\nnew FixtureSdk\\AdverseRoot(requiredValue: FixtureSdk\\Absent::Value);\nnew FixtureSdk\\AdverseRoot(requiredValue: null, optionalNonnull: null);\n").unwrap();
-    let output = Command::new(php())
-        .arg("-n")
+    let output = suspect_codegen::toolchain::php_command()
+        .expect("PHP is gated by native_php()")
         .arg(phpstan())
         .args([
             "analyse",
@@ -1277,8 +1276,9 @@ echo '10000 independent exact rational comparisons/integrality/divisibility case
 "#);
     fs::write(root.join("consumer.php"), script).unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "consumer.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "consumer.php"])
             .current_dir(&root),
         &root,
         "native-exact-math",
@@ -1414,8 +1414,9 @@ echo 'shared schema/numeric/equality/recursion and native conversion budget case
 "#);
     fs::write(root.join("consumer.php"), script).unwrap();
     checked(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "consumer.php"])
+        suspect_codegen::toolchain::php_command()
+            .expect("PHP is gated by native_php()")
+            .args(["-d", "error_reporting=-1", "consumer.php"])
             .current_dir(&root),
         &root,
         "native-budgets",

@@ -52,12 +52,12 @@ fn documents() -> Value {
         (
             "Variable",
             "variableServer",
-            json!([{"url":"{base}","variables":{"base":{"default":"http://absolute.example/v1"}}}]),
+            json!([{"url":"{base}","variables":{"base":{"default":"https://absolute.example/v1"}}}]),
         ),
         (
             "Absolute",
             "absoluteServer",
-            json!([{"url":"http://fixed.example/Keep%2f/%2e%2e/Case"}]),
+            json!([{"url":"https://fixed.example/Keep%2f/%2e%2e/Case"}]),
         ),
         (
             "Network",
@@ -79,9 +79,9 @@ fn documents() -> Value {
         }
         parts["components"]["pathItems"][name] = json!({"get":operation});
     }
-    json!({"entry":"http://requested.example/bootstrap/api.json","documents":[
-        {"requested":"http://requested.example/bootstrap/api.json","effective":"http://entry.example/root/spec/api.json","value":entry},
-        {"requested":"http://archive.example/download/parts.json","effective":"http://storage.example/releases/specs/parts.json","value":parts},
+    json!({"entry":"https://requested.example/bootstrap/api.json","documents":[
+        {"requested":"https://requested.example/bootstrap/api.json","effective":"https://entry.example/root/spec/api.json","value":entry},
+        {"requested":"https://archive.example/download/parts.json","effective":"https://storage.example/releases/specs/parts.json","value":parts},
         {"requested":"file:///recorded/local/source.json","effective":"file:///recorded/local/source.json","value":{"openapi":"3.2.0","$self":"https://logical.example/catalog/local.json","info":{"title":"Local source","version":"1"},"paths":{},"components":{"pathItems":{"Local":{"get":{"operationId":"localServer","servers":[{"url":"../Local%2Fapi"}],"responses":{"204":{"description":"done"}}}}}}}}
     ]})
 }
@@ -152,7 +152,7 @@ fn physical_server_metadata_and_schema_capability_fences() {
             .source()
             .document()
             .as_str(),
-        "http://entry.example/root/spec/api.json"
+        "https://entry.example/root/spec/api.json"
     );
     let empty = plan
         .operations()
@@ -165,7 +165,7 @@ fn physical_server_metadata_and_schema_capability_fences() {
             .source()
             .document()
             .as_str(),
-        "http://storage.example/releases/specs/parts.json"
+        "https://storage.example/releases/specs/parts.json"
     );
     let declared = plan
         .operations()
@@ -184,7 +184,7 @@ fn physical_server_metadata_and_schema_capability_fences() {
     );
     assert_eq!(
         server.resolve_document_url(&Default::default()).unwrap(),
-        "http://storage.example/releases/Api%2Fv1/%2e%2E/North"
+        "https://storage.example/releases/Api%2Fv1/%2e%2E/North"
     );
     for context in [
         declared.wire.source().use_site_resource().unwrap(),
@@ -234,7 +234,7 @@ fn physical_server_metadata_and_schema_capability_fences() {
             d.capability(),
             Some(Capability::SchemaResources | Capability::DynamicSchemaReferences)
         ) && d.source().source().document().as_str()
-            == "http://storage.example/releases/specs/parts.json"
+            == "https://storage.example/releases/specs/parts.json"
             && !d.source().span().is_empty()
             && d.resource_context().is_some()));
     }

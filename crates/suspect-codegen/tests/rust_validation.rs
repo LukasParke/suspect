@@ -11,7 +11,7 @@ use suspect_schema::{
 use suspect_source::Uri;
 
 fn native_cargo() -> Command {
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     if let Some(toolchain) = std::env::var_os("SUSPECT_NATIVE_RUST_TOOLCHAIN") {
         command.env("RUSTUP_TOOLCHAIN", toolchain);
     }
@@ -627,7 +627,7 @@ fn native_finite_reference_chain_honors_the_admitted_depth_ceiling() {
 }
 
 #[test]
-#[ignore = "requires native Cargo and OPENROUTER_WEB_ROOT"]
+#[ignore = "requires native Cargo and the pinned OpenRouter spec"]
 fn tracked_openrouter_nullable_caller_image_and_index_closures_match_owned_schema() {
     let root_dir = suspect_codegen::test_inputs::openrouter_root();
     let path = root_dir.join("projects/docs/openapi/openapi.yaml");

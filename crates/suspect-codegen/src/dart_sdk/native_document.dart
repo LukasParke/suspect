@@ -31,6 +31,26 @@ final class Script implements HttpTransport {
   }
   @override Future<void> close() async {check(seen==expectedUrls.length&&released==seen,'complete fixture and releases');}
 }
+final class Recorder implements HttpTransport {
+  final urls=<String>[];
+  @override Future<TransportResponse> send(TransportRequest request) async {
+    urls.add(request.url.toString());
+    return TransportResponse(status:204,headers:const {},body:const Stream.empty(),onClose:() async {});
+  }
+  @override Future<void> close() async {}
+}
+// ADR 0035: a declared plain-HTTP server keeps its scheme; a non-loopback
+// plain-HTTP override needs allowInsecureHttp.
+Future<void> plainHttp() async {
+  final recorder=Recorder();final client=Client(transport:recorder);
+  try {
+    await client.variable(server:const ServerSelection(variables:{'base':'http://plain.example.test/x'}));
+    try {await client.relative(server:ServerSelection(override:Uri.parse('http://plain.example.test/chosen')));throw StateError('plain HTTP override sent without opt-in');}
+    on ConfigurationException { /* Refused before send. */ }
+    await client.relative(server:ServerSelection(override:Uri.parse('http://plain.example.test/chosen'),allowInsecureHttp:true));
+    check(recorder.urls.join(' ')=='http://plain.example.test/x/variable http://plain.example.test/chosen/relative','plain HTTP: ${recorder.urls}');
+  } finally {await client.close();}
+}
 Future<void> exercise(HttpTransport transport) async {
   var hooks=0;
   AuthorizationCredential authorize(CredentialRequest request) {
@@ -67,4 +87,4 @@ Future<void> exercise(HttpTransport transport) async {
   } finally {await client.close();}
   print('DART_DOCUMENT_SERVER_OK');
 }
-Future<void> main()=>exercise(Script());
+Future<void> main() async {await exercise(Script());await plainHttp();}

@@ -28,7 +28,7 @@ export function serverURL(descriptor: OperationDescriptor<unknown>, client: Clie
             if (client.server !== undefined) throw new TypeError('choose serverURL or a declared server selection');
             validURLReference(client.serverURL);
             if (parseUriReference(client.serverURL).scheme === undefined) throw new TypeError('serverURL must be absolute');
-            return checkedURL(resolveUriDocument('https://unused.invalid/', client.serverURL));
+            return checkedURL(client.serverURL, client.allowInsecureHttp !== true);
         }
         const options = objectData(choice);
         if (Object.keys(options).some(key => !['index', 'name', 'variables', 'documentURL'].includes(key))) throw new TypeError('unknown server selection member');
@@ -49,20 +49,28 @@ export function serverURL(descriptor: OperationDescriptor<unknown>, client: Clie
             return overrides[name] as string | undefined ?? variable.default.value;
         });
         validURLReference(expanded);
-        let base = 'https://unused.invalid/';
-        if (parseUriReference(expanded).scheme === undefined) {
-            const documentURL = options.documentURL ?? selected.document_base.source.document;
-            if (typeof documentURL !== 'string') throw new TypeError('relative server needs the HTTP URL serving its source document');
-            const parsed = parseUriReference(documentURL);
-            if (parsed.scheme !== 'http' && parsed.scheme !== 'https' || parsed.authority === undefined || parsed.authority === '') throw new TypeError('a local-file relative server needs an explicit HTTP documentURL');
-            base = documentURL;
-        }
-        return checkedURL(resolveUriDocument(base, expanded));
+        // ADR 0035: an absolute server is checked as written; only a relative
+        // reference is resolved (RFC 3986, literal dot segments only).
+        if (parseUriReference(expanded).scheme !== undefined) return checkedURL(expanded);
+        const documentURL = options.documentURL ?? selected.document_base.source.document;
+        if (typeof documentURL !== 'string') throw new TypeError('relative server needs the HTTP URL serving its source document');
+        const parsed = parseUriReference(documentURL);
+        if (parsed.scheme !== 'http' && parsed.scheme !== 'https' || parsed.authority === undefined || parsed.authority === '') throw new TypeError('a local-file relative server needs an explicit HTTP documentURL');
+        return checkedURL(resolveUriDocument(documentURL, expanded));
     } catch (error) { throw new RuntimeError('request-representation', 'server selection or variables are invalid', descriptor.source, source, error); }
 }
-function checkedURL(value: string): string {
+// One server URL policy (ADR 0035): a declared server keeps its scheme; a
+// caller override (loopbackOnly) is https, or plain http only to loopback
+// unless allowInsecureHttp is set; no userinfo, query or fragment; a valid port; literal `.`/`..`
+// segments refused, never resolved; percent-encoded octets are opaque path
+// data sent verbatim; non-ASCII, controls and backslashes refused.
+function checkedURL(value: string, loopbackOnly = false): string {
+    const parsed = parseUriReference(value);
     const url = new URL(value);
     if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.hostname === '' || url.username !== '' || url.password !== '' || url.hash !== '' || url.search !== '') throw new TypeError('server URL requires HTTP(S), a host, and no userinfo/query/fragment');
+    if (/:0*$/.test(parsed.authority ?? '')) throw new TypeError('server URL requires a valid port');
+    if (loopbackOnly && url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new TypeError('plain HTTP servers must be loopback');
+    if (parsed.path.split('/').some(segment => segment === '.' || segment === '..')) throw new TypeError('server path contains a literal dot segment');
     // Use URL only for HTTP authority validation. Its repaired path spelling
     // must not replace the strict document-base result.
     return value;

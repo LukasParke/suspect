@@ -150,8 +150,11 @@ pub fn migrate_files(manifest: &Path) -> anyhow::Result<Report> {
             );
             if let Some(shared) = &extends {
                 let relative = relative_to(shared, &dir);
-                out.push_str(&format!("extends: {}\n", relative.display()));
-                lines.push(format!("extends: {}", relative.display()));
+                // A committed file: `/` on every platform, so the same
+                // `.suspect.yaml` resolves on Windows and Unix checkouts.
+                let relative = relative.to_string_lossy().replace('\\', "/");
+                out.push_str(&format!("extends: {relative}\n"));
+                lines.push(format!("extends: {relative}"));
             }
             out.push_str(&render(&moved));
             for item in &moved {

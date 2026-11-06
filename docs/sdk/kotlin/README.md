@@ -9,7 +9,7 @@ streams. Models use the checked static JSON Schema 2020-12 profile.
 
 ## Compiler interface and artifacts
 
-Enable `suspect-codegen`'s `kotlin-sdk,http-protocol` features and call:
+Enable `suspect-codegen`'s `kotlin-sdk` feature and call:
 
 ```rust
 suspect_codegen::kotlin_sdk::plan_sdk(contract, &selected, SdkConfig {
@@ -105,7 +105,10 @@ suspend fun withCredentials(token: String) {
 
 The source scheme named `apiKey` is HTTP **bearer**, so it produces
 `Authorization: Bearer <token>`. No API-key header convention is inferred from
-that name. The SDK does not acquire/refresh credentials or read the environment.
+that name. Unless the package was generated with `credential_env` or an
+`sdk_defaults` OAuth/environment policy (see
+[SDK-GOLDEN-DEFAULTS.md](../../guide/sdk-generation.md)), the SDK does not
+acquire/refresh credentials or read the environment.
 The generated quickstart explicitly reads `API_TOKEN` as application scaffolding.
 OpenRouter's management-key guidance remains in operation documentation.
 
@@ -237,7 +240,9 @@ Default finite policies:
 
 The JDK adapter retains at most the body ceiling plus one sentinel byte, then
 cancels oversized input. It disables redirects, cookies, implicit proxies and
-automatic credential acquisition. The SDK has no retry or pagination loop.
+automatic credential acquisition. The SDK has no retry loop
+([ADR 0025](../../adr/0025-one-http-exchange-per-call.md)); pagination helpers are
+generated only under an `sdk_defaults` pagination policy.
 Malformed UTF-8, duplicate JSON keys, wrong media/charset/encoding, unexpected
 statuses, invalid headers and resource failures retain classified outcomes.
 
@@ -259,7 +264,7 @@ required gate. Example provenance and invalid source examples remain visible.
 
 ## Toolchain pins and boundaries
 
-Pins verified on 2026-09-10 against primary repositories and resolved by Maven:
+Toolchain pins, resolved by Maven:
 
 | Component | Pin / actual runtime |
 | --- | --- |
@@ -276,13 +281,26 @@ Primary availability: [Kotlin releases](https://kotlinlang.org/docs/releases.htm
 [coroutines changelog](https://github.com/Kotlin/kotlinx.coroutines/blob/master/CHANGES.md),
 [Dokka Maven documentation](https://kotlinlang.org/docs/dokka-maven.html) and
 [Dokka artifact](https://repo.maven.apache.org/maven2/org/jetbrains/dokka/dokka-maven-plugin/2.2.0/).
-Availability records and actual JVM versions are in `target/sdk-kotlin-tools/`.
 Kotlin compilation is in-process; the module does not require a compiler daemon.
 Executable Maven examples run in a separate bounded JVM, so Maven does not try
 to interrupt the application's shared coroutine dispatcher during goal cleanup.
 
-Native intersections, tuple/prefixItems models, structural ref/union siblings,
-active directional annotations and OpenAPI 3.0 produce source-linked diagnostics.
+Native intersections, tuple/prefixItems models, structural ref/union siblings
+and active directional annotations produce source-linked diagnostics.
+
+OpenAPI 3.0 documents are admitted (`kotlin-jvm-protocol-v1` opts in to
+`OpenApi30`). Per [ADR 0016](../../adr/0016-closed-dialect-set.md), 3.0 Schema
+Objects are lowered onto the same checked instructions and model planning
+reads them through the shared `schema_view` dialect view: `nullable: true` adds
+null to the same-object `type` only (`String?`, `Model?`; a `$ref` to a
+nullable schema is nullable through its target; an `enum` must still list
+`null`; without a same-object `type` it has no effect), Boolean
+`exclusiveMinimum`/`exclusiveMaximum` make the adjacent bound exclusive, and a
+Reference Object applies only its `$ref`, so siblings neither refuse nor alter
+the alias. Direction-dependent `required` remains a located refusal. A package
+generated from a 3.0 description states this lowering in its README;
+`tests/fixtures/oas30/petstore-nullable.openapi.yaml` is the plan/emit witness
+and installed JDK 21/25 consumer fixture.
 The standalone portable validator has broader instruction coverage than native
 model representation, including tuples and unconstrained composition.
 
@@ -292,7 +310,7 @@ model representation, including tuples and unconstrained composition.
 | --- | --- |
 | Anonymous / OR / AND security | First complete source alternative, or explicit `RequestOptions.securityAlternative` |
 | Bearer, Basic, API keys | Source-named `Credentials` fields; `BasicCredentials`; header/query/cookie attachment |
-| OAuth/OIDC | Suspending `CredentialProvider` returns a complete Authorization value; `CredentialContext` retains scopes/roles, source and flow/discovery metadata |
+| OAuth/OIDC | Suspending `CredentialProvider` returns a complete Authorization value; `CredentialContext` retains scopes/roles, source and flow/discovery metadata. An `sdk_defaults` OAuth policy opts in to a generated token lifecycle |
 | Server choices and variables | `serverIndex`, `serverVariables`, `documentUrl` in client/per-call options; literal defaults/enums and relative retrieval-base resolution |
 | Parameters | Source style/explode/content/allowReserved and header/cookie rules; querystring content has no parameter-name prefix |
 | Multiple request media | Sealed body choice; `requestMedia` supplies a concrete wildcard representation |
@@ -346,13 +364,13 @@ the shared planner. `capabilities()` includes no compatibility profile by defaul
 ## Reproduction
 
 ```sh
-cargo test -p suspect-codegen --features kotlin-sdk,http-protocol \
-  --test kotlin_sdk --test kotlin_integration --test kotlin_protocol \
-  --target-dir target/sdk-kotlin-cargo
+cargo test -p suspect-codegen --features kotlin-sdk \
+  --test kotlin --target-dir target/sdk-kotlin-cargo -- \
+  kotlin_sdk:: kotlin_integration:: kotlin_protocol::
 
-cargo test -p suspect-codegen --features kotlin-sdk,http-protocol \
-  --test kotlin_sdk --test kotlin_protocol \
-  --target-dir target/sdk-kotlin-cargo -- --include-ignored --nocapture --test-threads=1
+cargo test -p suspect-codegen --features kotlin-sdk \
+  --test kotlin --target-dir target/sdk-kotlin-cargo -- \
+  --include-ignored --nocapture --test-threads=1 kotlin_sdk:: kotlin_protocol::
 ```
 
 Native tests use isolated `target/sdk-kotlin-native/` packages/consumers/logs and
@@ -361,62 +379,31 @@ Override tool discovery with `SUSPECT_KOTLIN_MAVEN`
 and `SUSPECT_KOTLIN_JAVA_HOME`; omit the Java override to exercise both installed
 JDKs. `OPENROUTER_WEB_ROOT` selects the read-only corpus checkout.
 
-The required matrix is the unchanged M2 fixture; five actual OpenRouter
+The required matrix is the base fixture; five actual OpenRouter
 operations (`getCredits`, `createKeys`, `updateKeys`, `getContainerFile`,
 `listContainerFiles`) with independent response fixtures; all 17 shared runtime
 vectors; and the independent hostile-name/composition/budget package. Each SDK
 package has an installed Kotlin consumer, positive-controlled negative types,
-executable source examples and native documentation coverage. Tests retain their
-artifacts on success and failure. Source integrity is checked against the pinned
+executable source examples and native documentation coverage. The Kotlin blocks
+in this document are extracted and compiled by the native tests. Source integrity is checked against the pinned
 OpenRouter SHA-256; the upstream document is never rewritten.
 
-## Preserved JSON baseline — 2026-09-10
-
-All four native gates passed on both JDKs. Each SDK gate installed the Maven
-module, executed an independent consumer, compiled positive-controlled negative
-types, ran constructor/coroutine examples and checked actual rendered KDoc pages.
-
-| Gate | Evidence directory under `target/sdk-kotlin-native/` | Per-JDK evidence |
-| --- | --- | --- |
-| M2 | `NativeM2-C9ddOU` | 20 wire exchanges; 6 negative type cases; 156 documented symbols |
-| Five actual OpenRouter operations | `NativeOpenRouter-Af4W3O` | 6 wire exchanges; 4 negative type cases; 519 documented symbols |
-| Adversarial models/names/budgets | `NativeAdversarial-8Q2Flt` | 4 negative type cases; 168 documented symbols |
-| Shared runtime corpus | `Runtime-L9mb0d` | 17 vectors: 40 valid / 41 invalid instances, plus resource controls |
-
-All three SDK README quickstarts passed through installed consumers. The exact
-Kotlin blocks in this document also compiled on both JDKs; their controlled
-create/credits/error/presence calls passed in `target/sdk-kotlin-docs-check/`.
-`target/sdk-kotlin-json-verified/report.json` records logs, rendered coverage and
-hashes of the verified source artifacts. Earlier failed/partial attempts remain
-separate and are not counted as passing evidence.
-
-### Current protocol and integration gates
+### Protocol profile
 
 `capabilities()` selects **`kotlin-jvm-protocol-v1`**. `Plan::protocol()` and
 `docs/protocol.json` retain the actual shared descriptors and enabled profile
 choices. Examples use `plan_protocol_examples` and its v2 body/part/header/item
 roles; binary aggregates never enter JSON model or validation roots.
-
-The 13 original compatibility/session tests passed in the byte-exact target-only
-harness. Extended tests cover rich wrappers, controls, streams and explicit
-profile capture/cache behavior. Current protocol evidence and source manifests
-are recorded in `target/sdk-kotlin-protocol-verified/REPORT.md`.
-
-The full native suite still contains the base and rich protocol gates.
-`fresh_generation_preserves_expected_m2_native_bindings` compares fresh emissions
-and independent native binding expectations. The one-off historical adoption
-probe was moved to `target/sdk-kotlin-tools/historical-probes/`; it is not part of
-the current `--include-ignored` suite. Tests do not read or write the preserved
-`sdk-kotlin-json-verified` reports.
+Integration tests cover compatibility/session behavior, rich wrappers, controls,
+streams and explicit profile capture/cache behavior.
 
 ## Scoped validation adoption
 
-For non-resource closures the default SDK planner uses the verified source-driven
-`OwnedCompiler::compile_v2` seam. The additive `validation::plan_validation_v2`
-and `plan_sdk_v2` entry points expose the same scoped profile. The lower-level
+For non-resource closures the default SDK planner uses the source-driven
+`OwnedCompiler::compile_v2` seam; `plan_sdk` is that planner, and
+`validation::plan_validation_v2` exposes the same scoped profile. The lower-level
 `validation::plan_validation` retains v1 admission. Exact version/profile pairs
-are checked before emission; resource/dynamic closures use the separately verified
-V3 profile below. Base closures still produce v1 programs and the original
+are checked before emission; resource/dynamic closures use the V3 profile below. Base closures still produce v1 programs and the original
 validation-runtime bytes.
 
 The v2 runtime implements the nine operations in
@@ -463,17 +450,17 @@ limits and check source/instance locations. Additional controls cover exact work
 thresholds, duplicate merges, property-name identity, recursion, Unicode ordering,
 count bounds and reporting/equality failures. The SDK gate verifies actual
 operations, installed consumers, negative types, constructor examples and Dokka
-on JDK 21/25. These tests have no dependency on previous target witnesses.
+on JDK 21/25.
 
 ```sh
-cargo test -p suspect-codegen --test kotlin_validation_v2 \
+cargo test -p suspect-codegen --test kotlin \
   -- --include-ignored --nocapture --test-threads=1
 ```
 
 ## Resource/dynamic validation and physical server bases
 
 `plan_sdk_v3` and `validation::plan_validation_v3` explicitly compile the checked
-V3 resource profile. The default SDK planner selects this verified profile only
+V3 resource profile. The default SDK planner selects this profile only
 when its actual codec closure has canonical-resource/dynamic requirements; other
 closures remain on V1/V2. Its exact version/profile pair and aligned resource/node
 tables are rechecked before native execution. Dynamic references enter only the
@@ -497,7 +484,7 @@ fun dynamicStrings(): List<NumbersItem> {
 }
 ```
 
-The physical-document server witness uses supplied requested/effective document
+The physical-document server test uses supplied requested/effective document
 aliases, distinct `$self` identities, referenced Path Items, absent versus empty
 server arrays, local-file explicit overrides, encoded dots/slashes and significant
 empty path segments. `CredentialContext.effectiveServer` supplies the selected
@@ -508,10 +495,10 @@ Maintained V3 cases come from the unmodified official `resource-conformance`
 fixtures through a closed provider and real `compile_v3`. Exact native selectors:
 
 ```sh
-cargo test -p suspect-codegen --test kotlin_validation_v3 \
+cargo test -p suspect-codegen --test kotlin \
   native_resource_44_vectors -- --ignored --nocapture
-cargo test -p suspect-codegen --test kotlin_validation_v3 \
+cargo test -p suspect-codegen --test kotlin \
   native_resource_sdk_operations -- --ignored --nocapture
-cargo test -p suspect-codegen --test kotlin_protocol_documents \
+cargo test -p suspect-codegen --test kotlin \
   native_physical_document_servers -- --ignored --nocapture
 ```

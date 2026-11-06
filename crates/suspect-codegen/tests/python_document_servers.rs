@@ -1,15 +1,12 @@
 //! Native physical retrieval bases are independent of logical OpenAPI identities.
 use serde_json::{Value, json};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{fs, path::Path, process::Command, sync::Arc};
 use suspect_codegen::python_http::{self, PackageConfig};
 use suspect_ir::contract::Contract;
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
+
+use crate::python_support;
 
 fn checked(command: &mut Command, root: &Path, label: &str) {
     let output = command
@@ -30,6 +27,9 @@ fn checked(command: &mut Command, root: &Path, label: &str) {
 #[test]
 #[ignore = "requires native Python 3.11/3.14 and cached wheel/mypy tools"]
 fn installed_python_physical_document_servers_preserve_redirects_overrides_and_encoded_paths() {
+    let Some(native) = python_support::installed() else {
+        return;
+    };
     let root = tempfile::Builder::new()
         .prefix("sdk-python-document-servers-")
         .tempdir_in(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"))
@@ -131,10 +131,9 @@ fn installed_python_physical_document_servers_preserve_redirects_overrides_and_e
     );
     suspect_codegen::write_files(&files, &root).unwrap();
     fs::write(root.join("consumer.py"), CONSUMER).unwrap();
-    let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/sdk-native-python-tools/bin/python");
+    let tools = &native.tools;
     checked(
-        Command::new(&tools)
+        Command::new(tools)
             .args(["-m", "build", "--wheel", "--no-isolation"])
             .current_dir(root.join("python")),
         &root,
@@ -145,18 +144,20 @@ fn installed_python_physical_document_servers_preserve_redirects_overrides_and_e
         .map(|entry| entry.unwrap().path())
         .find(|file| file.extension().is_some_and(|ext| ext == "whl"))
         .unwrap();
-    for version in ["3.11", "3.14"] {
+    for (version, interpreter) in &native.interpreters {
+        let version = *version;
         let venv = root.join(format!("venv-{version}"));
         checked(
-            Command::new("uv")
-                .args(["venv", "--offline", "--python", version])
+            Command::new(&native.uv)
+                .args(["venv", "--offline", "--python"])
+                .arg(interpreter)
                 .arg(&venv),
             &root,
             &format!("venv-{version}"),
         );
         let python = venv.join("bin/python");
         checked(
-            Command::new("uv")
+            Command::new(&native.uv)
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&python)
                 .arg(&wheel)
@@ -170,7 +171,7 @@ fn installed_python_physical_document_servers_preserve_redirects_overrides_and_e
             &format!("native-{version}"),
         );
         checked(
-            Command::new(&tools)
+            Command::new(tools)
                 .args([
                     "-m",
                     "mypy",
@@ -286,7 +287,8 @@ with httpx.MockTransport(handle) as transport:
 
     # Malformed overrides fail before transport, including urlsplit's bracket and
     # port errors. A local document never supplies an invented HTTP origin.
-    for override in ['https://host.example:bad/v1','https://[bad/v1','https://u:p@host.example/v1','https://host.example/%GG','\nhttps://host.example/v1']:
+    # ADR 0035: cleartext only to loopback, literal dot segments refused, port 0 and non-ASCII refused.
+    for override in ['https://host.example:bad/v1','https://[bad/v1','https://u:p@host.example/v1','https://host.example/%GG','\nhttps://host.example/v1','http://host.example/v1','https://host.example/a/../v1','https://host.example/./v1','https://host.example:0/v1','https://host.example/caf\u00e9']:
         with Client(transport=transport, auth=auth, server_url=override) as client:
             try:
                 client.physical_items()
@@ -294,6 +296,25 @@ with httpx.MockTransport(handle) as transport:
                 assert error.kind == 'request-representation', error
             else:
                 raise AssertionError(('malformed override admitted',override))
+    # ADR 0035: a declared plain-HTTP server keeps its scheme; a non-loopback
+    # plain-HTTP override needs allow_insecure_http=True.
+    plain_seen: list[str] = []
+    def plain(request: httpx.Request) -> httpx.Response:
+        plain_seen.append(str(request.url))
+        return httpx.Response(200, headers={'content-type': 'application/octet-stream'}, content=b'ok')
+    with httpx.MockTransport(plain) as plain_transport:
+        with Client(transport=plain_transport, server_variables={'base': 'http://plain.example/v1'}) as client:
+            client.variable_server()
+        with Client(transport=plain_transport, server_url='http://plain.example/v1') as client:
+            try:
+                client.variable_server()
+            except SdkError as error:
+                assert error.kind == 'request-representation', error
+            else:
+                raise AssertionError('plain HTTP override admitted without opt-in')
+        with Client(transport=plain_transport, server_url='http://plain.example/v1', allow_insecure_http=True) as client:
+            client.variable_server()
+    assert plain_seen == ['http://plain.example/v1/variable'] * 2, plain_seen
     with Client(transport=transport, auth=auth, document_url='file:///source/api.json') as client:
         try:
             client.physical_items()

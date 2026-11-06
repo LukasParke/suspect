@@ -1,0 +1,3 @@
+# Generated Rust models have no Serde derives; Serde integrates only through the codec
+
+Generated Rust models carry no `#[derive(Serialize, Deserialize)]`. Derives cannot enforce schema validation, `oneOf` exclusivity or exact number tokens (ADR-0017), and untagged enums would pick union branches by Serde's rules instead of the schema's. The optional `serde-json` feature (off by default) adds `serialize`/`deserialize` functions to each `{Symbol}Codec`, for use with `#[serde(with = ...)]`. They capture a `serde_json::value::RawValue` and run the real codec, so the validated path is the only path. Only serde_json is supported, not other Serde formats.

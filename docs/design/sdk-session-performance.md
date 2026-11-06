@@ -1,23 +1,21 @@
 # SDK Session performance
 
-**Hackathon disposition, 2026-09-10:** the user confirmed that the deliverable is
-generation and the output SDKs. Latency remains observational and is non-blocking
-for the explicitly named `hackathon-demo` acceptance profile. The original
-calibrated profile remains strict; its failed qualification is preserved.
+The v2 harness in `tools/sdk-session-perf` covers all **five canonical HTTP
+backends: TypeScript, Rust, Python, Go and Swift**, through the persistent `Session` API. Functional checks
+can run without timing. Performance reports remain **observational** until a
+separate collector/qualifier verifies repeated execution, pinned runner identity,
+sample counts, quantile confidence, stationarity and repeatability.
 
-The replacement Mac baseline completed five suites and **48,000 measured
-refreshes in 3 hours 27 minutes**. All work/size stability checks passed, but
-all 144 timing dimensions failed at least one noise/confidence/drift condition.
-An independent calculation reproduced all 677 overlapping qualification reasons;
-these are not SDK regressions, and no candidate ran. The launchd job is removed.
-Evidence: `target/session-baseline-mac-v2-restart01/` and
-`target/sdk-calibration-restart01/analysis-diagnosis.md`.
-The procedures below remain available for a future prospectively controlled run.
+This implements the measurement/regression seam for the complete generation
+workflow; the numbers are observations, not gates
+([ADR 0033](../adr/0033-performance-numbers-are-observations.md)). The shipped
+policy is a **candidate** “investigate >10% beyond measured noise” policy. It
+is not an approved absolute interactive-latency budget.
 
-## Full-plan timing controls (2026-09-10)
+## Timing attribution and schedule controls
 
-The resumed full-plan work adds **prospective attribution and workload-order
-controls**, with the original numerical thresholds preserved:
+The harness provides **prospective attribution and workload-order controls**;
+they do not change the numerical thresholds:
 
 - `run.py` and `calibrate.py` accept `--attribution`. The native benchmark records
   process user/system CPU time, block IO operations, page faults, context switches
@@ -25,7 +23,7 @@ controls**, with the original numerical thresholds preserved:
   inconsistent counters fail validation. These counters do not identify a thermal
   cause, physical IO bytes, or a per-refresh peak.
 - `--schedule fixed` pins each scenario to one position in every cycle. The default
-  `rotating` retains the historical schedule. The schedules have different workload
+  `rotating` schedule rotates the first edit. The schedules have different workload
   identities and cannot be compared as equivalent baseline/candidate evidence.
 - Native samples record actual cycle position, ordinal and elapsed observation
   time. Validation checks those fields against the declared schedule.
@@ -40,7 +38,7 @@ The attribution smoke is a tool check, not numerical acceptance evidence.
 
 ```sh
 python3 tools/sdk-session-perf/diagnose.py \
-  --input target/session-baseline-mac-v2-restart01/collection.json \
+  --input target/<baseline-run>/collection.json \
   --out target/NEW-diagnosis.json
 ```
 
@@ -63,7 +61,7 @@ completion claim.
 ## Run it
 
 From the repository root, with Rust/Cargo, a C compiler and Python 3.10+.
-While integration is changing, use a focused **untimed** check:
+For a focused **untimed** check:
 
 ```sh
 cargo build --locked --offline -p suspect-codegen --example sdk_session_bench \
@@ -80,7 +78,7 @@ with status `not-measured`; zero-valued timing/allocation fields are placeholder
 not samples of zero-cost execution. The suite wrapper accepts the same flag and
 `--fixture split-recursive --group all` for an attributed focused check.
 
-Once Main's integration edits settle, collect observations explicitly:
+To collect observations:
 
 ```sh
 python3 tools/sdk-session-perf/run.py \
@@ -89,9 +87,9 @@ python3 tools/sdk-session-perf/run.py \
   --iterations 5 --warmups 1 --offline
 ```
 
-`compact` runs the small M2 vertical and split-recursive M2 closure. `public`
-adds the **tracked** `projects/docs/openapi/openapi.yaml`, selecting `getCredits`,
-`createKeys`, `updateKeys`, `listContainerFiles`, and `getContainerFile`. This
+`compact` runs the small `m2-small` fixture and the `split-recursive` closure.
+`public` adds the **tracked** `projects/docs/openapi/openapi.yaml`, selecting
+`getCredits`, `createKeys`, `updateKeys`, `listContainerFiles`, and `getContainerFile`. This
 uses the canonical representative contract and tracked public HTTP workload. The provider-only,
 management and Temporal documents, and unselected public operations, are not
 represented as passing this HTTP workload. An unavailable/untracked public
@@ -276,18 +274,16 @@ source URIs occur in real output, and varying them changes the workload.
 Missing/incompatible cases fail closed. The generator source and binary hashes
 are **allowed to differ for a candidate**, because changed generator code is the
 thing being measured. All calibration runs must use the same source and binary.
-The new five-target v2 protocol is incompatible with archived v1 reports. The
-four-backend observations below and `policy-v1.json` remain historical evidence;
-they cannot qualify the expanded workload.
+The five-target v2 protocol is incompatible with v1 reports and `policy-v1.json`;
+v1 evidence cannot qualify the v2 workload.
 
 ## Collect and qualify a sustained p95 baseline
 
 `calibrate.py` runs the complete protocol; `policy-v2.json` defines its explicit
 candidate criteria. There is no `--calibrated` switch and no shipped qualified
-baseline. The user has explicitly reserved **this Mac after greenfield cleanup,
-builds and reviews finish**. `runners/luke-mac-v2.json` records that decision and
-pins observed hardware/power/tool identity. Qualification remains pending real
-measurements; Main must explicitly declare ready before collection starts.
+baseline. `runners/` holds versioned runner declarations pinned to an observed
+hardware/power/tool identity (`runners/luke-mac-v2.json` is one such
+declaration).
 
 ### Exact sampling protocol
 
@@ -296,7 +292,7 @@ measurements; Main must explicitly declare ready before collection starts.
 | Independent suite processes | At least **5** | At least **3** |
 | Measured cycles in each fixture/target process | At least **200** | Same protocol, at least **200** |
 | Warmup cycles per fixture/target process | At least **5**, retained separately | Same |
-| Required fixtures | M2, split-recursive, tracked public five operations | Identical |
+| Required fixtures | `m2-small`, `split-recursive`, tracked public five operations | Identical |
 | Required groups | TypeScript alone and **all five** canonical targets | Identical |
 | Build | Release; one stable source and binary across repetitions | Release; one stable candidate source and binary |
 
@@ -374,7 +370,7 @@ repeatability/drift screens add evidence but do not prove independence.
 Confidence is **per series**, conditional on the observed versioned reference;
 it is not a 95% simultaneous/familywise guarantee for the entire matrix.
 
-The plan's initial >10%-beyond-noise policy is implemented as:
+The initial >10%-beyond-noise policy is implemented as:
 
 ```text
 R = median(baseline process p95s)
@@ -395,7 +391,7 @@ Raw point estimates and `would_regress` remain visible. Fix interference or
 collect a new explicitly versioned protocol to improve precision; retain prior
 attempts and do not tune tolerances against the candidate being judged.
 
-### Main's commands, after integration settles on a reserved, pinned host
+### Commands on a reserved, pinned host
 
 Collect a baseline on the reserved, pinned host:
 
@@ -453,10 +449,10 @@ gate. A calibration process cannot be reused as a candidate.
 | `inconclusive`, `invalid`, `incompatible`, `ineligible` | Non-passing uncertainty or unusable evidence; exit 2 |
 
 Qualification and numerical acceptance are distinct. No baseline updates
-automatically. The policy remains a **candidate policy**, and absolute M6
+automatically. The policy remains a **candidate policy**, and absolute
 interactive budgets still require agreement based on actual qualified evidence.
 
-## CI collection and current functional evidence
+## CI collection
 
 `.github/workflows/sdk-session-performance.yml` runs compact **untimed** five-target
 functional smoke and collector/comparator tests on Ubuntu 24.04 with Rust
@@ -473,8 +469,8 @@ modes require:
   the public suite, `SDK_SESSION_PERF_CORPUS_ROOT` pointing to the pinned tracked
   checkout;
 - a v2 runner declaration pinned to its observed identity. The self-hosted CI
-  label is not provisioned here; the user-reserved Mac can run the same CLI
-  protocol locally once Main declares ready.
+  label is not provisioned here; a reserved local host can run the same CLI
+  protocol.
 
 `calibrate` runs the collector for five complete 200-cycle suites with five
 warmups and `--require-qualified`; it uploads `sdk-session-baseline`, including
@@ -486,33 +482,32 @@ limit. Missing artifacts, unsuitable identity, insufficient evidence, uncertaint
 and noise fail rather than falling back to a passing smoke result. Compact-only
 collections remain observational under the default policy's public-input requirement.
 
-On 2026-09-09 the focused five-backend split-recursive check completed in
-`target/sdk-session-five-functional-02/report.json`: eight untimed cold/warm/edit/
-revert checks plus target removal/restoration and Swift module rename/restoration.
-Cold used one compile/five renders; warm/reverts used zero compiles/renders;
-target removal reused four target caches; the module rename rendered Swift once
-and reused the other four. Fresh-output, byte/metadata stability and obsolete-file
-checks passed. The v2 raw-report validator accepted this report. Its performance
-status is **not-measured**; it adds no observations to the historical table.
-
-The 21 collector/comparator tests pass, including actual CLI exit codes, exact
-binomial coverage, uncertain tails, within-run drift, collection overlap/reuse,
-missing identity pins, Swift module-cache counters and preservation of failed
-attempts. Collector tests use explicitly synthetic subprocesses/reports; their
-qualified fixture results are not evidence about any real runner. Local runner
-inventory was exercised and remained observational. Full five-target measurements
-await Main's integration settling and actual runner qualification.
+The collector/comparator tests (`tools/sdk-session-perf/test_*.py`) cover actual
+CLI exit codes, exact binomial coverage, uncertain tails, within-run drift,
+collection overlap/reuse, missing identity pins, Swift module-cache counters and
+preservation of failed attempts. Collector tests use explicitly synthetic
+subprocesses/reports; their qualified fixture results are not evidence about any
+real runner.
 
 Canonical native package build/import/codec/HTTP tests remain separate workloads.
 This harness does not infer their performance from Session timings. It does not
-yet establish absolute interactive budgets, per-phase compiler internals,
-cache-retained heap/peak RSS, recursion growth bounds or full M6 exit evidence.
+establish absolute interactive budgets, per-phase compiler internals,
+cache-retained heap/peak RSS or recursion growth bounds.
 
-## Reserved Mac readiness and planning estimate
+## Importing evidence into `sdk-full` acceptance
 
-User decision, 2026-09-09: **“Calibrate this Mac” after builds/reviews finish**.
-Reservation file: `tools/sdk-session-perf/runners/luke-mac-v2.json`.
-The paired `runners/luke-mac-inventory-20260909.json` is an observational record:
+`tools/sdk-session-perf/accept.py` imports collected evidence into the xtask
+acceptance runs. `cargo run --locked -p xtask -- sdk-full --performance-plan
+PLAN` takes a `suspect.sdk.full.performance-plan.v1` file whose `evidence` pins
+the manifest below by path and SHA-256, and runs the four `accept.py import`
+stages itself (`xtask/src/sdk_full.rs`). `accept.py plan` emits the
+`suspect.sdk.m3-m6.performance-plan.v1` stage plan consumed by
+`sdk-m3-m6 --performance-plan` (`xtask/src/sdk_m3_m6.rs`). Collection
+happens in the original workspace, where real Git/input provenance and fixed
+private measurement paths are valid; acceptance executes from xtask's
+byte-verified source copy. The adapter performs read-only verification and
+imports evidence; it never runs measurements inside the acceptance build/test
+workload.
 
 - macOS **26.6.2 / 25G83**, Darwin 25.6.0, Apple M5 Pro, **18 physical/logical
   CPUs**, **64 GiB** RAM;
@@ -596,10 +591,11 @@ The adapter verifies more than the verdict tag:
    selected source census, individual bytes, harness contents, source-file kinds,
    permissions and confined symlink targets. This final-tree acceptance adapter
    does not transplant timing evidence from a different implementation.
-3. Match xtask's `source-manifest.json` to `SUSPECT_M3_M6_SOURCE_SHA256`, using
-   xtask's serialization order, and verify the separate frozen acceptance CLI
-   against `SUSPECT_M3_M6_BINARY_SHA256`. The CLI hash is a binding to this
-   acceptance invocation, not a claim that it is the benchmark executable.
+3. Match xtask's `source-manifest.json` to `--source-sha256` (default
+   `SUSPECT_M3_M6_SOURCE_SHA256`), using xtask's serialization order, and verify
+   the separate frozen acceptance CLI against `--cli-sha256` (default
+   `SUSPECT_M3_M6_BINARY_SHA256`). The CLI hash is a binding to this acceptance
+   invocation, not a claim that it is the benchmark executable.
 4. Hash every measured frozen benchmark binary; verify actual tool executable
    bytes, versions/queries and Xcode dispatchers; verify actual Cargo config
    files and runner machine/power identity. Reconstruct session configurations
@@ -615,14 +611,11 @@ The adapter verifies more than the verdict tag:
 Only then are original raw reports, policy/declaration, frozen benchmark bytes
 and prepared input bytes copied into content-addressed, readonly files below
 `{out}/performance/raw/`. Existing identical blobs are verified, never overwritten.
-Each stage creates its own previously nonexistent normalized report. xtask's
-final seal covers these reports and copied evidence. Existing target reports and
-historical observations remain unchanged; no legacy/M0 failed-stage lineage is
-required by this bridge.
+Each stage creates its own previously nonexistent normalized report, and
+xtask's final seal covers these reports and copied evidence.
 
-After Main records the real pin-manifest hash, produce the complete four-stage
-plan (this validates numerical pins/verdict; actual acceptance-file binding is
-checked again when the stages run):
+`accept.py plan` validates the numerical pins/verdict and emits the four-stage
+`sdk-m3-m6` plan (actual acceptance-file binding is checked again when the stages run):
 
 ```sh
 python3 tools/sdk-session-perf/accept.py plan \
@@ -632,14 +625,11 @@ python3 tools/sdk-session-perf/accept.py plan \
   --out target/sdk-m3-m6-performance-plan.json
 ```
 
-The generated plan uses `suspect.sdk.m3-m6.performance-plan.v1`, exact stage IDs
-`performance-small`, `performance-split-recursive`, `performance-openrouter`,
+The plan contains exact stage IDs `performance-small`,
+`performance-split-recursive`, `performance-openrouter` and
 `performance-compare` (last), the measured Python executable, and
 `cwd: {workspace}`. It pins all consumed baseline/config/report/binary/prepared
-input files. Main supplies this plan to its current `sdk-m3-m6` entrypoint; Main
-owns changes to xtask acceptance requirements during greenfield cleanup.
-
-The individual command shape, already emitted by `plan`, is:
+input files. Each stage runs:
 
 ```sh
 "$MEASURED_PYTHON" "{workspace}/tools/sdk-session-perf/accept.py" import \
@@ -664,90 +654,3 @@ Comparison reports expose `complete`, `gated`, `verdict`, `regressions`,
 format/policy/verification assertions and all required RFC 6901 claim pointers.
 An unusable or changed import exits 2 with an incomplete report; a qualified tag
 without matching source/tools/config/input bytes cannot satisfy acceptance.
-
-## Historical four-backend observations (v1, immutable)
-
-The following evidence is the original TS/Rust/Python/Go result, including its
-original API/tooling verification. It is not re-labelled as five-target or v2
-evidence. The raw reports, 240 observations and v1 policy remain unchanged.
-
-On 2026-09-09, `target/sdk-session-perf-observed-04/report.json` completed all six
-fixture/target combinations on a shared Apple M5 Pro development host, using
-Rust 1.97.1 and a release binary. **240 measured refreshes**, 48 separate warmup
-refreshes and 12 configuration probes passed the functional checks. All 120
-measured warm/revert refreshes performed zero compiles/renders, with zero
-redundant rewrites. All changed outputs matched fresh-session oracles and disk.
-
-These are **median refresh milliseconds from five samples per series**, not
-calibrated p95 evidence:
-
-| Fixture / targets | Cold | Warm | Schema edit | Operation edit | Docs edit | Baseline artifact bytes |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| M2 / TypeScript | 109.29 | 7.26 | 32.46 | 77.00 | 24.73 | 372,975 |
-| M2 / all four | 382.66 | 23.84 | 110.74 | 237.62 | 89.59 | 1,223,604 |
-| Split-recursive / TypeScript | 119.72 | 6.12 | 37.84 | 39.79 | 29.43 | 156,235 |
-| Split-recursive / all four | 411.71 | 41.43 | 154.91 | 159.18 | 99.85 | 516,455 |
-| Public five / TypeScript | 679.65 | 17.49 | 612.56 | 642.57 | 595.70 | 985,512 |
-| Public five / all four | 861.71 | 45.56 | 651.13 | 708.78 | 608.19 | 3,503,385 |
-
-The raw report also retains per-phase allocation counts/requested bytes, every
-individual latency sample, per-file artifact hashes and all source/tool/config
-identities. Median warm allocated bytes for the all-target M2, split and public
-cases were 3,117,942, 1,676,220 and 9,553,730 respectively; these are allocator
-requests, not retained memory. RSS is explicitly unavailable on this macOS run.
-
-Native benchmark binary SHA-256:
-`2ec09d54f973c9dbac4305f9a5115c34f65a1767d788f8ef2869149ba6a34bf1`.
-Generator/build source-manifest SHA-256:
-`a2195c36352d2c232eadd99825e7bd430e1f328b9d8cbb3ea66369ffaf9f2c72`.
-The public input was tracked-HEAD at
-`db378a2a90d0167b9dca4f98b52074c54d249e1f`, 1,432,512 bytes, SHA-256
-`bd4953b29f34de134ed4be27b2803c5622a756c3c63bc8617636b6abe5de1821`.
-
-Targeted example type-check/Clippy and workflow YAML parsing succeeded. Clippy
-reported library warnings outside this benchmark; no example warnings were
-reported. The comparator's 12 adversarial tests pass, including real CLI exit
-codes, noisy/ineligible/incompatible evidence, false release-profile claims,
-stale-output counters and regression injection. The synthetic test numbers are
-not included in the measurement table.
-
-The baseline CLI accepted that real report and wrote
-`target/sdk-session-perf-observational-baseline.json` with status `observational`
-and `gating_eligible: false`. An actual `compare --gate` invocation refused it
-with exit 2 / `ineligible`; `target/sdk-session-perf-gate-refusal.json` retains
-the dedicated-runner, sample-count and independent-run reasons. This verifies
-the measured-report/comparator boundary without promoting smoke-size samples.
-
-Later attribution-enhanced attempts `sdk-session-perf-observed-05` and `-06`
-stopped before measurement because the shared source tree changed during their
-builds; their `failure.json` files preserve that outcome. They contribute no
-timing evidence. Rustup tool resolution was checked separately against the
-actual Rust/Cargo executable paths and SHA-256 hashes. Re-run the final suite
-when integration edits have settled; `-04` is the complete stable-build result
-cited above.
-
-The host is not a calibrated dedicated runner. A numerical gate, measured
-absolute budgets and Swift Session performance remain unestablished.
-
-## Observational snapshot: scoped compilation (2026-10-06)
-
-After operation-scoped compilation and the 50ms poll
-(`Contract::from_workspace_scoped`, session `operation_ids`), on
-plex-api-spec (63,028 lines, 404 operations, 6 selected), release build,
-one machine, no controlled collection:
-
-| Path | Before | After |
-|---|---|---|
-| Contract compile | 358 ms (all 404 ops) | 221 ms (scoped) |
-| Watch refresh per save | 0.78–0.82 s | 0.41–0.49 s |
-| No-op change detection | 0.27 s | ~0.05 s |
-
-Stage split of the remaining per-edit work: ~195 ms parse, ~168 ms
-document materialization (the span index over 69,568 values, which also
-carries alias-ambiguity validation), then scoped compile, admission,
-render and write. Lazy span lookup is the identified next lever; it
-touches occurrence-aware source identity and is not attempted yet.
-
-Equivalence is pinned by `crates/suspect-codegen/tests/scoped_compile.rs`
-(byte-identical output across TypeScript, Python and Go) and verified
-live against one-shot codegen on the same spec.

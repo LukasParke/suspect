@@ -1,0 +1,139 @@
+# OpenAPI 3.0 petstore witness for native model/codec planning (C#, Kotlin).
+# Oracle: OAS 3.0.3 Schema Object (nullable, Boolean exclusiveMinimum/
+# exclusiveMaximum) and Reference Object (siblings of $ref are ignored).
+openapi: 3.0.3
+info:
+  title: Petstore 3.0
+  version: "1.0.0"
+servers:
+  - url: https://petstore.example.test/v1
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            exclusiveMinimum: true
+            maximum: 100
+      responses:
+        "200":
+          description: A page of pets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pets"
+        default:
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createPet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Pet"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+  /pets/{petId}:
+    get:
+      operationId: showPetById
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: One pet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [id, name, tag, owner]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 0
+          exclusiveMinimum: true
+        name:
+          type: string
+        # Scalar nullable: the same-object type gains null.
+        tag:
+          type: string
+          nullable: true
+        # Reference Object: every sibling is ignored, so the effective schema
+        # is exactly Owner (an object, not null, not a string).
+        owner:
+          $ref: "#/components/schemas/Owner"
+          nullable: true
+          type: string
+          description: Ignored Reference Object sibling.
+        # A $ref to a nullable schema is nullable through its target.
+        nickname:
+          $ref: "#/components/schemas/Nickname"
+        # Object nullable.
+        metadata:
+          type: object
+          nullable: true
+          properties:
+            note:
+              type: string
+        # Boolean exclusive bound modifies the adjacent maximum.
+        weight:
+          type: number
+          maximum: 50
+          exclusiveMaximum: true
+        # nullable admits null only because the enum also lists it.
+        status:
+          type: string
+          nullable: true
+          enum: [available, sold, null]
+        # nullable without a same-object type has no effect.
+        anything:
+          nullable: true
+      additionalProperties: false
+    Owner:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+    Nickname:
+      type: string
+      nullable: true
+      minLength: 1
+    Pets:
+      type: array
+      maxItems: 100
+      items:
+        $ref: "#/components/schemas/Pet"
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string

@@ -382,9 +382,10 @@ module __NAMESPACE__
       end
       def resolve_server_url(base, reference)
         ref = uri_parts(reference)
+        # ADR 0035: an absolute server is checked as written; only a relative
+        # reference is resolved, removing literal dot segments only.
         if ref['scheme']
           target = ref.dup
-          target['path'] = remove_dot_segments(ref['path'])
         else
           absolute_url(base, true)
           origin = uri_parts(base)
@@ -411,8 +412,7 @@ module __NAMESPACE__
         url = target['scheme'] + '://' + target['authority'] + target['path']
         url += '?' + target['query'] if target['query']
         url += '#' + target['fragment'] if target['fragment']
-        absolute_url(url)
-        url
+        Internal.server_url(url)
       end
       def server(servers, selector, variables, document_url, override)
         return Internal.server_url(override) if override

@@ -13,6 +13,8 @@ use suspect_ref::WorkspaceBuilder;
 use suspect_schema::{Config, OwnedCompiler, OwnedProgram};
 use suspect_source::Uri;
 
+use crate::python_support;
+
 fn artifacts(label: &str) -> PathBuf {
     let parent = std::env::var_os("SUSPECT_PYTHON_SCOPED_ARTIFACTS")
         .map(PathBuf::from)
@@ -291,6 +293,12 @@ fn v2_emission_is_additive_and_v1_program_bytes_are_identical() {
 #[test]
 #[ignore = "requires Python 3.11 and 3.14; compiles maintained source fixtures through compile_v2"]
 fn scoped_python_runtime_matches_source_vectors_guards_and_exact_budgets() {
+    let (Some(interpreters), Some(tools)) = (
+        python_support::pinned_all(["3.11", "3.14"]),
+        python_support::tools(),
+    ) else {
+        return;
+    };
     let root = artifacts("runtime");
     let (program, vectors) = vectors(&root);
     let mut files = python_validation::emit(&program).unwrap();
@@ -306,21 +314,15 @@ fn scoped_python_runtime_matches_source_vectors_guards_and_exact_budgets() {
     )
     .unwrap();
     fs::write(root.join("python/consumer.py"), RUNTIME).unwrap();
-    for version in ["3.11", "3.14"] {
+    for (version, python) in ["3.11", "3.14"].into_iter().zip(&interpreters) {
         checked(
-            Command::new(format!("python{version}"))
+            Command::new(python)
                 .arg("consumer.py")
                 .current_dir(root.join("python")),
             &root,
             &format!("runtime-{version}"),
         );
     }
-    let tools = std::env::var_os("SUSPECT_PYTHON_TOOLS")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/sdk-native-python-tools/bin/python")
-        });
     checked(
         Command::new(tools)
             .args([

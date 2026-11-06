@@ -86,10 +86,11 @@ fn documents(entry_origin: &str, fragment_origin: &str) -> Vec<(String, String, 
         ),
     ]
 }
-fn tool(name: &str, default: &str) -> PathBuf {
-    std::env::var_os(name)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| default.into())
+/// `cmake` or the C++ compiler (`clang++`) resolved by [`crate::toolchain`]
+/// (honouring the `SUSPECT_CPP_*` overrides); the test gates first.
+fn tool(_name: &str, default: &str) -> PathBuf {
+    let id = if default == "clang++" { "cxx" } else { default };
+    crate::toolchain::resolve_path(id).expect("gated by native_tools")
 }
 fn checked(command: &mut Command, root: &Path) {
     let output = command.output().unwrap();
@@ -117,6 +118,9 @@ fn checked(command: &mut Command, root: &Path) {
 #[test]
 #[ignore = "installed C++ libcurl physical-document-base/redirect-provenance/encoded-path witness"]
 fn native_document_relative_servers() {
+    if !super::v2_tests::native_tools(&["cmake", "cxx", "doxygen"]) {
+        return;
+    }
     let root = root();
     let a = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let b = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

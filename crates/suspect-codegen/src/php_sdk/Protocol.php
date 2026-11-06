@@ -173,7 +173,10 @@ final class Protocol
         }
         foreach ($variables as $key=>$_) { if (!isset($declared[$key])) { throw new SdkError('configuration','unknown server variable'); } }
         if (strpbrk($url,'?#')!==false) { throw new SdkError('configuration','server URL cannot contain query or fragment'); }
-        if (!preg_match('~\Ahttps?://~i',$url)) {
+        // ADR 0035: only a relative reference is resolved (RFC 3986 section 5.2,
+        // literal dot segments only); an absolute server is checked as written.
+        $relative=!preg_match('~\Ahttps?://~i',$url);
+        if ($relative) {
             if($base===null){
                 $location=self::get($candidate,'document_base');
                 $document=self::text(self::get($location,'source'),'document');if(preg_match('~\Ahttps?://~i',$document)===1){$base=$document;}
@@ -187,6 +190,7 @@ final class Protocol
             else { $path=$parts['path']??'/';if($path===''){$path='/';} $slash=strrpos($path,'/'); $url=$authority.substr($path,0,$slash===false?0:$slash+1).$url; }
         }
         Wire::serverOrigin($url);$parsed=parse_url($url); if ($parsed===false || !isset($parsed['scheme'],$parsed['host'])) { throw new SdkError('configuration','invalid resolved server'); }
+        if (!$relative) { Wire::server($url); return $url; }
         $segments=[];$path=explode('/',$parsed['path']??'');$last=count($path)-1;
         foreach($path as$i=>$segment){
             if($segment==='.'||$segment==='..'){
@@ -401,14 +405,12 @@ final class Protocol
     public static function userAgent(ClientOptions $options): ?string
     {
         if ($options->userAgent !== null) { return $options->userAgent === '' ? null : $options->userAgent; }
-        $version=RuntimeConfig::ATTRIBUTION_SUSPECT_VERSION;
-        if ($version==='') { return null; }
         $identity=RuntimeConfig::ATTRIBUTION_SDK_NAME.'/'.RuntimeConfig::ATTRIBUTION_SDK_VERSION;
         if ($options->applicationId!==null && $options->applicationId!=='') {
             if (!self::applicationIdentity($options->applicationId)) { return null; }
             $identity=$options->applicationId;
         }
-        return 'suspect/'.$version.' '.$identity.' ('.RuntimeConfig::ATTRIBUTION_LANGUAGE.'/'.\PHP_VERSION.'; openapi/'.RuntimeConfig::ATTRIBUTION_SPEC_VERSION.')';
+        return 'suspect/'.RuntimeConfig::ATTRIBUTION_SUSPECT_VERSION.' '.$identity.' ('.RuntimeConfig::ATTRIBUTION_LANGUAGE.'/'.\PHP_VERSION.'; openapi/'.RuntimeConfig::ATTRIBUTION_SPEC_VERSION.')';
     }
 
     /** Execute prepared native values using one source-selected exchange.

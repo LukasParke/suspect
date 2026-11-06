@@ -29,7 +29,10 @@ pub enum IncomingPayload {
     /// No declared request body: the decoder validates headers and returns.
     None,
     /// JSON through the operation's own model codec.
-    Json { schema: SchemaId },
+    Json {
+        /// Body codec schema.
+        schema: SchemaId,
+    },
     /// Schema-free JSON: the decoded value is the parsed JSON value.
     SchemaFreeJson,
 }
@@ -49,7 +52,10 @@ impl IncomingPayload {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IncomingBody {
     /// JSON through the operation's own model codec.
-    Json { schema: SchemaId },
+    Json {
+        /// Reply codec schema.
+        schema: SchemaId,
+    },
     /// Schema-free JSON: the constructed value is encoded as bounded JSON.
     SchemaFreeJson,
 }
@@ -67,13 +73,18 @@ impl IncomingBody {
 /// One declared reply the construct helper builds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomingReply {
+    /// The first declared exact 2xx status.
     pub status: u16,
+    /// Encoding of the first declared reply media; `None` for a body-less reply.
     pub body: Option<IncomingBody>,
     /// Declared reply header wire names, in declaration order.
     pub headers: Vec<String>,
+    /// Required subset of `headers`, in declaration order.
     pub required_headers: Vec<String>,
     /// Bound after model planning: the constructed reply's native type.
     pub reply_type: String,
+    /// Bound after model planning: the reply model codec; empty unless `body`
+    /// is schema-bound JSON.
     pub reply_codec: String,
 }
 
@@ -84,25 +95,42 @@ pub struct IncomingReply {
 pub struct IncomingEntry {
     /// Webhook key, or `parentOperationId.callbackName`.
     pub name: String,
+    /// `webhook` or `callback`.
     pub kind: &'static str,
     /// The verb the provider sends.
     pub method: String,
+    /// The webhook key, or the callback expression string, exactly as declared.
     pub route: String,
+    /// Whether `route` carries runtime expression syntax (`{...}`).
     pub expression: bool,
+    /// Source document of the receipt.
     pub document: String,
+    /// JSON Pointer of the receipt within `document`.
     pub pointer: String,
+    /// Receipt use site.
     pub source: SourceId,
+    /// Descriptor map key: `name` with non-alphanumerics replaced by `_`.
     pub descriptor_key: String,
+    /// Route constant name (`<Stem>WebhookRoute`).
     pub route_const: String,
+    /// Decoder function name (`decode<Stem>Webhook`).
     pub decode: String,
+    /// Reply constructor function name (`construct<Stem>Response`).
     pub construct: String,
+    /// How the decoder interprets the received body.
     pub payload: IncomingPayload,
+    /// Whether the declared request body is required.
     pub required_body: bool,
+    /// Wire names of required request headers, in declaration order.
     pub required_headers: Vec<String>,
+    /// Reply the construct helper builds; `None` without an exact 2xx response.
     pub response: Option<IncomingReply>,
+    /// Shared-planner and v1-helper limitations surfaced in the generated KDoc.
     pub explanations: Vec<String>,
     /// Bound after model planning: the decoded payload's native type.
     pub payload_type: String,
+    /// Bound after model planning: the payload model codec; empty unless
+    /// `payload` is schema-bound JSON.
     pub payload_codec: String,
 }
 

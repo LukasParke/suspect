@@ -1,8 +1,6 @@
 //! Compatibility witnesses through the public Contract/snapshot boundary.
 //! Native equality must describe the actual expanded TypeScript surface.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc};
 use suspect_codegen::{

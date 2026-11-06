@@ -251,10 +251,7 @@ fn plan_carries_the_compiled_receipts_with_allocated_names() {
     assert_eq!(new_issue.route, "newIssue");
     assert!(!new_issue.expression);
     assert_eq!(new_issue.decode, "decodeNewIssueWebhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("constructNewIssueResponse")
-    );
+    assert_eq!(new_issue.construct, "constructNewIssueResponse");
     assert_eq!(new_issue.payload_type, "NewIssuePayload");
     assert_eq!(new_issue.route_type, "NewIssueWebhookRoute");
     assert_eq!(new_issue.descriptor, "newIssue");
@@ -264,7 +261,7 @@ fn plan_carries_the_compiled_receipts_with_allocated_names() {
     assert_eq!(response.status, 204);
     assert!(response.body.is_none());
     let ping = receipts.iter().find(|r| r.name == "ping").unwrap();
-    assert_eq!(ping.construct.as_deref(), Some("constructPingResponse"));
+    assert_eq!(ping.construct, "constructPingResponse");
     let ping_response = ping.response.as_ref().unwrap();
     assert_eq!(ping_response.status, 200);
     assert!(ping_response.body.is_some());
@@ -306,26 +303,16 @@ fn non_json_receipt_media_refuse_the_plan() {
 }
 
 fn swiftc() -> Option<std::path::PathBuf> {
-    if let Some(path) = std::env::var_os("SUSPECT_SWIFTC_BIN") {
-        return Some(std::path::PathBuf::from(path));
-    }
-    let found = Command::new("xcrun")
-        .args(["--find", "swiftc"])
-        .output()
-        .ok()?;
-    if !found.status.success() {
-        return None;
-    }
-    let text = String::from_utf8(found.stdout).ok()?;
-    let path = std::path::PathBuf::from(text.trim());
-    Command::new(&path).arg("--version").output().ok()?;
-    Some(path)
+    let _ = suspect_codegen::toolchain::require("swift");
+    Some(
+        suspect_codegen::toolchain::swift_tool("swiftc")
+            .expect("the Swift toolchain has no swiftc"),
+    )
 }
 
 fn swift() -> std::path::PathBuf {
-    std::env::var_os("SUSPECT_SWIFT_BIN")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("/usr/bin/swift"))
+    suspect_codegen::toolchain::resolve_path("swift")
+        .expect("gated by toolchain::require(\"swift\")")
 }
 
 fn swift_command(root: &Path, action: &str) -> Command {
@@ -334,10 +321,13 @@ fn swift_command(root: &Path, action: &str) -> Command {
     if action == "test" {
         command.arg("--disable-swift-testing");
     }
-    if let Some(sdkroot) = std::env::var_os("SUSPECT_SWIFT_SDKROOT") {
+    if let Some(sdkroot) = suspect_codegen::toolchain::swift_sdk_root() {
         command.arg("--sdk").arg(&sdkroot).env("SDKROOT", sdkroot);
     }
-    command.env("SWIFT_EXEC", swiftc().unwrap_or_else(|| "swiftc".into()));
+    command.env(
+        "SWIFT_EXEC",
+        swiftc().expect("gated by toolchain::require(\"swift\")"),
+    );
     command.current_dir(root);
     command
 }

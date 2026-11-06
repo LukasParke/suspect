@@ -42,7 +42,8 @@ export interface RuleMeta {
   usesZod?: boolean;
 }
 
-export type TargetKind = "spec" | "facts" | "union";
+/** Only the OpenAPI document today; kept as a list so kinds can be added. */
+export type TargetKind = "spec";
 
 /** Host → worker: run rules over one shipped document. */
 export interface EvaluateFrame {

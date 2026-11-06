@@ -1,11 +1,6 @@
 //! Native provider source-address admission, independent of API lifecycle gates.
-#![cfg(feature = "http-protocol")]
 
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{path::Path, process::Command, sync::Arc};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -71,10 +66,8 @@ fn provider_source_components_are_admitted_before_any_artifacts() {
 #[test]
 #[ignore = "real Terraform address parsing only; fresh isolated evidence, no API or full lifecycle replay"]
 fn native_provider_source_address_boundary() {
-    let evidence = PathBuf::from(
-        std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE").expect("set a fresh evidence directory"),
-    );
-    std::fs::create_dir(&evidence).unwrap();
+    let _ = suspect_codegen::toolchain::require("terraform");
+    let evidence = crate::terraform_support::evidence_dir("sdk-terraform-address-evidence-");
     std::fs::create_dir(evidence.join("commands")).unwrap();
     std::fs::copy(
         std::env::current_exe().unwrap(),

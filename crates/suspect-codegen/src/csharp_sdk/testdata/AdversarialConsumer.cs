@@ -70,8 +70,12 @@ static class Probe
         await client.OptionalBodyAsync(new OptionalBodyInput { Body = "value" });
         Check(sent.SequenceEqual(new[] { "absent", "null", "\"value\"" }), "No body, null body and string body remain distinct");
         using var archive = ZipFile.OpenRead(args[0]);
-        using var reader = new StreamReader(archive.GetEntry("docs/index.html")!.Open());
-        var html = reader.ReadToEnd();
+        // Reference docs are split into pages (docs/index.html plus
+        // docs/symbols/*.html); prose must stay inert on every page.
+        var html = string.Concat(archive.Entries
+            .Where(e => e.FullName.StartsWith("docs/", StringComparison.Ordinal) && e.FullName.EndsWith(".html", StringComparison.Ordinal))
+            .OrderBy(e => e.FullName, StringComparer.Ordinal)
+            .Select(e => { using var reader = new StreamReader(e.Open()); return reader.ReadToEnd(); }));
         Check(html.Contains("&lt;script&gt;alert(1)&lt;/script&gt;") && !html.Contains("<script>"), "Source prose remains inert in native documentation");
         Console.WriteLine($"ADVERSARIAL PASS: {_checks} checks; {RuntimeInformation.FrameworkDescription}; installed assembly {typeof(Client).Assembly.Location}");
     }

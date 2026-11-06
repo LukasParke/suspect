@@ -120,7 +120,6 @@ fn yard_value(plan: &SdkPlan, t: &NativeType) -> String {
         NativeType::Codec(i) => yard_model(plan, *i),
         NativeType::Json => "nil, Boolean, String, Integer, JsonNumber, Array, Hash".into(),
         NativeType::Bytes => "Bytes".into(),
-        NativeType::NoContent => "NoContent".into(),
         NativeType::Scalar(s) => match s {
             wire::ScalarType::String => "String",
             wire::ScalarType::Boolean => "Boolean",
@@ -143,7 +142,6 @@ pub(super) fn native_type(plan: &SdkPlan, t: &NativeType, request: bool) -> Stri
         NativeType::Codec(i) => codec_type(plan, *i),
         NativeType::Json => "json_value".into(),
         NativeType::Bytes => "Bytes".into(),
-        NativeType::NoContent => "NoContent".into(),
         NativeType::Scalar(s) => match s {
             wire::ScalarType::String => "String",
             wire::ScalarType::Boolean => "bool",
@@ -1396,12 +1394,33 @@ fn examples(plan: &SdkPlan, p: &PackageConfig) -> (String, Option<String>) {
 fn source_map(plan: &SdkPlan, p: &PackageConfig) -> String {
     format!("{}\n",serde_json::to_string_pretty(&json!({"version":"suspect.ruby-native-plan.v2","protocolVersion":plan.protocol().version(),"adapter":plan.protocol().capabilities(),"package":{"name":p.name,"require":p.require_name,"namespace":p.namespace},"models":plan.models().symbols().map(|s|json!({"source":src(&s.source),"schemaIndex":s.schema_index,"name":s.name,"typeName":s.type_name})).collect::<Vec<_>>(),"records":plan.records().iter().map(|r|json!({"source":src(&r.source),"name":r.name,"fields":r.fields.iter().map(|f|json!({"name":f.name,"wire":f.wire_name,"required":f.required,"type":native_type(plan,&f.value_type,true)})).collect::<Vec<_>>()})).collect::<Vec<_>>(),"operations":plan.operations().iter().map(|o|json!({"source":src(&o.source),"operationId":o.operation_id,"method":o.method_name,"body":o.body.as_ref().map(|b|b.media.iter().map(|m|json!({"media":m.wire.media_type().declared(),"type":native_type(plan,&m.value_type,true)})).collect::<Vec<_>>()),"responses":o.responses.iter().map(|r|json!({"status":r.status_key,"class":r.class_name,"errorClass":r.error_class,"type":response_type(plan,r)})).collect::<Vec<_>>()})).collect::<Vec<_>>()})).unwrap())
 }
+/// The README's first call when no source example yields a complete
+/// quickstart: the first operation (plan order) callable with no inputs,
+/// i.e. no required parameters or body and at most one bearer-only security
+/// alternative (what `Client.open(auth:)` alone satisfies).
+fn no_input_call(plan: &SdkPlan) -> Option<String> {
+    plan.operations()
+        .iter()
+        .find(|op| {
+            let alternatives = op.wire.security().alternatives();
+            op.parameters.iter().all(|p| !p.required)
+                && op.body.as_ref().is_none_or(|b| !b.required)
+                && alternatives.len() <= 1
+                && alternatives
+                    .iter()
+                    .flat_map(|a| a.requirements())
+                    .all(|r| matches!(r.credential(), wire::CredentialHook::Bearer { .. }))
+        })
+        .map(|op| format!("client.{}", op.method_name))
+}
 fn guide(plan: &SdkPlan, p: &PackageConfig) -> String {
     let ns = &p.namespace;
     let (_, quick) = examples(plan, p);
+    let no_input = no_input_call(plan);
     let snippet = quick
         .as_deref()
         .and_then(|q| q.lines().find(|l| l.trim_start().starts_with("client.")))
+        .or(no_input.as_deref())
         .unwrap_or("        # Choose a source operation from the reference below.")
         .trim();
     let mut out = format!(

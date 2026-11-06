@@ -52,13 +52,16 @@ final class ServerInfo {
   String get urlBase=>'server-document';
 }
 /// Runtime choice of a declared server, or an explicit absolute URL override.
+///
+/// An [override] is HTTPS, or plain HTTP to a loopback host unless
+/// [allowInsecureHttp] is true (ADR 0035). Declared servers keep their scheme.
 final class ServerSelection {
-  const ServerSelection({this.index=0,this.variables=const {},this.documentUrl,this.override});
-  final int index; final Map<String,String> variables; final Uri? documentUrl; final Uri? override;
+  const ServerSelection({this.index=0,this.variables=const {},this.documentUrl,this.override,this.allowInsecureHttp=false});
+  final int index; final Map<String,String> variables; final Uri? documentUrl; final Uri? override; final bool allowInsecureHttp;
 }
 
 Uri _serverUrl(_WireOperation op,ServerSelection selection,int limit){
-  if(selection.override!=null){_checkUrl(selection.override!,limit);return selection.override!;}
+  if(selection.override!=null){_checkUrl(selection.override!,limit,loopbackOnly:!selection.allowInsecureHttp);return selection.override!;}
   if(selection.index<0||selection.index>=op.servers.length){throw const ConfigurationException('server index is not declared');}
   final server=op.servers[selection.index];
   for(final name in selection.variables.keys){if(!server.variables.any((v)=>v.name==name)){throw const ConfigurationException('undeclared server variable override');}}
@@ -78,20 +81,28 @@ Uri _serverUrl(_WireOperation op,ServerSelection selection,int limit){
     final parsed=_urlParts(base,limit);
     if(parsed.scheme==null||!const ['http','https'].contains(parsed.scheme!.toLowerCase())||parsed.authority==null){throw const ConfigurationException('relative server needs an HTTP document URL');}
     value=_resolveUrlText(base,value,limit);
-  } else {
-    value=_resolveUrlText(value,value,limit);
   }
+  // ADR 0035: an absolute server is checked as written; only a relative
+  // reference is resolved (RFC 3986, literal dot segments only).
+  if(value.codeUnits.any((c)=>c>126)){throw const ConfigurationException('server URL must be ASCII');}
   final uri=_httpUri(value,limit);
   _checkUrl(uri,limit);return uri;
 }
 void _checkPercent(String value){
   for(var i=0;i<value.length;i++){if(value.codeUnitAt(i)==37){if(i+2>=value.length||!_hexDigit(value.codeUnitAt(i+1))||!_hexDigit(value.codeUnitAt(i+2))){throw const ConfigurationException('invalid URI percent escape');}i+=2;}}
 }
-void _checkUrl(Uri uri,int maximum){
+// One server URL policy (ADR 0035): a declared server keeps its scheme; a
+// caller override (loopbackOnly) is https, or plain http only to loopback
+// unless allowInsecureHttp is set; no userinfo, query or fragment; a valid port; literal `.`/`..`
+// segments refused; percent-encoded octets are opaque and sent verbatim.
+void _checkUrl(Uri uri,int maximum,{bool loopbackOnly=false}){
   final text=uri.toString();
   if(text.length>maximum){throw const ResourceLimitException('server URL');}
   if(!const ['http','https'].contains(uri.scheme)||!uri.hasAuthority||uri.host.isEmpty||uri.userInfo.isNotEmpty||uri.hasQuery||uri.hasFragment||
-      text.codeUnits.any((c)=>c<33||c==127||c==92)) {throw const ConfigurationException('server requires absolute HTTP(S), without userinfo, query or fragment');}
+      text.codeUnits.any((c)=>c<33||c>126||c==92)) {throw const ConfigurationException('server requires absolute HTTP(S), without userinfo, query or fragment');}
+  if(uri.port<1||uri.port>65535){throw const ConfigurationException('invalid server port');}
+  if(loopbackOnly&&uri.scheme=='http'&&!const ['localhost','127.0.0.1','::1'].contains(uri.host.toLowerCase())){throw const ConfigurationException('plain HTTP servers must be loopback');}
+  if(uri.path.split('/').any((s)=>s=='.'||s=='..')){throw const ConfigurationException('server path contains a literal dot segment');}
   _checkPercent(text);
 }
 

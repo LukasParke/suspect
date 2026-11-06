@@ -706,9 +706,7 @@ pub fn publish(args: &PublishArgs) -> anyhow::Result<i32> {
             "publishing {} {} to {}",
             target.backend, target.package, target.registry
         );
-        let status = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(&target.command)
+        let status = host_shell(&target.command)
             .current_dir(&target.directory)
             .status()
             .map_err(|e| anyhow::anyhow!("{}: {e}", target.command))?;
@@ -725,6 +723,19 @@ pub fn publish(args: &PublishArgs) -> anyhow::Result<i32> {
     }
     eprintln!("published {} target(s)", plan.ready);
     Ok(0)
+}
+
+/// The host shell running a target's publish command: `sh -c` on Unix,
+/// `cmd /C` on Windows (where `sh` exists only with Git Bash on `PATH`).
+fn host_shell(command: &str) -> std::process::Command {
+    let (shell, flag) = if cfg!(windows) {
+        ("cmd", "/C")
+    } else {
+        ("sh", "-c")
+    };
+    let mut process = std::process::Command::new(shell);
+    process.arg(flag).arg(command);
+    process
 }
 
 fn render_text(plan: &PublishPlan) {
@@ -900,6 +911,13 @@ mod tests {
         )
         .unwrap();
         parse_manifest(&path).unwrap()
+    }
+
+    #[test]
+    fn publish_commands_run_in_the_host_shell_and_report_their_status() {
+        // `exit N` means the same in `sh -c` and `cmd /C`.
+        assert!(host_shell("exit 0").status().unwrap().success());
+        assert_eq!(host_shell("exit 3").status().unwrap().code(), Some(3));
     }
 
     #[test]

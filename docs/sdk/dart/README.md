@@ -1,23 +1,13 @@
 # Dart SDK backend
 
-Status **2026-09-10**: native OpenAPI 3.1/3.2 protocol implementation, installable
-pub packages, strict native types, typed compatibility capture and executable
-guides. Advanced native consumers passed on **Dart 3.9.4 and 3.13.3, macOS arm64**,
-as compiled JavaScript under Node, and in **Chrome 153.0.8010.37**.
+Native OpenAPI 3.0/3.1/3.2 protocol implementation, installable pub packages, strict
+native types, typed compatibility capture and executable guides. Native consumers
+are tested on **Dart 3.9.4 (floor) and 3.13.3 (current), macOS arm64**, as
+compiled JavaScript under Node, and in **Chrome 153**.
 
-The earlier nine-test floor/current VM/JS baseline remains preserved in
-`target/sdk-dart-verified-20260910/report.json`. Advanced evidence has fresh paths
-under `target/sdk-dart-protocol-20260910/`; it does not relabel earlier reports.
-
-**Scoped validation v2 is admitted.** All nine applicator instructions, native
-model/codec paths and real operations passed installed VM/JavaScript and Chrome
-witnesses on both SDK tiers. Its separate evidence is
-`target/sdk-dart-v2-20260910/report.json`.
-
-**Resource/dynamic validation v3 is also admitted**, after its independent
-installed native and browser witnesses. Ordinary closures retain their v1/v2
-programs. V3 evidence is indexed separately in
-`target/sdk-dart-v3-20260910/report.json`.
+**Scoped validation v2** (all nine applicator instructions) and
+**resource/dynamic validation v3** are admitted. Ordinary closures retain their
+v1/v2 programs ([ADR 0020](../../adr/0020-validation-programs-are-versioned-and-frozen.md)).
 
 ## Package and ordinary usage
 
@@ -135,29 +125,18 @@ names. Source-required deprecated types remain publicly marked deprecated; the
 configured generator scopes internal codec/example lint handling to those
 necessary references. Unconfigured output keeps its original bytes.
 
-Evidence: `target/sdk-dart-credential-env-20260911/report.json`. Both 3.9.4 and
-3.13.3 passed installed VM process-env controls, compiled JS/portable controls,
-the real OpenRouter source schemas, seven compiled VM/JS source examples and
-zero-warning dartdoc. Four Chrome 153 pages passed. Canonical forwarding,
-semantic capture, policy change classification and Session edit/revert identity
-pass. All 25 files of the pre-change no-policy package match their original hashes.
+Native tests cover installed VM process-env controls, compiled JS/portable
+controls, the real OpenRouter source schemas, compiled VM/JS source examples,
+zero-warning dartdoc and Chrome pages. The constructor's non-nullable
+`credentials` signature (literal null rejected statically, dynamic null raising
+`TypeError` with zero env reads/HTTP) has the focused selector
+`native_credential_env_constructor_compatibility`.
 
-Standards P2 correction: the original configured-env receipt incorrectly accepted
-a nullable `credentials` parameter. That receipt and its package bytes remain
-historical evidence. The corrected non-nullable signature is verified separately
-in `target/sdk-dart-credential-env-null-20260911/report.json`: literal null is
-rejected statically, dynamic null raises the native `TypeError` with zero env
-reads/HTTP, and omission, empty and partial objects retain the intended behavior.
-Its focused selector is `native_credential_env_constructor_compatibility` in
-`--test dart_credential_env`, with the same floor/current controls. Both VM/JS
-tiers and two separate Chrome constructor pages pass; the earlier broad matrices
-were not replayed.
-
-Exact native selectors in `--test dart_credential_env` are
+Exact native selectors in `--test dart` are
 `native_credential_env_controls` and `native_openrouter_credential_env`, with
 `-- --exact --ignored --nocapture`. `SUSPECT_DART_BIN`,
 `SUSPECT_DART_REPO_ROOT` and `SUSPECT_DART_GATE_ROOT` select the usual native tools
-and retained output. The source gate accepts `OPENROUTER_WEB_ROOT` for the actual
+and output root. The source gate accepts `OPENROUTER_WEB_ROOT` for the actual
 source checkout. Support files are conditional `environment.dart`,
 `environment_io.dart` and `environment_stub.dart`; the emitted README and
 `doc/CREDENTIAL-ENV.md` describe the configured mapping and platform behavior.
@@ -190,6 +169,24 @@ escaped instance pointers. Completed mismatch and incomplete evaluation are
 different outcomes. Branch trials share root validation work; multipart/form part
 conversion also shares one request-wide conversion/evaluation budget.
 
+### OpenAPI 3.0 sources
+
+OAS 3.0 Schema Objects are lowered onto the same checked program and native
+models ([ADR 0016](../../adr/0016-closed-dialect-set.md)). `nullable: true` widens only
+a same-object `type` (`type: string, nullable: true` is `String?`; a nullable
+object is `Owner?`); it cannot bypass an `enum`/`const` or composition, and
+without a same-object `type` it changes nothing. Boolean `exclusiveMinimum` /
+`exclusiveMaximum` make the adjacent `minimum`/`maximum` exclusive. A Reference
+Object applies only its `$ref`: sibling `type`, `nullable`, `readOnly` or
+`description` neither shape the native type nor document it, so a `$ref` to a
+nullable schema is nullable through its target. 3.0 `type: string, format: binary`
+octet bodies are native `Uint8List`. `OpenApi30` is recorded in the manifest
+capability set only for sources that declare OAS 3.0, so 3.1/3.2 package bytes
+are unchanged. Directional `readOnly`/`writeOnly` (and therefore 3.0
+direction-dependent `required`) remain located refusals.
+`dart_sdk::native_oas30_nullable_bounds_and_reference_siblings` installs and runs
+a consumer of `tests/fixtures/oas30/nullable-bounds-refs.openapi.yaml`.
+
 ## Scoped validation v2
 
 The HTTP planner first uses `OwnedCompiler::compile_v2`. A closure that needs only v1
@@ -199,7 +196,7 @@ modern applicators selects `validation_v2.dart` and the exact
 `oas31-jsonschema202012-static-applicators` pair. Typed operands, targets, source
 locations, patterns and profiles pass `OwnedProgram::check()` before lowering.
 Unknown/mismatched envelopes are refused. V1/v2 envelopes reject resource/dynamic
-instructions; resource closures use the separately witnessed v3 profile below.
+instructions; resource closures use the v3 profile below.
 
 The nine new instructions implement:
 
@@ -256,64 +253,43 @@ The executable rules are documented in
 [SDK-SCHEMA-APPLICATORS.md](../../design/schema-applicators.md), and native adoption
 requirements in [SDK-SCHEMA-NATIVE-ADOPTION.md](../../design/schema-native-adoption.md).
 
-### V2 evidence and selectors
-
-Paths below are relative to `target/sdk-dart-v2-20260910/`.
-
-| Gate | Evidence |
-| --- | --- |
-| 32 maintained source-driven cases plus 27 native controls, VM/Node on 3.9.4 | `vectors-floor-01.log`, `floor/vectors-D4z5ZL/` |
-| Same 59 cases, VM/Node on 3.13.3 | `vectors-current-compiled-02.log`, `current/vectors-Y1hCeP/` |
-| Installed four-operation SDK, types/wire/examples/docs on 3.9.4 | `sdk-floor-04.log`, `floor/sdk-uRh3GN/` |
-| Same installed SDK gate on 3.13.3 | `sdk-current-01.log`, `current/sdk-3N7Ctb/` |
-| Chrome 153, both tiers' vectors, SDK consumer and source examples: six pages | `browser-QTakWr/report.json`, `browser-01.log` |
-| Final public admission: five focused Rust checks; both installed packages remain byte-identical | `public-admission-01.log` |
-| V2 typed compatibility and the affected original admission assertion | `capture-v2-01.log`, `affected-admission-01.log` |
+### V2 tests and selectors
 
 The vector gate reads the maintained
 `crates/suspect-schema/tests/fixtures/owned-applicators-v2.json`, builds real
-Contracts and calls `compile_v2`; it needs no earlier witness artifact. It checks
-every finding's original document/schema/instance location, eight independently
-derived step counts and 237 budget-sweep assertions. Added controls cover exact
-counts, shared equality and numeric failures, key identity/order, recursion,
-error caps and successful-annotation isolation.
+Contracts and calls `compile_v2`. It checks every finding's original
+document/schema/instance location, independently derived step counts and
+budget-sweep assertions. Added controls cover exact counts, shared equality and
+numeric failures, key identity/order, recursion, error caps and
+successful-annotation isolation.
 
 The SDK gate covers `scopedEcho`, `optionalPatch`, `mixedExtras` and `scopedRows`.
-It verifies seven real socket exchanges including the exact README quickstart,
-eight negative-type controls, nine source examples on VM and JS, lazy per-item
+It verifies real socket exchanges including the exact README quickstart,
+negative-type controls, source examples on VM and JS, lazy per-item
 validation/cleanup, and zero-warning dartdoc with rendered symbol checks. Hosted
 archive SHA-256, offline pub resolution and every installed file's bytes are
 verified before running consumers.
-
-The current vector run reused the immediately preceding aggregate-built test
-binary during a shared dynamic-profile migration; see
-`vectors-compiled-identity.json`. The final vector executor differs only by
-formatting and a private helper rename needed when linked with the HTTP runtime;
-`vector-runtime-parity.json` verifies that correspondence. The installed SDK
-witnesses use the final executor, and public admission was enabled only after
-their VM/JS/Chrome gates passed. Historical attempts and the superseded local
-example-planner draft remain retained.
 
 Exact native test selectors:
 
 ```sh
 SUSPECT_DART_REPO_ROOT="$PWD" cargo test -p suspect-codegen \
-  --no-default-features --features dart-sdk,http-protocol --lib \
+  --no-default-features --features dart-sdk --lib \
   dart_sdk::validation_tests::native_v2_source_vectors \
   -- --exact --ignored --nocapture
 
 SUSPECT_DART_REPO_ROOT="$PWD" cargo test -p suspect-codegen \
-  --no-default-features --features dart-sdk,http-protocol --lib \
+  --no-default-features --features dart-sdk --lib \
   dart_sdk::sdk_v2_tests::native_v2_sdk_operations \
   -- --exact --ignored --nocapture
 ```
 
-`SUSPECT_DART_BIN` selects the toolchain. The floor is
+`SUSPECT_DART_BIN` selects the toolchain. The default (floor) is
 `target/sdk-dart-tools/dart-sdk/bin/dart`; current is
 `target/sdk-dart-tools/current-3.13.3/dart-sdk/bin/dart`. Use absolute paths.
-`SUSPECT_DART_GATE_ROOT` selects the retained output parent, with a unique
+`SUSPECT_DART_GATE_ROOT` selects the output parent, with a unique
 subdirectory for each gate. The optional browser harness is
-`tests/dart_support/browser.mjs`; pass an evidence root and a manifest of exact
+`tests/dart_support/browser.mjs`; pass an output root and a manifest of exact
 compiled script paths/expected completion markers. It uses installed Chrome
 and Node built-ins, with an isolated profile and loopback server.
 
@@ -323,7 +299,7 @@ The existing `plan_sdk` / `plan_sdk_with_profiles` entrypoints prefer the static
 compiler. If static admission fails, they explicitly try `compile_v3` and require
 its checked `suspect.validation.experimental.v3` /
 `oas31-jsonschema202012-resources-dynamic` pair. `SchemaResources` and
-`DynamicSchemaReferences` were enabled only after native v3 acceptance.
+`DynamicSchemaReferences` are enabled.
 Ordinary v1/v2 program, executor and model bytes stay on their established paths;
 there is no new canonical-dispatch API or mandatory generation option.
 
@@ -353,30 +329,27 @@ records these context-bound carriers and the v3 codec profile. Findings and
 ownership retain physical SourceIds, including redirected schema documents;
 logical `$id`/`$self`/anchor identities remain separate metadata.
 
-V3 examples use Main's `plan_protocol_examples_v3`, retaining bounded generation,
+V3 examples use the shared `plan_protocol_examples_v3`, retaining bounded generation,
 original examples and validation against the complete source schema. The emitted
 README renders the resource guide inline; `doc/RESOURCE-VALIDATION.md` and the
 full checked program are also included in the installed package.
 
-Focused acceptance on **3.9.4 and 3.13.3**, under
-`target/sdk-dart-v3-20260910/`:
+Native v3 tests on **3.9.4 and 3.13.3**:
 
 - **44 unmodified official cases** from the maintained
-  `resource-conformance/` fixture plus **21 independent controls**: 65 cases,
-  four independently counted resource costs, 35 budget-sweep assertions,
-  exact finding locations and post-return scope restoration. The supplied
-  remote documents use a closed provider and the real `compile_v3` seam.
-- Installed SDK: five operations, strict versus loose recursive resources,
-  dynamic integer override of a string fallback, redirected/logical static
-  references, per-item streams, seven independent socket exchanges, six
-  negative-type controls and ten compiled VM/JS source examples.
+  `resource-conformance/` fixture plus independent controls covering resource
+  costs, budget sweeps, exact finding locations and post-return scope
+  restoration. The supplied remote documents use a closed provider and the real
+  `compile_v3` seam.
+- Installed SDK: strict versus loose recursive resources, dynamic integer
+  override of a string fallback, redirected/logical static references, per-item
+  streams, independent socket exchanges, negative-type controls and compiled
+  VM/JS source examples.
 - The exact README quickstart runs against the fixture server. Strict package
   and consumer analysis, zero-warning dartdoc and rendered contextual-field
-  symbols pass on both tiers. Every installed package file is compared with
-  emitted bytes, including after offline pub resolution.
-- Chrome 153 passes six pages: both tiers' vector, SDK and example JavaScript
-  artifacts. The final public planner reproduces both SDK witness packages
-  byte-for-byte after capability promotion.
+  symbols are checked on both tiers. Every installed package file is compared
+  with emitted bytes, including after offline pub resolution.
+- Chrome runs both tiers' vector, SDK and example JavaScript artifacts.
 
 Exact library-test selectors are
 `dart_sdk::v3_tests::native_v3_source_resources` and
@@ -395,7 +368,7 @@ reinterpret raw HTTP declarations or fabricate schemas for opaque data.
 | Concern | Native behavior |
 | --- | --- |
 | Security | Absent/disabled/anonymous, OR alternatives, AND requirements; bearer, Basic, header/query/cookie API keys |
-| OAuth/OIDC | Caller `CredentialProvider` hooks receive scopes/roles, scheme/operation source and flow/discovery metadata; return explicit authorization values |
+| OAuth/OIDC | Caller `CredentialProvider` hooks receive scopes/roles, scheme/operation source and flow/discovery metadata; return explicit authorization values. An `sdk_defaults` OAuth policy opts in to a generated token lifecycle |
 | Servers | Effective choices, relative URLs, literal variable substitution, declared defaults/enums and explicit overrides |
 | Methods | Standard methods, `QUERY`, exact case-sensitive custom tokens from `additionalOperations` |
 | Parameters | Simple/label/matrix/form/space/pipe/deepObject, headers, cookies, complete JSON/text content, reserved expansion and 3.2 whole-querystring JSON/text/form |
@@ -411,7 +384,9 @@ used for bearer/API keys, `BasicCredentials` for Basic, and callbacks for
 OAuth/OIDC. The default selects the first source-ordered complete alternative;
 `securityAlternative:` chooses explicitly. Attachments are staged before sending,
 and conflicting headers/query/cookies reject instead of overwriting each other.
-A source scheme named `apiKey` can still be HTTP bearer. The application supplies
+A source scheme named `apiKey` can still be HTTP bearer. Unless the package was
+generated with `credential_env` or `sdk_defaults` (see
+[SDK-GOLDEN-DEFAULTS.md](../../guide/sdk-generation.md)), the application supplies
 environment lookup, token acquisition and refresh.
 
 `ServerSelection(index:, variables:, documentUrl:)` selects a server. Relative
@@ -420,7 +395,7 @@ conventions. A local source file requires a supplied HTTP document URL.
 `Client(server: Uri.parse(...))` is an explicit override. Malformed escapes,
 userinfo/query/fragment server values and unstable path representations reject.
 
-`DocumentRelativeServers` is separately witnessed and enabled. The default base
+`DocumentRelativeServers` is enabled. The default base
 comes from `ServerPlan::document_base()`: the effective physical retrieval
 document containing the Server Object. An absent default belongs to the entry
 document; an explicit empty override belongs to its declaring document.
@@ -436,13 +411,11 @@ the exact HTTP target. OAuth/OIDC hooks expose `CredentialInfo.urlBase` and
 `CredentialRequest.serverUrl`, the selected effective server before appending
 the operation path. Metadata endpoints remain original strings for the caller.
 
-Focused evidence: `target/sdk-dart-document-base-20260910/report.json`.
-`dart_sdk::document_tests::native_document_relative_servers` passes installed
-VM/JS on 3.9.4 and 3.13.3 plus both compiled consumers in Chrome 153, with twelve
-real exchanges across two independent origins. It covers redirect aliases,
-different `$self` names, inherited/default/empty/relative/variable servers,
-literal versus escaped dots/slashes, file-source overrides and OAuth/OIDC bases.
-The earlier protocol/v1/v2 matrices retain their original evidence.
+`dart_sdk::document_tests::native_document_relative_servers` runs installed
+VM/JS consumers on both tiers and in Chrome, with real exchanges across two
+independent origins. It covers redirect aliases, different `$self` names,
+inherited/default/empty/relative/variable servers, literal versus escaped
+dots/slashes, file-source overrides and OAuth/OIDC bases.
 
 Response alternatives and multipart/request content choices have allocated sealed
 native types. A default response can produce a success or an API exception, with
@@ -507,18 +480,18 @@ dart_sdk::plan_sdk_with_profiles(
 )?;
 ```
 
-`GenerationOptions.compatibility_profiles` is handled by Main's backend/session
+`GenerationOptions.compatibility_profiles` is handled by the backend/session
 pipeline and retained in native snapshots. Only explicitly requested profiles are
 applied to Dart's capability fence. `LegacyBinaryStringV1` admits the legacy
 string/binary marker in binary media/parts; actual native `Uint8List` bytes are
 used. It does not change JSON media into bytes. The default still refuses that
 nonstandard marker in 3.1/3.2. Both runtimes have installed-package byte and JSON
-control witnesses.
+control tests.
 
 ## Admission boundaries
 
-Unimplemented/undefined declarations retain located diagnostics: OpenAPI 3.0,
-unnamed operations, directional codecs, undefined style/explode/type combinations,
+Unimplemented/undefined declarations retain located diagnostics: unnamed
+operations, directional codecs (including OAS 3.0 direction-dependent `required`), undefined style/explode/type combinations,
 arbitrary untyped form extras, JSON cookie content without an escaping policy,
 positional/nested multipart, form/multipart response parsing, request item streams,
 aggregate stream assertions, JSON-sequence framing and mixed stream/error-content
@@ -537,26 +510,9 @@ credential descriptors expose actual allocated names and source bindings.
 and erased signatures, fixed getters/presence/defaults, parent membership,
 constructors, codecs, native status/media/part classes, typed headers,
 Future/Stream returns, security alternatives and client options. Internal program
-indices never become interface identities. The original 11 integration checks
-passed in the exact-source target harness; Main subsequently verified the expanded
-12-test integration and generation-options integration in
-`target/sdk-full-options-integrations-01.log`.
+indices never become interface identities.
 
-Main owns registration, GenerationOptions, CLI/session plumbing and the shared
-provenance registry. Dart-owned code applies those options and records them.
-
-## Evidence and reproduction
-
-Advanced report root: **`target/sdk-dart-protocol-20260910/`**.
-
-| Gate | Evidence |
-| --- | --- |
-| Original 11 public backend/session/native-comparison tests | `integration-target-only-2.log`, exact-source `integration-base-source.tar.gz` |
-| Rich 3.9.4 VM/Node consumers, 18 real socket exchanges, types/docs | `floor-rich-final.log`, `floor-final/protocol-c67UpW/` |
-| Explicit legacy profile on 3.9.4, including raw bytes and JSON control | `legacy-option-native-aggregate.log`; `target/sdk-dart-expanded-native/legacy-profile-yHH0Za/` |
-| Complete advanced 3.13.3 suite: four tests, VM/Node, sparse selections and explicit profiles | `current-native-compiled-gate.log`, `current-native/` |
-| Headless Chrome 153, same compiled portable consumer | `browser-cdp-result.json`, `browser-cdp-dom.html`, `browser_cdp.mjs` |
-| Prior base profile nine-test floor/current acceptance | `target/sdk-dart-verified-20260910/report.json` |
+## Verification
 
 The advanced tests build an archive from emitted bytes, install it through an
 independent loopback pub server into an isolated cache, prove offline resolution,
@@ -566,38 +522,28 @@ Independent wire fixtures assert methods, query/header/body bytes and observe
 peer EOF on cancellation. The JavaScript consumer executes the same portable
 auth/media/form/framing/backpressure tests under Node and Chrome.
 
-The final current-runtime run used the already compiled aggregate test executable
-while a new unrelated IR edit temporarily prevented rebuilding. Its binary hash
-and source-mtime guard are retained in `compiled-gate-identity.json`. Source
-subset transforms and all earlier failed/partial logs are preserved rather than
-reported as successful aggregate builds.
-
-To run with an available aggregate build:
+To run the protocol suite:
 
 ```sh
 SUSPECT_DART_REPO_ROOT="$PWD" \
-  cargo test -p suspect-codegen --features dart-sdk,http-protocol \
-  --test dart_protocol -- --include-ignored --nocapture --test-threads=1
+  cargo test -p suspect-codegen --features dart-sdk \
+  --test dart dart_protocol:: -- --include-ignored --nocapture --test-threads=1
 ```
 
 Set `SUSPECT_DART_BIN` to
 `target/sdk-dart-tools/current-3.13.3/dart-sdk/bin/dart` for current-runtime checks.
-Both toolchain archives and all installed SDK files were checked against official
-SHA-256 values; see `target/sdk-dart-tools/verification-20260910.json`.
 
 Primary protocol references: [OpenAPI 3.2.0](https://spec.openapis.org/oas/v3.2.0.html),
 especially sequential media/SSE mapping and encoding-by-name; [WHATWG SSE](https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream);
 [Dart HttpClient](https://api.dart.dev/dart-io/HttpClient-class.html),
 [SecureSocket](https://api.dart.dev/dart-io/SecureSocket-class.html), and
-[SDK archives](https://dart.dev/get-dart/archive). The inspected OAS text is
-retained as `oas-3.2.0.md` under the advanced report root.
+[SDK archives](https://dart.dev/get-dart/archive).
 
 ## DX comparison scope
 
 Readable operation-role model names, direct native construction, explicit
-credential/server controls, sealed content choices and executable guides address
-the Dart-specific gaps in `SDK-DX-ASSESSMENT.md`. Flat operation naming, explicit
-presence/exact-number types, some long nested names and validated wrappers for
-non-native schema compositions remain tradeoffs. The inspected Speakeasy
-TypeScript/Python packages are a useful breadth/usability baseline, not evidence
-of an overall quality or security ranking for this independently gated Dart code.
+credential/server controls, sealed content choices and executable guides are the
+Dart DX priorities. Flat operation naming, explicit presence/exact-number types,
+some long nested names and validated wrappers for non-native schema compositions
+remain tradeoffs. Published vendor SDKs are a breadth/usability reference, not a
+parity target ([ADR 0030](../../adr/0030-no-drop-in-parity-with-published-sdks.md)).

@@ -100,7 +100,7 @@ fn native_docs(plan: &ModelPlan) {
     suspect_codegen::write_files(&plan.render().unwrap(), directory.path()).unwrap();
     let root = directory.path().join("typescript");
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/typescript-docs/build.mjs");
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let output = Command::new(node)
         .arg(tool)
         .arg(&root)

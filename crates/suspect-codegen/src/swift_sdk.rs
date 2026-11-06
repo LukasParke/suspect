@@ -105,9 +105,13 @@ impl Default for SwiftConfig {
 /// One admitted operation with allocated native Swift names.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Operation use site.
     pub source: SourceId,
+    /// Source `operationId`, or `<method>_<path>` when absent.
     pub operation_id: String,
+    /// Upper-case HTTP method.
     pub method: String,
+    /// Source path template.
     pub path: String,
     /// lowerCamel method name on the client, collision-free and not a
     /// Swift keyword.
@@ -132,9 +136,11 @@ impl PlannedOperation {
     pub fn protocol(&self) -> &http_protocol::OperationPlan {
         &self.wire
     }
+    /// Planned request body, when declared.
     pub fn body(&self) -> Option<&PlannedBody> {
         self.body.as_ref()
     }
+    /// Planned responses in protocol order.
     pub fn responses(&self) -> &[PlannedResponse] {
         &self.responses
     }
@@ -145,6 +151,7 @@ impl PlannedOperation {
     }
 }
 
+/// One operation parameter as an input-struct property.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
     pub(crate) wire: http_protocol::ParameterPlan,
@@ -155,6 +162,7 @@ pub struct PlannedParameter {
 }
 
 impl PlannedParameter {
+    /// Shared wire decisions for the parameter.
     #[must_use]
     pub const fn wire(&self) -> &http_protocol::ParameterPlan {
         &self.wire
@@ -206,14 +214,17 @@ impl std::fmt::Debug for SdkPlan {
 }
 
 impl SdkPlan {
+    /// Original retained source contract.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// Admitted operations in protocol order.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Native model symbol names keyed by schema source.
     #[must_use]
     pub fn symbols(&self) -> &BTreeMap<SchemaId, String> {
         &self.symbols
@@ -222,6 +233,8 @@ impl SdkPlan {
     pub(crate) fn models(&self) -> &models::ModelPlan {
         &self.models
     }
+    /// Client credential property keyed by security scheme name; the first
+    /// declaration of a name wins (see [`Self::credential_property`]).
     #[must_use]
     pub fn credentials(&self) -> &BTreeMap<String, String> {
         &self.credentials
@@ -270,6 +283,7 @@ impl SdkPlan {
     pub fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
     }
+    /// Transport policy the plan was built with.
     #[must_use]
     pub const fn config(&self) -> &SwiftConfig {
         &self.config
@@ -316,8 +330,11 @@ impl Default for PackageConfig {
 /// Package identity admission failures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageError {
+    /// [`PackageConfig::name`] is not an admitted package name.
     InvalidName,
+    /// [`PackageConfig::version`] is not an exact SemVer version.
     InvalidVersion,
+    /// [`PackageConfig::module_name`] is not a legal, non-keyword Swift identifier.
     InvalidModuleName,
 }
 

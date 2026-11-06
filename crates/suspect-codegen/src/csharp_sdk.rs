@@ -35,8 +35,11 @@ mod validation_tests;
 /// NuGet identity and native namespace; these do not alter service semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SdkConfig {
+    /// NuGet package id (ASCII alphanumerics and `._-`, at most 100 bytes).
     pub name: String,
+    /// NuGet package version.
     pub version: String,
+    /// Dotted C# namespace for generated types; keywords are refused.
     pub namespace: String,
 }
 impl Default for SdkConfig {
@@ -52,66 +55,110 @@ impl Default for SdkConfig {
 /// Allocated native operation symbols and the immutable shared wire plan.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Operation use-site source location.
     pub source: SourceId,
+    /// Declared `operationId`, or `METHOD path` when undeclared.
     pub operation_id: String,
+    /// Allocated client method name (`<Stem>Async`).
     pub method_name: String,
+    /// Generated input type name.
     pub input_type: String,
+    /// Generated result type name.
     pub result_type: String,
+    /// Generated API exception type name (`<Stem>ApiException`).
     pub error_type: String,
+    /// HTTP method token.
     pub http_method: String,
+    /// Declared path template.
     pub path: String,
+    /// Declared operation description; empty when absent.
     pub description: String,
+    /// Shared wire plan for the operation.
     pub wire: http_protocol::OperationPlan,
+    /// Planned parameters in declaration order.
     pub parameters: Vec<PlannedParameter>,
+    /// Planned request body, if declared.
     pub body: Option<PlannedBody>,
+    /// Planned responses in declaration order.
     pub responses: Vec<PlannedResponse>,
 }
 impl PlannedOperation {
+    /// Whether no parameter or body is required, so a no-input overload is emitted.
     #[must_use]
     pub fn has_no_input_overload(&self) -> bool {
         !self.parameters.iter().any(|p| p.required)
             && !self.body.as_ref().is_some_and(|b| b.required)
     }
+    /// Whether exactly one response can succeed, so the result is that response's type.
     #[must_use]
     pub fn direct_result(&self) -> bool {
         self.responses.iter().filter(|r| r.may_succeed()).count() == 1
     }
 }
+/// A planned operation parameter, exposed as an input property.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
+    /// Allocated input property name.
     pub property_name: String,
+    /// Declaring use-site source location.
     pub source: SourceId,
+    /// Schema of the parameter codec.
     pub schema: SchemaId,
+    /// Spelled C# type of the property.
     pub native_type: String,
+    /// Declared parameter name sent on the wire.
     pub wire_name: String,
+    /// Where the parameter is sent.
     pub location: http_protocol::ParameterLocation,
+    /// Whether the parameter is required.
     pub required: bool,
+    /// Shared wire plan for the parameter.
     pub wire: http_protocol::ParameterPlan,
 }
+/// A planned operation request body.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
+    /// Declaring use-site source location.
     pub source: SourceId,
+    /// Spelled C# body type; a generated union when several media types are declared.
     pub native_type: String,
+    /// Whether the body is required.
     pub required: bool,
+    /// Shared wire plan for the body.
     pub wire: http_protocol::BodyPlan,
+    /// Planned media types in declaration order.
     pub media: Vec<protocol::PlannedMedia>,
+    /// Whether the body is a generated union over media types.
     pub union: bool,
 }
+/// A planned response for one declared status, status range or default.
 #[derive(Debug, Clone)]
 pub struct PlannedResponse {
+    /// Declaring use-site source location.
     pub source: SourceId,
+    /// Spelled C# payload type: a generated union, a media type's type, `byte[]` or `HttpNoContent`.
     pub native_type: String,
+    /// Success result type: the result type itself when it is the only success, else a nested `<Result>.<Status>` case.
     pub type_name: String,
+    /// Nested error case type (`<ApiException>.<Status>`).
     pub error_type_name: String,
+    /// Shared wire plan for the response.
     pub wire: http_protocol::ResponsePlan,
+    /// Planned media types; empty when the response is always empty.
     pub media: Vec<protocol::PlannedMedia>,
+    /// Planned response headers.
     pub headers: Vec<protocol::PlannedHeader>,
+    /// Generated headers type, when any headers are declared.
     pub header_type: Option<String>,
+    /// Whether the payload is a generated union (several media types, or media plus an empty case).
     pub union: bool,
+    /// Whether a body is never present: HEAD, 1xx, 204 or 304.
     pub always_empty: bool,
+    /// Whether a body may be absent: always-empty, or a 2XX/3XX/default selector.
     pub may_be_empty: bool,
 }
 impl PlannedResponse {
+    /// Whether this response can land in the success result (2xx, 2XX or default).
     #[must_use]
     pub fn may_succeed(&self) -> bool {
         matches!(
@@ -121,6 +168,7 @@ impl PlannedResponse {
                 | http_protocol::ResponseStatus::Default
         )
     }
+    /// Whether this response can land in the error result (anything but 2xx/2XX).
     #[must_use]
     pub fn may_fail(&self) -> bool {
         !matches!(
@@ -153,10 +201,12 @@ pub struct SdkPlan {
     samples: samples::Samples,
 }
 impl SdkPlan {
+    /// Planned operations in emission order.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Planned C# model types and codecs.
     #[must_use]
     pub const fn models(&self) -> &models::ModelPlan {
         &self.models
@@ -166,6 +216,7 @@ impl SdkPlan {
     pub fn credentials(&self) -> &BTreeMap<String, String> {
         &self.credentials
     }
+    /// Planned credential bindings with full source provenance.
     #[must_use]
     pub fn credential_bindings(&self) -> &[protocol::PlannedCredential] {
         &self.credential_bindings
@@ -181,6 +232,7 @@ impl SdkPlan {
     ) -> String {
         credential_env::key(requirement, self.credential_env.is_some())
     }
+    /// The canonical HTTP protocol plan the operations were lowered from.
     #[must_use]
     pub const fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
@@ -211,27 +263,27 @@ impl SdkPlan {
     pub fn incoming(&self) -> &http_protocol::IncomingPlan {
         &self.incoming
     }
-    #[must_use]
-    pub const fn package(&self) -> &SdkConfig {
-        &self.config
-    }
     /// `ua/v1` attribution constants compiled from package identity and source.
     #[must_use]
     pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
         self.attribution.as_ref()
     }
+    /// Package identity the plan was admitted under.
     #[must_use]
     pub const fn config(&self) -> &SdkConfig {
         &self.config
     }
+    /// The admitted contract this plan was built from.
     #[must_use]
     pub const fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// The compiled schema validation program embedded in the package.
     #[must_use]
     pub const fn program(&self) -> &OwnedProgram {
         &self.program
     }
+    /// Compiled request/response examples for documentation and samples.
     #[must_use]
     pub const fn examples(&self) -> &examples::ExamplePlan {
         &self.examples

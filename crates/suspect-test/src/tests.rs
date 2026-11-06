@@ -1625,7 +1625,11 @@ workflows:
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("refs.arazzo.yaml"), ARAZZO_REFS).expect("write arazzo");
     let arazzo = LowDoc::parse(
-        format!("file://{}", dir.path().join("refs.arazzo.yaml").display()).into(),
+        suspect_source::Uri::from_path(&dir.path().join("refs.arazzo.yaml"))
+            .unwrap()
+            .as_str()
+            .to_owned()
+            .into(),
         Source::from_vec(ARAZZO_REFS.as_bytes().to_vec()),
     );
     let plan = compile_plan(&arazzo, &ws).expect("compiles");

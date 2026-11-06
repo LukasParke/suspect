@@ -9,7 +9,6 @@
 
 use super::*;
 use crate::http_protocol::{OAuthClientAuth, OAuthFlowDescriptorKind, OAuthPlan, OAuthSchemePlan};
-use std::collections::BTreeSet;
 
 /// Everything `package` needs to emit OAuth support.
 pub(super) struct Emission {
@@ -97,51 +96,14 @@ pub(super) fn emission(plan: &HttpPlan) -> Option<Emission> {
     })
 }
 
-/// The security-requirement source pointers whose attaches must never be
-/// replayed: requirements that name a compiled scheme on an operation whose
-/// responses carry a stream representation. Delivered stream data prevents a
-/// transparent restart, so those operations are excluded from the replay
-/// wrapper's one-replay budget.
-fn no_replay_requirements(
-    plan: &HttpPlan,
-    compiled: &[CompiledScheme],
-) -> BTreeMap<String, BTreeSet<String>> {
-    let names: BTreeSet<&str> = compiled.iter().map(|s| s.name.as_str()).collect();
-    let mut pointers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for operation in &plan.operations {
-        let streams =
-            operation.responses().iter().any(|response| {
-                response.wire().media().iter().any(|media| {
-                    matches!(media.representation(), wire::Representation::Stream { .. })
-                })
-            });
-        if !streams {
-            continue;
-        }
-        for credential in operation.credentials() {
-            let requirement = &credential.requirement;
-            if !matches!(
-                requirement.credential(),
-                wire::CredentialHook::OAuth2 { .. } | wire::CredentialHook::OpenIdConnect { .. }
-            ) {
-                continue;
-            }
-            if names.contains(requirement.name()) {
-                pointers
-                    .entry(requirement.name().to_owned())
-                    .or_default()
-                    .insert(requirement.source().source().pointer().to_owned());
-            }
-        }
-    }
-    pointers
-}
-
 /// The replaying credential wrapper: one coordinated refresh plus one
 /// eligible request replay per qualifying 401, opt-in per provider, and
 /// never for stream-protected operations.
 fn replay_section(plan: &HttpPlan, compiled: &[CompiledScheme], discovery: bool) -> String {
-    let no_replay = no_replay_requirements(plan, compiled);
+    let no_replay = wire::oauth_no_replay_requirements(
+        plan.operations.iter().map(PlannedOperation::wire),
+        &compiled.iter().map(|scheme| scheme.name.as_str()).collect(),
+    );
     let mut code = String::from(
         "\n/// Stream-protected requirement pointers per compiled scheme: attaches\n/// for these requirements are never replayed, because delivered stream\n/// data prevents a transparent restart.\nstatic REPLAY_NO_REPLAY: &[(&str, &[&str])] = &[",
     );

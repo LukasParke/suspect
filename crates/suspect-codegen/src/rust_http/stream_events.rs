@@ -37,7 +37,9 @@ pub struct StreamEventsEntry {
     pub operation_id: String,
     /// Allocated public type-name stem shared by this entry's types.
     pub stem: String,
+    /// The operation's allocated input type name.
     pub input_type: String,
+    /// The operation's allocated error type name.
     pub error_type: String,
     /// The stream item codec's declared model: every declared kind's payload
     /// decodes into this declared model type.
@@ -50,10 +52,13 @@ pub struct StreamEventsEntry {
     /// Whether the last data frame before the sentinel or end of body is
     /// preserved as the completion's terminal usage instead of being yielded.
     pub keep_final_usage: bool,
+    /// Item model field carrying the declared SSE `id` metadata, when the model has one.
     pub id_metadata: Option<EventMetadata>,
+    /// Item model field carrying the declared SSE `retry` metadata, when the model has one.
     pub retry_metadata: Option<EventMetadata>,
-    /// Response and media indices of the declared success stream.
+    /// Index of the declared success stream among the operation's responses.
     pub response_index: usize,
+    /// Index of the stream media within that response.
     pub media_index: usize,
     /// Declared media type of the stream response body.
     pub media_type: String,

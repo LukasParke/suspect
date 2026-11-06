@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,10 +56,14 @@ type Doer interface {
 // ClientOptions controls explicit server/security selection and finite transport policy.
 // Zero limits select generated defaults; positive limits may only lower them.
 type ClientOptions struct {
-	Transport       Doer
-	ServerURL       string
-	ServerIndex     int
-	ServerVariables map[string]string
+	Transport Doer
+	// ServerURL is an explicit override: HTTPS, or plain HTTP to a loopback
+	// host unless AllowInsecureHTTP is set. Declared servers keep their scheme.
+	ServerURL string
+	// AllowInsecureHTTP opts in to a plain-HTTP ServerURL on a non-loopback host.
+	AllowInsecureHTTP bool
+	ServerIndex       int
+	ServerVariables   map[string]string
 	// DocumentURL supplies an HTTP retrieval base for locally loaded relative servers.
 	DocumentURL string
 	// SecurityAlternative selects a source OR member. Nil chooses the first
@@ -113,7 +118,7 @@ func NewClient(credentials Credentials, options ClientOptions) (*Client, error) 
 		return nil, &SDKError{Kind: "request-representation"}
 	}
 	if options.ServerURL != "" {
-		if _, err := httpBaseURL(options.ServerURL); err != nil {
+		if err := httpServerURL(options.ServerURL, !options.AllowInsecureHTTP); err != nil {
 			return nil, err
 		}
 		if options.ServerIndex != 0 || len(options.ServerVariables) != 0 {
@@ -440,6 +445,43 @@ func httpBaseURL(value string) (*url.URL, error) {
 	}
 	return u, nil
 }
+
+// httpServerURL applies the one server URL policy (ADR 0035): a declared
+// server keeps its scheme; a caller override (loopbackOnly) is https, or plain
+// http only to loopback unless AllowInsecureHTTP is set; no userinfo, query
+// or fragment; a valid port; literal dot segments refused, never resolved; percent-encoded octets are opaque path
+// data sent verbatim; non-ASCII, controls and backslashes refused.
+func httpServerURL(value string, loopbackOnly bool) error {
+	for i := 0; i < len(value); i++ {
+		if value[i] <= ' ' || value[i] >= 0x7f {
+			return httpProblem("request-representation")
+		}
+	}
+	u, err := httpBaseURL(value)
+	if err != nil {
+		return err
+	}
+	if port := u.Port(); port != "" {
+		if n, e := strconv.Atoi(port); e != nil || n < 1 || n > 65535 {
+			return httpProblem("request-representation")
+		}
+	} else if strings.HasSuffix(u.Host, ":") {
+		return httpProblem("request-representation")
+	}
+	if loopbackOnly && u.Scheme == "http" {
+		switch strings.ToLower(u.Hostname()) {
+		case "localhost", "127.0.0.1", "::1":
+		default:
+			return httpProblem("request-representation")
+		}
+	}
+	for _, segment := range strings.Split(u.EscapedPath(), "/") {
+		if segment == "." || segment == ".." {
+			return httpProblem("request-representation")
+		}
+	}
+	return nil
+}
 func (c *Client) server(op httpOperation) (string, error) {
 	if c.options.ServerURL != "" {
 		return c.options.ServerURL, nil
@@ -521,7 +563,7 @@ func (c *Client) server(op httpOperation) (string, error) {
 		}
 		u = b.ResolveReference(u)
 	}
-	if _, err = httpBaseURL(u.String()); err != nil {
+	if err = httpServerURL(u.String(), false); err != nil {
 		return "", httpError("request-representation", op, at, err)
 	}
 	return u.String(), nil

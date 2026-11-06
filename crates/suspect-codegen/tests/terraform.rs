@@ -459,15 +459,7 @@ fn desired_artifacts_preserve_ownership_and_unchanged_metadata() {
 #[test]
 #[ignore = "requires real Go/Terraform; retains every native attempt under an explicit evidence root"]
 fn real_terraform_lifecycle_through_pinned_generated_sdk() {
-    let evidence = std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE")
-        .expect("set a fresh SUSPECT_TERRAFORM_EVIDENCE directory");
-    let evidence = PathBuf::from(evidence);
-    std::fs::create_dir(&evidence).expect("native evidence must be new");
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        evidence.join("generator-test.bin"),
-    )
-    .unwrap();
+    let evidence = crate::terraform_support::fresh_evidence("sdk-terraform-lifecycle-evidence-");
     let root = tempfile::Builder::new()
         .prefix("sdk-terraform-native-")
         .tempdir_in(native_tmp())
@@ -513,15 +505,7 @@ fn real_terraform_lifecycle_through_pinned_generated_sdk() {
 #[test]
 #[ignore = "supplemental native profile/SDK-upgrade controls; requires a fresh evidence path"]
 fn native_optional_computed_anonymous_and_sdk_upgrade_controls() {
-    let evidence = PathBuf::from(
-        std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE").expect("set a fresh evidence directory"),
-    );
-    std::fs::create_dir(&evidence).unwrap();
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        evidence.join("generator-test.bin"),
-    )
-    .unwrap();
+    let evidence = crate::terraform_support::fresh_evidence("sdk-terraform-variants-evidence-");
     let root = tempfile::Builder::new()
         .prefix("sdk-terraform-variants-")
         .tempdir_in(native_tmp())

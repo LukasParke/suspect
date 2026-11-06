@@ -666,6 +666,7 @@ fn unavailable_package_or_schema_is_located_instead_of_an_incomplete_native_snap
 #[ignore = "narrow .NET 8 metadata/constructor gate for the new snapshot descriptors; preserves native evidence"]
 fn native_package_metadata_agrees_with_snapshot_construction_and_accessors() {
     use std::process::Command;
+    let _ = suspect_codegen::toolchain::require("dotnet");
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-integration");
     fs::create_dir_all(&parent).unwrap();
     let parent = fs::canonicalize(parent).unwrap();

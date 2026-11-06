@@ -344,7 +344,6 @@ const PHP: Assets = assets!(
     "php_sdk/Transport.php",
 );
 
-#[cfg(feature = "http-protocol")]
 const PROTOCOL: Assets = assets!(
     "http_protocol.rs",
     "http_protocol/model.rs",
@@ -396,10 +395,7 @@ pub(super) fn capture(backend: &str) -> RuntimeProvenance {
         "ruby-http" => crate::ruby_sdk::source_assets(),
         _ => &[],
     };
-    #[cfg(feature = "http-protocol")]
     let protocol = PROTOCOL;
-    #[cfg(not(feature = "http-protocol"))]
-    let protocol: Assets = &[];
     let assets: BTreeMap<_, _> = COMMON
         .iter()
         .chain(profile)

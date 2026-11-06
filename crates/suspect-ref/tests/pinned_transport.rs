@@ -457,12 +457,22 @@ fn timeout_interrupts_stalled_headers_and_cancellation_interrupts_stalled_bodies
         }
         // The request is recorded by the server's worker thread, which
         // races the (much shorter) client timeout under load; poll for it
-        // instead of asserting synchronously.
+        // instead of asserting synchronously. The cancelled exchange got
+        // response bytes, so its request certainly arrived; an 80 ms
+        // timeout under load can fire before the request is even sent, so
+        // that case only rules out a retry.
         let deadline = Instant::now() + Duration::from_secs(2);
-        while server.requests().is_empty() && Instant::now() < deadline {
+        while cancel && server.requests().is_empty() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
-        assert_eq!(server.requests().len(), 1);
+        if cancel {
+            assert_eq!(server.requests().len(), 1);
+        } else {
+            assert!(
+                server.requests().len() <= 1,
+                "a timed-out acquisition retried"
+            );
+        }
     }
 }
 

@@ -1,0 +1,3 @@
+# Remote references are acquired explicitly and pinned; compilation never fetches
+
+`Workspace` and `Contract` compilation are always offline. A remote reference loads only from a `DocumentProvider` of pre-pinned bytes; otherwise it fails with `RemoteDenied`, and a provider miss never falls back to the network or the filesystem. Remote inputs come from a separate `suspect acquire` step driven by a versioned manifest that records each requested URI, effective URI, SHA-256, media type and redirect chain. Acquisition never follows `$ref` or `$id` on its own. Changed bytes or redirects are drift errors, and the tool never rewrites the manifest. Generation is therefore reproducible, auditable for what it reads, and works with the origin offline.

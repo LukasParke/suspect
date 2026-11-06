@@ -43,6 +43,55 @@ impl DialectPolicy {
     }
 }
 
+/// Whether any source document declares the OAS 3.0 feature set. Referenced
+/// fragments inherit their context from a declaring document, so this is the
+/// complete condition under which protocol planning can require `OpenApi30`.
+#[cfg(any(
+    feature = "csharp-sdk",
+    feature = "dart-sdk",
+    feature = "kotlin-sdk",
+    feature = "php-sdk"
+))]
+pub(crate) fn declares_oas30(contract: &Contract) -> bool {
+    contract.documents().any(|(_, raw)| {
+        raw.get("openapi")
+            .and_then(Value::as_str)
+            .is_some_and(|version| version.starts_with("3.0."))
+    })
+}
+
+/// Record the adapter's `OpenApi30` opt-in only for sources with OAS 3.0
+/// content. The capability set is serialized into native manifests, so this
+/// keeps 3.1/3.2 package bytes independent of the 3.0 lowering opt-in.
+#[cfg(any(
+    feature = "csharp-sdk",
+    feature = "dart-sdk",
+    feature = "kotlin-sdk",
+    feature = "php-sdk"
+))]
+pub(crate) fn oas30_capability_for(
+    contract: &Contract,
+    capabilities: crate::http_protocol::Capabilities,
+) -> crate::http_protocol::Capabilities {
+    use crate::http_protocol::{Capabilities, Capability};
+    if declares_oas30(contract) || !capabilities.supports(Capability::OpenApi30) {
+        return capabilities;
+    }
+    let mut stripped = Capabilities::for_adapter(
+        capabilities.adapter(),
+        capabilities
+            .enabled()
+            .iter()
+            .copied()
+            .filter(|capability| *capability != Capability::OpenApi30),
+    )
+    .with_limits(capabilities.limits());
+    for profile in capabilities.profiles() {
+        stripped = stripped.with_profile(*profile);
+    }
+    stripped
+}
+
 pub(crate) fn reference_only(schema: Schema<'_>) -> bool {
     schema.ignores_ref_siblings()
 }

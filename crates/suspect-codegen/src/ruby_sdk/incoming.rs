@@ -82,7 +82,7 @@ pub struct IncomingReceipt {
     pub decode: String,
     /// The module function constructing the declared reply, when an exact 2xx
     /// response is declared.
-    pub construct: Option<String>,
+    pub construct: String,
     pub payload: Payload,
     pub required_body: bool,
     pub required_headers: Vec<String>,
@@ -312,7 +312,7 @@ pub(super) fn prepare(
             },
             route_const,
             decode,
-            construct: Some(construct),
+            construct,
             payload,
             required_body: operation
                 .request()
@@ -409,9 +409,7 @@ fn decoder(out: &mut String, receipt: &IncomingReceipt) {
 
 /// One receipt's reply constructor, when an exact 2xx response is declared.
 fn constructor(out: &mut String, receipt: &IncomingReceipt, response: &ConstructedResponse) {
-    let Some(construct) = &receipt.construct else {
-        return;
-    };
+    let construct = &receipt.construct;
     let has_body = response.body.is_some();
     let has_headers = !response.headers.is_empty();
     let name = esc(&receipt.name);
@@ -533,7 +531,8 @@ pub(super) fn signatures(emission: &IncomingEmission) -> String {
             decode = receipt.decode,
             payload = payload_type(receipt),
         );
-        if let (Some(construct), Some(response)) = (&receipt.construct, &receipt.response) {
+        if let Some(response) = &receipt.response {
+            let construct = &receipt.construct;
             let mut signature = String::from("(");
             if let Some(body) = &response.body {
                 let type_name = match body {

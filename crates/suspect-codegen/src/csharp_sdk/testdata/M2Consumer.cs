@@ -193,11 +193,17 @@ static class Probe
         await Failure(() => Call(), SdkErrorKind.ResourceLimit);
         responder = (_, _) => { var response = Response(); response.Headers.TryAddWithoutValidation("X-Many", Enumerable.Repeat("x", 257)); return Task.FromResult(response); };
         await Failure(() => Call(), SdkErrorKind.ResourceLimit);
-        foreach (var server in new[] { "http://127.0.0.1:bad/api", "https://user:secret@example.test", "https://example.test/api/../escape", "https://example.test/api/%2E%2E", "https://example.test/api/%2e%2e%2fprivate", "https://example.test?x=y", "https://example.test/#fragment" })
+        foreach (var server in new[] { "http://127.0.0.1:bad/api", "https://user:secret@example.test", "https://example.test/api/../escape", "https://example.test/./api", "http://example.test/api", "https://example.test:0/api", "https://example.test?x=y", "https://example.test/#fragment" })
         {
             try { using var bad = new Client(new Credentials(), new ClientOptions { ServerUrl = server }, transport); throw new Exception("Accepted invalid server"); }
             catch (SdkException error) { Check(error.Kind == SdkErrorKind.RequestRepresentation, "Invalid server classification"); }
         }
+        // ADR 0035: encoded octets are opaque path data, never refused for what they decode to.
+        foreach (var server in new[] { "https://example.test/api/%2E%2E", "https://example.test/api/%2e%2e%2fprivate", "http://localhost:8080/api", "http://[::1]/api" })
+        {
+            using var accepted = new Client(new Credentials(), new ClientOptions { ServerUrl = server }, transport);
+        }
+        using (var insecure = new Client(new Credentials(), new ClientOptions { ServerUrl = "http://example.test/api", AllowInsecureHttp = true }, transport)) { }
     }
     private static async Task CancellationAndCleanup()
     {
@@ -283,7 +289,7 @@ static class Probe
         using var archive = ZipFile.OpenRead(package);
         string Read(string path) { using var stream = archive.GetEntry(path)!.Open(); using var reader = new StreamReader(stream); return reader.ReadToEnd(); }
         var native = XDocument.Parse(Read("lib/net8.0/Suspect.Csharp.M2.xml")).Descendants("member").Select(e => (string)e.Attribute("name")!).ToHashSet();
-        using var reference = JsonDocument.Parse(Read("docs/reference.json")); var html = Read("docs/index.html");
+        using var reference = JsonDocument.Parse(Read("docs/reference.json")); var html = string.Concat(archive.Entries.Where(e=>e.FullName.StartsWith("docs/",StringComparison.Ordinal)&&e.FullName.EndsWith(".html",StringComparison.Ordinal)).OrderBy(e=>e.FullName,StringComparer.Ordinal).Select(e=>Read(e.FullName)));
         foreach (var symbol in reference.RootElement.GetProperty("symbols").EnumerateArray())
         {
             Check(native.Contains(symbol.GetProperty("xmlId").GetString()!), "Native compiler documentation identity: " + symbol.GetProperty("xmlId"));

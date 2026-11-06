@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::Value;
-use suspect_ir::contract::{Contract, SchemaId};
+use suspect_ir::contract::{Contract, SchemaDialect, SchemaId};
 use suspect_schema::OwnedProgram;
 
 use super::{HttpDiagnostic, diagnostic};
@@ -11,23 +11,33 @@ use super::{HttpDiagnostic, diagnostic};
 /// One source schema, its native name and public codec property.
 #[derive(Debug, Clone)]
 pub struct Symbol {
+    /// Declaring schema.
     pub source: SchemaId,
+    /// Allocated Kotlin declaration name.
     pub name: String,
+    /// Public codec property for `source`.
     pub codec_name: String,
+    /// Kotlin type expression, resolving aliases and nullability.
     pub kotlin_type: String,
     /// Actual native constructor, where this schema declares a data/value class.
     pub constructor: Option<String>,
     pub(crate) index: usize,
+    /// Native representation.
     pub shape: Shape,
+    /// Whether the value domain admits JSON null.
     pub nullable: bool,
 }
 
 /// Allocated property and primary-constructor participation.
 #[derive(Debug, Clone)]
 pub struct Field {
+    /// JSON property name.
     pub wire_name: String,
+    /// Kotlin property name, unique within the class.
     pub name: String,
+    /// Property schema.
     pub schema: SchemaId,
+    /// Whether the property must be present.
     pub required: bool,
     /// Includes Presence for source-optional members.
     pub kotlin_type: String,
@@ -38,35 +48,54 @@ pub struct Field {
 /// Retained native representations, without reparsing emitted Kotlin.
 #[derive(Debug, Clone)]
 pub enum Shape {
+    /// Any JSON value, as `JsonValue`.
     Any,
     /// Schema-bound carrier for shapes whose complete constraints cannot be
     /// projected into static Kotlin fields. Both codec directions remain checked.
     CheckedJson,
+    /// No admissible value (`false` schema).
     Never,
+    /// Only JSON null.
     Null,
+    /// JSON boolean.
     Boolean,
+    /// JSON string.
     String,
+    /// JSON number or integer, as `JsonNumber`.
     Number,
+    /// Another schema's representation under this schema's own codec.
     Alias(SchemaId),
+    /// Homogeneous list; `None` items are `JsonValue`.
     Array(Option<SchemaId>),
+    /// Data class over declared properties.
     Object {
+        /// Declared properties in source order.
         fields: Vec<Field>,
+        /// Treatment of undeclared properties.
         additional: Additional,
     },
+    /// Enum class of `(case name, wire value)` pairs.
     StringEnum(Vec<(String, String)>),
+    /// Sealed union of `(case name, arm schema)` pairs.
     Union {
+        /// Arms in source order.
         variants: Vec<(String, SchemaId)>,
+        /// `oneOf` (exactly one arm matches) rather than `anyOf`.
         exclusive: bool,
     },
 }
 
+/// Treatment of an object's undeclared properties.
 #[derive(Debug, Clone)]
 pub enum Additional {
+    /// Rejected (`additionalProperties: false`).
     Closed,
+    /// Retained as arbitrary JSON values.
     Any,
     /// Keys/values admitted by scoped pattern/unevaluated rules. Stored as exact
     /// JSON, not projected through additionalProperties alone.
     Scoped,
+    /// Retained as values of the `additionalProperties` schema.
     Typed(SchemaId),
 }
 
@@ -78,11 +107,13 @@ pub struct ModelPlan {
 }
 
 impl ModelPlan {
+    /// Declarations in root order.
     #[must_use]
     pub fn symbols(&self) -> &[Symbol] {
         &self.symbols
     }
 
+    /// Declaration for `id`, when planned.
     #[must_use]
     pub fn symbol(&self, id: &SchemaId) -> Option<&Symbol> {
         self.by_id.get(id).map(|&index| &self.symbols[index])
@@ -92,6 +123,11 @@ impl ModelPlan {
         self.symbol(id).expect("admitted Kotlin schema")
     }
 
+    /// Declaration `id` resolves to after following aliases.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `id` or an alias target is not planned.
     pub fn target(&self, id: &SchemaId) -> &Symbol {
         let mut symbol = self.get(id);
         while let Shape::Alias(target) = &symbol.shape {
@@ -128,7 +164,9 @@ pub(crate) fn plan(
     let mut symbols = Vec::new();
     let mut codec_names = BTreeSet::new();
     for id in roots {
-        let raw = contract.schema(id).expect("owned root").raw();
+        // Dialect view: an OAS 3.0 Reference Object exposes only `$ref`.
+        let view = crate::schema_view::raw(contract.schema(id).expect("owned root"));
+        let raw = &*view;
         for key in ["readOnly", "writeOnly"] {
             if raw.get(key) == Some(&Value::Bool(true)) {
                 errors.push(diagnostic(contract, id.child(key), "kotlin-direction-unsupported", "active readOnly/writeOnly requires directional native views, not a neutral model"));
@@ -286,7 +324,10 @@ fn native_type(
 
 fn shape(contract: &Contract, id: &SchemaId) -> Result<(Shape, bool), String> {
     let schema = contract.schema(id).expect("owned schema");
-    let raw = schema.raw();
+    // OAS 3.0 Reference Object siblings are ignored: the view exposes only
+    // `$ref`, so they neither refuse nor alter the alias.
+    let view = crate::schema_view::raw(schema);
+    let raw = &*view;
     if let Some(value) = raw.as_bool() {
         return Ok((if value { Shape::Any } else { Shape::Never }, false));
     }
@@ -364,7 +405,12 @@ fn shape(contract: &Contract, id: &SchemaId) -> Result<(Shape, bool), String> {
         Some(Value::Array(types)) => types.iter().filter_map(Value::as_str).collect(),
         _ => Vec::new(),
     };
-    let nullable = types.contains(&"null") && types.len() > 1;
+    // OAS 3.0 `nullable: true` adds null to the same-object type only; without
+    // a same-object `type` it has no effect (enum/composition still apply).
+    let oas30_nullable = matches!(schema.dialect(), SchemaDialect::OpenApi30)
+        && raw.get("nullable") == Some(&Value::Bool(true))
+        && raw.get("type").is_some_and(Value::is_string);
+    let nullable = types.contains(&"null") && types.len() > 1 || oas30_nullable;
     let nonnull: Vec<_> = types.iter().copied().filter(|t| *t != "null").collect();
     if nonnull.len() > 1 {
         return Err(
@@ -445,7 +491,14 @@ fn shape(contract: &Contract, id: &SchemaId) -> Result<(Shape, bool), String> {
             };
             Shape::Object { fields, additional }
         }
-        None if raw.keys().all(|key| annotation(key)) => Shape::Any,
+        // OAS 3.0 `nullable` without a same-object `type` has no effect.
+        None if raw.keys().all(|key| {
+            annotation(key)
+                || matches!(schema.dialect(), SchemaDialect::OpenApi30) && key == "nullable"
+        }) =>
+        {
+            Shape::Any
+        }
         None => {
             return Err(
                 "assertions without a supported explicit native type cannot become erased JSON"

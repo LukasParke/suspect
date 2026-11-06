@@ -5,29 +5,23 @@ codecs, the portable `OwnedProgram` validator, synchronous and
 `CompletableFuture` HTTP, Maven packages, Javadoc and executable source-bound
 examples. Generated artifacts are rooted under **`java/`**.
 
-The accepted base uses the original M2 fixture, five actual OpenRouter
-operations, independent hand-authored response bytes and all 17 shared runtime
-validation vectors. Toolchains are JDK **21.0.12.1** and **25.0.4.1**, with Maven
-**3.9.16**. Current evidence and exact source hashes are indexed in
-`target/sdk-java-verification/REPORT.md`.
+Native tests use the base fixture, five actual OpenRouter operations, independent
+hand-authored response bytes and all 17 shared runtime validation vectors, on JDK
+**21.0.12.1** and **25.0.4.1** with Maven **3.9.16**.
 
-The HTTP protocol phase adds ordinary OAS 3.0/3.1/3.2 auth/server/parameter,
-status/media/header/link, native bytes, form/multipart and closeable SSE/JSON-lines
-support. Its independent byte consumers, stream controls, typed compatibility
-records and new actual OpenRouter operations are indexed in
-`target/sdk-java-protocol/REPORT.md`. Base and canonical reflection evidence remain
-in their original reports and are reused.
+The HTTP protocol support covers ordinary OAS 3.0/3.1/3.2 auth/server/parameter,
+status/media/header/link, native bytes, form/multipart and closeable
+SSE/JSON-lines, with independent byte consumers, stream controls and typed
+compatibility records.
 
-Scoped schema-v2 adoption is source-driven through
-`tests/java_schema_v2.rs`. The runtime covers all nine instructions, scoped
-successful-evaluation annotations, exact counts, fresh branch/key identities and
-noninvertible failures. Evidence is retained in
-`target/sdk-java-validation-v2/REPORT.md` separately from the HTTP phase.
+Scoped schema-v2 adoption is source-driven through `tests/java_schema_v2.rs`. The
+runtime covers all nine instructions, scoped successful-evaluation annotations,
+exact counts, fresh branch/key identities and noninvertible failures.
 
-The explicit resource/dynamic V3 profile is verified through
+The explicit resource/dynamic V3 profile is tested through
 `tests/java_schema_v3.rs`: all 44 original official dynamic-reference cases,
 independent scope/context/budget/malformed controls and installed SDK operations
-on JDK 21/25. Its records are in `target/sdk-java-validation-v3/REPORT.md`.
+on JDK 21/25.
 
 ## Consumer interface
 
@@ -64,8 +58,10 @@ try (var client = new OpenRouter(HttpRuntime.Options.builder()
 
 The actual source scheme named `apiKey` is HTTP bearer. Its header is
 `Authorization: Bearer <token>`. The source's management-key requirement remains
-in the operation documentation. The SDK applies supplied credentials; it does
-not acquire a token or infer permissions from its spelling.
+in the operation documentation. The SDK applies supplied credentials and does not
+infer permissions from its spelling; it acquires tokens only for OAuth schemes
+under an opt-in `sdk_defaults` policy
+([SDK-GOLDEN-DEFAULTS.md](../../guide/sdk-generation.md)).
 
 A single declared success returns its concrete result directly. Multiple
 successes use a sealed result interface. Declared errors are source/status-bound
@@ -144,16 +140,18 @@ exceptions cannot replace primary resource failures or cancellation.
 `close()` releases owned HTTP, worker and deadline resources and terminates
 in-flight calls. Injected clients retain caller ownership and must disable
 redirects, cookies and implicit authentication. SDK-owned transports also
-disable environment proxy selection. The SDK adds no retries or pagination
-loops.
+disable environment proxy selection. The SDK adds no retries
+([ADR 0025](../../adr/0025-one-http-exchange-per-call.md)); pagination helpers are
+generated only under an `sdk_defaults` pagination policy.
 
 ### Native protocol surface
 
 - Security preserves anonymous/OR/AND choices. Options provide bearer
   `credential`, UTF-8 `basic`, header/query/cookie `apiKey`, and caller-owned
   `authorization` hooks for OAuth2/OIDC. `CredentialContext` exposes original
-  flow/discovery/source metadata and scopes/roles. No login, token refresh or
-  permission inference is built in.
+  flow/discovery/source metadata and scopes/roles. Without an `sdk_defaults`
+  OAuth policy, no login or token refresh is generated; permissions are never
+  inferred.
 - `RequestOptions` adds per-call server URL, source index/name, variable,
   document URL, security alternative, Accept and timeout controls. Relative
   servers resolve against retrieval URLs; file specs require an explicit HTTP
@@ -223,18 +221,16 @@ satisfiable OR alternatives remain usable. RequestOptions retains explicit
 per-call server, deadline and security-alternative controls.
 
 Factories, helper branches, policy files and their documentation are emitted only
-when a successfully bound policy exists. The no-policy whole-artifact fixture
-retains its sealed 44-file hash. Typed capture records `semantic_descriptor()`
+when a successfully bound policy exists; unconfigured packages keep their bytes.
+Typed capture records `semantic_descriptor()`
 without physical provenance; `credential-env.json` retains the source binding.
 Helper names participate in configured-only native name reservation.
 
-The branded actual-source witness uses `ai.openrouter.sdk` and Maven
+The branded actual-source test uses `ai.openrouter.sdk` and Maven
 `ai.openrouter:openrouter-sdk:0.1.0`, with `getCurrentKey` (`GET /key`) as the live
 default and `getCredits` as explicit management mode. Native tests intercept the
 original `https://openrouter.ai/api/v1` server through a controlled JDK transport.
-The compiled support program and exact receipts are indexed in
-`target/sdk-java-credential-env/REPORT.md`; no real account call is part of those
-tests. Maintained selectors are `java_credential_env::native_credential_env_controls`
+No real account call is part of those tests. Maintained selectors are `java_credential_env::native_credential_env_controls`
 and `java_credential_env::native_credential_env_openrouter` on JDK 21/25.
 
 ## Maven, documentation and examples
@@ -266,7 +262,7 @@ The acceptance cases require every selected operation input and retained native
 example to be available, compile, and execute. Native documentation coverage
 checks the actual rendered symbols and field/codec anchors.
 
-## Library API for Main integration
+## Library API
 
 The Java-owned public entry point remains:
 
@@ -312,7 +308,7 @@ Planning does not expose an emission-only `release_ready` claim.
 ### Canonical registration and comparison
 
 `Backend::JavaHttp` is registered under feature `java-sdk`, with profile
-`java-http`, directory `java`, and owner `suspect-sdk:java-http`.
+`java-http` and directory `java`.
 `TargetConfig.package_name` is **Maven `group:artifact`**;
 `TargetConfig.import_name` is the Java package and defaults to the Maven group.
 The canonical client class is **`Client`**. These identities are independent:
@@ -338,13 +334,10 @@ parsing. It also retains sealed media variants, header/part/aggregate builders,
 byte and stream types, range/default wrappers and ownership controls.
 `group_id: None` remains equivalent to an explicit same-group choice for all
 sources/resources except the manifest recording that the option was supplied.
-Phase 3 adds protocol artifacts, so the original 68-file phase-2 hash remains
-historical evidence rather than an invariant on the expanded package.
 
 `tests/java_integration.rs` covers registry/generation, compatibility deltas,
 session warm/configuration reuse, byte preservation and a JVM reflection check
-of the new canonical package. Evidence is in
-`target/sdk-java-integration/REPORT.md`. The accepted JDK/runtime matrix is reused.
+of the canonical package.
 
 ### Exact retained compatibility descriptors
 
@@ -410,62 +403,50 @@ instance and exact interned ordered-resource identity. Lookup/entry visits share
 the ordinary budget, and target annotation scopes are fresh. No runtime schema
 resolution, acquisition or dynamic-annotation inference occurs.
 
-`SchemaResources` and `DynamicSchemaReferences` are enabled in the verified
+`SchemaResources` and `DynamicSchemaReferences` are enabled in the
 `capabilities_v3` path; the existing capability function remains V1/V2. The
-separately verified `DocumentRelativeServers` path continues using physical
+`DocumentRelativeServers` path continues using physical
 retrieval URLs rather than `$self`/`$id`.
 
-## Verification commands and evidence
+## Verification commands
 
 ```sh
-cargo test -p suspect-codegen --features java-sdk --test java_sdk
+cargo test -p suspect-codegen --features java-sdk --test java java_sdk::
 
 JAVA_HOME="$HOME/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS" \
 SUSPECT_MAVEN_BIN="$HOME/.local/share/mise/installs/maven/3.9.16/apache-maven-3.9.16/bin/mvn" \
-cargo test -p suspect-codegen --features java-sdk --test java_sdk \
+cargo test -p suspect-codegen --features java-sdk --test java \
   -- --ignored --nocapture --test-threads=1
 ```
 
 The current-JDK run uses `temurin-25.0.4+101.0.LTS` with the same command. These
 set `JAVA_HOME` per process; no global tool activation is required. Native tests
-retain emitted packages, installed-jar consumers, all logs and failed attempts
-under `target/sdk-java-native/`. Maven's local cache is isolated under
+write emitted packages, installed-jar consumers and logs under
+`target/sdk-java-native/`. Maven's local cache is isolated under
 `target/sdk-java-maven-cache/java/repository`.
 
-The accepted native base was verified during the shared-protocol migration using
-the source-linked, target-only harness at `target/sdk-java-base-verification/java/`:
-**7 planning tests and 4 native package gates on each JDK**, plus warnings-denied
-Clippy in that closure. Its historical canonical build blockers remain recorded
-in `target/sdk-java-verification/REPORT.md`.
-
-The subsequent canonical registration phase passes **15 integration tests** with
-the normal default-feature command:
+Canonical registration is covered by the integration tests:
 
 ```sh
-cargo test -p suspect-codegen --features java-sdk --test java_integration
+cargo test -p suspect-codegen --features java-sdk --test java java_integration::
 ```
 
-A separate new JDK 21 package/metadata gate builds and installs the canonical
-`Client` package at independent Maven coordinates, then checks its compatibility
-descriptors against JVM public members, generic types, constructors, literal
-values, sealed memberships and source-codec bindings. It reuses the accepted
-runtime matrix. Its evidence is in `target/sdk-java-integration/REPORT.md`.
+A JDK 21 package/metadata gate builds and installs the canonical `Client` package
+at independent Maven coordinates, then checks its compatibility descriptors
+against JVM public members, generic types, constructors, literal values, sealed
+memberships and source-codec bindings.
 
-The new protocol-only native gates are:
+The protocol-only native gates are:
 
 ```sh
 JAVA_HOME="$HOME/.local/share/mise/installs/java/temurin-21.0.12+101.0.LTS" \
 cargo test -p suspect-codegen --no-default-features --features java-sdk \
-  --test java_protocol -- --ignored --nocapture --test-threads=1
+  --test java java_protocol:: -- --ignored --nocapture --test-threads=1
 ```
 
 Use the JDK 25 home for the other protocol tier. `SUSPECT_JAVA_PROTOCOL_GATES`
-can narrow ongoing verification to `examples,wire,controls,edges,multipart,lifetime,types,normative`.
-Every native attempt is retained under `target/sdk-java-protocol/java/`. A
-source-linked Java-only harness against Main's reviewed v1 schema snapshot is
-available under `target/sdk-java-protocol/v1-isolation/` during shared schema
-work; its records explicitly identify the isolated dependency. It is not evidence
-of canonical v2/v3 schema admission.
+can narrow a run to a subset of
+`examples,wire,controls,edges,multipart,lifetime,types,normative`.
 
 ## Boundaries and DX assessment
 
@@ -479,20 +460,19 @@ The validator implements complete v1, scoped v2 and indexed-resource v3 instruct
 `OwnedCompiler::compile_v2` preserves ordinary v1 program bytes; scoped examples
 use the shared `plan_protocol_examples_v2` seam. Native intersections/tuples in
 scoped closures use checked immutable JSON carriers. Resource/dynamic admission
-is explicit through the new V3 APIs and canonical dispatch; existing direct
+is explicit through the V3 APIs and canonical dispatch; existing direct
 V1/V2 entrypoints preserve their refusals. Directional projections, legacy
 recursive-reference keywords and custom dialect/vocabulary semantics remain
 source-linked boundaries.
 Safe static-refinement siblings and OAS 3.0 ref/nullable/exclusive-bound context
 are retained. Format is annotation-only in the declared profile.
 
-Compared with the Speakeasy assessment in `SDK-DX-ASSESSMENT.md`, this Java slice
-improves inline names (`CreateKeysRequest`, `GetCreditsResponse`), constructs
-examples through native builders, provides a no-argument credits call, and
-returns a sole success directly. Remaining consumer friction includes flat
-operation names, operation-input wrappers, a custom exact-number type, generic
-scheme-name credential configuration, and source URI/pointer prose rather than
-a polished hosted source-link experience. Automatic auth workflows, hosted
-documentation and distribution maturity remain application/product work. Native
-correctness evidence alone does not establish overall Speakeasy parity or full
-M4/M5 release acceptance.
+The Java package uses readable inline names (`CreateKeysRequest`,
+`GetCreditsResponse`), constructs examples through native builders, provides a
+no-argument credits call, and returns a sole success directly. Remaining consumer
+friction includes flat operation names, operation-input wrappers, a custom
+exact-number type, generic scheme-name credential configuration, and source
+URI/pointer prose rather than a polished hosted source-link experience. Hosted
+documentation and distribution maturity remain application/product work. Drop-in
+parity with published vendor SDKs is not a goal
+([ADR 0030](../../adr/0030-no-drop-in-parity-with-published-sdks.md)).

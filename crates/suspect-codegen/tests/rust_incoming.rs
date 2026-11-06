@@ -7,7 +7,6 @@
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::Command,
     sync::Arc,
 };
 use suspect_codegen::{
@@ -195,10 +194,7 @@ fn the_v3_path_compiles_receipts_and_the_v1_v2_paths_stay_empty() {
         .expect("the declared webhook compiles");
     assert_eq!(new_issue.kind, "webhook");
     assert_eq!(new_issue.decode, "decode_new_issue_webhook");
-    assert_eq!(
-        new_issue.construct.as_deref(),
-        Some("construct_new_issue_response")
-    );
+    assert_eq!(new_issue.construct, "construct_new_issue_response");
     assert_eq!(new_issue.route, "newIssue");
     assert!(!new_issue.expression);
     assert_eq!(new_issue.required_headers, vec!["x-signature".to_owned()]);
@@ -428,7 +424,7 @@ fn cargo_target() -> PathBuf {
 }
 
 fn cargo(command: &str, manifest: &Path, args: &[&str]) -> (bool, String) {
-    let output = Command::new("cargo")
+    let output = suspect_codegen::toolchain::nested_cargo()
         .arg(command)
         .arg("--offline")
         .arg("--quiet")

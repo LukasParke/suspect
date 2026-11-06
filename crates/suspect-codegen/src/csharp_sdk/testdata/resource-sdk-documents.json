@@ -3,7 +3,7 @@
   "documents":[
     {
       "requested":"http://requested.csharp.test/openapi.json",
-      "effective":"http://api.csharp.test/v1/spec/openapi.json",
+      "effective":"https://api.csharp.test/v1/spec/openapi.json",
       "value":{
         "openapi":"3.2.0",
         "$self":"https://logical.csharp.test/catalog/api.json#sdk",
@@ -29,32 +29,32 @@
     },
     {
       "requested":"http://requested.csharp.test/fallback.json",
-      "effective":"http://storage.csharp.test/schema/fallback.json",
+      "effective":"https://storage.csharp.test/schema/fallback.json",
       "value":{"$id":"https://schemas.csharp.test/fallback","$dynamicAnchor":"value","type":"string","examples":["fallback annotation must not become an overriding value"]}
     },
     {
       "requested":"http://requested.csharp.test/value.json",
-      "effective":"http://storage.csharp.test/schema/value.json",
+      "effective":"https://storage.csharp.test/schema/value.json",
       "value":{"$id":"https://schemas.csharp.test/value","$dynamicRef":"https://schemas.csharp.test/fallback#value"}
     },
     {
       "requested":"http://requested.csharp.test/choice.json",
-      "effective":"http://storage.csharp.test/schema/choice.json",
+      "effective":"https://storage.csharp.test/schema/choice.json",
       "value":{"$id":"https://schemas.csharp.test/choice","anyOf":[{"$dynamicRef":"https://schemas.csharp.test/fallback#value"},{"type":"boolean"}]}
     },
     {
       "requested":"http://requested.csharp.test/catalog.json",
-      "effective":"http://storage.csharp.test/schema/catalog.json",
+      "effective":"https://storage.csharp.test/schema/catalog.json",
       "value":{"$id":"https://schemas.csharp.test/catalog","$defs":{"a/b~% #é":{"type":"integer","minimum":9007199254740993,"examples":[9007199254740993]}}}
     },
     {
       "requested":"http://requested.csharp.test/detached.json",
-      "effective":"http://storage.csharp.test/schema/detached.json",
+      "effective":"https://storage.csharp.test/schema/detached.json",
       "value":{"$id":"https://schemas.csharp.test/detached","const":false,"$defs":{"Binding":{"$dynamicAnchor":"value","type":"integer","minimum":7},"start":{"$ref":"https://schemas.csharp.test/base#/$defs/use"}}}
     },
     {
       "requested":"http://requested.csharp.test/base.json",
-      "effective":"http://storage.csharp.test/schema/base.json",
+      "effective":"https://storage.csharp.test/schema/base.json",
       "value":{"$id":"https://schemas.csharp.test/base","$defs":{"value":{"$dynamicAnchor":"value","type":"string"},"use":{"$dynamicRef":"#value"}}}
     }
   ]

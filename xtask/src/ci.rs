@@ -275,14 +275,14 @@ pub(crate) const JOBS: &[Job] = &[
     Job {
         name: "test-macos",
         workflow: CI_YML,
-        commands: "cargo test -p suspect-cli -p suspect-low -p suspect-ref (on macOS)",
+        commands: "cargo test --no-fail-fast -p suspect-cli -p suspect-low -p suspect-ref (on macOS)",
         tools: &[],
         run: |ctx| portable_tests(ctx, "macos"),
     },
     Job {
         name: "test-windows",
         workflow: CI_YML,
-        commands: "cargo test -p suspect-cli -p suspect-low -p suspect-ref (on Windows)",
+        commands: "cargo test --no-fail-fast -p suspect-cli -p suspect-low -p suspect-ref (on Windows)",
         tools: &[],
         run: |ctx| portable_tests(ctx, "windows"),
     },
@@ -374,8 +374,11 @@ fn portable_tests(ctx: &Ctx, os: &str) -> Result<()> {
         println!("(runs on {os} only; this host is {})", std::env::consts::OS);
         return Ok(());
     }
+    // Every failing binary in one run: a platform job is where several
+    // portability failures surface at once.
     ctx.cargo(&[
         "test",
+        "--no-fail-fast",
         "-p",
         "suspect-cli",
         "-p",

@@ -1,7 +1,7 @@
 //! Canonical Contract → Rust models/docs → native package consumers.
 
 use serde_json::{Value, json};
-use std::{path::Path, process::Command, sync::Arc};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::rust_models::{ModelPlan, plan_models};
 use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::WorkspaceBuilder;
@@ -60,7 +60,7 @@ fn native(plan: &ModelPlan, consumer: &str) {
         ("test", false, true),
         ("doc", false, false),
     ] {
-        let mut command = Command::new("cargo");
+        let mut command = suspect_codegen::toolchain::nested_cargo();
         let manifest = if use_consumer {
             consumer_package.join("Cargo.toml")
         } else {

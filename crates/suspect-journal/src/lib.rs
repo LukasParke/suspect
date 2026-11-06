@@ -11,6 +11,8 @@
 //! Cassettes are append-only, streamable, diffable in git, and serve replay,
 //! offline test transports, and environment drift comparison.
 
+#![deny(missing_docs)]
+
 use std::collections::BTreeSet;
 use std::io::Write as _;
 use std::sync::Mutex;
@@ -111,7 +113,8 @@ pub struct TrafficRecord {
     pub correlation: String,
     /// HTTP method.
     pub method: String,
-    /// Full URL as requested.
+    /// URL as requested, with userinfo passwords and secret query
+    /// parameter values redacted.
     pub url: String,
     /// Response status; `None` for transport failures.
     pub status: Option<u16>,
@@ -279,18 +282,32 @@ impl Sink for VecSink {
 
 /// Credential scrubber applied before anything reaches a sink.
 ///
-/// Two denylists: header names and JSON body keys (both case-insensitive).
-/// Values are replaced with `[redacted]`; structure is preserved so diffs
-/// stay meaningful.
-#[derive(Debug, Clone, Default)]
+/// Two denylists: exact header names, and secret-name suffixes matched
+/// against header names, JSON body keys and URL query parameter names.
+/// Names are normalized before matching (lowercased, `-`/`_` removed), and
+/// a name is secret when its normalized form ends with a denylisted
+/// suffix: `access_token`, `X-Auth-Token` and `client_secret` match, while
+/// `max_tokens` and `token_type` do not. Values are replaced with
+/// `[redacted]`; structure is preserved so diffs stay meaningful.
+#[derive(Debug, Clone)]
 pub struct Redactor {
     headers: BTreeSet<String>,
-    json_keys: BTreeSet<String>,
+    secret_suffixes: BTreeSet<String>,
+}
+
+impl Default for Redactor {
+    /// The same denylists as [`Redactor::new`]; a redactor never starts
+    /// out redacting nothing.
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Redactor {
-    /// Default denylist: `authorization`, `cookie`, `set-cookie`,
-    /// `proxy-authorization`, `x-api-key`.
+    /// Default denylists. Headers: `authorization`, `cookie`,
+    /// `set-cookie`, `proxy-authorization`. Secret suffixes: `password`,
+    /// `passwd`, `token`, `secret`, `apikey`, `privatekey`, `credential`,
+    /// `credentials`, `signature`, `authorization`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -299,26 +316,46 @@ impl Redactor {
                 "cookie",
                 "set-cookie",
                 "proxy-authorization",
-                "x-api-key",
             ]
             .into_iter()
             .map(str::to_owned)
             .collect(),
-            json_keys: ["password", "token", "secret", "api_key"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
+            secret_suffixes: [
+                "password",
+                "passwd",
+                "token",
+                "secret",
+                "apikey",
+                "privatekey",
+                "credential",
+                "credentials",
+                "signature",
+                "authorization",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
         }
     }
 
-    /// Adds one header name to the denylist (matched case-insensitively).
+    /// Adds one header name to the exact-match denylist (case-insensitive).
     pub fn deny_header(&mut self, key: &str) {
         self.headers.insert(key.to_ascii_lowercase());
     }
 
-    /// Adds one JSON key to the body denylist (matched case-insensitively).
+    /// Adds one secret-name suffix, matched against header names, JSON
+    /// keys and query parameter names after normalization.
     pub fn deny_json_key(&mut self, key: &str) {
-        self.json_keys.insert(key.to_lowercase());
+        self.secret_suffixes.insert(normalize(key));
+    }
+
+    /// Whether a header name, JSON key or query parameter name is secret.
+    #[must_use]
+    pub fn is_secret_name(&self, name: &str) -> bool {
+        let normalized = normalize(name);
+        self.secret_suffixes
+            .iter()
+            .any(|suffix| normalized.ends_with(suffix.as_str()))
     }
 
     /// Redacts matching headers.
@@ -327,13 +364,47 @@ impl Redactor {
         headers
             .iter()
             .map(|(k, v)| {
-                if self.headers.contains(&k.to_ascii_lowercase()) {
+                if self.headers.contains(&k.to_ascii_lowercase()) || self.is_secret_name(k) {
                     (k.clone(), REDACTED.to_owned())
                 } else {
                     (k.clone(), v.clone())
                 }
             })
             .collect()
+    }
+
+    /// Redacts a URL's userinfo password and the values of secret query
+    /// parameters (`?api_key=…`, `&access_token=…`). Everything else,
+    /// including the fragment, is kept byte for byte.
+    #[must_use]
+    pub fn url(&self, url: &str) -> String {
+        let (before_fragment, fragment) = match url.split_once('#') {
+            Some((head, tail)) => (head, Some(tail)),
+            None => (url, None),
+        };
+        let (base, query) = match before_fragment.split_once('?') {
+            Some((head, tail)) => (head, Some(tail)),
+            None => (before_fragment, None),
+        };
+        let mut out = redact_userinfo(base);
+        if let Some(query) = query {
+            out.push('?');
+            let pairs: Vec<String> = query
+                .split('&')
+                .map(|pair| match pair.split_once('=') {
+                    Some((name, _)) if self.is_secret_name(&percent_decode_lossy(name)) => {
+                        format!("{name}={REDACTED}")
+                    }
+                    _ => pair.to_owned(),
+                })
+                .collect();
+            out.push_str(&pairs.join("&"));
+        }
+        if let Some(fragment) = fragment {
+            out.push('#');
+            out.push_str(fragment);
+        }
+        out
     }
 
     /// Redacts matching keys anywhere inside a JSON body. Non-JSON bodies
@@ -343,34 +414,92 @@ impl Redactor {
         let Ok(mut value) = serde_json::from_str::<serde_json::Value>(body) else {
             return body.to_owned();
         };
-        Self::redact_value(&mut value, &self.json_keys);
+        self.json_value(&mut value);
         serde_json::to_string(&value).unwrap_or_else(|_| body.to_owned())
     }
 
     /// Redacts matching keys anywhere inside a JSON value, in place.
     pub fn json_value(&self, value: &mut serde_json::Value) {
-        Self::redact_value(value, &self.json_keys);
-    }
-
-    fn redact_value(value: &mut serde_json::Value, keys: &BTreeSet<String>) {
         match value {
             serde_json::Value::Object(map) => {
                 for (k, v) in map.iter_mut() {
-                    if keys.contains(&k.to_lowercase()) {
+                    if self.is_secret_name(k) {
                         *v = serde_json::Value::String(REDACTED.to_owned());
                     } else {
-                        Self::redact_value(v, keys);
+                        self.json_value(v);
                     }
                 }
             }
             serde_json::Value::Array(items) => {
                 for item in items {
-                    Self::redact_value(item, keys);
+                    self.json_value(item);
                 }
             }
             _ => {}
         }
     }
+}
+
+/// Lowercases and drops `-`/`_` so `X-Api-Key`, `api_key` and `apiKey`
+/// compare equal.
+fn normalize(name: &str) -> String {
+    name.chars()
+        .filter(|c| *c != '-' && *c != '_')
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Replaces the password in `scheme://user:password@host…` with
+/// `[redacted]`; returns the input unchanged when there is none.
+fn redact_userinfo(base: &str) -> String {
+    let Some(scheme_end) = base.find("://") else {
+        return base.to_owned();
+    };
+    let authority_start = scheme_end + 3;
+    let authority_end = base[authority_start..]
+        .find('/')
+        .map_or(base.len(), |i| authority_start + i);
+    let authority = &base[authority_start..authority_end];
+    let Some(at) = authority.rfind('@') else {
+        return base.to_owned();
+    };
+    let userinfo = &authority[..at];
+    let Some(colon) = userinfo.find(':') else {
+        return base.to_owned();
+    };
+    format!(
+        "{}{}:{REDACTED}{}",
+        &base[..authority_start],
+        &userinfo[..colon],
+        &base[authority_start + at..]
+    )
+}
+
+/// Percent-decodes a query parameter name for matching only; invalid
+/// escapes are kept literally.
+fn percent_decode_lossy(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex(bytes[i + 1]), hex(bytes[i + 2]))
+        {
+            out.push(hi * 16 + lo);
+            i += 3;
+        } else {
+            out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex(byte: u8) -> Option<u8> {
+    (byte as char)
+        .to_digit(16)
+        .and_then(|d| u8::try_from(d).ok())
 }
 
 /// Placeholder substituted for redacted values.
@@ -412,6 +541,7 @@ impl Journal {
         match &mut record {
             Record::Traffic(t) => {
                 t.id = self.seq;
+                t.url = self.redactor.url(&t.url);
                 t.request_headers = self.redactor.headers(&t.request_headers);
                 t.response_headers = self.redactor.headers(&t.response_headers);
             }
@@ -437,13 +567,9 @@ impl Journal {
         }));
     }
 
-    /// Convenience for [`Record::Traffic`] with automatic redaction.
-    pub fn traffic(&mut self, mut t: TrafficRecord) {
-        t.request_headers = self.redactor.headers(&t.request_headers);
-        t.response_headers = self.redactor.headers(&t.response_headers);
-        if t.id == 0 && self.seq > 0 {
-            t.id = self.seq;
-        }
+    /// Convenience for [`Record::Traffic`]. [`Journal::emit`] assigns the
+    /// sequence id and redacts the URL and headers.
+    pub fn traffic(&mut self, t: TrafficRecord) {
         self.emit(Record::Traffic(t));
     }
 

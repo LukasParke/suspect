@@ -68,7 +68,11 @@ private suspend fun wire() {
                     val prefix="\uFEFF: comment\r\nevent: message\r\nid: a\r\nretry: 0007\r\nunknown: ignored\r\ndata: {\"literal\":1}\r\ndata: 😀\r\n\r\n".toByteArray()
                     for(byte in prefix){exchange.responseBody.write(byte.toInt());exchange.responseBody.flush()}
                     streamEntered.complete(Unit)
-                    try {repeat(512){exchange.responseBody.write("data: later\n\n".toByteArray());exchange.responseBody.flush();Thread.sleep(5)}}
+                    // Write well past any socket buffer (8 KiB events for ~3 s), so a
+                    // client that closed early surfaces as a write failure on every
+                    // platform; small writes can all fit in Linux buffers.
+                    val later="data: ${"x".repeat(8192)}\n\n".toByteArray()
+                    try {repeat(600){exchange.responseBody.write(later);exchange.responseBody.flush();Thread.sleep(5)}}
                     catch(_:java.io.IOException){streamClosed.countDown()}
                     return@createContext
                 }
@@ -214,6 +218,11 @@ private suspend fun resources() {
     val transport=Transport{calls.incrementAndGet();HttpResponse(200,mapOf("Content-Type" to listOf("application/json")),REPLY.toByteArray())}
     Client(transport=transport).use{client->fails<SdkException>{client.basic()};fails<SdkException>{client.secure(requestOptions=RequestOptions(securityAlternative=0))}}
     Client(Credentials(basicAuth=BasicCredentials("user\n","password")),transport).use{client->check(fails<SdkException>{client.basic()}.kind==FailureKind.AUTHENTICATION)}
+    // ADR 0035: a declared plain-HTTP server keeps its scheme; a non-loopback HTTP override needs the opt-in.
+    val seen=mutableListOf<String>();val recording=Transport{seen.add(it.url.toString());HttpResponse(200,mapOf("Content-Type" to listOf("application/json")),REPLY.toByteArray())}
+    Client(transport=recording,options=ClientOptions(serverIndex=2)).use{client->client.servers();check(seen.single()=="http://plain.example.test/api/servers")}
+    check(runCatching{ClientOptions(serverUrl=URI("http://plain.example.test/api"))}.isFailure)
+    Client(transport=recording,options=ClientOptions(serverUrl=URI("http://plain.example.test/api"),allowInsecureHttp=true)).use{client->client.servers();check(seen.last()=="http://plain.example.test/api/servers")}
     check(calls.get()==0)
     var producerClosed=false
     Client(transport=transport,options=ClientOptions(maxRequestBytes=128,maxStreamItemBytes=64)).use{client->

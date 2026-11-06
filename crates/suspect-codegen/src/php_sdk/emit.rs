@@ -1,12 +1,12 @@
 //! PHP source, Composer package and native documentation from one admitted plan.
 
 use super::{
-    ModelCore as Plan, PhpConfig, PlannedOperation,
+    ModelCore as Plan, PhpConfig,
     models::{Extras, Field, Initializer, Node, Shape, union},
 };
 use crate::OutFile;
 use std::{collections::BTreeMap, fmt::Write};
-use suspect_ir::contract::{ParameterLocation, SchemaId};
+use suspect_ir::contract::SchemaId;
 use suspect_schema::{OwnedProgram, ProgramInstruction, ProgramSource};
 
 #[path = "docs.rs"]
@@ -41,85 +41,33 @@ pub(super) fn validation(program: &OwnedProgram, config: &PhpConfig) -> Vec<OutF
     files
 }
 
-pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
-    let mut files = Vec::new();
-    let mut add = |path: &str, content: String| {
-        files.push(OutFile {
-            path: format!("php/{path}"),
-            content,
-        })
-    };
-    for (path, text) in [
-        ("src/Number.php", include_str!("Number.php")),
-        ("src/Json.php", include_str!("Json.php")),
-        ("src/Validation.php", include_str!("Validation.php")),
-        ("src/ValidationV2.php", include_str!("ValidationV2.php")),
-        (
-            "src/ValidationResources.php",
-            include_str!("ValidationResources.php"),
-        ),
-        ("src/Http.php", include_str!("Http.php")),
-        ("src/Protocol.php", include_str!("Protocol.php")),
-        ("src/Stream.php", include_str!("Stream.php")),
-        ("src/Parts.php", include_str!("Parts.php")),
-        ("src/Transport.php", include_str!("Transport.php")),
-    ] {
-        add(path, text.replace("__NAMESPACE__", &plan.config.namespace));
+/// `Protocol.php`. Attribution is decided at generation time, not by
+/// comparing generated constants at runtime (PHPStan at max level rejects a
+/// condition on a constant as always true/false): without a descriptor the
+/// automatic User-Agent and its application-identifier check are left out.
+fn protocol_source(attribution: bool) -> String {
+    let source = include_str!("Protocol.php");
+    if attribution {
+        return source.to_owned();
     }
-    let indices: BTreeMap<_, _> = plan
-        .program
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(i, n)| ((n.source.document.clone(), n.source.pointer.clone()), i))
-        .collect();
-    let context = Context { plan, indices };
-    let runtime = RuntimeContext {
-        program: &plan.program,
-        config: &plan.config,
-    };
-    add("src/RuntimeConfig.php", runtime.config());
-    add("src/ValidationProgram.php", runtime.validation_program());
-    add("src/Models.php", context.models());
-    add("src/Codecs.php", context.codecs());
-    add("src/Operations.php", context.operations());
-    add("src/Client.php", context.client());
-    let manifest = serde_json::json!({
-        "name": plan.config.package_name,
-        "version": plan.config.package_version,
-        "description": "Native source-generated PHP SDK with exact JSON codecs and bounded validation",
-        "type": "library",
-        "license": "proprietary",
-        "require": {"php": "^8.3", "ext-json": "*"},
-        "suggest": {"ext-curl": "Required by the default CurlTransport; custom transports may supply their own HTTP implementation."},
-        "autoload": {"classmap": ["src/"]},
-        "require-dev": {"phpstan/phpstan": "2.2.13"},
-        "scripts": {"typecheck": "phpstan analyse --no-progress", "examples": ["@php examples/codecs.php", "@php examples/client.php", "@php examples/quickstart.php"]},
-        "config": {"allow-plugins": false, "sort-packages": true},
-        "archive": {"exclude": ["/vendor", "/composer.lock", "/build", "/.git"]},
-    });
-    add(
-        "composer.json",
-        format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap()),
-    );
-    add("phpstan.neon", "parameters:\n    level: max\n    phpVersion: 80300\n    treatPhpDocTypesAsCertain: false\n    paths:\n        - src\n        - examples\n    tmpDir: build/phpstan\n".into());
-    add("README.md", context.readme());
-    add("docs/index.html", context.reference());
-    add("docs/coverage.json", context.coverage());
-    add(
-        "docs/examples.json",
-        crate::http_examples::manifest(&plan.examples),
-    );
-    add(
-        "docs/examples.md",
-        crate::http_examples::markdown(&plan.examples, "composer examples"),
-    );
-    add("examples/codecs.php", context.codec_examples());
-    add("examples/client.php", context.client_examples());
-    add("examples/quickstart.php", context.quickstart_example());
-    add("examples/autoload.php", "<?php\ndeclare(strict_types=1);\n// An installed-package consumer may explicitly supply its own Composer loader.\nrequire getenv('SUSPECT_SDK_AUTOLOAD') ?: dirname(__DIR__) . '/vendor/autoload.php';\n".into());
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    files
+    let start = source
+        .find("    /** Validate one caller-supplied application identifier")
+        .expect("Protocol.php declares applicationIdentity");
+    let explicit = "        if ($options->userAgent !== null) { return $options->userAgent === '' ? null : $options->userAgent; }\n";
+    let body = source[start..].find(explicit).expect("userAgent explicit branch") + start + explicit.len();
+    // The function's closing brace: a line that is exactly four spaces and `}`.
+    let end = source[body..].find("\n    }\n").expect("userAgent end") + body + 1;
+    let user_agent_doc = source[start..]
+        .find("    /** ua/v1 attribution:")
+        .expect("userAgent doc")
+        + start;
+    let mut out = String::with_capacity(source.len());
+    out.push_str(&source[..start]);
+    out.push_str("    /** Without generated attribution only an explicit caller User-Agent is sent;\n     * an explicit empty value also sends none. */\n");
+    out.push_str(&source[source[user_agent_doc..].find("    public static function userAgent").unwrap() + user_agent_doc..body]);
+    out.push_str("        return null;\n");
+    out.push_str(&source[end..]);
+    out
 }
 
 struct Context<'a> {
@@ -130,8 +78,9 @@ struct Context<'a> {
 pub(super) fn model_assets(plan: &Plan) -> Vec<OutFile> {
     let mut files = validation(&plan.program, &plan.config);
     for (name, text) in [
+        // (Protocol.php depends on whether attribution is configured.)
         ("Http.php", include_str!("Http.php")),
-        ("Protocol.php", include_str!("Protocol.php")),
+        ("Protocol.php", protocol_source(plan.config.attribution.is_some()).as_str()),
         ("Stream.php", include_str!("Stream.php")),
         ("Parts.php", include_str!("Parts.php")),
         ("Transport.php", include_str!("Transport.php")),
@@ -962,258 +911,7 @@ impl Context<'_> {
         }
         out
     }
-
-    fn operations(&self) -> String {
-        let mut out = self.head();
-        for op in &self.plan.operations {
-            doc(
-                &mut out,
-                &format!(
-                    "Arguments for {}. {}\nSource: {}#{}",
-                    op.operation_id,
-                    op.wire.description,
-                    op.source.document(),
-                    op.source.pointer()
-                ),
-                "",
-            );
-            writeln!(out, "final class {}\n{{\n    /**", op.input_type).unwrap();
-            let args = self.arguments(op);
-            for (name, id, required) in &args {
-                let description = op
-                    .parameters
-                    .iter()
-                    .find(|p| p.name == *name)
-                    .map(|p| p.description.as_str())
-                    .or_else(|| {
-                        op.body
-                            .as_ref()
-                            .filter(|b| b.name == *name)
-                            .map(|b| b.description.as_str())
-                    })
-                    .unwrap_or_default();
-                writeln!(
-                    out,
-                    "     * @param {} ${name} {}",
-                    self.field_type(id, *required, true),
-                    comment_inline(description)
-                )
-                .unwrap();
-            }
-            out.push_str("     */\n    public function __construct(\n");
-            for (name, id, required) in &args {
-                writeln!(
-                    out,
-                    "        public {} ${name}{},",
-                    self.field_type(id, *required, false),
-                    if *required { "" } else { " = Absent::Value" }
-                )
-                .unwrap();
-            }
-            out.push_str("    ) {}\n}\n\n");
-            writeln!(out, "/** Documented API failures for {}. */\nabstract class {} extends ApiError\n{{\n    public function __construct(HttpResponse $response)\n    {{\n        parent::__construct({}, {}, $response);\n    }}\n}}\n", comment_inline(&op.operation_id), op.error_type, php(&op.operation_id), php(&format!("{}#{}", op.source.document(), op.source.pointer()))).unwrap();
-            for response in &op.wire.responses {
-                let success = (200..300).contains(&response.status);
-                let name = if success {
-                    &op.success_types
-                } else {
-                    &op.error_types
-                }
-                .iter()
-                .find(|(status, _)| *status == response.status)
-                .unwrap()
-                .1
-                .as_str();
-                let ty = self.ty(&response.schema, false);
-                let doc_ty = self.ty(&response.schema, true);
-                doc(
-                    &mut out,
-                    &format!(
-                        "{} exact status {}.\n{}\nSource: {}#{}",
-                        op.operation_id,
-                        response.status,
-                        op.responses
-                            .iter()
-                            .find(|r| r.status == response.status)
-                            .expect("allocated response")
-                            .description,
-                        response.source.document(),
-                        response.source.pointer()
-                    ),
-                    "",
-                );
-                if success {
-                    writeln!(out, "final readonly class {name}\n{{\n    public const STATUS = {};\n    /** @param {doc_ty} $body */\n    public function __construct(public {ty} $body, public HttpResponse $response) {{}}\n}}\n", response.status).unwrap();
-                } else {
-                    writeln!(out, "final class {name} extends {}\n{{\n    public const STATUS = {};\n    /** @param {doc_ty} $body */\n    public function __construct(public readonly {ty} $body, HttpResponse $response)\n    {{\n        parent::__construct($response);\n    }}\n}}\n", op.error_type, response.status).unwrap();
-                }
-            }
-        }
-        out
-    }
-
-    fn arguments<'a>(&self, op: &'a PlannedOperation) -> Vec<(&'a str, &'a SchemaId, bool)> {
-        let mut args: Vec<_> = op
-            .parameters
-            .iter()
-            .map(|p| (p.name.as_str(), &p.schema, p.required))
-            .collect();
-        if let Some(body) = &op.wire.body {
-            args.push(("body", &body.schema, body.required));
-        }
-        args.sort_by_key(|(_, _, required)| !*required);
-        args
-    }
-
-    fn client(&self) -> String {
-        let mut out = self.head();
-        out.push_str("/** Native operation seam for application dependency injection. */\ninterface ClientInterface\n{\n");
-        for op in &self.plan.operations {
-            let result = if op.success_types.is_empty() {
-                "never".into()
-            } else {
-                union(
-                    op.success_types
-                        .iter()
-                        .map(|(_, name)| name.clone())
-                        .collect(),
-                )
-            };
-            let default = if self.arguments(op).iter().any(|(_, _, required)| *required) {
-                "".into()
-            } else {
-                format!(" = new {}()", op.input_type)
-            };
-            writeln!(out, "    public function {}({} $input{default}, ?RequestOptions $options = null): {result};", op.method_name, op.input_type).unwrap();
-        }
-        out.push_str("}\n\n/** Synchronous source-selected client. One invocation sends once. */\nfinal class Client implements ClientInterface\n{\n    /** Credentials and transport are explicit client-wide dependencies. */\n    public function __construct(\n        private readonly Credentials $credentials,\n        private readonly Transport $transport = new CurlTransport(),\n        private readonly ClientOptions $options = new ClientOptions(),\n    ) {}\n");
-        for op in &self.plan.operations {
-            let result = if op.success_types.is_empty() {
-                "never".into()
-            } else {
-                union(
-                    op.success_types
-                        .iter()
-                        .map(|(_, name)| name.clone())
-                        .collect(),
-                )
-            };
-            let mut tags = vec!["@throws SdkError".to_owned()];
-            tags.extend(
-                op.error_types
-                    .iter()
-                    .map(|(_, name)| format!("@throws {name}")),
-            );
-            doc_tags(
-                &mut out,
-                &format!(
-                    "{}\nSource: {}#{}",
-                    op.wire.description,
-                    op.source.document(),
-                    op.source.pointer()
-                ),
-                "    ",
-                &tags,
-            );
-            let default = if self.arguments(op).iter().any(|(_, _, required)| *required) {
-                "".into()
-            } else {
-                format!(" = new {}()", op.input_type)
-            };
-            writeln!(out, "    public function {}({} $input{default}, ?RequestOptions $options = null): {result}\n    {{\n        try {{\n        $call = new CallContext($this->options, $options);\n        $context = new CodecContext($call->control);\n        $path = {};\n        $query = [];\n        $queryBytes = 0;\n        $body = null;", op.method_name, op.input_type, php(&op.wire.path)).unwrap();
-            if !self.arguments(op).is_empty() {
-                out.push_str("        try {\n");
-            }
-            for p in &op.parameters {
-                let name = &p.name;
-                let indent = if p.required {
-                    "            "
-                } else {
-                    "                "
-                };
-                if !p.required {
-                    writeln!(out, "            if ($input->{name} !== Absent::Value) {{").unwrap();
-                }
-                writeln!(
-                    out,
-                    "{indent}$value = Codecs::to{}($input->{name}, $context);",
-                    self.name(&p.schema)
-                )
-                .unwrap();
-                if p.location == ParameterLocation::Path {
-                    writeln!(out, "{indent}$path = str_replace({}, Wire::segment($value->asString(), $this->options->maxRequestBytes), $path);", php(&format!("{{{}}}", p.wire_name))).unwrap();
-                } else {
-                    writeln!(out, "{indent}Wire::query($query, $queryBytes, {}, $value, {}, {}, $this->options->maxRequestBytes);", php(&p.wire_name), boolean(p.array), boolean(p.explode)).unwrap();
-                }
-                if !p.required {
-                    out.push_str("            }\n");
-                }
-            }
-            if let Some(body) = &op.wire.body {
-                let assignment = format!(
-                    "$body = Codecs::to{}($input->body, $context)->toJson(new JsonLimits(maxBytes: $this->options->maxRequestBytes, control: $call->control));",
-                    self.name(&body.schema)
-                );
-                if body.required {
-                    writeln!(out, "            {assignment}").unwrap();
-                } else {
-                    writeln!(
-                        out,
-                        "            if ($input->body !== Absent::Value) {{ {assignment} }}"
-                    )
-                    .unwrap();
-                }
-            }
-            if !self.arguments(op).is_empty() {
-                out.push_str("        } catch (ValidationError|JsonError|\\Error $e) {\n            throw new SdkError('request_validation', 'request does not satisfy the source contract', previous: $e);\n        }\n");
-            }
-            writeln!(out, "        $response = $this->exchange({}, {}, {}, $path, $query, $body, $call);\n        $context = new CodecContext($call->control);\n        switch ($response->status) {{", php(&op.wire.method), php(&op.wire.server), php(&op.wire.security_scheme_name)).unwrap();
-            for response in &op.wire.responses {
-                let success = (200..300).contains(&response.status);
-                let name = if success {
-                    &op.success_types
-                } else {
-                    &op.error_types
-                }
-                .iter()
-                .find(|(s, _)| *s == response.status)
-                .unwrap()
-                .1
-                .as_str();
-                writeln!(out, "            case {}:\n                Wire::jsonResponse($response, $call->maxCaptureBytes);\n                try {{ $decoded = Codecs::decode{}($response->body, $context); }}\n                catch (ValidationError|JsonError|\\Error $e) {{ throw new SdkError('response_validation', 'response does not satisfy the declared schema', $response->capture($call->maxCaptureBytes), $e); }}\n                $call->check();\n                {} new {name}($decoded, $response);", response.status, self.name(&response.schema), if success { "return" } else { "throw" }).unwrap();
-            }
-            writeln!(out, "            default: throw new SdkError('unexpected_status', 'response status is not declared by this operation', $response->capture($call->maxCaptureBytes));\n        }}\n        }} catch (SdkError $e) {{ throw $e->at({}, {}); }}\n    }}\n", php(&op.operation_id), php(&format!("{}#{}", op.source.document(), op.source.pointer()))).unwrap();
-        }
-        out.push_str(CLIENT_EXCHANGE);
-        out.push_str("}\n");
-        out
-    }
 }
-
-const CLIENT_EXCHANGE: &str = r#"    /** @param list<string> $query */
-    private function exchange(string $method, string $server, string $scheme, string $path, array $query, ?string $body, CallContext $call): HttpResponse
-    {
-        $call->check();
-        $server = $this->options->serverUrl ?? $server;
-        Wire::server($server);
-        $url = rtrim($server, '/') . $path . ($query === [] ? '' : '?' . implode('&', $query));
-        if (strlen($url) > $this->options->maxRequestBytes || ($body !== null && strlen($body) > $this->options->maxRequestBytes)) {
-            throw new SdkError('resource_limit', 'request URL/body exceeds byte ceiling');
-        }
-        $headers = ['Accept' => 'application/json', 'Accept-Encoding' => 'identity', 'Authorization' => $this->credentials->bearer($scheme)];
-        if ($body !== null) { $headers['Content-Type'] = 'application/json'; }
-        Wire::headers($headers, $this->options->maxHeaderBytes);
-        $request = new HttpRequest($method, $url, $headers, $body, $call->remainingMilliseconds(), $call->maxResponseBytes, $this->options->maxHeaderBytes, $call->maxCaptureBytes, $call->control);
-        try { $response = $this->transport->send($request); }
-        catch (SdkError $e) { throw $e; }
-        catch (\Throwable $e) { throw new SdkError('transport', 'custom transport failed', previous: $e); }
-        try { $call->check(); }
-        catch (SdkError $e) { throw $e->withCapture($response->capture($call->maxCaptureBytes, true)); }
-        if (strlen($response->body) > $call->maxResponseBytes || $response->headerBytes > $this->options->maxHeaderBytes) { throw new SdkError('resource_limit', 'transport returned an oversized response', $response->capture($call->maxCaptureBytes, true)); }
-        Wire::contentEncoding($response, $call->maxCaptureBytes);
-        return $response;
-    }
-"#;
 
 fn sorted_fields(fields: &[Field]) -> Vec<&Field> {
     let mut fields: Vec<_> = fields.iter().filter(|f| f.initializer.is_none()).collect();
@@ -1293,4 +991,22 @@ fn doc_tags(out: &mut String, text: &str, indent: &str, tags: &[String]) {
         writeln!(out, "{indent} * {tag}").unwrap();
     }
     writeln!(out, "{indent} */").unwrap();
+}
+
+#[cfg(test)]
+mod protocol_source_tests {
+    use super::protocol_source;
+
+    #[test]
+    fn attribution_is_decided_at_generation_time() {
+        let attributed = protocol_source(true);
+        assert!(attributed.contains("'suspect/'.RuntimeConfig::ATTRIBUTION_SUSPECT_VERSION"));
+        assert!(!attributed.contains("$version"));
+        let plain = protocol_source(false);
+        assert!(!plain.contains("applicationIdentity"), "{plain}");
+        assert!(!plain.contains("ATTRIBUTION_"));
+        let start = plain.find("public static function userAgent").unwrap();
+        let body = &plain[start..start + plain[start..].find("\n    }\n").unwrap()];
+        assert!(body.contains("$options->userAgent") && body.ends_with("return null;"), "{body}");
+    }
 }

@@ -1,6 +1,6 @@
 //! Per-rule profiler for the stripe corpus.
 //!
-//! Run: `SUSPECT_PROFILE=1 cargo run --release -p suspect-lint --example profile_stripe`
+//! Run: `SUSPECT_PROFILE=1 cargo run --release -p suspect-lint --example lint_profile_stripe`
 
 use std::path::PathBuf;
 use std::time::Instant;

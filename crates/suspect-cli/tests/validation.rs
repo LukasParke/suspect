@@ -114,7 +114,9 @@ fn referenced_json_syntax_errors_keep_their_source_file() {
             .iter()
             .any(|finding| finding["code"] == "syntax-error"
                 && finding["line"] == 1
-                && finding["file"].as_str().unwrap().ends_with("/shared.json")),
+                && std::path::Path::new(finding["file"].as_str().unwrap())
+                    .file_name()
+                    .is_some_and(|name| name == "shared.json")),
         "{findings}"
     );
 }

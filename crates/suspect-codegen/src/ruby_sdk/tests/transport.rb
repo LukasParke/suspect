@@ -102,9 +102,14 @@ end
 [nil, false, '30', 0, -1, Float::NAN, Float::INFINITY, 86_401].each do |timeout|
   reject(ArgumentError) { Client.new(auth: {'apiKey' => 'token'}, timeout: timeout) }
 end
-['https://user:secret@example.com', 'https://example.com?x=1', 'https://example.com#x', 'https://example.com/../a', 'https://example.com/%2e%2E/a', "https://example.com\n", 'https://example.com/invalid%'].each do |url|
+['https://user:secret@example.com', 'https://example.com?x=1', 'https://example.com#x', 'https://example.com/../a', 'https://example.com/./a', 'http://example.com/a', 'https://example.com:0/a', "https://example.com/caf\u00e9", "https://example.com\n", 'https://example.com/invalid%'].each do |url|
   reject(ArgumentError) { Client.new(auth: {'apiKey' => 'token'}, server_url: url) }
 end
+# ADR 0035: encoded octets are opaque path data; plain HTTP is valid to loopback.
+['https://example.com/%2e%2E/a', 'https://example.com/a%2fb', 'http://localhost:8080/a', 'http://[::1]/a'].each do |url|
+  Client.new(auth: {'apiKey' => 'token'}, server_url: url)
+end
+Client.new(auth: {'apiKey' => 'token'}, server_url: 'http://example.com/a', allow_insecure_http: true)
 transport = ProbeTransport.new(body: WIDGET)
 client = Client.new(auth: {}, transport: transport)
 error = reject(RequestError) { client.get_widget(widget_id: 'x') }

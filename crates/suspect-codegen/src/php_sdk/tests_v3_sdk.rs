@@ -81,8 +81,7 @@ pub(super) fn verify() {
     )
     .unwrap();
     run(
-        Command::new(php())
-            .arg("-n")
+        php_command()
             .arg(phpstan())
             .args([
                 "analyse",
@@ -97,8 +96,8 @@ pub(super) fn verify() {
     );
     for name in ["codecs", "client", "quickstart"] {
         run(
-            Command::new(php())
-                .args(["-n", "-d", "error_reporting=-1"])
+            php_command()
+                .args(["-d", "error_reporting=-1"])
                 .arg(installed.join(format!("examples/{name}.php")))
                 .env("SUSPECT_SDK_AUTOLOAD", consumer.join("vendor/autoload.php"))
                 .current_dir(&consumer),
@@ -114,8 +113,8 @@ pub(super) fn verify() {
     .unwrap();
     typecheck(&root, &consumer, &["positive.php"], "consumer-types");
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "positive.php"])
             .current_dir(&consumer),
         &root,
         "native-sdk",
@@ -138,16 +137,15 @@ pub(super) fn verify() {
     )
     .unwrap();
     run(
-        Command::new(php())
-            .args(["-n", "-d", "error_reporting=-1", "docs.php"])
+        php_command()
+            .args(["-d", "error_reporting=-1", "docs.php"])
             .arg(&installed)
             .current_dir(&consumer),
         &root,
         "native-docs",
     );
     fs::write(consumer.join("negative.php"), SDK_NEGATIVE).unwrap();
-    let output = Command::new(php())
-        .arg("-n")
+    let output = php_command()
         .arg(phpstan())
         .args([
             "analyse",

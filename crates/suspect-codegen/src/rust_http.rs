@@ -161,13 +161,21 @@ pub use crate::http_contract::HttpDiagnostic;
 /// Allocated native operation names shared by code, examples and documentation.
 #[derive(Debug, Clone)]
 pub struct PlannedOperation {
+    /// Source location of the operation declaration.
     pub source: SourceId,
+    /// Source operationId, or `<method>_<path>` when none is declared.
     pub operation_id: String,
+    /// Allocated snake-case operation module name.
     pub module_name: String,
+    /// Allocated snake-case client method name.
     pub function_name: String,
+    /// Input struct name, the PascalCase operation stem.
     pub input_type: String,
+    /// `<Stem>Success` response enum name.
     pub success_type: String,
+    /// `<Stem>Error` call error enum name.
     pub error_type: String,
+    /// `<Stem>ApiError` declared-error-response enum name.
     pub api_error_type: String,
     /// Allocated no-input helper, present when no input is required.
     pub default_function_name: Option<String>,
@@ -178,46 +186,68 @@ pub struct PlannedOperation {
     credentials: Vec<PlannedCredential>,
 }
 
+/// One source parameter's allocated input struct field.
 #[derive(Debug, Clone)]
 pub struct PlannedParameter {
     wire: http_protocol::ParameterPlan,
+    /// Allocated snake-case field name, location-prefixed on collision.
     pub name: String,
+    /// Model type name of the parameter's codec schema.
     pub model: String,
 }
 
+/// One declared response or part header's allocated field.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
     wire: http_protocol::HeaderPlan,
+    /// Allocated snake-case field name.
     pub name: String,
+    /// Model type name of the header's codec schema.
     pub model: String,
 }
 
 /// Native payload identity. Byte payloads never have a JSON codec binding.
 #[derive(Debug, Clone)]
 pub enum Payload {
+    /// JSON or text through a compiled model codec.
     Model {
+        /// Codec schema source.
         schema: SchemaId,
+        /// Model type name for that schema.
         model: String,
     },
+    /// Schema-free JSON value.
     Json,
+    /// Schema-free text.
     Text,
+    /// Raw bytes.
     Bytes,
+    /// No body: forbidden by the method or status.
     NoContent,
+    /// SSE or JSON-lines stream of items.
     Stream {
+        /// Item codec schema source; `None` for an untyped stream.
         schema: Option<SchemaId>,
+        /// Item model type name; `None` for an untyped stream.
         model: Option<String>,
+        /// Whether the stream is a request body rather than a response.
         request: bool,
     },
+    /// Form or multipart aggregate.
     Parts(Box<PlannedAggregate>),
 }
 
+/// One declared media of a request body with its native payload.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
     wire: http_protocol::MediaPlan,
+    /// Allocated body choice variant name derived from the media type.
     pub variant: String,
+    /// Native payload identity of this media.
     pub payload: Payload,
 }
 
+/// One request body's native type and declared media.
 #[derive(Debug, Clone)]
 pub struct PlannedBody {
     wire: http_protocol::BodyPlan,
@@ -229,43 +259,62 @@ pub struct PlannedBody {
 /// A finite structural aggregate with separately bound part/item codecs.
 #[derive(Debug, Clone)]
 pub struct PlannedAggregate {
+    /// Allocated aggregate struct name.
     pub type_name: String,
+    /// Multipart rather than URL-encoded form.
     pub multipart: bool,
+    /// Positional multipart (prefix parts then repeated items) rather than named parts.
     pub positional: bool,
     parts: Vec<PlannedPart>,
     additional: Option<Box<PlannedPart>>,
 }
 
+/// One form field or multipart part with its allocated field.
 #[derive(Debug, Clone)]
 pub struct PlannedPart {
     wire: http_protocol::PartPlan,
+    /// Allocated snake-case field name (`part_<n>` when unnamed, `additional`
+    /// or `items` for additional parts).
     pub name: String,
+    /// Model type name of the part codec; `None` for binary parts.
     pub model: Option<String>,
+    /// Allocated part headers struct name, present when headers are declared.
     pub headers_type: Option<String>,
     headers: Vec<PlannedHeader>,
 }
 
+/// One declared response with its native variants.
 #[derive(Debug, Clone)]
 pub struct PlannedResponse {
     wire: http_protocol::ResponsePlan,
+    /// Allocated response headers struct name, present when headers are declared.
     pub headers_type: Option<String>,
     headers: Vec<PlannedHeader>,
     variants: Vec<PlannedResponseVariant>,
 }
 
+/// One status/media alternative of a response, a variant of the success or
+/// API error enum.
 #[derive(Debug, Clone)]
 pub struct PlannedResponseVariant {
+    /// Allocated variant name, e.g. `Status200`, `Range4XX`, `DefaultNoContent`.
     pub name: String,
+    /// Media index within the response; `None` for a body-less variant.
     pub media_index: Option<usize>,
+    /// Whether the status selector admits a success (2xx, `2XX`, `default`).
     pub success: bool,
+    /// Whether the status selector admits a failure (non-2xx, `default`).
     pub error: bool,
+    /// Whether this is the no-body alternative the method or status forces or permits.
     pub forbidden: bool,
+    /// Native payload identity of this variant.
     pub payload: Payload,
 }
 
 macro_rules! wire_accessor {
     ($native:ty, $wire:ty) => {
         impl $native {
+            /// Shared wire plan this native binding lowers.
             #[must_use]
             pub fn wire(&self) -> &$wire {
                 &self.wire
@@ -282,18 +331,23 @@ wire_accessor!(PlannedPart, http_protocol::PartPlan);
 wire_accessor!(PlannedResponse, http_protocol::ResponsePlan);
 
 impl PlannedOperation {
+    /// Allocated input fields in source parameter order.
     #[must_use]
     pub fn parameters(&self) -> &[PlannedParameter] {
         &self.parameters
     }
+    /// The request body, when declared.
     #[must_use]
     pub fn body(&self) -> Option<&PlannedBody> {
         self.body.as_ref()
     }
+    /// Declared responses in source order.
     #[must_use]
     pub fn responses(&self) -> &[PlannedResponse] {
         &self.responses
     }
+    /// Credential requirements across every security alternative, in
+    /// declaration order, bound to their shared constructors.
     #[must_use]
     pub fn credentials(&self) -> &[PlannedCredential] {
         &self.credentials
@@ -305,32 +359,39 @@ impl PlannedOperation {
     }
 }
 impl PlannedBody {
+    /// Declared media in source order.
     #[must_use]
     pub fn media(&self) -> &[PlannedMedia] {
         &self.media
     }
 }
 impl PlannedAggregate {
+    /// Named fields, or positional prefix parts, in source order.
     #[must_use]
     pub fn parts(&self) -> &[PlannedPart] {
         &self.parts
     }
+    /// Admitted additional parts, when the aggregate allows them.
     #[must_use]
     pub fn additional(&self) -> Option<&PlannedPart> {
         self.additional.as_deref()
     }
 }
 impl PlannedPart {
+    /// Declared part headers in source order.
     #[must_use]
     pub fn headers(&self) -> &[PlannedHeader] {
         &self.headers
     }
 }
 impl PlannedResponse {
+    /// Declared response headers in source order.
     #[must_use]
     pub fn headers(&self) -> &[PlannedHeader] {
         &self.headers
     }
+    /// Native variants: one per media, or one body-less variant, plus a
+    /// no-content alternative for `2XX`/`3XX`/`default` responses with media.
     #[must_use]
     pub fn variants(&self) -> &[PlannedResponseVariant] {
         &self.variants
@@ -356,9 +417,13 @@ pub struct HttpPlan {
     incoming_receipts: Vec<incoming::IncomingReceipt>,
 }
 
+/// One security requirement bound to its allocated credential constructor.
 #[derive(Debug, Clone)]
 pub struct PlannedCredential {
+    /// Allocated snake-case credential constructor, shared by every use of
+    /// the same scheme.
     pub constructor: String,
+    /// The shared credential requirement.
     pub requirement: http_protocol::CredentialRequirement,
 }
 
@@ -368,14 +433,17 @@ impl HttpPlan {
     pub fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
     }
+    /// Native model symbol names keyed by schema source.
     #[must_use]
     pub fn symbols(&self) -> &BTreeMap<SchemaId, String> {
         &self.symbols
     }
+    /// Credential constructors keyed by security scheme use-site source.
     #[must_use]
     pub fn credentials(&self) -> &BTreeMap<SourceId, PlannedCredential> {
         &self.credentials
     }
+    /// Source-bound runtime environment policy; generation never reads values.
     #[must_use]
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
@@ -430,14 +498,17 @@ impl HttpPlan {
     pub fn incoming_receipts(&self) -> &[incoming::IncomingReceipt] {
         &self.incoming_receipts
     }
+    /// Selected operations with their allocated native names.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Model codecs and validation for every schema the operations reach.
     #[must_use]
     pub fn codecs(&self) -> &CodecPlan {
         &self.codecs
     }
+    /// The source contract this plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
@@ -473,9 +544,12 @@ impl Default for PackageConfig {
     }
 }
 
+/// Rejected [`PackageConfig`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageError {
+    /// The name is not a portable lowercase Cargo package name.
     InvalidName,
+    /// The version is not an exact Cargo SemVer.
     InvalidVersion,
 }
 impl std::fmt::Display for PackageError {

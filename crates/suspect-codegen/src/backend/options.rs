@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GenerationOptions {
+    /// Opt-in source interpretation profiles added to every adapter's capabilities.
     #[serde(default)]
     pub compatibility_profiles: BTreeSet<CompatibilityProfile>,
     /// Source scheme -> runtime variable names; values are never read by generation.
@@ -44,7 +45,6 @@ pub(crate) fn typescript_options(
 ) -> crate::typescript::http::HttpConfig {
     crate::typescript::http::HttpConfig {
         legacy_binary_string: options.legacy_binary_strings(),
-        #[cfg(feature = "http-protocol")]
         compatibility_profiles: options.compatibility_profiles.iter().copied().collect(),
         credential_env: options.credential_env.clone(),
         sdk_defaults: options.sdk_defaults.clone(),

@@ -1,7 +1,7 @@
 //! ua/v1 attribution compiles into the generated PHP package: constant parts at
 //! generation time, PHP version discovery in the native runtime, and explicit
 //! caller override/suppression options on the immutable ClientOptions.
-#![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
+#![cfg(feature = "php-sdk")]
 use std::sync::Arc;
 
 use suspect_codegen::backend::{self, Backend, GenerationOptions};

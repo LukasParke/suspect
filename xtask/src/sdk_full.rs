@@ -2,6 +2,47 @@
 //!
 //! This module deliberately has no dependency on codegen. The historical M3/M6
 //! inventory is not extended: only its snapshot/command/seal mechanics are reused.
+//!
+//! # Usage
+//!
+//! ```text
+//! cargo run --locked --offline -p xtask -- sdk-full \
+//!   --source OPENROUTER_ROOT --editor-host-tools PINNED_TOOLS_JSON \
+//!   --out target/sdk-full-NEW [--functional-only | --performance-plan PINNED_PLAN_JSON]
+//! cargo run --locked --offline -p xtask -- sdk-full --list-stages [--functional-only]
+//! cargo run --locked --offline -p xtask -- sdk-full --check-syntax
+//! ```
+//!
+//! The default profile is **strict**: every gate, including the four numerical
+//! performance stages, must be met, so a usable qualified `--performance-plan`
+//! is required for success. `--functional-only` (mutually exclusive with
+//! `--performance-plan`) removes only those four numerical stages from the exit
+//! decision; they stay in the inventory and report as deferred, and the report
+//! never claims whole-plan completion. Both real editor-host scenarios need
+//! explicit tool pins through `--editor-host-tools`.
+//!
+//! `--list-stages` prints the stage inventory for the selected profile and
+//! accepts no other flag. `--check-syntax` performs no generation, build, tool
+//! activation or measurement: it validates the inventory, checks that the
+//! compiled runner's embedded source bytes match the current sources, and
+//! reports `missingSuiteSources`, `missingNamedWitnesses` and
+//! `missingSupportSources`, exiting nonzero unless `readyToBuild` is true.
+//!
+//! `--out` must be a new directory whose existing parent lies under this
+//! workspace's `target/` (and outside `--source`). Attempts never resume into or
+//! overwrite an earlier report or scratch directory. Scratch is reserved
+//! separately under `$TMPDIR/opencode/`, keyed by the report name and output-path
+//! hash; its ancestors must contain neither `Cargo.toml` nor `.git`.
+//!
+//! | Result | Report | Exit |
+//! | --- | --- | --- |
+//! | Strict, every required gate met | `complete: true`, `profileComplete: true`, `status: passed` | 0 |
+//! | Strict, no usable qualified performance plan | numerical rows unmet, `complete: false` | nonzero |
+//! | Functional-only, functional gates met | `profileComplete: true`, `complete: false`, `status: functional-passed-numerical-pending` | 0 |
+//! | Any required functional/native gate missing or failed | `profileComplete: false`, `status: incomplete` | nonzero |
+//!
+//! `releaseReady` and `sdkReleaseReady` are always false: selected-operation SDK
+//! acceptance is not a publishing release.
 
 use super::sdk_m3_m6::{
     self as sealed, Criterion, INPUTS, Inventory, OPERATIONS, PERFORMANCE, Run, Stage,
@@ -18,7 +59,7 @@ use std::{
 };
 
 const FULL: &[&str] = &["SDK-FULL"];
-const FEATURES: &str = "suspect-codegen/java-sdk,suspect-codegen/csharp-sdk,suspect-codegen/kotlin-sdk,suspect-codegen/ruby-sdk,suspect-codegen/php-sdk,suspect-codegen/dart-sdk,suspect-codegen/cpp-sdk,suspect-codegen/http-protocol";
+const FEATURES: &str = "suspect-codegen/java-sdk,suspect-codegen/csharp-sdk,suspect-codegen/kotlin-sdk,suspect-codegen/ruby-sdk,suspect-codegen/php-sdk,suspect-codegen/dart-sdk,suspect-codegen/cpp-sdk";
 const SWIFT_FLOOR_PAYLOAD: &str =
     "swift-6.0.3-protocol-reexpanded/swift-6.0.3-RELEASE-osx-package.pkg/Payload";
 const SWIFT_FLOOR_SELECTORS: &[&str] = &[
@@ -2476,6 +2517,8 @@ fn configure_environment(run: &mut Run) -> Result<()> {
         ("CARGO_NET_OFFLINE", "true"),
         ("CARGO_BUILD_JOBS", "2"),
         ("GOMODCACHE", "{work}/caches/go-mod"),
+        // Writable module cache, so the private work tree can be deleted.
+        ("GOFLAGS", "-modcacherw"),
         ("GOCACHE", "{work}/caches/go-build"),
         ("GOPATH", "{work}/go"),
         ("GOPROXY", "off"),

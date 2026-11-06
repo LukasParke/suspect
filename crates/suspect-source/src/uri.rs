@@ -8,12 +8,17 @@ use url::Url;
 /// Errors produced when parsing or joining URIs.
 #[derive(Debug, thiserror::Error)]
 pub enum UriError {
+    /// The text is not an absolute URI; carries the parser's message.
     #[error("invalid URI: {0}")]
     Invalid(String),
+    /// A relative reference was resolved without a base URI.
     #[error("relative URI without a base")]
     NoBase,
+    /// A filesystem path could not be represented as UTF-8.
     #[error("path is not valid UTF-8")]
     NotUtf8,
+    /// Reading the current directory (to absolutize a relative path)
+    /// failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -80,6 +85,7 @@ impl Uri {
         Ok(Self(joined.as_str().into()))
     }
 
+    /// The canonical URI string.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -119,9 +125,12 @@ impl Uri {
     }
 }
 
+/// Infallible conversion for caller-built URIs (synthetic `mem://` URIs in
+/// tests, URIs an editor already validated). A string that does not parse
+/// is kept verbatim rather than rejected; use [`Uri::parse`] when the input
+/// is untrusted and must be validated.
 impl From<String> for Uri {
     fn from(s: String) -> Self {
-        // Caller-provided URIs are trusted to be absolute; parse validates.
         match Uri::parse(&s) {
             Ok(u) => u,
             Err(_) => Uri(s.into()),

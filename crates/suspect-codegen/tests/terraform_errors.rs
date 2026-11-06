@@ -1,10 +1,7 @@
 //! SDK-owned API-error lifetimes and fail-closed missing response admission.
 #![cfg(feature = "http-protocol")]
 use serde_json::{Value, json};
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::terraform::{
     MappingProfile, TargetConfig, emit_provider, parse_mapping, plan_provider,
 };
@@ -86,15 +83,7 @@ fn missing_requires_completed_sdk_validation_before_any_artifacts() {
 #[test]
 #[ignore = "focused real SDK/Framework error ownership; no completed lifecycle matrix replay"]
 fn native_sdk_error_lifetimes_and_state_distinctions() {
-    let evidence = PathBuf::from(
-        std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE").expect("fresh evidence directory required"),
-    );
-    std::fs::create_dir(&evidence).unwrap();
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        evidence.join("generator-test.bin"),
-    )
-    .unwrap();
+    let evidence = crate::terraform_support::fresh_evidence("sdk-terraform-errors-evidence-");
     let root = tempfile::Builder::new()
         .prefix("sdk-terraform-errors-")
         .tempdir_in(native_tmp())

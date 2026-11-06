@@ -207,7 +207,7 @@ fn rust_document_base_capability_does_not_enable_schema_or_dynamic_execution() {
 }
 
 fn cargo(mode: &str, manifest: &Path, target: &Path) -> Command {
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     command
         .args([mode, "--offline", "--quiet", "--manifest-path"])
         .arg(manifest)

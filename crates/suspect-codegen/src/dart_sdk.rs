@@ -44,7 +44,9 @@ pub use protocol::{
 /// Pub identity is presentation configuration, independent of API semantics.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageConfig {
+    /// Pub package name: a lowercase Dart identifier of at most 64 ASCII characters.
     pub name: String,
+    /// Exact SemVer package version.
     pub version: String,
 }
 impl Default for PackageConfig {
@@ -59,6 +61,7 @@ impl Default for PackageConfig {
 /// Independent, finite schema, conversion, wire and streaming resource policies.
 #[derive(Debug, Clone)]
 pub struct DartConfig {
+    /// Pub package identity.
     pub package: PackageConfig,
     /// Explicit variable names bound to used source security declarations.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
@@ -66,17 +69,29 @@ pub struct DartConfig {
     pub sdk_defaults: Option<crate::sdk_defaults::SdkDefaults>,
     /// `ua/v1` attribution constants compiled from package identity and source.
     pub attribution: Option<crate::attribution::AttributionDescriptor>,
+    /// Shared owned-schema compiler/executor policy; depth at most 128.
     pub schema: suspect_schema::Config,
+    /// JSON parse/serialize nesting ceiling, 1 to 128.
     pub max_json_depth: usize,
+    /// Native conversion nesting ceiling, 1 to 128.
     pub max_conversion_depth: usize,
+    /// Shared native conversion visits per call.
     pub max_conversion_steps: usize,
+    /// JSON parse/serialize node visits per document.
     pub max_json_steps: usize,
+    /// Maximum request-body and assembled-URL bytes; default for `Client`.
     pub max_request_bytes: usize,
+    /// Maximum response-body bytes; default for `Client`.
     pub max_response_bytes: usize,
+    /// Bounded raw body prefix retained by SDK failures; at most `max_response_bytes`.
     pub max_capture_bytes: usize,
+    /// Aggregate response header bytes; default for `Client`.
     pub max_response_header_bytes: usize,
+    /// Independent ceiling for each in-memory form/multipart part.
     pub max_part_bytes: usize,
+    /// Maximum framed SSE event or JSON-lines item before decoding.
     pub max_stream_item_bytes: usize,
+    /// Maximum buffered stream bytes; at least `max_stream_item_bytes`.
     pub max_stream_buffer_bytes: usize,
 }
 impl Default for DartConfig {
@@ -136,22 +151,27 @@ impl std::fmt::Debug for Plan {
     }
 }
 impl Plan {
+    /// Canonical contract the plan was built from.
     #[must_use]
     pub fn contract(&self) -> &Arc<Contract> {
         &self.contract
     }
+    /// Native model symbols for every compiled codec schema.
     #[must_use]
     pub fn models(&self) -> &ModelPlan {
         &self.models
     }
+    /// Selected operations, in protocol order.
     #[must_use]
     pub fn operations(&self) -> &[PlannedOperation] {
         &self.operations
     }
+    /// Client credential slots, one per used source security scheme.
     #[must_use]
     pub fn credentials(&self) -> &[PlannedCredential] {
         &self.credentials
     }
+    /// Environment-variable bindings for credentials, when configured.
     #[must_use]
     pub fn credential_env(&self) -> Option<&crate::credential_env::CredentialEnvPlan> {
         self.credential_env.as_ref()
@@ -194,28 +214,35 @@ impl Plan {
     pub fn attribution(&self) -> Option<&crate::attribution::AttributionDescriptor> {
         self.config.attribution.as_ref()
     }
+    /// Checked validation program executed by the generated runtime.
     #[must_use]
     pub fn program(&self) -> &OwnedProgram {
         &self.program
     }
+    /// Admitted protocol plan for the selected operations.
     #[must_use]
     pub fn protocol(&self) -> &http_protocol::ProtocolPlan {
         &self.protocol
     }
+    /// Configuration the plan was admitted under.
     #[must_use]
     pub fn config(&self) -> &DartConfig {
         &self.config
     }
+    /// Per-operation source examples used by generated docs.
     #[must_use]
     pub fn examples(&self) -> &crate::examples::ExamplePlan {
         &self.examples
     }
+    /// Render the complete pub package.
     #[must_use]
     pub fn render(&self) -> Vec<OutFile> {
         emit::package(self)
     }
 }
+/// Backend-neutral alias for [`Plan`].
 pub type SdkPlan = Plan;
+/// Render the complete pub package; same as [`Plan::render`].
 #[must_use]
 pub fn emit_sdk(plan: &Plan) -> Vec<OutFile> {
     plan.render()

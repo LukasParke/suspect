@@ -24,7 +24,21 @@ pub fn slug(value: &str) -> String {
     while out.ends_with('-') {
         out.pop();
     }
-    if out.is_empty() { "other".into() } else { out }
+    if out.is_empty() {
+        return "other".into();
+    }
+    // Windows reserves these device names in every directory, with or
+    // without an extension, so `con.rst` cannot exist there and the
+    // artifact layer refuses it. Keep the readable name with a suffix.
+    let reserved = matches!(out.as_str(), "con" | "prn" | "aux" | "nul")
+        || (out.len() == 4
+            && (out.starts_with("com") || out.starts_with("lpt"))
+            && out.as_bytes()[3].is_ascii_digit()
+            && out.as_bytes()[3] != b'0');
+    if reserved {
+        out.push_str("-page");
+    }
+    out
 }
 
 /// Allocate a unique file stem, suffixing `-2`, `-3`, … on collision.
@@ -129,6 +143,22 @@ mod tests {
         assert_eq!(slug("Live TV"), "live-tv");
         assert_eq!(slug("A/B--C!"), "a-b-c");
         assert_eq!(slug("---"), "other");
+    }
+
+    #[test]
+    fn slugs_never_name_a_windows_device() {
+        for (group, expected) in [
+            ("Con", "con-page"),
+            ("aux", "aux-page"),
+            ("NUL", "nul-page"),
+            ("COM1", "com1-page"),
+            ("lpt9", "lpt9-page"),
+            ("com0", "com0"),
+            ("console", "console"),
+            ("Connect", "connect"),
+        ] {
+            assert_eq!(slug(group), expected, "{group}");
+        }
     }
 
     #[test]

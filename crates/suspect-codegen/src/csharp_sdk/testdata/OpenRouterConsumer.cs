@@ -47,7 +47,7 @@ static class Probe
         using var archive = ZipFile.OpenRead(args[0]);
         string Read(string path) { using var reader = new StreamReader(archive.GetEntry(path)!.Open()); return reader.ReadToEnd(); }
         var native = XDocument.Parse(Read("lib/net8.0/Suspect.Csharp.OpenRouter.xml")).Descendants("member").Select(member => (string)member.Attribute("name")!).ToHashSet();
-        using var reference = JsonDocument.Parse(Read("docs/reference.json")); var html = Read("docs/index.html");
+        using var reference = JsonDocument.Parse(Read("docs/reference.json")); var html = string.Concat(archive.Entries.Where(e=>e.FullName.StartsWith("docs/",StringComparison.Ordinal)&&e.FullName.EndsWith(".html",StringComparison.Ordinal)).OrderBy(e=>e.FullName,StringComparer.Ordinal).Select(e=>Read(e.FullName)));
         foreach (var symbol in reference.RootElement.GetProperty("symbols").EnumerateArray())
         {
             Check(native.Contains(symbol.GetProperty("xmlId").GetString()!), "Actual compiler XML symbol: " + symbol.GetProperty("xmlId"));

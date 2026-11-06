@@ -115,15 +115,17 @@ fn no_policy_retains_pre_change_sdk_and_terraform_bytes() {
     // on a target/ witness at runtime.
     let synthetic = inventory(&synthetic_files());
     assert_eq!(synthetic.as_object().unwrap().len(), 51);
+    // Pin updated for the ADR 0035 server URL policy edit to the runtime.
     assert_eq!(
         inventory_hash(&synthetic),
-        "7d6f3d0ac78a6f1599aff04c7530ef2312f24ea451012b721a12f190d373ab0f"
+        "10e55e3916413153cebb7d49fb102e0dec75b4b3b8d9951690eab8a552779121"
     );
     let terraform = inventory(&terraform_files());
     assert_eq!(terraform.as_object().unwrap().len(), 65);
+    // Pin updated: the provider embeds the Go runtime's ADR 0035 server URL policy edit.
     assert_eq!(
         inventory_hash(&terraform),
-        "1680e4d1b66ebd1f970bb93296f2f6e2be29dc06a7d8fe2364f937a1b0a0dfbf"
+        "3d834deae2b350e57985c01578395e0c67126de5ffe2df480727485e586743b1"
     );
     let sdk = json!(
         terraform
@@ -135,9 +137,10 @@ fn no_policy_retains_pre_change_sdk_and_terraform_bytes() {
             .collect::<BTreeMap<_, _>>()
     );
     assert_eq!(sdk.as_object().unwrap().len(), 51);
+    // Pin updated for the Go runtime's ADR 0035 server URL policy edit.
     assert_eq!(
         inventory_hash(&sdk),
-        "f2e35f322cdbbfb86b2cc73e35e6eb8aed5e3fb5ad7b458100e1f7b29c0b724b"
+        "0178e32983733c934c1313f6d862e2e1e1a772fe8d16bec3a29472508fdf7082"
     );
 }
 
@@ -505,7 +508,7 @@ fn generator_environment_values_do_not_enter_configured_or_unconfigured_artifact
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "generator_environment_values_do_not_enter_configured_or_unconfigured_artifacts",
+                qualified("generator_environment_values_do_not_enter_configured_or_unconfigured_artifacts").as_str(),
                 "--nocapture",
             ])
             .env(MARKER, "1")
@@ -515,6 +518,7 @@ fn generator_environment_values_do_not_enter_configured_or_unconfigured_artifact
             .env("SUSPECT_GO_ENV_COOKIE", CANARY)
             .output()
             .unwrap();
+        assert_ran_one(&output.stdout);
         assert!(
             output.status.success(),
             "{}{}",
@@ -536,9 +540,10 @@ fn generator_environment_values_do_not_enter_configured_or_unconfigured_artifact
             .unwrap()
             .contains(CANARY)
     );
+    // Pin updated for the ADR 0035 server URL policy edit to the runtime.
     assert_eq!(
         inventory_hash(&inventory(&synthetic_files())),
-        "7d6f3d0ac78a6f1599aff04c7530ef2312f24ea451012b721a12f190d373ab0f"
+        "10e55e3916413153cebb7d49fb102e0dec75b4b3b8d9951690eab8a552779121"
     );
 }
 
@@ -576,7 +581,7 @@ func TestAllocatedAndBoundedFactory(t *testing.T){var model sdk.NewClientFromEnv
 }
 
 #[test]
-#[ignore = "requires OPENROUTER_WEB_ROOT and native Go 1.23.12/1.27.1"]
+#[ignore = "requires OPENROUTER_WEB_ROOT (the OpenRouter checkout) and native Go 1.23.12/1.27.1"]
 fn native_actual_openrouter_key_and_credits_use_env_snapshot_and_source_https() {
     let path =
         suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
@@ -691,3 +696,24 @@ func TestSourceAlternativesConjunctionAndAnonymousChoice(t *testing.T){
  if calls!=5{t.Fatal("unexpected retry or missing call",calls)}
 }
 "#;
+
+/// The libtest name of `test` in this binary: `<file module>::<test>` when
+/// this file is a module of a grouped test binary (tests/groups/), the bare
+/// name when it is its own crate. Self-invocations with `--exact` need it,
+/// or the child runs zero tests and the check passes vacuously.
+fn qualified(test: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{test}"),
+        None => test.to_owned(),
+    }
+}
+
+/// Fails unless a self-invocation actually ran exactly one test: an
+/// `--exact` filter that matches nothing also exits successfully.
+fn assert_ran_one(stdout: &[u8]) {
+    let text = String::from_utf8_lossy(stdout);
+    assert!(
+        text.contains("running 1 test"),
+        "self-invocation selected no test (check the --exact name):\n{text}"
+    );
+}

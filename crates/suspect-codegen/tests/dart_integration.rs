@@ -948,3 +948,35 @@ fn generation_options_are_explicit_snapshot_and_session_identity() {
     assert!(Arc::ptr_eq(&cold.contract, &changed.contract));
     assert_eq!(session.generate().unwrap().delta.renders, 0);
 }
+
+/// Parameters named like the emitted method body's locals (`prepare`,
+/// `inputs`, `selected`, `response`) are renamed: Dart scopes a local over
+/// its whole block, so `toJson(response)` before `final response = ...` is a
+/// `referenced_before_declaration` error, and `inputs` would silently read
+/// the local list instead of the caller's argument.
+#[test]
+fn parameters_never_collide_with_method_body_locals() {
+    let mut value = api();
+    let parameters = value["paths"]["/things/{id}"]["patch"]["parameters"]
+        .as_array_mut()
+        .unwrap();
+    for name in ["prepare", "inputs", "selected", "response"] {
+        parameters.push(json!({"name":name,"in":"query","schema":{"type":"string"}}));
+    }
+    let fixture = Fixture::new(&value);
+    let snapshot = snapshot(fixture.load());
+    let update = snapshot.native[0]
+        .operations
+        .iter()
+        .find(|op| op.operation_id == "updateThing")
+        .unwrap();
+    for wire in ["prepare", "inputs", "selected", "response"] {
+        let parameter = update.descriptor["parameters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["wire"] == wire)
+            .unwrap();
+        assert_eq!(parameter["member"], format!("{wire}2"));
+    }
+}

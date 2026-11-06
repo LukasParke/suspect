@@ -16,9 +16,7 @@ use suspect_ir::contract::{Contract, SourceId};
 use suspect_ref::{DocumentProvider, ProvidedDocument, WorkspaceBuilder};
 use suspect_source::Uri;
 
-#[allow(dead_code)]
-#[path = "../src/swift_sdk/validation_v2_support.rs"]
-mod support;
+use crate::swift_validation_v2_support as support;
 
 const ENTRY: &str = "https://swift-credential.test/openapi.json";
 
@@ -127,6 +125,7 @@ fn no_policy_artifacts_are_frozen() {
     )
     .unwrap();
     let files = emit_sdk(&plan, &package()).unwrap();
+    // Pin (HTTPProtocol/HTTPTransport/GettingStarted) updated for the ADR 0035 server URL policy.
     let expected: BTreeMap<String, String> =
         serde_json::from_str(include_str!("fixtures/swift-credential-env-no-policy.json")).unwrap();
     assert_eq!(hashes(&files), expected);
@@ -260,7 +259,7 @@ fn generation_never_reads_credential_values() {
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
-                "generation_never_reads_credential_values",
+                qualified("generation_never_reads_credential_values").as_str(),
                 "--nocapture",
                 "--test-threads=1",
             ])
@@ -268,6 +267,7 @@ fn generation_never_reads_credential_values() {
             .env("SUSPECT_SWIFT_ENV_BEARER", CANARY)
             .output()
             .unwrap();
+        assert_ran_one(&output.stdout);
         assert!(
             output.status.success(),
             "generator canary child failed: {}",
@@ -361,7 +361,8 @@ fn installed(root: &Path, plan: &SdkPlan, package: &PackageConfig, native: &str)
 }
 
 fn typing(root: &Path, module: &str, positive: &str, negatives: &[(&str, &str)]) {
-    let modules = support::directory(&root.join("build/sdk"), "Modules").unwrap();
+    let modules =
+        suspect_codegen::toolchain::swift_module_dir(&root.join("build/sdk"), module).unwrap();
     let positive_path = root.join("positive.swift");
     std::fs::write(&positive_path, format!("import {module}\n{positive}\n")).unwrap();
     support::checked(
@@ -395,6 +396,9 @@ fn typing(root: &Path, module: &str, positive: &str, negatives: &[(&str, &str)])
 #[test]
 #[ignore = "installed Swift environment defaults/precedence/security/snapshot/byte limits and DocC on the selected tier"]
 fn native_credential_env_precedence_snapshot_and_docs() {
+    if !support::available() {
+        return;
+    }
     let root = root("synthetic-");
     let plan = configured(contract(&document()), policy());
     installed(
@@ -425,6 +429,9 @@ fn native_credential_env_precedence_snapshot_and_docs() {
 #[test]
 #[ignore = "actual OpenRouter getCurrentKey/getCredits schemas, controlled HTTPS transport capture, environment API and DocC"]
 fn native_openrouter_current_key_environment_defaults() {
+    if !support::available() {
+        return;
+    }
     let root = root("openrouter-");
     let checkout = suspect_codegen::test_inputs::openrouter_root();
     let input = checkout.join("projects/docs/openapi/openapi.yaml");
@@ -483,5 +490,26 @@ fn native_openrouter_current_key_environment_defaults() {
     println!(
         "Swift actual OpenRouter GET /key environment default/HTTPS source/DocC passed at {}",
         root.display()
+    );
+}
+
+/// The libtest name of `test` in this binary: `<file module>::<test>` when
+/// this file is a module of a grouped test binary (tests/groups/), the bare
+/// name when it is its own crate. Self-invocations with `--exact` need it,
+/// or the child runs zero tests and the check passes vacuously.
+fn qualified(test: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{test}"),
+        None => test.to_owned(),
+    }
+}
+
+/// Fails unless a self-invocation actually ran exactly one test: an
+/// `--exact` filter that matches nothing also exits successfully.
+fn assert_ran_one(stdout: &[u8]) {
+    let text = String::from_utf8_lossy(stdout);
+    assert!(
+        text.contains("running 1 test"),
+        "self-invocation selected no test (check the --exact name):\n{text}"
     );
 }

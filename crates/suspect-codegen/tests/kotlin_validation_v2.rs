@@ -1,5 +1,6 @@
-#![cfg(all(feature = "kotlin-sdk", feature = "http-protocol"))]
+#![cfg(feature = "kotlin-sdk")]
 //! Source-driven scoped execution; never consumes an earlier target witness.
+use crate::kotlin_support as support;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
@@ -11,9 +12,6 @@ use suspect_ir::contract::{Contract, SchemaId};
 use suspect_ref::WorkspaceBuilder;
 use suspect_schema::{Config, OwnedProgram, ProgramInstruction};
 use suspect_source::Uri;
-#[path = "kotlin_support/mod.rs"]
-#[allow(dead_code)]
-mod support;
 
 fn root() -> PathBuf {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-kotlin-applicators");
@@ -578,7 +576,7 @@ fn sdk_plan(root: &Path) -> kotlin_sdk::Plan {
         .operations()
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
-    kotlin_sdk::plan_sdk_v2(
+    kotlin_sdk::plan_sdk(
         contract,
         &selected,
         kotlin_sdk::SdkConfig {

@@ -142,10 +142,12 @@ fn collect(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
 /// # Errors
 /// Manifest or IO failures; a failing stage is reported, not raised.
 pub fn ci(args: &CiArgs) -> anyhow::Result<i32> {
-    let root = args
-        .root
-        .canonicalize()
-        .unwrap_or_else(|_| args.root.clone());
+    // Lexical, like `project build` and SDK generation (which keep an
+    // entry's spelling so relative references resolve from it): a
+    // canonicalized root would spell the same spec differently (`\\?\`, 8.3
+    // short names, symlinks) and the codegen drift check would compare
+    // artifacts recording a different source URI.
+    let root = std::path::absolute(&args.root).unwrap_or_else(|_| args.root.clone());
     let projects = discover_projects(&root);
     if projects.is_empty() {
         eprintln!(

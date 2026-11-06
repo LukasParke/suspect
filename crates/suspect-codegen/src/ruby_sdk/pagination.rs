@@ -75,6 +75,7 @@ pub struct PaginationPlan {
     /// Allocated reader helper names, emitted beside the walkers.
     field_reader: String,
     count_reader: String,
+    /// Emittable paginated operations, in plan order.
     pub operations: Vec<PaginatedOperation>,
 }
 

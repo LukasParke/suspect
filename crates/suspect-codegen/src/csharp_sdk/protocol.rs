@@ -14,6 +14,7 @@ use suspect_schema::{OwnedCompiler, OwnedOutcome};
 /// Explicit interpretation profiles and runtime client-default policies.
 #[derive(Debug, Clone, Default)]
 pub struct ProtocolOptions {
+    /// Explicitly opted-in compatibility interpretations (for example legacy wire conventions).
     pub compatibility_profiles: Vec<p::CompatibilityProfile>,
     /// Source scheme names mapped to runtime environment-variable names only.
     pub credential_env: Option<crate::credential_env::CredentialEnv>,
@@ -23,57 +24,94 @@ pub struct ProtocolOptions {
     pub attribution: Option<crate::attribution::AttributionDescriptor>,
 }
 
+/// A credential property on the generated `Credentials` type.
 #[derive(Debug, Clone)]
 pub struct PlannedCredential {
+    /// Credential identity: the scheme use site when an environment policy is
+    /// configured, else the terminal scheme.
     pub key: String,
+    /// Allocated C# property name.
     pub property_name: String,
+    /// C# property type: `string`, `BasicCredential` or `AuthorizationProvider`.
     pub native_type: String,
+    /// Shared wire requirement for the credential.
     pub requirement: p::CredentialRequirement,
 }
+/// A planned request, response or part header property.
 #[derive(Debug, Clone)]
 pub struct PlannedHeader {
+    /// Allocated C# property name.
     pub property_name: String,
+    /// Spelled C# type of the header value.
     pub native_type: String,
+    /// Shared wire plan for the header.
     pub wire: p::HeaderPlan,
 }
+/// One field of a form or named multipart body.
 #[derive(Debug, Clone)]
 pub struct PlannedPart {
+    /// Allocated C# property name.
     pub property_name: String,
+    /// Property type: the item type, or a `List<..>` of it for repeated array items.
     pub native_type: String,
+    /// Spelled C# type of one part value.
     pub value_type: String,
+    /// Generated per-part wrapper type; multipart only.
     pub wrapper_type: Option<String>,
+    /// Generated part headers type, when any headers are declared.
     pub header_type: Option<String>,
+    /// Planned per-part headers.
     pub headers: Vec<PlannedHeader>,
+    /// Shared wire plan for the part.
     pub wire: p::PartPlan,
 }
+/// A generated form or named multipart body type.
 #[derive(Debug, Clone)]
 pub struct PlannedParts {
+    /// Allocated C# type name.
     pub native_type: String,
+    /// Whether this is multipart (otherwise a URL-encoded form).
     pub multipart: bool,
+    /// Shared object rules (required/additional handling).
     pub rules: p::ObjectRules,
+    /// Declared fields in wire order.
     pub fields: Vec<PlannedPart>,
+    /// Catch-all for undeclared fields, when allowed.
     pub additional: Option<Box<PlannedPart>>,
 }
 /// Ordered, finite multipart values. The shared plan truncates a false-prefix
 /// barrier and forbids the tail; no unreachable native slot is invented.
 #[derive(Debug, Clone)]
 pub struct PlannedPositionalParts {
+    /// Allocated C# type name.
     pub native_type: String,
+    /// The array schema the positional parts come from.
     pub schema: p::SchemaUse,
+    /// Fixed prefix parts (`Item1`, `Item2`, ...).
     pub prefix: Vec<PlannedPart>,
+    /// Repeated tail part, when allowed.
     pub items: Option<Box<PlannedPart>>,
+    /// Declared `minItems`, when present.
     pub min_items: Option<p::Located<u64>>,
+    /// Declared `maxItems`, when present.
     pub max_items: Option<p::Located<u64>>,
 }
+/// One media type of a request or response body.
 #[derive(Debug, Clone)]
 pub struct PlannedMedia {
+    /// Allocated union variant name (`Json`, `Text`, `Bytes`, `Form`, ...).
     pub variant_name: String,
+    /// Spelled C# type of the payload.
     pub native_type: String,
+    /// Shared wire plan for the media type.
     pub wire: p::MediaPlan,
+    /// Form or named multipart layout, when the media is one.
     pub parts: Option<PlannedParts>,
+    /// Positional multipart layout, when the media is one.
     pub positional: Option<PlannedPositionalParts>,
 }
 impl PlannedMedia {
+    /// The JSON/text codec or stream item schema, if any.
     pub fn schema(&self) -> Option<&SchemaId> {
         match self.wire.representation() {
             p::Representation::Json { codec } | p::Representation::Text { codec, .. } => {
@@ -83,6 +121,7 @@ impl PlannedMedia {
             _ => None,
         }
     }
+    /// Whether the media is a framed stream.
     pub fn is_stream(&self) -> bool {
         matches!(self.wire.representation(), p::Representation::Stream { .. })
     }
@@ -137,6 +176,7 @@ pub fn capabilities() -> p::Capabilities {
             PositionalMultipart,
             ServerSentEvents,
             JsonLines,
+            OpenApi30,
             OpenApi32,
         ],
     )
@@ -165,7 +205,10 @@ pub(super) fn plan_with_validation(
     options: ProtocolOptions,
     scoped: bool,
 ) -> Result<SdkPlan, Vec<HttpDiagnostic>> {
-    plan_with_capabilities(contract, selected, config, options, scoped, capabilities())
+    // List OpenApi30 in the plan (and so the manifest) only for 3.0 sources,
+    // keeping 3.1/3.2 package bytes independent of the 3.0 opt-in.
+    let capabilities = crate::schema_view::oas30_capability_for(&contract, capabilities());
+    plan_with_capabilities(contract, selected, config, options, scoped, capabilities)
 }
 
 pub(super) fn plan_with_capabilities(
@@ -377,7 +420,9 @@ pub(super) fn plan_with_capabilities(
         contract.reachable_from(&codec_roots)
     };
     for id in &reachable {
-        if let Some(raw) = contract.source(id) {
+        // Dialect view: an OAS 3.0 Reference Object's readOnly/writeOnly
+        // siblings are ignored, not active directional annotations.
+        if let Some(raw) = contract.schema(id).map(crate::schema_view::raw) {
             for keyword in ["readOnly", "writeOnly"] {
                 if raw
                     .get(keyword)
@@ -655,10 +700,12 @@ pub(super) fn plan_with_capabilities(
             .iter()
             .map(|r| {
                 let tag = status_name(r.status());
+                // RFC 9110: 1xx, 204, 205 and 304 never carry content (205
+                // "Reset Content" included, as in every other backend).
                 let always_empty = op.method().as_str() == "HEAD"
                     || matches!(
                         r.status(),
-                        p::ResponseStatus::Exact(100..=199 | 204 | 304)
+                        p::ResponseStatus::Exact(100..=199 | 204 | 205 | 304)
                             | p::ResponseStatus::Range(1)
                     );
                 let may_be_empty = always_empty
@@ -753,14 +800,15 @@ pub(super) fn plan_with_capabilities(
         samples,
     })
 }
-pub fn credential_key(r: &p::CredentialRequirement) -> String {
+/// Deduplication key of a credential: the terminal scheme's `document#pointer`.
+pub(super) fn credential_key(r: &p::CredentialRequirement) -> String {
     format!(
         "{}#{}",
         r.scheme().terminal().source().document(),
         r.scheme().terminal().source().pointer()
     )
 }
-pub fn status_name(status: p::ResponseStatus) -> String {
+fn status_name(status: p::ResponseStatus) -> String {
     match status {
         p::ResponseStatus::Exact(s) => format!("Status{s}"),
         p::ResponseStatus::Range(c) => format!("Status{c}xx"),

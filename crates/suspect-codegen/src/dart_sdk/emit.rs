@@ -233,11 +233,12 @@ pub(super) fn package(plan: &Plan) -> Vec<OutFile> {
             include_str!("io_exact.dart")
         ),
     );
+    let readme = include_str!("README.md").to_owned();
     push(
         "README.md",
         format!(
             "{}{}{}",
-            include_str!("README.md")
+            readme
                 .replace("__PACKAGE__", name)
                 .replace("__VERSION__", version)
                 .replace("__OPENAPI__", plan.contract.openapi_version())

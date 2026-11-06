@@ -32,82 +32,140 @@ env:
 jobs:
   matrix:
     name: ${{ matrix.name }} native evidence
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     # Never block a push or pull request on a scheduled evidence run.
     continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
+        # `test_filter` is the grouped test binary
+        # (crates/suspect-codegen/tests/groups/<name>.rs); `setup` is the
+        # backend name tools/native-setup.sh provisions.
         include:
-          - name: rust
-            toolchain: "stable"
-            install: "rustup toolchain install stable --profile minimal"
-            test_filter: "rust_"
-          - name: go
-            toolchain: "go1.23"
-            install: |
-              curl -fsSL https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
-              echo "/usr/local/go/bin" >> "$GITHUB_PATH"
-            test_filter: "go_"
-          - name: node
-            toolchain: "node22"
-            install: |
-              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-              sudo apt-get install -y nodejs
-            test_filter: "typescript_"
-          - name: python
-            toolchain: "python3.12"
-            install: |
-              sudo apt-get update
-              sudo apt-get install -y python3.12 python3.12-venv
-            test_filter: "python_"
-          - name: dotnet
-            toolchain: "8.0"
-            install: "dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet"
-            test_filter: "csharp_"
-          - name: jdk
-            toolchain: "21"
-            install: |
-              sudo apt-get update
-              sudo apt-get install -y openjdk-21-jdk maven
-            test_filter: "java_"
-          - name: ruby
-            toolchain: "3.3"
-            install: |
-              sudo apt-get update
-              sudo apt-get install -y ruby-full
-            test_filter: "ruby_"
-          - name: php
-            toolchain: "8.3"
-            install: |
-              sudo apt-get update
-              sudo apt-get install -y php8.3-cli php8.3-curl php8.3-xml
-            test_filter: "php_"
-          - name: dart
-            toolchain: "stable"
-            install: |
-              sudo apt-get update
-              sudo apt-get install -y curl unzip
-              curl -fsSL https://storage.googleapis.com/dart-archive/channels/stable/release/latest/sdk/dartsdk-linux-x64.zip -o /tmp/dart.zip
-              sudo unzip /tmp/dart.zip -d /usr/lib
-              echo "/usr/lib/dart-sdk/bin" >> "$GITHUB_PATH"
-            test_filter: "dart_"
-          - name: swift
-            toolchain: "6.0"
-            install: |
-              sudo apt-get update
-              sudo apt-get install -y swiftlang
-            test_filter: "swift_"
+          - {name: rust, toolchain: "stable", test_filter: rust, setup: rust}
+          - {name: go, toolchain: "go1.23", test_filter: go, setup: go}
+          - {name: node, toolchain: "node22.23.1+node24", test_filter: typescript, setup: typescript}
+          - {name: python, toolchain: "python3.11+3.14", test_filter: python, setup: python}
+          - {name: dotnet, toolchain: "8.0+10.0", test_filter: csharp, setup: csharp}
+          - {name: jdk, toolchain: "21+25", test_filter: java, setup: java}
+          - {name: kotlin, toolchain: "jdk21+25", test_filter: kotlin, setup: kotlin}
+          - {name: ruby, toolchain: "3.3", test_filter: ruby, setup: ruby}
+          - {name: php, toolchain: "8.3", test_filter: php, setup: php}
+          - {name: dart, toolchain: "3.9.4", test_filter: dart, setup: dart}
+          - {name: cpp, toolchain: "c++/cmake/doxygen", test_filter: cpp, setup: cpp}
+          # The generated Swift SDK targets Apple platforms (docs/sdk/swift).
+          - {name: swift, toolchain: "Xcode Swift 6", test_filter: swift, setup: swift, os: macos-15}
+          - {name: terraform, toolchain: "1.15.8+go1.23", test_filter: terraform, setup: terraform}
+          # Cross-backend suites: Go, Node, Python, Swift and a headless
+          # Chrome (preinstalled on the image).
+          - {name: shared, toolchain: "go+node+python+swift", test_filter: shared, setup: "typescript python rust"}
+    env:
+      OPENROUTER_WEB_TOKEN: ${{ secrets.OPENROUTER_WEB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The OpenRouter gates read OPENROUTER_WEB_ROOT, a private
+      # openrouter-web checkout at toolchain::OPENROUTER_SPEC_COMMIT (a
+      # codegen test keeps the two in sync). Needs the OPENROUTER_WEB_TOKEN
+      # secret; without it those gates fail this (non-blocking) entry.
+      - if: env.OPENROUTER_WEB_TOKEN != ''
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: OpenRouterTeam/openrouter-web
+          ref: 50b0c3910b36dc33c949a490bbe2fba59d574c42
+          token: ${{ env.OPENROUTER_WEB_TOKEN }}
+          path: openrouter-web
+          persist-credentials: false
+      - if: env.OPENROUTER_WEB_TOKEN != ''
+        run: echo "OPENROUTER_WEB_ROOT=$GITHUB_WORKSPACE/openrouter-web" >> "$GITHUB_ENV"
 
       # Builds suspect with the version in rust-toolchain.toml.
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: "1.99.1"
+          # rust-toolchain.toml's components, installed here once: otherwise
+          # the first cargo call adds them lazily, which can collide with
+          # the image's rustup proxies (`detected conflict: bin/cargo-fmt`).
+          components: rustfmt, clippy, rust-src
 
-      - name: Build the toolchain
-        run: ${{ matrix.install }}
+      # Official setup actions at the versions the toolchain gates pin
+      # (crates/suspect-codegen/src/toolchain.rs).
+      - if: contains(fromJSON('["go","terraform","shared"]'), matrix.name)
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.23"
+      # The TypeScript suites run Node 24 as a second runtime and pin the
+      # package/doc toolchain to Node 22.23.1 exactly. Install 24 first and
+      # record it, so 22.23.1 is the one left on PATH.
+      - if: contains(fromJSON('["node","shared"]'), matrix.name)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24"
+      - if: contains(fromJSON('["node","shared"]'), matrix.name)
+        run: echo "SUSPECT_NODE24_BIN=$(command -v node)" >> "$GITHUB_ENV"
+      - if: contains(fromJSON('["node","shared"]'), matrix.name)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.23.1"
+      # The TypeScript suites compile consumers with `tsc` from PATH; use the
+      # compiler version tools/typescript-docs pins.
+      - if: contains(fromJSON('["node","shared"]'), matrix.name)
+        run: npm install --global --no-audit --no-fund typescript@5.9.3
+      # Generated Python packages are checked on the 3.11 floor and current
+      # 3.14; installed-wheel suites create uv venvs per interpreter.
+      - if: contains(fromJSON('["python","go","shared"]'), matrix.name)
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: |
+            3.11
+            3.14
+      - if: contains(fromJSON('["python","go","shared"]'), matrix.name)
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - if: matrix.name == 'dotnet'
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          # Exact SDKs: the suites pin them with rollForward: disable.
+          dotnet-version: |
+            8.0.424
+            10.0.400
+      - if: contains(fromJSON('["jdk","kotlin"]'), matrix.name)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+      # setup-java exports JAVA_HOME_<major>_X64 for each install; the
+      # Kotlin suites exercise both supported JDKs.
+      - if: matrix.name == 'kotlin'
+        run: echo "SUSPECT_KOTLIN_JAVA_HOMES=$JAVA_HOME_21_X64:$JAVA_HOME_25_X64" >> "$GITHUB_ENV"
+      - if: matrix.name == 'ruby'
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1.336.0
+        with:
+          ruby-version: "3.3"
+      - if: matrix.name == 'php'
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: "8.3"
+          extensions: curl, mbstring, xml
+      - if: matrix.name == 'dart'
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: "3.9.4"
+      # Swift runs on macOS with the image's Xcode toolchain.
+      - if: matrix.name == 'terraform'
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          # Pinned to tests/fixtures/terraform-v1/target.json terraform_version;
+          # the address gate asserts the exact native parser revision.
+          terraform_version: "1.15.8"
+          terraform_wrapper: false
+      # Browser gates drive the image's Google Chrome (the fixtures default
+      # to the macOS app path).
+      - if: contains(fromJSON('["node","dart","shared"]'), matrix.name)
+        run: |
+          chrome="$(command -v google-chrome)"
+          echo "SUSPECT_CHROMIUM=$chrome" >> "$GITHUB_ENV"
+          echo "SUSPECT_DART_CHROME=$chrome" >> "$GITHUB_ENV"
 
       - name: Report the toolchain version
         run: |
@@ -124,22 +182,31 @@ jobs:
               php) php --version | head -1 ;;
               dart) dart --version 2>&1 | head -1 ;;
               swift) swift --version ;;
+              kotlin) java -version 2>&1 | head -1; mvn --version | head -1 ;;
+              cpp) c++ --version | head -1; cmake --version | head -1 ;;
+              terraform) terraform version | head -1 ;;
+              shared) go version; node --version; python3 --version; swift --version 2>&1 | head -1 ;;
               *) rustc --version ;;
             esac
           } | tee toolchain.txt
+
+      # Per-suite packages under target/ (npm tool deps, the Python tools
+      # venv, Ruby gems, PHP phars); a no-op for backends that need none.
+      - name: Provision suite tools
+        run: tools/native-setup.sh ${{ matrix.setup }}
 
       - name: Build suspect
         run: cargo build --release -p suspect-cli
 
       - name: Run the backend's acceptance suites
         run: |
-          # `--ignored` runs the opt-in native suites. The glob selects every
-          # test target whose file starts with this backend's prefix
-          # (`crates/suspect-codegen/tests/<prefix>*.rs`). A failure fails
+          # `--ignored` runs the opt-in native suites. Each backend's suites
+          # are one grouped test binary
+          # (`crates/suspect-codegen/tests/groups/<name>.rs`). A failure fails
           # this matrix entry; the job's `continue-on-error` keeps it from
           # blocking anything else.
           cargo test -p suspect-codegen --release \
-            --test "${{ matrix.test_filter }}*" \
+            --test "${{ matrix.test_filter }}" \
             -- --ignored --nocapture
 
       - name: Publish the declared coverage matrix

@@ -128,7 +128,11 @@ struct CredentialRequest {
 using CredentialProvider = std::function<Result<Authorization, TransportError>(const CredentialRequest&)>;
 
 struct ClientOptions {
+    /** Explicit override: HTTPS, or plain HTTP to a loopback host unless
+     * allow_insecure_http is set (ADR 0035). Declared servers keep their scheme. */
     Presence<std::string> server_url;
+    /** Opt in to a plain-HTTP server_url on a non-loopback host. */
+    bool allow_insecure_http = false;
     Presence<std::string> document_url;
     std::size_t server_index = 0;
     std::map<std::string, std::string, std::less<>> server_variables;

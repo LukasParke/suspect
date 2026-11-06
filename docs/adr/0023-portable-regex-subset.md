@@ -1,0 +1,3 @@
+# Regex patterns use a portable regular subset compiled to a Thompson NFA
+
+`pattern` and `patternProperties` compile to a bounded Thompson NFA over Unicode scalars (`crates/suspect-schema/src/pattern.rs`). The NFA is part of the portable program, and every native runtime executes it with the same work accounting and no backtracking. ECMA-262 constructs outside the regular subset fail compilation with a located `Unsupported` error and are never handed to the host engine: lookarounds, backreferences, `\b`, `\p{…}`, and for OAS 3.0 also `.`, complements and `\s`. Host regex engines disagree with each other and with ECMA-262, and backtracking engines allow exponential-time inputs. Lone UTF-16 surrogates in JS strings give `EvaluationFailure`, not invalid.

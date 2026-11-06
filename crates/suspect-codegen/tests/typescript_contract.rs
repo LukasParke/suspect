@@ -514,12 +514,26 @@ fn directional_annotations_follow_reference_identity_in_each_openapi_version() {
                 }}
             }),
             |contract| {
+                let plan = plan_models(
+                    contract,
+                    &roots(contract, &["Input"]),
+                    &[ModelView::Neutral, ModelView::Request],
+                );
+                if version.starts_with("3.0.") {
+                    // OpenAPI 3.0 directional `required` has no supported
+                    // validation profile: the referenced readOnly identity
+                    // must still be recognized, as a located refusal.
+                    assert!(
+                        plan.diagnostics().iter().any(|error| error.code
+                            == "oas30-directional-required-unsupported"
+                            && error.source.pointer() == "/components/schemas/Input/required"),
+                        "{:?}",
+                        plan.diagnostics()
+                    );
+                    return;
+                }
                 native(
-                    &plan_models(
-                        contract,
-                        &roots(contract, &["Input"]),
-                        &[ModelView::Neutral, ModelView::Request],
-                    ),
+                    &plan,
                     r#"
 import type { Input, InputRequest } from './models.js';
 const request: InputRequest = { name:'value' };

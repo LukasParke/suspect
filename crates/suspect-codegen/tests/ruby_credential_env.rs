@@ -286,7 +286,7 @@ fn isolated_current_contract() {
         command
             .args([
                 "--exact",
-                "bound_policy_uses_admitted_source_names_and_keeps_no_policy_bytes",
+                &qualified("bound_policy_uses_admitted_source_names_and_keeps_no_policy_bytes"),
                 "--nocapture",
             ])
             .env("SUSPECT_RUBY_ENV_HOST_PROBE_INPUT", &first)
@@ -303,6 +303,7 @@ fn isolated_current_contract() {
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
+        assert_ran_one(&output.stdout);
         receipts.push(serde_json::from_slice::<Value>(&std::fs::read(receipt).unwrap()).unwrap());
     }
     assert_eq!(
@@ -544,12 +545,9 @@ fn canonical_credential_env_capture_is_semantic_and_keeps_credential_surface() {
 }
 
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    // SUSPECT_RUBY_HOME, the version-manager install, or the home of the
+    // `ruby` on PATH (setup-ruby on CI).
+    suspect_codegen::toolchain::require_home("ruby")
 }
 fn default_gems() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))
@@ -802,5 +800,25 @@ fn installed_openrouter_env_uses_source_default_https_and_real_key_schemas() {
             ),
         &directory,
         "types",
+    );
+}
+
+/// The `--exact` name of `test` inside this binary: the crate groups its
+/// suites into one binary per backend, so test paths carry this file's
+/// module (`ruby_credential_env::…`) there and none in a standalone build.
+fn qualified(test: &str) -> String {
+    match module_path!().split_once("::") {
+        Some((_, module)) => format!("{module}::{test}"),
+        None => test.to_owned(),
+    }
+}
+
+/// Fails unless a self-invocation actually ran exactly one test: an
+/// `--exact` filter that matches nothing also exits successfully.
+fn assert_ran_one(stdout: &[u8]) {
+    let text = String::from_utf8_lossy(stdout);
+    assert!(
+        text.contains("running 1 test"),
+        "self-invocation selected no test (check the --exact name):\n{text}"
     );
 }

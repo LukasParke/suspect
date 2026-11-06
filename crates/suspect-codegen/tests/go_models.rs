@@ -238,7 +238,7 @@ func TestNativeModels(t *testing.T) {
 }
 
 #[test]
-#[ignore = "requires native Go and the tracked OpenRouter checkout"]
+#[ignore = "requires native Go and OPENROUTER_WEB_ROOT (the OpenRouter checkout)"]
 fn tracked_credits_models_have_exact_native_number_fields() {
     let root = suspect_codegen::test_inputs::openrouter_root();
     let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));

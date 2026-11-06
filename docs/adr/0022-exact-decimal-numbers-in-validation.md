@@ -1,0 +1,3 @@
+# Schema numbers are exact decimals, never machine floats or integers
+
+Numeric bounds, `multipleOf`, `integer` checks and `enum`/`const`/`uniqueItems` equality all use `ExactNumber` (`crates/suspect-schema/src/number.rs`): a sign, a normalized decimal coefficient and an arbitrary-precision exponent. Exponents are compared symbolically, never expanded into digits. Portable programs carry the original numeric token. Real contracts contain wide integers and exponent forms where f64/i64 give wrong answers: 2^53 and 2^53+1 compare equal, `1e-400` underflows, and decimal `multipleOf` is wrong. Size is bounded by `max_number_bytes`, and exceeding it is an `EvaluationFailure` (ADR-0021). `num-bigint` is a compiler dependency only.

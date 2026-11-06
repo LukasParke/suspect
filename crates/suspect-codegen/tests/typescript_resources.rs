@@ -1,7 +1,5 @@
 //! Source-driven native resource/dynamic validation through the checked v3 seam.
 
-#![cfg(feature = "http-protocol")]
-
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
@@ -194,7 +192,7 @@ fn native(label: &str, programs: &[OwnedProgram], cases: &Value, extra: &str) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools");
     let matrix = std::env::var_os("SUSPECT_TYPESCRIPT_V3_MATRIX").is_some();
     let compilers = if matrix {
@@ -256,7 +254,9 @@ fn native(label: &str, programs: &[OwnedProgram], cases: &Value, extra: &str) {
         )
         .unwrap();
         println!("resource validator compiler: Version {version}");
-        for node in std::iter::once(node.clone()).chain(std::env::var_os("SUSPECT_NODE24_BIN")) {
+        for node in std::iter::once(node.clone().into_os_string())
+            .chain(std::env::var_os("SUSPECT_NODE24_BIN"))
+        {
             let result = checked(
                 Command::new(node).current_dir(&generated).arg(&consumer),
                 &generated,
@@ -634,7 +634,7 @@ fn installed(
     .unwrap();
     suspect_codegen::write_files(&files, &root).unwrap();
     let package = root.join("typescript");
-    let selected_node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let selected_node = suspect_codegen::toolchain::pinned_node(22);
     let executable = checked(
         Command::new(&selected_node).args(["--print", "process.execPath"]),
         &root,
@@ -684,8 +684,7 @@ fn installed(
         ]),
         &root,
     );
-    let node24 = std::env::var_os("SUSPECT_NODE24_BIN")
-        .expect("set SUSPECT_NODE24_BIN for the second required runtime");
+    let node24 = suspect_codegen::toolchain::pinned_node(24);
     for (version, compiler) in [
         ("5.9.3", package.join("node_modules/typescript/bin/tsc")),
         ("5.5.4", floor.join("node_modules/typescript/bin/tsc")),
@@ -761,7 +760,10 @@ fn installed(
                 ]),
             &root,
         );
-        for node in [node.clone().into_os_string(), node24.clone()] {
+        for node in [
+            node.clone().into_os_string(),
+            node24.clone().into_os_string(),
+        ] {
             checked(
                 Command::new(&node)
                     .current_dir(&consumer)
@@ -1216,7 +1218,7 @@ fn browser_v3_executes_official_sources_dynamic_sdk_calls_and_contextual_codecs(
         include_str!("fixtures/typescript-resources-browser.mjs"),
     )
     .unwrap();
-    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let compiler = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tools/typescript-docs/node_modules/typescript/bin/tsc");
     let mut command = Command::new(&node);
@@ -1278,6 +1280,7 @@ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const local=`http://127.0.0.1:${server.address().port}`;
 // A loopback transport supplies the fixture's virtual-host DNS/proxy routing.
 // Request-target spelling and the physical authority stay literal on the wire.
+// ADR 0035: these declared plain-HTTP servers keep their scheme.
 const rawFetch=(input,init)=>new Promise((resolve,reject)=>{
     const match=/^http:\/\/([^/]+)(\/.*)$/.exec(String(input));assert.ok(match,'physical HTTP URI');
     const request=httpRequest({hostname:'127.0.0.1',port:server.address().port,method:init.method,path:match[2],headers:{...Object.fromEntries(init.headers),host:match[1]}},response=>{response.resume();response.on('end',()=>resolve(new Response(null,{status:response.statusCode})));});request.on('error',reject);request.end();

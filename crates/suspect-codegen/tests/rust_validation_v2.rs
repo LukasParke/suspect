@@ -75,7 +75,7 @@ fn checked(command: &mut Command, root: &Path) {
     );
 }
 fn cargo(mode: &str, manifest: &Path, target: &Path) -> Command {
-    let mut command = Command::new("cargo");
+    let mut command = suspect_codegen::toolchain::nested_cargo();
     command
         .args([mode, "--offline", "--quiet", "--manifest-path"])
         .arg(manifest)

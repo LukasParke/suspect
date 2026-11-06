@@ -3,7 +3,6 @@
 import argparse
 import importlib.util
 import json
-import os
 from pathlib import Path
 import shutil
 import traceback
@@ -20,7 +19,7 @@ def main():
     parser.add_argument("--fixtures", type=Path, required=True)
     args = parser.parse_args()
     root, evidence, fixtures = args.root.resolve(), args.evidence.resolve(), args.fixtures.resolve()
-    assert root.is_relative_to(acceptance.APPROVED)
+    assert root.is_relative_to(acceptance.APPROVED.resolve()), "native roots must be isolated under the approved temporary directory"
     acceptance.require_terraform()
     run = acceptance.Runner(evidence)
     report = {"format": "suspect.terraform.native-variants.v1", "native_root": str(root), "local_acceptance_only": True, "passed": False}
@@ -42,28 +41,17 @@ def main():
                 shutil.copy2(fixtures / "anonymous_test.go", package / "provider/anonymous_test.go")
                 selector = "TestAnonymous"
             # Physical source identities are deliberately fresh in the anonymous
-            # SDK. Give its unpublished module a fresh namespace cache; reuse
-            # only the already checksummed public dependency/toolchain cache.
-            shared_cache = acceptance.APPROVED / "sdk-terraform-dependency-cache-20260910-01"
-            cache = directory / "module-cache"
-            cache.mkdir()
-            private_host = config["sdk"]["module_path"].split("/")[0]
-            for child in shared_cache.iterdir():
-                if child.name not in ("cache", private_host):
-                    (cache / child.name).symlink_to(child, target_is_directory=child.is_dir())
-            download = cache / "cache/download"
-            download.mkdir(parents=True)
-            for child in (shared_cache / "cache/download").iterdir():
-                if child.name != private_host:
-                    (download / child.name).symlink_to(child, target_is_directory=child.is_dir())
-            env = {k: v for k, v in os.environ.items() if not k.startswith(("GO", "TF_"))}
-            env.update(GOWORK="off", GOMODCACHE=str(cache), GOCACHE=str(acceptance.APPROVED / "sdk-terraform-build-cache-20260910-01"), GOPROXY=f"file://{proxy},https://proxy.golang.org", GONOSUMDB=config["sdk"]["module_path"])
-            for tier in ("go1.23.12", "go1.27.1"):
-                selected = {**env, "GOTOOLCHAIN": tier}
-                version = run.run(f"{variant}-{tier}-version", ["go", "version"], package, selected)
-                run.claim(f"{variant}-{tier}-pin", tier.encode() in version)
-                run.run(f"{variant}-{tier}-tests", ["go", "test", "-mod=readonly", "-race", "-count=1", "-v", "-run", selector, "./..."], package, selected, timeout=180)
-                modules = list(acceptance.json_stream(run.run(f"{variant}-{tier}-sdk-link", ["go", "list", "-m", "-json", "all"], package, selected)))
+            # SDK. focused_go_env purges the unpublished module's host from the
+            # shared cache for every variant; only the checksummed public
+            # dependency/toolchain cache is reused.
+            env = acceptance.focused_go_env(proxy, config["sdk"]["module_path"])
+            floor, go = config["go_toolchain"], acceptance.go_binary()
+            for tier, selection in acceptance.go_tiers(floor).items():
+                selected = {**env, **selection}
+                version = run.run(f"{variant}-{tier}-version", [go, "env", "GOVERSION"], package, selected, timeout=600).decode().strip()
+                acceptance.claim_go_tier(run, f"{variant}-{tier}-pin", tier, floor, version)
+                run.run(f"{variant}-{tier}-tests", [go, "test", "-mod=readonly", "-race", "-count=1", "-v", "-run", selector, "./..."], package, selected, timeout=900)
+                modules = list(acceptance.json_stream(run.run(f"{variant}-{tier}-sdk-link", [go, "list", "-m", "-json", "all"], package, selected)))
                 acceptance.save_json(evidence / f"{variant}-{tier}-modules.json", modules)
                 sdk = next(m for m in modules if m["Path"] == config["sdk"]["module_path"])
                 run.claim(f"{variant}-{tier}-exact-sdk", sdk["Version"] == info["version"] and sdk["Sum"] == info["sum"] and "Replace" not in sdk, sdk)
