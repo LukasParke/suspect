@@ -66,14 +66,20 @@ pub fn materialize(git_ref: &str, path: &Path) -> Result<std::path::PathBuf, Bas
             absolute.display()
         ))
     })?;
+    // git prints `C:/…` on Windows while `canonicalize` gives `\\?\C:\…`
+    // (and resolves 8.3 short names): canonicalize the root the same way
+    // before taking the relative path, and hand git `/` separators.
+    let repository = repository.canonicalize().unwrap_or(repository);
     let relative = absolute
         .strip_prefix(&repository)
         .map_err(|_| BaselineError::MissingAtRef {
             git_ref: git_ref.to_owned(),
             path: absolute.display().to_string(),
         })?
-        .to_string_lossy()
-        .into_owned();
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
 
     let output = Command::new("git")
         .arg("-C")

@@ -1058,7 +1058,8 @@ pub fn document_highlights(doc: &OpenDoc, offset: usize) -> Vec<DocumentHighligh
     let Some(target) = wanted else {
         return Vec::new();
     };
-    if std::env::var("SUSPECT_HLDBG").is_ok() {
+    let debug = std::env::var_os("SUSPECT_HLDBG").is_some();
+    if debug {
         eprintln!("HLDBG target={target:?}");
     }
 
@@ -1079,11 +1080,15 @@ pub fn document_highlights(doc: &OpenDoc, offset: usize) -> Vec<DocumentHighligh
         };
         let value = value.content();
         if normalized_ref(&value) == target {
-            eprintln!(
-                "HLDBG ref match at {:?} norm={:?}",
-                lsp_range(bytes, li, value.byte_range()),
-                normalized_ref(&value)
-            );
+            // Gated like the target line: an ungated print wrote one stderr
+            // line per `$ref` match on every highlight request.
+            if debug {
+                eprintln!(
+                    "HLDBG ref match at {:?} norm={:?}",
+                    lsp_range(bytes, li, value.byte_range()),
+                    normalized_ref(&value)
+                );
+            }
             out.push(DocumentHighlight {
                 range: lsp_range(bytes, li, value.byte_range()),
                 kind: Some(DocumentHighlightKind::TEXT),
