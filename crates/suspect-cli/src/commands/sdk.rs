@@ -676,31 +676,64 @@ fn commit(args: &SdkArgs, prepared: Result<Prepared, Vec<Diagnostic>>) -> anyhow
                         report.status = "drift";
                         // Name what drifted, so a failing `--check` (and the
                         // `ci` codegen stage) says which outputs to look at.
-                        let drift = |path: &std::path::Path, what: &str| Diagnostic {
+                        // Bounded: a never-generated directory is one line,
+                        // and at most LISTED paths are named.
+                        const LISTED: usize = 20;
+                        let drift = |path: &std::path::Path, what: String| Diagnostic {
                             file: args.out.join(path).display().to_string(),
                             pointer: String::new(),
                             line: 1,
                             col: 1,
                             range: None,
                             code: "sdk-artifact-drift".into(),
-                            message: format!("generated output {what}"),
+                            message: what,
                         };
-                        for change in &ownership.changes {
-                            let what = match change.kind {
-                                suspect_codegen::OwnershipChangeKind::Unchanged => continue,
-                                suspect_codegen::OwnershipChangeKind::Created => "is missing",
-                                suspect_codegen::OwnershipChangeKind::Changed => {
-                                    "differs from a fresh generation"
-                                }
-                                _ => "is obsolete or no longer owned",
-                            };
-                            report.diagnostics.push(drift(&change.path, what));
-                        }
-                        if ownership.manifest != suspect_codegen::ArtifactChange::Unchanged {
+                        let drifted: Vec<_> = ownership
+                            .changes
+                            .iter()
+                            .filter_map(|change| {
+                                let what = match change.kind {
+                                    suspect_codegen::OwnershipChangeKind::Unchanged => return None,
+                                    suspect_codegen::OwnershipChangeKind::Created => "is missing",
+                                    suspect_codegen::OwnershipChangeKind::Changed => {
+                                        "differs from a fresh generation"
+                                    }
+                                    _ => "is obsolete or no longer owned",
+                                };
+                                Some((change, what))
+                            })
+                            .collect();
+                        let all_missing = !drifted.is_empty()
+                            && drifted.len() == ownership.changes.len()
+                            && drifted.iter().all(|(change, _)| {
+                                change.kind == suspect_codegen::OwnershipChangeKind::Created
+                            });
+                        if all_missing {
                             report.diagnostics.push(drift(
-                                std::path::Path::new(suspect_codegen::OWNERSHIP_MANIFEST),
-                                "ownership manifest is stale",
+                                std::path::Path::new(""),
+                                format!(
+                                    "nothing generated yet ({} outputs missing)",
+                                    drifted.len()
+                                ),
                             ));
+                        } else {
+                            for (change, what) in drifted.iter().take(LISTED) {
+                                report
+                                    .diagnostics
+                                    .push(drift(&change.path, format!("generated output {what}")));
+                            }
+                            if drifted.len() > LISTED {
+                                report.diagnostics.push(drift(
+                                    std::path::Path::new(""),
+                                    format!("and {} more drifted outputs", drifted.len() - LISTED),
+                                ));
+                            }
+                            if ownership.manifest != suspect_codegen::ArtifactChange::Unchanged {
+                                report.diagnostics.push(drift(
+                                    std::path::Path::new(suspect_codegen::OWNERSHIP_MANIFEST),
+                                    "ownership manifest is stale".into(),
+                                ));
+                            }
                         }
                     } else {
                         match suspect_codegen::write_files_with_owner(
