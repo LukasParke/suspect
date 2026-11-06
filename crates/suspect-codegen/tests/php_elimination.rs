@@ -295,9 +295,8 @@ fn tools() -> PathBuf {
 }
 
 fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| tools().join("php-8.3.32/php"))
+    // SUSPECT_PHP_BIN, the provisioned static build, then PATH.
+    suspect_codegen::toolchain::require("php")
 }
 
 fn composer() -> PathBuf {

@@ -545,12 +545,9 @@ fn canonical_credential_env_capture_is_semantic_and_keeps_credential_surface() {
 }
 
 fn ruby_home() -> PathBuf {
-    std::env::var_os("SUSPECT_RUBY_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap())
-                .join(".local/share/mise/installs/ruby/3.3.12")
-        })
+    // SUSPECT_RUBY_HOME, the version-manager install, or the home of the
+    // `ruby` on PATH (setup-ruby on CI).
+    suspect_codegen::toolchain::require_home("ruby")
 }
 fn default_gems() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))

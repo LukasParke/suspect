@@ -43,9 +43,8 @@ fn load(path: &Path) -> Arc<Contract> {
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(path).unwrap()).unwrap())
 }
 fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo().join("target/sdk-php-tools/php-8.3.32/php"))
+    // SUSPECT_PHP_BIN, the provisioned static build, then PATH.
+    suspect_codegen::toolchain::require("php")
 }
 fn tool(variable: &str, name: &str) -> PathBuf {
     std::env::var_os(variable)

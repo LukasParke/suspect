@@ -30,10 +30,11 @@ pub fn evidence_dir(prefix: &str) -> PathBuf {
 }
 
 /// A fresh retained native root under the approved temporary directory
-/// (`$TMPDIR/opencode`, the same one the Python runners assert), recorded
+/// (`$TMPDIR/suspect-terraform-native`, the `APPROVED` root the Python runners
+/// assert), recorded
 /// in `evidence/native-root.txt`.
 pub fn native_root(prefix: &str, evidence: &Path) -> PathBuf {
-    let approved = std::env::temp_dir().join("opencode");
+    let approved = std::env::temp_dir().join("suspect-terraform-native");
     std::fs::create_dir_all(&approved).unwrap();
     let root = tempfile::Builder::new()
         .prefix(prefix)
@@ -99,4 +100,32 @@ pub fn run_runner(
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// The evidence root for one `#[ignore]`d Terraform gate. A
+/// `SUSPECT_TERRAFORM_EVIDENCE` path that does not exist yet is used as is
+/// (one gate run on its own, as the Terraform guide shows); otherwise each
+/// gate gets a fresh directory under it (or the temp dir), so a whole-group
+/// run such as the nightly job never reuses one. Holds a copy of the test
+/// binary that produced it.
+pub fn fresh_evidence(prefix: &str) -> PathBuf {
+    if let Some(path) = std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        // Claim the exact path atomically: gates in one binary run
+        // concurrently, so only the one whose `create_dir` succeeds owns it.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        if std::fs::create_dir(&path).is_ok() {
+            std::fs::copy(
+                std::env::current_exe().unwrap(),
+                path.join("generator-test.bin"),
+            )
+            .unwrap();
+            return path;
+        }
+    }
+    evidence_dir(prefix)
 }

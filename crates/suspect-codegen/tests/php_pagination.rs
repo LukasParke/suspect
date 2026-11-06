@@ -6,12 +6,7 @@
 //! byte-identical.
 #![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
 
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    process::Command,
-    sync::Arc,
-};
+use std::{fs, path::PathBuf, process::Command, sync::Arc};
 
 use serde_json::{Value, json};
 use suspect_codegen::{
@@ -318,18 +313,10 @@ fn cursor_without_items_emits_the_page_walk_only() {
     assert!(!client.contains("scanKeysPageItems"), "{client}");
 }
 
-/// The repository's verified PHP 8.3 interpreter, when available.
+/// The PHP interpreter (SUSPECT_PHP_BIN, the provisioned static build,
+/// then PATH); an `#[ignore]` gate fails when there is none.
 fn php() -> Option<PathBuf> {
-    let candidate = std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools/php-8.3.32/php")
-        });
-    Command::new(&candidate)
-        .arg("-v")
-        .output()
-        .is_ok()
-        .then_some(candidate)
+    Some(suspect_codegen::toolchain::require("php"))
 }
 
 #[ignore = "requires the PHP CLI on the test host"]

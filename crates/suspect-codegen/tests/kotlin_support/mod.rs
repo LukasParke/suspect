@@ -13,6 +13,25 @@ pub fn java_homes() -> Vec<(String, PathBuf)> {
     if let Some(home) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME") {
         return vec![("override".into(), home.into())];
     }
+    // The supported-JDK matrix as a PATH-style list (CI exports the
+    // setup-java homes here), each labelled by its `release` major version.
+    if let Some(list) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOMES").filter(|v| !v.is_empty()) {
+        return std::env::split_paths(&list)
+            .enumerate()
+            .map(|(index, home)| {
+                let major = std::fs::read_to_string(home.join("release"))
+                    .ok()
+                    .and_then(|release| {
+                        release.lines().find_map(|line| {
+                            let version = line.strip_prefix("JAVA_VERSION=")?.trim_matches('"');
+                            Some(version.split('.').next()?.to_owned())
+                        })
+                    })
+                    .unwrap_or_else(|| format!("jdk{index}"));
+                (major, home)
+            })
+            .collect();
+    }
     let mise = std::env::var_os("HOME")
         .map(|home| PathBuf::from(home).join(".local/share/mise/installs/java"));
     let matrix = [("21", "temurin-21"), ("25", "temurin-25")]

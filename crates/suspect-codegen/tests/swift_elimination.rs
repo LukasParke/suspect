@@ -542,7 +542,16 @@ fn swift_consumers_eliminate_unrelated_operations() {
         &base_root,
         &CODEC_ONLY_CONSUMER,
         "release",
-        &["-Xlinker", "-dead_strip"],
+        &[
+            "-Xlinker",
+            // Darwin ld64 spells the pass `-dead_strip`; GNU ld / lld on
+            // Linux `--gc-sections`.
+            if cfg!(target_os = "macos") {
+                "-dead_strip"
+            } else {
+                "--gc-sections"
+            },
+        ],
     );
     println!(
         "release codec-only with -Xlinker -dead_strip: {dead_strip_bytes} B, {dead_strip_symbols} nm symbols, listWidgets={}",

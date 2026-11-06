@@ -1,9 +1,6 @@
 //! Native Go import-path collisions at the separate Terraform package boundary.
 #![cfg(feature = "http-protocol")]
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use suspect_codegen::{go_http, terraform::*};
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
@@ -63,14 +60,7 @@ fn sdk_modules_cannot_shadow_generated_provider_packages() {
 #[test]
 #[ignore = "native pinned Go package lookup; no SDK replacement or lifecycle replay"]
 fn native_pinned_module_import_boundaries() {
-    let evidence =
-        PathBuf::from(std::env::var_os("SUSPECT_TERRAFORM_EVIDENCE").expect("fresh evidence root"));
-    std::fs::create_dir(&evidence).unwrap();
-    std::fs::copy(
-        std::env::current_exe().unwrap(),
-        evidence.join("generator-test.bin"),
-    )
-    .unwrap();
+    let evidence = crate::terraform_support::fresh_evidence("sdk-terraform-modules-evidence-");
     let root = tempfile::Builder::new()
         .prefix("sdk-terraform-modules-")
         .tempdir_in(native_tmp())

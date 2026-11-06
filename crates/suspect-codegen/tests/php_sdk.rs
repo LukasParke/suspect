@@ -27,9 +27,8 @@ fn tools() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools")
 }
 fn php() -> PathBuf {
-    std::env::var_os("SUSPECT_PHP_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| tools().join("php-8.3.32/php"))
+    // SUSPECT_PHP_BIN, the provisioned static build, then PATH.
+    suspect_codegen::toolchain::require("php")
 }
 fn phpstan() -> PathBuf {
     std::env::var_os("SUSPECT_PHPSTAN_PHAR")

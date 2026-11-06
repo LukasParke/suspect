@@ -2,7 +2,7 @@
 # Provisions the tool directories the opt-in native SDK suites expect
 # (`cargo test -p suspect-codegen --test <backend>_* -- --ignored`).
 #
-# Usage: tools/native-setup.sh <backend>...   (typescript python go ruby php cpp | all)
+# Usage: tools/native-setup.sh <backend>...   (typescript python go ruby php cpp rust | all)
 #
 # Toolchains themselves (node, python3.11/3.14, ruby, java, dotnet, ...) are
 # found by `suspect_codegen::toolchain`; this script only installs the
@@ -22,6 +22,33 @@ typescript() {
       (cd "$dir" && npm ci --no-audit --no-fund --loglevel=error)
     fi
   done
+}
+
+rust() {
+  # The Rust suites build every generated SDK with `cargo --offline`, so its
+  # pinned dependency set must already be in the registry cache with a
+  # current index (a stale one picks yanked releases or none). Resolve it
+  # once, online, in a throwaway crate mirroring rust_codecs::cargo_manifest.
+  local scratch
+  scratch="$(mktemp -d)"
+  mkdir -p "$scratch/src"
+  : > "$scratch/src/lib.rs"
+  cat > "$scratch/Cargo.toml" <<'TOML'
+[package]
+name = "suspect-generated-rust-deps"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.151", features = ["raw_value"] }
+url = "=2.5.8"
+reqwest = { version = "=0.12.28", default-features = false, features = ["rustls-tls"] }
+TOML
+  echo "cargo fetch: generated Rust SDK dependencies"
+  cargo fetch --quiet --manifest-path "$scratch/Cargo.toml"
+  rm -rf "$scratch"
 }
 
 python() {
@@ -177,10 +204,10 @@ if [[ $# -eq 0 ]]; then
 fi
 for backend in "$@"; do
   case "$backend" in
-    typescript | python | ruby | php | cpp) "$backend" ;;
+    typescript | python | ruby | php | cpp | rust) "$backend" ;;
     # Go and Python SDK docs build with Sphinx from the Python tools venv.
     go) python ;;
-    all) typescript; python; ruby; php; cpp ;;
+    all) typescript; python; ruby; php; cpp; rust ;;
     *) echo "$backend: nothing to provision" ;;
   esac
 done
