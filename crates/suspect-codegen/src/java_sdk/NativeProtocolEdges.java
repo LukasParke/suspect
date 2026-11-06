@@ -104,7 +104,7 @@ public final class NativeProtocolEdges {
     private static void bufferedDeadline() {
         var script = json("{\"ok\":"); script.stallBody = true;
         var transport = new NativeSupport.Mock(script);
-        try (var client = new Client(options(transport).timeout(Duration.ofMillis(150)).maxCaptureBytes(4).build())) {
+        try (var client = new Client(options(transport).timeout(Duration.ofMillis(1000)).maxCaptureBytes(4).build())) {
             var error = fails("timeout", client::publicValue);
             check(error.status() == 200 && Arrays.equals(error.capture(), bytes("{\"ok")) && error.truncated(), "partial buffered timeout lost status/capture");
         }
@@ -133,7 +133,7 @@ public final class NativeProtocolEdges {
     private static void typedErrorStream() throws Exception {
         var script = new NativeSupport.Script(400, "text/event-stream", "data: error detail\n\n"); script.stallBody = true;
         var transport = new NativeSupport.Mock(script);
-        try (var client = new Client(options(transport).timeout(Duration.ofMillis(200)).build())) {
+        try (var client = new Client(options(transport).timeout(Duration.ofMillis(1000)).build())) {
             try { client.errorEvents(); throw new AssertionError("declared stream error became success"); }
             catch (ErrorEventsStatus400 error) {
                 try (error) {

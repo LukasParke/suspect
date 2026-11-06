@@ -57,7 +57,7 @@ jobs:
           - {name: terraform, toolchain: "1.15.8+go1.23", test_filter: terraform, setup: terraform}
           # Cross-backend suites: Go, Node, Python, Swift and a headless
           # Chrome (preinstalled on the image).
-          - {name: shared, toolchain: "go+node+python+swift", test_filter: shared, setup: "typescript python"}
+          - {name: shared, toolchain: "go+node+python+swift", test_filter: shared, setup: "typescript python rust"}
     env:
       OPENROUTER_WEB_TOKEN: ${{ secrets.OPENROUTER_WEB_TOKEN }}
     steps:
@@ -84,7 +84,7 @@ jobs:
           # rust-toolchain.toml's components, installed here once: otherwise
           # the first cargo call adds them lazily, which can collide with
           # the image's rustup proxies (`detected conflict: bin/cargo-fmt`).
-          components: rustfmt, clippy
+          components: rustfmt, clippy, rust-src
 
       # Official setup actions at the versions the toolchain gates pin
       # (crates/suspect-codegen/src/toolchain.rs).
