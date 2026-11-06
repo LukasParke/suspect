@@ -67,17 +67,13 @@ impl Tools {
 fn installed_sdk_checks_floor_current_types_and_executes_both_node_runtimes() {
     let temporary = tempfile::tempdir().unwrap();
     let retained = temporary.keep();
-    let Some(selected) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let selected = suspect_codegen::toolchain::pinned_node(22);
     let output = checked(
         Command::new(&selected).args(["--print", "process.execPath"]),
         &retained,
     );
     let node = PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
-    let Some(node24) = suspect_codegen::toolchain::pinned_node(24) else {
-        return;
-    };
+    let node24 = suspect_codegen::toolchain::pinned_node(24);
     let npm = node
         .parent()
         .unwrap()
@@ -100,9 +96,8 @@ fn installed_sdk_checks_floor_current_types_and_executes_both_node_runtimes() {
             .starts_with("v24.")
     );
 
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(source.parent().unwrap())

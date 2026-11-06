@@ -192,9 +192,7 @@ fn native(label: &str, programs: &[OwnedProgram], cases: &Value, extra: &str) {
             .collect::<Vec<_>>()
             .join(",")
     );
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let tools = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools");
     let matrix = std::env::var_os("SUSPECT_TYPESCRIPT_V3_MATRIX").is_some();
     let compilers = if matrix {
@@ -636,9 +634,7 @@ fn installed(
     .unwrap();
     suspect_codegen::write_files(&files, &root).unwrap();
     let package = root.join("typescript");
-    let Some(selected_node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let selected_node = suspect_codegen::toolchain::pinned_node(22);
     let executable = checked(
         Command::new(&selected_node).args(["--print", "process.execPath"]),
         &root,
@@ -688,9 +684,7 @@ fn installed(
         ]),
         &root,
     );
-    let Some(node24) = suspect_codegen::toolchain::pinned_node(24) else {
-        return;
-    };
+    let node24 = suspect_codegen::toolchain::pinned_node(24);
     for (version, compiler) in [
         ("5.9.3", package.join("node_modules/typescript/bin/tsc")),
         ("5.5.4", floor.join("node_modules/typescript/bin/tsc")),
@@ -1224,9 +1218,7 @@ fn browser_v3_executes_official_sources_dynamic_sdk_calls_and_contextual_codecs(
         include_str!("fixtures/typescript-resources-browser.mjs"),
     )
     .unwrap();
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let compiler = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tools/typescript-docs/node_modules/typescript/bin/tsc");
     let mut command = Command::new(&node);

@@ -166,11 +166,6 @@ fn aggregate_factories_refuse_jvm_arity_overflow_at_source() {
         "{errors:?}"
     );
 }
-/// `false` (after printing why) when the JDK or Maven is unavailable.
-fn native_tools() -> bool {
-    suspect_codegen::toolchain::require_home("jdk").is_some()
-        && suspect_codegen::toolchain::require("maven").is_some()
-}
 fn checked(command: &mut Command, root: &Path) {
     let result = command.output().unwrap();
     let logs = root.join("logs");
@@ -197,9 +192,6 @@ fn checked(command: &mut Command, root: &Path) {
 #[test]
 #[ignore = "focused changed aggregate-example seam; installed SDK on JDK21/25"]
 fn native_declared_aggregate_examples() {
-    if !native_tools() {
-        return;
-    }
     let root = root();
     let plan = plan(&root);
     for file in plan.render().unwrap() {
@@ -207,8 +199,9 @@ fn native_declared_aggregate_examples() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let java = suspect_codegen::toolchain::resolve_home("jdk").expect("gated by native_tools()");
-    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
+    let java = PathBuf::from(std::env::var_os("JAVA_HOME").expect("select JDK21/25"));
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/sdk-java-maven-cache/java/repository");
     checked(

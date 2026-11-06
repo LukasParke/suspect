@@ -184,9 +184,7 @@ const { createClient, isSdkError } = operations;
     }
 })().catch(error=>{ console.error(error);process.exitCode=1; });
 "#).unwrap();
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     for args in [
         vec![consumer.join("consumer.mjs")],
         vec![

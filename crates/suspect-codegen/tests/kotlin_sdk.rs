@@ -14,8 +14,6 @@ use suspect_ir::contract::{Contract, SourceId};
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
-use crate::kotlin_support as support;
-
 fn root(name: &str) -> PathBuf {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-kotlin-native");
     std::fs::create_dir_all(&base).unwrap();
@@ -319,17 +317,31 @@ fn malformed_paths_are_source_linked_before_native_emission() {
     }
 }
 
-/// See `support::java_homes`: empty (after a skip message) when the JDK
-/// or Maven is unavailable.
+/// The JDK 21/25 matrix: the mise major-version installs under `$HOME`
+/// that exist, else the single JDK 21+ the toolchain manifest gates
+/// (`SUSPECT_JAVA_BIN`, `JAVA_HOME`, then `PATH`).
 fn java_homes() -> Vec<PathBuf> {
-    support::java_homes()
-        .into_iter()
-        .map(|(_, home)| home)
-        .collect()
+    if let Some(home) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME") {
+        return vec![home.into()];
+    }
+    let mise = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".local/share/mise/installs/java"));
+    let matrix = ["temurin-21", "temurin-25"]
+        .iter()
+        .filter_map(|name| mise.as_ref().map(|mise| mise.join(name)))
+        .filter(|home| home.join("bin/java").is_file())
+        .collect::<Vec<_>>();
+    if !matrix.is_empty() {
+        return matrix;
+    }
+    vec![suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))]
 }
 
 fn maven(home: &Path) -> Command {
-    let binary = support::maven_binary().expect("gated by java_homes()");
+    let binary = std::env::var_os("SUSPECT_KOTLIN_MAVEN")
+        .map(PathBuf::from)
+        .or_else(|| suspect_codegen::toolchain::resolve_path("maven"))
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let mut command = Command::new(binary);
     command
         .args(["-B", "--no-transfer-progress"])
@@ -400,7 +412,7 @@ fn native_package(plan: &Plan, name: &str, source: &str) -> PathBuf {
     std::fs::write(consumer.join(format!("src/main/kotlin/{name}.kt")), source).unwrap();
     if name == "NativeOpenRouter" {
         let docs = std::fs::read_to_string(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/SDK-KOTLIN.md"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/sdk/kotlin/README.md"),
         )
         .unwrap();
         let snippets = docs
@@ -679,12 +691,8 @@ fn native_negative_types(root: &Path, cases: &[&str]) {
 #[ignore = "requires actual read-only OpenRouter corpus and native Maven/JDK toolchains"]
 fn native_actual_five_openrouter_operations() {
     use sha2::Digest;
-    if java_homes().is_empty() {
-        return;
-    }
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&path).expect("actual OpenRouter description is required");
     assert_eq!(
         format!("{:x}", sha2::Sha256::digest(&bytes)),

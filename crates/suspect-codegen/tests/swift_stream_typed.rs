@@ -282,7 +282,7 @@ fn plan_carries_the_compiled_stream_semantics_and_emittable_operations() {
 }
 
 fn swiftc() -> Option<std::path::PathBuf> {
-    suspect_codegen::toolchain::require("swift")?;
+    let _ = suspect_codegen::toolchain::require("swift");
     Some(
         suspect_codegen::toolchain::swift_tool("swiftc")
             .expect("the Swift toolchain has no swiftc"),
@@ -551,8 +551,7 @@ final class TypedStreamTests: XCTestCase {
 #[test]
 fn native_typed_events_drive_stubbed_streams() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_stream_typed: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_stream_typed: no Swift 6 toolchain");
     };
     eprintln!("swift_stream_typed: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();

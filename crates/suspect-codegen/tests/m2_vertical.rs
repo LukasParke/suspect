@@ -183,7 +183,7 @@ struct Toolchain {
 }
 
 fn toolchain() -> Option<Toolchain> {
-    let selected = suspect_codegen::toolchain::pinned_node(22)?;
+    let selected = suspect_codegen::toolchain::pinned_node(22);
     let output = Command::new(&selected)
         .args(["--print", "process.execPath"])
         .output()

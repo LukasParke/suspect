@@ -74,7 +74,7 @@ fn fixture() -> Value {
         paths.insert(path.into(), json!({"get":value}));
     }
     let mut servers = op("serverChoice");
-    servers["servers"] = json!([{"url":"../{version}","name":"relative","variables":{"version":{"default":"v1","enum":["v1","v2"]}}},{"url":"https://{region}.example.test/{version}","name":"regional","variables":{"region":{"default":"eu","enum":["eu","us"]},"version":{"default":"v1"}}},{"url":"http://plain.example.test/v1","name":"plain"}]);
+    servers["servers"] = json!([{"url":"../{version}","name":"relative","variables":{"version":{"default":"v1","enum":["v1","v2"]}}},{"url":"https://{region}.example.test/{version}","name":"regional","variables":{"region":{"default":"eu","enum":["eu","us"]},"version":{"default":"v1"}}}]);
     paths.insert("/server".into(), json!({"get":servers}));
     let mut default = op("defaultServer");
     default["servers"] = json!([]);
@@ -516,13 +516,12 @@ fn checked(command: &mut Command, root: &Path) {
         String::from_utf8_lossy(&result.stderr)
     );
 }
-/// `false` (after printing why) when the JDK or Maven is unavailable.
-fn native_tools() -> bool {
-    suspect_codegen::toolchain::require_home("jdk").is_some()
-        && suspect_codegen::toolchain::require("maven").is_some()
-}
 fn java() -> PathBuf {
-    suspect_codegen::toolchain::resolve_home("jdk").expect("gated by native_tools()")
+    std::env::var_os("JAVA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
+        })
 }
 fn normative_vectors(root: &Path) {
     let fixture: Value =
@@ -578,9 +577,6 @@ fn normative_vectors(root: &Path) {
 #[test]
 #[ignore = "requires JDK21/25 and Maven; new full protocol artifact compilation"]
 fn native_protocol_package() {
-    if !native_tools() {
-        return;
-    }
     let root = root();
     let plan = plan_at(&root);
     for file in plan.render().unwrap() {
@@ -594,7 +590,8 @@ fn native_protocol_package() {
             .as_ref()
             .is_none_or(|g| g.split(',').any(|v| v == name))
     };
-    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -803,13 +800,8 @@ fn native_protocol_package() {
 #[test]
 #[ignore = "new actual OpenRouter operations; requires JDK21/25 and Maven"]
 fn native_protocol_openrouter() {
-    if !native_tools() {
-        return;
-    }
     let root = root();
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let contract = load(&source);
     let operations = contract
         .operations()
@@ -869,7 +861,8 @@ fn native_protocol_openrouter() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -916,9 +909,6 @@ fn native_protocol_openrouter() {
 #[test]
 #[ignore = "new serving-document server capability; JDK21/25 native consumer"]
 fn native_protocol_document_servers() {
-    if !native_tools() {
-        return;
-    }
     use suspect_ref::{DocumentProvider, ProvidedDocument};
     let response = json!({"200":{"description":"OK","content":{"application/json":{"schema":{"type":"boolean"}}}}});
     let entry = json!({"openapi":"3.2.0","$self":"https://identity.example.test/not-a-server.json","info":{"title":"Physical serving URLs","version":"1"},"paths":{"/inherited":{"$ref":"https://parts.example.test/paths/items.json#/Inherited"},"/explicit":{"$ref":"https://parts.example.test/paths/items.json#/Explicit"},"/relative":{"$ref":"https://parts.example.test/paths/items.json#/Relative"}}});
@@ -965,7 +955,8 @@ fn native_protocol_document_servers() {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])

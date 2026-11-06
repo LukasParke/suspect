@@ -100,9 +100,7 @@ fn native_docs(plan: &ModelPlan) {
     suspect_codegen::write_files(&plan.render().unwrap(), directory.path()).unwrap();
     let root = directory.path().join("typescript");
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/typescript-docs/build.mjs");
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let output = Command::new(node)
         .arg(tool)
         .arg(&root)
@@ -188,9 +186,7 @@ fn native_typedoc_preserves_hostile_prose_and_escaped_symbol_names_as_text() {
 #[test]
 #[ignore = "requires pinned Node/TypeDoc and tracked OpenRouter public YAML"]
 fn native_typedoc_covers_tracked_openrouter_caller_and_image_closures() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let roots = contract
         .schema_roots()

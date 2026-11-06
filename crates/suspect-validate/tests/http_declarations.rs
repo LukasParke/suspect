@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[path = "../../suspect-codegen/src/test_inputs.rs"]
+mod test_inputs;
+
 use std::{path::Path, sync::Arc};
 use suspect_oas::Session;
 use suspect_ref::WorkspaceBuilder;
@@ -133,7 +137,7 @@ fn external_request_body_reports_the_target_document() {
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT tracked public spec"]
 fn tracked_openrouter_mutations_are_caught_at_exact_values() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("OPENROUTER_WEB_ROOT");
+    let root = test_inputs::openrouter_root();
     let original =
         std::fs::read_to_string(Path::new(&root).join("projects/docs/openapi/openapi.yaml"))
             .unwrap();
@@ -371,7 +375,7 @@ fn security_extensions_examples_and_optional_operation_names_are_not_generation_
 #[test]
 #[ignore = "requires OPENROUTER_WEB_ROOT tracked public spec"]
 fn tracked_openrouter_outer_security_and_callback_mutations_preserve_existing_defects() {
-    let root = std::env::var_os("OPENROUTER_WEB_ROOT").expect("OPENROUTER_WEB_ROOT");
+    let root = test_inputs::openrouter_root();
     let original =
         std::fs::read_to_string(Path::new(&root).join("projects/docs/openapi/openapi.yaml"))
             .unwrap();

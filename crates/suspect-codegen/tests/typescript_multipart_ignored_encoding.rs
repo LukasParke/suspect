@@ -201,17 +201,13 @@ fn ignored_multipart_styles_preserve_content_in_installed_requests_and_responses
     .unwrap();
     suspect_codegen::write_files(&files, &root).unwrap();
     let package = root.join("typescript");
-    let Some(selected_node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let selected_node = suspect_codegen::toolchain::pinned_node(22);
     let executable = checked(
         Command::new(&selected_node).args(["--print", "process.execPath"]),
         &root,
     );
     let node = PathBuf::from(String::from_utf8(executable.stdout).unwrap().trim());
-    let Some(node24) = suspect_codegen::toolchain::pinned_node(24) else {
-        return;
-    };
+    let node24 = suspect_codegen::toolchain::pinned_node(24);
     for (executable, major) in [(node.as_os_str(), "22"), (node24.as_os_str(), "24")] {
         let version = checked(
             Command::new(executable).args(["--print", "process.versions.node.split('.')[0]"]),

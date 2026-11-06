@@ -5,8 +5,6 @@
 
 use std::{process::Command, sync::Arc};
 
-use crate::python_support;
-
 use serde_json::{Value, json};
 use suspect_codegen::{
     backend::{Backend, GenerationOptions, TargetConfig, generate_with_options},
@@ -76,10 +74,6 @@ fn all_profiles() -> Vec<http_protocol::CompatibilityProfile> {
         http_protocol::CompatibilityProfile::ColonPathParametersV1,
         http_protocol::CompatibilityProfile::SchemalessStreamEventsV1,
     ]
-}
-
-fn tool_available(name: &str) -> bool {
-    Command::new(name).arg("--version").output().is_ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +330,10 @@ fn emitted_field_types_for(
 
 #[test]
 fn the_nullable_profile_decodes_null_in_the_emitted_python_codecs() {
-    let Some(python_bin) = python_support::python_at_least("SUSPECT_PYTHON_BIN", (3, 10)) else {
+    // The emitted codecs need the generated SDK's Python floor (3.11+);
+    // `SUSPECT_PYTHON_BIN` overrides the interpreter, and an absent or
+    // older one skips with the manifest's install guidance.
+    let Some(interpreter) = suspect_codegen::toolchain::optional("python") else {
         return;
     };
     let contract = contract_with_document(nullable_document());
@@ -383,7 +380,7 @@ print("OK")
 "#,
         )
         .unwrap();
-        let output = Command::new(&python_bin)
+        let output = Command::new(&interpreter)
             .arg("consumer.py")
             .current_dir(&python)
             .output()
@@ -691,8 +688,7 @@ fn the_emitted_typescript_sdk_normalizes_colon_paths_and_surfaces_null() {
 
 #[test]
 fn the_emitted_typescript_sdk_streams_schemaless_sse_as_untyped_frames() {
-    if !tool_available("node") {
-        eprintln!("node is not on PATH; skipping the emitted schemaless-stream check");
+    if suspect_codegen::toolchain::optional("node").is_none() {
         return;
     }
     let document = json!({

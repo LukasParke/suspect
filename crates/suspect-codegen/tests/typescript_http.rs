@@ -381,11 +381,10 @@ void run().catch((error: unknown) => { console.error(error); throw error; });
 }
 
 #[test]
-#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML)"]
+#[ignore = "requires OPENROUTER_WEB_ROOT (the OpenRouter checkout)"]
 fn tracked_openrouter_operations_and_query_inputs_plan_together() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    let path = std::path::Path::new(&root).join("projects/docs/openapi/openapi.yaml");
     let contract = {
         let workspace = Arc::new(
             WorkspaceBuilder::new()

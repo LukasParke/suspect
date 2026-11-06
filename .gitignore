@@ -2,7 +2,11 @@
 corpus/
 *.profraw
 /fixtures
-.vscode-suspect/node_modules/
+node_modules/
+editors/vscode/dist/
+editors/vscode/bin/
+*.vsix
+*.log
 __pycache__/
 *.py[cod]
 .suspect-cache/

@@ -4,7 +4,7 @@
 //! a javac compile gate over the whole package, and native behavior against a
 //! stubbed `HttpClient`. Static runtime files are never modified, and plans
 //! without a discriminated SSE operation emit no new file at all.
-#![cfg(feature = "java-sdk")]
+#![cfg(all(feature = "java-sdk", feature = "http-protocol"))]
 
 use std::{
     fs,
@@ -349,16 +349,19 @@ fn control_operations_without_discrimination_keep_the_untyped_package() {
 }
 
 /// A JDK 21+ toolchain, mirroring the other Java acceptance tests.
-fn java_home() -> Option<PathBuf> {
+fn java_home() -> PathBuf {
     std::env::var_os("SUSPECT_JAVA_HOME")
+        .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
-        .or_else(|| suspect_codegen::toolchain::require_home("jdk"))
+        .unwrap_or_else(|| {
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
+        })
 }
 
 /// Compile the whole emitted package; the classes directory doubles as the
 /// behavioral probe's classpath, including the generated resources.
-fn compiled_package(root: &Path) -> Option<PathBuf> {
-    let home = java_home()?;
+fn compiled_package(root: &Path) -> PathBuf {
+    let home = java_home();
     assert!(
         home.join("bin/javac").is_file(),
         "required JDK: {}",
@@ -408,7 +411,7 @@ fn compiled_package(root: &Path) -> Option<PathBuf> {
         )
         .unwrap();
     }
-    Some(classes)
+    classes
 }
 
 #[ignore = "requires JDK and Maven on the test host"]
@@ -424,13 +427,9 @@ fn generated_stream_events_compile_strictly_with_the_package() {
 fn typed_stream_events_drive_stubbed_streams_in_java() {
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(), root.path()).unwrap();
-    let Some(classes) = compiled_package(root.path()) else {
-        return;
-    };
+    let classes = compiled_package(root.path());
     fs::write(root.path().join("StreamEventsProbe.java"), PROBE).unwrap();
-    let Some(home) = java_home() else {
-        return;
-    };
+    let home = java_home();
     let output = Command::new(home.join("bin/javac"))
         .args(["--release", "21", "-Xlint:all", "-Werror", "-cp"])
         .arg(&classes)

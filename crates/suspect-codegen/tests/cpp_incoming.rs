@@ -377,17 +377,15 @@ fn toolchain() -> Option<(std::path::PathBuf, std::path::PathBuf)> {
     Some((cmake, cxx))
 }
 
-/// `cmake` or the C++ compiler (`clang++`), resolved by
-/// `suspect_codegen::toolchain::require` (honouring the `SUSPECT_CPP_*`
-/// overrides): `None` after its skip message, or a panic under
-/// `SUSPECT_REQUIRE_NATIVE`, so a missing toolchain cannot pass as a
-/// degraded run in CI.
-fn tool(_variable: &str, fallback: &str) -> Option<std::path::PathBuf> {
-    suspect_codegen::toolchain::require(if fallback == "clang++" {
-        "cxx"
-    } else {
-        fallback
-    })
+fn tool(variable: &str, fallback: &str) -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os(variable) {
+        return Some(std::path::PathBuf::from(path));
+    }
+    let probe = Command::new(fallback).arg("--version").output().ok()?;
+    probe
+        .status
+        .success()
+        .then(|| std::path::PathBuf::from(fallback))
 }
 
 /// Runs the command and fails the test with the retained log on failure.
@@ -576,8 +574,7 @@ int main() {
 #[test]
 fn native_incoming_receipts_decode_and_construct() {
     let Some((cmake, cxx)) = toolchain() else {
-        eprintln!("cpp_incoming: cmake/clang++ not available; degrading to static assertions");
-        return;
+        panic!("cpp_incoming: cmake/clang++ not available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(), root.path()).unwrap();

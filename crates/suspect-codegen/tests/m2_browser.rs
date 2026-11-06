@@ -93,33 +93,10 @@ fn fs_read(path: &Path) -> Vec<u8> {
 #[test]
 #[ignore = "requires the tracked corpus, pinned Node/TypeScript and an isolated Chromium executable"]
 fn generated_sdk_runs_in_a_real_browser_with_exact_numbers_and_abort() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
-    let browser = std::env::var_os("SUSPECT_CHROMIUM")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-        });
-    if !browser.is_file() {
-        let skip = format!(
-            "no Chromium at {}; set SUSPECT_CHROMIUM to a Chromium executable",
-            browser.display()
-        );
-        assert!(
-            !suspect_codegen::toolchain::native_required(),
-            "{} is set: {skip}",
-            suspect_codegen::toolchain::REQUIRE_NATIVE_ENV
-        );
-        eprintln!("skipping: {skip}");
-        return;
-    }
     let temporary = tempfile::tempdir().unwrap();
     let retained = temporary.keep();
+    let source = suspect_codegen::test_inputs::openrouter_root();
+    let path = source.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())
@@ -148,6 +125,7 @@ fn generated_sdk_runs_in_a_real_browser_with_exact_numbers_and_abort() {
     )
     .unwrap();
     let root = retained.join("typescript");
+    let node = std::env::var_os("SUSPECT_DOCS_NODE").unwrap_or_else(|| "node".into());
     let tsc = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tools/typescript-docs/node_modules/typescript/bin/tsc");
     checked(
@@ -183,7 +161,6 @@ try {
         while !stop.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((stream, _)) => {
-                    stream.set_nonblocking(false).unwrap();
                     let root = served.clone();
                     let count = count.clone();
                     handlers.push(std::thread::spawn(move || serve(stream, &root, &count)));
@@ -198,6 +175,15 @@ try {
             let _ = handler.join();
         }
     });
+    let browser = std::env::var_os("SUSPECT_CHROMIUM")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+        });
+    assert!(
+        browser.is_file(),
+        "set SUSPECT_CHROMIUM to a real Chromium executable"
+    );
     let stdout = std::fs::File::create(retained.join("browser.stdout.html")).unwrap();
     let stderr = std::fs::File::create(retained.join("browser.stderr.log")).unwrap();
     let mut child = Command::new(&browser)

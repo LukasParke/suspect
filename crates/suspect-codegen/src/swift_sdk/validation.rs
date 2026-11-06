@@ -544,9 +544,7 @@ mod tests {
         .unwrap();
         std::fs::write(root.join("Tests/Vectors/Vectors.swift"), tests).unwrap();
         std::fs::write(root.join("Package.swift"),"// swift-tools-version: 6.0\nimport PackageDescription\nlet package = Package(name: \"PortableValidation\", targets: [.target(name: \"PortableValidation\", swiftSettings: [.swiftLanguageMode(.v6)]), .testTarget(name: \"Vectors\", dependencies: [\"PortableValidation\"], swiftSettings: [.swiftLanguageMode(.v6)])])\n").unwrap();
-        let Some(swift) = crate::toolchain::require("swift") else {
-            return;
-        };
+        let swift = crate::toolchain::require("swift");
         let swiftc =
             crate::toolchain::swift_tool("swiftc").expect("the Swift toolchain has no swiftc");
         let mut command = Command::new(swift);

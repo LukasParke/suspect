@@ -23,11 +23,11 @@ pub(super) fn repo() -> PathBuf {
         })
 }
 /// PHP plus the provisioned Composer/PHPStan phars (`tools/native-setup.sh php`),
-/// or `false` after the skip message (a panic under `SUSPECT_REQUIRE_NATIVE`).
+/// or a panic naming what is missing (an `#[ignore]` gate never passes by skipping).
 pub(super) fn native_php() -> bool {
-    crate::toolchain::require("php").is_some()
-        && crate::toolchain::require_provisioned("SUSPECT_COMPOSER_PHAR", "sdk-php-tools/composer-2.10.3.phar", "php").is_some()
-        && crate::toolchain::require_provisioned("SUSPECT_PHPSTAN_PHAR", "sdk-php-tools/phpstan-2.2.13.phar", "php").is_some()
+    crate::toolchain::require("php").exists()
+        && crate::toolchain::require_provisioned("SUSPECT_COMPOSER_PHAR", "sdk-php-tools/composer-2.10.3.phar", "php").exists()
+        && crate::toolchain::require_provisioned("SUSPECT_PHPSTAN_PHAR", "sdk-php-tools/phpstan-2.2.13.phar", "php").exists()
 }
 /// The resolved PHP with `-n` plus the ini-enabled shared extensions.
 pub(super) fn php_command() -> Command {

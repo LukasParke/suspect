@@ -5,9 +5,14 @@
 //! runtime files are never modified; the typed decode lives entirely inside
 //! the generated package, and operations without a discriminated stream schema
 //! emit no new bytes at all.
-#![cfg(feature = "php-sdk")]
+#![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
 
-use std::{fs, path::PathBuf, process::Command, sync::Arc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+};
 
 use serde_json::{Value, json};
 use suspect_codegen::{
@@ -318,17 +323,23 @@ fn sdk_defaults_neither_enable_nor_disable_typed_stream_emission() {
 
 /// The repository's verified PHP 8.3 interpreter, when available.
 fn php() -> Option<PathBuf> {
-    // `SUSPECT_PHP_BIN`, the source-built target-dir PHP, then `PATH`;
-    // a hard failure under `SUSPECT_REQUIRE_NATIVE`.
-    suspect_codegen::toolchain::require("php")
+    let candidate = std::env::var_os("SUSPECT_PHP_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools/php-8.3.32/php")
+        });
+    Command::new(&candidate)
+        .arg("-v")
+        .output()
+        .is_ok()
+        .then_some(candidate)
 }
 
 #[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&GenerationOptions::default()), root.path()).unwrap();
@@ -358,8 +369,7 @@ fn emitted_php_files_lint() {
 #[test]
 fn typed_stream_events_drive_stubbed_streams_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&GenerationOptions::default());

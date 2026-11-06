@@ -56,8 +56,8 @@ pub struct Native {
 }
 
 pub fn native() -> Option<Native> {
-    let terraform = suspect_codegen::toolchain::require("terraform")?;
-    let go = suspect_codegen::toolchain::require("go")?;
+    let terraform = suspect_codegen::toolchain::require("terraform");
+    let go = suspect_codegen::toolchain::require("go");
     Some(Native { go, terraform })
 }
 

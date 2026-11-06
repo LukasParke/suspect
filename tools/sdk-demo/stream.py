@@ -24,9 +24,9 @@ def prepare(root: Path) -> None:
     def run(label: str, argv: list[str | Path], cwd: Path = work) -> str:
         return record(work, label, list(map(str, argv)), cwd=cwd, env=env).stdout
 
-    run("generate", [root / "bin/suspect", "codegen", source, "--profile", "typescript-http",
+    run("generate", [root / "bin/suspect", "gen", "sdk", source, "--profile", "typescript-http",
         "--package-name", "@demo/standard-stream-sdk", "--package-version", "0.1.0", "--operation-id", "events",
-        "--out", work / "generated", "--format", "json"])
+        "--output", work / "generated", "--format", "json"])
     package = work / "package"
     shutil.copytree(work / "generated/typescript", package)
     run("npm-ci", [t["npm"], "ci", "--offline", "--ignore-scripts", "--no-audit", "--no-fund"], package)

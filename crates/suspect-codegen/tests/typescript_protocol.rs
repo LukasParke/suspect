@@ -927,9 +927,8 @@ fn unverified_and_ambiguous_protocols_are_source_located_refusals() {
 #[test]
 #[ignore = "requires the tracked OpenRouter description"]
 fn real_extra_openrouter_operations_use_native_json_and_explicit_legacy_byte_profile() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    let path = Path::new(&root).join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())
@@ -1309,9 +1308,7 @@ fn native_impl(plan: &HttpPlan, types: &str, consumer: &str, execute_types: bool
         &root,
     );
     std::fs::write(root.join("consumer.mjs"), consumer).unwrap();
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     checked(
         Command::new(&node)
             .current_dir(&root)

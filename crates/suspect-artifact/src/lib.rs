@@ -277,7 +277,9 @@ fn normalize_target(path: &Path) -> Result<PathBuf, ArtifactError> {
     if text.contains(['\\', '\0', ':']) {
         return Err(ArtifactError(format!("invalid artifact target {text:?}")));
     }
-    let mut normalized = PathBuf::new();
+    // Joined with `/` on every platform: `PathBuf::push` would use `\` on
+    // Windows, and the normalized form is also the ownership manifest key.
+    let mut normalized = Vec::<&str>::new();
     for component in path.components() {
         match component {
             Component::Normal(name) => {
@@ -300,7 +302,7 @@ fn normalize_target(path: &Path) -> Result<PathBuf, ArtifactError> {
                         "non-portable artifact target {text:?}"
                     )));
                 }
-                normalized.push(name);
+                normalized.push(name_text);
             }
             Component::CurDir => {}
             _ => {
@@ -310,10 +312,10 @@ fn normalize_target(path: &Path) -> Result<PathBuf, ArtifactError> {
             }
         }
     }
-    if normalized.as_os_str().is_empty() {
+    if normalized.is_empty() {
         return Err(ArtifactError("artifact target must name a file".into()));
     }
-    Ok(normalized)
+    Ok(PathBuf::from(normalized.join("/")))
 }
 
 struct OutputRoot {

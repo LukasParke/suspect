@@ -435,9 +435,7 @@ fn conditional_nullability_is_retained_by_the_admitted_scoped_codec_profile() {
 #[test]
 #[ignore = "requires installed Python"]
 fn python_native_dialect_models_and_codecs() {
-    let Some(python) = suspect_codegen::toolchain::pinned_python("3.11") else {
-        return;
-    };
+    let python = suspect_codegen::toolchain::pinned_python("3.11");
     for version in ["3.0.4", "3.1.2"] {
         let contract = fixture(version);
         let roots = [root(&contract, "Record")];
@@ -482,9 +480,7 @@ assert C.ChoiceCodec.decode('1')==1
 #[test]
 #[ignore = "requires installed Go"]
 fn go_native_dialect_models_and_codecs() {
-    let Some(go) = suspect_codegen::toolchain::require("go") else {
-        return;
-    };
+    let go = suspect_codegen::toolchain::require("go");
     for version in ["3.0.4", "3.1.2"] {
         let contract = fixture(version);
         let roots = [root(&contract, "Record")];
@@ -527,9 +523,7 @@ func TestDialectConsumer(t *testing.T) {{
 #[test]
 #[ignore = "requires installed Node and TypeScript"]
 fn typescript_native_dialect_models_and_codecs() {
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     // The workspace-pinned compiler `tools/native-setup.sh typescript` installs.
     let tsc = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tools/typescript-docs/node_modules/typescript/bin/tsc");
@@ -643,9 +637,7 @@ const invalid:Record=null;
 #[test]
 #[ignore = "requires installed Swift 6"]
 fn swift_native_dialect_models_and_codecs() {
-    let Some(swift) = suspect_codegen::toolchain::require("swift") else {
-        return;
-    };
+    let swift = suspect_codegen::toolchain::require("swift");
     for version in ["3.0.4", "3.1.2"] {
         let contract = fixture(version);
         let selected = contract

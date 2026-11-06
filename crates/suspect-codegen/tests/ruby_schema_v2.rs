@@ -52,16 +52,15 @@ fn source(schema: Value) -> (Arc<Contract>, SchemaId) {
 fn ruby_home() -> PathBuf {
     suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
 }
-/// Ruby and the provisioned gems are available (skip message, or a panic
-/// under `SUSPECT_REQUIRE_NATIVE`, otherwise).
+/// Ruby and the provisioned gems are available (a panic naming what is missing otherwise).
 fn native_ready() -> bool {
-    suspect_codegen::toolchain::require_home("ruby").is_some()
+    suspect_codegen::toolchain::require_home("ruby").exists()
         && suspect_codegen::toolchain::require_provisioned(
             "SUSPECT_RUBY_GEMS",
             "sdk-ruby-tools/gems",
             "ruby",
         )
-        .is_some()
+        .exists()
 }
 /// The RBS/Steep/YARD gems `tools/native-setup.sh ruby` provisions
 /// (`SUSPECT_RUBY_GEMS` overrides); test entries gate on [`native_ready`].
@@ -71,7 +70,6 @@ fn tools() -> PathBuf {
         "sdk-ruby-tools/gems",
         "ruby",
     )
-    .expect("gated by native_ready()")
 }
 fn default_gems() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))

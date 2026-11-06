@@ -206,11 +206,9 @@ fn symlink_targets_cannot_write_or_satisfy_drift_checks() {
 }
 
 #[test]
-#[ignore = "requires the pinned OpenRouter OpenAPI document"]
+#[ignore = "requires OPENROUTER_WEB_ROOT (the tracked public YAML)"]
 fn openrouter_generation_is_byte_and_metadata_stable() {
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let directory = tempfile::tempdir().unwrap();
     let wanted = [
         "getCredits",

@@ -333,7 +333,7 @@ fn bench_diagnostics(c: &mut Criterion) {
         );
         // digitalocean.yaml $refs ~660 sibling .yml files that are not in
         // corpus, so load_all cannot complete; that is fine — the LSP
-        // runs the same battery regardless and validate_diagnostics
+        // runs the same battery regardless and OAS validation
         // degrades to no semantic diagnostics on load failure. stripe.yaml
         // is self-contained and exercises validate_entry fully.
         if let Err(e) = ws.load_all(file) {
@@ -343,11 +343,7 @@ fn bench_diagnostics(c: &mut Criterion) {
 
         let mut g = group(c, name, bytes.len(), sample);
         g.bench_function("compute_diagnostics", |b| {
-            b.iter(|| {
-                black_box(
-                    compute_diagnostics(Some(&ws), &low, &Default::default(), None, false).len(),
-                )
-            })
+            b.iter(|| black_box(compute_diagnostics(Some(&ws), &low, &Default::default()).len()))
         });
         g.finish();
     }

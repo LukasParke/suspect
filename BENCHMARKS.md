@@ -155,11 +155,52 @@ Local edges (regression-tested: `block_scalar_refs_resolve`).
 
 LSP edit latency is the headline: a 1 KB edit into the 6.4 MB Stripe doc
 reparses incrementally in ~1.5 ms (vs 164 ms full), keeping keystroke
-interactivity far inside the 3 ms p99 budget.
+interactivity far inside the 3 ms p99 budget. Re-measured 2026-10-31
+after the P1 check pass (Apple M5 Pro, 18 cores, macOS 27, rustc 1.99.1):
+`incremental_100` 1.49 ms, `incremental_1000` 1.68 ms,
+`incremental_10000` 1.79 ms (upper bound 1.83 ms), full reparse 106.6 ms.
 
-## CLI end-to-end (`suspect bench`)
+## Editor check pass on a 63k-line spec (P1 gate)
 
-`suspect bench <fixture> --iters N` reports parse / low-model / resolve /
+The `suspect-cli/tests/lsp_bench.rs` harness, release build, run against
+a copy of the plex-api-spec project (`SUSPECT_BENCH_ROOT`; the largest
+document is a 63k-line, 2.5 MB OAS 3.1 file). Apple M5 Pro, 18 cores,
+macOS 27, rustc 1.99.1. "codegen" is the project as committed (its
+`suspect.project.json` lists codegen targets, so SDK findings and
+admission are on); "no codegen" removes `codegen:` from `.suspect.yaml`
+and the `codegen` targets from the manifest, so admission does not run.
+Cold open is the median of 7 runs of `bench_cold_open` (first burst:
+hover, symbols, folds, document and workspace diagnostics); the other
+rows are one run each of `bench_edit_churn`, `bench_mixed_load` and
+`bench_open_burst`.
+
+| Measure | Before P1 step 3 (`465cb0a`) | P1 step 9 (`a73f03c`) | Now |
+|---|---|---|---|
+| Cold open, no codegen | 2272 ms | 2278 ms | **2218 ms** |
+| Cold open, codegen | 2302 ms | 2966 ms | **2262 ms** |
+| Edit-churn diagnostics mean, no codegen | 1863 ms | 1869 ms | **1458 ms** |
+| Edit-churn diagnostics mean, codegen | 1865 ms | 2831 ms | **1458 ms** |
+| Mixed-load p95, no codegen | 2166 ms | 2146 ms | **1949 ms** |
+| Mixed-load p95, codegen | 2156 ms | 2631 ms | **1928 ms** |
+| Open-burst worst, no codegen | 5269 ms | 6092 ms | **4151 ms** |
+| Open-burst worst, codegen | 5301 ms | 6751 ms | **4404 ms** |
+
+Where the time goes on that document (one check pass, cold open, three
+passes in flight: push, document pull, workspace pull): validation
+550-700 ms, lint 1.13-1.25 s, admission ~600 ms, markdown ~28 ms,
+extension schemas ~36 ms, syntax ~24 ms, policy (canonicalize, dedupe,
+suppression scan, floor) ~3 ms, mapping to LSP < 0.2 ms, building the
+`Policy` < 1 ms. Without codegen the check pass costs what the old
+battery did, so the step-3/step-7 bench gate holds; the regression was
+admission alone, which ran after every other check. `check_document`
+now runs validation and admission on their own threads beside lint
+(plain scoped threads: a `rayon::join` let one request's pool worker
+pick up another document's lint and doubled the worst case), so the
+pass is as long as lint, and admission no longer adds to it.
+
+## CLI end-to-end (`suspect dev bench`)
+
+`suspect dev bench <fixture> --iters N` reports parse / low-model / resolve /
 validate / lint / lsp-edit / schema-compile / jsonpath / overlay stage means
 for any single file — the same numbers the criterion suites measure, from the
 shipped binary.
@@ -188,7 +229,7 @@ tree-sitter cursor primitives underneath.
 |---|---|---|
 | Parse+index 1 MB YAML ≤ 15 ms | ~50 ms/MB YAML (grammar-bound) | MISS — grammar-bound; documented |
 | 10 MB multi-file load ≤ 80 ms | ~0.9–1.0 s cold for 9–11 MB single files | MISS — same bound |
-| LSP keystroke ≤ 3 ms p99 | 1.5–1.9 ms incremental on 6.4 MB | **PASS** |
+| LSP keystroke ≤ 3 ms p99 | 1.5–1.9 ms incremental on 6.4 MB (1.49–1.83 ms re-measured 2026-10-31) | **PASS** |
 | Validate 10 MB ≤ 300 ms | 3.5 s (6.4 MB stripe) | MISS — see profile lever |
 | Lint 10 MB ≤ 500 ms | 4.8 s (6.4 MB stripe) | MISS — see profile lever |
 | Memory ≤ 4× input | not yet measured | UNMEASURED |
@@ -220,3 +261,29 @@ milestone, not an architecture problem.
 - Lint query-result cache (Arc-shared NodeList per distinct expression):
   rules sharing `given` queries evaluate once per document instead of once
   per rule.
+
+## Platform budgets (historical)
+
+See [docs/internal/PERFORMANCE.md](docs/internal/PERFORMANCE.md) for the full profiling report,
+phase-by-phase cost attribution, and the ranked plan of attack.
+These measurements are fixture-specific; they do not establish OpenRouter
+end-to-end SDK generation or emitted-SDK performance.
+Current session measurements and pending Mac calibration are documented in
+[SDK session performance](docs/design/sdk-session-performance.md).
+
+| Path | Budget | Achieved |
+|---|---|---|
+| Parse + IR cold | < 10 ms | **7.5 ms** |
+| Lint p95/file | ≤ 50 ms | **42 ms** |
+| Validate p95/file | ≤ 50 ms | **44 ms** |
+| Gateway startup | < 1 s | **~880 ms** |
+| Executor per step | ≤ 100 µs | **3.6 µs** |
+| Load generator per request (in-process, incl. metrics) | ≤ 15 µs | **~4 µs CPU, 0.5 µs wall @ 8 workers** |
+| Load generator sustained vs local mock gateway | ≥ 20k req/s | **43k req/s, 0 dropped samples, p99 1.15 ms** |
+| Load metrics aggregator ingest | ≥ 200k samples/s | **64M samples/s** |
+| Gateway MOCK throughput | ≥ 30k req/s | **95–127k** |
+| REPLAY throughput | ≥ 50k req/s | **88–146k** |
+| Prepared docs rendering | ≥ 400 MiB/s synthetic test floor | **1.6–1.9 GB/s** historical rendering measurement |
+| Watch save→rerun | < 150ms | ~10 ms event latency |
+
+Run them: `cargo bench`.

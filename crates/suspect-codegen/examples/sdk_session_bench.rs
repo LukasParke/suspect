@@ -1,4 +1,4 @@
-//! Instrument the canonical persistent Session. See docs/SDK-SESSION-PERFORMANCE.md.
+//! Instrument the canonical persistent Session. See docs/design/sdk-session-performance.md.
 //! All edits and writes are confined to a newly created private benchmark tree.
 
 use std::alloc::{GlobalAlloc, Layout, System};

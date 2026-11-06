@@ -5,11 +5,15 @@ use crate::error::OverlayError;
 /// A parsed Overlay 1.0/1.1 document.
 pub struct OverlayDoc<'d> {
     root: NodeRef<'d>,
+    /// The `actions` sequence.
+    actions_node: NodeRef<'d>,
     actions: Vec<ActionView<'d>>,
 }
 
 /// One action of an overlay.
 pub struct ActionView<'d> {
+    /// The action's own mapping in the `actions` sequence.
+    pub node: NodeRef<'d>,
     /// Raw JSONPath expression text.
     pub target: &'d str,
     /// Compiled query (None when the expression failed to parse — reported
@@ -102,6 +106,7 @@ impl<'d> OverlayDoc<'d> {
                 .transpose()?;
             let description = item.get("description").and_then(|n| n.as_str());
             actions.push(ActionView {
+                node: item,
                 target,
                 parsed,
                 update,
@@ -111,7 +116,11 @@ impl<'d> OverlayDoc<'d> {
                 description,
             });
         }
-        Ok(Self { root, actions })
+        Ok(Self {
+            root,
+            actions_node,
+            actions,
+        })
     }
 
     #[must_use]
@@ -169,10 +178,13 @@ impl std::fmt::Debug for OverlayDoc<'_> {
 /// Non-fatal structural findings (spec-conformance linting).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OverlayDiagnostic {
-    /// Stable machine-readable identifier (e.g. `empty-actions`).
+    /// Stable machine-readable identifier (e.g. `overlay-empty-actions`).
     pub code: &'static str,
     /// Human-readable explanation of the finding.
     pub message: String,
+    /// Byte range of the offending node: the `actions` value for
+    /// `overlay-empty-actions`, the action's mapping otherwise.
+    pub range: std::ops::Range<usize>,
 }
 
 /// Structural checks beyond hard errors: empty action lists, `update` paired
@@ -184,6 +196,7 @@ pub fn validate_overlay(doc: &OverlayDoc<'_>) -> Vec<OverlayDiagnostic> {
         out.push(OverlayDiagnostic {
             code: "overlay-empty-actions",
             message: "`actions` must contain at least one value".into(),
+            range: doc.actions_node.byte_range(),
         });
     }
     for (i, a) in doc.actions().iter().enumerate() {
@@ -191,12 +204,14 @@ pub fn validate_overlay(doc: &OverlayDoc<'_>) -> Vec<OverlayDiagnostic> {
             out.push(OverlayDiagnostic {
                 code: "overlay-update-with-remove",
                 message: format!("action #{i}: `update` has no effect while `remove` is true"),
+                range: a.node.byte_range(),
             });
         }
         if a.description.is_none() {
             out.push(OverlayDiagnostic {
                 code: "overlay-action-missing-description",
                 message: format!("action #{i}: `description` recommended"),
+                range: a.node.byte_range(),
             });
         }
     }

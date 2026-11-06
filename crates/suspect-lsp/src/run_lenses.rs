@@ -100,6 +100,7 @@ pub fn run_lenses(doc: &LowDoc) -> Vec<CodeLens> {
 ///
 /// `crit` is the criterion description from the event stream; the source
 /// range is recovered by matching it against the plan's compiled criteria.
+// Only the live-run workflow runner reaches these.
 #[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CriterionFailure {
@@ -117,6 +118,7 @@ pub(crate) struct CriterionFailure {
 /// the recorded range of the failing criterion's condition string, falling
 /// back to the document start for transport-level failures with no
 /// criterion counterpart.
+// Only the live-run workflow runner reaches these.
 #[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) fn failure_range(wf: &WfPlan, failure: &CriterionFailure) -> Range<usize> {
     if failure.crit == "transport" {
@@ -135,6 +137,7 @@ pub(crate) fn failure_range(wf: &WfPlan, failure: &CriterionFailure) -> Range<us
 /// Runs a single compiled workflow against `transport`, mirroring every
 /// [`TestEvent`] into `mirror` (when given) so callers can stream progress,
 /// and returning the run summary plus the criteria that failed.
+// Only the live-run workflow runner reaches these.
 #[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) async fn run_workflow_core(
     wf: &WfPlan,
@@ -187,6 +190,7 @@ pub(crate) async fn run_workflow_core(
 
 /// Converts criterion failures into editor diagnostics anchored at each
 /// failing criterion's recorded condition range.
+// Only the live-run workflow runner reaches these.
 #[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) fn failures_to_diagnostics(
     wf: &WfPlan,
@@ -358,7 +362,8 @@ pub(crate) fn pick_outcome(outcomes: &[suspect_gen::RenderOutcome]) -> Option<&P
 }
 
 /// One-line human rendering of a [`TestEvent`] for `window/logMessage`.
-#[cfg(feature = "live-run")]
+// Only the live-run workflow runner reaches these.
+#[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 #[must_use]
 pub(crate) fn describe_event(ev: &TestEvent) -> String {
     match ev {
@@ -402,43 +407,6 @@ pub(crate) fn describe_event(ev: &TestEvent) -> String {
             format!("run done: {passed} passed, {failed} failed")
         }
     }
-}
-
-/// Resolves the base URL used by live runs: initialization options
-/// (`suspect.run.baseUrl` or `run.baseUrl`, then top-level `baseUrl`), then
-/// `SUSPECT_BASE_URL`, then `http://localhost:8080`.
-#[must_use]
-pub fn base_url_from_options(init_options: Option<&serde_json::Value>) -> String {
-    if let Some(opts) = init_options {
-        if let Some(v) = opts.get("baseUrl").and_then(|v| v.as_str()) {
-            return v.to_owned();
-        }
-        for path in [
-            ["suspect", "run", "baseUrl"],
-            ["run", "baseUrl", ""],
-            ["baseUrl", "", ""],
-        ] {
-            let mut cur = opts;
-            let mut found = None;
-            for key in path {
-                if key.is_empty() {
-                    break;
-                }
-                match cur.get(key) {
-                    Some(v) if key == "baseUrl" => {
-                        found = v.as_str();
-                        break;
-                    }
-                    Some(next) => cur = next,
-                    None => break,
-                }
-            }
-            if let Some(v) = found {
-                return v.to_owned();
-            }
-        }
-    }
-    std::env::var("SUSPECT_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_owned())
 }
 
 #[cfg(test)]

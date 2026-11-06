@@ -14,9 +14,9 @@ use rayon::prelude::*;
 use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 
+use crate::Findings;
 use crate::commands::validate::validate_file;
 use crate::output::{self, Finding, Severity};
-use crate::{OutputFormat, TextFormat};
 
 /// One admission review input.
 #[derive(Debug, clap::Args)]
@@ -26,7 +26,7 @@ pub struct AdmissionArgs {
     pub paths: Vec<PathBuf>,
     /// Output format for the report.
     #[command(flatten)]
-    pub text: TextFormat,
+    pub findings: Findings,
 }
 
 /// Reviews one document through the admission layer. Input and syntax
@@ -141,11 +141,7 @@ pub fn admission(args: &AdmissionArgs) -> anyhow::Result<i32> {
         (&a.file, a.line, a.col, &a.code, &a.message)
             .cmp(&(&b.file, b.line, b.col, &b.code, &b.message))
     });
-    match args.text.format {
-        OutputFormat::Text => output::print_findings(&findings),
-        OutputFormat::Json => output::print_json(&findings)?,
-        OutputFormat::Sarif => crate::sarif::print_sarif(&findings)?,
-    }
+    output::print_findings_as(&findings, args.findings.format)?;
     Ok(i32::from(
         findings.iter().any(|f| f.severity == Severity::Error),
     ))

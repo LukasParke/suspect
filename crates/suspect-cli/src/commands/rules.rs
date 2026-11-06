@@ -11,29 +11,28 @@ use suspect_low::LowDoc;
 use suspect_rules::{Error as RulesError, RuleHost, StartOptions};
 use suspect_source::{Source, Uri};
 
+use crate::Findings;
 use crate::output::{self, Finding, Severity};
-use crate::{OutputFormat, TextFormat};
 
-fn severity_from_str(s: Option<&str>) -> Severity {
-    match s {
-        Some("error") => Severity::Error,
-        Some("info") => Severity::Info,
-        Some("hint") => Severity::Hint,
-        _ => Severity::Warning,
+/// A rule's declared severity, with the shared config spellings
+/// (`warn`, `information`, ...). `off` drops the finding (`None`); absent
+/// or unknown names report as a warning.
+fn severity_from_str(s: Option<&str>) -> Option<Severity> {
+    match s.and_then(suspect_config::parse_severity) {
+        Some(suspect_config::SeverityName::Off) => None,
+        name => Some(
+            name.and_then(Severity::from_config)
+                .unwrap_or(Severity::Warning),
+        ),
     }
 }
 
-fn load_doc(path: &std::path::Path) -> LowDoc {
-    match std::fs::read(path) {
-        Ok(bytes) => LowDoc::parse(
-            Uri::from(path.to_string_lossy().into_owned().leak() as &str),
-            Source::from_vec(bytes),
-        ),
-        Err(e) => {
-            eprintln!("error: {}: {e}", path.display());
-            std::process::exit(2);
-        }
-    }
+fn load_doc(path: &std::path::Path) -> anyhow::Result<LowDoc> {
+    let bytes = std::fs::read(path).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+    Ok(LowDoc::parse(
+        Uri::from(path.to_string_lossy().into_owned().leak() as &str),
+        Source::from_vec(bytes),
+    ))
 }
 
 fn to_findings(doc: &LowDoc, shown: &str, findings: Vec<suspect_rules::TsFinding>) -> Vec<Finding> {
@@ -41,51 +40,79 @@ fn to_findings(doc: &LowDoc, shown: &str, findings: Vec<suspect_rules::TsFinding
     let index = doc.inner().line_index();
     findings
         .into_iter()
-        .map(|f| {
+        .filter_map(|f| {
+            let severity = severity_from_str(f.severity.as_deref())?;
             let (line, col) = f
                 .span
                 .map(|(start, _)| index.line_col(bytes, start))
                 .unwrap_or((0, 0));
-            Finding {
+            Some(Finding {
                 file: shown.to_owned(),
-                severity: severity_from_str(f.severity.as_deref()),
+                severity,
                 code: f.rule_id,
                 message: f.message,
                 line: line + 1,
                 col: col + 1,
                 range: f.span.map(|(start, end)| start..end),
-            }
+            })
         })
         .collect()
 }
 
 /// `suspect rules check <documents>` — run TS rules from `.suspect/rules`
-/// against each document through the Bun sidecar.
+/// against each document through the Bun sidecar. Returns 1 when an
+/// error-severity finding is reported, else 0.
 ///
 /// # Errors
-/// Document or runtime failures.
+/// Document or runtime failures, including an unavailable Bun.
 pub fn check(
     paths: &[PathBuf],
     timeout_ms: Option<u64>,
     min_severity: Severity,
-    text: TextFormat,
-) -> anyhow::Result<()> {
+    findings: Findings,
+) -> anyhow::Result<i32> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(check_async(paths, timeout_ms, min_severity, text))
+    runtime.block_on(check_async(paths, timeout_ms, min_severity, findings))
 }
 
 async fn check_async(
     paths: &[PathBuf],
     timeout_ms: Option<u64>,
     min_severity: Severity,
-    text: TextFormat,
-) -> anyhow::Result<()> {
-    let workspace_root = std::env::current_dir()?;
+    findings: Findings,
+) -> anyhow::Result<i32> {
+    // `rules.roots` (default `.suspect/rules` beside the settings file)
+    // names the directories scanned for rules.
+    let resolved = crate::settings::resolve(paths, suspect_config::Layer::flags())?;
+    let workspace_root = resolved.root.clone();
+    let roots = &resolved.settings.rules.roots;
+    let mut rule_files = Vec::new();
+    for root in roots {
+        rule_files.extend(
+            suspect_rules::discover_rule_files(
+                &workspace_root,
+                &suspect_rules::RulesConfig {
+                    dir: Some(root.clone()),
+                    ..suspect_rules::RulesConfig::default()
+                },
+            )
+            .map_err(|e| anyhow::anyhow!("{e}"))?,
+        );
+    }
+    if rule_files.is_empty() {
+        let looked: Vec<String> = roots.iter().map(|r| r.display().to_string()).collect();
+        eprintln!(
+            "no TS rules found (looked in {}) — nothing to do",
+            looked.join(", ")
+        );
+        return Ok(0);
+    }
+    let files = rule_files.len();
     let mut host = match RuleHost::start(StartOptions {
         workspace_root: workspace_root.clone(),
-        rule_files: Vec::new(),
+        rule_files,
         timeout_ms,
         bun: None,
         cache_dir: None,
@@ -93,17 +120,23 @@ async fn check_async(
     .await
     {
         Ok(Some(host)) => host,
+        // The host declines to start without bun in `auto` mode; rules
+        // exist, so that is an environment error here (exit 2), where
+        // `check` reports a warning and goes on.
+        Ok(None) if suspect_rules::discover::find_bun().is_none() => {
+            return Err(anyhow::anyhow!(
+                "{files} TypeScript rule file(s) not run: bun is not on PATH (install from https://bun.sh)"
+            ));
+        }
         Ok(None) => {
             eprintln!(
                 "no TS rules found (looked in {}) — nothing to do",
                 workspace_root.join(".suspect/rules").display()
             );
-            return Ok(());
+            return Ok(0);
         }
-        Err(RulesError::BunUnavailable(msg)) => {
-            eprintln!("error: {msg}");
-            std::process::exit(1);
-        }
+        // An environment failure, not a finding: surfaces as exit 2.
+        Err(RulesError::BunUnavailable(msg)) => return Err(anyhow::anyhow!("{msg}")),
         Err(e) => return Err(anyhow::anyhow!("{e}")),
     };
 
@@ -111,7 +144,7 @@ async fn check_async(
 
     let mut all: Vec<Finding> = Vec::new();
     for path in paths {
-        let doc = load_doc(path);
+        let doc = load_doc(path)?;
         let started = Instant::now();
         let found = host
             .evaluate(&doc)
@@ -128,10 +161,7 @@ async fn check_async(
     }
 
     all.retain(|f| f.severity >= min_severity);
-    match text.format {
-        OutputFormat::Json | OutputFormat::Sarif => output::print_json(&all)?,
-        OutputFormat::Text => output::print_findings(&all),
-    }
+    output::print_findings_as(&all, findings.format)?;
 
     let disabled = host.disabled();
     if !disabled.is_empty() {
@@ -139,10 +169,7 @@ async fn check_async(
         eprintln!("disabled this session: {}", list.join(", "));
     }
     host.shutdown().await.ok();
-    if all.iter().any(|f| f.severity == Severity::Error) {
-        std::process::exit(1);
-    }
-    Ok(())
+    Ok(i32::from(all.iter().any(|f| f.severity == Severity::Error)))
 }
 
 /// `suspect rules new <name>` — scaffold a rule file under
@@ -178,7 +205,7 @@ async fn bench_async(
     timeout_ms: Option<u64>,
 ) -> anyhow::Result<()> {
     let workspace_root = std::env::current_dir()?;
-    let doc = load_doc(&path);
+    let doc = load_doc(&path)?;
 
     let started = Instant::now();
     let mut host = RuleHost::start(StartOptions {
@@ -240,7 +267,7 @@ pub enum RulesCmd {
         min_severity: Severity,
         /// Output format for the finding list.
         #[command(flatten)]
-        text: TextFormat,
+        findings: Findings,
     },
     /// Scaffold a new TS rule file.
     New {
@@ -269,20 +296,34 @@ impl RulesCmd {
     ///
     /// # Errors
     /// Whatever the selected subcommand surfaces.
-    pub fn run(self) -> anyhow::Result<()> {
+    pub fn run(self) -> anyhow::Result<i32> {
         match self {
             Self::Check {
                 paths,
                 timeout_ms,
                 min_severity,
-                text,
-            } => check(&paths, Some(timeout_ms), min_severity, text),
-            Self::New { name, dir } => new(&name, dir),
+                findings,
+            } => check(&paths, Some(timeout_ms), min_severity, findings),
+            Self::New { name, dir } => new(&name, dir).map(|()| 0),
             Self::Bench {
                 path,
                 iterations,
                 timeout_ms,
-            } => bench(path, iterations, Some(timeout_ms)),
+            } => bench(path, iterations, Some(timeout_ms)).map(|()| 0),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn off_drops_a_finding_and_unknown_names_warn() {
+        assert_eq!(severity_from_str(Some("off")), None);
+        assert_eq!(severity_from_str(Some("error")), Some(Severity::Error));
+        assert_eq!(severity_from_str(Some("information")), Some(Severity::Info));
+        assert_eq!(severity_from_str(Some("loud")), Some(Severity::Warning));
+        assert_eq!(severity_from_str(None), Some(Severity::Warning));
     }
 }

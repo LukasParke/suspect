@@ -6,93 +6,152 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
 
+# Every job is `cargo xtask ci <job id> --ci` (xtask/src/ci.rs); the steps
+# before it only install tools. Run the same job locally with
+# `cargo xtask ci <job id>`. A test keeps this file and the job table in sync.
+# The toolchain version is the one in rust-toolchain.toml.
 jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: rustup component add rustfmt
-      - run: cargo fmt --all --check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+          components: rustfmt
+      - run: cargo xtask ci fmt --ci
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: rustup component add clippy
-      - run: cargo clippy --workspace --all-targets
-      # The language server's live-run feature gates the workflow runner;
-      # the build without it must stay warning-free too.
-      - run: cargo clippy -p suspect-lsp --no-default-features --all-targets
-      # Every language SDK backend is an opt-in feature over the shared
-      # protocol plan; the build with none of them must stay warning-free.
-      - run: cargo clippy -p suspect-codegen --no-default-features --all-targets
-  # The declared `rust-version` (workspace Cargo.toml) must actually build.
-  msrv:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88
-      - run: cargo check --workspace --all-targets
-  # Workflow files are code too: expression, context and shell mistakes
-  # otherwise only surface when a scheduled run silently misbehaves.
-  workflows:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: raven-actions/actionlint@v2
-  # Advisories, licenses, bans and sources per deny.toml.
-  deny:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci clippy --ci
   # Mirrors the docs.yml build so broken or private intra-doc links fail the
   # PR instead of the post-merge Pages deploy.
   docs:
     runs-on: ubuntu-latest
-    env:
-      RUSTDOCFLAGS: "-D warnings"
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo doc --workspace --no-deps
-  # Generated artifacts and manifests must be portable (forward-slash
-  # manifest paths, no Windows device-name files), so the suite runs on
-  # every host OS a generator user may run it from.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci docs --ci
+  # Advisories, licenses, bans and sources per the root deny.toml.
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-deny
+      - run: cargo xtask ci cargo-deny --ci
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo test --workspace
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The suspect-rules worker tests need Bun; with --ci the job sets
+      # SUSPECT_REQUIRE_TOOLS=bun,node,python so a missing one fails.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - run: cargo xtask ci test --ci
   bench-smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo bench --workspace -- --test
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci bench-smoke --ci
   corpus-validation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo run -p xtask -- fetch-corpus
-      - run: cargo test -p suspect-cli --test corpus_suite
-  # Line coverage of the default test suite, published as an lcov artifact.
-  coverage:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci corpus-validation --ci
+  # Relative links in every tracked Markdown file, offline (lychee.toml).
+  links:
     runs-on: ubuntu-latest
-    env:
-      RUSTFLAGS: ""
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          components: llvm-tools-preview
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info
-      - run: cargo llvm-cov report --summary-only
-      - uses: actions/upload-artifact@v4
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
-          name: coverage-lcov
-          path: lcov.info
+          tool: lychee@0.24.2
+      - run: cargo xtask ci links --ci
+  # The seven foundation crates must stay publishable (docs/proposals/P5-release.md).
+  # Every other crate is `publish = false`.
+  package-foundation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci package-foundation --ci
+  # One lockstep version across crates, lockfiles, editors and the rules SDK.
+  check-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci check-versions --ci
+  # release.yml is generated by cargo-dist from dist-workspace.toml; edit the
+  # config and run `dist generate`, never the workflow. The version matches
+  # cargo-dist-version there (dist refuses to run with another).
+  dist-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-dist@0.32.0
+      - run: cargo xtask ci dist-check --ci
+  # Non-Linux coverage for the binary and the load path (P5 step 3). The
+  # Windows job is informational until its first green run, then
+  # `continue-on-error` goes (docs/proposals/P5-release.md, Windows tier 2).
+  # Line endings stay LF on Windows through .gitattributes.
+  test-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci test-macos --ci
+  test-windows:
+    runs-on: windows-2022
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo xtask ci test-windows --ci

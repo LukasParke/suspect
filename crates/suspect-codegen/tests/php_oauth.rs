@@ -6,7 +6,7 @@
 //! polling, revocation and introspection. Static runtime files are never
 //! modified; plans without a configured policy — or with only the deprecated
 //! implicit and password flows — emit nothing at all.
-#![cfg(feature = "php-sdk")]
+#![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
 
 use std::{fs, path::PathBuf, process::Command, sync::Arc};
 
@@ -363,20 +363,16 @@ fn oauth_file_emits_only_under_a_usable_scheme() {
 
 /// The repository's verified PHP 8.3 interpreter, when available.
 fn php() -> Option<PathBuf> {
-    // `SUSPECT_PHP_BIN`, the source-built target-dir PHP, then `PATH`;
-    // a hard failure under `SUSPECT_REQUIRE_NATIVE`.
-    suspect_codegen::toolchain::require("php")
+    // The manifest resolves `SUSPECT_PHP_BIN`, the pinned target-dir
+    // toolchain, then `PATH`, and gates the version (>= 8.2).
+    suspect_codegen::toolchain::gate("php").ok()
 }
 
 #[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_oauth_php_lints() {
     let Some(php) = php() else {
-        eprintln!(
-            "php_oauth: skipping — {}",
-            suspect_codegen::toolchain::guidance("php")
-        );
-        return;
+        panic!("php_oauth: {}", suspect_codegen::toolchain::guidance("php"));
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&service_document(), &configured()), root.path())
@@ -395,8 +391,7 @@ fn emitted_oauth_php_lints() {
 #[test]
 fn oauth_lifecycle_drives_stubbed_transport_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&service_document(), &configured());
@@ -498,11 +493,7 @@ fn discovery_schemes_emit_the_discovery_engine_and_the_per_instance_cache() {
 #[test]
 fn emitted_discovery_oauth_php_lints() {
     let Some(php) = php() else {
-        eprintln!(
-            "php_oauth: skipping — {}",
-            suspect_codegen::toolchain::guidance("php")
-        );
-        return;
+        panic!("php_oauth: {}", suspect_codegen::toolchain::guidance("php"));
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -524,8 +515,7 @@ fn emitted_discovery_oauth_php_lints() {
 #[test]
 fn discovery_lifecycle_drives_stubbed_transport_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&discovery_document(), &discovery_options());
@@ -1264,11 +1254,7 @@ fn replaying_credentials_resolve_their_discovery_variant() {
 #[test]
 fn emitted_replay_oauth_php_lints() {
     let Some(php) = php() else {
-        eprintln!(
-            "php_oauth: skipping — {}",
-            suspect_codegen::toolchain::guidance("php")
-        );
-        return;
+        panic!("php_oauth: {}", suspect_codegen::toolchain::guidance("php"));
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(
@@ -1292,8 +1278,7 @@ fn emitted_replay_oauth_php_lints() {
 #[test]
 fn replay_lifecycle_drives_stubbed_transport_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&replay_document(), &replay_options());

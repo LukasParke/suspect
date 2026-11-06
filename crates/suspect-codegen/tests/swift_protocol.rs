@@ -223,7 +223,7 @@ fn remaining_standard_undefined_inputs_decline_before_emission() {
 #[test]
 #[ignore = "requires Swift, DocC and real socket/TLS fixtures for additional standard capabilities"]
 fn native_remaining_standard_custom_query_positional() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
+    if !suspect_codegen::toolchain::require("swift").exists() {
         return;
     }
     let contract = fixture(&remaining_fixture::document());
@@ -732,7 +732,7 @@ fn typechecks(root: &Path) {
 #[test]
 #[ignore = "requires installed Swift 6, DocC and real loopback sockets"]
 fn native_protocol_spm_types_wire_stream_lifetimes_and_docs() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
+    if !suspect_codegen::toolchain::require("swift").exists() {
         return;
     }
     let root = root("protocol-");
@@ -767,12 +767,8 @@ fn native_protocol_spm_types_wire_stream_lifetimes_and_docs() {
 #[test]
 #[ignore = "requires the original OpenRouter checkout, Swift 6, DocC and loopback sockets"]
 fn native_new_openrouter_operations_and_explicit_legacy_binary_profile() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
-        return;
-    }
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let path = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(path.is_file(), "the actual source corpus is required");
     let contract = load(&path);
     let wanted = [
@@ -896,7 +892,7 @@ fn native_new_openrouter_operations_and_explicit_legacy_binary_profile() {
 #[test]
 #[ignore = "requires installed Swift 6 and DocC; OAS 3.0 source projection witness"]
 fn native_openapi30_binary_and_nullable_http_projection() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
+    if !suspect_codegen::toolchain::require("swift").exists() {
         return;
     }
     let document = json!({"openapi":"3.0.3","info":{"title":"OAS 3.0 native HTTP witness","version":"1"},"servers":[{"url":"https://old.example.test/v0"}],

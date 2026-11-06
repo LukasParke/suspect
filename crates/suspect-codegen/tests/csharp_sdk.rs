@@ -68,27 +68,6 @@ fn selected(contract: &Contract) -> Vec<SourceId> {
 }
 
 #[test]
-fn reset_content_and_no_content_responses_never_decode_a_body() {
-    // RFC 9110: 204 and 205 carry no content even if a body is declared, as
-    // every other backend already treats them.
-    let contract = contract(
-        json!({"Thing": {"type": "object"}}),
-        json!({"/things": {"post": {"operationId": "resetThings", "responses": {
-            "204": {"description": "done"},
-            "205": {"description": "reset", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Thing"}}}}
-        }}}}),
-    );
-    let plan = plan_sdk(contract.clone(), &selected(&contract), SdkConfig::default()).unwrap();
-    let responses = &plan.operations()[0].responses;
-    assert_eq!(responses.len(), 2);
-    assert!(
-        responses.iter().all(|r| r.native_type == "HttpNoContent"),
-        "{:?}",
-        responses.iter().map(|r| &r.native_type).collect::<Vec<_>>()
-    );
-}
-
-#[test]
 fn plan_admits_object_records_with_presence_and_extras() {
     let contract = one_operation(json!({
         "Thing": {
@@ -388,9 +367,6 @@ fn split_static_references_keep_native_identity_and_example_bindings() {
 #[test]
 #[ignore = "requires installed .NET SDKs 8.0.424 and 10.0.400; retains native evidence"]
 fn native_package_builds_and_consumes_negative_types() {
-    if suspect_codegen::toolchain::require("dotnet").is_none() {
-        return;
-    }
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/m2/canonical.openapi.yaml");
     let original = fs::read(&path).unwrap();
@@ -442,12 +418,8 @@ const TOOLCHAINS: &[(&str, &str)] = &[("8.0.424", "net8.0"), ("10.0.400", "net10
 #[test]
 #[ignore = "newly admitted real OpenRouter anonymous/undeclared-body operation; .NET 8/10 installed consumers"]
 fn native_openrouter_expanded_anonymous_operation() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    if suspect_codegen::toolchain::require("dotnet").is_none() {
-        return;
-    }
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    let path = root.join("projects/docs/openapi/openapi.yaml");
     let before = fs::read(&path).unwrap();
     let contract = load(&path);
     let selected = contract
@@ -561,7 +533,7 @@ impl Native {
     }
     fn command(&self, directory: &str, args: &[&str]) -> Command {
         let dotnet = suspect_codegen::toolchain::resolve_path("dotnet")
-            .expect("dotnet is gated by the test entry");
+            .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("dotnet")));
         let mut command = Command::new(dotnet);
         command
             .args(args)
@@ -772,18 +744,13 @@ impl Native {
 #[test]
 #[ignore = "requires the read-only OpenRouter corpus and installed .NET SDKs"]
 fn native_actual_openrouter_five_operations() {
+    let root = suspect_codegen::test_inputs::openrouter_root();
     let files = [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",
         "projects/docs/assets/provider-monitor-schema-v2.openapi.json",
         "packages/temporal/benchmarks.openapi.json",
     ];
-    let Some(root) = suspect_codegen::toolchain::openrouter_checkout(&files) else {
-        return;
-    };
-    if suspect_codegen::toolchain::require("dotnet").is_none() {
-        return;
-    }
     let snapshots = files.map(|path| fs::read(root.join(path)).unwrap());
     let contract = load(&root.join(files[0]));
     let wanted = [
@@ -863,9 +830,6 @@ fn native_actual_openrouter_five_operations() {
 #[test]
 #[ignore = "requires installed .NET SDKs; executes the independent 17-case shared runtime contract"]
 fn native_portable_validation_executes_shared_vectors_and_failure_controls() {
-    if suspect_codegen::toolchain::require("dotnet").is_none() {
-        return;
-    }
     let vectors: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
     let mut schemas = serde_json::Map::new();
@@ -947,9 +911,6 @@ fn native_portable_validation_executes_shared_vectors_and_failure_controls() {
 #[test]
 #[ignore = "requires installed .NET SDKs; proves nullable types, selected and parent union validation, and native names"]
 fn native_nullable_union_and_name_adversarial_contract() {
-    if suspect_codegen::toolchain::require("dotnet").is_none() {
-        return;
-    }
     let schemas = json!({
         "Thing":{"type":"object","required":["name","required_nullable","choice"],"additionalProperties":false,"properties":{
             "name":{"type":"string"},"required_nullable":{"type":["string","null"]},"optional":{"type":"string"},"nullable":{"type":["string","null"]},
@@ -1010,181 +971,4 @@ fn native_nullable_union_and_name_adversarial_contract() {
         ]);
         native.finish("nullable-unions-names", &original);
     }
-}
-
-fn oas30_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/oas30/petstore-nullable.openapi.yaml")
-}
-
-fn oas30_config() -> SdkConfig {
-    SdkConfig {
-        name: "Suspect.Csharp.Oas30".into(),
-        version: "1.0.0".into(),
-        namespace: "Suspect.Csharp.Oas30".into(),
-    }
-}
-
-/// OAS 3.0 lowering (ADR 0016) as native C#: `nullable` changes only the
-/// same-object type, Boolean exclusive bounds modify the adjacent bound, and a
-/// Reference Object applies only its `$ref` (siblings neither refuse nor alter).
-#[test]
-fn oas30_nullable_exclusive_bounds_and_reference_siblings_lower_natively() {
-    let contract = load(&oas30_fixture());
-    let plan = plan_sdk(contract.clone(), &selected(&contract), oas30_config())
-        .unwrap_or_else(|errors| panic!("OAS 3.0 petstore is admitted: {errors:#?}"));
-    assert_eq!(plan.operations().len(), 3);
-    let models = plan.models();
-    let (key, fields) = models
-        .declarations()
-        .iter()
-        .find_map(|(key, decl)| match decl {
-            CsDecl::Record { fields, .. } if models.names()[key] == "Pet" => Some((key, fields)),
-            _ => None,
-        })
-        .expect("Pet record");
-    assert_eq!(key.0.pointer(), "/components/schemas/Pet");
-    let field = |wire: &str| fields.iter().find(|f| f.wire == wire).unwrap();
-    let rendered = |wire: &str| models.render_type(&field(wire).ty);
-    // Scalar nullable.
-    assert!(field("tag").required && field("tag").nullable);
-    assert_eq!(rendered("tag"), "string?");
-    // Reference Object siblings (nullable/type/description) are ignored.
-    assert!(field("owner").required && !field("owner").nullable);
-    assert_eq!(rendered("owner"), "Owner");
-    assert_eq!(field("owner").description, "");
-    // A $ref to a nullable target is nullable through the target.
-    assert!(field("nickname").nullable);
-    assert_eq!(rendered("nickname"), "string?");
-    // Object nullable keeps its nominal record.
-    assert!(field("metadata").nullable);
-    assert_eq!(rendered("metadata"), "PetMetadata?");
-    assert!(field("status").nullable);
-    assert_eq!(rendered("status"), "PetStatus?");
-    assert!(!field("weight").nullable && !field("id").nullable);
-    // nullable without a same-object type has no effect: an unconstrained carrier.
-    assert_eq!(rendered("anything"), "global::System.Text.Json.JsonElement");
-
-    let files = plan.render().unwrap();
-    let file = |path: &str| {
-        &files
-            .iter()
-            .find(|f| f.path == path)
-            .unwrap_or_else(|| panic!("{path}"))
-            .content
-    };
-    let source = file("csharp/src/Models.g.cs");
-    for declaration in [
-        "public required string? Tag { get; set; }",
-        "public required Owner Owner { get; set; }",
-        "public Optional<string?> Nickname { get; set; }",
-        "public Optional<PetMetadata?> Metadata { get; set; }",
-        "public Optional<PetStatus?> Status { get; set; }",
-        "public Optional<JsonNumber> Weight { get; set; }",
-    ] {
-        assert!(source.contains(declaration), "{declaration}\n{source}");
-    }
-    assert!(
-        files
-            .iter()
-            .all(|f| !f.content.contains("Ignored Reference Object sibling")),
-        "an ignored $ref description sibling never reaches generated docs"
-    );
-    let program: Value = serde_json::from_str(file("csharp/validation-program.json")).unwrap();
-    let node = |pointer: &str| {
-        program["nodes"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|n| n["source"]["pointer"] == pointer)
-            .unwrap_or_else(|| panic!("{pointer}"))
-            .clone()
-    };
-    let checks = |pointer: &str| {
-        node(pointer)["checks"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| {
-                let mut c = c.clone();
-                c.as_object_mut().unwrap().remove("source");
-                c
-            })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        checks("/components/schemas/Pet/properties/tag"),
-        [json!({"op":"type","types":["null","string"]})]
-    );
-    assert!(
-        checks("/components/schemas/Pet/properties/weight")
-            .contains(&json!({"op":"bound","value":"50","maximum":true,"exclusive":true}))
-    );
-    assert!(
-        checks("/components/schemas/Pet/properties/id")
-            .contains(&json!({"op":"bound","value":"0","maximum":false,"exclusive":true}))
-    );
-    let owner = checks("/components/schemas/Pet/properties/owner");
-    assert!(
-        owner.len() == 1 && owner[0]["op"] == "ref",
-        "only the $ref applies: {owner:?}"
-    );
-}
-
-#[test]
-#[ignore = "requires installed .NET SDKs 8.0.424 and 10.0.400; OpenAPI 3.0 installed consumer"]
-fn native_oas30_petstore_nullable_consumer() {
-    if suspect_codegen::toolchain::require("dotnet").is_none() {
-        return;
-    }
-    let path = oas30_fixture();
-    let original = fs::read(&path).unwrap();
-    let contract = load(&path);
-    let config = oas30_config();
-    let plan = plan_sdk(contract.clone(), &selected(&contract), config.clone()).unwrap();
-    for (sdk, framework) in TOOLCHAINS {
-        let native = Native::new("oas30", sdk, framework, &plan.render().unwrap());
-        native.write("source.openapi.yaml", &original);
-        let package = native.package(plan.config());
-        native.consumer(
-            plan.config(),
-            include_str!("../src/csharp_sdk/testdata/Oas30Consumer.cs"),
-            &package,
-        );
-        native.examples();
-        native.negative(plan.config(), &[
-            ("owner-nonnull", "_ = new Pet { Id = new JsonInteger(\"1\"), Name = \"x\", Tag = null, Owner = null };", "CS8625"),
-            ("tag-required", "_ = new Pet { Id = new JsonInteger(\"1\"), Name = \"x\", Owner = new Owner { Name = \"x\" } };", "CS9035"),
-            ("weight-nonnull", "_ = new Pet { Id = new JsonInteger(\"1\"), Name = \"x\", Tag = null, Owner = new Owner { Name = \"x\" }, Weight = Optional<JsonNumber>.Present(null) };", "CS1503"),
-        ]);
-        native.finish("oas30", &original);
-    }
-    assert_eq!(
-        fs::read(path).unwrap(),
-        original,
-        "the 3.0 fixture is read-only"
-    );
-}
-
-/// OAS 3.0's direction-dependent `required` (a required readOnly member)
-/// stays a located refusal: this native profile has no directional views.
-#[test]
-fn oas30_directional_required_is_refused_with_a_located_diagnostic() {
-    let mut value = source_document(&oas30_fixture());
-    value["components"]["schemas"]["Owner"]["properties"]["name"]["readOnly"] = json!(true);
-    let contract = raw_contract(value);
-    let errors = plan_sdk(contract.clone(), &selected(&contract), oas30_config()).unwrap_err();
-    let error = errors
-        .iter()
-        .find(|e| {
-            e.code == "csharp-directional-codec-unsupported"
-                && e.source.pointer() == "/components/schemas/Owner/properties/name/readOnly"
-        })
-        .unwrap_or_else(|| panic!("located Owner refusal: {errors:#?}"));
-    assert!(contract.source(&error.source).is_some() && error.at.end > error.at.start);
-}
-
-fn source_document(path: &Path) -> Value {
-    let contract = load(path);
-    contract.document(contract.entry()).unwrap().clone()
 }

@@ -41,7 +41,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const USAGE: &str = "usage: cargo run -p xtask -- sdk-m3-m6 --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo run -p xtask -- sdk-m3-m6 --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See the module docs in xtask/src/sdk_m3_m6.rs.\n";
+const USAGE: &str = "usage: cargo xtask verify-sdk-demo --source OPENROUTER_ROOT --out NEW_TARGET_DIRECTORY [--demo | --performance-plan PLAN_JSON]\n       cargo xtask verify-sdk-demo --list-stages [--demo]\n--demo verifies generation, native SDKs and iteration tools; latency remains observational. Full acceptance requires qualified performance evidence. See docs/internal/SDK-M3-M6-EXIT.md.\n";
 const BOTH: &[&str] = &["M3", "M6"];
 const M3: &[&str] = &["M3"];
 const M6: &[&str] = &["M6"];
@@ -1105,57 +1105,6 @@ pub(super) fn prepare(run: &mut Run) -> Result<Inventory> {
     Ok(files)
 }
 
-/// `$XDG_DATA_HOME`, else `~/.local/share` (`None` without a home).
-fn data_home() -> Option<PathBuf> {
-    let non_empty = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
-    non_empty("XDG_DATA_HOME").map(PathBuf::from).or_else(|| {
-        non_empty("HOME")
-            .or_else(|| non_empty("USERPROFILE"))
-            .map(|home| PathBuf::from(home).join(".local/share"))
-    })
-}
-
-/// The pinned mise Node install (`$MISE_DATA_DIR/installs/node/<version>`).
-/// Without a home directory the bare `node` on `PATH` is used.
-fn mise_node(version: &str) -> PathBuf {
-    std::env::var_os("MISE_DATA_DIR")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| data_home().map(|dir| dir.join("mise")))
-        .map_or_else(
-            || "node".into(),
-            |mise| mise.join("installs/node").join(version).join("bin/node"),
-        )
-}
-
-/// The Python 3.11 floor interpreter: a uv-managed CPython 3.11
-/// (`$UV_PYTHON_INSTALL_DIR`, else `<data home>/uv/python`; the minor-version
-/// link `cpython-3.11-<platform>` is preferred over patch directories),
-/// else `python3.11` on `PATH`.
-fn python_floor(env: &BTreeMap<String, String>) -> PathBuf {
-    let uv = std::env::var_os("UV_PYTHON_INSTALL_DIR")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| data_home().map(|dir| dir.join("uv/python")));
-    let mut candidates: Vec<String> = uv
-        .as_deref()
-        .and_then(|dir| fs::read_dir(dir).ok())
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-        .filter(|name| name.starts_with("cpython-3.11-") || name.starts_with("cpython-3.11."))
-        .collect();
-    candidates.sort_by(|a, b| {
-        (!a.starts_with("cpython-3.11-"), std::cmp::Reverse(a))
-            .cmp(&(!b.starts_with("cpython-3.11-"), std::cmp::Reverse(b)))
-    });
-    candidates
-        .iter()
-        .filter_map(|name| Some(uv.as_ref()?.join(name).join("bin/python3.11")))
-        .find(|path| path.is_file())
-        .unwrap_or_else(|| resolve("python3.11", env))
-}
-
 pub(super) fn env_values(run: &mut Run) -> Result<()> {
     for name in [
         "HOME",
@@ -1179,9 +1128,22 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
     }
     let selected =
         |name: &str, default: &str| std::env::var(name).unwrap_or_else(|_| default.into());
-    let python_floor = python_floor(&run.env).display().to_string();
-    let node22 = mise_node("22.23.1").display().to_string();
-    let node24 = mise_node("24.21.0").display().to_string();
+    // Interpreter defaults when the `SUSPECT_*` override is unset: the
+    // versioned executable on the caller's PATH (Python), or the mise
+    // major-version install under `$HOME` falling back to `node` on PATH.
+    // The `tool-*` stages then verify the exact versions.
+    let on_path = |name: &str| resolve(name, &run.env).display().to_string();
+    let mise_node = |major: &str| {
+        std::env::var_os("HOME")
+            .map(|home| {
+                PathBuf::from(home)
+                    .join(format!(".local/share/mise/installs/node/{major}/bin/node"))
+            })
+            .filter(|node| node.is_file())
+            .map_or_else(|| on_path("node"), |node| node.display().to_string())
+    };
+    let (python_floor, python_current) = (on_path("python3.11"), on_path("python3.14"));
+    let (node22, node24) = (mise_node("22"), mise_node("24"));
     for (token, name, default) in [
         (
             "{python-floor}",
@@ -1191,7 +1153,7 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
         (
             "{python-current}",
             "SUSPECT_PYTHON_CURRENT_BIN",
-            "/opt/homebrew/opt/python@3.14/bin/python3.14",
+            python_current.as_str(),
         ),
         ("{node22}", "SUSPECT_DOCS_NODE", node22.as_str()),
         ("{node24}", "SUSPECT_NODE24_BIN", node24.as_str()),
@@ -1264,10 +1226,6 @@ pub(super) fn env_values(run: &mut Run) -> Result<()> {
         ("SUSPECT_GO_TOOLCHAIN", "local"),
         ("GOWORK", "off"),
         ("OPENROUTER_WEB_ROOT", "{out}/inputs"),
-        (
-            "SUSPECT_OPENROUTER_YAML",
-            "{out}/inputs/projects/docs/openapi/openapi.yaml",
-        ),
         ("SUSPECT_PYTHON_BIN", "{python-current}"),
         ("SUSPECT_PYTHON_TOOLS", "{python-tools}"),
         ("SUSPECT_PYTHON_FLOOR_BIN", "{python-floor}"),
@@ -1649,7 +1607,7 @@ pub(super) fn editor_stages() -> Vec<Stage> {
 pub(super) fn package_stages() -> Vec<Stage> {
     let mut steps = Vec::new();
     for (id, flag, status, success, code) in [("preview", "--preview", "drift", false, 1), ("generate", "", "written", true, 0), ("drift", "--check", "current", true, 0)] {
-        let mut item = stage(&format!("five-op-{id}"), BOTH, "{out}/bin/suspect", &["codegen-session", "--config", "{out}/configs/five-operations.json", "--out", "{work}/packages", "--format", "json"], "{workspace}");
+        let mut item = stage(&format!("five-op-{id}"), BOTH, "{out}/bin/suspect", &["gen", "session", "--config", "{out}/configs/five-operations.json", "--output", "{work}/packages", "--format", "ndjson"], "{workspace}");
         if !flag.is_empty() { item.args.push(flag.into()); }
         item.expected_exit = code;
         item.criterion = Criterion::Json { report: None, assertions: BTreeMap::from([("/format".into(), json!("suspect.sdk.session.v1")), ("/status".into(), json!(status)), ("/success".into(), json!(success))]) };

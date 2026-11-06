@@ -295,22 +295,9 @@ fn tools() -> PathBuf {
 }
 
 fn php() -> PathBuf {
-    suspect_codegen::toolchain::resolve_path("php").expect("PHP is gated by native_php()")
-}
-/// PHP plus the provisioned Composer phars (`tools/native-setup.sh php`),
-/// or `false` after the skip message (a panic under `SUSPECT_REQUIRE_NATIVE`).
-fn native_php() -> bool {
-    suspect_codegen::toolchain::require("php").is_some()
-        && suspect_codegen::toolchain::require_provisioned(
-            "SUSPECT_COMPOSER_PHAR",
-            "sdk-php-tools/composer-2.10.3.phar",
-            "php",
-        )
-        .is_some()
-}
-/// The resolved PHP with `-n` plus the ini-enabled shared extensions.
-fn php_command() -> Command {
-    suspect_codegen::toolchain::php_command().expect("PHP is gated by native_php()")
+    std::env::var_os("SUSPECT_PHP_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| tools().join("php-8.3.32/php"))
 }
 
 fn composer() -> PathBuf {
@@ -342,7 +329,7 @@ fn checked(command: &mut Command, retained: &Path, label: &str) -> String {
 fn dump_autoload(generation: &Path) {
     let home = generation.join("composer-home");
     std::fs::create_dir_all(&home).unwrap();
-    let mut command = php_command();
+    let mut command = Command::new(php());
     command
         .arg(composer())
         .args(["dump-autoload", "--no-interaction", "--quiet"])
@@ -380,7 +367,7 @@ fn included_files(generation: &Path, program: &str, label: &str) -> Vec<PathBuf>
         "require 'vendor/autoload.php';\n{program}\nforeach (get_included_files() as $file) {{ if (str_contains($file, 'php/src')) echo $file, PHP_EOL; }}"
     );
     let output = checked(
-        php_command()
+        Command::new(php())
             .arg("-r")
             .arg(&script)
             .current_dir(generation.join("php")),
@@ -413,9 +400,6 @@ fn write_report(report: &Value) {
 #[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn php_consumers_eliminate_unrelated_operations() {
-    if !native_php() {
-        return;
-    }
     let _gate = NATIVE_GATE.lock().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-elimination");
     std::fs::create_dir_all(&root).unwrap();
@@ -517,7 +501,7 @@ if (class_exists('EliminationSdk\\Client', false)) { throw new RuntimeException(
         codec_extended["unrelated_markers_loaded"]["zeta-quantum"]
             .as_bool()
             .unwrap(),
-        "documented file-granular retention regressed: the unrelated schema no longer rides in Codecs.php; re-measure and update the pinned expectation in this test"
+        "documented file-granular retention regressed: the unrelated schema no longer rides in Codecs.php; update docs/design/elimination-audit.md"
     );
 
     // --- Client consumer (composition shape) ---------------------------------

@@ -621,9 +621,7 @@ fn canonical_generation_options_are_identical_in_generation_and_snapshot_capture
 fn native_positional_multipart_matrix() {
     let root = directory("native-");
     let plan = plan_in(&root, &fixture());
-    let Some(dotnet) = suspect_codegen::toolchain::require("dotnet") else {
-        return;
-    };
+    let dotnet = suspect_codegen::toolchain::gate("dotnet").unwrap_or_else(|skip| panic!("{skip}"));
     for (sdk, framework) in [("8.0.424", "net8.0"), ("10.0.400", "net10.0")] {
         let case = root.join(sdk);
         fs::create_dir_all(case.join("feed")).unwrap();

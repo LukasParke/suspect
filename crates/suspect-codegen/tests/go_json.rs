@@ -442,18 +442,15 @@ func main() {
 "#;
 
 #[test]
-#[ignore = "requires the pinned OpenRouter checkout (SUSPECT_OPENROUTER_YAML) and the native Go toolchain"]
+#[ignore = "requires OPENROUTER_WEB_ROOT, the native Go toolchain; missing inputs fail"]
 fn tracked_openrouter_contract_documents_roundtrip_through_native_go_runtime() {
-    let companions = [
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    for relative in [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",
         "projects/docs/assets/provider-monitor-schema-v2.openapi.json",
         "packages/temporal/benchmarks.openapi.json",
-    ];
-    let Some(root) = suspect_codegen::toolchain::openrouter_checkout(&companions) else {
-        return;
-    };
-    for relative in companions {
+    ] {
         let path = Path::new(&root).join(relative);
         let workspace = Arc::new(
             WorkspaceBuilder::new()

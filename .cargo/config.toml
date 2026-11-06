@@ -1,0 +1,3 @@
+[alias]
+# `cargo xtask ci`, `cargo xtask verify-sdk`, ...; see CONTRIBUTING.md.
+xtask = "run --locked --quiet -p xtask --"

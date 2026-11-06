@@ -10,6 +10,7 @@ import * as vscode from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import { availableSdkProfiles, SdkProfile } from './generation';
 import { errorMessage, suspectBinary } from './runner';
+import { codegenDefaults } from './codegenSettings';
 
 type ClientGetter = () => LanguageClient | undefined;
 
@@ -165,10 +166,11 @@ export function registerLiveSdkPreview(getClient: ClientGetter): vscode.Disposab
 				{ placeHolder: 'Suspect: live SDK preview — choose a profile' },
 			);
 			if (!pick) return;
-			const config = vscode.workspace.getConfiguration('suspect', editor.document.uri);
-			const packageName = config.get<string>('sdk.packageName', '');
+			const scope = editor.document.uri;
+			const defaults = await codegenDefaults(getClient(), scope);
+			const packageName = defaults.packageName;
 			if (!packageName) {
-				void vscode.window.showWarningMessage('Set suspect.sdk.packageName to identify the preview package.');
+				void vscode.window.showWarningMessage('Set suspect.codegen.packageName (or codegen.package_name in .suspect.yaml) to identify the preview package.');
 				return;
 			}
 			active?.dispose();
@@ -176,9 +178,9 @@ export function registerLiveSdkPreview(getClient: ClientGetter): vscode.Disposab
 				uri: editor.document.uri,
 				profile: pick.label as SdkProfile,
 				packageName,
-				packageVersion: config.get<string>('sdk.packageVersion', '0.1.0'),
-				importName: config.get<string>('sdk.importNames') || undefined,
-				operationIds: config.get<string[]>('sdk.operationIds', []),
+				packageVersion: defaults.packageVersion || '0.1.0',
+				importName: defaults.importNames[pick.label] || undefined,
+				operationIds: [...defaults.operationIds],
 			});
 			active.start();
 		}),

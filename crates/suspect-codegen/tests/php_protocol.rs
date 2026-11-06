@@ -448,21 +448,21 @@ fn php() -> PathBuf {
     suspect_codegen::toolchain::resolve_path("php").expect("PHP is gated by native_php()")
 }
 /// PHP plus the provisioned Composer/PHPStan phars (`tools/native-setup.sh php`),
-/// or `false` after the skip message (a panic under `SUSPECT_REQUIRE_NATIVE`).
+/// or a panic naming what is missing (an `#[ignore]` gate never passes by skipping).
 fn native_php() -> bool {
-    suspect_codegen::toolchain::require("php").is_some()
+    suspect_codegen::toolchain::require("php").exists()
         && suspect_codegen::toolchain::require_provisioned(
             "SUSPECT_COMPOSER_PHAR",
             "sdk-php-tools/composer-2.10.3.phar",
             "php",
         )
-        .is_some()
+        .exists()
         && suspect_codegen::toolchain::require_provisioned(
             "SUSPECT_PHPSTAN_PHAR",
             "sdk-php-tools/phpstan-2.2.13.phar",
             "php",
         )
-        .is_some()
+        .exists()
 }
 fn composer_phar() -> PathBuf {
     std::env::var_os("SUSPECT_COMPOSER_PHAR")

@@ -30,114 +30,23 @@ import urllib.parse
 import zipfile
 
 
-APPROVED = Path(tempfile.gettempdir()) / "opencode"
+# Native roots and shared Go caches live under the caller's temporary
+# directory (`TMPDIR`); the Rust selectors create their roots in the same place.
+APPROVED = (Path(tempfile.gettempdir()) / "suspect-terraform-native").resolve()
+# `SUSPECT_TERRAFORM_BIN` overrides the executable (as in the Rust gates);
+# otherwise `terraform` is looked up on PATH. `require_terraform()` fails
+# with an actionable message before any command runs.
+TERRAFORM = Path(os.environ.get("SUSPECT_TERRAFORM_BIN") or shutil.which("terraform") or "terraform")
 
 
-def mise_data_dir() -> Path:
-    """The mise data directory: $MISE_DATA_DIR, $XDG_DATA_HOME/mise, or ~/.local/share/mise."""
-    if os.environ.get("MISE_DATA_DIR"):
-        return Path(os.environ["MISE_DATA_DIR"])
-    if os.environ.get("XDG_DATA_HOME"):
-        return Path(os.environ["XDG_DATA_HOME"]) / "mise"
-    return Path.home() / ".local/share/mise"
-
-
-def resolve_terraform() -> Path:
-    """SUSPECT_TERRAFORM_BIN, then `terraform` on PATH, then the mise install."""
-    override = os.environ.get("SUSPECT_TERRAFORM_BIN")
-    if override:
-        return Path(override)
-    on_path = shutil.which("terraform")
-    if on_path:
-        return Path(on_path)
-    managed = mise_data_dir() / "installs/terraform/latest/terraform"
-    if managed.is_file():
-        return managed
-    raise SystemExit(
-        "terraform not found: set SUSPECT_TERRAFORM_BIN, put terraform on PATH, or install it with mise"
-    )
-
-
-TERRAFORM = resolve_terraform()
-
-
-GO_CACHES = Path(__file__).resolve().parent.parent / "target/sdk-terraform-tools"
-
-
-def go_binary() -> str:
-    """SUSPECT_GO_BIN (the executable the Rust gate resolved), else `go` on PATH."""
-    return os.environ.get("SUSPECT_GO_BIN") or "go"
-
-
-def go_tiers(floor: str) -> dict[str, dict[str, str]]:
-    """The two Go toolchain tiers a focused gate runs under: the provider's
-    declared floor toolchain (downloaded through the module proxy by
-    `GOTOOLCHAIN`), and the locally installed Go."""
-    return {floor: {"GOTOOLCHAIN": floor}, "local": {"GOTOOLCHAIN": "local"}}
-
-
-def claim_go_tier(run, label, tier, floor, version):
-    """The floor tier must be exactly the pinned toolchain; the local tier at least as new."""
-    if tier == floor:
-        run.claim(label, version == floor, version)
-    else:
-        def numbers(text):
-            return tuple(int(part) for part in text.removeprefix("go").split(".") if part.isdigit())
-        run.claim(label, numbers(version) >= numbers(floor), {"local": version, "floor": floor})
-
-
-_CACHE_LOCK = None
-
-
-def lock_go_caches() -> None:
-    """Holds an exclusive lock on the shared Go caches until this runner
-    exits. The gates run concurrently (one grouped test binary) and each
-    emits different bytes for the same private module@version, so one
-    runner purging or extracting the private host must never interleave
-    with another runner's build."""
-    global _CACHE_LOCK
-    if _CACHE_LOCK is None:
-        GO_CACHES.mkdir(parents=True, exist_ok=True)
-        _CACHE_LOCK = open(GO_CACHES / ".lock", "w")
-        fcntl.flock(_CACHE_LOCK, fcntl.LOCK_EX)
-
-
-def go_platform(env: dict[str, str]) -> str:
-    """The host Go platform (`darwin_arm64`, `linux_amd64`, ...) of the local toolchain."""
-    out = subprocess.run([go_binary(), "env", "GOOS", "GOARCH"], env={**env, "GOTOOLCHAIN": "local"}, capture_output=True, check=True).stdout
-    return "_".join(out.decode().split())
-
-
-def focused_go_env(proxy: Path, private_module: str) -> dict[str, str]:
-    """Go environment for native gates: the freshly emitted SDK from the
-    local file proxy, public dependencies from proxy.golang.org (checksum
-    verified), and persistent module/build caches under
-    target/sdk-terraform-tools. Takes the cache lock (see lock_go_caches),
-    then purges the private fixture host from the shared module cache so a
-    stale SDK zip from an earlier generator (or another gate's variant) can
-    never satisfy the lookup. Each call re-purges, so call it once per
-    distinct emitted SDK."""
-    lock_go_caches()
-    host = private_module.split("/")[0]
-    modcache, gocache = GO_CACHES / "gomodcache", GO_CACHES / "gocache"
-
-    for stale in (modcache / host, modcache / "cache/download" / host):
-        if stale.exists():
-            for directory, _, _ in os.walk(stale):
-                os.chmod(directory, 0o700)
-            shutil.rmtree(stale)
-    modcache.mkdir(parents=True, exist_ok=True)
-    gocache.mkdir(parents=True, exist_ok=True)
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("GO", "TF_"))}
-    env.update(
-        GOWORK="off",
-        GOFLAGS="-modcacherw",
-        GOPROXY=f"file://{proxy},https://proxy.golang.org",
-        GONOSUMDB=host,
-        GOMODCACHE=str(modcache),
-        GOCACHE=str(gocache),
-    )
-    return env
+def require_terraform() -> Path:
+    if not TERRAFORM.is_file():
+        raise SystemExit(
+            f"terraform executable not found ({TERRAFORM}); install Terraform 1.10+ "
+            "(https://developer.hashicorp.com/terraform/install) and put it on PATH, "
+            "or set SUSPECT_TERRAFORM_BIN to its absolute path"
+        )
+    return TERRAFORM
 
 
 def sha(path: Path) -> str:
@@ -663,7 +572,8 @@ def main():
     parser.add_argument("--fixtures", type=Path, required=True)
     args = parser.parse_args()
     root, evidence, fixtures = args.root.resolve(), args.evidence.resolve(), args.fixtures.resolve()
-    assert root.is_relative_to(APPROVED.resolve()), "native roots must be isolated under the approved temporary directory"
+    assert root.is_relative_to(APPROVED), f"native roots must be isolated under the approved temporary directory {APPROVED}"
+    require_terraform()
     run = Runner(evidence)
     report = {"format": "suspect.terraform.acceptance.v1", "native_root": str(root), "local_acceptance_only": True, "publishing": False, "passed": False}
     try:

@@ -37,7 +37,7 @@ fn fixture() -> HttpPlan {
 }
 fn build(root: &Path) -> Option<Output> {
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/typescript-docs/build.mjs");
-    let node = suspect_codegen::toolchain::pinned_node(22)?;
+    let node = suspect_codegen::toolchain::pinned_node(22);
     Some(Command::new(node).arg(tool).arg(root).output().unwrap())
 }
 fn text(o: &Output) -> String {
@@ -260,9 +260,7 @@ fn native_http_gate_rejects_manifest_export_prose_and_type_binding_mutations() {
 #[test]
 #[ignore = "requires pinned Node 22.23.1, TypeDoc, TypeScript and tracked OpenRouter YAML"]
 fn native_http_docs_cover_tracked_openrouter_operations_and_query_inputs() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let c = contract(&path);
     let ids = [
         "getCredits",

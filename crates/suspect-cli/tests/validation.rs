@@ -20,11 +20,9 @@ fn validate_with(name: &str, source: &str, extra: &[&str]) -> (i32, serde_json::
         .arg(path)
         .output()
         .unwrap();
-    (
-        output.status.code().unwrap(),
-        serde_json::from_slice(&output.stdout)
-            .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr))),
-    )
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(&output.stderr)));
+    (output.status.code().unwrap(), report["findings"].clone())
 }
 
 #[test]
@@ -107,7 +105,8 @@ fn referenced_json_syntax_errors_keep_their_source_file() {
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(1));
-    let findings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let findings = &report["findings"];
     assert!(
         findings
             .as_array()

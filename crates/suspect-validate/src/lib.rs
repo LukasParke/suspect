@@ -8,10 +8,12 @@
 mod checks;
 mod diagnostic;
 mod guidance;
+mod rules;
 
 use suspect_oas::{ModelError, OpenApi, Session};
 
 pub use diagnostic::{Diagnostic, Severity};
+pub use rules::rules;
 /// Validates one loaded OpenAPI document.
 ///
 /// Runs the full check battery over `api` — operation, parameter, path,

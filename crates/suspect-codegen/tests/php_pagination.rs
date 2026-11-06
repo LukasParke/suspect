@@ -4,9 +4,14 @@
 //! stubbed transport. Static runtime files are never modified; the walks live
 //! entirely inside the generated `Client.php`, and no-policy generation stays
 //! byte-identical.
-#![cfg(feature = "php-sdk")]
+#![cfg(all(feature = "php-sdk", feature = "http-protocol"))]
 
-use std::{fs, path::PathBuf, process::Command, sync::Arc};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::Arc,
+};
 
 use serde_json::{Value, json};
 use suspect_codegen::{
@@ -230,8 +235,7 @@ fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
         "page and next-page walks must stop on a false has-more indicator; the item walk inherits it:\n{client}"
     );
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&files, root.path()).unwrap();
@@ -316,17 +320,23 @@ fn cursor_without_items_emits_the_page_walk_only() {
 
 /// The repository's verified PHP 8.3 interpreter, when available.
 fn php() -> Option<PathBuf> {
-    // `SUSPECT_PHP_BIN`, the source-built target-dir PHP, then `PATH`;
-    // a hard failure under `SUSPECT_REQUIRE_NATIVE`.
-    suspect_codegen::toolchain::require("php")
+    let candidate = std::env::var_os("SUSPECT_PHP_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-php-tools/php-8.3.32/php")
+        });
+    Command::new(&candidate)
+        .arg("-v")
+        .output()
+        .is_ok()
+        .then_some(candidate)
 }
 
 #[ignore = "requires the PHP CLI on the test host"]
 #[test]
 fn emitted_php_files_lint() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; skipping the lint check");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&configured()), root.path()).unwrap();
@@ -356,8 +366,7 @@ fn emitted_php_files_lint() {
 #[test]
 fn pagination_walks_drive_stubbed_pages_in_php() {
     let Some(php) = php() else {
-        eprintln!("no PHP interpreter available; static emission assertions only");
-        return;
+        panic!("no PHP interpreter available");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(&configured());

@@ -362,7 +362,8 @@ fn policy_edit_and_revert_are_session_identity_without_secret_values() {
 
 fn openrouter() -> Option<Plan> {
     use sha2::{Digest, Sha256};
-    let path = suspect_codegen::toolchain::openrouter_spec()?;
+    let base = suspect_codegen::test_inputs::openrouter_root();
+    let path = base.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&path).unwrap();
     assert_eq!(
         format!("{:x}", Sha256::digest(&bytes)),

@@ -107,7 +107,7 @@ struct GatewayChild {
 }
 
 impl GatewayChild {
-    /// Starts `suspect gateway --port 0` and returns once it is serving.
+    /// Starts `suspect traffic gateway --port 0` and returns once it is serving.
     ///
     /// The gateway binds the port itself and announces the bound address
     /// on stderr only once it can serve. Reserving a port here instead
@@ -120,7 +120,7 @@ impl GatewayChild {
         let spec = root.join("api.yaml");
         let mut command = suspect();
         command
-            .arg("gateway")
+            .args(["traffic", "gateway"])
             .arg(&spec)
             .args(["--port", "0"])
             .args(args)
@@ -180,8 +180,9 @@ fn why_traces_a_failure_to_its_source_location() {
     let root = directory.path();
     write_workspace(root);
     let output = suspect()
-        .args(["why", "type: string expected", "--spec"])
+        .arg("why")
         .arg(root.join("api.yaml"))
+        .arg("type: string expected")
         .args(["--why-line", "3", "--why-col", "9"])
         .output()
         .expect("run");
@@ -201,8 +202,9 @@ fn why_traces_a_failure_to_its_source_location() {
     );
 
     let output = suspect()
-        .args(["why", "anything", "--spec"])
+        .arg("why")
         .arg(root.join("api.yaml"))
+        .arg("anything")
         .args(["--format", "json"])
         .output()
         .expect("run");
@@ -259,7 +261,7 @@ fn a_journal_file_receives_the_run_summary() {
     let journal = root.join("runs.jsonl");
     let output = suspect()
         .current_dir(root)
-        .arg("test")
+        .args(["test", "run"])
         .arg("check.yaml")
         .args([
             "--base-url",

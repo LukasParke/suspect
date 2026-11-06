@@ -294,8 +294,11 @@ fn generate(document: Value) -> Vec<OutFile> {
     .unwrap()
 }
 
+/// `SUSPECT_DOTNET_BIN`, the mise install, then `PATH` (the toolchain
+/// manifest's resolution order).
 fn dotnet() -> PathBuf {
-    suspect_codegen::toolchain::resolve_path("dotnet").expect("dotnet is gated by the test entry")
+    suspect_codegen::toolchain::resolve_path("dotnet")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("dotnet")))
 }
 
 fn dotnet_command(directory: &Path, home: &Path) -> Command {
@@ -522,9 +525,6 @@ fn write_report(report: &Value) {
 #[ignore = "requires the .NET SDK on the test host"]
 #[test]
 fn csharp_consumers_eliminate_unrelated_operations() {
-    if suspect_codegen::toolchain::require("dotnet").is_none() {
-        return;
-    }
     let _gate = NATIVE_GATE.lock().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-elimination");
     fs::create_dir_all(&root).unwrap();

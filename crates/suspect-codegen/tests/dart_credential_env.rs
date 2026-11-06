@@ -394,9 +394,7 @@ fn installed(root: &Path, p: &dart_sdk::Plan) {
 #[test]
 #[ignore = "actual SDK HTTPS, trust/hostname rejection and cancellation; local fixture credentials only"]
 fn native_transport_uses_verified_https() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("transport-tls-");
     let c = contract(&document(), "https://credential.example/tls-control.json");
     let selected = c
@@ -449,9 +447,7 @@ fn native_transport_uses_verified_https() {
 #[test]
 #[ignore = "focused real SDK HttpClient authority-header regression; loopback only"]
 fn native_transport_preserves_required_host_header() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("transport-host-");
     let server = support::Server::start(|stream, request, url| {
         let authority = url.strip_prefix("http://").unwrap();
@@ -503,9 +499,7 @@ fn native_transport_preserves_required_host_header() {
 #[test]
 #[ignore = "configured installed VM/JS/browser credential-env controls on Dart floor/current"]
 fn native_credential_env_controls() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("credential-env-controls-");
     let p = plan(
         contract(&document(), "https://credential.example/openapi.json"),
@@ -625,9 +619,7 @@ fn native_credential_env_controls() {
 #[test]
 #[ignore = "targeted installed credential constructor null/type compatibility on VM/JS; separate browser receipt"]
 fn native_credential_env_constructor_compatibility() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("credential-env-constructor-");
     let p = plan(
         contract(&document(), "https://credential.example/openapi.json"),
@@ -729,13 +721,10 @@ fn native_credential_env_constructor_compatibility() {
 #[test]
 #[ignore = "actual OpenRouter getCurrentKey/getCredits source with installed runtime env and source-default HTTPS capture"]
 fn native_openrouter_credential_env() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = support::root("credential-env-openrouter-");
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let source_hash = format!("{:x}", Sha256::digest(std::fs::read(&path).unwrap()));
     let c = support::load(&path);
     let selected = c

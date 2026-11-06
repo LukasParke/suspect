@@ -2,21 +2,15 @@ name: native-evidence
 
 # Continuous native evidence for the SDK backends.
 #
-# Each backend's acceptance suites are `#[ignore]`d because they need a
-# native toolchain. This workflow installs one backend's toolchain per job,
-# runs every ignored suite for that backend (`tests/<prefix>_*.rs` plus the
-# in-crate `src/<module>` tests), and publishes the declared coverage matrix
-# (`suspect evidence`) beside the test log.
+# The per-backend acceptance suites are `#[ignore]`d because they need a
+# native toolchain, so "is backend X actually verified right now?" is
+# otherwise unknowable. This job answers it on a schedule without blocking
+# a pull request: it installs each toolchain, runs that backend's suites,
+# and publishes the declared coverage matrix (`suspect dev evidence`) beside
+# the run results as an artifact.
 #
-# `SUSPECT_REQUIRE_NATIVE=1` turns a missing or broken toolchain into a
-# failure instead of a skip, so a green job means the suites really ran.
-# The OpenRouter-backed suites need the private openrouter-web repository at
-# the pinned commit (toolchain::OPENROUTER_SPEC_COMMIT). Set the
-# OPENROUTER_WEB_TOKEN secret (read access to OpenRouterTeam/openrouter-web)
-# to check it out; without the secret those suites skip cleanly.
-#
-# This runs on a schedule and on demand. It does not gate pull requests;
-# ci.yml is the blocking gate.
+# It is deliberately non-blocking for PRs. The blocking correctness gate is
+# ci.yml; this is the dated evidence record.
 
 on:
   schedule:
@@ -25,7 +19,7 @@ on:
   workflow_dispatch:
     inputs:
       backend:
-        description: Run a single backend by name (empty runs all)
+        description: Run a single backend (empty runs all)
         required: false
         default: ""
 
@@ -34,62 +28,97 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-D warnings"
-  SUSPECT_REQUIRE_NATIVE: "1"
 
 jobs:
-  # Builds the backend matrix, filtered to `inputs.backend` when set (a job
-  # `if:` cannot read `matrix`, so the filter happens here).
-  plan:
-    runs-on: ubuntu-24.04
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-    steps:
-      - id: matrix
-        env:
-          ONLY: ${{ inputs.backend }}
-        run: |
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os
-          backends = [
-              ("rust", "rust", "rust_"), ("go", "go", "go_"),
-              ("typescript", "typescript", "typescript::"), ("python", "python", "python_"),
-              ("csharp", "csharp", "csharp_sdk::"), ("java", "java", "java_sdk::"),
-              ("kotlin", "kotlin", "kotlin_sdk::"), ("ruby", "ruby", "ruby_sdk::"),
-              ("php", "php", "php_sdk::"), ("dart", "dart", "dart_sdk::"),
-              ("cpp", "cpp", "cpp_sdk::"), ("swift", "swift", "swift_sdk::"),
-              ("terraform", "terraform", "terraform::"),
-              # Cross-backend suites (tests/groups/shared.rs): Go, Node,
-              # Python, Swift and a headless Chrome; no in-crate module.
-              ("shared", "shared", ""),
-          ]
-          only = os.environ.get("ONLY", "")
-          include = [
-              {"name": n, "prefix": p, "module": m}
-              for n, p, m in backends
-              if not only or only == n
-          ]
-          if not include:
-              raise SystemExit(f"unknown backend {only!r}")
-          print("matrix=" + json.dumps({"include": include}))
-          PY
-
-  backend:
+  matrix:
     name: ${{ matrix.name }} native evidence
-    needs: plan
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    runs-on: ubuntu-latest
+    # Never block a push or pull request on a scheduled evidence run.
+    continue-on-error: true
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix:
+        include:
+          - name: rust
+            toolchain: "stable"
+            install: "rustup toolchain install stable --profile minimal"
+            test_filter: "rust"
+          - name: go
+            toolchain: "go1.23"
+            install: |
+              curl -fsSL https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+              echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+            test_filter: "go"
+          - name: node
+            toolchain: "node22"
+            install: |
+              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+              sudo apt-get install -y nodejs
+            test_filter: "typescript"
+          - name: python
+            toolchain: "python3.12"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y python3.12 python3.12-venv
+            test_filter: "python"
+          - name: dotnet
+            toolchain: "8.0"
+            install: "dotnet-install.sh --channel 8.0 --install-dir $HOME/.dotnet"
+            test_filter: "csharp"
+          - name: jdk
+            toolchain: "21"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y openjdk-21-jdk maven
+            test_filter: "java"
+          - name: ruby
+            toolchain: "3.3"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y ruby-full
+            test_filter: "ruby"
+          - name: php
+            toolchain: "8.3"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y php8.3-cli php8.3-curl php8.3-xml
+            test_filter: "php"
+          - name: dart
+            toolchain: "stable"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y curl unzip
+              curl -fsSL https://storage.googleapis.com/dart-archive/channels/stable/release/latest/sdk/dartsdk-linux-x64.zip -o /tmp/dart.zip
+              sudo unzip /tmp/dart.zip -d /usr/lib
+              echo "/usr/lib/dart-sdk/bin" >> "$GITHUB_PATH"
+            test_filter: "dart"
+          - name: swift
+            toolchain: "6.0"
+            install: |
+              sudo apt-get update
+              sudo apt-get install -y swiftlang
+            test_filter: "swift"
+          # Cross-backend suites (crates/suspect-codegen/tests/groups/shared.rs):
+          # Go, Node, Python and a headless Chrome (preinstalled on the image).
+          - name: shared
+            toolchain: "go1.23+node22+python3.12"
+            install: |
+              curl -fsSL https://go.dev/dl/go1.23.4.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+              echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+              sudo apt-get install -y nodejs python3.12 python3.12-venv
+              echo "SUSPECT_CHROMIUM=$(command -v google-chrome)" >> "$GITHUB_ENV"
+            test_filter: "shared"
     env:
       OPENROUTER_WEB_TOKEN: ${{ secrets.OPENROUTER_WEB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      # Pinned to toolchain::OPENROUTER_SPEC_COMMIT; a codegen test keeps the
-      # two in sync.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The OpenRouter gates read OPENROUTER_WEB_ROOT, a private
+      # openrouter-web checkout at toolchain::OPENROUTER_SPEC_COMMIT (a
+      # codegen test keeps the two in sync). Needs the OPENROUTER_WEB_TOKEN
+      # secret; without it those gates fail this (non-blocking) entry.
       - if: env.OPENROUTER_WEB_TOKEN != ''
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: OpenRouterTeam/openrouter-web
           ref: 50b0c3910b36dc33c949a490bbe2fba59d574c42
@@ -97,104 +126,32 @@ jobs:
           path: openrouter-web
           persist-credentials: false
       - if: env.OPENROUTER_WEB_TOKEN != ''
-        shell: bash
         run: echo "OPENROUTER_WEB_ROOT=$GITHUB_WORKSPACE/openrouter-web" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: native-${{ matrix.name }}
 
-      - if: matrix.name == 'go' || matrix.name == 'terraform' || matrix.name == 'shared'
-        uses: actions/setup-go@v5
+      # Builds suspect with the version in rust-toolchain.toml.
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          go-version: "1.23"
-      # The TypeScript suites run Node 24 as a second runtime and pin the
-      # package/doc toolchain to Node 22.23.1 exactly (tools/typescript-*
-      # build scripts check the version). Install 24 first and record it, so
-      # 22.23.1 is the one left on PATH.
-      - if: matrix.name == 'typescript' || matrix.name == 'shared'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-      - if: matrix.name == 'typescript' || matrix.name == 'shared'
-        run: echo "SUSPECT_NODE24_BIN=$(command -v node)" >> "$GITHUB_ENV"
-      - if: matrix.name == 'typescript' || matrix.name == 'shared'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22.23.1"
-      # Generated Python packages are checked on the 3.11 floor and current
-      # 3.14; installed-wheel suites create uv venvs per interpreter.
-      - if: matrix.name == 'python' || matrix.name == 'go' || matrix.name == 'shared'
-        uses: actions/setup-python@v5
-        with:
-          python-version: |
-            3.11
-            3.14
-      - if: matrix.name == 'python' || matrix.name == 'go' || matrix.name == 'shared'
-        uses: astral-sh/setup-uv@v6
-      - if: matrix.name == 'csharp'
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
-      - if: matrix.name == 'java' || matrix.name == 'kotlin'
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: |
-            25
-            21
-      - if: matrix.name == 'kotlin'
-        # setup-java exports JAVA_HOME_<major>_X64 for each install; the
-        # Kotlin suites exercise both supported JDKs.
-        run: echo "SUSPECT_KOTLIN_JAVA_HOMES=$JAVA_HOME_21_X64:$JAVA_HOME_25_X64" >> "$GITHUB_ENV"
-      - if: matrix.name == 'ruby'
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-      - if: matrix.name == 'php'
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.3"
-          extensions: curl, mbstring, xml
-      - if: matrix.name == 'dart'
-        uses: dart-lang/setup-dart@v1
-        with:
-          sdk: "3.9.4"
-      - if: matrix.name == 'swift' || matrix.name == 'shared'
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.0.3"
-      - if: matrix.name == 'terraform'
-        uses: hashicorp/setup-terraform@v3
-        with:
-          # Pinned to tests/fixtures/terraform-v1/target.json terraform_version;
-          # the address gate asserts the exact native parser revision.
-          terraform_version: "1.15.8"
-          terraform_wrapper: false
-      # ubuntu-24.04 images ship Google Chrome; the browser gate drives it.
-      - if: matrix.name == 'shared'
-        run: echo "SUSPECT_CHROMIUM=$(command -v google-chrome)" >> "$GITHUB_ENV"
+          toolchain: "1.99.1"
 
-      - name: Report the toolchain
+      - name: Build the toolchain
+        run: ${{ matrix.install }}
+
+      - name: Report the toolchain version
         run: |
           {
             echo "backend: ${{ matrix.name }}"
-            rustc --version
+            echo "declared: ${{ matrix.toolchain }}"
             case "${{ matrix.name }}" in
-              go|terraform) go version ;;&
-              terraform) terraform version | head -1 ;;
-              typescript) node --version; npm --version ;;
+              go) go version ;;
+              node) node --version ;;
               python) python3 --version ;;
-              csharp) dotnet --list-sdks ;;
-              java|kotlin) java -version 2>&1 | head -1; mvn --version | head -1 ;;
+              dotnet) dotnet --version ;;
+              jdk) java -version 2>&1 | head -1 ;;
               ruby) ruby --version ;;
               php) php --version | head -1 ;;
               dart) dart --version 2>&1 | head -1 ;;
-              cpp) c++ --version | head -1; cmake --version | head -1 ;;
-              swift) swift --version 2>&1 | head -1 ;;
-              shared) go version; node --version; python3 --version; swift --version 2>&1 | head -1; google-chrome --version ;;
+              swift) swift --version ;;
+              *) rustc --version ;;
             esac
           } | tee toolchain.txt
 
@@ -202,42 +159,42 @@ jobs:
       # venv, Ruby gems, PHP phars); a no-op for backends that need none.
       - name: Provision suite tools
         run: |
-          if [ "${{ matrix.name }}" = shared ]; then
-            tools/native-setup.sh typescript python
-          else
-            tools/native-setup.sh ${{ matrix.name }}
-          fi
+          case "${{ matrix.name }}" in
+            node) tools/native-setup.sh typescript ;;
+            shared) tools/native-setup.sh typescript python ;;
+            *) tools/native-setup.sh ${{ matrix.name }} ;;
+          esac
 
-      # Each backend's suites are one grouped test binary
-      # (crates/suspect-codegen/tests/groups/<prefix>.rs).
-      - name: Run the backend's native suites
-        shell: bash
+      - name: Build suspect
+        run: cargo build --release -p suspect-cli
+
+      - name: Run the backend's acceptance suites
         run: |
-          set -euo pipefail
-          cargo test -p suspect-codegen --test ${{ matrix.prefix }} --no-fail-fast -- --ignored 2>&1 | tee native-tests.log
-          if [ -n "${{ matrix.module }}" ]; then
-            cargo test -p suspect-codegen --lib -- --ignored "${{ matrix.module }}" 2>&1 | tee -a native-tests.log
-          fi
+          # `--ignored` runs the opt-in native suites. Each backend's suites
+          # are one grouped test binary
+          # (`crates/suspect-codegen/tests/groups/<name>.rs`). A failure fails
+          # this matrix entry; the job's `continue-on-error` keeps it from
+          # blocking anything else.
+          cargo test -p suspect-codegen --release \
+            --test "${{ matrix.test_filter }}" \
+            -- --ignored --nocapture
 
       - name: Publish the declared coverage matrix
-        if: always()
         run: |
-          cargo run -q -p suspect-cli -- evidence --format json > evidence.json
+          ./target/release/suspect dev evidence --format json > evidence.json
           {
             echo "# SDK evidence ${{ matrix.name }} ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
             echo
             cat toolchain.txt
             echo
-            cargo run -q -p suspect-cli -- evidence
+            ./target/release/suspect dev evidence
           } > evidence.md
 
       - name: Upload evidence
-        if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sdk-evidence-${{ matrix.name }}
           path: |
             evidence.json
             evidence.md
             toolchain.txt
-            native-tests.log

@@ -432,10 +432,9 @@ fn native_openrouter_current_key_environment_defaults() {
     if !support::available() {
         return;
     }
-    let Some(input) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
     let root = root("openrouter-");
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let input = checkout.join("projects/docs/openapi/openapi.yaml");
     let bytes = std::fs::read(&input).expect("actual OpenRouter source checkout required");
     let workspace = Arc::new(
         WorkspaceBuilder::new()

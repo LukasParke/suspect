@@ -160,9 +160,7 @@ assert.throws(() => codecs.RecordResponseCodec.decode('{"name":"n"}'), invalid);
 "#,
     )
     .unwrap();
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let output = Command::new(&node)
         .arg(consumer.join("consumer.mjs"))
         .output()

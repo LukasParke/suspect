@@ -89,10 +89,10 @@ fn main() {
     out.insert("file".into(), json!("petstore.yaml"));
     out.insert("text".into(), json!(SPEC));
 
-    // Diagnostics: the validator plus the Spectral-compatible linter, as the
-    // server publishes them (severity, code, source, editor range).
-    let mut all_diags = diagnostics::validate_diagnostics(&ws, low, false);
-    all_diags.extend(diagnostics::lint_diagnostics(low, None, None));
+    // Diagnostics as the server publishes them (severity, code, source,
+    // editor range).
+    let mut all_diags =
+        diagnostics::compute_diagnostics(Some(&ws), low, &suspect_config::Settings::default());
     all_diags.sort_by_key(|d| (d.range.start.line, d.range.start.character));
     out.insert(
         "diagnostics".into(),

@@ -272,9 +272,6 @@ fn native_names_tags_and_constructor_descriptors_preserve_hostile_source_data() 
 #[test]
 #[ignore = "C++20 installed core-only package; source-hostile names, recursive unions, typed extras, selected-arm and parent constraints"]
 fn native_adversarial_models_and_consumers() {
-    if !cpp_tools() {
-        return;
-    }
     let plan = plan(adversarial_document());
     let root = root("adversarial");
     build_sdk(&plan, &root, true, false);
@@ -544,24 +541,10 @@ fn portable_literal_representation_limits_are_source_linked_before_emission() {
     }
 }
 
-/// `cmake`, the C++ compiler (`clang++`) or `doxygen`, resolved by
-/// `suspect_codegen::toolchain` (which honours the `SUSPECT_CPP_*`
-/// overrides). Each native test gates on [`cpp_tools`] first.
-fn tool(_variable: &str, fallback: &str) -> PathBuf {
-    let id = if fallback == "clang++" {
-        "cxx"
-    } else {
-        fallback
-    };
-    suspect_codegen::toolchain::resolve_path(id)
-        .unwrap_or_else(|| panic!("{id} is gated by cpp_tools()"))
-}
-/// Whether CMake, a C++20 compiler and Doxygen are available: skips (after
-/// the toolchain's message), or panics under `SUSPECT_REQUIRE_NATIVE`.
-fn cpp_tools() -> bool {
-    ["cmake", "cxx", "doxygen"]
-        .iter()
-        .all(|id| suspect_codegen::toolchain::require(id).is_some())
+fn tool(variable: &str, fallback: &str) -> PathBuf {
+    std::env::var_os(variable)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fallback.into())
 }
 fn cmake() -> PathBuf {
     tool("SUSPECT_CPP_CMAKE", "cmake")
@@ -755,9 +738,6 @@ fn native_types(root: &Path) {
 #[test]
 #[ignore = "requires C++20, CMake, libcurl and Doxygen; actual installed package and independent HTTP"]
 fn native_m2_cpp_cmake_codecs_http_and_docs() {
-    if !cpp_tools() {
-        return;
-    }
     let plan = m2();
     let root = root("m2");
     build_sdk(&plan, &root, true, true);
@@ -787,13 +767,9 @@ fn native_m2_cpp_cmake_codecs_http_and_docs() {
 #[test]
 #[ignore = "requires the read-only OpenRouter checkout, C++20, libcurl, CMake and Doxygen"]
 fn native_five_actual_openrouter_operations() {
-    if !cpp_tools() {
-        return;
-    }
     use sha2::{Digest, Sha256};
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let before =
         Sha256::digest(std::fs::read(&path).expect("actual tracked OpenRouter source is required"));
     let contract = load(&path);
@@ -1254,9 +1230,6 @@ fn cpp_string(value: &str) -> String {
 #[test]
 #[ignore = "requires C++20; executes all 17 shared validation vectors independently of native model admission"]
 fn native_shared_runtime_contract_vectors() {
-    if suspect_codegen::toolchain::require("cxx").is_none() {
-        return;
-    }
     let corpus: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
     let cases = corpus["cases"].as_array().unwrap();

@@ -1,5 +1,5 @@
 //! Persistent canonical SDK generation, readonly preview and content-based watch.
-use crate::OutputFormat;
+use crate::StreamFormat;
 use anyhow::{Context, Result};
 use clap::Args;
 use serde::Deserialize;
@@ -19,11 +19,17 @@ use suspect_codegen::{
 #[derive(Debug, Args)]
 /// Persistent multi-backend generation and readonly preview options.
 pub struct SessionArgs {
-    /// JSON configuration file; relative source paths resolve from its directory.
+    /// JSON or YAML (`.yaml`/`.yml`) configuration file; relative source
+    /// paths resolve from its directory.
     #[arg(long)]
     pub config: PathBuf,
     /// Owned output root.
-    #[arg(long, default_value = "sdk-out")]
+    #[arg(
+        short = 'o',
+        long = "output",
+        value_name = "DIR",
+        default_value = "sdk-out"
+    )]
     pub out: PathBuf,
     /// Preserve a process/session across input and configuration changes.
     #[arg(long)]
@@ -34,9 +40,10 @@ pub struct SessionArgs {
     /// Return complete generated contents as readonly preview artifacts.
     #[arg(long)]
     pub preview: bool,
-    /// Human-readable status or versioned newline-delimited JSON records.
+    /// Human-readable status or versioned newline-delimited JSON records
+    /// (`ndjson`; `json` is accepted).
     #[arg(long, value_enum, default_value = "text")]
-    pub format: OutputFormat,
+    pub format: StreamFormat,
     /// Content-fingerprint polling interval, in milliseconds. 50ms keeps
     /// perceived refresh latency low; a poll hashes only the closure's
     /// bytes, so the cost is negligible next to any real change.
@@ -86,7 +93,7 @@ pub(super) fn read_config(
         "configuration exceeds 4 MiB"
     );
     let config: Configuration =
-        serde_json::from_slice(&bytes).context("invalid SDK session configuration")?;
+        super::structured::parse(path, &bytes).context("invalid SDK session configuration")?;
     let relative = |value: PathBuf| {
         if value.is_absolute() {
             value
@@ -146,7 +153,7 @@ fn diagnostics(error: &anyhow::Error) -> Value {
 fn output(args: &SessionArgs, value: &Value) -> Result<()> {
     let stdout = io::stdout();
     let mut stdout = stdout.lock();
-    if matches!(args.format, OutputFormat::Json) {
+    if args.format.is_ndjson() {
         serde_json::to_writer(&mut stdout, value)?;
         writeln!(stdout)?;
     } else {

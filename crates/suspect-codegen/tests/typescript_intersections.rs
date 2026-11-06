@@ -305,11 +305,9 @@ const wrong: Disjoint = { x:1n, y:2.5 };
 }
 
 #[test]
-#[ignore = "requires native tsc and the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML)"]
+#[ignore = "requires native tsc and OPENROUTER_WEB_ROOT (the pinned OpenRouter checkout)"]
 fn tracked_openrouter_compositions_keep_their_native_branches() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let selected = [
         root(&contract, "ORAnthropicNullableCaller"),

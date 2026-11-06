@@ -1404,15 +1404,14 @@ fn native_canonical_package_and_compatibility_metadata_match_public_jvm_types() 
         serde_json::to_vec_pretty(&native).unwrap(),
     )
     .unwrap();
-    let Some(home) = std::env::var_os("SUSPECT_JAVA_HOME")
+    let home = std::env::var_os("SUSPECT_JAVA_HOME")
+        .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
-        .or_else(|| suspect_codegen::toolchain::require_home("jdk"))
-    else {
-        return;
-    };
-    let Some(maven) = suspect_codegen::toolchain::require("maven") else {
-        return;
-    };
+        .unwrap_or_else(|| {
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
+        });
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let repository = crate_root().join("../../target/sdk-java-maven-cache/java/repository");
     checked_native(
         std::process::Command::new(&maven)

@@ -500,7 +500,7 @@ fn review_package(plan: &suspect_codegen::swift_sdk::SdkPlan, root: &Path, sourc
 #[test]
 #[ignore = "native package regression: source parameter names must not shadow example locals"]
 fn native_review_example_local_names() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
+    if !suspect_codegen::toolchain::require("swift").exists() {
         return;
     }
     let root = review_root("example-names");
@@ -545,7 +545,7 @@ fn native_review_example_local_names() {
 #[test]
 #[ignore = "native public-client resource regression with Darwin peak-allocation evidence"]
 fn native_review_query_expansion_budget() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
+    if !suspect_codegen::toolchain::require("swift").exists() {
         return;
     }
     let root = review_root("query-budget");
@@ -619,7 +619,7 @@ fn native_package(
 #[test]
 #[ignore = "requires Swift 6 and DocC; generates and consumes the unchanged original M2 fixture"]
 fn native_m2_swift_spm_codecs_http_and_docs() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
+    if !suspect_codegen::toolchain::require("swift").exists() {
         return;
     }
     let path =
@@ -746,12 +746,8 @@ fn native_negative_types(root: &Path) {
 #[test]
 #[ignore = "requires the actual OpenRouter checkout, Swift 6 and DocC"]
 fn native_five_actual_openrouter_operations() {
-    if suspect_codegen::toolchain::require("swift").is_none() {
-        return;
-    }
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let path = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(
         path.is_file(),
         "actual OpenRouter corpus is required: {}",

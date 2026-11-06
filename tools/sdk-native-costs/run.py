@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect or verify the sdk-full native-costs contract using installed tools only."""
+"""Collect or verify the `cargo xtask verify-sdk` native-costs contract using installed tools only."""
 
 from __future__ import annotations
 

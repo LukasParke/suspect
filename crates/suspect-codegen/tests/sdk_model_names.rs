@@ -8,8 +8,6 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
-use crate::python_support;
-
 fn specification() -> Value {
     json!({"openapi":"3.1.0","info":{"title":"Naming","version":"1"},
     "servers":[{"url":"https://api.example.test/v1"}], "security":[{"Bearer":[]}],
@@ -61,12 +59,14 @@ fn native_python_constructor_has_an_operation_role_name_and_original_source_bind
         schema.pointer(),
         "/paths/~1widgets/post/requestBody/content/application~1json/schema"
     );
-    let directory = tempfile::tempdir().unwrap();
-    suspect_codegen::write_files(&plan.render().unwrap(), directory.path()).unwrap();
-    let Some(python_bin) = python_support::python_at_least("SUSPECT_PYTHON_BIN", (3, 10)) else {
+    // Executing the emitted models needs the generated SDK's Python floor
+    // (3.11+); `SUSPECT_PYTHON_BIN` overrides the interpreter.
+    let Some(python) = suspect_codegen::toolchain::optional("python") else {
         return;
     };
-    let result = Command::new(python_bin)
+    let directory = tempfile::tempdir().unwrap();
+    suspect_codegen::write_files(&plan.render().unwrap(), directory.path()).unwrap();
+    let result = Command::new(&python)
         .current_dir(directory.path()).args(["-c", "from python.models import CreateWidgetRequest, CreateWidgetRequestMetadata\nvalue = CreateWidgetRequest(name='demo', metadata=CreateWidgetRequestMetadata(label='owned'))\nassert value.name == 'demo' and value.metadata.label == 'owned'"])
         .output().unwrap();
     assert!(

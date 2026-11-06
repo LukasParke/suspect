@@ -1299,7 +1299,7 @@ final class ReplayTests: XCTestCase {
 "##;
 
 fn swiftc() -> Option<std::path::PathBuf> {
-    suspect_codegen::toolchain::require("swift")?;
+    let _ = suspect_codegen::toolchain::require("swift");
     Some(
         suspect_codegen::toolchain::swift_tool("swiftc")
             .expect("the Swift toolchain has no swiftc"),
@@ -1332,8 +1332,7 @@ fn swift_command(root: &Path, action: &str) -> Command {
 #[test]
 fn native_lifecycle_counts_requests_and_protects_secrets() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_oauth: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_oauth: no Swift 6 toolchain");
     };
     eprintln!("swift_oauth: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();
@@ -1633,8 +1632,7 @@ final class DiscoveryTests: XCTestCase {
 #[test]
 fn native_discovery_resolves_caches_and_validates_documents() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_oauth discovery: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_oauth discovery: no Swift 6 toolchain");
     };
     eprintln!("swift_oauth discovery: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();
@@ -1694,8 +1692,7 @@ fn native_discovery_resolves_caches_and_validates_documents() {
 #[test]
 fn native_replay_lifecycle_budgets_one_refresh_and_one_replay() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_oauth replay: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_oauth replay: no Swift 6 toolchain");
     };
     eprintln!("swift_oauth replay: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();

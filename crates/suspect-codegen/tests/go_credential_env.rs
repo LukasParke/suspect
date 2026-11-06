@@ -581,11 +581,10 @@ func TestAllocatedAndBoundedFactory(t *testing.T){var model sdk.NewClientFromEnv
 }
 
 #[test]
-#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) and native Go 1.23.12/1.27.1"]
+#[ignore = "requires OPENROUTER_WEB_ROOT (the OpenRouter checkout) and native Go 1.23.12/1.27.1"]
 fn native_actual_openrouter_key_and_credits_use_env_snapshot_and_source_https() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let path =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())

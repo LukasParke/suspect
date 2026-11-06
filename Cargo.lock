@@ -620,7 +620,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1625,7 +1625,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1828,7 +1828,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2074,6 +2074,7 @@ dependencies = [
  "criterion",
  "rustc-hash",
  "serde_json",
+ "suspect-diag",
  "suspect-jsonpath",
  "suspect-low",
  "suspect-overlay",
@@ -2096,6 +2097,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "suspect-check"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "suspect-arazzo",
+ "suspect-codegen",
+ "suspect-config",
+ "suspect-diag",
+ "suspect-ir",
+ "suspect-lint",
+ "suspect-low",
+ "suspect-oas",
+ "suspect-overlay",
+ "suspect-ref",
+ "suspect-rules",
+ "suspect-schema",
+ "suspect-source",
+ "suspect-syntax",
+ "suspect-test",
+ "suspect-validate",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "suspect-cli"
 version = "0.1.0"
 dependencies = [
@@ -2105,14 +2132,18 @@ dependencies = [
  "bytes",
  "clap",
  "libc",
+ "notify",
  "rayon",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
  "suspect-arazzo",
+ "suspect-check",
  "suspect-codegen",
  "suspect-config",
+ "suspect-diag",
  "suspect-gateway",
  "suspect-gen",
  "suspect-ir",
@@ -2124,15 +2155,12 @@ dependencies = [
  "suspect-oas",
  "suspect-overlay",
  "suspect-ref",
- "suspect-reverse",
  "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",
  "suspect-test",
- "suspect-upgrade",
  "suspect-validate",
- "suspect-watch",
  "tempfile",
  "tokio",
  "tower-lsp",
@@ -2152,6 +2180,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "suspect-artifact",
+ "suspect-diag",
  "suspect-gen",
  "suspect-ir",
  "suspect-low",
@@ -2168,16 +2197,19 @@ name = "suspect-config"
 version = "0.1.0"
 dependencies = [
  "serde_json",
+ "suspect-diag",
  "suspect-low",
  "suspect-source",
  "tempfile",
 ]
 
 [[package]]
-name = "suspect-faker"
+name = "suspect-diag"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
+ "suspect-source",
 ]
 
 [[package]]
@@ -2215,8 +2247,10 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-artifact",
- "suspect-faker",
  "suspect-ir",
+ "suspect-low",
+ "suspect-source",
+ "suspect-syntax",
  "tempfile",
  "unicode-ident",
 ]
@@ -2265,11 +2299,13 @@ name = "suspect-lint"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "pulldown-cmark",
  "rayon",
  "regex",
  "rustc-hash",
  "serde",
  "serde_json",
+ "suspect-diag",
  "suspect-ir",
  "suspect-jsonpath",
  "suspect-low",
@@ -2299,13 +2335,14 @@ dependencies = [
  "bytes",
  "criterion",
  "futures",
- "pulldown-cmark",
  "reqwest",
  "serde",
  "serde_json",
  "suspect-arazzo",
+ "suspect-check",
  "suspect-codegen",
  "suspect-config",
+ "suspect-diag",
  "suspect-gen",
  "suspect-ir",
  "suspect-lint",
@@ -2313,7 +2350,7 @@ dependencies = [
  "suspect-oas",
  "suspect-overlay",
  "suspect-ref",
- "suspect-rex",
+ "suspect-rules",
  "suspect-schema",
  "suspect-source",
  "suspect-syntax",
@@ -2371,25 +2408,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "url",
-]
-
-[[package]]
-name = "suspect-reverse"
-version = "0.1.0"
-dependencies = [
- "regex",
- "serde",
- "suspect-ir",
- "tempfile",
-]
-
-[[package]]
-name = "suspect-rex"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "suspect-low",
 ]
 
 [[package]]
@@ -2483,28 +2501,17 @@ dependencies = [
  "serde",
  "serde_json",
  "suspect-arazzo",
- "suspect-faker",
+ "suspect-diag",
  "suspect-ir",
  "suspect-journal",
  "suspect-low",
  "suspect-overlay",
  "suspect-ref",
- "suspect-rex",
  "suspect-runtime",
  "suspect-schema",
  "suspect-source",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "suspect-upgrade"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "suspect-low",
- "suspect-overlay",
- "suspect-source",
 ]
 
 [[package]]
@@ -2515,6 +2522,7 @@ dependencies = [
  "rayon",
  "rustc-hash",
  "serde_json",
+ "suspect-diag",
  "suspect-low",
  "suspect-oas",
  "suspect-overlay",
@@ -2522,14 +2530,6 @@ dependencies = [
  "suspect-schema",
  "suspect-source",
  "thiserror",
-]
-
-[[package]]
-name = "suspect-watch"
-version = "0.1.0"
-dependencies = [
- "notify",
- "tempfile",
 ]
 
 [[package]]
@@ -2584,7 +2584,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3117,7 +3117,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

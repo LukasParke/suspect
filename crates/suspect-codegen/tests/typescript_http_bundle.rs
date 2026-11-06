@@ -33,8 +33,10 @@ struct Tools {
     path: OsString,
 }
 impl Tools {
-    fn pinned() -> Option<Self> {
-        let selected = suspect_codegen::toolchain::pinned_node(22)?;
+    fn pinned() -> Self {
+        let selected = std::env::var_os("SUSPECT_PACKAGE_NODE")
+            .or_else(|| std::env::var_os("SUSPECT_DOCS_NODE"))
+            .unwrap_or_else(|| "node".into());
         let node = PathBuf::from(
             String::from_utf8(
                 checked(Command::new(selected).args(["--print", "process.execPath"])).stdout,
@@ -64,7 +66,7 @@ impl Tools {
                 .trim(),
             "10.9.8"
         );
-        Some(tools)
+        tools
     }
     fn node(&self) -> Command {
         let mut command = Command::new(&self.node);
@@ -89,15 +91,11 @@ fn load(path: &Path) -> Arc<Contract> {
 }
 
 #[test]
-#[ignore = "requires the pinned OpenRouter spec, pinned Node 22.23.1/npm, cached TypeScript and esbuild"]
+#[ignore = "requires tracked OpenRouter, pinned Node 22.23.1/npm, cached TypeScript and esbuild"]
 fn installed_openrouter_http_bundle_records_size_shaking_and_runtime_cost() {
-    let Some(tools) = Tools::pinned() else {
-        return;
-    };
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let contract = load(&spec);
+    let tools = Tools::pinned();
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let contract = load(&checkout.join("projects/docs/openapi/openapi.yaml"));
     let selected = contract
         .operations()
         .filter(|operation| {

@@ -228,17 +228,11 @@ error('limit',()=>codec<unknown>('Bad',any).decode('null',{maxNodes:0}));
 }
 
 #[test]
-#[ignore = "requires native TypeScript/Node.js and the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML)"]
+#[ignore = "requires native TypeScript/Node.js and OPENROUTER_WEB_ROOT (the OpenRouter checkout)"]
 fn tracked_openrouter_caller_and_index_decode_and_encode_in_native_runtime() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let workspace = Arc::new(
-        WorkspaceBuilder::new()
-            .root(path.parent().unwrap())
-            .build()
-            .unwrap(),
-    );
+    let root_dir = suspect_codegen::test_inputs::openrouter_root();
+    let path = root_dir.join("projects/docs/openapi/openapi.yaml");
+    let workspace = Arc::new(WorkspaceBuilder::new().root(&root_dir).build().unwrap());
     let contract =
         Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(&path).unwrap()).unwrap());
     let caller = contract

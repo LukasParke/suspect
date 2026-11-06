@@ -10,8 +10,9 @@ const WANTED: &[&str] = &[
     "listContainerFiles",
     "getContainerFile",
 ];
-fn source() -> Option<(Arc<Contract>, Vec<SourceId>)> {
-    let path = suspect_codegen::toolchain::openrouter_spec()?;
+fn source() -> (Arc<Contract>, Vec<SourceId>) {
+    let path =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())
@@ -26,7 +27,7 @@ fn source() -> Option<(Arc<Contract>, Vec<SourceId>)> {
         .map(|op| op.source().clone())
         .collect::<Vec<_>>();
     assert_eq!(selected.len(), 5);
-    Some((contract, selected))
+    (contract, selected)
 }
 fn checked(command: &mut Command, root: &Path) {
     let output = command.output().unwrap();
@@ -54,9 +55,7 @@ fn body(contract: &Contract, id: &str) -> SourceId {
 #[test]
 #[ignore = "requires tracked public corpus, Python wheel tools and native Python"]
 fn installed_python_five_operations_preserve_the_actual_wire_contract() {
-    let Some((contract, selected)) = source() else {
-        return;
-    };
+    let (contract, selected) = source();
     let plan =
         suspect_codegen::python_http::plan_http(contract.clone(), &selected, Default::default())
             .unwrap();
@@ -96,9 +95,7 @@ fn installed_python_five_operations_preserve_the_actual_wire_contract() {
         .map(|entry| entry.unwrap().path())
         .find(|file| file.extension().is_some_and(|ext| ext == "whl"))
         .unwrap();
-    let Some(interpreter) = suspect_codegen::toolchain::pinned_python("3.11") else {
-        return;
-    };
+    let interpreter = std::env::var_os("SUSPECT_PYTHON_BIN").unwrap_or_else(|| "python3".into());
     checked(
         Command::new("uv")
             .args(["venv", "--python"])
@@ -135,9 +132,7 @@ fn installed_python_five_operations_preserve_the_actual_wire_contract() {
 #[test]
 #[ignore = "requires tracked public corpus and native Go"]
 fn native_go_five_operations_preserve_the_actual_wire_contract() {
-    let Some((contract, selected)) = source() else {
-        return;
-    };
+    let (contract, selected) = source();
     let plan = suspect_codegen::go_http::plan_http(contract.clone(), &selected, Default::default())
         .unwrap();
     let name = |id: &str| {

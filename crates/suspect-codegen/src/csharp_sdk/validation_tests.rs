@@ -65,7 +65,9 @@ impl Native {
         native
     }
     pub(super) fn run(&self, dir: &str, label: &str, args: &[&str]) -> Output {
-        let executable = dotnet();
+        // `SUSPECT_DOTNET_BIN`, the mise install, then `PATH`.
+        let executable = crate::toolchain::resolve_path("dotnet")
+            .unwrap_or_else(|| panic!("{}", crate::toolchain::guidance("dotnet")));
         let mut command = Command::new(&executable);
         command
             .args(args)
@@ -196,11 +198,7 @@ fn compile_cases(root: &Path, fixture: &Value) -> Value {
 /// Gate for the native .NET tests: prints the skip message and returns
 /// `false` when no `dotnet` is available (see `crate::toolchain`).
 pub(super) fn dotnet_available() -> bool {
-    crate::toolchain::require("dotnet").is_some()
-}
-
-fn dotnet() -> PathBuf {
-    crate::toolchain::resolve_path("dotnet").expect("dotnet is gated by `dotnet_available`")
+    crate::toolchain::require("dotnet").exists()
 }
 
 #[test]

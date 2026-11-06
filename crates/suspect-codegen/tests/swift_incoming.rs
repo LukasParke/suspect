@@ -303,7 +303,7 @@ fn non_json_receipt_media_refuse_the_plan() {
 }
 
 fn swiftc() -> Option<std::path::PathBuf> {
-    suspect_codegen::toolchain::require("swift")?;
+    let _ = suspect_codegen::toolchain::require("swift");
     Some(
         suspect_codegen::toolchain::swift_tool("swiftc")
             .expect("the Swift toolchain has no swiftc"),
@@ -460,8 +460,7 @@ final class IncomingTests: XCTestCase {
 #[test]
 fn native_receipts_decode_and_construct() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_incoming: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_incoming: no Swift 6 toolchain");
     };
     eprintln!("swift_incoming: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();

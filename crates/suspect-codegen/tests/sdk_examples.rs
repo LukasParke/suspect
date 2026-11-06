@@ -280,9 +280,8 @@ fn directional_example_context_is_explicitly_unavailable() {
 #[test]
 #[ignore = "requires the tracked OpenRouter public snapshot"]
 fn tracked_examples_keep_the_real_patch_key_source_defect_visible() {
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(source.parent().unwrap())

@@ -221,7 +221,10 @@ fn manual_has_more_mapping_emits_and_honors_the_false_stop_rule() {
     let root = tempfile::tempdir().unwrap();
     write_files(&files, root.path()).unwrap();
     let Some(python) = httpx_interpreter() else {
-        eprintln!("no interpreter with httpx available; emission assertions only");
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
+        );
         return;
     };
     let script = r#"import sys
@@ -293,24 +296,13 @@ fn httpx_interpreter() -> Option<PathBuf> {
     if imports_httpx(Path::new("python3")) {
         return Some(PathBuf::from("python3"));
     }
-    // The provisioned tools venv (`tools/native-setup.sh python`); missing
-    // or httpx-less, it is a hard failure under `SUSPECT_REQUIRE_NATIVE`.
-    let candidate = suspect_codegen::toolchain::require_provisioned(
-        "SUSPECT_PYTHON_BIN",
-        "sdk-native-python-tools/bin/python",
-        "python",
-    )?;
-    if imports_httpx(&candidate) {
-        return Some(candidate);
-    }
-    let required = std::env::var(suspect_codegen::toolchain::REQUIRE_NATIVE_ENV)
-        .is_ok_and(|value| !value.is_empty() && value != "0");
-    assert!(
-        !required,
-        "{} cannot import httpx; run `tools/native-setup.sh python`",
-        candidate.display()
-    );
-    None
+    let candidate = std::env::var_os("SUSPECT_PYTHON_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/sdk-native-python-tools/bin/python")
+        });
+    imports_httpx(&candidate).then_some(candidate)
 }
 
 const BEHAVIOR: &str = r#"import asyncio
@@ -508,8 +500,9 @@ fn native_pagination_walks_stops_and_stalls_over_a_stubbed_transport() {
     }
 
     let Some(python) = httpx_interpreter() else {
-        eprintln!(
-            "no interpreter with httpx available; degraded to static emission and py_compile checks"
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
         );
         return;
     };
@@ -542,7 +535,10 @@ fn page_size_fallback_supplies_the_first_page_limit_only() {
     let root = tempfile::tempdir().unwrap();
     write_files(&files, root.path()).unwrap();
     let Some(python) = httpx_interpreter() else {
-        eprintln!("no interpreter with httpx available; emission assertions only");
+        suspect_codegen::toolchain::skip(
+            "python-httpx",
+            "no interpreter with httpx available (SUSPECT_PYTHON_BIN or python3; pip install httpx)",
+        );
         return;
     };
     let script = r#"import sys

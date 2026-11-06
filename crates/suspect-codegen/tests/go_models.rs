@@ -238,12 +238,10 @@ func TestNativeModels(t *testing.T) {
 }
 
 #[test]
-#[ignore = "requires native Go and the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML)"]
+#[ignore = "requires native Go and OPENROUTER_WEB_ROOT (the OpenRouter checkout)"]
 fn tracked_credits_models_have_exact_native_number_fields() {
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let contract = load(&spec);
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));
     let response = contract
         .operations()
         .find(|op| op.operation_id() == Some("getCredits"))

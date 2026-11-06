@@ -427,30 +427,32 @@ raise 'untyped items changed' unless items.map { |item| item.data } == ['a', 'b'
 puts 'typed stream behavior verified'
 "#;
 
+fn ruby_home() -> std::path::PathBuf {
+    std::env::var_os("SUSPECT_RUBY_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+                .join(".local/share/mise/installs/ruby/3.3.12")
+        })
+}
+
 /// The gem requires Ruby >= 3.3; older interpreters cannot even parse the
-/// emitted runtime syntax, so discovery refuses them. The interpreter is
-/// resolved by `suspect_codegen::toolchain` (`SUSPECT_RUBY_BIN`,
-/// `SUSPECT_RUBY_HOME`, mise, `PATH`); a missing or too-old Ruby is a hard
-/// failure under `SUSPECT_REQUIRE_NATIVE`.
+/// emitted runtime syntax, so discovery refuses them.
 fn ruby() -> Option<std::path::PathBuf> {
-    let ruby = suspect_codegen::toolchain::require("ruby")?;
-    let output = Command::new(&ruby).arg("--version").output().ok()?;
-    let found = String::from_utf8_lossy(&output.stdout)
-        .split_whitespace()
-        .nth(1)
-        .unwrap_or_default()
-        .to_owned();
-    if suspect_codegen::toolchain::version_at_least(&found, "3.3") {
-        return Some(ruby);
+    if let Some(path) = std::env::var_os("SUSPECT_RUBY_BIN") {
+        return Some(std::path::PathBuf::from(path));
     }
-    let required = std::env::var(suspect_codegen::toolchain::REQUIRE_NATIVE_ENV)
-        .is_ok_and(|value| !value.is_empty() && value != "0");
-    assert!(
-        !required,
-        "{} is Ruby {found}; the generated gem needs Ruby >= 3.3",
-        ruby.display()
-    );
-    None
+    let ruby = ruby_home().join("bin/ruby");
+    if !ruby.is_file() {
+        return None;
+    }
+    let output = Command::new(&ruby).arg("--version").output().ok()?;
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let minor = text
+        .strip_prefix("ruby ")
+        .and_then(|rest| rest.split('.').nth(1))
+        .and_then(|minor| minor.parse::<u32>().ok())?;
+    (minor >= 3).then_some(ruby)
 }
 
 fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
@@ -469,8 +471,7 @@ fn checked(command: &mut Command, root: &std::path::Path, label: &str) {
 #[test]
 fn native_typed_events_drive_stubbed_streams() {
     let Some(ruby) = ruby() else {
-        eprintln!("ruby_stream_typed: no Ruby >= 3.3 toolchain; degrading to static assertions");
-        return;
+        panic!("ruby_stream_typed: no Ruby >= 3.3 toolchain");
     };
     let root = tempfile::tempdir().unwrap();
     let files = generate(stream_document());

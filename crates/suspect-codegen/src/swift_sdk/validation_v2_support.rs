@@ -18,9 +18,9 @@ pub fn root(label: &str) -> PathBuf {
         .unwrap()
 }
 /// Whether the Swift gates may run: `false` after the toolchain skip
-/// message (a panic instead under `SUSPECT_REQUIRE_NATIVE`).
+/// panic naming what is missing (an `#[ignore]` gate never passes by skipping).
 pub fn available() -> bool {
-    suspect_codegen::toolchain::require("swift").is_some()
+    suspect_codegen::toolchain::require("swift").exists()
 }
 fn find_tool(name: &str) -> PathBuf {
     suspect_codegen::toolchain::swift_tool(name)

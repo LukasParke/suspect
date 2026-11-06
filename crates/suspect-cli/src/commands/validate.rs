@@ -1,16 +1,16 @@
-//! Source-located OpenAPI validation for local and CI use.
+//! OpenAPI validation as `output::Finding`s for the commands that report
+//! it beside their own results (`project build`, `upgrade`, `gen admission`).
+//! The `validate` command itself is `check` with [`super::check::VALIDATE`].
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use rayon::prelude::*;
 use suspect_oas::Session;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
-use crate::OutputFormat;
-use crate::output::{self, Finding, Severity};
+use crate::output::{Finding, Severity};
 
 /// Validates one entry document. Input failures become findings so batch
 /// validation can still report problems in the other documents.
@@ -202,40 +202,12 @@ fn syntax_findings(doc: &suspect_low::LowDoc, shown: &str) -> Vec<Finding> {
     findings
 }
 
-/// Validates all documents and prints deterministic diagnostics. Returns 1
-/// when any error exists and 0 otherwise.
+/// Reads a `--reference-allowlist` file: a JSON array of absolute
+/// document paths, canonicalized.
 ///
 /// # Errors
-/// Propagates invalid allowlist configuration and output serialization errors;
-/// source input failures are findings.
-pub fn validate(
-    paths: &[PathBuf],
-    format: OutputFormat,
-    reference_allowlist: Option<&Path>,
-    strict_format: bool,
-) -> anyhow::Result<i32> {
-    let allowed = reference_allowlist
-        .map(load_reference_allowlist)
-        .transpose()?;
-    let mut findings: Vec<Finding> = paths
-        .par_iter()
-        .flat_map(|path| validate_file(path, allowed.as_deref(), strict_format))
-        .collect();
-    findings.sort_by(|a, b| {
-        (&a.file, a.line, a.col, &a.code, &a.message)
-            .cmp(&(&b.file, b.line, b.col, &b.code, &b.message))
-    });
-    match format {
-        OutputFormat::Text => output::print_findings(&findings),
-        OutputFormat::Json => output::print_json(&findings)?,
-        OutputFormat::Sarif => crate::sarif::print_sarif(&findings)?,
-    }
-    Ok(i32::from(
-        findings.iter().any(|f| f.severity == Severity::Error),
-    ))
-}
-
-fn load_reference_allowlist(path: &Path) -> anyhow::Result<Vec<Uri>> {
+/// The file cannot be read, is too large, or names a missing document.
+pub(crate) fn load_reference_allowlist(path: &Path) -> anyhow::Result<Vec<Uri>> {
     use anyhow::{Context, ensure};
 
     const MAX_BYTES: u64 = 1024 * 1024;

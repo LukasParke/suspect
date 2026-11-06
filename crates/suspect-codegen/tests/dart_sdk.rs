@@ -428,9 +428,7 @@ fn checked(command: &mut Command, root: &Path, name: &str) -> Output {
 #[test]
 #[ignore = "required native Dart floor/current package, installed-consumer and wire gate"]
 fn native_m2_installed_consumer() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let contract = m2();
     let plan = plan_sdk(
         contract.clone(),
@@ -1069,9 +1067,7 @@ fn dart_quote(value: &str) -> String {
 #[test]
 #[ignore = "required Dart checked-program, shared-vector, reference and resource gate"]
 fn native_runtime_vectors_refs_and_resource_classification() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = gate_root("runtime-");
     let vectors: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
@@ -1222,12 +1218,8 @@ fn native_runtime_vectors_refs_and_resource_classification() {
 #[test]
 #[ignore = "required actual OpenRouter source, Dart installed pub package, HTTP and dartdoc gate"]
 fn native_five_actual_openrouter_operations() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let path = checkout.join("projects/docs/openapi/openapi.yaml");
     let before = Sha256::digest(std::fs::read(&path).expect("actual OpenRouter input is required"));
     let contract = load(&path);
     let wanted = [
@@ -1408,9 +1400,7 @@ fn native_five_actual_openrouter_operations() {
 #[test]
 #[ignore = "required installed Dart naming, nullable-body, query-work and source-escaping gate"]
 fn native_adversarial_names_and_optional_body() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let reserved = [
         "Client",
         "JsonNumber",
@@ -1728,9 +1718,7 @@ fn oas30_nullable_exclusive_bounds_and_reference_siblings_lower_to_native_models
 #[test]
 #[ignore = "required installed Dart OpenAPI 3.0 nullable, exclusive-bound and reference-sibling gate"]
 fn native_oas30_nullable_bounds_and_reference_siblings() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let contract = oas30();
     let plan = plan_sdk(
         contract.clone(),

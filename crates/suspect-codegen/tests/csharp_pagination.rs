@@ -470,11 +470,10 @@ fn project(config: &str, framework: &str) -> String {
 #[test]
 fn native_walks_drive_a_stubbed_http_handler() {
     let Some(dotnet) = dotnet() else {
-        eprintln!(
-            "csharp_pagination: skipping — {}",
+        panic!(
+            "csharp_pagination: {}",
             suspect_codegen::toolchain::guidance("dotnet")
         );
-        return;
     };
     eprintln!("csharp_pagination: {dotnet}");
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-pagination");

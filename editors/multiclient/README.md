@@ -49,6 +49,11 @@ and Zed's log that the server attached and answered.
 
     ./editors/multiclient/zed_smoke.sh
 
+`ZED_SMOKE_MANAGED=1` runs it without `binary.path` and requires `suspect`
+to be absent from `PATH`, so the server can only be the release build the
+extension downloads and checks. That is a manual check: it needs the
+GitHub release for the extension's version, and skips until it exists.
+
 ### 4. Capability-matrix notes
 
 The harness captures capability sets as fixtures

@@ -14,8 +14,6 @@ use suspect_ir::contract::Contract;
 use suspect_ref::WorkspaceBuilder;
 use suspect_source::Uri;
 
-use crate::python_support;
-
 const IMPORT: &str = "protocol_python_sdk";
 fn root(label: &str) -> PathBuf {
     let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
@@ -36,6 +34,9 @@ fn load(path: &Path) -> Arc<Contract> {
             .unwrap(),
     );
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(path).unwrap()).unwrap())
+}
+fn tools() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-native-python-tools/bin/python")
 }
 fn checked(command: &mut Command, root: &Path, label: &str) {
     let output = command
@@ -273,9 +274,6 @@ fn protocol_plan_retains_real_roots_and_public_native_bindings() {
 #[test]
 #[ignore = "requires native Python/httpx/build/mypy/Sphinx tools and cached wheel dependencies"]
 fn installed_protocol_vectors_and_stream_lifetimes() {
-    let Some(native) = python_support::installed() else {
-        return;
-    };
     let root = root("native");
     let (_, files) = emit(&root);
     let snippets = readme_snippets(&files, &root);
@@ -288,7 +286,7 @@ fn installed_protocol_vectors_and_stream_lifetimes() {
     fs::write(root.join("bad_types.py"),"from protocol_python_sdk import Client, operations\ndef wrong(client: Client) -> None:\n    client.write_bytes(body='text is not bytes')\n    client.write_json()\n    operations.UploadPartsRequestMultipartFilePart(value='not bytes', headers=operations.UploadPartsRequestMultipartFileHeaders(x_checksum='x'))\n").unwrap();
     let package = root.join("python");
     checked(
-        Command::new(&native.tools)
+        Command::new(tools())
             .args(["-m", "build", "--wheel", "--no-isolation"])
             .current_dir(&package),
         &root,
@@ -299,20 +297,18 @@ fn installed_protocol_vectors_and_stream_lifetimes() {
         .map(|e| e.unwrap().path())
         .find(|p| p.extension().is_some_and(|e| e == "whl"))
         .unwrap();
-    for (version, interpreter) in &native.interpreters {
-        let version = *version;
+    for version in ["3.11", "3.14"] {
         let environment = root.join(format!("venv-{version}"));
         checked(
-            Command::new(&native.uv)
-                .args(["venv", "--offline", "--python"])
-                .arg(interpreter)
+            Command::new("uv")
+                .args(["venv", "--offline", "--python", version])
                 .arg(&environment),
             &root,
             &format!("venv-{version}"),
         );
         let python = environment.join("bin/python");
         checked(
-            Command::new(&native.uv)
+            Command::new("uv")
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&python)
                 .arg(&wheel),
@@ -320,7 +316,7 @@ fn installed_protocol_vectors_and_stream_lifetimes() {
             &format!("install-{version}"),
         );
         checked(
-            Command::new(&native.tools)
+            Command::new(tools())
                 .args([
                     "-m",
                     "mypy",
@@ -345,7 +341,7 @@ fn installed_protocol_vectors_and_stream_lifetimes() {
             &root,
             &format!("native-{version}"),
         );
-        let negative = Command::new(&native.tools)
+        let negative = Command::new(tools())
             .args([
                 "-m",
                 "mypy",
@@ -381,7 +377,7 @@ fn installed_protocol_vectors_and_stream_lifetimes() {
             .output()
             .unwrap();
         checked(
-            Command::new(&native.tools)
+            Command::new(tools())
                 .args([
                     "-m",
                     "sphinx",
@@ -403,7 +399,7 @@ fn installed_protocol_vectors_and_stream_lifetimes() {
         );
     }
     checked(
-        Command::new(&native.tools)
+        Command::new(tools())
             .args([
                 "-m",
                 "mypy",
@@ -554,15 +550,10 @@ fn canonical_generation_options_match_python_compatibility_capture() {
 }
 
 #[test]
-#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) and native wheel/type/docs tools"]
+#[ignore = "requires tracked OpenRouter source and native wheel/type/docs tools"]
 fn installed_real_binary_and_extra_json_operations() {
-    let (Some(native), Some(source)) = (
-        python_support::installed(),
-        suspect_codegen::toolchain::openrouter_spec(),
-    ) else {
-        return;
-    };
     let root = root("openrouter");
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let contract = load(&source);
     let wanted = [
         "downloadContainerFileContent",
@@ -601,7 +592,7 @@ fn installed_real_binary_and_extra_json_operations() {
     fs::write(root.join("consumer.py"), REAL_CONSUMER).unwrap();
     let package = root.join("python");
     checked(
-        Command::new(&native.tools)
+        Command::new(tools())
             .args(["-m", "build", "--wheel", "--no-isolation"])
             .current_dir(&package),
         &root,
@@ -612,20 +603,18 @@ fn installed_real_binary_and_extra_json_operations() {
         .map(|e| e.unwrap().path())
         .find(|p| p.extension().is_some_and(|e| e == "whl"))
         .unwrap();
-    for (version, interpreter) in &native.interpreters {
-        let version = *version;
+    for version in ["3.11", "3.14"] {
         let environment = root.join(format!("venv-{version}"));
         checked(
-            Command::new(&native.uv)
-                .args(["venv", "--offline", "--python"])
-                .arg(interpreter)
+            Command::new("uv")
+                .args(["venv", "--offline", "--python", version])
                 .arg(&environment),
             &root,
             &format!("venv-{version}"),
         );
         let python = environment.join("bin/python");
         checked(
-            Command::new(&native.uv)
+            Command::new("uv")
                 .args(["pip", "install", "--offline", "--python"])
                 .arg(&python)
                 .arg(&wheel),
@@ -633,7 +622,7 @@ fn installed_real_binary_and_extra_json_operations() {
             &format!("install-{version}"),
         );
         checked(
-            Command::new(&native.tools)
+            Command::new(tools())
                 .args([
                     "-m",
                     "mypy",
@@ -665,7 +654,7 @@ fn installed_real_binary_and_extra_json_operations() {
             .output()
             .unwrap();
         checked(
-            Command::new(&native.tools)
+            Command::new(tools())
                 .args([
                     "-m",
                     "sphinx",
@@ -687,7 +676,7 @@ fn installed_real_binary_and_extra_json_operations() {
         );
     }
     checked(
-        Command::new(&native.tools)
+        Command::new(tools())
             .args([
                 "-m",
                 "mypy",

@@ -2,9 +2,8 @@
 //! through the shared Contract/protocol planner and the TypeScript/Python
 //! native backends.
 //!
-//! This file is the executable evidence for XML media support; the refusal
-//! policy it applies is `docs/adr/0010-refuse-what-cannot-be-represented.md`.
-//! The v1 contract it documents is
+//! This file is the executable evidence for the XML rows of
+//! `docs/reference/openapi-matrix.md`. The v1 contract it documents is
 //! **fail-loud, never fail-silent**:
 //!
 //! 1. A declared XML *structure* — an object schema, any typed schema, a

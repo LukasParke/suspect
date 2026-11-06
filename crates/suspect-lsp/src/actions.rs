@@ -94,14 +94,36 @@ pub fn code_actions(
 /// Recomputes the current diagnostic battery server-side (fresher than the
 /// diagnostics snapshot the client holds) and applies every known fix,
 /// dropping conflicting or overlapping edits.
+///
+/// The battery runs under the same policy the published diagnostics do —
+/// the configured `lint.ruleset`, `validate.strict_format` and severity
+/// floor — so "fix all" fixes exactly the findings the editor shows, not
+/// the default ruleset's.
 #[must_use]
 pub fn resolve_code_action(
     doc: &OpenDoc,
     uri: &Url,
     ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
-    cfg: &crate::config_files::SuspectConfig,
+    settings: &suspect_config::Settings,
 ) -> Option<CodeAction> {
-    let diags = crate::diagnostics::compute_diagnostics(ws, &doc.low, cfg, None, false);
+    resolve_code_action_under(
+        doc,
+        uri,
+        ws,
+        &suspect_check::Policy::from_settings(settings),
+    )
+}
+
+/// [`resolve_code_action`] under a built policy (the server's, from the
+/// document's resolved configuration).
+#[must_use]
+pub fn resolve_code_action_under(
+    doc: &OpenDoc,
+    uri: &Url,
+    ws: Option<&std::sync::Arc<suspect_ref::Workspace>>,
+    policy: &suspect_check::Policy,
+) -> Option<CodeAction> {
+    let diags = crate::diagnostics::diagnostics_under(ws, &doc.low, policy, Vec::new());
     let edits = all_edits(doc, ws.map(std::sync::Arc::as_ref), &diags);
     if edits.is_empty() {
         return None;
@@ -1422,6 +1444,51 @@ paths:
     }
 
     #[test]
+    fn resolve_runs_under_the_configured_ruleset_and_floor() {
+        let text = "\
+openapi: 3.1.0
+info:
+  title: T
+  version: '1'
+paths:
+  /pets/:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: ok
+";
+        let d = open(text);
+        let uri = url("api.yaml");
+        let resolve = |ruleset: Option<&std::path::Path>, floor: &str| {
+            let mut settings = suspect_config::Settings::default();
+            settings.lint.ruleset = ruleset.map(std::path::Path::to_path_buf);
+            settings.lint.min_severity = Some(floor.to_owned());
+            resolve_code_action(&d, &uri, None, &settings)
+        };
+        let hint = "hint";
+        // The default ruleset flags the trailing slash, and fixes it.
+        assert!(
+            resolve(None, hint).is_some(),
+            "the default ruleset's trailing-slash fix must resolve"
+        );
+        // A configured ruleset with no rules: nothing the editor shows is
+        // fixable, so "fix all" must not fix the default ruleset's findings.
+        let dir = tempfile::tempdir().unwrap();
+        let ruleset = dir.path().join("rules.yaml");
+        std::fs::write(&ruleset, "rules: {}\n").unwrap();
+        assert!(
+            resolve(Some(&ruleset), hint).is_none(),
+            "fix all must use the configured ruleset, not the default"
+        );
+        // A floor above the finding hides it, so it is not fixed either.
+        assert!(
+            resolve(None, "error").is_none(),
+            "fix all must not fix findings below the configured floor"
+        );
+    }
+
+    #[test]
     fn fix_all_defers_edit_and_resolve_recomputes_it() {
         let text = "\
 openapi: 3.1.0
@@ -2116,7 +2183,11 @@ paths:
         let problems =
             crate::config_schema::problems(crate::config_schema::FileKind::Settings, &doc.low);
         assert_eq!(problems.len(), 2, "{problems:#?}");
-        let diagnostics = crate::config_schema::diagnostics(&doc.low);
+        let diagnostics: Vec<Diagnostic> =
+            crate::diagnostics::compute_diagnostics(None, &doc.low, &Default::default())
+                .into_iter()
+                .filter(|d| d.source.as_deref() == Some(crate::diagnostics::SOURCE))
+                .collect();
         assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
         assert!(
             diagnostics

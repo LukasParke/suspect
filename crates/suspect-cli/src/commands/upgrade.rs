@@ -8,12 +8,30 @@ pub struct UpgradeArgs {
     /// The Swagger 2.0 document to upgrade.
     #[arg(required = true)]
     pub input: PathBuf,
-    /// Output path (`stdout` when omitted).
-    #[arg(long)]
-    pub output: Option<PathBuf>,
-    /// Serialization format for the upgraded document.
+    /// Output file and serialization (default: the `--output` extension,
+    /// else the input's — `.yaml`/`.yml` emit YAML, anything else JSON).
     #[command(flatten)]
-    pub text: crate::TextFormat,
+    pub out: crate::DocOut,
+}
+
+/// The emission format: the explicit flag, then a `.json`/`.yaml`/`.yml`
+/// output path, then the input's extension; JSON when nothing says YAML.
+fn pick_format(args: &UpgradeArgs) -> crate::DocFormat {
+    let by_extension = |p: &std::path::Path| match p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("yaml" | "yml") => Some(crate::DocFormat::Yaml),
+        Some("json") => Some(crate::DocFormat::Json),
+        _ => None,
+    };
+    args.out
+        .to
+        .or_else(|| args.out.output.as_deref().and_then(by_extension))
+        .or_else(|| by_extension(&args.input))
+        .unwrap_or(crate::DocFormat::Json)
 }
 
 /// Upgrades the document and writes the result; also validates the output
@@ -38,22 +56,28 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     }
     let doc = suspect_overlay::Value::from_node(low.root()).to_json();
     let doc: serde_json::Value = serde_json::from_str(&doc)?;
-    let upgraded = suspect_upgrade::upgrade(&doc).map_err(anyhow::Error::msg)?;
+    let upgraded = crate::upgrade::upgrade(&doc).map_err(anyhow::Error::msg)?;
 
-    // The output format follows the destination's extension (the input's
-    // when writing to stdout): YAML for `.yaml`/`.yml`, JSON otherwise.
-    let target = args.output.as_deref().unwrap_or(&absolute);
-    let yaml = target
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml"));
-    let document = to_ordered(&upgraded, true);
-    let output_text = if yaml {
-        document.to_yaml()
-    } else {
-        document.to_json_pretty() + "\n"
+    let json_text = serde_json::to_string_pretty(&upgraded)? + "\n";
+    let output_text = match pick_format(args) {
+        crate::DocFormat::Json => json_text,
+        crate::DocFormat::Yaml => {
+            // Re-parse the JSON text (valid YAML) so the shared emitter
+            // `fmt` and `bundle` use writes it, keeping key order.
+            let uri = suspect_source::Uri::parse("mem://upgraded.json")
+                .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+            let reparsed = suspect_low::LowDoc::parse(
+                uri,
+                suspect_source::Source::from_vec(json_text.into_bytes()),
+            );
+            let mut yaml = suspect_overlay::Value::from_node(reparsed.root()).to_yaml();
+            if !yaml.ends_with('\n') {
+                yaml.push('\n');
+            }
+            yaml
+        }
     };
-    match &args.output {
+    match &args.out.output {
         Some(path) => {
             std::fs::write(path, &output_text)?;
             eprintln!("upgraded → {}", path.display());
@@ -62,7 +86,7 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
     }
     // Validate the upgraded document with the 3.1 battery so the user
     // sees the remaining findings when the output is a file.
-    if let Some(out_path) = &args.output {
+    if let Some(out_path) = &args.out.output {
         let findings = crate::commands::validate::validate_file(out_path.as_path(), None, false);
         let error_count = findings
             .iter()
@@ -79,54 +103,4 @@ pub fn upgrade(args: &UpgradeArgs) -> anyhow::Result<i32> {
         }
     }
     Ok(0)
-}
-
-/// Conventional OpenAPI top-level key order; other keys (extensions)
-/// follow in their existing order.
-const TOP_LEVEL_ORDER: [&str; 9] = [
-    "openapi",
-    "info",
-    "jsonSchemaDialect",
-    "servers",
-    "security",
-    "tags",
-    "externalDocs",
-    "paths",
-    "components",
-];
-
-/// Converts the upgraded JSON into the overlay value tree, which has
-/// ordered objects and a YAML emitter. The root's keys are put in
-/// conventional OpenAPI order.
-fn to_ordered(value: &serde_json::Value, root: bool) -> suspect_overlay::Value {
-    use suspect_overlay::Value as V;
-    match value {
-        serde_json::Value::Null => V::Null,
-        serde_json::Value::Bool(b) => V::Bool(*b),
-        serde_json::Value::Number(n) => n
-            .as_i64()
-            .map(V::Int)
-            .or_else(|| n.as_f64().map(V::Float))
-            .unwrap_or_else(|| V::Str(n.to_string().into())),
-        serde_json::Value::String(s) => V::Str(s.as_str().into()),
-        serde_json::Value::Array(items) => {
-            V::Array(items.iter().map(|item| to_ordered(item, false)).collect())
-        }
-        serde_json::Value::Object(map) => {
-            let mut entries: Vec<(Box<str>, V)> = map
-                .iter()
-                .map(|(k, v)| (k.as_str().into(), to_ordered(v, false)))
-                .collect();
-            if root {
-                let rank = |key: &str| {
-                    TOP_LEVEL_ORDER
-                        .iter()
-                        .position(|known| *known == key)
-                        .unwrap_or(TOP_LEVEL_ORDER.len())
-                };
-                entries.sort_by_key(|(key, _)| rank(key));
-            }
-            V::Object(entries)
-        }
-    }
 }

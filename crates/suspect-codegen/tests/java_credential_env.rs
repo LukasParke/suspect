@@ -137,7 +137,6 @@ fn no_policy_emission_is_byte_stable() {
         })
         .collect::<BTreeMap<_, _>>();
     let hash = format!("{:x}", Sha256::digest(serde_json::to_vec(&hashes).unwrap()));
-    // Pin updated for the ADR 0035 server URL policy edit to the runtime.
     assert_eq!(
         hash,
         "e9d62df39ac3fe2657bfdc8cda1d330fac0415e82145c309b31177c8901c7796"
@@ -421,13 +420,10 @@ fn canonical_capture_retains_semantic_policy_and_actual_factory_signatures() {
     println!("JAVA_CREDENTIAL_ENV_CAPTURE {}", root.display());
 }
 
-/// `false` (after printing why) when the JDK or Maven is unavailable.
-fn native_tools() -> bool {
-    suspect_codegen::toolchain::require_home("jdk").is_some()
-        && suspect_codegen::toolchain::require("maven").is_some()
-}
 fn java() -> PathBuf {
-    suspect_codegen::toolchain::resolve_home("jdk").expect("gated by native_tools()")
+    std::env::var_os("JAVA_HOME")
+        .map(PathBuf::from)
+        .expect("select JDK21/25 with JAVA_HOME")
 }
 fn repository() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-java-maven-cache/java/repository")
@@ -461,7 +457,8 @@ fn install(plan: &SdkPlan, root: &Path) -> PathBuf {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, file.content).unwrap();
     }
-    let maven = suspect_codegen::toolchain::resolve_path("maven").expect("gated by native_tools()");
+    let maven = suspect_codegen::toolchain::resolve_path("maven")
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     checked(
         Command::new(maven)
             .args(["-B", "-q", "install"])
@@ -498,9 +495,6 @@ fn runtime(command: &mut Command) {
 #[test]
 #[ignore = "fresh credential-env controls on JDK21/25; installed package and source-default HTTPS interception"]
 fn native_credential_env_controls() {
-    if !native_tools() {
-        return;
-    }
     let root = root();
     let plan = configured();
     let jar = install(&plan, &root);
@@ -601,13 +595,8 @@ fn native_credential_env_controls() {
 #[test]
 #[ignore = "actual getCurrentKey/getCredits source schemas and branded fromEnv helper on JDK21/25"]
 fn native_credential_env_openrouter() {
-    if !native_tools() {
-        return;
-    }
     let root = root();
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let source = suspect_codegen::test_inputs::openrouter_spec();
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(source.parent().unwrap())

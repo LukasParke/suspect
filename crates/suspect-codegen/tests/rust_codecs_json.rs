@@ -1,6 +1,7 @@
 //! Standalone native checks for the generated, dependency-free Rust JSON runtime.
 
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 use suspect_ir::contract::Contract;
@@ -180,18 +181,15 @@ fn prioritized_openrouter_payload_examples_roundtrip_exactly() {
 }
 
 #[test]
-#[ignore = "requires the pinned openrouter-web checkout; missing tracked inputs fail"]
+#[ignore = "requires OPENROUTER_WEB_ROOT; missing tracked inputs fail"]
 fn all_tracked_openrouter_documents_roundtrip_against_json_value_oracle() {
-    let documents = [
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    for relative in [
         "projects/docs/openapi/openapi.yaml",
         "openrouter-management.openapi.yaml",
         "projects/docs/assets/provider-monitor-schema-v2.openapi.json",
         "packages/temporal/benchmarks.openapi.json",
-    ];
-    let Some(root) = suspect_codegen::toolchain::openrouter_checkout(&documents) else {
-        return;
-    };
-    for relative in documents {
+    ] {
         let path = root.join(relative);
         assert!(
             path.is_file(),
@@ -276,7 +274,7 @@ fn public_api() {
             vec!["doc", "--offline", "--no-deps"],
         ),
     ] {
-        let mut command = suspect_codegen::toolchain::nested_cargo();
+        let mut command = Command::new("cargo");
         command
             .args(args)
             .arg("--manifest-path")
@@ -292,7 +290,7 @@ fn public_api() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let tree = suspect_codegen::toolchain::nested_cargo()
+    let tree = Command::new("cargo")
         .args(["tree", "--offline", "--manifest-path"])
         .arg(consumer.join("Cargo.toml"))
         .output()

@@ -354,11 +354,10 @@ fn installed_http_rejects_invalid_ports_at_the_sdk_boundary() {
 }
 
 #[test]
-#[ignore = "separate opt-in: requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) and native Python"]
+#[ignore = "separate opt-in: requires OPENROUTER_WEB_ROOT (the OpenRouter checkout) and native Python"]
 fn original_openrouter_container_file_accepts_zero_padded_integer_exponents() {
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let contract = load(&source);
     let root = schema(&contract, "ContainerFile");
     let plan = plan_codecs(

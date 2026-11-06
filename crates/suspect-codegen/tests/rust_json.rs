@@ -1,6 +1,7 @@
 //! Exact JSON integration through the canonical Rust `ModelPlan` package.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -105,7 +106,7 @@ pub fn model_error(value: generated_models::models::JsonError) -> bool { value }
 pub fn support_value() -> generated_models::JsonValue { generated_models::Nullable::Null }
 pub fn support_error_kind(error: &generated_models::JsonError) -> generated_models::JsonErrorKind { error.kind }
 "#).unwrap();
-    let output = suspect_codegen::toolchain::nested_cargo()
+    let output = Command::new("cargo")
         .args(["check", "--offline", "--manifest-path"])
         .arg(consumer.join("Cargo.toml"))
         .arg("--target-dir")
@@ -123,9 +124,7 @@ pub fn support_error_kind(error: &generated_models::JsonError) -> generated_mode
 #[test]
 #[ignore = "requires tracked OpenRouter checkout and native Cargo"]
 fn tracked_models_and_four_documents_pass_native_package_gates() {
-    let Some(checkout) = openrouter_web_root() else {
-        return;
-    };
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
     let primary = checkout.join("projects/docs/openapi/openapi.yaml");
     assert!(primary.is_file(), "missing tracked OpenRouter checkout");
     let primary_contract = contract(&primary);
@@ -140,7 +139,12 @@ fn tracked_models_and_four_documents_pass_native_package_gates() {
     let consumer = directory.path().join("consumer");
     std::fs::create_dir_all(consumer.join("src")).unwrap();
 
-    let relatives = TRACKED_DOCUMENTS;
+    let relatives = [
+        "projects/docs/openapi/openapi.yaml",
+        "openrouter-management.openapi.yaml",
+        "projects/docs/assets/provider-monitor-schema-v2.openapi.json",
+        "packages/temporal/benchmarks.openapi.json",
+    ];
     let mut oracles = Vec::new();
     for (index, relative) in relatives.iter().enumerate() {
         let path = checkout.join(relative);
@@ -200,7 +204,7 @@ fn models_and_exact_json_are_public_and_executable() {
             &["doc", "--offline", "--no-deps"][..],
         ),
     ] {
-        let output = suspect_codegen::toolchain::nested_cargo()
+        let output = Command::new("cargo")
             .args(args)
             .arg("--manifest-path")
             .arg(manifest)
@@ -218,7 +222,7 @@ fn models_and_exact_json_are_public_and_executable() {
         );
     }
     for manifest in [package.join("Cargo.toml"), consumer.join("Cargo.toml")] {
-        let output = suspect_codegen::toolchain::nested_cargo()
+        let output = Command::new("cargo")
             .args(["clippy", "--offline", "--all-targets", "--manifest-path"])
             .arg(manifest)
             .arg("--target-dir")
@@ -235,7 +239,7 @@ fn models_and_exact_json_are_public_and_executable() {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    let tree = suspect_codegen::toolchain::nested_cargo()
+    let tree = Command::new("cargo")
         .args(["tree", "--offline", "--manifest-path"])
         .arg(consumer.join("Cargo.toml"))
         .current_dir(&consumer)
@@ -251,17 +255,3 @@ fn models_and_exact_json_are_public_and_executable() {
         assert_eq!(&actual, oracle, "{} changed", relatives[index]);
     }
 }
-
-/// The pinned `openrouter-web` checkout, or `None` (after printing a skip
-/// message) when it is not available.
-fn openrouter_web_root() -> Option<PathBuf> {
-    suspect_codegen::toolchain::openrouter_checkout(&TRACKED_DOCUMENTS)
-}
-
-/// The tracked OpenRouter descriptions, relative to the checkout root.
-const TRACKED_DOCUMENTS: [&str; 4] = [
-    "projects/docs/openapi/openapi.yaml",
-    "openrouter-management.openapi.yaml",
-    "projects/docs/assets/provider-monitor-schema-v2.openapi.json",
-    "packages/temporal/benchmarks.openapi.json",
-];

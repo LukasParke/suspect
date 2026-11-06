@@ -4,7 +4,7 @@
 //! a developer machine whose `python3` is an older system Python (macOS
 //! ships 3.9 with Xcode) still finds the supported 3.11/3.14 installs.
 //! Missing interpreters or tool venvs skip, or panic under
-//! `SUSPECT_REQUIRE_NATIVE=1`.
+//! `SUSPECT_REQUIRE_TOOLS=python` (or `all`).
 #![allow(dead_code)]
 
 use std::{
@@ -20,13 +20,13 @@ use suspect_codegen::toolchain;
 pub fn python() -> Option<PathBuf> {
     match std::env::var_os("SUSPECT_PYTHON_BIN").filter(|value| !value.is_empty()) {
         Some(path) => Some(path.into()),
-        None => toolchain::pinned_python("3.11"),
+        None => Some(toolchain::pinned_python("3.11")),
     }
 }
 
 /// An interpreter of one exact admitted minor version (`"3.11"`, `"3.14"`).
 pub fn pinned(minor: &str) -> Option<PathBuf> {
-    toolchain::pinned_python(minor)
+    Some(toolchain::pinned_python(minor))
 }
 
 /// Every interpreter in `minors`, or `None` (after the skip message) when
@@ -43,7 +43,7 @@ pub fn pinned_all<const N: usize>(minors: [&str; N]) -> Option<[PathBuf; N]> {
 /// `tools/native-setup.sh python` (`SUSPECT_PYTHON_TOOLS` overrides it).
 ///
 /// # Panics
-/// When the venv is missing and `SUSPECT_REQUIRE_NATIVE` is set.
+/// When the venv is missing and `SUSPECT_REQUIRE_TOOLS` is set.
 pub fn tools() -> Option<PathBuf> {
     let path = std::env::var_os("SUSPECT_PYTHON_TOOLS")
         .filter(|value| !value.is_empty())
@@ -69,7 +69,7 @@ pub fn tools() -> Option<PathBuf> {
 /// so `tools/native-setup.sh python` warms uv's cache.
 ///
 /// # Panics
-/// When uv is missing and `SUSPECT_REQUIRE_NATIVE` is set.
+/// When uv is missing and `SUSPECT_REQUIRE_TOOLS` is set.
 pub fn uv() -> Option<PathBuf> {
     let uv: PathBuf = std::env::var_os("SUSPECT_UV_BIN")
         .filter(|value| !value.is_empty())
@@ -90,14 +90,7 @@ pub fn uv() -> Option<PathBuf> {
 }
 
 fn skip(message: &str) {
-    let required = std::env::var(toolchain::REQUIRE_NATIVE_ENV)
-        .is_ok_and(|value| !value.is_empty() && value != "0");
-    assert!(
-        !required,
-        "{} is set: {message}",
-        toolchain::REQUIRE_NATIVE_ENV
-    );
-    eprintln!("skipping: {message}");
+    toolchain::skip("python", message);
 }
 
 /// Returns the interpreter named by `env_var` (default `python3`) when it is
@@ -129,9 +122,7 @@ pub fn python_at_least(env_var: &str, min: (u32, u32)) -> Option<OsString> {
     if std::env::var_os(env_var).is_none() && min <= (3, 11) {
         // A too-old default `python3`: fall back to the pinned supported
         // interpreter instead of skipping.
-        if let Some(pinned) = toolchain::pinned_python("3.11") {
-            return Some(pinned.into());
-        }
+        return Some(toolchain::pinned_python("3.11").into());
     }
     let message = format!(
         "{} {problem}; this check needs Python {}.{}+ (set {env_var} to override)",

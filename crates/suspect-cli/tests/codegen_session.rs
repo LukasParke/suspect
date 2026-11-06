@@ -18,13 +18,14 @@ fn command(root: &Path) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_suspect"));
     command
         .args([
-            "codegen-session",
+            "gen",
+            "session",
             "--config",
             "session.json",
-            "--out",
+            "--output",
             "output",
             "--format",
-            "json",
+            "ndjson",
         ])
         .current_dir(root);
     command
@@ -37,6 +38,40 @@ fn run(root: &Path, args: &[&str]) -> (i32, Vec<Value>) {
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
     (output.status.code().unwrap(), lines)
+}
+#[test]
+fn a_yaml_configuration_generates_what_the_json_one_does() {
+    let root = setup();
+    std::fs::write(
+        root.path().join("session.yaml"),
+        "spec: api.json\nowner: session-test\ntargets:\n  - backend: typescript-http\n    package_name: test-sdk\n    package_version: 0.0.0\n  - backend: rust-http\n    package_name: test-sdk\n    package_version: 0.0.0\n",
+    )
+    .unwrap();
+    let (code, _) = run(root.path(), &[]);
+    assert_eq!(code, 0);
+    // Same targets and owner: the YAML session finds nothing to change.
+    let output = Command::new(env!("CARGO_BIN_EXE_suspect"))
+        .args([
+            "gen",
+            "session",
+            "--config",
+            "session.yaml",
+            "--output",
+            "output",
+            "--format",
+            "ndjson",
+            "--check",
+        ])
+        .current_dir(root.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 #[test]
 fn preview_is_readonly_and_write_check_preserve_user_edits() {

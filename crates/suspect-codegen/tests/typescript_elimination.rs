@@ -884,7 +884,7 @@ impl Esbuild {
 }
 
 fn node_program() -> Option<PathBuf> {
-    suspect_codegen::toolchain::pinned_node(22)
+    Some(suspect_codegen::toolchain::pinned_node(22))
 }
 
 struct Bundle {

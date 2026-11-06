@@ -155,10 +155,8 @@ assert inspect.signature(models.Node).parameters['optional'].default is models.U
 #[test]
 #[ignore = "requires native Python and the tracked OpenRouter checkout"]
 fn tracked_credits_closure_has_native_exact_number_fields() {
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let contract = load(&spec);
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    let contract = load(&Path::new(&root).join("projects/docs/openapi/openapi.yaml"));
     let response = contract
         .operations()
         .find(|op| op.operation_id() == Some("getCredits"))

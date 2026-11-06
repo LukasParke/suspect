@@ -8,74 +8,36 @@ use suspect_codegen::kotlin_sdk::{
     Plan, PlannedHeader,
     models::{Additional, Shape},
 };
-use suspect_codegen::toolchain;
 
-/// The JDKs every Kotlin gate runs on: `SUSPECT_KOTLIN_JAVA_HOME` alone
-/// when set; else every home in the `SUSPECT_KOTLIN_JAVA_HOMES` path list
-/// (CI sets this to its JDK 21 and 25 installs); otherwise the mise
-/// Temurin 21 and 25 installs that exist; otherwise the toolchain's default
-/// JDK. Empty only after a skip message was printed because the JDK or
-/// Maven is unavailable (a panic instead under `SUSPECT_REQUIRE_NATIVE`),
-/// so gates must `return` on empty.
 pub fn java_homes() -> Vec<(String, PathBuf)> {
-    if maven_binary().is_none() {
-        return Vec::new();
-    }
-    if let Some(home) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME").filter(|h| !h.is_empty()) {
+    if let Some(home) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOME") {
         return vec![("override".into(), home.into())];
     }
-    if let Some(list) = std::env::var_os("SUSPECT_KOTLIN_JAVA_HOMES").filter(|h| !h.is_empty()) {
-        let homes = std::env::split_paths(&list)
-            .enumerate()
-            .map(|(index, home)| (format!("jdk{index}"), home))
-            .collect::<Vec<_>>();
-        for (_, home) in &homes {
-            assert!(
-                home.join("bin/java").is_file(),
-                "SUSPECT_KOTLIN_JAVA_HOMES entry {} has no bin/java",
-                home.display()
-            );
-        }
-        return homes;
-    }
-    let homes = ["21", "25"]
+    let mise = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".local/share/mise/installs/java"));
+    let matrix = [("21", "temurin-21"), ("25", "temurin-25")]
         .into_iter()
-        .filter_map(|version| Some((version.to_string(), temurin_home(version)?)))
+        .filter_map(|(version, name)| {
+            let home = mise.as_ref()?.join(name);
+            home.join("bin/java")
+                .is_file()
+                .then(|| (version.to_owned(), home))
+        })
         .collect::<Vec<_>>();
-    if !homes.is_empty() {
-        return homes;
+    if !matrix.is_empty() {
+        return matrix;
     }
-    toolchain::require_home("jdk")
-        .map(|home| vec![("default".into(), home)])
-        .unwrap_or_default()
-}
-
-/// The newest mise `temurin-<major>[.…]` install with a `bin/java`.
-fn temurin_home(major: &str) -> Option<PathBuf> {
-    let installs = toolchain::mise_data_dir()?.join("installs/java");
-    let exact = format!("temurin-{major}");
-    let versioned = format!("{exact}.");
-    std::fs::read_dir(&installs)
-        .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| *name == exact || name.starts_with(&versioned))
-        .map(|name| installs.join(name))
-        .filter(|home| home.join("bin/java").is_file())
-        .max()
-}
-
-/// Maven: `SUSPECT_KOTLIN_MAVEN`, else the toolchain (which honours
-/// `SUSPECT_MAVEN_BIN`). `None` after printing why it is unavailable.
-pub fn maven_binary() -> Option<PathBuf> {
-    std::env::var_os("SUSPECT_KOTLIN_MAVEN")
-        .filter(|path| !path.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| toolchain::require("maven"))
+    vec![(
+        "toolchain".into(),
+        suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}")),
+    )]
 }
 
 pub fn maven(home: &Path) -> Command {
-    let binary = maven_binary().expect("gated by java_homes()");
+    let binary = std::env::var_os("SUSPECT_KOTLIN_MAVEN")
+        .map(PathBuf::from)
+        .or_else(|| suspect_codegen::toolchain::resolve_path("maven"))
+        .unwrap_or_else(|| panic!("{}", suspect_codegen::toolchain::guidance("maven")));
     let repo = std::env::var_os("SUSPECT_KOTLIN_MAVEN_REPO")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -115,7 +77,7 @@ pub fn installed_quickstart(root: &Path, rich_guide: bool) {
         return;
     }
     let docs = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/SDK-KOTLIN.md"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/sdk/kotlin/README.md"),
     )
     .unwrap();
     let snippets = docs

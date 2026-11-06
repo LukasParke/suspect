@@ -97,9 +97,7 @@ fn native(source: &Path, operation_ids: &[&str]) {
     suspect_codegen::write_files(&ts, &root).unwrap();
     suspect_codegen::write_files(&rs, &root.join("rs")).unwrap();
 
-    let Some(node) = suspect_codegen::toolchain::pinned_node(22) else {
-        return;
-    };
+    let node = suspect_codegen::toolchain::pinned_node(22);
     let output = checked(
         Command::new(&node).args(["--print", "process.execPath"]),
         &root,
@@ -247,9 +245,8 @@ fn shared_contract_examples_execute_from_both_installed_packages() {
 #[test]
 #[ignore = "requires native Cargo/Node/npm caches and the tracked OpenRouter corpus"]
 fn tracked_operation_examples_execute_from_both_installed_packages() {
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     native(
         &source,
         &[

@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use serde_json::json;
 
 use crate::orchestrate::{
-    BEGIN_MARK, END_MARK, Manifest, OutputRule, WriteReason, parse_manifest, render_manifest,
+    BEGIN_MARK, END_MARK, Manifest, OutputRule, WriteReason, parse_manifest, parse_manifest_doc,
+    render_manifest,
 };
 use crate::{FilterRegistry, MinijinjaEngine, TemplateEngine};
 
@@ -241,9 +242,6 @@ target = "src/gen/models.ts"
 [[output]]
 template = "client.rs.j2"
 target = "src/gen/{{ package }}_client.rs"
-
-[other_table]
-ignored = true
 "#;
     let manifest = parse_manifest(text).unwrap();
     assert_eq!(
@@ -260,6 +258,46 @@ ignored = true
         ]
     );
     assert!(parse_manifest("[[output]]\ntemplate = \"x.j2\"").is_err());
+    // Any other table is rejected rather than skipped.
+    let error = parse_manifest(&format!("{text}\n[other_table]\nignored = true\n")).unwrap_err();
+    assert!(error.0.contains("unknown table [other_table]"), "{error}");
+}
+
+#[test]
+fn yaml_and_json_manifests_declare_the_same_rules_as_toml() {
+    let toml =
+        parse_manifest("[[output]]\ntemplate = \"m.j2\"\ntarget = \"src/{{ package }}.rs\"\n")
+            .unwrap();
+    let yaml = parse_manifest_doc(
+        b"output:\n  - template: m.j2\n    target: \"src/{{ package }}.rs\"\n",
+        suspect_syntax::Format::Yaml,
+    )
+    .unwrap();
+    let json = parse_manifest_doc(
+        br#"{"output": [{"template": "m.j2", "target": "src/{{ package }}.rs"}]}"#,
+        suspect_syntax::Format::Json,
+    )
+    .unwrap();
+    assert_eq!(toml, yaml);
+    assert_eq!(toml, json);
+
+    let error = parse_manifest_doc(
+        b"output:\n  - template: m.j2\n    targte: x\n",
+        suspect_syntax::Format::Yaml,
+    )
+    .unwrap_err();
+    assert!(
+        error.0.starts_with("3: unknown output rule key `targte`"),
+        "{error}"
+    );
+    let error = parse_manifest_doc(b"outputs: []\n", suspect_syntax::Format::Yaml).unwrap_err();
+    assert!(error.0.contains("unknown key `outputs`"), "{error}");
+    let error = parse_manifest_doc(
+        b"output:\n  - template: m.j2\n",
+        suspect_syntax::Format::Yaml,
+    )
+    .unwrap_err();
+    assert!(error.0.contains("both `template` and `target`"), "{error}");
 }
 
 #[test]

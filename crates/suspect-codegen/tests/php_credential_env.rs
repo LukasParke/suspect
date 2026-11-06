@@ -42,26 +42,10 @@ fn load(path: &Path) -> Arc<Contract> {
     );
     Arc::new(Contract::from_workspace(&workspace, &Uri::from_path(path).unwrap()).unwrap())
 }
-/// PHP plus the provisioned Composer/PHPStan phars (`tools/native-setup.sh php`),
-/// or `false` after the skip message (a panic under `SUSPECT_REQUIRE_NATIVE`).
-fn native_php() -> bool {
-    suspect_codegen::toolchain::require("php").is_some()
-        && suspect_codegen::toolchain::require_provisioned(
-            "SUSPECT_COMPOSER_PHAR",
-            "sdk-php-tools/composer-2.10.3.phar",
-            "php",
-        )
-        .is_some()
-        && suspect_codegen::toolchain::require_provisioned(
-            "SUSPECT_PHPSTAN_PHAR",
-            "sdk-php-tools/phpstan-2.2.13.phar",
-            "php",
-        )
-        .is_some()
-}
-/// The resolved PHP with `-n` plus the ini-enabled shared extensions.
-fn php_command() -> Command {
-    suspect_codegen::toolchain::php_command().expect("PHP is gated by native_php()")
+fn php() -> PathBuf {
+    std::env::var_os("SUSPECT_PHP_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo().join("target/sdk-php-tools/php-8.3.32/php"))
 }
 fn tool(variable: &str, name: &str) -> PathBuf {
     std::env::var_os(variable)
@@ -177,7 +161,8 @@ fn installed(root: &Path, plan: &Plan) -> PathBuf {
         fs::write(path, &file.content).unwrap();
     }
     run(
-        php_command()
+        Command::new(php())
+            .arg("-n")
             .arg(tool("SUSPECT_COMPOSER_PHAR", "composer-2.10.3.phar"))
             .args([
                 "archive",
@@ -198,7 +183,8 @@ fn installed(root: &Path, plan: &Plan) -> PathBuf {
     fs::create_dir(&consumer).unwrap();
     fs::write(consumer.join("composer.json"),json!({"name":"fixture/credential-consumer","require":{"openrouter/sdk":"0.1.0"},"repositories":[{"type":"package","package":manifest},{"packagist.org":false}],"config":{"allow-plugins":false}}).to_string()).unwrap();
     run(
-        php_command()
+        Command::new(php())
+            .arg("-n")
             .arg(tool("SUSPECT_COMPOSER_PHAR", "composer-2.10.3.phar"))
             .args([
                 "install",
@@ -221,7 +207,8 @@ fn installed(root: &Path, plan: &Plan) -> PathBuf {
     }
     fs::write(root.join("emitted-manifest.json"),serde_json::to_string_pretty(&files.iter().map(|file|json!({"path":file.path,"sha256":format!("{:x}",Sha256::digest(file.content.as_bytes()))})).collect::<Vec<_>>()).unwrap()).unwrap();
     run(
-        php_command()
+        Command::new(php())
+            .arg("-n")
             .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
             .args([
                 "analyse",
@@ -512,15 +499,13 @@ fn php_admission_keeps_shared_unsupported_credential_findings_located() {
 #[test]
 #[ignore = "installed Composer/PHPStan runtime env gate; PHP 8.3/8.5 selector SUSPECT_PHP_BIN"]
 fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
-    if !native_php() {
-        return;
-    }
     let (root, contract) = fixture(&source());
     let planned = plan(contract, config(Some(policy()))).unwrap();
     let consumer = installed(&root, &planned);
     fs::write(consumer.join("positive.php"), ENV_CONSUMER).unwrap();
     run(
-        php_command()
+        Command::new(php())
+            .arg("-n")
             .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
             .args([
                 "analyse",
@@ -534,8 +519,8 @@ fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
         "consumer-types",
     );
     run(
-        php_command()
-            .args(["-d", "error_reporting=-1", "positive.php"])
+        Command::new(php())
+            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
             .env("SUSPECT_PHP_ENV_TOKEN", "before-import-token")
             .current_dir(&consumer),
         &root,
@@ -543,8 +528,9 @@ fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
     );
     fs::write(consumer.join("unavailable.php"), UNAVAILABLE_CONSUMER).unwrap();
     run(
-        php_command()
+        Command::new(php())
             .args([
+                "-n",
                 "-d",
                 "disable_functions=getenv",
                 "-d",
@@ -557,7 +543,8 @@ fn native_env_snapshot_explicit_auth_and_unavailable_platform() {
         "native-unavailable",
     );
     fs::write(consumer.join("negative.php"),"<?php\nrequire __DIR__.'/vendor/autoload.php';\nnew OpenRouter\\Client(null);\nnew OpenRouter\\Client(OpenRouter\\Absent::Value);\nOpenRouter\\Client::fromEnv(transport: null);\n").unwrap();
-    let output = php_command()
+    let output = Command::new(php())
+        .arg("-n")
         .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
         .args([
             "analyse",
@@ -637,12 +624,8 @@ echo 'unavailable getenv preserves anonymous and explicit-credential operations'
 #[test]
 #[ignore = "actual read-only OpenRouter source, installed branded SDK, controlled transport; PHP 8.3/8.5"]
 fn native_openrouter_current_key_factory_uses_source_https() {
-    let Some(source) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    if !native_php() {
-        return;
-    }
+    let source =
+        suspect_codegen::test_inputs::openrouter_root().join("projects/docs/openapi/openapi.yaml");
     let before = fs::read(&source).unwrap();
     let contract = load(&source);
     let wanted = ["getCurrentKey", "getCredits"];
@@ -682,7 +665,8 @@ fn native_openrouter_current_key_factory_uses_source_https() {
     }
     fs::write(consumer.join("positive.php"), OPENROUTER_CONSUMER).unwrap();
     run(
-        php_command()
+        Command::new(php())
+            .arg("-n")
             .arg(tool("SUSPECT_PHPSTAN_PHAR", "phpstan-2.2.13.phar"))
             .args([
                 "analyse",
@@ -696,8 +680,8 @@ fn native_openrouter_current_key_factory_uses_source_https() {
         "consumer-types",
     );
     run(
-        php_command()
-            .args(["-d", "error_reporting=-1", "positive.php"])
+        Command::new(php())
+            .args(["-n", "-d", "error_reporting=-1", "positive.php"])
             .env("OPENROUTER_API_KEY", "controlled-user-token")
             .current_dir(&consumer),
         &root,
@@ -729,10 +713,9 @@ putenv('OPENROUTER_API_KEY');$missing=S\Client::fromEnv(transport:$transport);tr
 echo 'OpenRouter getCurrentKey/default HTTPS and explicit getCredits mode passed with controlled transport',PHP_EOL;
 "#;
 
-/// The libtest name of `test` in this binary: `<file module>::<test>` when
-/// this file is a module of a grouped test binary (tests/groups/), the bare
-/// name when it is its own crate. Self-invocations with `--exact` need it,
-/// or the child runs zero tests and the check passes vacuously.
+/// The `--exact` name of `test` inside this binary: the crate groups its
+/// suites into one binary per backend, so test paths carry this file's
+/// module (`php_credential_env::…`) there and none in a standalone build.
 fn qualified(test: &str) -> String {
     match module_path!().split_once("::") {
         Some((_, module)) => format!("{module}::{test}"),

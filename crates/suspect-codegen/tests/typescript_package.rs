@@ -274,7 +274,7 @@ struct Toolchain {
 
 impl Toolchain {
     fn pinned() -> Option<Self> {
-        let selected = suspect_codegen::toolchain::pinned_node(22)?;
+        let selected = suspect_codegen::toolchain::pinned_node(22);
         let output = checked(Command::new(selected).args(["--print", "process.execPath"]));
         let node = PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
         let bin = node.parent().unwrap();
@@ -529,10 +529,8 @@ maps(path.join(installed, 'dist'));
 #[test]
 #[ignore = "requires pinned Node 22.23.1/npm 10.9.8 and cached TypeScript 5.9.3"]
 fn installed_openrouter_http_package_runs_a_recorded_request_and_its_documented_helper() {
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let contract = load(&spec);
+    let source = suspect_codegen::test_inputs::openrouter_root();
+    let contract = load(&Path::new(&source).join("projects/docs/openapi/openapi.yaml"));
     let selected = contract
         .operations()
         .filter(|operation| {
@@ -611,10 +609,8 @@ if (false) {
 #[test]
 #[ignore = "requires tracked OpenRouter YAML, pinned Node/npm and cached TypeScript"]
 fn installed_openrouter_container_list_and_get_preserve_query_wire_contract() {
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let contract = load(&spec);
+    let source = suspect_codegen::test_inputs::openrouter_root();
+    let contract = load(&Path::new(&source).join("projects/docs/openapi/openapi.yaml"));
     let selected = contract
         .operations()
         .filter(|op| {
@@ -838,10 +834,8 @@ if (integer !== 9007199254740993n) throw new Error('incorrect installed declarat
 #[test]
 #[ignore = "requires tracked OpenRouter YAML, pinned Node/npm and cached TypeScript"]
 fn installed_package_preserves_tracked_openrouter_caller_and_image_closures() {
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let contract = load(&spec);
+    let checkout = suspect_codegen::test_inputs::openrouter_root();
+    let contract = load(&Path::new(&checkout).join("projects/docs/openapi/openapi.yaml"));
     let roots = contract
         .schema_roots()
         .iter()

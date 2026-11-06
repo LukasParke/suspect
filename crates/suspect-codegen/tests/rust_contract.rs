@@ -302,9 +302,7 @@ fn unsupported_shapes_are_errors_and_never_dynamic_fallbacks() {
 #[test]
 #[ignore = "requires native Cargo and the pinned tracked OpenRouter checkout"]
 fn tracked_openrouter_nullable_caller_and_image_sources_preserve_every_payload() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let selected = roots(
         &contract,

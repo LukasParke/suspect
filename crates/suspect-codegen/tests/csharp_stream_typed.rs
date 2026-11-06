@@ -584,11 +584,10 @@ fn project(config: &str, framework: &str) -> String {
 #[test]
 fn typed_events_drive_stubbed_streams_in_dotnet() {
     let Some(dotnet) = dotnet() else {
-        eprintln!(
-            "csharp_stream_typed: skipping — {}",
+        panic!(
+            "csharp_stream_typed: {}",
             suspect_codegen::toolchain::guidance("dotnet")
         );
-        return;
     };
     eprintln!("csharp_stream_typed: {dotnet}");
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-csharp-stream-typed");

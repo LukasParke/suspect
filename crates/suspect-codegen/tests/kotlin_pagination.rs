@@ -442,12 +442,10 @@ fn manual_templates_emit_for_every_supported_shape() {
 
     // The manual package typechecks when the JVM toolchain is available.
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_pagination: no JDK 21 found; emission assertions only");
-        return;
+        panic!("kotlin_pagination: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_pagination: no Maven found; emission assertions only");
-        return;
+        panic!("kotlin_pagination: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&files, root.path()).unwrap();
@@ -470,12 +468,10 @@ fn manual_templates_emit_for_every_supported_shape() {
 #[test]
 fn emitted_package_compiles_with_a_jdk_toolchain() {
     let Some(java_home) = java_home() else {
-        eprintln!("kotlin_pagination: no JDK 21 found; degrading to static assertions");
-        return;
+        panic!("kotlin_pagination: no JDK 21 found");
     };
     let Some(maven) = maven() else {
-        eprintln!("kotlin_pagination: no Maven found; degrading to static assertions");
-        return;
+        panic!("kotlin_pagination: no Maven found");
     };
     let root = tempfile::tempdir().unwrap();
     suspect_codegen::write_files(&generate(&configured_options()), root.path()).unwrap();

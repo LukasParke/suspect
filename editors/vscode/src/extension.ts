@@ -5,18 +5,23 @@ import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 import { parseArazzo } from './parse';
 import { registerNotebook } from './notebook';
-import { errorMessage, gatewayPort, spawnSuspectRun, suspectBinary } from './runner';
+import { BINARY_SETTINGS, binaryChoice, bundledBinary, errorMessage, gatewayPort, spawnSuspectRun, suspectBinary, useExtensionRoot } from './runner';
 import {
 	Generation, generationArgs, isSdkProfile, SDK_PROFILE_DIRECTORIES, SdkProfile, availableSdkProfiles, runGeneration, readCurrentSdkArtifact, readSdkSessionIdentity,
 	SdkCompatibilityProfile, readSdkCompatibilityProfiles, SdkSessionHandle, SdkSessionIdentity, SdkSessionRecord, startSdkSession,
 } from './generation';
 import { registerTesting } from './testing';
 import { registerProjectView } from './projectView';
-import { openSuspectConfig, setSeverityFloor } from './config';
-import { generationContract, registerServerCommands } from './serverCommands';
+import { openSuspectConfig, setSeverityFloor, useClient } from './config';
+import { codegenDefaults, SESSION_SETTINGS } from './codegenSettings';
+import { ConfigStatus, explainConfig, explainRow, registerConfigStatus } from './explainConfig';
+import { generationContract, registerServerCommands, RUN_WORKFLOW_COMMAND } from './serverCommands';
+import { MIN_CLI_VERSION, suspectCapabilities, tooOldServer } from './protocol';
+import { DocumentKindTracker, trackDocumentKind } from './documentKind';
 import { registerLiveSdkPreview } from './liveSdk';
 import { findArazzoDocuments, findProjects } from './discover';
 import { looksLikeArazzo } from './project';
+import * as settings from './settings.generated';
 
 interface GatewayState {
 	child: cp.ChildProcess;
@@ -28,10 +33,33 @@ let client: LanguageClient | undefined;
 let gateway: GatewayState | undefined;
 let gatewayStatus: vscode.StatusBarItem | undefined;
 let sdkGeneration: SdkGenerationController | undefined;
+/** The extension's own package version, sent to the server, which checks it. */
+let extensionVersion: string | undefined;
+/** Keeps the `suspect.documentKind` context key current; shared across client restarts. */
+let documentKinds: DocumentKindTracker | undefined;
+/** Watches the committed config layers; shared across client restarts. */
+let configWatcher: vscode.FileSystemWatcher | undefined;
+/** The status-bar item naming the settings file in effect; shared across client restarts. */
+let configStatus: ConfigStatus | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
+	extensionVersion = (context.extension?.packageJSON as { version?: string } | undefined)?.version;
+	useExtensionRoot(context.extensionUri?.fsPath);
+	// Integrated terminals run the same build as the extension: the
+	// "Run Now" actions type `suspect ...` into one.
+	const bundled = bundledBinary();
+	if (bundled && process.platform !== 'win32') {
+		// An installer that dropped the mode bit would leave it unusable.
+		try { fs.accessSync(bundled, fs.constants.X_OK); } catch { try { fs.chmodSync(bundled, 0o755); } catch { /* spawning reports it */ } }
+	}
+	if (bundled) {
+		context.environmentVariableCollection.prepend('PATH', path.dirname(bundled) + path.delimiter);
+	} else {
+		context.environmentVariableCollection.clear();
+	}
+	context.subscriptions.push(vscode.commands.registerCommand('suspect.locateBinary', () => locateBinary()));
 	context.subscriptions.push(
-		vscode.commands.registerCommand('suspect.runWorkflow', (uri?: vscode.Uri | string, workflow?: string) =>
+		vscode.commands.registerCommand(RUN_WORKFLOW_COMMAND, (uri?: vscode.Uri | string, workflow?: string) =>
 			runWorkflowCommand(uri, workflow),
 		),
 		vscode.commands.registerCommand('suspect.startGateway', () => startGateway()),
@@ -54,12 +82,23 @@ export function activate(context: vscode.ExtensionContext): void {
 	registerNotebook(context);
 	sdkGeneration = registerSdkGeneration(context);
 
-	startClient();
+	// Register the editor-owned server commands before the client starts:
+	// the client declares these ids as its own in the handshake.
 	context.subscriptions.push(...registerServerCommands(() => client));
 	context.subscriptions.push(...registerLiveSdkPreview(() => client));
+	documentKinds = trackDocumentKind(() => client);
+	context.subscriptions.push(...documentKinds.disposables);
+	// The committed config layers the server merges under the editor settings:
+	// suspect-config's CONFIG_NAMES plus the project manifest.
+	configWatcher = vscode.workspace.createFileSystemWatcher('**/{.suspect.yaml,.suspect.yml,suspect.yaml,suspect.yml,suspect.project.json}');
+	context.subscriptions.push(configWatcher);
+	useClient(() => client);
+	configStatus = registerConfigStatus(() => client, configWatcher);
+	context.subscriptions.push(...configStatus.disposables);
+	startClient();
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((event) => {
-			if (event.affectsConfiguration('suspect.basePath')) {
+			if (BINARY_SETTINGS.some((key) => event.affectsConfiguration(key))) {
 				void restartClient();
 			}
 		}),
@@ -77,8 +116,9 @@ export async function deactivate(): Promise<void> {
 }
 
 function startClient(): void {
+	const { binary, source } = binaryChoice();
 	const serverOptions: ServerOptions = {
-		command: suspectBinary(),
+		command: binary,
 		args: ['lsp'],
 		// Executables use stdio by default. An explicit transport makes the client
 		// append --stdio, which the canonical `suspect lsp` command does not accept.
@@ -88,21 +128,74 @@ function startClient(): void {
 			{ scheme: 'file', language: 'yaml' },
 			{ scheme: 'file', language: 'json' },
 		],
+		synchronize: {
+			// Sends the `suspect.*` settings on start and on every change
+			// (workspace/didChangeConfiguration), so the server's lint floor,
+			// rules and hints follow the editor settings live.
+			configurationSection: 'suspect',
+			// Config-file edits reach the server as didChangeWatchedFiles.
+			fileEvents: configWatcher,
+		},
 	};
-	client = new LanguageClient('suspect', 'Suspect', serverOptions, clientOptions);
-	// Both the LSP and the editor advertise this workflow action. Keep the editor's
-	// picker/progress implementation as its single owner, including for LSP lenses,
-	// while registering every other server command normally.
-	const commands = client.getFeature('workspace/executeCommand');
-	const registerCommands = commands.register.bind(commands);
-	commands.register = (data) => registerCommands({
-		...data,
-		registerOptions: { ...data.registerOptions, commands: data.registerOptions.commands.filter((command) => command !== 'suspect.runWorkflow') },
+	const current = new LanguageClient('suspect', 'Suspect', serverOptions, clientOptions);
+	client = current;
+	// Declares the server command ids the extension registers itself, so the
+	// server leaves them out of executeCommandProvider and the client does
+	// not register them twice, and the extension version the server checks.
+	current.registerFeature(suspectCapabilities(extensionVersion));
+	void Promise.resolve(current.start()).then(() => {
+		// Every command the extension spawns uses the grouped tree; an older
+		// binary answers each with a usage error.
+		const old = tooOldServer(current);
+		if (old !== undefined) {
+			void vscode.window.showWarningMessage(
+				`The Suspect CLI at \`${binary}\` is version ${old}; this extension needs ${MIN_CLI_VERSION} or newer. Update it or set suspect.basePath to a newer build.`,
+				LOCATE_BINARY, 'Open Settings',
+			).then((choice) => {
+				if (choice === LOCATE_BINARY) void locateBinary();
+				else if (choice === 'Open Settings') void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
+			});
+		}
+		return Promise.all([documentKinds?.refresh(), configStatus?.refresh()]);
+	}, (err: unknown) => {
+		if (client === current) client = undefined;
+		const message = errorMessage(err);
+		const missing = /ENOENT|Launching server using command/.test(message);
+		// A server older than the experimental.suspect handshake ignores
+		// the declared commands and advertises ids this extension owns.
+		const tooOld = /command '[^']+' already exists/.test(message);
+		const text = missing
+			? source === 'path'
+				? `Suspect CLI not found: this platform has no bundled binary and \`suspect\` is not on PATH. Install it (${INSTALL_COMMAND}) or locate the binary.`
+				: `Suspect CLI not found at \`${binary}\`. Install it (${INSTALL_COMMAND}) or locate the binary.`
+			: tooOld
+				? `The Suspect CLI at \`${binary}\` is older than this extension. Update it or set suspect.basePath to a newer build.`
+				: `Suspect language server failed to start: ${message}`;
+		void vscode.window.showWarningMessage(text, LOCATE_BINARY, 'Open Settings').then((choice) => {
+			if (choice === LOCATE_BINARY) {
+				void locateBinary();
+			} else if (choice === 'Open Settings') {
+				void vscode.commands.executeCommand('workbench.action.openSettings', 'suspect.basePath');
+			}
+		});
 	});
-	void Promise.resolve(client.start()).catch((err: unknown) => {
-		vscode.window.showWarningMessage(`Suspect language server failed to start: ${errorMessage(err)}`);
-		client = undefined;
+}
+
+const LOCATE_BINARY = 'Locate binary…';
+
+/** The P5 installer, for the platform the extension runs on. */
+const INSTALL_COMMAND = process.platform === 'win32'
+	? 'powershell -ExecutionPolicy Bypass -c "irm https://github.com/LukasParke/suspect/releases/latest/download/suspect-cli-installer.ps1 | iex"'
+	: 'curl --proto \'=https\' --tlsv1.2 -LsSf https://github.com/LukasParke/suspect/releases/latest/download/suspect-cli-installer.sh | sh';
+
+/** Picks the CLI executable and writes it to `suspect.basePath` (user settings); the client restarts on the change. */
+async function locateBinary(): Promise<void> {
+	const picked = await vscode.window.showOpenDialog({
+		canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+		openLabel: 'Use this suspect binary', title: 'Locate the suspect CLI',
 	});
+	if (!picked?.[0]) return;
+	await vscode.workspace.getConfiguration('suspect').update('basePath', picked[0].fsPath, vscode.ConfigurationTarget.Global);
 }
 
 async function restartClient(): Promise<void> {
@@ -250,15 +343,17 @@ async function startGateway(): Promise<void> {
 	if (!spec) {
 		return;
 	}
-	const port = gatewayPort();
+	// The editor setting, else `gateway.port` as the server resolved it for this spec.
+	const configured = explainRow(await explainConfig(client, spec), 'gateway.port')?.value;
+	const port = typeof configured === 'number' && configured > 0 ? configured : gatewayPort();
 	const specLabel = vscode.workspace.asRelativePath(spec);
 	let child: cp.ChildProcess;
 	try {
-		child = cp.spawn(suspectBinary(), ['gateway', spec.fsPath, '--port', String(port), '--mode', 'mock'], {
+		child = cp.spawn(suspectBinary(), ['traffic', 'gateway', spec.fsPath, '--port', String(port), '--mode', 'mock'], {
 			stdio: 'ignore',
 		});
 	} catch (err) {
-		vscode.window.showErrorMessage(`Failed to launch suspect gateway: ${errorMessage(err)}`);
+		vscode.window.showErrorMessage(`Failed to launch suspect traffic gateway: ${errorMessage(err)}`);
 		return;
 	}
 	gateway = { child, port, specLabel };
@@ -306,8 +401,9 @@ function updateGatewayStatus(): void {
 }
 
 /** Prompts for explicit package identity and exact selectors shared by the canonical HTTP profiles. */
-async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, profile: SdkProfile): Promise<{ packageName: string; packageVersion: string; importName?: string; compatibilityProfiles: SdkCompatibilityProfile[]; operationIds: string[] } | undefined> {
-    const compatibilityProfiles = readSdkCompatibilityProfiles(config.get<unknown>('sdk.compatibilityProfiles', []));
+async function promptPackageIdentity(scope: vscode.Uri, profile: SdkProfile): Promise<{ packageName: string; packageVersion: string; importName?: string; compatibilityProfiles: SdkCompatibilityProfile[]; operationIds: string[] } | undefined> {
+    const defaults = await codegenDefaults(client, scope);
+    const compatibilityProfiles = readSdkCompatibilityProfiles(defaults.compatibilityProfiles);
     const packagePrompts: Record<SdkProfile, string> = {
         'typescript-http': 'Explicit npm package name (independent of the API title)',
         'rust-http': 'Explicit Cargo package name (independent of the API title)',
@@ -324,23 +420,23 @@ async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, prof
     };
     const packageName = await vscode.window.showInputBox({
         prompt: packagePrompts[profile],
-        value: config.get<string>('sdk.packageName', ''),
+        value: defaults.packageName,
         validateInput: (value) => value.length ? undefined : 'A package name is required',
     });
     if (packageName === undefined) return undefined;
     const packageVersion = await vscode.window.showInputBox({
         prompt: profile === 'python-http'
-            ? `Explicit package SemVer; default Python import: ${packageName.replace(/-/g, '_')}. Configure sdk.importNames for an override.`
+            ? `Explicit package SemVer; default Python import: ${packageName.replace(/-/g, '_')}. Configure codegen.importNames for an override.`
             : profile === 'swift-http'
-            ? `Exact stable SemVer (no prerelease/build metadata); default Swift module: ${packageName}. Configure sdk.importNames for an override.`
+            ? `Exact stable SemVer (no prerelease/build metadata); default Swift module: ${packageName}. Configure codegen.importNames for an override.`
             : 'Explicit package SemVer (independent of the API version)',
-        value: config.get<string>('sdk.packageVersion', ''),
+        value: defaults.packageVersion,
         validateInput: (value) => value.length ? undefined : 'A package version is required',
     });
     if (packageVersion === undefined) return undefined;
     const selectors = await vscode.window.showInputBox({
         prompt: 'Exact operation IDs as a JSON string array; [] attempts every operation',
-        value: JSON.stringify(config.get<string[]>('sdk.operationIds', [])),
+        value: JSON.stringify(defaults.operationIds),
         validateInput: (value) => {
             try {
                 const ids: unknown = JSON.parse(value);
@@ -350,7 +446,7 @@ async function promptPackageIdentity(config: vscode.WorkspaceConfiguration, prof
         },
     });
     if (selectors === undefined) return undefined;
-    const importName = config.get<Record<string, string>>('sdk.importNames', {})[profile];
+    const importName = defaults.importNames[profile];
     return { packageName, packageVersion, ...(importName ? { importName } : {}), compatibilityProfiles, operationIds: JSON.parse(selectors) };
 }
 
@@ -396,7 +492,7 @@ async function genPresetCommand(): Promise<void> {
     try {
         if (isSdkProfile(presetPick.generationKind)) {
             const identity = await promptPackageIdentity(
-                vscode.workspace.getConfiguration('suspect', spec),
+                spec,
                 presetPick.generationKind,
             );
             if (!identity) return;
@@ -545,7 +641,7 @@ class SdkGenerationController implements vscode.Disposable {
 			vscode.commands.registerCommand('suspect.stopSdkWatch', () => this.stop()),
 			vscode.commands.registerCommand('suspect.showSdkPreview', () => this.showLatest()),
 			vscode.workspace.onDidChangeConfiguration((event) => {
-				if (['suspect.basePath', 'suspect.sdk.sessionConfig', 'suspect.sdk.sessionOutput'].some((key) => event.affectsConfiguration(key))) {
+				if ([...BINARY_SETTINGS, ...SESSION_SETTINGS].some((key) => event.affectsConfiguration(key))) {
 					void this.stop('SDK settings changed. Start an SDK preview or watch again.');
 				}
 			}),
@@ -594,11 +690,11 @@ class SdkGenerationController implements vscode.Disposable {
 			const active = vscode.window.activeTextEditor?.document.uri;
 			let folder = active ? vscode.workspace.getWorkspaceFolder(active) : undefined;
 			if (!folder && vscode.workspace.workspaceFolders?.length === 1) folder = vscode.workspace.workspaceFolders[0];
-			let configured = vscode.workspace.getConfiguration('suspect', folder?.uri).get<string>('sdk.sessionConfig', '');
+			let configured = (await codegenDefaults(client, folder?.uri)).sessionConfig;
 			if (configured && !path.isAbsolute(configured) && !folder) {
 				folder = await vscode.window.showWorkspaceFolderPick({ placeHolder: 'Workspace containing the SDK session config' });
 				if (!folder) return undefined;
-				configured = vscode.workspace.getConfiguration('suspect', folder.uri).get<string>('sdk.sessionConfig', '');
+				configured = (await codegenDefaults(client, folder.uri)).sessionConfig;
 			}
 			if (configured) {
 				configUri = vscode.Uri.file(path.resolve(folder?.uri.fsPath ?? '', configured));
@@ -612,10 +708,9 @@ class SdkGenerationController implements vscode.Disposable {
 		}
 		if (!configUri) return undefined;
 		if (configUri.scheme !== 'file') throw new Error('Select a local JSON SDK session config.');
-		const settings = vscode.workspace.getConfiguration('suspect', configUri);
 		const out = await vscode.window.showInputBox({
 			prompt: `SDK output directory to compare; relative paths resolve from ${path.dirname(configUri.fsPath)}`,
-			value: settings.get<string>('sdk.sessionOutput', 'sdk-out'),
+			value: (await codegenDefaults(client, configUri)).sessionOut,
 			validateInput: (value) => value.length && !value.includes('\0') ? undefined : 'Enter an output directory',
 		});
 		if (out === undefined) return undefined;

@@ -123,7 +123,7 @@ fn codec_manifest_binds_every_public_model_to_its_codec_and_source() {
 
 fn build(root: &Path) -> Option<Output> {
     let tool = Path::new(env!("CARGO_MANIFEST_DIR")).join("tools/typescript-docs/build.mjs");
-    let node = suspect_codegen::toolchain::pinned_node(22)?;
+    let node = suspect_codegen::toolchain::pinned_node(22);
     Some(
         Command::new(node)
             .arg(tool)
@@ -191,9 +191,7 @@ fn native_codec_docs_preserve_hostile_prose_collisions_and_actual_methods() {
 #[test]
 #[ignore = "requires pinned native Node/TypeDoc and tracked OpenRouter YAML"]
 fn native_codec_docs_cover_tracked_openrouter_caller_and_image_closures() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let roots = contract
         .schema_roots()

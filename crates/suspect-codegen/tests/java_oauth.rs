@@ -7,7 +7,7 @@
 //! never modified; plans without a configured policy — or with only the
 //! deprecated implicit and password flows — emit no new file at all, so
 //! no-policy output stays byte-identical.
-#![cfg(feature = "java-sdk")]
+#![cfg(all(feature = "java-sdk", feature = "http-protocol"))]
 
 use std::{
     fs,
@@ -309,16 +309,22 @@ fn oauth_class_emits_only_under_a_usable_scheme() {
 }
 
 /// A JDK 21+ toolchain, mirroring the other Java acceptance tests.
-fn java_home() -> Option<PathBuf> {
+fn java_home() -> PathBuf {
+    // `SUSPECT_JAVA_HOME` and `JAVA_HOME` keep their override roles; the
+    // manifest otherwise resolves and version-gates the JDK (>= 21) and the
+    // JVM reports its own home.
     std::env::var_os("SUSPECT_JAVA_HOME")
+        .or_else(|| std::env::var_os("JAVA_HOME"))
         .map(PathBuf::from)
-        .or_else(|| suspect_codegen::toolchain::require_home("jdk"))
+        .unwrap_or_else(|| {
+            suspect_codegen::toolchain::java_home().unwrap_or_else(|skip| panic!("{skip}"))
+        })
 }
 
 /// Compile the whole emitted package; the classes directory doubles as the
 /// behavioral probe's classpath, including the generated resources.
-fn compiled_package(root: &Path) -> Option<PathBuf> {
-    let home = java_home()?;
+fn compiled_package(root: &Path) -> PathBuf {
+    let home = java_home();
     assert!(
         home.join("bin/javac").is_file(),
         "required JDK at {} is missing: {}",
@@ -369,7 +375,7 @@ fn compiled_package(root: &Path) -> Option<PathBuf> {
         )
         .unwrap();
     }
-    Some(classes)
+    classes
 }
 
 #[ignore = "requires JDK and Maven on the test host"]
@@ -387,13 +393,9 @@ fn oauth_lifecycle_drives_stubbed_transport_in_java() {
     let root = tempfile::tempdir().unwrap();
     let files = generate(&service_document(), &configured());
     suspect_codegen::write_files(&files, root.path()).unwrap();
-    let Some(classes) = compiled_package(root.path()) else {
-        return;
-    };
+    let classes = compiled_package(root.path());
     fs::write(root.path().join("OAuthProbe.java"), PROBE).unwrap();
-    let Some(home) = java_home() else {
-        return;
-    };
+    let home = java_home();
     let output = Command::new(home.join("bin/javac"))
         .args(["--release", "21", "-Xlint:all", "-Werror", "-cp"])
         .arg(&classes)
@@ -1036,13 +1038,9 @@ fn discovery_lifecycle_drives_stubbed_transport_in_java() {
     let root = tempfile::tempdir().unwrap();
     let files = generate(&discovery_document(), &discovery_options());
     suspect_codegen::write_files(&files, root.path()).unwrap();
-    let Some(classes) = compiled_package(root.path()) else {
-        return;
-    };
+    let classes = compiled_package(root.path());
     fs::write(root.path().join("DiscoveryProbe.java"), DISCOVERY_PROBE).unwrap();
-    let Some(home) = java_home() else {
-        return;
-    };
+    let home = java_home();
     let output = Command::new(home.join("bin/javac"))
         .args(["--release", "21", "-Xlint:all", "-Werror", "-cp"])
         .arg(&classes)
@@ -1515,13 +1513,9 @@ fn replay_lifecycle_drives_stubbed_httpclient_in_java() {
     let root = tempfile::tempdir().unwrap();
     let files = generate(&replay_document(), &replay_options());
     suspect_codegen::write_files(&files, root.path()).unwrap();
-    let Some(classes) = compiled_package(root.path()) else {
-        return;
-    };
+    let classes = compiled_package(root.path());
     fs::write(root.path().join("ReplayProbe.java"), REPLAY_PROBE).unwrap();
-    let Some(home) = java_home() else {
-        return;
-    };
+    let home = java_home();
     let output = Command::new(home.join("bin/javac"))
         .args(["--release", "21", "-Xlint:all", "-Werror", "-cp"])
         .arg(&classes)

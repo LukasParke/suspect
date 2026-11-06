@@ -72,10 +72,9 @@ fn identity() -> PackageConfig {
 fn ruby_home() -> PathBuf {
     suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
 }
-/// Ruby is resolvable (skip message, or a panic under
-/// `SUSPECT_REQUIRE_NATIVE`, otherwise).
+/// Ruby is resolvable (a panic naming what is missing otherwise).
 fn native_ready() -> bool {
-    suspect_codegen::toolchain::require_home("ruby").is_some()
+    suspect_codegen::toolchain::require_home("ruby").exists()
 }
 fn first_request(readme: &str) -> &str {
     readme

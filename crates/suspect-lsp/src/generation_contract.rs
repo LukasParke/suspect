@@ -6,7 +6,7 @@
 //! naming analysis) runs in this process over the live workspace document,
 //! so generation-time failures surface as a queryable report while
 //! writing. Nothing is generated; the report is the admission layer's own
-//! output, byte-identical to what `suspect admission` prints.
+//! output, byte-identical to what `suspect gen admission` prints.
 
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::Range;
@@ -60,9 +60,13 @@ pub struct GenerationContractResult {
     pub refusals: usize,
 }
 
-/// Names the `suspect/generationContract` custom request. Uninhabited: it
-/// is only ever used as a type.
-pub enum GenerationContractRequest {}
+/// Marker type naming the `suspect/generationContract` custom request;
+/// never constructed.
+pub enum GenerationContractRequest {
+    /// Never constructed; the enum exists only to name the request type.
+    #[allow(dead_code)]
+    Marker,
+}
 
 impl Request for GenerationContractRequest {
     type Params = GenerationContractParams;

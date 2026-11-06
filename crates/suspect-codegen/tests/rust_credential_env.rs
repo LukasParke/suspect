@@ -479,9 +479,8 @@ fn installed_rust_credential_env_snapshots_and_explicit_credentials_obey_source_
 #[test]
 #[ignore = "requires native Rust 1.88/stable, tracked OpenRouter source and pinned Cargo dependencies"]
 fn installed_rust_openrouter_env_current_key_uses_source_default_https() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let root = suspect_codegen::test_inputs::openrouter_root();
+    let path = root.join("projects/docs/openapi/openapi.yaml");
     let workspace = Arc::new(
         WorkspaceBuilder::new()
             .root(path.parent().unwrap())

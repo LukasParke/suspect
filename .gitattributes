@@ -1,3 +1,3 @@
-# Generated output and golden fixtures are compared byte for byte; keep LF
-# on every checkout, including Windows (core.autocrlf).
+# Fixtures and golden files are compared byte for byte; check out LF on
+# every platform (Windows CI included).
 * text=auto eol=lf

@@ -5,22 +5,27 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
 authors.workspace = true
 # Integration tests are grouped one binary per backend (tests/groups/).
 autotests = false
 
 [features]
-default = ["ruby-sdk", "csharp-sdk", "java-sdk", "kotlin-sdk", "php-sdk", "dart-sdk", "cpp-sdk"]
+default = ["ruby-sdk", "csharp-sdk", "java-sdk", "kotlin-sdk", "php-sdk", "dart-sdk", "cpp-sdk", "http-protocol"]
 # Language modules become default after native acceptance.
-java-sdk = []
-csharp-sdk = []
-kotlin-sdk = []
-ruby-sdk = []
-php-sdk = []
-dart-sdk = []
-cpp-sdk = []
+java-sdk = ["http-protocol"]
+csharp-sdk = ["http-protocol"]
+kotlin-sdk = ["http-protocol"]
+ruby-sdk = ["http-protocol"]
+php-sdk = ["http-protocol"]
+dart-sdk = ["http-protocol"]
+cpp-sdk = ["http-protocol"]
+http-protocol = []
 
 [dependencies]
+suspect-diag.workspace = true
 suspect-artifact.workspace = true
 suspect-ir.workspace = true
 suspect-gen.workspace = true

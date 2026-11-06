@@ -139,13 +139,12 @@ fn native_environment_credentials() {
 #[test]
 #[ignore = "actual OpenRouter getCurrentKey/getCredits schemas and source-default HTTPS through controlled .NET8/10 handlers"]
 fn native_openrouter_environment_client() {
-    let Some(path) = crate::toolchain::openrouter_spec() else {
-        return;
-    };
     if !dotnet_available() {
         return;
     }
     let root = directory("openrouter-");
+    let corpus = crate::test_inputs::openrouter_root();
+    let path = corpus.join("projects/docs/openapi/openapi.yaml");
     let original = fs::read(&path).unwrap();
     let workspace = Arc::new(
         WorkspaceBuilder::new()

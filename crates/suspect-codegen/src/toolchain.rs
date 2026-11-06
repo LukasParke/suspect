@@ -4,10 +4,14 @@
 //! gates are opt-in (`#[ignore]`) so CI stays hermetic. This manifest makes
 //! the requirements declarative: per tool, the command that reports its
 //! version, the regex that extracts it, the minimum acceptable version, and
-//! the installation guidance shown when the probe fails. Gates call
-//! [`probe_status`] instead of hand-rolled `Option` dances, so the skip
-//! message tells a contributor exactly what is missing, what was found,
-//! what is required, and how to install it.
+//! the installation guidance shown when the probe fails.
+//!
+//! The skip-vs-fail rule: a default-suite test may skip when a tool is
+//! missing ([`optional`], [`skip`]: one `skipped:` line, then return); an
+//! `#[ignore]` gate fails ([`require`]). No gate passes by skipping.
+//! `SUSPECT_REQUIRE_TOOLS` (comma-separated ids, or `all`) turns
+//! default-suite skips for the listed tools into failures; CI sets it for
+//! the tools it installs.
 
 /// One native tool the acceptance gates may require.
 pub struct Tool {
@@ -135,6 +139,20 @@ pub const TOOLS: &[Tool] = &[
         min_version: "20",
         install_documentation: "Install Node.js 20 or later from https://nodejs.org",
         env_override: "",
+        home_env: "",
+        version_manager_path: "",
+        home_query: &[],
+        needs_java_home: false,
+    },
+    Tool {
+        id: "python",
+        description: "Python 3.11+ gates executing emitted Python SDKs and codecs",
+        version_command: &["python3", "--version"],
+        version_regex: r"Python (\d+\.\d+(?:\.\d+)?)",
+        // The emitted `pyproject.toml` declares `requires-python=">=3.11"`.
+        min_version: "3.11",
+        install_documentation: "Install Python 3.11 or later from https://www.python.org/downloads (or `uv python install 3.11`), then point SUSPECT_PYTHON_BIN at its interpreter",
+        env_override: "SUSPECT_PYTHON_BIN",
         home_env: "",
         version_manager_path: "",
         home_query: &[],
@@ -389,73 +407,133 @@ pub fn nested_cargo() -> std::process::Command {
     command
 }
 
-/// The environment variable that turns a missing tool into a hard
-/// failure. CI jobs dedicated to one backend set it so a broken toolchain
-/// install cannot pass as a skipped gate.
-pub const REQUIRE_NATIVE_ENV: &str = "SUSPECT_REQUIRE_NATIVE";
+/// The `JAVA_HOME` of the gated JDK (`gate("jdk")`), as reported by the JVM
+/// itself (`java.home`), so PATH shims, `/usr/bin/java` stubs and
+/// alternatives links all resolve to the real installation.
+///
+/// # Errors
+/// The `jdk` gate's skip message when no JDK 21+ is resolvable, or a
+/// description of why `java.home` could not be read.
+pub fn java_home() -> Result<std::path::PathBuf, String> {
+    let java = gate("jdk")?;
+    let output = std::process::Command::new(&java)
+        .args(["-XshowSettings:properties", "-version"])
+        .output()
+        .map_err(|error| format!("{}: {error}", java.display()))?;
+    let text = String::from_utf8_lossy(&output.stderr).into_owned()
+        + &String::from_utf8_lossy(&output.stdout);
+    text.lines()
+        .find_map(|line| line.trim().strip_prefix("java.home = "))
+        .map(|home| std::path::PathBuf::from(home.trim()))
+        .filter(|home| home.join("bin").is_dir())
+        .ok_or_else(|| format!("{} did not report java.home", java.display()))
+}
 
-/// Gate entry point for acceptance tests: the resolved executable, or
-/// `None` after printing the actionable skip message.
+/// The variable listing the tools whose default-suite skips are failures.
+pub const REQUIRE_TOOLS: &str = "SUSPECT_REQUIRE_TOOLS";
+
+/// Whether `id` is listed in `list` (a `SUSPECT_REQUIRE_TOOLS` value:
+/// comma-separated ids, or `all`).
+#[must_use]
+pub fn listed(list: &str, id: &str) -> bool {
+    list.split(',')
+        .map(str::trim)
+        .any(|entry| entry == "all" || entry == id)
+}
+
+/// Whether `SUSPECT_REQUIRE_TOOLS` requires `id`.
+#[must_use]
+pub fn is_required(id: &str) -> bool {
+    std::env::var(REQUIRE_TOOLS).is_ok_and(|list| listed(&list, id))
+}
+
+/// The standard default-suite skip: prints `skipped: {what}`, or panics
+/// when `SUSPECT_REQUIRE_TOOLS` requires `id`. `what` names the tool and
+/// how to install it. For requirements that are not one manifest tool (an
+/// interpreter with a package, a compiler outside the manifest), `id` is a
+/// descriptive name such as `python-httpx`, required only by `all`.
 ///
 /// # Panics
-/// When the tool is unavailable and [`REQUIRE_NATIVE_ENV`] is set to a
-/// non-empty value other than `0`.
+/// When `id` is required.
+pub fn skip(id: &str, what: &str) {
+    skip_with(std::env::var(REQUIRE_TOOLS).ok().as_deref(), id, what);
+}
+
+fn skip_with(required: Option<&str>, id: &str, what: &str) {
+    if required.is_some_and(|list| listed(list, id)) {
+        panic!("{REQUIRE_TOOLS} requires `{id}`: {what}");
+    }
+    eprintln!("skipped: {what}");
+}
+
+/// Default-suite tests: the executable, or `None` after printing the
+/// standard skip line. Panics instead of skipping when `id` is listed in
+/// `SUSPECT_REQUIRE_TOOLS` (or it is `all`).
+///
+/// ```
+/// let Some(go) = suspect_codegen::toolchain::optional("go") else {
+///     return;
+/// };
+/// # let _ = go;
+/// ```
 #[must_use]
-pub fn require(id: &str) -> Option<std::path::PathBuf> {
+pub fn optional(id: &str) -> Option<std::path::PathBuf> {
+    optional_with(std::env::var(REQUIRE_TOOLS).ok().as_deref(), id)
+}
+
+fn optional_with(required: Option<&str>, id: &str) -> Option<std::path::PathBuf> {
     match gate(id) {
         Ok(path) => Some(path),
-        Err(skip) => {
-            assert!(!native_required(), "{REQUIRE_NATIVE_ENV} is set: {skip}");
-            eprintln!("skipping: {skip}");
+        Err(message) => {
+            skip_with(required, id, &message);
             None
         }
     }
+}
+
+/// `#[ignore]` gates: the executable, or a panic with the guidance text. A
+/// gate someone asked for never passes without running.
+///
+/// # Panics
+/// When the tool is missing or too old.
+#[must_use]
+pub fn require(id: &str) -> std::path::PathBuf {
+    gate(id).unwrap_or_else(|message| panic!("{message}"))
 }
 
 /// [`require`] for a tool's home directory (`jdk`, `ruby`).
 ///
 /// # Panics
-/// As [`require`].
+/// When the tool is missing or its home directory cannot be determined.
 #[must_use]
-pub fn require_home(id: &str) -> Option<std::path::PathBuf> {
-    require(id)?;
-    let home = resolve_home(id);
-    if home.is_none() {
-        let skip = format!("`{id}` is installed but its home directory could not be determined");
-        assert!(!native_required(), "{REQUIRE_NATIVE_ENV} is set: {skip}");
-        eprintln!("skipping: {skip}");
-    }
-    home
+pub fn require_home(id: &str) -> std::path::PathBuf {
+    let _ = require(id);
+    resolve_home(id).unwrap_or_else(|| {
+        panic!("`{id}` is installed but its home directory could not be determined")
+    })
 }
 
-/// [`external_fixture`] for acceptance tests: the path, or `None` after
-/// printing the skip message. External fixtures are never required, even
-/// under [`REQUIRE_NATIVE_ENV`], because CI does not have them.
+/// [`external_fixture`] for `#[ignore]` gates: the path, or a panic with
+/// the message naming the variable to set.
+///
+/// # Panics
+/// When the fixture is missing.
 #[must_use]
-pub fn require_fixture(env_var: &str, what: &str) -> Option<std::path::PathBuf> {
-    match external_fixture(env_var, what) {
-        Ok(path) => Some(path),
-        Err(skip) => {
-            eprintln!("skipping: {skip}");
-            None
-        }
-    }
+pub fn require_fixture(env_var: &str, what: &str) -> std::path::PathBuf {
+    external_fixture(env_var, what).unwrap_or_else(|message| panic!("{message}"))
 }
 
 /// A file `tools/native-setup.sh <backend>` provisions under the
 /// workspace `target/` directory (`relative` is relative to `target/`),
-/// or the path named by `env_var` when that is set. `None` after a skip
-/// message naming the setup command when the file is missing.
+/// or the path named by `env_var` when that is set.
 ///
-/// # Panics
-/// As [`require`]: under [`REQUIRE_NATIVE_ENV`] a missing provisioned
-/// file is a hard failure, because CI runs the setup script.
-#[must_use]
-pub fn require_provisioned(
+/// # Errors
+/// The message naming the setup command when the file is missing.
+pub fn provisioned(
     env_var: &str,
     relative: &str,
     backend: &str,
-) -> Option<std::path::PathBuf> {
+) -> Result<std::path::PathBuf, String> {
     let path = std::env::var_os(env_var)
         .filter(|value| !value.is_empty())
         .map_or_else(
@@ -467,15 +545,21 @@ pub fn require_provisioned(
             std::path::PathBuf::from,
         );
     if path.exists() {
-        return Some(path);
+        return Ok(path);
     }
-    let skip = format!(
+    Err(format!(
         "{} is missing; run `tools/native-setup.sh {backend}` (or set {env_var})",
         path.display()
-    );
-    assert!(!native_required(), "{REQUIRE_NATIVE_ENV} is set: {skip}");
-    eprintln!("skipping: {skip}");
-    None
+    ))
+}
+
+/// [`provisioned`] for `#[ignore]` gates.
+///
+/// # Panics
+/// When the file is missing.
+#[must_use]
+pub fn require_provisioned(env_var: &str, relative: &str, backend: &str) -> std::path::PathBuf {
+    provisioned(env_var, relative, backend).unwrap_or_else(|message| panic!("{message}"))
 }
 
 /// A PHP command that ignores every `php.ini` (`-n`, so no user or
@@ -489,7 +573,7 @@ pub fn require_provisioned(
 /// `-n` set and re-adds exactly those with `-d extension=…` (Zend
 /// extensions such as Xdebug and OPcache are not re-added). A static
 /// build gets plain `-n`. `None` when PHP cannot be located; gate with
-/// [`require`] first for the skip message.
+/// [`require`] first.
 #[must_use]
 pub fn php_command() -> Option<std::process::Command> {
     static ARGS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -555,7 +639,7 @@ fn php_hermetic_args(php: &std::path::Path) -> Vec<String> {
 /// Swift.org or swiftly toolchain, Linux included) is used; when the driver
 /// is the macOS `/usr/bin` shim, `xcrun --find` locates the selected Xcode
 /// toolchain's tool instead. `None` when it cannot be found; gate with
-/// [`require`]`("swift")` first for the skip message.
+/// [`require`]`("swift")` first.
 #[must_use]
 pub fn swift_tool(name: &str) -> Option<std::path::PathBuf> {
     let override_var = match name {
@@ -648,117 +732,50 @@ pub fn swift_module_dir(scratch: &std::path::Path, module: &str) -> Option<std::
     found.into_iter().next()
 }
 
-/// Whether `SUSPECT_REQUIRE_NATIVE` turns skips into failures (set,
-/// non-empty and not `0`).
-pub fn native_required() -> bool {
-    std::env::var(REQUIRE_NATIVE_ENV).is_ok_and(|value| !value.is_empty() && value != "0")
-}
-
-/// SHA-256 of the OpenRouter OpenAPI document the OpenRouter-backed gates
-/// were written against (`openrouter-web` commit `50b0c3910b36`,
-/// `projects/docs/openapi/openapi.yaml`). Gates compare their expected
-/// operations, names and recorded responses to this exact revision.
-pub const OPENROUTER_SPEC_SHA256: &str =
-    "bd4953b29f34de134ed4be27b2803c5622a756c3c63bc8617636b6abe5de1821";
-
-/// The `openrouter-web` commit whose OpenAPI document is
-/// [`OPENROUTER_SPEC_SHA256`].
+/// The `openrouter-web` commit the OpenRouter-backed gates were written
+/// against; `native-evidence.yml` checks out exactly this revision.
 pub const OPENROUTER_SPEC_COMMIT: &str = "50b0c3910b36dc33c949a490bbe2fba59d574c42";
 
-/// The pinned OpenRouter OpenAPI document for gates that exercise a real
-/// production API description.
+/// The OpenRouter OpenAPI document ([`crate::test_inputs::openrouter_spec`]).
 ///
-/// Looks in `SUSPECT_OPENROUTER_YAML` / `SUSPECT_OPENROUTER_OPENAPI` (a
-/// file), then `$OPENROUTER_WEB_ROOT/projects/docs/openapi/openapi.yaml`,
-/// then a sibling `../openrouter-web` checkout of this workspace. The file
-/// is used only when its SHA-256 is [`OPENROUTER_SPEC_SHA256`]; any other
-/// revision would make the gates fail on upstream spec drift rather than
-/// on generator behavior. Otherwise prints a skip message with the command
-/// that materializes the pinned file, and returns `None`. Never required,
-/// even under [`REQUIRE_NATIVE_ENV`].
+/// # Panics
+/// When `OPENROUTER_WEB_ROOT` is unset or has no specification.
 #[must_use]
-pub fn openrouter_spec() -> Option<std::path::PathBuf> {
-    const RELATIVE: &str = "projects/docs/openapi/openapi.yaml";
-    let non_empty = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
-    let candidate = non_empty("SUSPECT_OPENROUTER_YAML")
-        .or_else(|| non_empty("SUSPECT_OPENROUTER_OPENAPI"))
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            non_empty("OPENROUTER_WEB_ROOT").map(|root| std::path::Path::new(&root).join(RELATIVE))
-        })
-        .or_else(|| {
-            let sibling = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../openrouter-web")
-                .join(RELATIVE);
-            sibling.is_file().then_some(sibling)
-        });
-    let materialize = format!(
-        "materialize it with `git -C <openrouter-web> show {OPENROUTER_SPEC_COMMIT}:{RELATIVE} > openrouter.yaml` and set SUSPECT_OPENROUTER_YAML to that file"
-    );
-    let Some(path) = candidate else {
-        eprintln!("skipping: no OpenRouter OpenAPI document; {materialize}");
-        return None;
-    };
-    let Ok(bytes) = std::fs::read(&path) else {
-        eprintln!("skipping: cannot read {}; {materialize}", path.display());
-        return None;
-    };
-    let digest = sha2::Digest::finalize(<sha2::Sha256 as sha2::Digest>::new_with_prefix(&bytes));
-    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    if hex != OPENROUTER_SPEC_SHA256 {
-        eprintln!(
-            "skipping: {} is OpenRouter revision {hex}, gates are pinned to {OPENROUTER_SPEC_SHA256}; {materialize}",
-            path.display()
-        );
-        return None;
-    }
-    Some(path)
+pub fn openrouter_spec() -> std::path::PathBuf {
+    crate::test_inputs::openrouter_spec()
 }
 
-/// The root of the pinned OpenRouter checkout, for gates that read
-/// companion documents beside [`openrouter_spec`].
+/// The `OPENROUTER_WEB_ROOT` checkout, for gates that read companion
+/// documents beside [`openrouter_spec`]; each of `companions` (relative to
+/// the root) must exist.
 ///
-/// The root is the pinned spec's path with
-/// `projects/docs/openapi/openapi.yaml` stripped (so a materialized tree
-/// `<root>/projects/docs/openapi/openapi.yaml` works as well as a real
-/// checkout). Each of `companions` (paths relative to the root) must
-/// exist; they are not hash-pinned, so materialize them from
-/// [`OPENROUTER_SPEC_COMMIT`] too. `None` after a skip message otherwise.
-/// Never required, even under [`REQUIRE_NATIVE_ENV`].
+/// # Panics
+/// When the root or a companion is missing.
 #[must_use]
-pub fn openrouter_checkout(companions: &[&str]) -> Option<std::path::PathBuf> {
-    let spec = openrouter_spec()?;
-    let Some(root) = spec.ancestors().nth(4).map(std::path::Path::to_path_buf) else {
-        eprintln!(
-            "skipping: {} is not inside an openrouter-web tree",
-            spec.display()
-        );
-        return None;
-    };
+pub fn openrouter_checkout(companions: &[&str]) -> std::path::PathBuf {
+    let root = crate::test_inputs::openrouter_root();
     if let Some(missing) = companions
         .iter()
         .find(|relative| !root.join(relative).is_file())
     {
-        eprintln!(
-            "skipping: {} has no {missing}; materialize it with `git -C <openrouter-web> show {OPENROUTER_SPEC_COMMIT}:{missing}`",
+        panic!(
+            "missing input: {} has no {missing} (check out openrouter-web at {OPENROUTER_SPEC_COMMIT})",
             root.display()
         );
-        return None;
     }
-    Some(root)
+    root
 }
 
 /// A Node.js executable of one pinned major version (`22` or `24`).
 ///
 /// `SUSPECT_PACKAGE_NODE` (for 22) or `SUSPECT_NODE24_BIN` (for 24) wins;
 /// then the mise `installs/node/<major>` install; then `node` on `PATH`
-/// when it reports that major version. `None` after the skip message
-/// (a panic instead under [`REQUIRE_NATIVE_ENV`]).
+/// when it reports that major version.
 ///
 /// # Panics
-/// As [`require`].
+/// When no such Node is found.
 #[must_use]
-pub fn pinned_node(major: u32) -> Option<std::path::PathBuf> {
+pub fn pinned_node(major: u32) -> std::path::PathBuf {
     let override_var = match major {
         22 => "SUSPECT_PACKAGE_NODE",
         24 => "SUSPECT_NODE24_BIN",
@@ -767,7 +784,7 @@ pub fn pinned_node(major: u32) -> Option<std::path::PathBuf> {
     if !override_var.is_empty()
         && let Some(path) = std::env::var_os(override_var).filter(|value| !value.is_empty())
     {
-        return Some(path.into());
+        return path.into();
     }
     let reports_major = |node: &std::path::Path| {
         std::process::Command::new(node)
@@ -785,35 +802,31 @@ pub fn pinned_node(major: u32) -> Option<std::path::PathBuf> {
     };
     let managed = mise_data_dir().map(|dir| dir.join(format!("installs/node/{major}/bin/node")));
     if let Some(node) = managed.filter(|node| node.is_file() && reports_major(node)) {
-        return Some(node);
+        return node;
     }
     if let Some(node) = find_on_path("node").filter(|node| reports_major(node)) {
-        return Some(node);
+        return node;
     }
-    let skip = format!(
+    panic!(
         "Node {major} not found; set {} or install it (e.g. `mise install node@{major}`)",
         if override_var.is_empty() {
             "PATH"
         } else {
             override_var
         }
-    );
-    assert!(!native_required(), "{REQUIRE_NATIVE_ENV} is set: {skip}");
-    eprintln!("skipping: {skip}");
-    None
+    )
 }
 
 /// A Python interpreter of one exact minor version (`"3.11"`, `"3.14"`).
 ///
 /// Looks for `python<minor>` on `PATH`, then the mise
 /// `installs/python/<minor>` and uv `cpython-<minor>-*` installs, and
-/// accepts only an interpreter that reports that version. `None` after the
-/// skip message (a panic instead under [`REQUIRE_NATIVE_ENV`]).
+/// accepts only an interpreter that reports that version.
 ///
 /// # Panics
-/// As [`require`].
+/// When no such interpreter is found.
 #[must_use]
-pub fn pinned_python(minor: &str) -> Option<std::path::PathBuf> {
+pub fn pinned_python(minor: &str) -> std::path::PathBuf {
     let reports = |python: &std::path::Path| {
         std::process::Command::new(python)
             .args(["-c", "import sys; print('%d.%d' % sys.version_info[:2])"])
@@ -857,14 +870,11 @@ pub fn pinned_python(minor: &str) -> Option<std::path::PathBuf> {
         .into_iter()
         .find(|python| python.is_file() && reports(python))
     {
-        return Some(found);
+        return found;
     }
-    let skip = format!(
+    panic!(
         "Python {minor} not found; install it (e.g. `uv python install {minor}`) so `python{minor}` is on PATH"
-    );
-    assert!(!native_required(), "{REQUIRE_NATIVE_ENV} is set: {skip}");
-    eprintln!("skipping: {skip}");
-    None
+    )
 }
 
 /// The mise data directory: `$MISE_DATA_DIR`, else `$XDG_DATA_HOME/mise`,
@@ -999,7 +1009,7 @@ fn find_on_path(name: &str) -> Option<std::path::PathBuf> {
 /// let jdk = suspect_codegen::toolchain::gate("jdk");
 /// match jdk {
 ///     Ok(java) => { /* run the gate with `java` */ }
-///     Err(skip) => eprintln!("skipping: {skip}"),
+///     Err(skip) => panic!("{skip}"),
 /// }
 /// ```
 ///
@@ -1128,6 +1138,7 @@ mod tests {
                 "Apple clang version 21.0.0 (clang-2100.0.123.102)\nTarget: arm64-apple-darwin",
             ),
             ("doxygen", "1.9.8"),
+            ("python", "Python 3.11.13"),
         ];
         for tool in TOOLS {
             assert!(
@@ -1190,6 +1201,35 @@ mod tests {
         }
         // Unknown ids resolve to nothing.
         assert!(resolve_path("definitely-not-a-tool").is_none());
+    }
+
+    #[test]
+    fn require_tools_lists_ids_or_all() {
+        assert!(listed("bun, node,python", "node"));
+        assert!(listed("all", "dotnet"));
+        assert!(!listed("bun,node", "python"));
+        assert!(!listed("", "go"));
+    }
+
+    #[test]
+    #[should_panic(expected = "SUSPECT_REQUIRE_TOOLS requires `definitely-not-a-tool`")]
+    fn optional_panics_instead_of_skipping_when_all_tools_are_required() {
+        let _ = optional_with(Some("all"), "definitely-not-a-tool");
+    }
+
+    #[test]
+    fn optional_skips_when_the_tool_is_not_required() {
+        assert_eq!(
+            optional_with(Some("bun,node"), "definitely-not-a-tool"),
+            None
+        );
+        assert_eq!(optional_with(None, "definitely-not-a-tool"), None);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown tool id")]
+    fn require_panics_with_the_guidance_text() {
+        let _ = require("definitely-not-a-tool");
     }
 
     #[test]

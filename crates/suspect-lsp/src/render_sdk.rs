@@ -142,9 +142,12 @@ pub fn render_sdk(contract: std::sync::Arc<Contract>, params: &RenderSdkParams) 
     }
 }
 
-/// Names the `suspect/renderSdk` custom request. Uninhabited: it is only
-/// ever used as a type.
-pub enum RenderSdkRequest {}
+/// Marker type naming the `suspect/renderSdk` custom request.
+pub enum RenderSdkRequest {
+    /// Never constructed; the enum exists only to name the request type.
+    #[allow(dead_code)]
+    Marker,
+}
 
 impl tower_lsp::lsp_types::request::Request for RenderSdkRequest {
     type Params = RenderSdkParams;

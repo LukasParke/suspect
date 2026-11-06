@@ -548,11 +548,9 @@ const missingNeutral: Input = { name:'value' };
 }
 
 #[test]
-#[ignore = "requires tsc and the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML)"]
+#[ignore = "requires tsc and OPENROUTER_WEB_ROOT (the pinned OpenRouter checkout)"]
 fn tracked_openrouter_nullable_caller_and_image_source_keep_their_branches() {
-    let Some(path) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
+    let path = suspect_codegen::test_inputs::openrouter_spec();
     let contract = contract(&path);
     let roots = roots(
         &contract,

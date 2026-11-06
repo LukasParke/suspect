@@ -293,12 +293,29 @@ fn generate(document: Value) -> Vec<OutFile> {
     .unwrap()
 }
 
-/// The Ruby prefix (`SUSPECT_RUBY_HOME`, else the resolved toolchain's).
-/// The test entry gates on [`suspect_codegen::toolchain::require_home`].
+/// `SUSPECT_RUBY_HOME`, else the installation of the Ruby the toolchain
+/// manifest gates (`SUSPECT_RUBY_BIN`, then `PATH`), as reported by
+/// `RbConfig` so version-manager shims resolve to the real `bin/`.
 fn ruby_home() -> PathBuf {
+    if let Some(home) = std::env::var_os("SUSPECT_RUBY_HOME") {
+        return home.into();
+    }
     static HOME: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     HOME.get_or_init(|| {
-        suspect_codegen::toolchain::resolve_home("ruby").expect("ruby is gated by the test entry")
+        let ruby = suspect_codegen::toolchain::gate("ruby").unwrap_or_else(|skip| panic!("{skip}"));
+        let output = Command::new(&ruby)
+            .args(["-e", "print RbConfig::CONFIG['bindir']"])
+            .output()
+            .unwrap_or_else(|error| panic!("{}: {error}", ruby.display()));
+        assert!(
+            output.status.success(),
+            "{} -e RbConfig failed",
+            ruby.display()
+        );
+        PathBuf::from(String::from_utf8_lossy(&output.stdout).trim())
+            .parent()
+            .expect("Ruby bindir has a parent")
+            .to_path_buf()
     })
     .clone()
 }
@@ -397,9 +414,6 @@ fn write_report(report: &Value) {
 #[ignore = "requires the Ruby interpreter on the test host"]
 #[test]
 fn ruby_consumers_eliminate_unrelated_operations() {
-    if suspect_codegen::toolchain::require_home("ruby").is_none() {
-        return;
-    }
     let _gate = NATIVE_GATE.lock().unwrap();
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/sdk-ruby-elimination");
     std::fs::create_dir_all(&root).unwrap();
@@ -488,7 +502,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
     assert!(
         extended_markers["listGizmos"].as_bool().unwrap()
             && extended_markers["zeta-quantum"].as_bool().unwrap(),
-        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; re-measure and update the pinned expectation in this test"
+        "documented composition retention regressed: the unrelated operation no longer loads with the full gem; update docs/design/elimination-audit.md"
     );
 
     // --- Codec-only consumer ------------------------------------------------
@@ -550,7 +564,7 @@ fn ruby_consumers_eliminate_unrelated_operations() {
         codec_extended["unrelated_markers_loaded"]["zeta-quantum"]
             .as_bool()
             .unwrap(),
-        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; re-measure and update the pinned expectation in this test"
+        "documented file-granular retention regressed: the unrelated schema no longer rides in models.rb; update docs/design/elimination-audit.md"
     );
     // The codec consumer works against the models/codecs table pair, which
     // grows by the unrelated schema's shape+codec data (measured, recorded).

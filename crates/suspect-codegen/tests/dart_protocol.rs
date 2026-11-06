@@ -386,9 +386,7 @@ fn typed_protocol_admission_retains_real_inputs_and_declines_undefined_profiles(
 #[test]
 #[ignore = "native pub, strict typing, wire/framing/cleanup gate on Dart floor/current and portable JS"]
 fn native_rich_protocol() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     let root = root("protocol-");
     let path = root.join("api.json");
     std::fs::write(&path, document().to_string()).unwrap();
@@ -642,9 +640,7 @@ fn native_rich_protocol() {
 #[test]
 #[ignore = "native sparse selections must analyze without invented JSON schemas or unused runtime branches"]
 fn native_sparse_selections() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     for (label, method, operation) in [
         (
             "no-body",
@@ -695,9 +691,7 @@ fn native_sparse_selections() {
 #[test]
 #[ignore = "explicit compatibility option with installed native bytes and JSON-context witnesses"]
 fn native_explicit_legacy_binary_profile() {
-    let Some(_dart) = suspect_codegen::toolchain::require("dart") else {
-        return;
-    };
+    let _dart = suspect_codegen::toolchain::require("dart");
     use suspect_codegen::{
         backend::{self, Backend, GenerationOptions, TargetConfig},
         compatibility::{self, PlanStatus},

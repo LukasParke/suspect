@@ -56,6 +56,7 @@ fn summary_entry(code: &str) -> Option<&'static str> {
         "oas-response-map-invalid" => "Invalid responses map",
         "oas-response-missing-description" => "Response without a description",
         "oas-responses-invalid" => "Invalid responses object",
+        "oas-schema-instance-invalid" => "Example, default or enum value violates its schema",
         "oas-schema-invalid-keyword" => "Schema keyword not valid in this dialect",
         "oas-schema-invalid-kind" => "Schema node is the wrong kind",
         "oas-schema-invalid-type" => "Schema type value is not valid",
@@ -73,6 +74,8 @@ fn summary_entry(code: &str) -> Option<&'static str> {
         "oas-server-variable-enum-invalid" => "Server variable enumeration is not valid",
         "oas-server-variable-invalid" => "Invalid server variable",
         "oas-server-variable-unknown" => "Server URL references an undeclared variable",
+        "oas-tag-parent-cycle" => "Tag parent chain forms a cycle",
+        "oas-tag-parent-unknown" => "Tag parent is not a declared tag",
         "oas-tag-undeclared" => "Operation tag not declared in the root tags list",
         "oas-unused-path-param" => "Declared path parameter does not appear in the path template",
         "oas-webhook-unsupported-version" => "Webhooks require a newer OpenAPI version",
@@ -239,6 +242,15 @@ fn how_to_fix_entry(code: &str) -> Option<&'static str> {
         "oas-server-variable-invalid" => "Server variables must be objects with a `default`.",
         "oas-server-variable-unknown" => {
             "Declare the variable in the server's `variables` object, or remove it from the URL."
+        }
+        "oas-schema-instance-invalid" => {
+            "Change the value so it validates against its schema, or correct the schema."
+        }
+        "oas-tag-parent-cycle" => {
+            "Break the cycle so every tag's `parent` chain ends at a tag without a parent."
+        }
+        "oas-tag-parent-unknown" => {
+            "Declare the parent in the root `tags` list, or correct the `parent` name."
         }
         "oas-tag-undeclared" => {
             "Add the tag to the root `tags` list, or use one already declared there."

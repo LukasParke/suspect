@@ -566,7 +566,7 @@ final class PaginationWalkTests: XCTestCase {
 "##;
 
 fn swiftc() -> Option<std::path::PathBuf> {
-    suspect_codegen::toolchain::require("swift")?;
+    let _ = suspect_codegen::toolchain::require("swift");
     Some(
         suspect_codegen::toolchain::swift_tool("swiftc")
             .expect("the Swift toolchain has no swiftc"),
@@ -599,8 +599,7 @@ fn swift_command(root: &Path, action: &str) -> Command {
 #[test]
 fn native_walks_count_requests_and_preserve_input() {
     let Some(swiftc) = swiftc() else {
-        eprintln!("swift_pagination: no Swift 6 toolchain; degrading to static assertions");
-        return;
+        panic!("swift_pagination: no Swift 6 toolchain");
     };
     eprintln!("swift_pagination: {}", swiftc.display());
     let root = tempfile::tempdir().unwrap();

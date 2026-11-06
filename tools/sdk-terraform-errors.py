@@ -13,7 +13,7 @@ spec.loader.exec_module(helpers)
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument("--root",type=Path,required=True);parser.add_argument("--evidence",type=Path,required=True)
-    args=parser.parse_args();root=args.root.resolve();evidence=args.evidence.resolve();run=helpers.Runner(evidence)
+    args=parser.parse_args();root=args.root.resolve();evidence=args.evidence.resolve();helpers.require_terraform();run=helpers.Runner(evidence)
     report={"format":"suspect.terraform.error-ownership.v1","passed":False,"native_root":str(root),"scope":"real emitted SDK/Framework; exact SDK ZIP/h1, no replacement; no publishing or full-matrix replay"}
     try:
         original=helpers.tree_hashes(root/"generated")

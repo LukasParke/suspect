@@ -33,10 +33,10 @@ pub(super) fn cxx() -> PathBuf {
     crate::toolchain::resolve_path("cxx").expect("gated by native_tools")
 }
 /// Whether every listed toolchain id (`cmake`, `cxx`, `doxygen`) is
-/// available: skips after the toolchain's message, or panics under
-/// `SUSPECT_REQUIRE_NATIVE`.
+/// available; panics with the toolchain's message otherwise (an
+/// `#[ignore]` gate never passes by skipping).
 pub(super) fn native_tools(ids: &[&str]) -> bool {
-    ids.iter().all(|id| crate::toolchain::require(id).is_some())
+    ids.iter().all(|id| crate::toolchain::require(id).exists())
 }
 fn checked(command: &mut Command, root: &Path) -> std::process::Output {
     use std::io::Write;

@@ -252,32 +252,18 @@ fn root() -> PathBuf {
         .canonicalize()
         .unwrap()
 }
-/// The Ruby prefix resolved by `suspect_codegen::toolchain`
-/// (`SUSPECT_RUBY_HOME`, the mise install, or `ruby` on `PATH`); test
-/// entries gate on [`native_ready`] first.
 fn ruby_home() -> PathBuf {
-    suspect_codegen::toolchain::resolve_home("ruby").expect("gated by native_ready()")
+    std::env::var_os("SUSPECT_RUBY_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(std::env::var_os("HOME").unwrap())
+                .join(".local/share/mise/installs/ruby/3.3.12")
+        })
 }
-/// Ruby and the provisioned gems are available (skip message, or a panic
-/// under `SUSPECT_REQUIRE_NATIVE`, otherwise).
-fn native_ready() -> bool {
-    suspect_codegen::toolchain::require_home("ruby").is_some()
-        && suspect_codegen::toolchain::require_provisioned(
-            "SUSPECT_RUBY_GEMS",
-            "sdk-ruby-tools/gems",
-            "ruby",
-        )
-        .is_some()
-}
-/// The RBS/Steep/YARD gems `tools/native-setup.sh ruby` provisions
-/// (`SUSPECT_RUBY_GEMS` overrides); test entries gate on [`native_ready`].
 fn tools() -> PathBuf {
-    suspect_codegen::toolchain::require_provisioned(
-        "SUSPECT_RUBY_GEMS",
-        "sdk-ruby-tools/gems",
-        "ruby",
-    )
-    .expect("gated by native_ready()")
+    std::env::var_os("SUSPECT_RUBY_GEMS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root().join("target/sdk-ruby-tools/gems"))
 }
 fn default_gems() -> PathBuf {
     std::fs::read_dir(ruby_home().join("lib/ruby/gems"))
@@ -465,9 +451,6 @@ fn typecheck(root: &Path) {
 #[test]
 #[ignore = "requires Ruby 3.3.12+/4.0, isolated YARD/RBS/Steep tools; builds and installs a real gem"]
 fn native_m2_gem_types_docs_examples_and_independent_wire() {
-    if !native_ready() {
-        return;
-    }
     let root = native_package(&canonical(), "m2");
     signatures_docs_examples(&root);
     typecheck(&root);
@@ -482,9 +465,6 @@ fn native_m2_gem_types_docs_examples_and_independent_wire() {
 #[test]
 #[ignore = "requires native Ruby; executes all 17 shared schemas plus independent adversarial vectors"]
 fn native_shared_contract_exact_json_and_adversarial_models() {
-    if !native_ready() {
-        return;
-    }
     let cases: Value =
         serde_json::from_str(include_str!("fixtures/runtime-contract-v1.json")).unwrap();
     let mut schemas: serde_json::Map<_, _> = cases["cases"]
@@ -541,9 +521,6 @@ fn native_shared_contract_exact_json_and_adversarial_models() {
 #[test]
 #[ignore = "requires native Ruby; independent finite-budget contracts run through installed codecs"]
 fn native_shared_branch_copy_equality_and_number_budgets() {
-    if !native_ready() {
-        return;
-    }
     let cases = [
         (
             "evaluation",
@@ -619,15 +596,10 @@ fn native_shared_branch_copy_equality_and_number_budgets() {
 }
 
 #[test]
-#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) and native Ruby; five real operations with hand-authored HTTP responses"]
+#[ignore = "requires tracked OpenRouter source and native Ruby; five real operations with hand-authored HTTP responses"]
 fn native_openrouter_five_actual_operations() {
-    if !native_ready() {
-        return;
-    }
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let c = load(&spec);
+    let web = suspect_codegen::test_inputs::openrouter_root();
+    let c = load(&web.join("projects/docs/openapi/openapi.yaml"));
     let wanted = [
         "getCredits",
         "createKeys",
@@ -815,9 +787,6 @@ fn protocol_declines_conflicting_credentials_and_undefined_cookie_repetition() {
 #[test]
 #[ignore = "requires native Ruby, installed gem, YARD/RBS/Steep and real loopback HTTP"]
 fn native_expanded_protocol_wire_parts_streams_and_types() {
-    if !native_ready() {
-        return;
-    }
     let (plan, fixture) = expanded_protocol();
     let root = native_package(&plan, "protocol");
     std::fs::create_dir_all(root.join("consumer")).unwrap();
@@ -923,15 +892,10 @@ fn native_expanded_protocol_wire_parts_streams_and_types() {
 }
 
 #[test]
-#[ignore = "requires the pinned OpenRouter spec (SUSPECT_OPENROUTER_YAML) and native Ruby; explicit binary compatibility profile"]
+#[ignore = "requires tracked OpenRouter source and native Ruby; explicit binary compatibility profile"]
 fn native_additional_openrouter_binary_and_delete_operations() {
-    if !native_ready() {
-        return;
-    }
-    let Some(spec) = suspect_codegen::toolchain::openrouter_spec() else {
-        return;
-    };
-    let c = load(&spec);
+    let web = suspect_codegen::test_inputs::openrouter_root();
+    let c = load(&web.join("projects/docs/openapi/openapi.yaml"));
     let ids = [
         "downloadContainerFileContent",
         "downloadFileContent",
@@ -997,9 +961,6 @@ fn native_additional_openrouter_binary_and_delete_operations() {
 #[test]
 #[ignore = "requires native Ruby; OpenAPI 3.0 normalized codecs and byte contexts"]
 fn native_oas30_nullable_reference_siblings_and_binary() {
-    if !native_ready() {
-        return;
-    }
     let doc = json!({"openapi":"3.0.4","info":{"title":"Ruby 3.0 witness","version":"1"},"servers":[{"url":"https://example.test"}],"components":{"schemas":{
         "Old":{"type":"object","required":["id","note"],"properties":{"id":{"type":"string"},"note":{"type":"string","nullable":true},"optional":{"type":"string","default":"receiver-default"}},"additionalProperties":false},
         "Alias":{"$ref":"#/components/schemas/Old","type":"integer","readOnly":true}
