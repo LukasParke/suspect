@@ -136,6 +136,7 @@ fn warmed() -> (Workspace, Editor, Site) {
                 editor.open(&path, &text);
             }
             std::thread::sleep(Duration::from_millis(1_500));
+            warm(&editor);
             // Positions are found against the biggest document, whatever it
             // turned out to be.
             let biggest = real_documents(&root)
@@ -155,11 +156,20 @@ fn warmed() -> (Workspace, Editor, Site) {
                 editor.open(&path, &text);
             }
             std::thread::sleep(Duration::from_millis(900));
+            warm(&editor);
             let site = site(&ws);
             std::mem::forget(dir);
             (ws, editor, site)
         }
     }
+}
+
+/// Waits, unmeasured, until the whole-workspace index exists: a
+/// `workspace/symbol` answer needs it built. A fixed sleep alone left a
+/// slower host (the Windows runner) building it during the first measured
+/// round, so one cold request read as a multi-second budget breach.
+fn warm(editor: &Editor) {
+    let _ = editor.request("workspace/symbol", serde_json::json!({"query": ""}));
 }
 
 /// Site discovery that tolerates a real project not matching the generator's

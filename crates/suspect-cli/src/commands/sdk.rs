@@ -674,6 +674,34 @@ fn commit(args: &SdkArgs, prepared: Result<Prepared, Vec<Diagnostic>>) -> anyhow
                         report.status = "current";
                     } else if args.check {
                         report.status = "drift";
+                        // Name what drifted, so a failing `--check` (and the
+                        // `ci` codegen stage) says which outputs to look at.
+                        let drift = |path: &std::path::Path, what: &str| Diagnostic {
+                            file: args.out.join(path).display().to_string(),
+                            pointer: String::new(),
+                            line: 1,
+                            col: 1,
+                            range: None,
+                            code: "sdk-artifact-drift".into(),
+                            message: format!("generated output {what}"),
+                        };
+                        for change in &ownership.changes {
+                            let what = match change.kind {
+                                suspect_codegen::OwnershipChangeKind::Unchanged => continue,
+                                suspect_codegen::OwnershipChangeKind::Created => "is missing",
+                                suspect_codegen::OwnershipChangeKind::Changed => {
+                                    "differs from a fresh generation"
+                                }
+                                _ => "is obsolete or no longer owned",
+                            };
+                            report.diagnostics.push(drift(&change.path, what));
+                        }
+                        if ownership.manifest != suspect_codegen::ArtifactChange::Unchanged {
+                            report.diagnostics.push(drift(
+                                std::path::Path::new(suspect_codegen::OWNERSHIP_MANIFEST),
+                                "ownership manifest is stale",
+                            ));
+                        }
                     } else {
                         match suspect_codegen::write_files_with_owner(
                             &prepared.files,

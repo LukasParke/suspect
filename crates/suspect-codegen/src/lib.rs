@@ -71,7 +71,9 @@ pub mod typescript;
 
 use std::path::Path;
 
-pub use suspect_artifact::{Adoption, OwnershipChangeKind, OwnershipReport};
+pub use suspect_artifact::{
+    Adoption, Change as ArtifactChange, OWNERSHIP_MANIFEST, OwnershipChangeKind, OwnershipReport,
+};
 /// One generated file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutFile {

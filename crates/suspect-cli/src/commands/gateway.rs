@@ -90,6 +90,9 @@ pub fn gateway(
             let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
                 .await
                 .map_err(|e| anyhow::anyhow!("cannot bind 127.0.0.1:{port}: {e}"))?;
+            // Opt in to graceful Ctrl-C before the readiness line: a Ctrl-C
+            // right after it must stop the server (exit 0), not abort (130).
+            let shutdown = crate::interrupt::graceful();
             // Announce only once bound, with the real address (`--port 0`
             // resolves here): the line is the readiness signal.
             eprintln!(
@@ -101,7 +104,7 @@ pub fn gateway(
                 result = suspect_gateway::scenario::serve_scenario_on(listener, steps) => {
                     result.map(|()| 0).map_err(|e| anyhow::anyhow!("{e}"))
                 }
-                () = shutdown_signal() => Ok(0),
+                () = shutdown_signal(shutdown) => Ok(0),
             }
         });
     }
@@ -154,6 +157,9 @@ pub fn gateway(
         let bound = suspect_gateway::bind(cfg, journal)
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
+        // Opt in to graceful Ctrl-C before the readiness line: a Ctrl-C
+        // right after it must stop the server (exit 0), not abort (130).
+        let shutdown = crate::interrupt::graceful();
         // Announce only once the router is built and the port is bound,
         // with the real address (`--port 0` resolves here): the line is
         // the readiness signal.
@@ -163,7 +169,7 @@ pub fn gateway(
                 Ok(()) => Ok(0),
                 Err(e) => Err(anyhow::anyhow!(e)),
             },
-            _ = shutdown_signal() => {
+            _ = shutdown_signal(shutdown) => {
                 eprintln!("gateway shutting down");
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 Ok(0)
@@ -174,9 +180,7 @@ pub fn gateway(
 
 /// Resolves on the first Ctrl-C. Ctrl-C is how the gateway stops, so the
 /// command then returns 0 (`crate::interrupt`).
-async fn shutdown_signal() {
+async fn shutdown_signal(mut interrupted: tokio::sync::watch::Receiver<bool>) {
     // The sender is a static, so `wait_for` only returns on Ctrl-C.
-    let _ = crate::interrupt::graceful()
-        .wait_for(|interrupted| *interrupted)
-        .await;
+    let _ = interrupted.wait_for(|interrupted| *interrupted).await;
 }
