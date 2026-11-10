@@ -1369,6 +1369,11 @@ fn compile_criterion(
     Ok(CriterionPlan { kind, range })
 }
 
+/// The longest pause before a retry, whoever asks for it: a `retryAfter`
+/// or a server's `Retry-After` beyond it is held to it, so a run cannot be
+/// stalled for hours by one header.
+pub(crate) const MAX_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Compiles an action list of `owner` (`step 's'`, `workflow 'w'`):
 /// `onSuccess`/`onFailure` of a step, `successActions`/`failureActions`
 /// of a workflow. `retries` says whether the list may hold a `retry`. A
@@ -1415,6 +1420,17 @@ fn compile_actions(
                 }
             },
             Some("retry") if retries => {
+                // Arazzo lets a retry run a step or workflow first (refresh
+                // a token, then try again). Retrying without it would test
+                // something else than the suite describes.
+                for key in ["stepId", "workflowId"] {
+                    if let Some(target) = text(key) {
+                        return Err(located(format!(
+                            "action '{name}' is a retry that first runs {key} '{target}', \
+                             which this runner does not do"
+                        )));
+                    }
+                }
                 let number = |key: &str| {
                     node.get(key).and_then(|n| {
                         n.as_f64()
@@ -1438,7 +1454,9 @@ fn compile_actions(
                     }
                 };
                 ActionKind::Retry {
-                    after: std::time::Duration::from_secs_f64(after),
+                    after: std::time::Duration::from_secs_f64(
+                        after.min(MAX_RETRY_DELAY.as_secs_f64()),
+                    ),
                     limit,
                 }
             }
@@ -1505,12 +1523,13 @@ fn compile_param(step_id: &str, p: ParameterView<'_>) -> Result<StepParam, Compi
 /// source description that declares it.
 ///
 /// Preference order mirrors `operationId` first, then `operationPath`
-/// (`$sourceDescriptions.<name>#/paths/~1pets/get`, `<name>#/users/{userId}/delete`,
-/// or a literal `GET /pets`). A reference that names its source
-/// description resolves in that description; one that does not resolves in
-/// the first description that declares the operation. An `operationPath`
-/// no description declares still compiles, with no source: the request can
-/// be sent, but there is no contract to hold its response to.
+/// (`{$sourceDescriptions.<name>.url}#/paths/~1pets/get`, the same without
+/// braces or `.url`, `<name>#/users/{userId}/delete`, or a literal
+/// `GET /pets`). A reference that names its source description resolves
+/// in that description only; one that does not resolves in the first
+/// description that declares the operation. An `operationPath` no
+/// description declares still compiles, with no source: the request can be
+/// sent, but there is no contract to hold its response to.
 fn resolve_operation(
     step: &StepView<'_>,
     sources: &SourceIndex,
@@ -1531,16 +1550,25 @@ fn resolve_operation(
             .strip_prefix("$sourceDescriptions.")
             .and_then(|rest| rest.split_once('.'));
         if let Some((source, op_id)) = qualified {
-            if let Some(found) = sources
-                .index_of(source)
-                .and_then(|index| sources.find(Some(index), OpSelector::Id(op_id)))
-            {
-                return Ok(key_of(found));
-            }
-            // An unknown source name: fall back to the bare id anywhere.
-            if let Some(found) = sources.find(None, OpSelector::Id(op_id)) {
-                return Ok(key_of(found));
-            }
+            // The name is a promise about where the operation is declared:
+            // it is not looked for anywhere else.
+            let Some(index) = sources.index_of(source) else {
+                return Err(CompileError(format!(
+                    "step '{}': operationId '{id}' names source description '{source}', \
+                     which is not an OpenAPI description this document declares",
+                    step.step_id
+                )));
+            };
+            return sources
+                .find(Some(index), OpSelector::Id(op_id))
+                .map(key_of)
+                .ok_or_else(|| {
+                    CompileError(format!(
+                        "step '{}': operationId '{op_id}' not found in source description \
+                         '{source}'",
+                        step.step_id
+                    ))
+                });
         }
         if let Some(found) = sources.find(None, OpSelector::Id(id)) {
             return Ok(key_of(found));
@@ -1573,7 +1601,14 @@ fn resolve_operation(
 
     // Canonicalize against the referenced spec's IR when possible so the key
     // uses the exact path template from the OpenAPI document.
-    let source = name.and_then(|name| sources.index_of(name));
+    // `$sourceDescriptions.<name>.url` is the specification's spelling;
+    // the name as written wins, so a source called `x.url` still resolves.
+    let source = name.and_then(|name| {
+        sources.index_of(name).or_else(|| {
+            name.strip_suffix(".url")
+                .and_then(|bare| sources.index_of(bare))
+        })
+    });
     let selector = OpSelector::MethodPath(method, &raw_path);
     let found = match (name, source) {
         // A named source that is not an OpenAPI description declares
@@ -1597,18 +1632,24 @@ fn resolve_operation(
 
 /// Parses an `operationPath` spelling into
 /// `(source-name, Method, raw-path)`, following the accepted shapes:
-/// `$sourceDescriptions.<name>#/paths/~1pets/get`, `<name>#/users/{userId}/delete`,
-/// and literal `GET /pets`. Absolute-URL targets (`GET https://...`) are
-/// rejected so compilation fails with a clear error instead of a mangled path.
+/// `{$sourceDescriptions.<name>.url}#/paths/~1pets/get` (the
+/// specification's own, where the name comes back as `<name>.url`), the
+/// same without braces, `$sourceDescriptions.<name>#/paths/~1pets/get`,
+/// `<name>#/users/{userId}/delete`, and literal `GET /pets`. Absolute-URL
+/// targets (`GET https://...`) are rejected so compilation fails with a
+/// clear error instead of a mangled path.
 fn parse_operation_path(path: &str) -> Option<(Option<&str>, Method, String)> {
-    if let Some(rest) = path.strip_prefix("$sourceDescriptions.") {
-        let (name, frag) = rest.split_once('#')?;
-        let name = name.strip_suffix('.').unwrap_or(name);
-        let (m, p) = fragment_to_method_path(frag)?;
-        return Some((Some(name), m, p));
-    }
     if let Some((left, frag)) = path.split_once('#') {
-        let name = if left.is_empty() { None } else { Some(left) };
+        let left = left.trim();
+        // `{$expr}` and `$expr` name the same expression.
+        let left = left
+            .strip_prefix('{')
+            .and_then(|inner| inner.strip_suffix('}'))
+            .unwrap_or(left);
+        let name = left
+            .strip_prefix("$sourceDescriptions.")
+            .map_or(left, |name| name.strip_suffix('.').unwrap_or(name));
+        let name = if name.is_empty() { None } else { Some(name) };
         let (m, p) = fragment_to_method_path(frag)?;
         return Some((name, m, p));
     }
@@ -1697,7 +1738,7 @@ enum Op {
     Eq,
     /// `!=`
     Ne,
-    /// `/=` (regular-expression match)
+    /// `/=` or `=~` (regular-expression match)
     Re,
     /// `>=`
     Ge,
@@ -1724,8 +1765,9 @@ enum Target {
 ///
 /// - `'{$statusCode} == 200'` — status equality.
 /// - `'{$statusCode} /= /^2../'` — class match when the pattern has the
-///   `^N..` shape, otherwise a regex criterion (`/=` is this runner's
-///   regex-match operator).
+///   `^N..` shape, otherwise a regex held to the status (`/=`, also spelt
+///   `=~`, is this runner's regex-match operator; a body pointer on the
+///   left is matched by its value, the bare body as it arrived).
 /// - `'$response.body#/x == literal'` — body-pointer equality (JSON literal
 ///   or quoted/plain string), also against `$steps.<id>.outputs.<name>` or
 ///   `$inputs.<name>`.
@@ -1740,7 +1782,9 @@ enum Target {
 /// [`crate::condition`] into [`CriterionKind::Condition`].
 pub(crate) fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
     let trimmed = condition.trim();
-    if !crate::condition::is_compound(trimmed)
+    // `/=` belongs to the dedicated shapes alone, and the pattern after it
+    // may hold parentheses of its own.
+    if (is_pattern_match(trimmed) || !crate::condition::is_compound(trimmed))
         && let Some(kind) = condition_shape(trimmed)
     {
         return Ok(kind);
@@ -1751,21 +1795,13 @@ pub(crate) fn parse_condition(condition: &str) -> Result<CriterionKind, CompileE
         ))
     };
     let cond = crate::condition::parse(trimmed).map_err(unsupported)?;
-    // A lone literal, status or method is always "true": a criterion that
-    // can never fail is a mistake, not a check.
-    if let crate::condition::Cond::Truthy(operand) = &cond
-        && matches!(
-            operand,
-            crate::condition::Operand::Literal(_)
-                | crate::condition::Operand::Expr {
-                    rex: Rex::StatusCode | Rex::Method,
-                    ..
-                }
-        )
-    {
-        return Err(unsupported(
-            "it compares nothing, so it could never fail".to_owned(),
-        ));
+    // A literal, the status or the method standing alone is the same
+    // whatever the server answers: `$statusCode == 200 || 201` always
+    // holds. A condition with such an operand is a mistake, not a check.
+    if let Some(operand) = constant_operand(&cond) {
+        return Err(unsupported(format!(
+            "`{operand}` compares nothing, so it is the same for every response"
+        )));
     }
     Ok(CriterionKind::Condition {
         text: trimmed.to_owned(),
@@ -1773,15 +1809,50 @@ pub(crate) fn parse_condition(condition: &str) -> Result<CriterionKind, CompileE
     })
 }
 
+/// The first operand of `cond` that stands alone and cannot vary with the
+/// response body: a literal, `$statusCode` or `$method`.
+fn constant_operand(cond: &crate::condition::Cond) -> Option<String> {
+    use crate::condition::{Cond, Operand};
+    match cond {
+        Cond::Or(members) | Cond::And(members) => members.iter().find_map(constant_operand),
+        Cond::Not(member) => constant_operand(member),
+        Cond::Compare { .. } => None,
+        Cond::Truthy(Operand::Literal(value)) => Some(value.to_string()),
+        Cond::Truthy(Operand::Expr {
+            rex: Rex::StatusCode | Rex::Method,
+            text,
+        }) => Some(text.clone()),
+        Cond::Truthy(Operand::Expr { .. }) => None,
+    }
+}
+
+/// Whether the condition is `target /= pattern` and nothing more: its
+/// first operator is `/=`, and a `/…/flags` pattern is followed by nothing
+/// but its flags.
+fn is_pattern_match(trimmed: &str) -> bool {
+    let Some((_, Op::Re, rhs)) = split_op(trimmed) else {
+        return false;
+    };
+    match rhs.strip_prefix('/').and_then(|rest| rest.rsplit_once('/')) {
+        Some((_, flags)) => flags.chars().all(|flag| flag.is_ascii_alphabetic()),
+        None => true,
+    }
+}
+
 /// The dedicated criterion for a condition of one of the common shapes;
 /// `None` when the condition needs the full grammar.
 fn condition_shape(trimmed: &str) -> Option<CriterionKind> {
     let Some((lhs, op, rhs)) = split_op(trimmed) else {
-        // Operator-less conditions of this shape are body-existence checks.
-        return match classify_target(trimmed) {
-            Some(Target::Body(_)) => Some(CriterionKind::JsonPathTrue {
-                expr: fragment_after_hash(trimmed).unwrap_or_default(),
-            }),
+        // An operator-less condition that is one body expression is an
+        // existence check. Anything after the expression is not part of
+        // its pointer: the full grammar says what it is.
+        let bare = unbraced(trimmed);
+        return match classify_target(bare) {
+            Some(Target::Body(_)) if !bare.contains(char::is_whitespace) => {
+                Some(CriterionKind::JsonPathTrue {
+                    expr: fragment_after_hash(bare).unwrap_or_default(),
+                })
+            }
             _ => None,
         };
     };
@@ -1796,7 +1867,7 @@ fn condition_shape(trimmed: &str) -> Option<CriterionKind> {
             pointer: None,
             expected: expected_value(rhs),
         },
-        (Target::Status, Op::Re) => status_range_or_regex(regex_pattern(rhs)),
+        (target, Op::Re) => return pattern_criterion(lhs, &target, rhs),
         (Target::Body(pointer), Op::Eq) => CriterionKind::Equals {
             pointer: Some(pointer),
             expected: expected_value(rhs),
@@ -1804,9 +1875,6 @@ fn condition_shape(trimmed: &str) -> Option<CriterionKind> {
         (Target::Body(pointer), Op::Ne) if rhs.trim() == "null" => {
             CriterionKind::NotNull { pointer }
         }
-        (Target::Body(_), Op::Re) => CriterionKind::Regex {
-            pattern: regex_pattern(rhs),
-        },
         (Target::Body(pointer), Op::Gt | Op::Ge | Op::Lt | Op::Le) => {
             // A bound that is itself a runtime expression is not a literal.
             if rhs.trim_start().starts_with(['$', '{']) {
@@ -1829,6 +1897,43 @@ fn condition_shape(trimmed: &str) -> Option<CriterionKind> {
     })
 }
 
+/// The criterion for `target /= pattern`: the pattern is held to the value
+/// the target names — the status, the value at a body pointer, or the body
+/// as it arrived. `None` when the pattern is not a regular expression, so
+/// the condition is reported instead of failing every run.
+fn pattern_criterion(lhs: &str, target: &Target, rhs: &str) -> Option<CriterionKind> {
+    let pattern = regex_pattern(rhs);
+    regex::Regex::new(&pattern).ok()?;
+    match target {
+        Target::Status => {
+            // `^N..` is a status class, reported as one.
+            if let range @ CriterionKind::StatusInRange(..) = status_range_or_regex(pattern.clone())
+            {
+                return Some(range);
+            }
+        }
+        Target::Body(pointer) if pointer.is_empty() => {
+            return Some(CriterionKind::Regex { pattern });
+        }
+        Target::Body(_) => {}
+    }
+    let text = unbraced(lhs);
+    Some(CriterionKind::ContextRegex {
+        context: parse_rex(text).ok()?,
+        context_text: text.to_owned(),
+        pattern,
+    })
+}
+
+/// `{$expr}` and `$expr` name the same expression: the text without the
+/// optional braces.
+fn unbraced(text: &str) -> &str {
+    let text = text.trim();
+    text.strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .map_or(text, str::trim)
+}
+
 /// Splits `lhs op rhs` at the earliest operator occurrence that lies outside
 /// the pointer text following a `#/` marker, so operators inside a
 /// `$response.body#/...` fragment never yield split points.
@@ -1839,6 +1944,7 @@ fn split_op(cond: &str) -> Option<(&str, Op, &str)> {
         ("==", Op::Eq),
         ("!=", Op::Ne),
         ("/=", Op::Re),
+        ("=~", Op::Re),
         (">=", Op::Ge),
         ("<=", Op::Le),
         (">", Op::Gt),
@@ -1872,7 +1978,7 @@ fn in_pointer_text(frag_start: Option<usize>, cond: &str, idx: usize) -> bool {
 
 /// Classifies a condition LHS as status or body-pointer target.
 fn classify_target(lhs: &str) -> Option<Target> {
-    let lhs = lhs.trim();
+    let lhs = unbraced(lhs);
     if lhs.contains("$statusCode") {
         return Some(Target::Status);
     }
@@ -1959,11 +2065,18 @@ fn literal_value(rhs: &str) -> serde_json::Value {
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(rhs) {
         return v;
     }
-    let inner = rhs
-        .strip_prefix('\'')
-        .and_then(|s| s.strip_suffix('\''))
-        .or_else(|| rhs.strip_prefix('"').and_then(|s| s.strip_suffix('"')));
-    serde_json::Value::String(inner.unwrap_or(rhs).to_owned())
+    // A doubled quote inside a quoted string is one quote, as in the
+    // condition grammar.
+    let dequoted = |quote: char| {
+        rhs.strip_prefix(quote)
+            .and_then(|s| s.strip_suffix(quote))
+            .map(|inner| inner.replace(&format!("{quote}{quote}"), &quote.to_string()))
+    };
+    serde_json::Value::String(
+        dequoted('\'')
+            .or_else(|| dequoted('"'))
+            .unwrap_or_else(|| rhs.to_owned()),
+    )
 }
 
 /// Parses an equality RHS: a runtime expression reference

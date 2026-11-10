@@ -182,21 +182,12 @@ fn validate_step<'d>(
             ),
         ));
     }
-    if let Some(path) = step.operation_path() {
-        // form: $sourceDescriptions.<name>[.#/json-pointer] or $url#/...
-        if !path.starts_with('$') {
-            out.push(diag(
-                step.node().byte_range(),
-                "arazzo-invalid-operation-path",
-                format!("operationPath must start with `$`: {path:?}"),
-            ));
-        } else if let Err(e) = crate::expr::parse(path.split("#").next().unwrap_or(path)) {
-            out.push(diag(
-                step.node().byte_range(),
-                "arazzo-invalid-operation-path",
-                format!("invalid source expression: {e}"),
-            ));
-        }
+    if let Some(problem) = step.operation_path().and_then(operation_path_problem) {
+        out.push(diag(
+            step.node().byte_range(),
+            "arazzo-invalid-operation-path",
+            problem,
+        ));
     }
     for c in step.success_criteria() {
         match c.condition_text() {
@@ -707,10 +698,51 @@ fn validate_sequential_outputs(wf: &crate::WorkflowView<'_>, out: &mut Vec<Arazz
     }
 }
 
+/// HTTP method keys of a Path Item, the last token of an operation pointer.
+const OPERATION_METHODS: [&str; 9] = [
+    "get", "put", "post", "delete", "options", "head", "patch", "trace", "query",
+];
+
+/// What is wrong with an `operationPath`, if anything. The form is a
+/// source expression — `{$sourceDescriptions.<name>.url}`, with or without
+/// the braces — and, after `#`, a JSON pointer to an operation.
+fn operation_path_problem(path: &str) -> Option<String> {
+    let (source, fragment) = match path.split_once('#') {
+        Some((source, fragment)) => (source, Some(fragment)),
+        None => (path, None),
+    };
+    let source = source.trim();
+    let source = source
+        .strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .unwrap_or(source);
+    if !source.starts_with('$') {
+        return Some(format!("operationPath must start with `$`: {path:?}"));
+    }
+    if let Err(error) = crate::expr::parse(source) {
+        return Some(format!("invalid source expression: {error}"));
+    }
+    let tokens: Vec<&str> = fragment?
+        .split('/')
+        .filter(|token| !token.is_empty())
+        .collect();
+    let method = match tokens.as_slice() {
+        ["paths", _, method, ..] => Some(method),
+        ["paths", ..] | [] | [_] => None,
+        [.., method] => Some(method),
+    };
+    let names_operation =
+        method.is_some_and(|method| OPERATION_METHODS.contains(&method.to_lowercase().as_str()));
+    (!names_operation).then(|| {
+        format!("operationPath must point at an operation, as `#/paths/<path>/<method>`: {path:?}")
+    })
+}
+
 /// Criterion-condition validity per Arazzo §5.8.11: a condition is either a
 /// plain runtime expression, an embedded-expression template, or a
 /// comparison — `<expression> <op> <literal>` with the operators the
-/// Criterion Object defines (`==`, `!=`, `<`, `<=`, `>`, `>=`, `=~`).
+/// Criterion Object defines (`==`, `!=`, `<`, `<=`, `>`, `>=`) and the
+/// runner's pattern match (`=~`, also spelt `/=`).
 /// `$statusCode == 200` — the canonical Arazzo condition — is a comparison,
 /// not a bare expression, and must not be flagged invalid.
 /// Diagnoses an invalid condition: names what the parser expected, where
@@ -750,12 +782,14 @@ fn condition_problem(cond: &str) -> Option<String> {
 /// The comparisons of a `simple` condition: its text split at `&&` and
 /// `||`, each part without the `!` and parentheses around it. Operators
 /// inside a quoted string or inside the pointer text after a `#` are part
-/// of that text.
+/// of that text, and so is everything after a pattern-match operator: the
+/// pattern runs to the end of the condition.
 fn clauses(cond: &str) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
     let mut in_pointer = false;
+    let mut in_pattern = false;
     let mut chars = cond.chars().peekable();
     while let Some(ch) = chars.next() {
         match quote {
@@ -778,7 +812,10 @@ fn clauses(cond: &str) -> Vec<String> {
         } else if ch == '#' {
             in_pointer = true;
         }
-        if !in_pointer && (ch == '&' || ch == '|') && chars.peek() == Some(&ch) {
+        if !in_pointer && matches!((ch, chars.peek()), ('/', Some('=')) | ('=', Some('~'))) {
+            in_pattern = true;
+        }
+        if !in_pointer && !in_pattern && (ch == '&' || ch == '|') && chars.peek() == Some(&ch) {
             chars.next();
             parts.push(std::mem::take(&mut current));
             continue;
@@ -848,7 +885,7 @@ fn clause_is_valid(cond: &str) -> bool {
     {
         return true;
     }
-    for op in ["=~", "==", "!=", "<=", ">=", "<", ">"] {
+    for op in ["=~", "/=", "==", "!=", "<=", ">=", "<", ">"] {
         if let Some((lhs, _rhs)) = cond.split_once(op) {
             // An operator only counts outside a JSON pointer (`#/a<b`).
             if lhs.contains('#') && lhs.rsplit('#').next().is_some_and(|tail| tail.contains(op)) {

@@ -646,6 +646,14 @@ fn actions_that_cannot_run_do_not_compile() {
             "retry",
         ),
         (
+            "        onFailure:\n          - { name: a, type: retry, stepId: s }\n",
+            "stepId 's'",
+        ),
+        (
+            "        onFailure:\n          - { name: a, type: retry, workflowId: other }\n",
+            "workflowId 'other'",
+        ),
+        (
             "        onFailure:\n          - { name: a, type: explode }\n",
             "explode",
         ),
@@ -790,4 +798,469 @@ fn steps_and_replacements_that_cannot_run_do_not_compile() {
         let error = compile(&flow).expect_err("must not compile");
         assert!(error.0.contains(needle), "`{needle}` in: {error}");
     }
+}
+
+// ------------------------------------------------- review findings, pinned
+
+/// `(passed, failed, skipped)` of the reported cases.
+fn case_counts(cases: &[reporters::Case]) -> (usize, usize, usize) {
+    let failed = cases.iter().filter(|case| case.is_failed()).count();
+    let skipped = cases.iter().filter(|case| case.is_skipped()).count();
+    (cases.len() - failed - skipped, failed, skipped)
+}
+
+#[test]
+fn an_operation_path_in_the_specifications_own_form_keeps_its_contract() {
+    for path in [
+        "'{$sourceDescriptions.api.url}#/paths/~1jobs/get'",
+        "$sourceDescriptions.api.url#/paths/~1jobs/get",
+        "$sourceDescriptions.api#/paths/~1jobs/get",
+    ] {
+        let flow = format!(
+            "workflows:\n  - workflowId: w\n    steps:\n      - stepId: s\n        operationPath: {path}\n"
+        );
+        let plan = compile(&flow).expect("compiles");
+        assert!(
+            plan.workflows[0].steps[0].contract.is_some(),
+            "{path} names a declared operation"
+        );
+        let server = Script::default().on("GET /jobs", vec![reply(200, "{}")]);
+        let (summary, events) = run_with(&plan, &server, serde_json::json!({}));
+        assert_eq!(counts(&summary), (1, 0, 0), "{path}: {events:#?}");
+    }
+}
+
+#[test]
+fn an_operand_that_decides_nothing_does_not_compile_wherever_it_stands() {
+    for condition in [
+        "$statusCode == 200 || 201",
+        "$statusCode == 200 && 'ok'",
+        "!(404)",
+        "$statusCode == 200 || $statusCode",
+        "($method) && $statusCode == 200",
+    ] {
+        let error =
+            compile(&one_step("listJobs", &criteria(&[condition]))).expect_err("must not compile");
+        assert!(error.0.contains("compares nothing"), "{condition}: {error}");
+    }
+    // An expression that may be absent is a check wherever it stands.
+    compile(&one_step(
+        "listJobs",
+        &criteria(&[
+            "$statusCode == 200 && $response.body#/id",
+            "!$response.header.X-Error",
+        ]),
+    ))
+    .expect("compiles");
+}
+
+const LOOP: &str = "workflows:
+  - workflowId: w
+    steps:
+      - stepId: setup
+        operationId: listJobs
+      - stepId: work
+        operationId: startJob
+        successCriteria:
+          - condition: $statusCode == 202
+        onFailure:
+          - { name: again, type: goto, stepId: setup }
+";
+
+#[test]
+fn a_step_a_goto_runs_again_is_still_one_step() {
+    let server = Script::default()
+        .on("GET /jobs", vec![reply(200, "{}")])
+        .on("POST /jobs", vec![reply(500, "")]);
+    let plan = compile(LOOP).expect("compiles");
+    let (summary, events) = run_with(&plan, &server, serde_json::json!({}));
+    assert!(server.requests().len() > 4, "the loop ran until it was cut");
+    assert_eq!(
+        counts(&summary),
+        (1, 1, 0),
+        "two steps, however often they ran: {events:#?}"
+    );
+    assert_eq!(
+        case_counts(&reporters::workflow_cases(&plan, &events)),
+        counts(&summary),
+        "the totals are the totals of the reported cases"
+    );
+}
+
+#[test]
+fn a_step_that_never_ran_is_skipped_whatever_the_route() {
+    let flow = "workflows:
+  - workflowId: w
+    steps:
+      - stepId: a
+        operationId: listJobs
+        onSuccess:
+          - { name: jump, type: goto, stepId: c }
+      - stepId: b
+        operationId: startJob
+      - stepId: c
+        operationId: cleanup
+        successCriteria:
+          - condition: $statusCode == 200
+      - stepId: d
+        operationId: showJob
+        parameters:
+          - { name: jobId, in: path, value: j1 }
+";
+    let server = Script::default()
+        .on("GET /jobs", vec![reply(200, "{}")])
+        .on("POST /cleanup", vec![reply(500, "")]);
+    let plan = compile(flow).expect("compiles");
+    let (summary, events) = run_with(&plan, &server, serde_json::json!({}));
+    assert_eq!(server.requests(), ["GET /jobs", "POST /cleanup"]);
+    assert_eq!(counts(&summary), (1, 1, 2), "{events:#?}");
+    assert_eq!(
+        case_counts(&reporters::workflow_cases(&plan, &events)),
+        counts(&summary)
+    );
+}
+
+#[test]
+fn a_retry_delay_is_bounded() {
+    use std::time::Duration;
+    let declared = Duration::from_millis(250);
+    let longest = Duration::from_secs(300);
+    for seconds in ["86400", "1e20"] {
+        let header = [("Retry-After".to_owned(), seconds.to_owned())];
+        assert_eq!(
+            crate::exec::retry_delay(declared, &header),
+            longest,
+            "Retry-After: {seconds}"
+        );
+    }
+    for not_a_delay in ["inf", "NaN", "-1", "1e400"] {
+        let header = [("Retry-After".to_owned(), not_a_delay.to_owned())];
+        assert_eq!(
+            crate::exec::retry_delay(declared, &header),
+            declared,
+            "Retry-After: {not_a_delay}"
+        );
+    }
+    // A declared delay is held to the same bound instead of overflowing.
+    for declared in ["86400", "1e20"] {
+        let flow = POLL.replace("retryAfter: 0", &format!("retryAfter: {declared}"));
+        let plan = compile(&flow).expect("compiles");
+        let crate::plan::ActionKind::Retry { after, .. } =
+            plan.workflows[0].steps[0].on_failure[0].kind
+        else {
+            panic!("a retry");
+        };
+        assert_eq!(after, longest, "retryAfter: {declared}");
+    }
+}
+
+#[test]
+fn a_condition_means_the_same_inside_parentheses() {
+    let run_one = |condition: &str, body: &'static str| {
+        let flow = one_step("listJobs", &criteria(&[condition]));
+        let server = Script::default().on("GET /jobs", vec![reply(200, body)]);
+        counts(&run(&flow, &server).0)
+    };
+    for condition in ["$response.body#/x == null", "($response.body#/x == null)"] {
+        assert_eq!(run_one(condition, "{}"), (1, 0, 0), "{condition}: absent");
+        assert_eq!(
+            run_one(condition, r#"{"x":null}"#),
+            (1, 0, 0),
+            "{condition}: null"
+        );
+        assert_eq!(
+            run_one(condition, r#"{"x":1}"#),
+            (0, 1, 0),
+            "{condition}: present"
+        );
+    }
+    for condition in [
+        "$response.body#/q == 'it''s'",
+        "($response.body#/q == 'it''s')",
+    ] {
+        assert_eq!(
+            run_one(condition, r#"{"q":"it's"}"#),
+            (1, 0, 0),
+            "{condition}"
+        );
+        assert_eq!(
+            run_one(condition, r#"{"q":"it''s"}"#),
+            (0, 1, 0),
+            "{condition}"
+        );
+    }
+    for condition in ["$response.body != null", "($response.body != null)"] {
+        assert_eq!(
+            run_one(condition, "{}"),
+            (1, 0, 0),
+            "{condition}: a document"
+        );
+        assert_eq!(run_one(condition, "null"), (0, 1, 0), "{condition}: null");
+        assert_eq!(run_one(condition, ""), (0, 1, 0), "{condition}: no body");
+    }
+}
+
+#[test]
+fn a_regex_criterion_needs_its_context_to_exist() {
+    let flow = one_step(
+        "listJobs",
+        "        successCriteria:\n          - context: $response.header.X-Request-Id\n            condition: '^[a-z]*$'\n            type: regex\n",
+    );
+    let with_id = Script::default().on(
+        "GET /jobs",
+        vec![Reply {
+            status: 200,
+            headers: vec![("x-request-id", "abc")],
+            body: "{}",
+        }],
+    );
+    assert_eq!(counts(&run(&flow, &with_id).0), (1, 0, 0));
+    let without = Script::default().on("GET /jobs", vec![reply(200, "{}")]);
+    let (summary, events) = run(&flow, &without);
+    assert_eq!(
+        counts(&summary),
+        (0, 1, 0),
+        "a header that is not there matches nothing: {events:#?}"
+    );
+    assert!(failures(&events)[0].2.contains("missing"), "{events:#?}");
+}
+
+#[test]
+fn a_body_that_is_not_json_is_its_text() {
+    let flow = one_step(
+        "listJobs",
+        "        successCriteria:\n          - context: $response.body\n            condition: '^OK$'\n            type: regex\n          - condition: $response.body == 'OK'\n          - condition: $response.body != null\n",
+    );
+    let ok = Script::default().on("GET /jobs", vec![reply(200, "OK")]);
+    let (summary, events) = run(&flow, &ok);
+    assert_eq!(counts(&summary), (1, 0, 0), "{events:#?}");
+    let not_ok = Script::default().on("GET /jobs", vec![reply(200, "FAILED")]);
+    let (summary, events) = run(&flow, &not_ok);
+    assert_eq!(counts(&summary), (0, 1, 0));
+    assert_eq!(failures(&events).len(), 2, "{events:#?}");
+}
+
+#[test]
+fn a_retry_replaces_only_the_attempt_it_retries() {
+    let flow = "workflows:
+  - workflowId: w
+    steps:
+      - stepId: setup
+        operationId: listJobs
+      - stepId: work
+        operationId: startJob
+        successCriteria:
+          - condition: $statusCode == 202
+        onFailure:
+          - name: busy
+            type: retry
+            retryAfter: 0
+            retryLimit: 2
+            criteria:
+              - condition: $statusCode == 503
+          - { name: restart, type: goto, stepId: setup }
+";
+    // 500: back to setup. Then 503: retried. Then accepted.
+    let server = Script::default()
+        .on("GET /jobs", vec![reply(200, "{}")])
+        .on(
+            "POST /jobs",
+            vec![reply(500, ""), reply(503, ""), reply(202, "{}")],
+        );
+    let plan = compile(flow).expect("compiles");
+    let (summary, events) = run_with(&plan, &server, serde_json::json!({}));
+    assert_eq!(
+        server.requests(),
+        [
+            "GET /jobs",
+            "POST /jobs",
+            "GET /jobs",
+            "POST /jobs",
+            "POST /jobs"
+        ],
+        "{events:#?}"
+    );
+    assert_eq!(
+        counts(&summary),
+        (1, 1, 0),
+        "the run that failed stays on the record: {events:#?}"
+    );
+    let cases = reporters::workflow_cases(&plan, &events);
+    assert_eq!(case_counts(&cases), (1, 1, 0), "{cases:#?}");
+    let reporters::Outcome::Failed { failures } = &cases[1].outcome else {
+        panic!("`work` failed: {cases:#?}");
+    };
+    assert_eq!(
+        failures.len(),
+        1,
+        "only the run no retry replaced: {failures:#?}"
+    );
+    assert!(failures[0].actual.contains("500"), "{failures:#?}");
+    let console = reporters::console(&summary, &events);
+    assert_eq!(console.matches("  FAIL ").count(), 1, "{console}");
+    assert!(console.contains("500"), "{console}");
+}
+
+#[test]
+fn a_qualified_operation_id_resolves_only_in_its_source() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("api.yaml"), API).expect("api");
+    std::fs::write(
+        dir.path().join("billing.yaml"),
+        "openapi: 3.1.0\ninfo: { title: Billing, version: '1' }\npaths:\n  /invoices:\n    get:\n      operationId: listInvoices\n      responses:\n        default: { description: any }\n",
+    )
+    .expect("billing");
+    let ws = WorkspaceBuilder::new()
+        .root(dir.path())
+        .build()
+        .expect("ws");
+    ws.load_all("api.yaml").expect("load");
+    ws.load_all("billing.yaml").expect("load");
+    let ws = Arc::new(ws);
+    let compile_step = |operation: &str| {
+        let text = format!(
+            "arazzo: 1.0.0\ninfo: {{ title: t, version: '1' }}\nsourceDescriptions:\n  - {{ name: api, url: api.yaml, type: openapi }}\n  - {{ name: billing, url: billing.yaml, type: openapi }}\nworkflows:\n  - workflowId: w\n    steps:\n      - stepId: s\n        operationId: {operation}\n"
+        );
+        let doc = LowDoc::parse(
+            "mem://flows.arazzo.yaml".into(),
+            Source::from_vec(text.into_bytes()),
+        );
+        compile_plan(&doc, &ws)
+    };
+    let plan = compile_step("$sourceDescriptions.billing.listInvoices").expect("compiles");
+    assert_eq!(plan.workflows[0].steps[0].contract, Some(1));
+    compile_step("listJobs").expect("an unqualified id resolves anywhere");
+
+    // `billing` exists and does not declare it: not another source's.
+    let error = compile_step("$sourceDescriptions.billing.listJobs").expect_err("not in billing");
+    assert!(
+        error.0.contains("listJobs") && error.0.contains("'billing'"),
+        "{error}"
+    );
+    let error = compile_step("$sourceDescriptions.nowhere.listJobs").expect_err("no such source");
+    assert!(error.0.contains("'nowhere'"), "{error}");
+}
+
+#[test]
+fn a_root_filter_reads_an_array_context_as_its_items() {
+    let flow = one_step(
+        "listJobs",
+        "        successCriteria:\n          - context: $response.body\n            condition: $[?!@.error]\n            type: jsonpath\n",
+    );
+    let clean = Script::default().on("GET /jobs", vec![reply(200, r#"[{"id":1}]"#)]);
+    assert_eq!(counts(&run(&flow, &clean).0), (1, 0, 0));
+    let failed = Script::default().on("GET /jobs", vec![reply(200, r#"[{"error":"x"}]"#)]);
+    let (summary, events) = run(&flow, &failed);
+    assert_eq!(
+        counts(&summary),
+        (0, 1, 0),
+        "no item is without an error: {events:#?}"
+    );
+}
+
+#[test]
+fn a_parenthesis_ends_a_pointer_and_a_pattern_keeps_its_groups() {
+    let run_one = |condition: &str, body: &'static str| {
+        let flow = one_step("listJobs", &criteria(&[condition]));
+        let server = Script::default().on("GET /jobs", vec![reply(200, body)]);
+        counts(&run(&flow, &server).0)
+    };
+    assert_eq!(
+        run_one("!($response.body#/failed)", r#"{"failed":false}"#),
+        (1, 0, 0)
+    );
+    assert_eq!(
+        run_one("!($response.body#/failed)", r#"{"failed":true}"#),
+        (0, 1, 0)
+    );
+    assert_eq!(
+        run_one(
+            "($response.body#/a == 1) && ($response.body#/b == 2)",
+            r#"{"a":1,"b":2}"#
+        ),
+        (1, 0, 0)
+    );
+    // Parentheses inside a pointer belong to it.
+    assert_eq!(
+        run_one("($response.body#/f(x) == 1)", r#"{"f(x)":1}"#),
+        (1, 0, 0)
+    );
+
+    assert_eq!(run_one("$response.body /= /(a|b)c/", "bc"), (1, 0, 0));
+    assert_eq!(run_one("$response.body /= /(a|b)c/", "dc"), (0, 1, 0));
+    // What follows a pattern is not dropped.
+    let error = compile(&one_step(
+        "listJobs",
+        &criteria(&["$response.body /= /a/ && $statusCode == 500"]),
+    ))
+    .expect_err("must not compile");
+    assert!(error.0.contains("unsupported success criterion"), "{error}");
+}
+
+#[test]
+fn a_pattern_match_has_two_spellings() {
+    for operator in ["/=", "=~"] {
+        let flow = one_step(
+            "listJobs",
+            &criteria(&[
+                &format!("$response.body#/name {operator} /^job-[0-9]+$/"),
+                &format!("{{$response.body#/name}} {operator} /^job-/"),
+                &format!("$response.body {operator} /job-7/"),
+                &format!("$statusCode {operator} /^2../"),
+                &format!("$statusCode {operator} /^20[01]$/"),
+            ]),
+        );
+        let named = Script::default().on("GET /jobs", vec![reply(200, r#"{"name":"job-7"}"#)]);
+        let (summary, events) = run(&flow, &named);
+        assert_eq!(counts(&summary), (1, 0, 0), "{operator}: {events:#?}");
+
+        // The pattern is held to the value it names, not to the whole body.
+        let elsewhere = Script::default().on(
+            "GET /jobs",
+            vec![reply(204, r#"{"name":"task","note":"job-7 200"}"#)],
+        );
+        let (summary, events) = run(&flow, &elsewhere);
+        assert_eq!(counts(&summary), (0, 1, 0), "{operator}");
+        assert_eq!(
+            failures(&events).len(),
+            3,
+            "the two patterns on the name and the one on the status: {events:#?}"
+        );
+    }
+    // A pattern that is not a regular expression does not compile.
+    let error = compile(&one_step(
+        "listJobs",
+        &criteria(&["$response.body#/name /= /([/"]),
+    ))
+    .expect_err("must not compile");
+    assert!(error.0.contains("unsupported success criterion"), "{error}");
+}
+
+#[test]
+fn an_expression_in_braces_reads_the_same_value() {
+    let flow = one_step(
+        "listJobs",
+        &criteria(&[
+            "{$response.body#/name} == 'job-7'",
+            "{$response.body#/total} > 1",
+            "{$response.body#/name} != null",
+            "{$response.body#/name}",
+        ]),
+    );
+    let server = Script::default().on(
+        "GET /jobs",
+        vec![reply(200, r#"{"name":"job-7","total":2}"#)],
+    );
+    let (summary, events) = run(&flow, &server);
+    assert_eq!(counts(&summary), (1, 0, 0), "{events:#?}");
+}
+
+#[test]
+fn text_after_an_expression_is_not_part_of_its_pointer() {
+    let error = compile(&one_step(
+        "listJobs",
+        &criteria(&["$response.body#/name is 'rex'"]),
+    ))
+    .expect_err("must not compile");
+    assert!(error.0.contains("unsupported success criterion"), "{error}");
 }

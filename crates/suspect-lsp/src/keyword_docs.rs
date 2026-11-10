@@ -1733,9 +1733,9 @@ const SCHEMA_KEYWORDS: &[(&str, KeywordDoc)] = &[
             "Arazzo",
             "Arazzo 1.0",
             "Runtime expression to a source + operation",
-            "Addresses an operation by source description and path/method: `{$sourceDescriptions.plex-api#/paths/~1pets/get}`.",
-            "Alternative to `operationId`. Malformed expressions surface as `arazzo-invalid-operation-path`.",
-            "operationPath: '{$sourceDescriptions.plex-api#/paths/~1pets/get}'"
+            "Addresses an operation by source description and a JSON pointer to it: `{$sourceDescriptions.plex-api.url}#/paths/~1pets/get`.",
+            "Alternative to `operationId`. A malformed expression, or a pointer that names no operation, surfaces as `arazzo-invalid-operation-path`.",
+            "operationPath: '{$sourceDescriptions.plex-api.url}#/paths/~1pets/get'"
         ),
     ),
     (

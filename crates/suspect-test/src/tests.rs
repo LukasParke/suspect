@@ -2778,9 +2778,13 @@ async fn on_failure_goto_reruns_from_the_target_step() {
         vec!["prepare", "check", "make", "prepare", "check", "make"],
         "{events:#?}"
     );
-    // The first `make` failure stays on the record; the re-runs replace,
-    // rather than add to, the earlier passes.
-    assert_eq!((summary.passed, summary.failed), (3, 1), "{events:#?}");
+    // Three steps, each counted once: the first `make` failure stays on
+    // the record though its second run passed, as the reports show it.
+    assert_eq!(
+        (summary.passed, summary.failed, summary.skipped),
+        (2, 1, 0),
+        "{events:#?}"
+    );
 }
 
 /// `make` always fails and its `onFailure` jumps back to itself.

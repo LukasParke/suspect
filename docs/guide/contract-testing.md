@@ -50,7 +50,7 @@ For every reply, in this order:
 | `response-status` | the status is not one the operation declares: no exact code, no range (`4XX`) and no `default` |
 | `response-header` | a response header declared `required` is missing, or a declared header does not satisfy its schema |
 | `response-content-type` | the `Content-Type` is not one the response declares (`application/*` and `*/*` cover what they say; parameters such as `charset` are ignored) |
-| `response-schema` | a JSON body (`application/json` or any `+json` type) does not satisfy the schema of its media type |
+| `response-schema` | a JSON body (`application/json` or any `+json` type) does not satisfy the schema of its media type, or there is no body where the response declares one with a schema |
 | the step's `successCriteria` | any criterion does not hold; a step without criteria requires a `2xx` |
 
 The contract checks run whether or not the step has criteria, and a
@@ -69,7 +69,7 @@ of that applies:
 | Level | Applies |
 |---|---|
 | `strict` (default) | everything above |
-| `schema` | the body schema of declared responses only; a status or content type the description omits is not a finding. For descriptions that document the success path only |
+| `schema` | the body schema of declared responses only; a status or content type the description omits is not a finding (a body in a JSON type the response does not list is still held to its JSON schema). For descriptions that document the success path only |
 | `off` | success criteria only |
 
 ```yaml
@@ -90,7 +90,11 @@ test:
   Nothing else about the property changes.
 - **Inline and shared declarations.** A schema written inline is checked
   like a component. A response, parameter, request body, header or path
-  item behind a `$ref` is followed.
+  item behind a `$ref` is followed, and so is a schema reference that
+  points anywhere in the document (`#/components/schemas/Pet/properties/id`).
+- **Composition.** A property declared in one `allOf` member and required
+  in another is still excused by its `readOnly` or `writeOnly`. A long
+  `uniqueItems` list is checked to the end.
 - **Several files.** A reference into another file (`$ref:
   './schemas/pet.yaml'`) is loaded and checked like a local one, recursion
   included. A reference that cannot be loaded fails the step that needs it;
@@ -131,9 +135,11 @@ workflows:
 
 - **The operation** is `operationId` (qualify it as
   `$sourceDescriptions.<name>.<operationId>` when two descriptions share an
-  id) or `operationPath` (`$sourceDescriptions.<name>#/paths/~1pets/get`, or
-  the literal `GET /pets`). Under `strict`, an `operationPath` no
-  description declares fails with the check `operation`.
+  id) or `operationPath`
+  (`'{$sourceDescriptions.<name>.url}#/paths/~1pets/get'`, also without
+  the braces or `.url`). An operation that names its description is
+  looked for there and nowhere else. Under `strict`, an `operationPath`
+  no description declares fails with the check `operation`.
 - **Inputs** come from `--input name=value` (repeatable; the value is JSON
   when it parses), `--inputs-file`, then the workflow's `parameters`, then
   the `default` of its `inputs` schema.
@@ -158,6 +164,7 @@ A criterion is a `simple` condition unless it declares a `type`.
 | logic and grouping | `$statusCode == 200 \|\| $statusCode == 201`, `!($response.body#/state == 'failed')`, `a && (b \|\| c)` |
 | against run state | `$response.body#/id == $steps.create.outputs.petId`, `$response.body#/name == $inputs.petName` |
 | existence | `$response.body#/id != null`, or the bare expression `$response.body#/id` |
+| pattern (an extension to Arazzo) | `$response.body#/id =~ /^pet_[0-9]+$/`, `$statusCode =~ /^2../`; also spelt `/=`. The pattern is the rest of the condition |
 | regex on a context | `context: $response.body#/id`, `condition: '^pet_[0-9]+$'`, `type: regex` |
 | JSONPath on a context | `context: $response.body`, `condition: $.items[?@.status == 'available']`, `type: jsonpath` |
 
@@ -166,6 +173,14 @@ parentheses. Literals are `true`, `false`, `null`, numbers and
 single-quoted strings (`''` is a quote). String comparison is
 case-insensitive, as Arazzo requires. A header value that spells a number
 compares as that number. An expression may be written `{$statusCode}`.
+
+- A value that is not there equals `null` and nothing else.
+- A body that is not JSON is its text: `$response.body == 'OK'`.
+- A literal, `$statusCode` or `$method` standing alone compares nothing.
+  `$statusCode == 200 || 201` would hold for every reply, so a suite with
+  such a condition does not compile.
+- A regex criterion whose context is missing (a header the reply does not
+  carry) fails.
 
 A JSONPath criterion (RFC 9535) holds when the query selects at least one
 node. A query that is one filter on the root, such as Arazzo's own example
@@ -201,7 +216,7 @@ hold applies (an action without criteria always does).
 
 | Action | Effect |
 |---|---|
-| `retry` (`onFailure`) | the step runs again after `retryAfter` seconds, up to `retryLimit` times (once when omitted). A `Retry-After` response header in seconds overrides `retryAfter`. The step is judged by its last attempt. An exhausted retry is passed over for the next action |
+| `retry` (`onFailure`) | the step runs again after `retryAfter` seconds, up to `retryLimit` times (once when omitted). A `Retry-After` response header in seconds overrides `retryAfter`; no pause is longer than five minutes. The step is judged by its last attempt. An exhausted retry is passed over for the next action |
 | `goto` with `stepId` | the workflow continues at that step; steps the jump passes over are not run. A workflow follows at most 16 gotos |
 | `end` | the workflow ends: failed after `onFailure`, passed after `onSuccess` |
 
@@ -236,6 +251,11 @@ Settings come from `.suspect.yaml` next to the suite (`suspect config
 | JUnit XML | `--junit out/junit.xml`: one `<testsuite>` per workflow, one `<testcase>` per step, failures with every failed check and the requests sent; steps not reached are `<skipped>` |
 | JSON | `--report-file out/report.json`: counts and one entry per step (`suite`, `name`, `status`, `failures`, `requests`) |
 
+A step is one case however often a `goto` ran it, and it is failed if any
+run of it failed; a retry replaces only the attempt it retries. The totals
+count each step once, so `passed + failed + skipped` is the number of
+steps.
+
 `suspect test stateful`, `fuzz` and `replay` take `--junit` and
 `--report-file` too, with one case per sequence, operation and exchange.
 
@@ -253,8 +273,10 @@ Offline, each request is answered by the recording of that request: the
 method, path and query are matched, the scheme and host are not, so a
 cassette recorded against one host replays against any base URL. A request
 sent twice walks its recordings in order (read, delete, read again), and a
-recording with the same request body is preferred. A request the cassette
-does not hold fails its step with a `transport` failure that names it.
+recording with the same request body is preferred. A request recorded
+only with another query string is answered by that recording. A request
+the cassette does not hold at all fails its step with a `transport`
+failure that names it.
 
 Credentials are redacted from cassettes when they are recorded, so a
 cassette can be committed. The replies in it are still held to the
@@ -356,9 +378,12 @@ is shown on the criterion or step that failed. See the
 - Bodies are schema-checked when they are JSON. XML, form and binary
   bodies are checked for status and content type only.
 - A `goto` to a `workflowId`, a step that runs a workflow (`workflowId`
-  on a step), `type: xpath` criteria, `$url` and `replacements` on a
-  payload that is not JSON are not run: the suite fails to compile and
-  says which. Order workflows with `dependsOn` and read their outputs
-  through `$workflows.<id>.outputs` instead.
+  on a step), a `retry` that first runs a `stepId` or `workflowId`,
+  `type: xpath` criteria, `$url` and `replacements` on a payload that is
+  not JSON are not run: the suite fails to compile and says which. Order
+  workflows with `dependsOn` and read their outputs through
+  `$workflows.<id>.outputs` instead.
 - Array- and object-typed parameters and headers are not decoded, so they
-  are not schema-checked.
+  are not schema-checked. A scalar one is read as the type its schema
+  declares (`10` is a number for `type: integer` and text for `type:
+  string`).

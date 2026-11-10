@@ -119,8 +119,8 @@ impl Case {
 /// event log of its run: failed when any check of the step failed, passed
 /// when it ran and none did, skipped when it never started (an earlier
 /// step of its workflow failed, or an action ended the workflow or jumped
-/// past it). A retried step is judged by its last attempt; a step an
-/// `onFailure` goto re-ran is one case, failed if any run of it failed.
+/// past it). A retried step is judged by the last attempt of each run; a
+/// step a goto ran again is one case, failed if any run of it failed.
 #[must_use]
 pub fn workflow_cases(plan: &Plan, events: &[TestEvent]) -> Vec<Case> {
     struct Seen {
@@ -128,6 +128,8 @@ pub fn workflow_cases(plan: &Plan, events: &[TestEvent]) -> Vec<Case> {
         duration_ms: u64,
         requests: Vec<String>,
         failures: Vec<Failure>,
+        /// How many of `failures` predate the attempt in progress.
+        before_attempt: usize,
     }
     let mut cases: Vec<(String, String, Seen)> = plan
         .workflows
@@ -142,6 +144,7 @@ pub fn workflow_cases(plan: &Plan, events: &[TestEvent]) -> Vec<Case> {
                         duration_ms: 0,
                         requests: Vec::new(),
                         failures: Vec::new(),
+                        before_attempt: 0,
                     },
                 )
             })
@@ -163,6 +166,7 @@ pub fn workflow_cases(plan: &Plan, events: &[TestEvent]) -> Vec<Case> {
                 duration_ms: 0,
                 requests: Vec::new(),
                 failures: Vec::new(),
+                before_attempt: 0,
             },
         ));
         cases.len() - 1
@@ -186,9 +190,13 @@ pub fn workflow_cases(plan: &Plan, events: &[TestEvent]) -> Vec<Case> {
     for (index, event) in updates {
         let seen = &mut cases[index].2;
         match event {
-            TestEvent::StepStarted { .. } => seen.started = true,
-            // Only the last attempt decides a retried step.
-            TestEvent::StepRetried { .. } => seen.failures.clear(),
+            TestEvent::StepStarted { .. } => {
+                seen.started = true;
+                seen.before_attempt = seen.failures.len();
+            }
+            // The attempt being retried is replaced, its failures with it.
+            // What an earlier run of the step failed stays on the record.
+            TestEvent::StepRetried { .. } => seen.failures.truncate(seen.before_attempt),
             TestEvent::RequestSent { method, url, .. } => {
                 seen.requests.push(format!("{method} {url}"));
             }
@@ -246,6 +254,8 @@ struct WfReport {
     requests: Vec<(String, Option<u16>)>,
     /// `(step id, rendered failure)` pairs.
     failures: Vec<(String, String)>,
+    /// Step id → how many of `failures` predate its attempt in progress.
+    before_attempt: std::collections::HashMap<String, usize>,
 }
 
 impl WfReport {
@@ -256,6 +266,7 @@ impl WfReport {
             duration_ms: 0,
             requests: Vec::new(),
             failures: Vec::new(),
+            before_attempt: std::collections::HashMap::new(),
         }
     }
 }
@@ -269,6 +280,12 @@ pub fn console(summary: &RunSummary, events_log: &[TestEvent]) -> String {
     for ev in events_log {
         match ev {
             TestEvent::WfStarted { id } => reports.push(WfReport::new(id)),
+            TestEvent::StepStarted { wf, step } => {
+                let report = report_for(&mut reports, wf);
+                report
+                    .before_attempt
+                    .insert(step.clone(), report.failures.len());
+            }
             TestEvent::RequestSent {
                 wf, method, url, ..
             } => {
@@ -302,11 +319,16 @@ pub fn console(summary: &RunSummary, events_log: &[TestEvent]) -> String {
                 ));
                 report.passed = false;
             }
-            // The attempt being retried is replaced, failures and all.
+            // The attempt being retried is replaced, failures and all;
+            // what an earlier run of the step failed stays.
             TestEvent::StepRetried { wf, step, .. } => {
-                report_for(&mut reports, wf)
-                    .failures
-                    .retain(|(failed, _)| failed != step);
+                let report = report_for(&mut reports, wf);
+                let kept = report.before_attempt.get(step).copied().unwrap_or(0);
+                let mut position = 0;
+                report.failures.retain(|(failed, _)| {
+                    position += 1;
+                    position <= kept || failed != step
+                });
             }
             // The runner's verdict is the workflow's verdict.
             TestEvent::WfDone { wf, passed } => {

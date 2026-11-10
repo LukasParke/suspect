@@ -176,9 +176,24 @@ pub(crate) async fn run_workflow_core(
         collector
     );
 
+    (summary, reported_failures(&events))
+}
+
+/// The criterion failures a finished run reports. An attempt that was
+/// retried is replaced, its failures with it; what an earlier run of the
+/// same step failed (before a goto ran it again) stays.
+// Only the live-run workflow runner reaches this.
+#[cfg_attr(not(feature = "live-run"), allow(dead_code))]
+pub(crate) fn reported_failures(events: &[TestEvent]) -> Vec<CriterionFailure> {
     let mut failures: Vec<CriterionFailure> = Vec::new();
-    for ev in &events {
+    // Step id → how many failures predate its attempt in progress.
+    let mut before_attempt: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for ev in events {
         match ev {
+            TestEvent::StepStarted { step, .. } => {
+                before_attempt.insert(step.as_str(), failures.len());
+            }
             TestEvent::CriterionFail {
                 step,
                 crit,
@@ -191,15 +206,18 @@ pub(crate) async fn run_workflow_core(
                 expected: expected.clone(),
                 actual: actual.clone(),
             }),
-            // A retried attempt is replaced, its failures with it: only
-            // the last attempt of a step is reported.
             TestEvent::StepRetried { step, .. } => {
-                failures.retain(|failure| &failure.step_id != step);
+                let kept = before_attempt.get(step.as_str()).copied().unwrap_or(0);
+                let mut position = 0;
+                failures.retain(|failure| {
+                    position += 1;
+                    position <= kept || &failure.step_id != step
+                });
             }
             _ => {}
         }
     }
-    (summary, failures)
+    failures
 }
 
 /// Converts criterion failures into editor diagnostics anchored at each

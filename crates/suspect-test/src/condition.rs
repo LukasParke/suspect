@@ -333,9 +333,12 @@ fn tokenize(text: &str) -> Result<Vec<Token>, String> {
 /// The length of the bare word at the start of `rest`. A word ends at
 /// whitespace, and — outside the pointer text after a `#` — at an operator
 /// or parenthesis. Pointer text runs to the next whitespace, so
-/// `$response.body#/a==b` is one expression.
+/// `$response.body#/a==b` is one expression; it keeps the parentheses it
+/// opens (`#/f(x)`) and ends at one it did not, so `($response.body#/ok)`
+/// is a group around an expression.
 fn word_length(rest: &str) -> usize {
     let mut in_pointer = false;
+    let mut open = 0usize;
     for (index, ch) in rest.char_indices() {
         if ch.is_whitespace() {
             return index;
@@ -343,7 +346,14 @@ fn word_length(rest: &str) -> usize {
         if ch == '#' {
             in_pointer = true;
         }
-        if !in_pointer && index > 0 && operator_at(&rest[index..]).is_some() {
+        if in_pointer {
+            match ch {
+                '(' => open += 1,
+                ')' if open == 0 => return index,
+                ')' => open -= 1,
+                _ => {}
+            }
+        } else if index > 0 && operator_at(&rest[index..]).is_some() {
             return index;
         }
     }

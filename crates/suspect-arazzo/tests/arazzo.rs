@@ -751,3 +751,83 @@ components:
         "only the action that really has no type is reported: {diags:#?}"
     );
 }
+
+/// Diagnostics of one code for a workflow with the single step `step`.
+fn step_diagnostics(step: &str, code: &str) -> Vec<String> {
+    let doc = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n{step}"
+    ));
+    validate_arazzo(&suspect_arazzo::ArazzoDoc::new(&doc))
+        .iter()
+        .filter(|d| d.code == code)
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+/// The specification writes an `operationPath` as
+/// `{$sourceDescriptions.<name>.url}#/paths/~1pets/get`; the braces are
+/// part of the form, not a mistake.
+#[test]
+fn an_operation_path_in_the_specifications_own_form_is_valid() {
+    for path in [
+        "'{$sourceDescriptions.api.url}#/paths/~1pets/get'",
+        "$sourceDescriptions.api.url#/paths/~1pets~1{petId}/delete",
+        "$sourceDescriptions.api#/paths/~1pets/get",
+    ] {
+        let found = step_diagnostics(
+            &format!("        operationPath: {path}\n"),
+            "arazzo-invalid-operation-path",
+        );
+        assert!(found.is_empty(), "{path}: {found:?}");
+    }
+}
+
+#[test]
+fn an_operation_path_that_names_no_operation_is_invalid() {
+    for (path, needle) in [
+        (
+            "'{$sourceDescriptions.api.url}#/paths'",
+            "point at an operation",
+        ),
+        (
+            "'{$sourceDescriptions.api.url}#/paths/~1pets'",
+            "point at an operation",
+        ),
+        (
+            "'{$sourceDescriptions.api.url}#/paths/~1pets/fetch'",
+            "point at an operation",
+        ),
+        ("'{sourceDescriptions.api.url}#/paths/~1pets/get'", "`$`"),
+        (
+            "'{$sourceDescriptions.}#/paths/~1pets/get'",
+            "source expression",
+        ),
+    ] {
+        let found = step_diagnostics(
+            &format!("        operationPath: {path}\n"),
+            "arazzo-invalid-operation-path",
+        );
+        assert_eq!(found.len(), 1, "{path}: {found:?}");
+        assert!(found[0].contains(needle), "{path}: {found:?}");
+    }
+}
+
+/// A pattern match is a condition the runner evaluates, in either
+/// spelling, and its pattern is not split at the operators it contains.
+#[test]
+fn a_pattern_match_is_a_valid_condition() {
+    for condition in [
+        "$response.body /= /abc/",
+        "$response.body /= /(a|b)c/",
+        "$response.body#/name =~ /^(a||b)$/",
+        "'{$statusCode} /= /^2../'",
+    ] {
+        let found = step_diagnostics(
+            &format!(
+                "        operationId: listPets\n        successCriteria:\n          - condition: {condition}\n"
+            ),
+            "arazzo-invalid-condition",
+        );
+        assert!(found.is_empty(), "{condition}: {found:?}");
+    }
+}

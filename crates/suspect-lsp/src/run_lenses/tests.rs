@@ -231,3 +231,50 @@ fn failure_range_falls_back_for_transport_errors() {
     };
     assert_eq!(failure_range(&wf, &f), 0..0);
 }
+
+/// A retry replaces the attempt it retries, not what an earlier run of the
+/// same step failed before a goto ran it again.
+#[test]
+fn a_retry_replaces_only_the_attempt_in_progress() {
+    let started = |step: &str| TestEvent::StepStarted {
+        wf: "w".to_owned(),
+        step: step.to_owned(),
+    };
+    let failed = |step: &str, actual: &str| TestEvent::CriterionFail {
+        wf: "w".to_owned(),
+        step: step.to_owned(),
+        crit: "$statusCode == 202".to_owned(),
+        expected: "202".to_owned(),
+        actual: actual.to_owned(),
+    };
+    let retried = |step: &str| TestEvent::StepRetried {
+        wf: "w".to_owned(),
+        step: step.to_owned(),
+        attempt: 1,
+        limit: 2,
+        delay_ms: 0,
+    };
+    // `work` fails with 500 and a goto runs the workflow again; its second
+    // run fails with 503, is retried and passes. `other` fails throughout.
+    let events = [
+        started("other"),
+        failed("other", "400"),
+        started("work"),
+        failed("work", "500"),
+        started("work"),
+        failed("work", "503"),
+        retried("work"),
+        started("work"),
+    ];
+    let reported: Vec<(String, String)> = reported_failures(&events)
+        .into_iter()
+        .map(|failure| (failure.step_id, failure.actual))
+        .collect();
+    assert_eq!(
+        reported,
+        [
+            ("other".to_owned(), "400".to_owned()),
+            ("work".to_owned(), "500".to_owned())
+        ]
+    );
+}

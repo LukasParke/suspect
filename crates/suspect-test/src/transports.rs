@@ -148,10 +148,12 @@ impl HttpClient for CannedTransport {
 /// 1. one not yet served whose request body is the same wins,
 /// 2. else the earliest not yet served, so a request repeated within a run
 ///    (read, delete, read again) walks its recordings in order,
-/// 3. else the earliest not yet served with the same path and another
-///    query,
-/// 4. else the latest one already served — a re-sent request gets the
+/// 3. else the latest one already served — a re-sent request gets the
 ///    answer that stood last.
+///
+/// Only a request with no recording of its own is answered by one of the
+/// same path and another query: the earliest not yet served, else the
+/// latest served.
 ///
 /// A request with no recording at all is a transport error naming it.
 /// The gateway's `ReplayIndex` serves a long-lived process and is
@@ -217,13 +219,13 @@ impl ReplayTransport {
             })
             .or_else(|| {
                 indices()
-                    .filter(fresh)
-                    .find(|index| same_path(&self.entries[*index]))
+                    .rev()
+                    .find(|index| same_request(&self.entries[*index]))
             })
             .or_else(|| {
                 indices()
-                    .rev()
-                    .find(|index| same_request(&self.entries[*index]))
+                    .filter(fresh)
+                    .find(|index| same_path(&self.entries[*index]))
             })
             .or_else(|| {
                 indices()
@@ -397,6 +399,25 @@ mod tests {
         assert_eq!(
             send(&transport, "POST", "http://live/pets", r#"{"name":"Rex"}"#).await,
             Ok((201, "rex".to_owned()))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_repeated_request_is_not_answered_by_another_query() {
+        let transport = ReplayTransport::new(vec![
+            recorded(1, "GET", "http://rec/pets?page=1", "", 200, "one"),
+            recorded(2, "GET", "http://rec/pets?page=2", "", 200, "two"),
+        ]);
+        for _ in 0..2 {
+            assert_eq!(
+                send(&transport, "GET", "http://live/pets?page=1", "").await,
+                Ok((200, "one".to_owned())),
+                "page 1 is page 1 however often it is asked for"
+            );
+        }
+        assert_eq!(
+            send(&transport, "GET", "http://live/pets?page=2", "").await,
+            Ok((200, "two".to_owned()))
         );
     }
 

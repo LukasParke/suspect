@@ -1099,6 +1099,10 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
     let mut completed: BTreeSet<String> = BTreeSet::new();
     let mut remaining: Vec<usize> = (0..wf.steps.len()).collect();
     let mut goto_jumps = 0usize;
+    // What became of each step. A step a goto runs again is still one
+    // step: it failed if any run of it failed, as the reports count it.
+    let mut ran = vec![false; wf.steps.len()];
+    let mut failed = vec![false; wf.steps.len()];
     let foreign_done = |dependency: &crate::plan::WorkflowStepRef| {
         opts.workflows_outputs
             .get(&dependency.workflow)
@@ -1155,8 +1159,7 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
                     ),
                 )
                 .await;
-            outcome.failed += 1;
-            outcome.skipped += remaining.len() - 1;
+            failed[remaining[0]] = true;
             outcome.ok = false;
             remaining.clear();
             break;
@@ -1214,6 +1217,7 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
                 None => break (result, None),
             }
         };
+        ran[index] = true;
         // Where an `onSuccess`/`onFailure` goto sends the workflow.
         let mut goto: Option<(&str, &str)> = None;
         if result.sample.ok() {
@@ -1232,13 +1236,9 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
                 serde_json::Value::Object(result.outputs),
             );
             completed.insert(step.step_id.clone());
-            outcome.passed += 1;
             match success_action.map(|action| &action.kind) {
                 // The workflow ends here, passed: what remains is not run.
-                Some(ActionKind::End) => {
-                    outcome.skipped += remaining.len();
-                    remaining.clear();
-                }
+                Some(ActionKind::End) => remaining.clear(),
                 Some(ActionKind::Goto(target)) => goto = Some((target, "on-success-goto")),
                 _ => {
                     if !remaining.is_empty()
@@ -1249,16 +1249,13 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
                 }
             }
         } else {
-            outcome.failed += 1;
+            failed[index] = true;
             outcome.ok = false;
             match failure_action.map(|action| &action.kind) {
                 Some(ActionKind::Goto(target)) => goto = Some((target, "on-failure-goto")),
                 // `end`, or no action that applies: the rest of the
                 // workflow cannot run.
-                _ => {
-                    outcome.skipped += remaining.len();
-                    remaining.clear();
-                }
+                _ => remaining.clear(),
             }
         }
         // A goto is a one-way transfer: execution continues at the target
@@ -1278,14 +1275,10 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
                         &format!("goto '{target}' did not let the workflow finish"),
                     )
                     .await;
-                if outcome.ok {
-                    // A loop of successes is still a workflow that never
-                    // ended: the step that jumped last carries the failure.
-                    outcome.ok = false;
-                    outcome.failed += 1;
-                    outcome.passed -= 1;
-                }
-                outcome.skipped += remaining.len();
+                // A loop of successes is still a workflow that never
+                // ended: the step that jumped last carries the failure.
+                failed[index] = true;
+                outcome.ok = false;
                 remaining.clear();
                 continue;
             }
@@ -1293,20 +1286,20 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
             for rerun in next..wf.steps.len() {
                 let step_id = &wf.steps[rerun].step_id;
                 steps_outputs.remove(step_id);
-                if completed.remove(step_id) {
-                    // Its re-run is counted afresh.
-                    outcome.passed -= 1;
-                }
+                completed.remove(step_id);
                 remaining.push(rerun);
             }
         }
     }
-    if outcome.skipped == 0 {
-        outcome.skipped = wf
-            .steps
-            .len()
-            .saturating_sub(outcome.passed + outcome.failed);
-    }
+    // Every step is counted once: failed, else passed when it ran, else
+    // skipped.
+    outcome.failed = failed.iter().filter(|failed| **failed).count();
+    outcome.passed = ran
+        .iter()
+        .zip(&failed)
+        .filter(|(ran, failed)| **ran && !**failed)
+        .count();
+    outcome.skipped = wf.steps.len() - outcome.passed - outcome.failed;
 
     if outcome.ok {
         let ctx = RexCtx::default()
@@ -1383,6 +1376,7 @@ struct Seen<'a> {
     status: u16,
     headers: &'a [(String, String)],
     body_text: &'a str,
+    /// The body as a value ([`body_value`]).
     body_json: Option<&'a serde_json::Value>,
 }
 
@@ -1403,7 +1397,7 @@ fn action_applies(action: &ActionPlan, exchange: Option<&Exchange>, state: &RunS
     let Some(exchange) = exchange else {
         return false;
     };
-    let body_json: Option<serde_json::Value> = serde_json::from_str(&exchange.body).ok();
+    let body_json = body_value(&exchange.body);
     let seen = Seen {
         method: &exchange.method,
         status: exchange.status,
@@ -1417,16 +1411,29 @@ fn action_applies(action: &ActionPlan, exchange: Option<&Exchange>, state: &RunS
         .all(|criterion| check_criterion(&criterion.kind, &seen, state).is_ok())
 }
 
+/// A body as the value criteria read: the JSON document it is, else its
+/// text. No body is no value.
+fn body_value(text: &str) -> Option<serde_json::Value> {
+    serde_json::from_str(text)
+        .ok()
+        .or_else(|| (!text.is_empty()).then(|| serde_json::Value::String(text.to_owned())))
+}
+
 /// The pause before a retry: the action's `retryAfter`, unless the reply
 /// carried a `Retry-After` header counted in seconds, which the server
-/// knows better.
+/// knows better. Neither pauses the run for longer than
+/// [`MAX_RETRY_DELAY`](crate::plan::MAX_RETRY_DELAY).
 pub(crate) fn retry_delay(declared: Duration, headers: &[(String, String)]) -> Duration {
+    let longest = crate::plan::MAX_RETRY_DELAY;
     headers
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case("retry-after"))
         .and_then(|(_, value)| value.trim().parse::<f64>().ok())
         .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
-        .map_or(declared, Duration::from_secs_f64)
+        .map_or(declared, |seconds| {
+            Duration::from_secs_f64(seconds.min(longest.as_secs_f64()))
+        })
+        .min(longest)
 }
 
 /// Evaluates one criterion against a finished exchange.
@@ -1467,12 +1474,13 @@ fn check_criterion(
             pattern,
         } => {
             let value = eval_rex(context, &ctx());
+            let expected = format!("{context_text} to match /{pattern}/");
+            // Nothing to match is not an empty string that might match.
             let text = match &value {
                 Some(serde_json::Value::String(text)) => text.clone(),
                 Some(other) => other.to_string(),
-                None => String::new(),
+                None => return Err((expected, format!("{context_text} is missing"))),
             };
-            let expected = format!("{context_text} to match /{pattern}/");
             match regex::Regex::new(pattern) {
                 Ok(re) if re.is_match(&text) => Ok(()),
                 Ok(_) => Err((
@@ -1508,8 +1516,10 @@ fn check_criterion(
 ///
 /// A query that is one filter on the root (`$[?count(@.pets) > 0]`, the
 /// Arazzo specification's own example) is also tried with the value as the
-/// filter's current node: RFC 9535 applies such a filter to the root's
-/// children, so against an object it could never see the object itself.
+/// filter's current node when the value is an object: RFC 9535 applies
+/// such a filter to the root's children, so against an object it could
+/// never see the object itself. An array is filtered item by item, as
+/// written.
 fn json_path_selects(query: &str, value: &serde_json::Value) -> bool {
     let Ok(path) = suspect_jsonpath::Path::parse(query) else {
         return false;
@@ -1524,7 +1534,9 @@ fn json_path_selects(query: &str, value: &serde_json::Value) -> bool {
         })
     };
     selects(value.to_string())
-        || (query.trim_start().starts_with("$[?") && selects(format!("[{value}]")))
+        || (value.is_object()
+            && query.trim_start().starts_with("$[?")
+            && selects(format!("[{value}]")))
 }
 
 /// Runs one Arazzo 1.1 AsyncAPI step: `send` publishes the evaluated
@@ -1735,7 +1747,7 @@ async fn evaluate_response(
 ) -> StepResult {
     let observer = env.observer;
     let body_text = String::from_utf8_lossy(&response.body).into_owned();
-    let body_json: Option<serde_json::Value> = serde_json::from_str(&body_text).ok();
+    let body_json = body_value(&body_text);
     let seen = Seen {
         method,
         status: response.status,
@@ -2388,6 +2400,8 @@ fn eval_criterion(
                         format!("{pointer} == {expected}"),
                         format!("{pointer} == {actual}"),
                     )),
+                    // Nothing equals `null`, as in the condition grammar.
+                    None if expected.is_null() => Ok(()),
                     None => Err((
                         format!("{pointer} == {expected}"),
                         format!("{pointer} <missing>"),
@@ -2477,6 +2491,9 @@ fn resolve_pointer<'v>(
     pointer: &str,
 ) -> Option<&'v serde_json::Value> {
     let mut current = doc?;
+    if pointer.is_empty() {
+        return Some(current);
+    }
     for token in pointer.trim_start_matches('/').split('/') {
         current = match current {
             serde_json::Value::Object(map) => map.get(token)?,

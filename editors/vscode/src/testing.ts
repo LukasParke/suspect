@@ -25,6 +25,7 @@ import { affectsProject, findArazzoDocuments, findProjects } from './discover';
 import { parseArazzo } from './parse';
 import { testId, undeclaredDocuments } from './project';
 import { errorMessage, SuspectEvent, spawnSuspectRunWith, testBaseUrl } from './runner';
+import { StepVerdicts } from './stepVerdicts';
 import { diffBaseline } from './settings.generated';
 
 /** One stage result from `suspect ci --format json`. Pure: testable. */
@@ -389,7 +390,7 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 		});
 		for (const item of wfItems.values()) run.enqueued(item);
 		const started = new Set<vscode.TestItem>();
-		const failed = new Set<vscode.TestItem>();
+		const verdicts = new StepVerdicts<vscode.TestItem>();
 
 		const onEvent = (ev: SuspectEvent) => {
 			switch (ev.event) {
@@ -397,6 +398,7 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 					const step = stepItems.get(`${ev.wf}/${ev.step}`);
 					if (step) {
 						started.add(step);
+						verdicts.started(step);
 						run.started(step);
 					}
 					return;
@@ -410,10 +412,10 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 					return;
 				}
 				case 'step_retried': {
-					// The attempt that failed is being replaced: only the
-					// step's last attempt decides it.
+					// The attempt that failed is being replaced; what an
+					// earlier run of the step failed stays.
 					const step = stepItems.get(`${ev.wf}/${ev.step}`);
-					if (step) failed.delete(step);
+					if (step) verdicts.retried(step);
 					run.appendOutput(`${ev.wf}/${ev.step}: retry ${ev.attempt} of ${ev.limit} after ${ev.delay_ms} ms\r\n`, undefined, step);
 					return;
 				}
@@ -423,7 +425,7 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 						const message = new vscode.TestMessage(`${ev.crit} — expected: ${ev.expected}, actual: ${ev.actual}`);
 						message.expectedOutput = ev.expected;
 						message.actualOutput = ev.actual;
-						failed.add(step);
+						verdicts.criterionFailed(step);
 						run.failed(step, message);
 					}
 					return;
@@ -435,7 +437,7 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 					// the runner never reached (it stops at the first failure)
 					// is skipped, not silently left pending.
 					wf.children.forEach((step) => {
-						if (failed.has(step)) return;
+						if (verdicts.hasFailed(step)) return;
 						if (started.has(step) || ev.passed) run.passed(step);
 						else run.skipped(step);
 					});
