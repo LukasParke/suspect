@@ -20,6 +20,10 @@ backends.
 
 ## Install
 
+No release has been tagged yet. Until `v0.1.0` is published, install from
+source (the last command below); the installers, the Homebrew formula and
+the release download of the GitHub Action start working with that release.
+
 Prebuilt binaries for macOS, Linux (glibc and static musl) and Windows are
 attached to every [release](https://github.com/LukasParke/suspect/releases)
 (Windows is tier 2 until one release has passed its smoke tests):
@@ -43,7 +47,9 @@ Windows) has a `.sha256` file next to it, and `gh attestation verify <file>
 
 In GitHub Actions, `LukasParke/suspect/.github/actions/suspect@v<version>`
 downloads the release binary and can run `check`, `test` or `gen`
-([`action.yml`](.github/actions/suspect/action.yml)).
+([`action.yml`](.github/actions/suspect/action.yml)). Referenced by branch
+or commit with `version: source`, it builds the CLI from that revision
+instead, which needs no release.
 
 ## Tour
 
@@ -84,16 +90,22 @@ $ suspect gen docs api.yaml --style markdown -o docs/api
 [docs generation](docs/guide/docs-generation.md)).
 
 Run Arazzo workflows as contract tests or load tests, live or against
-recorded traffic:
+recorded traffic. Every reply is held to the response its operation
+declares (status, content type, required headers, body schema), on top of
+the workflow's own success criteria:
 
 ```console
 $ suspect test run flows.arazzo.yaml --base-url http://localhost:8080 --input petName=Rex
+$ suspect test run tests/ --junit out/contract.xml          # every suite under tests/, one gate
 $ suspect test load profile.load.yaml
 $ suspect traffic gateway api.yaml -p 9000 --mode record --upstream http://staging:80 --cassette rec.scj
-$ suspect test run flows.arazzo.yaml --cassette rec.scj
+$ suspect test run flows.arazzo.yaml --cassette rec.scj     # offline, from the recording
+$ suspect traffic gateway api.yaml -p 8080 --mode mock --enforce   # a mock that holds consumers to the contract
 ```
 
-See [load testing](docs/guide/load-testing.md), the runnable example in
+See [contract testing](docs/guide/contract-testing.md) and its runnable
+example in [`examples/contract-testing/`](examples/contract-testing/),
+[load testing](docs/guide/load-testing.md) with
 [`examples/load/`](examples/load/), and the [gateway guide](docs/guide/gateway.md).
 
 ## Command map
@@ -128,6 +140,7 @@ interrupted.
 - [Documentation index](docs/README.md): guides, references, per-language SDK
   notes and design records.
 - Guides: [linting](docs/guide/linting.md), [editors](docs/guide/editors.md),
+  [contract testing](docs/guide/contract-testing.md),
   [gateway](docs/guide/gateway.md), [docs generation](docs/guide/docs-generation.md),
   [SDK generation](docs/guide/sdk-generation.md), [load testing](docs/guide/load-testing.md).
 - Reference: [CLI](docs/reference/cli.md), [diagnostic codes](docs/reference/diagnostics.md),

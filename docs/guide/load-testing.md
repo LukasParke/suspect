@@ -142,10 +142,16 @@ expires rather than per user. A failed token acquisition counts as an
 `errors.other` transport failure for that step.
 
 `successCriteria` always decide a step's verdict. `--validate-responses`
-additionally checks each response body against the schema the operation
-declares for its status (as `suspect test` always does); a violation
+additionally holds each reply to the response the operation declares
+(status, content type, required headers and body schema: the `strict`
+level `suspect test run` applies by default, see
+[contract testing](contract-testing.md#what-a-run-checks)); a violation
 counts as a contract failure. It is off by default because it compiles a
 schema per response on the generator.
+
+An `onFailure` retry is honoured under load too: each attempt is a request
+in the metrics, and the step counts as failed only if its last attempt
+fails.
 
 ## Metrics
 
@@ -158,7 +164,7 @@ schema per response on the generator.
 | `http.error_rate` | % of requests failing transport **or** criteria |
 | `http.downloaded_bytes`, `http.uploaded_bytes` | body bytes |
 | `errors.{timeout,connect,tls,reset,other,total}` | transport failures |
-| `contract.failures`, `contract.failure_rate` | responses failing `successCriteria` (or, with `--validate-responses`, their declared schema) |
+| `contract.failures`, `contract.failure_rate` | responses failing `successCriteria` (or, with `--validate-responses`, their declared contract) |
 | `vusers.{created,completed,failed,skipped,aborted}` | lifecycle; `skipped` = `maxVusers` hit, `aborted` = still running at the grace deadline |
 | `vusers.session_length.*` | ms per user |
 | `scenario.<name>.vusers.{created,completed,failed}` | per scenario |
