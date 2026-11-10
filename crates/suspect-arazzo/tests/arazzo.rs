@@ -644,3 +644,190 @@ fn step_dependency_entries_classify() {
         );
     }
 }
+
+/// A typed criterion's `condition` is a JSONPath query or a regular
+/// expression over its `context`, not a runtime expression; and a `simple`
+/// condition may combine comparisons.
+#[test]
+fn typed_and_compound_criteria_are_valid_conditions() {
+    let doc = parse_doc(
+        r#"
+arazzo: 1.0.1
+info: {title: t, version: '1'}
+sourceDescriptions:
+  - {name: api, url: api.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: s
+        operationId: listPets
+        successCriteria:
+          - context: $response.body
+            condition: $.items[?@.id]
+            type: jsonpath
+          - context: $response.body
+            condition: $[?count(@.pets) > 0]
+            type: jsonpath
+          - context: $statusCode
+            condition: '^200$'
+            type: regex
+          - condition: $statusCode == 200 || $statusCode == 201
+          - condition: $statusCode >= 200 && $statusCode < 300
+          - condition: '!($response.body#/state == ''failed'')'
+          - condition: $response.header.Content-Type == 'application/json'
+"#,
+    );
+    let diags = validate_arazzo(&ArazzoDoc::new(&doc));
+    let conditions: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "arazzo-invalid-condition")
+        .collect();
+    assert!(conditions.is_empty(), "{conditions:#?}");
+}
+
+#[test]
+fn a_malformed_jsonpath_criterion_is_an_invalid_condition() {
+    let doc = parse_doc(
+        r#"
+arazzo: 1.0.1
+info: {title: t, version: '1'}
+sourceDescriptions:
+  - {name: api, url: api.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: s
+        operationId: listPets
+        successCriteria:
+          - context: $response.body
+            condition: '$.items['
+            type: jsonpath
+"#,
+    );
+    let diags = validate_arazzo(&ArazzoDoc::new(&doc));
+    let conditions: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "arazzo-invalid-condition")
+        .collect();
+    assert_eq!(conditions.len(), 1, "{diags:#?}");
+    assert!(
+        conditions[0].message.contains("JSONPath"),
+        "{}",
+        conditions[0].message
+    );
+}
+
+/// A Reusable Object in an action list names its action elsewhere; it has
+/// no `type` of its own to be missing.
+#[test]
+fn a_reusable_action_reference_is_not_an_action_without_a_type() {
+    let doc = parse_doc(
+        r#"
+arazzo: 1.0.1
+info: {title: t, version: '1'}
+sourceDescriptions:
+  - {name: api, url: api.yaml, type: openapi}
+workflows:
+  - workflowId: w
+    steps:
+      - stepId: s
+        operationId: listPets
+        onFailure:
+          - reference: $components.failureActions.again
+          - {name: untyped}
+components:
+  failureActions:
+    again: {name: again, type: retry, retryAfter: 1, retryLimit: 2}
+"#,
+    );
+    let diags = validate_arazzo(&ArazzoDoc::new(&doc));
+    let missing: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == "arazzo-action-missing-type")
+        .collect();
+    assert_eq!(
+        missing.len(),
+        1,
+        "only the action that really has no type is reported: {diags:#?}"
+    );
+}
+
+/// Diagnostics of one code for a workflow with the single step `step`.
+fn step_diagnostics(step: &str, code: &str) -> Vec<String> {
+    let doc = parse_yaml(&format!(
+        "{V11_HEADER}workflows:\n  - workflowId: w\n    steps:\n      - stepId: a\n{step}"
+    ));
+    validate_arazzo(&suspect_arazzo::ArazzoDoc::new(&doc))
+        .iter()
+        .filter(|d| d.code == code)
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+/// The specification writes an `operationPath` as
+/// `{$sourceDescriptions.<name>.url}#/paths/~1pets/get`; the braces are
+/// part of the form, not a mistake.
+#[test]
+fn an_operation_path_in_the_specifications_own_form_is_valid() {
+    for path in [
+        "'{$sourceDescriptions.api.url}#/paths/~1pets/get'",
+        "$sourceDescriptions.api.url#/paths/~1pets~1{petId}/delete",
+        "$sourceDescriptions.api#/paths/~1pets/get",
+    ] {
+        let found = step_diagnostics(
+            &format!("        operationPath: {path}\n"),
+            "arazzo-invalid-operation-path",
+        );
+        assert!(found.is_empty(), "{path}: {found:?}");
+    }
+}
+
+#[test]
+fn an_operation_path_that_names_no_operation_is_invalid() {
+    for (path, needle) in [
+        (
+            "'{$sourceDescriptions.api.url}#/paths'",
+            "point at an operation",
+        ),
+        (
+            "'{$sourceDescriptions.api.url}#/paths/~1pets'",
+            "point at an operation",
+        ),
+        (
+            "'{$sourceDescriptions.api.url}#/paths/~1pets/fetch'",
+            "point at an operation",
+        ),
+        ("'{sourceDescriptions.api.url}#/paths/~1pets/get'", "`$`"),
+        (
+            "'{$sourceDescriptions.}#/paths/~1pets/get'",
+            "source expression",
+        ),
+    ] {
+        let found = step_diagnostics(
+            &format!("        operationPath: {path}\n"),
+            "arazzo-invalid-operation-path",
+        );
+        assert_eq!(found.len(), 1, "{path}: {found:?}");
+        assert!(found[0].contains(needle), "{path}: {found:?}");
+    }
+}
+
+/// A pattern match is a condition the runner evaluates, in either
+/// spelling, and its pattern is not split at the operators it contains.
+#[test]
+fn a_pattern_match_is_a_valid_condition() {
+    for condition in [
+        "$response.body /= /abc/",
+        "$response.body /= /(a|b)c/",
+        "$response.body#/name =~ /^(a||b)$/",
+        "'{$statusCode} /= /^2../'",
+    ] {
+        let found = step_diagnostics(
+            &format!(
+                "        operationId: listPets\n        successCriteria:\n          - condition: {condition}\n"
+            ),
+            "arazzo-invalid-condition",
+        );
+        assert!(found.is_empty(), "{condition}: {found:?}");
+    }
+}

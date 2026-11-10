@@ -534,6 +534,134 @@ components:
     assert!(same.status.success());
 }
 
+/// `diff impact` judges recorded replies with the contract check every
+/// other surface uses: a schema reached through component references is
+/// compiled, not skipped, and a status the new revision no longer declares
+/// is breakage.
+#[test]
+fn impact_follows_component_references_and_undeclared_statuses() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let old = r#"openapi: 3.1.0
+info: {title: API, version: '1.0.0'}
+paths:
+  /pets:
+    post:
+      operationId: createPet
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pet'}
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      parameters: [{name: petId, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pet'}
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        owner: {$ref: '#/components/schemas/Owner'}
+    Owner:
+      type: object
+      properties:
+        email: {type: string}
+"#;
+    // The owner's email becomes a number (reached only through a `$ref`),
+    // and creation now answers 200 instead of 201.
+    let new = old
+        .replace("email: {type: string}", "email: {type: integer}")
+        .replace(
+            "'201':\n          description: created",
+            "'200':\n          description: created",
+        );
+    assert_ne!(old, new);
+    std::fs::write(root.join("old.yaml"), old).unwrap();
+    std::fs::write(root.join("new.yaml"), &new).unwrap();
+
+    let body = |text: &str| Body {
+        encoding: BodyEncoding::Utf8,
+        content: text.to_owned(),
+        sha256: suspect_journal::sha256_hex(text.as_bytes()),
+    };
+    let entry = |id: u64, method: &str, path: &str, status: u16, response: &str| CassetteEntry {
+        id,
+        method: method.to_owned(),
+        url: format!("http://api.test{path}"),
+        status,
+        request_headers: vec![("User-Agent".to_owned(), "consumer-a/1.0".to_owned())],
+        request_body: body(""),
+        response_headers: vec![("content-type".to_owned(), "application/json".to_owned())],
+        response_body: body(response),
+        duration_ms: 1.0,
+    };
+    let entries = [
+        entry(
+            1,
+            "GET",
+            "/pets/42",
+            200,
+            r#"{"name":"rex","owner":{"email":"a@b.c"}}"#,
+        ),
+        entry(2, "POST", "/pets", 201, r#"{"name":"rex"}"#),
+        entry(3, "GET", "/pets/43", 200, r#"{"name":"tom"}"#),
+    ];
+    let header = CassetteHeader {
+        format: suspect_journal::CASSETTE_FORMAT.to_owned(),
+        version: suspect_journal::CASSETTE_VERSION,
+        recorded_at_ms: 0,
+        source: "test".to_owned(),
+    };
+    let cassette = root.join("traffic.scj");
+    let mut file = std::fs::File::create(&cassette).unwrap();
+    suspect_journal::write_cassette(&mut file, &header, &entries).unwrap();
+
+    let output = std::process::Command::new(binary())
+        .args([
+            "diff",
+            "impact",
+            "--format",
+            "json",
+            root.join("old.yaml").to_str().unwrap(),
+            root.join("new.yaml").to_str().unwrap(),
+            cassette.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "broken consumers must fail");
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["evaluated"], 3, "{report:#}");
+    assert_eq!(report["unaffected"], 1, "{report:#}");
+    assert_eq!(report["already_failing"], 0, "{report:#}");
+    assert_eq!(report["broken"], 2, "{report:#}");
+    let reasons: Vec<&str> = report["by_consumer"]["user-agent:consumer-a/1.0"]
+        .as_array()
+        .expect("consumer group")
+        .iter()
+        .filter_map(|exchange| exchange["reason"].as_str())
+        .collect();
+    assert!(
+        reasons.iter().any(|reason| reason.contains("/owner/email")),
+        "the violation behind the reference is located: {reasons:?}"
+    );
+    assert!(
+        reasons
+            .iter()
+            .any(|reason| reason.contains("status 201 is not declared")),
+        "{reasons:?}"
+    );
+}
+
 #[test]
 fn project_build_generates_declared_sdk_targets() {
     let dir = tempfile::tempdir().unwrap();

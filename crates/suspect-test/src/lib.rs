@@ -37,6 +37,7 @@
 //! [Arazzo 1.0]: https://spec.openapis.org/arazzo/v1.0.0
 
 pub mod auth;
+pub mod condition;
 pub mod duration;
 pub mod evolved_fuzz;
 pub mod exec;
@@ -50,18 +51,24 @@ pub mod stateful;
 pub mod transports;
 
 #[cfg(test)]
+mod conformance_tests;
+#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod workflow_tests;
+
+pub use suspect_runtime::{Conformance, Schemas};
 
 pub use exec::{
     ErrorClass, EventObserver, ExecObserver, HttpClient, HttpRequest, HttpResponse, InputMap,
     NullObserver, RunAuth, RunOpts, RunSummary, StepCx, StepSample, StepVerdict, TestEvent,
     ThinkPolicy, TransportError, VuId, WfOutcome, run_plan, run_plan_observed, run_plan_with,
-    run_plan_with_auth, run_plan_with_auth_and_messages, run_plan_with_messages, run_workflow,
-    run_workflow_owned,
+    run_plan_with_auth, run_plan_with_auth_and_messages, run_plan_with_broker,
+    run_plan_with_messages, run_workflow, run_workflow_owned,
 };
 pub use messaging::{FileBroker, LoopbackBroker, Message, MessageError, MessageTransport};
 pub use plan::{
-    Comparison, CompileError, CriterionKind, CriterionPlan, Expected, MessageDirection,
-    MessageStep, OpKey, Plan, StepParam, StepPlan, ThinkSpec, WfPlan, WorkflowStepRef,
-    compile_plan, dependency_waves,
+    ActionKind, ActionPlan, Comparison, CompileError, CriterionKind, CriterionPlan, Expected,
+    MessageDirection, MessageStep, OpKey, Plan, StepParam, StepPlan, ThinkSpec, WfPlan,
+    WorkflowStepRef, compile_plan, dependency_waves,
 };

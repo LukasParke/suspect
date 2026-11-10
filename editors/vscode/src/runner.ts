@@ -12,6 +12,8 @@ export type SuspectEvent =
 	| { event: 'step_started'; wf: string; step: string }
 	| { event: 'request_sent'; wf: string; step: string; method: string; url: string }
 	| { event: 'response_got'; wf: string; step: string; status: number; duration_ms: number }
+	| { event: 'response_validated'; wf: string; step: string; status: number }
+	| { event: 'step_retried'; wf: string; step: string; attempt: number; limit: number; delay_ms: number }
 	| { event: 'criterion_ok'; wf: string; step: string; crit: string }
 	| { event: 'criterion_fail'; wf: string; step: string; crit: string; expected: string; actual: string }
 	| { event: 'output_set'; wf: string; key: string; value: unknown }
@@ -31,6 +33,8 @@ const SUSPECT_EVENT_TAGS: Record<string, true> = {
 	step_started: true,
 	request_sent: true,
 	response_got: true,
+	response_validated: true,
+	step_retried: true,
 	criterion_ok: true,
 	criterion_fail: true,
 	output_set: true,

@@ -160,7 +160,6 @@ openapi.yaml:992:7-1019:50 warning suspect-lint security-no-delete-without-id: D
 openapi.yaml:994:14-994:17 warning suspect oas-tag-undeclared: tag `dvr` on delete operation is not declared in the root `tags`
 openapi.yaml:9:10-9:32 error suspect-lint security-server-https-only: Server URLs must use HTTPS — plaintext transport exposes credentials and data.
 openapi.yaml:9:10-9:32 warning suspect-lint server-host-not-example: Server URLs should not use example hosts (localhost, 127.0.0.1, example.com).
-openapi.yaml:9:10-9:32 warning suspect-lint server-trailing-slash: Server URLs should not end in a trailing slash.
 schemas.yaml:1014:5-1014:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
 schemas.yaml:1062:5-1062:13 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
 schemas.yaml:1068:5-1068:17 warning suspect-lint oas3-unused-component: Component should be referenced by at least one `$ref`.
@@ -225,7 +224,7 @@ broken/broken.arazzo.yaml:19:13-20:23 error suspect arazzo-goto-missing-target: 
 broken/broken.arazzo.yaml:21:13-23:32 error suspect arazzo-goto-unknown-workflow: `goto` references unknown workflow `nowhere`
 broken/broken.arazzo.yaml:24:13-25:27 error suspect arazzo-unknown-action-type: unknown action type `teleport`
 broken/broken.arazzo.yaml:26:9-30:24 error suspect arazzo-duplicate-step-id: duplicate stepId `one` in workflow `flow`
-broken/broken.arazzo.yaml:26:9-30:24 error suspect arazzo-invalid-operation-path: operationPath must start with `$`: "{$sourceDescriptions.api.url}#/paths"
+broken/broken.arazzo.yaml:26:9-30:24 error suspect arazzo-invalid-operation-path: operationPath must point at an operation, as `#/paths/<path>/<method>`: "{$sourceDescriptions.api.url}#/paths"
 broken/broken.arazzo.yaml:26:9-30:24 error suspect arazzo-step-multiple-targets: step `one` sets multiple of operationId/operationPath/channelPath/workflowId
 broken/broken.arazzo.yaml:2:1-34:1 error suspect arazzo-missing-info-title: missing `info.title`
 broken/broken.arazzo.yaml:30:13-30:24 error suspect arazzo-parameter-incomplete: parameter needs `name`+`in` (or a `target` for step parameters)

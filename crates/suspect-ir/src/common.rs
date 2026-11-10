@@ -28,8 +28,18 @@ pub(crate) fn method_key(method: Method) -> &'static str {
 /// to an immediate component schema resolves to a name; malformed fragments
 /// and references to nested schema locations stay unresolved.
 pub(crate) fn local_schema_ref(reference: &str) -> Option<String> {
+    local_component_ref(reference, "schemas")
+}
+
+/// Resolves a `$ref` value to the name of a local component in `section`
+/// (`schemas`, `responses`, `parameters`, `requestBodies`, `headers`,
+/// `pathItems`), under the same decoding rules as [`local_schema_ref`].
+pub(crate) fn local_component_ref(reference: &str, section: &str) -> Option<String> {
     let fragment = percent_decode(reference.strip_prefix('#')?)?;
-    let token = fragment.strip_prefix("/components/schemas/")?;
+    let token = fragment
+        .strip_prefix("/components/")?
+        .strip_prefix(section)?
+        .strip_prefix('/')?;
     if token.is_empty() || token.contains('/') {
         return None;
     }
@@ -46,6 +56,34 @@ pub(crate) fn local_schema_ref(reference: &str) -> Option<String> {
         });
     }
     Some(name)
+}
+
+/// The tokens of a same-document reference (`#/a/b~1c`), decoded: the URI
+/// fragment first, then each JSON Pointer token. `None` for a reference
+/// into another document, a plain-name fragment, or a malformed pointer.
+/// `#` alone is the document root: no tokens.
+pub(crate) fn local_pointer(reference: &str) -> Option<Vec<String>> {
+    let fragment = percent_decode(reference.strip_prefix('#')?)?;
+    if fragment.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut tokens = Vec::new();
+    for token in fragment.strip_prefix('/')?.split('/') {
+        let mut decoded = String::with_capacity(token.len());
+        let mut chars = token.chars();
+        while let Some(ch) = chars.next() {
+            decoded.push(match ch {
+                '~' => match chars.next()? {
+                    '0' => '~',
+                    '1' => '/',
+                    _ => return None,
+                },
+                ch => ch,
+            });
+        }
+        tokens.push(decoded);
+    }
+    Some(tokens)
 }
 
 /// Decodes URI-fragment `%XX` bytes without corrupting UTF-8 or replacing

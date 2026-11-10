@@ -357,7 +357,7 @@ async fn failing_criterion_fails_step_and_skips_rest() {
     // One workflow, two steps; the first fails its criterion so the second
     // is skipped.
     let plan = crate::plan::Plan {
-        components: BTreeMap::new(),
+        contracts: Vec::new(),
         workflows: vec![crate::plan::WfPlan {
             workflow_id: "broken-flow".to_owned(),
             inputs: Default::default(),
@@ -378,13 +378,16 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     }],
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
-                    failure_goto: None,
+                    on_failure: Vec::new(),
+                    on_success: Vec::new(),
                     timeout_ms: None,
                     message: None,
                     depends_on: Vec::new(),
                     workflow_depends_on: Vec::new(),
                     security: Vec::new(),
-                    response_schemas: Vec::new(),
+                    responses: Vec::new(),
+                    contract: None,
+                    accept: "application/json".to_owned(),
                     think: None,
                 },
                 crate::plan::StepPlan {
@@ -399,13 +402,16 @@ async fn failing_criterion_fails_step_and_skips_rest() {
                     success: Vec::new(),
                     outputs: Vec::new(),
                     body_pointers: Vec::new(),
-                    failure_goto: None,
+                    on_failure: Vec::new(),
+                    on_success: Vec::new(),
                     timeout_ms: None,
                     message: None,
                     depends_on: Vec::new(),
                     workflow_depends_on: Vec::new(),
                     security: Vec::new(),
-                    response_schemas: Vec::new(),
+                    responses: Vec::new(),
+                    contract: None,
+                    accept: "application/json".to_owned(),
                     think: None,
                 },
             ],
@@ -450,29 +456,181 @@ async fn failing_criterion_fails_step_and_skips_rest() {
     );
 }
 
-#[test]
-fn reporters_render_junit_console_and_ndjson() {
-    let passing = RunSummary {
-        passed: 3,
-        failed: 0,
-        skipped: 0,
-        duration_ms: 12,
-    };
-    let junit_ok = reporters::junit(&passing);
-    assert!(junit_ok.contains("<testsuites"));
-    assert!(junit_ok.contains("failures=\"0\""));
-    assert!(junit_ok.contains("<testcase "));
-    assert!(junit_ok.contains("skipped=\"0\""));
+/// The fixture run against a server that fails `createPet`: one failed
+/// step, one step never reached, one passing workflow.
+async fn half_failing_run() -> (crate::plan::Plan, RunSummary, Vec<TestEvent>) {
+    let plan = compile_fixture();
+    let http = CannedTransport::new()
+        .route(
+            Match {
+                method: Some("POST".to_owned()),
+                path_suffix: "/pets".to_owned(),
+            },
+            HttpResponse {
+                status: 500,
+                headers: Vec::new(),
+                body: Bytes::from_static(b"<boom> & \"bust\""),
+            },
+        )
+        .route(
+            Match {
+                method: Some("DELETE".to_owned()),
+                path_suffix: "/users/world".to_owned(),
+            },
+            HttpResponse {
+                status: 204,
+                headers: Vec::new(),
+                body: Bytes::new(),
+            },
+        );
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&plan, "http://api.test", &http, tx).await;
+    let events = drain(rx).await;
+    (plan, summary, events)
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn report_cases_cover_every_step_of_the_plan() {
+    let (plan, summary, events) = half_failing_run().await;
+    assert_eq!(
+        (summary.passed, summary.failed, summary.skipped),
+        (1, 1, 1),
+        "{events:#?}"
+    );
+    let cases = reporters::workflow_cases(&plan, &events);
+    let brief: Vec<(&str, &str, &str)> = cases
+        .iter()
+        .map(|case| {
+            (
+                case.suite.as_str(),
+                case.name.as_str(),
+                match case.outcome {
+                    reporters::Outcome::Passed => "passed",
+                    reporters::Outcome::Failed { .. } => "failed",
+                    reporters::Outcome::Skipped { .. } => "skipped",
+                },
+            )
+        })
+        .collect();
+    assert_eq!(
+        brief,
+        [
+            ("create-and-fetch", "create-pet", "failed"),
+            ("create-and-fetch", "show-created", "skipped"),
+            ("cleanup-user", "delete-user", "passed"),
+        ]
+    );
+    let reporters::Outcome::Failed { failures } = &cases[0].outcome else {
+        unreachable!("asserted above");
+    };
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.check == "statusCode == 201" && failure.actual == "500"),
+        "{failures:?}"
+    );
+    assert_eq!(
+        cases[0].requests,
+        ["POST http://api.test/pets -> 500"],
+        "what the step sent is part of the record"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn junit_reports_one_test_case_per_step() {
+    let (plan, summary, events) = half_failing_run().await;
+    let cases = reporters::workflow_cases(&plan, &events);
+    let xml = reporters::junit("flows.arazzo.yaml", &cases, summary.duration_ms);
+
+    assert!(
+        xml.contains(
+            r#"<testsuites name="flows.arazzo.yaml" tests="3" failures="1" errors="0" skipped="1""#
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            r#"<testsuite name="create-and-fetch" tests="2" failures="1" errors="0" skipped="1""#
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(
+            r#"<testsuite name="cleanup-user" tests="1" failures="0" errors="0" skipped="0""#
+        ),
+        "{xml}"
+    );
+    assert!(
+        xml.contains(r#"<testcase name="create-pet" classname="create-and-fetch""#),
+        "{xml}"
+    );
+    // The fixture declares only 201, so the undeclared 500 is the first
+    // finding and the workflow's own criterion the second.
+    assert!(
+        xml.contains(
+            r#"<failure message="response-status: expected a declared status (201), got 500" type="response-status">"#
+        ),
+        "the failure names its check and both sides: {xml}"
+    );
+    assert!(
+        xml.contains("statusCode == 201: expected 201, got 500"),
+        "every failed check is in the failure text: {xml}"
+    );
+    assert!(
+        xml.contains("POST http://api.test/pets -&gt; 500"),
+        "the failure text shows what was sent: {xml}"
+    );
+    assert!(
+        xml.contains(r#"<testcase name="show-created" classname="create-and-fetch""#)
+            && xml.contains("<skipped message="),
+        "{xml}"
+    );
+    assert_eq!(xml.matches("<testcase ").count(), 3, "{xml}");
+}
+
+#[test]
+fn junit_escapes_markup_in_names_and_messages() {
+    let cases = vec![reporters::Case {
+        suite: "a<b".to_owned(),
+        name: "x&y".to_owned(),
+        duration_ms: 1500,
+        requests: Vec::new(),
+        outcome: reporters::Outcome::Failed {
+            failures: vec![reporters::Failure {
+                check: "response-schema".to_owned(),
+                expected: "a body matching the declared schema".to_owned(),
+                actual: "/name: value has type integer, expected `string` <\"x\">".to_owned(),
+            }],
+        },
+    }];
+    let xml = reporters::junit("suite", &cases, 1500);
+    assert!(xml.contains(r#"<testsuite name="a&lt;b""#), "{xml}");
+    assert!(
+        xml.contains(r#"<testcase name="x&amp;y" classname="a&lt;b" time="1.500">"#),
+        "{xml}"
+    );
+    assert!(xml.contains("&lt;&quot;x&quot;&gt;"), "{xml}");
+    assert!(!xml.contains("<\"x\">"), "{xml}");
+}
+
+#[test]
+fn an_empty_run_is_a_well_formed_report() {
+    let xml = reporters::junit("suite", &[], 0);
+    assert!(
+        xml.contains(r#"<testsuites name="suite" tests="0" failures="0" errors="0" skipped="0""#),
+        "{xml}"
+    );
+    assert!(xml.trim_end().ends_with("</testsuites>"), "{xml}");
+}
+
+#[test]
+fn reporters_render_console_and_ndjson() {
     let failing = RunSummary {
         passed: 1,
         failed: 1,
         skipped: 0,
         duration_ms: 5,
     };
-    let junit_bad = reporters::junit(&failing);
-    assert!(junit_bad.contains("failures=\"1\""));
-    assert!(junit_bad.contains("<failure "));
 
     let events = vec![
         TestEvent::WfStarted {
@@ -520,12 +678,13 @@ fn reporters_render_junit_console_and_ndjson() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn replay_transport_serves_entries_in_order() {
-    let entry = |id: u64, status: u16, body: &str| CassetteEntry {
-        id,
-        method: "GET".to_owned(),
-        url: format!("http://api.test/item{id}"),
+/// The fixture's three exchanges as a recording, in the given order.
+fn fixture_cassette(order: [usize; 3]) -> Vec<CassetteEntry> {
+    let entry = |method: &str, path: &str, status: u16, body: &str| CassetteEntry {
+        id: 0,
+        method: method.to_owned(),
+        // Recorded through a gateway: another host than the run's base URL.
+        url: format!("http://127.0.0.1:9000{path}"),
         status,
         request_headers: Vec::new(),
         request_body: Body::from_bytes(b""),
@@ -533,30 +692,59 @@ async fn replay_transport_serves_entries_in_order() {
         response_body: Body::from_bytes(body.as_bytes()),
         duration_ms: 1.0,
     };
-    let transport = ReplayTransport::new(vec![entry(1, 200, "first"), entry(2, 404, "second")]);
+    let recorded = [
+        entry("POST", "/pets", 201, r#"{"id":"7","name":"Rex"}"#),
+        entry(
+            "GET",
+            "/pets/7?verbose=yes",
+            200,
+            r#"{"id":"7","name":"Rex"}"#,
+        ),
+        entry("DELETE", "/users/world", 204, ""),
+    ];
+    order
+        .into_iter()
+        .map(|index| recorded[index].clone())
+        .collect()
+}
 
-    let first = transport
-        .execute(HttpRequest::default())
-        .await
-        .expect("entry 1");
-    assert_eq!(first.status, 200);
-    assert_eq!(first.body.as_ref(), b"first");
+/// A recorded run replays whatever order its workflows happen to send
+/// their requests in: the two workflows of the fixture run concurrently,
+/// so no single line order of the cassette is "the" order.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cassette_replays_a_concurrent_run_in_any_recorded_order() {
+    for order in [[0, 1, 2], [2, 0, 1], [2, 1, 0], [1, 2, 0]] {
+        let transport = ReplayTransport::new(fixture_cassette(order));
+        let (tx, rx) = tokio::sync::mpsc::channel(256);
+        let summary = run_plan(&compile_fixture(), "http://api.test", &transport, tx).await;
+        let events = drain(rx).await;
+        assert_eq!(
+            (summary.passed, summary.failed, summary.skipped),
+            (3, 0, 0),
+            "cassette order {order:?}: {events:#?}"
+        );
+    }
+}
 
-    let second = transport
-        .execute(HttpRequest {
-            method: "GET".to_owned(),
-            url: "http://anything-else/".to_owned(),
-            headers: Vec::new(),
-            body: Bytes::new(),
-        })
-        .await
-        .expect("entry 2");
-    assert_eq!(second.status, 404);
-    assert_eq!(second.body.as_ref(), b"second");
-
-    // Exhausted cassette is a transport error regardless of the request.
-    let third = transport.execute(HttpRequest::default()).await;
-    assert!(third.is_err());
+/// A request the cassette never recorded fails its step as a transport
+/// error that names the request.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_missing_from_the_cassette_fails_its_step() {
+    let mut cassette = fixture_cassette([0, 1, 2]);
+    cassette.pop();
+    let transport = ReplayTransport::new(cassette);
+    let (tx, rx) = tokio::sync::mpsc::channel(256);
+    let summary = run_plan(&compile_fixture(), "http://api.test", &transport, tx).await;
+    let events = drain(rx).await;
+    assert_eq!((summary.passed, summary.failed), (2, 1), "{events:#?}");
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            TestEvent::CriterionFail { crit, actual, .. }
+                if crit == "transport" && actual.contains("DELETE http://api.test/users/world")
+        )),
+        "{events:#?}"
+    );
 }
 
 #[test]
@@ -994,8 +1182,8 @@ fn recursive_response_schema_violates_at_depth() {
     );
     let plan = compile_plan(&doc, &ws).expect("compiles");
     assert!(
-        !plan.components.is_empty(),
-        "the response schema must be carried on the step"
+        !plan.workflows[0].steps[0].responses.is_empty(),
+        "the declared responses must be carried on the step"
     );
 
     // A violation nine levels deep: the old inliner went permissive at
@@ -1098,10 +1286,24 @@ workflows:
           collected: $response.body
 "#;
 
-/// Records the execution order the scheduler chose.
+/// Records the execution order the scheduler chose. By default every
+/// request is answered `200`, which the fixture does not declare for its
+/// one `POST` (`createPet` declares `201`); [`OrderRecorder::conforming`]
+/// answers that `POST` as declared.
 #[derive(Default)]
 struct OrderRecorder {
     paths: std::sync::Mutex<Vec<String>>,
+    created: bool,
+}
+
+impl OrderRecorder {
+    /// A recorder whose replies carry the statuses the fixture declares.
+    fn conforming() -> Self {
+        Self {
+            created: true,
+            ..Self::default()
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -1112,7 +1314,11 @@ impl HttpClient for OrderRecorder {
     ) -> Result<crate::exec::HttpResponse, crate::exec::TransportError> {
         self.paths.lock().unwrap().push(req.url.clone());
         Ok(crate::exec::HttpResponse {
-            status: 200,
+            status: if self.created && req.method == "POST" {
+                201
+            } else {
+                200
+            },
             headers: Vec::new(),
             body: Bytes::from_static(b"[]"),
         })
@@ -1152,7 +1358,7 @@ fn dependencies_are_compiled_onto_the_plan() {
 #[test]
 fn the_scheduler_runs_dependencies_first() {
     let plan = compile_ordered();
-    let recorder = OrderRecorder::default();
+    let recorder = OrderRecorder::conforming();
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
     let summary = tokio::runtime::Runtime::new()
         .expect("runtime")
@@ -1783,6 +1989,7 @@ async fn event_stream_order_is_stable() {
             TestEvent::ResponseValidated { .. } => "response_validated",
             TestEvent::CriterionOk { .. } => "criterion_ok",
             TestEvent::CriterionFail { .. } => "criterion_fail",
+            TestEvent::StepRetried { .. } => "step_retried",
             TestEvent::OutputSet { .. } => "output_set",
             TestEvent::WfDone { .. } => "wf_done",
             TestEvent::RunDone { .. } => "run_done",
@@ -2299,7 +2506,7 @@ async fn qualified_same_workflow_depends_on_runs_the_step() {
     assert!(plan.workflows[0].depends_on.is_empty());
 
     let (tx, rx) = tokio::sync::mpsc::channel(256);
-    let summary = run_plan(&plan, "http://api.test", &OrderRecorder::default(), tx).await;
+    let summary = run_plan(&plan, "http://api.test", &OrderRecorder::conforming(), tx).await;
     let events = drain(rx).await;
     assert_eq!(
         (summary.passed, summary.failed, summary.skipped),
@@ -2550,8 +2757,12 @@ workflows:
 async fn on_failure_goto_reruns_from_the_target_step() {
     let plan = compile_text(GOTO_RECOVERY_ARAZZO).expect("compiles");
     assert_eq!(
-        plan.workflows[0].steps[2].failure_goto.as_deref(),
-        Some("prepare")
+        plan.workflows[0].steps[2]
+            .on_failure
+            .iter()
+            .map(|action| &action.kind)
+            .collect::<Vec<_>>(),
+        [&crate::plan::ActionKind::Goto("prepare".to_owned())]
     );
 
     let (tx, rx) = tokio::sync::mpsc::channel(256);
@@ -2567,9 +2778,13 @@ async fn on_failure_goto_reruns_from_the_target_step() {
         vec!["prepare", "check", "make", "prepare", "check", "make"],
         "{events:#?}"
     );
-    // The first `make` failure stays on the record; the re-runs replace,
-    // rather than add to, the earlier passes.
-    assert_eq!((summary.passed, summary.failed), (3, 1), "{events:#?}");
+    // Three steps, each counted once: the first `make` failure stays on
+    // the record though its second run passed, as the reports show it.
+    assert_eq!(
+        (summary.passed, summary.failed, summary.skipped),
+        (2, 1, 0),
+        "{events:#?}"
+    );
 }
 
 /// `make` always fails and its `onFailure` jumps back to itself.

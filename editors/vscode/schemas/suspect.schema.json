@@ -380,6 +380,16 @@
           },
           "x-suspect-env": "SUSPECT_BASE_URL"
         },
+        "conformance": {
+          "default": "strict",
+          "description": "How much of the declared response contract each reply is held to: `strict` (status, content type, required headers and body schema), `schema` (the body schema of declared responses only) or `off` (success criteria only).",
+          "enum": [
+            "strict",
+            "schema",
+            "off"
+          ],
+          "type": "string"
+        },
         "credentials": {
           "description": "Credentials file for the security schemes tests exercise. Default: `.suspect/credentials.json` discovered upward.",
           "type": "string",

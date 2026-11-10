@@ -487,8 +487,10 @@ mod tests {
                     status: *s,
                     description: None,
                     schema: None,
+                    ..Default::default()
                 })
                 .collect(),
+            unresolved: Vec::new(),
         }
     }
 

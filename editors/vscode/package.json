@@ -559,7 +559,7 @@
 		"compile": "tsc -p ./",
 		"watch": "tsc -watch -p ./",
 		"settings:write": "node scripts/settings.cjs --write",
-		"test:headless": "node --test test/settings.cjs test/manifest.cjs test/sdk-fixtures.cjs test/ui-surface.cjs test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs test/native-host/contract.test.cjs",
+		"test:headless": "node --test test/settings.cjs test/manifest.cjs test/sdk-fixtures.cjs test/ui-surface.cjs test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs test/step-verdicts.cjs test/native-host/contract.test.cjs",
 		"test:generation": "node --test test/generation*.cjs",
 		"test:generation:protocol": "node --test test/generation-discovery.cjs test/generation-session.cjs test/generation-ui.cjs",
 		"test:generation:host": "node test/native-host/run.cjs",

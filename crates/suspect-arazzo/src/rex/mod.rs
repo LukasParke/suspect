@@ -580,8 +580,9 @@ fn error(input: &str, reason: &str) -> RexError {
 }
 
 /// Evaluates a parsed expression against `ctx`, returning `None` when the
-/// addressed value does not exist (missing header/key, non-JSON body,
-/// unresolvable pointer).
+/// addressed value does not exist (missing header/key, no body, a pointer
+/// that does not resolve or that reaches into a body that is not JSON).
+/// A whole body that is not JSON is its text.
 #[must_use]
 pub fn eval_rex(rex: &Rex, ctx: &RexCtx<'_>) -> Option<serde_json::Value> {
     match rex {
@@ -655,8 +656,15 @@ fn eval_part(
                 Side::Request => ctx.request_body,
                 Side::Response => ctx.response_body,
             };
-            let doc = parse_json(body)?;
-            resolve_pointer(&doc, pointer).cloned()
+            match parse_json(body) {
+                Some(doc) => resolve_pointer(&doc, pointer).cloned(),
+                // A body that is not JSON is its text; nothing inside it
+                // can be addressed.
+                None if pointer.tokens().is_empty() && !body.is_empty() => {
+                    Some(serde_json::Value::String(body.to_owned()))
+                }
+                None => None,
+            }
         }
     }
 }

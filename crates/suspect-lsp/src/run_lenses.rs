@@ -141,13 +141,18 @@ pub(crate) fn failure_range(wf: &WfPlan, failure: &CriterionFailure) -> Range<us
 #[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) async fn run_workflow_core(
     wf: &WfPlan,
+    contracts: &[std::sync::Arc<suspect_test::Schemas>],
+    conformance: suspect_test::Conformance,
     base_url: &str,
     transport: &dyn HttpClient,
     mirror: Option<&tokio::sync::mpsc::Sender<TestEvent>>,
 ) -> (RunSummary, Vec<CriterionFailure>) {
+    // The workflow's steps index the plan's schema tables, so the tables
+    // travel with it: a response is held to its contract in the editor
+    // exactly as on the command line.
     let plan = Plan {
         workflows: vec![wf.clone()],
-        components: Default::default(),
+        contracts: contracts.to_vec(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TestEvent>(256);
     let collector = async {
@@ -162,30 +167,57 @@ pub(crate) async fn run_workflow_core(
         }
         events
     };
+    let opts = suspect_test::RunOpts {
+        conformance,
+        ..suspect_test::RunOpts::new(base_url)
+    };
     let (summary, events) = tokio::join!(
-        suspect_test::run_plan(&plan, base_url, transport, tx),
+        suspect_test::run_plan_with(&plan, &opts, transport, tx),
         collector
     );
 
-    let failures = events
-        .iter()
-        .filter_map(|ev| match ev {
+    (summary, reported_failures(&events))
+}
+
+/// The criterion failures a finished run reports. An attempt that was
+/// retried is replaced, its failures with it; what an earlier run of the
+/// same step failed (before a goto ran it again) stays.
+// Only the live-run workflow runner reaches this.
+#[cfg_attr(not(feature = "live-run"), allow(dead_code))]
+pub(crate) fn reported_failures(events: &[TestEvent]) -> Vec<CriterionFailure> {
+    let mut failures: Vec<CriterionFailure> = Vec::new();
+    // Step id → how many failures predate its attempt in progress.
+    let mut before_attempt: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for ev in events {
+        match ev {
+            TestEvent::StepStarted { step, .. } => {
+                before_attempt.insert(step.as_str(), failures.len());
+            }
             TestEvent::CriterionFail {
                 step,
                 crit,
                 expected,
                 actual,
                 ..
-            } => Some(CriterionFailure {
+            } => failures.push(CriterionFailure {
                 step_id: step.clone(),
                 crit: crit.clone(),
                 expected: expected.clone(),
                 actual: actual.clone(),
             }),
-            _ => None,
-        })
-        .collect();
-    (summary, failures)
+            TestEvent::StepRetried { step, .. } => {
+                let kept = before_attempt.get(step.as_str()).copied().unwrap_or(0);
+                let mut position = 0;
+                failures.retain(|failure| {
+                    position += 1;
+                    position <= kept || &failure.step_id != step
+                });
+            }
+            _ => {}
+        }
+    }
+    failures
 }
 
 /// Converts criterion failures into editor diagnostics anchored at each
@@ -396,6 +428,13 @@ pub(crate) fn describe_event(ev: &TestEvent) -> String {
             expected,
             actual,
         } => format!("[{wf}/{step}] FAIL {crit}: expected {expected}, got {actual}"),
+        TestEvent::StepRetried {
+            wf,
+            step,
+            attempt,
+            limit,
+            delay_ms,
+        } => format!("[{wf}/{step}] retry {attempt} of {limit} after {delay_ms} ms"),
         TestEvent::OutputSet { wf, key, value } => format!("[{wf}] output {key} = {value}"),
         TestEvent::WfDone { wf, passed } => {
             format!(

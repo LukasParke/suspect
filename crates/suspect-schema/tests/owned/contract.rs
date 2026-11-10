@@ -214,6 +214,33 @@ fn outcome(schema: &str, instance: &str, config: Config) -> OwnedOutcome {
     program.validate(&root, &serde_json::from_str(instance).unwrap())
 }
 
+/// The owned runtime decides a long `uniqueItems` array inside the default
+/// limits, and still finds equal items however they are spelt.
+#[test]
+fn unique_items_scales_with_the_array_not_its_square() {
+    let numbers: Vec<String> = (0..3000).map(|i| i.to_string()).collect();
+    let unique = format!("[{}]", numbers.join(","));
+    assert_eq!(
+        outcome(r#"{"uniqueItems":true}"#, &unique, Config::default()),
+        OwnedOutcome::Valid
+    );
+    for (first, last) in [
+        ("1", "1.0"),
+        (r#"{"a":1,"b":[1,2]}"#, r#"{"b":[1.0,2],"a":1e0}"#),
+        (r#""x""#, r#""x""#),
+    ] {
+        let repeated = format!("[{first},{},{last}]", numbers.join(","));
+        // `1` is also among the fillers; either way the array is not unique.
+        assert!(
+            matches!(
+                outcome(r#"{"uniqueItems":true}"#, &repeated, Config::default()),
+                OwnedOutcome::Invalid(_)
+            ),
+            "{first} and {last}"
+        );
+    }
+}
+
 #[test]
 fn exact_numbers_counts_and_equality_keep_their_mathematical_values() {
     for (schema, instance, valid) in [

@@ -289,7 +289,7 @@ pub(crate) const JOBS: &[Job] = &[
     Job {
         name: "platform-smoke",
         workflow: PLATFORM_YML,
-        commands: "cargo build --release -p suspect-cli; gateway mock + Arazzo suite live, then offline against a cassette",
+        commands: "cargo build --release -p suspect-cli; the bundled contract-testing example against the mock gateway: live, recorded through a gateway, then offline from that cassette",
         tools: &[],
         run: platform_smoke,
     },
@@ -472,66 +472,15 @@ impl Step {
 // platform-smoke
 // ---------------------------------------------------------------------------
 
-/// The CI port; locally a free port is used so a running gateway does not
-/// collide.
+/// The CI ports; locally free ports are used so a running gateway does not
+/// collide. The mock listens on the first, the recording gateway on the
+/// second.
 const CI_SMOKE_PORT: u16 = 8091;
 
-const SMOKE_PETSTORE: &str = r#"openapi: "3.0.0"
-info:
-  title: Smoke Petstore
-  version: "1.0.0"
-servers:
-  - url: http://127.0.0.1:{PORT}
-paths:
-  /pets/{petId}:
-    get:
-      operationId: showPetById
-      parameters:
-        - name: petId
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        '200':
-          description: one pet
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Pet'
-components:
-  schemas:
-    Pet:
-      type: object
-      required: [id, name]
-      properties:
-        id:
-          type: integer
-        name:
-          type: string
-        tag:
-          type: string
-"#;
-
-const SMOKE_SUITE: &str = r#"arazzo: 1.0.0
-info:
-  title: smoke flows
-  version: "1.0"
-sourceDescriptions:
-  - name: petstore
-    url: petstore.yaml
-workflows:
-  - workflowId: fetch-pet
-    steps:
-      - stepId: show-pet
-        operationId: showPetById
-        parameters:
-          - name: petId
-            in: path
-            value: 1
-        successCriteria:
-          - condition: '{$statusCode} == 200'
-"#;
+/// The description and suite the smoke runs: the bundled example, so what
+/// the documentation shows is what CI proves.
+const SMOKE_SPEC: &str = "examples/contract-testing/petstore.openapi.yaml";
+const SMOKE_SUITE: &str = "examples/contract-testing/flows.arazzo.yaml";
 
 /// Kills the gateway when the job ends, however it ends.
 struct Gateway(std::process::Child);
@@ -541,6 +490,34 @@ impl Drop for Gateway {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+/// Starts `suspect traffic gateway <spec> --port <port> <args>`, logging
+/// to `log`.
+fn spawn_gateway(
+    suspect: &Path,
+    spec: &Path,
+    port: u16,
+    args: &[&str],
+    log: &Path,
+) -> Result<Gateway> {
+    let file = std::fs::File::create(log)?;
+    println!(
+        "$ suspect traffic gateway {} --port {port} {} &",
+        spec.display(),
+        args.join(" ")
+    );
+    Ok(Gateway(
+        Command::new(suspect)
+            .args(["traffic", "gateway"])
+            .arg(spec)
+            .args(["--port", &port.to_string()])
+            .args(args)
+            .stdout(file.try_clone()?)
+            .stderr(file)
+            .spawn()
+            .with_context(|| format!("spawn {}", suspect.display()))?,
+    ))
 }
 
 fn platform_smoke(ctx: &Ctx) -> Result<()> {
@@ -556,67 +533,105 @@ fn platform_smoke(ctx: &Ctx) -> Result<()> {
     }
     std::fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
 
-    let port = if ctx.ci { CI_SMOKE_PORT } else { free_port()? };
-    let base = format!("http://127.0.0.1:{port}");
-    std::fs::write(
-        dir.join("petstore.yaml"),
-        SMOKE_PETSTORE.replace("{PORT}", &port.to_string()),
-    )?;
-    let suite = dir.join("suite.arazzo.yaml");
-    std::fs::write(&suite, SMOKE_SUITE)?;
+    let (mock_port, record_port) = if ctx.ci {
+        (CI_SMOKE_PORT, CI_SMOKE_PORT + 1)
+    } else {
+        (free_port()?, free_port()?)
+    };
+    let spec = ctx.root.join(SMOKE_SPEC);
+    let suite = ctx.root.join(SMOKE_SUITE);
+    let mock_log = dir.join("mock.log");
+    let record_log = dir.join("record.log");
+    let cassette = dir.join("smoke.scj");
 
-    let log_path = dir.join("gateway.log");
-    let log = std::fs::File::create(&log_path)?;
-    println!("$ suspect traffic gateway petstore.yaml --port {port} --mode mock &");
-    let gateway = Gateway(
-        Command::new(&suspect)
-            .args(["traffic", "gateway"])
-            .arg(dir.join("petstore.yaml"))
-            .args(["--port", &port.to_string(), "--mode", "mock"])
-            .stdout(log.try_clone()?)
-            .stderr(log)
-            .spawn()
-            .with_context(|| format!("spawn {}", suspect.display()))?,
+    // The mock stands in for the service, and enforces the contract on
+    // what the suite sends.
+    let mock = spawn_gateway(
+        &suspect,
+        &spec,
+        mock_port,
+        &["--mode", "mock", "--enforce"],
+        &mock_log,
+    )?;
+    let result = smoke_against(
+        &suspect,
+        &spec,
+        &suite,
+        mock_port,
+        record_port,
+        &cassette,
+        &record_log,
     );
-    let result = smoke_against(&suspect, &dir, &suite, &base);
-    drop(gateway);
+    drop(mock);
     if result.is_err() {
-        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
-        let tail = log.lines().rev().take(20).collect::<Vec<_>>();
-        eprintln!("gateway log (last lines):");
-        for line in tail.into_iter().rev() {
-            eprintln!("  {line}");
+        for log_path in [&mock_log, &record_log] {
+            let log = std::fs::read_to_string(log_path).unwrap_or_default();
+            let tail = log.lines().rev().take(20).collect::<Vec<_>>();
+            eprintln!("{} (last lines):", log_path.display());
+            for line in tail.into_iter().rev() {
+                eprintln!("  {line}");
+            }
         }
     }
     result
 }
 
-fn smoke_against(suspect: &Path, dir: &Path, suite: &Path, base: &str) -> Result<()> {
-    wait_ready(&format!("{base}/pets/1"))?;
+/// The suite live against the mock, then through a recording gateway,
+/// then offline from the cassette that gateway wrote.
+fn smoke_against(
+    suspect: &Path,
+    spec: &Path,
+    suite: &Path,
+    mock_port: u16,
+    record_port: u16,
+    cassette: &Path,
+    record_log: &Path,
+) -> Result<()> {
+    let mock = format!("http://127.0.0.1:{mock_port}");
+    let recorder = format!("http://127.0.0.1:{record_port}");
+    wait_ready(&format!("{mock}/pets"))?;
 
-    println!("$ suspect test run suite.arazzo.yaml --base-url {base} --format ndjson");
-    let live = Command::new(suspect)
-        .args(["test", "run"])
-        .arg(suite)
-        .args(["--base-url", base, "--format", "ndjson"])
-        .output()
-        .context("run suspect test (live)")?;
-    check_run_done("live", &live)?;
+    let run = |label: &str, extra: &[&str]| -> Result<()> {
+        println!(
+            "$ suspect test run {} {} --format ndjson",
+            suite.display(),
+            extra.join(" ")
+        );
+        let output = Command::new(suspect)
+            .args(["test", "run"])
+            .arg(suite)
+            .args(extra)
+            .args(["--format", "ndjson"])
+            .output()
+            .with_context(|| format!("run suspect test ({label})"))?;
+        check_run_done(label, &output)
+    };
 
-    let cassette = dir.join("smoke.cassette");
-    std::fs::write(&cassette, smoke_cassette(base))?;
-    println!(
-        "$ suspect test run suite.arazzo.yaml --base-url {base} --cassette smoke.cassette --format ndjson"
-    );
-    let offline = Command::new(suspect)
-        .args(["test", "run"])
-        .arg(suite)
-        .args(["--base-url", base, "--cassette"])
-        .arg(&cassette)
-        .args(["--format", "ndjson"])
-        .output()
-        .context("run suspect test (offline)")?;
-    check_run_done("offline", &offline)
+    run("live", &["--base-url", &mock])?;
+
+    {
+        let cassette_arg = cassette.to_string_lossy();
+        let _recording = spawn_gateway(
+            suspect,
+            spec,
+            record_port,
+            &[
+                "--mode",
+                "record",
+                "--upstream",
+                &mock,
+                "--cassette",
+                &cassette_arg,
+            ],
+            record_log,
+        )?;
+        wait_ready(&format!("{recorder}/pets"))?;
+        run("recorded", &["--base-url", &recorder])?;
+        // Dropping the gateway here ends the recording.
+    }
+
+    let cassette_arg = cassette.to_string_lossy();
+    run("offline", &["--cassette", &cassette_arg])
 }
 
 fn free_port() -> Result<u16> {
@@ -642,8 +657,8 @@ fn wait_ready(url: &str) -> Result<()> {
     bail!("gateway did not answer GET {url} with 200 within 30s")
 }
 
-/// The NDJSON stream must carry `run_done` with one pass and no failure
-/// (the human report and the run summary follow it on stdout).
+/// The NDJSON stream must carry `run_done` with every step passed and none
+/// failed, and the command must exit successfully.
 fn check_run_done(label: &str, output: &std::process::Output) -> Result<()> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     print!("{stdout}");
@@ -653,48 +668,14 @@ fn check_run_done(label: &str, output: &std::process::Output) -> Result<()> {
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
         .rfind(|record| record["event"] == "run_done")
         .with_context(|| format!("{label}: no run_done event in the ndjson report"))?;
-    if done["passed"] != 1 || done["failed"] != 0 || !output.status.success() {
+    let passed = done["passed"].as_u64().unwrap_or(0);
+    if passed == 0 || done["failed"] != 0 || !output.status.success() {
         bail!(
-            "{label}: expected run_done with passed 1, failed 0 and success; got {done} ({})",
+            "{label}: expected run_done with steps passed, none failed and success; got {done} ({})",
             output.status
         );
     }
     Ok(())
-}
-
-/// A one-entry Suspect Cassette answering `GET /pets/1`.
-fn smoke_cassette(base: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let body_obj = |raw: &[u8]| {
-        let sha: String = Sha256::digest(raw)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        serde_json::json!({
-            "encoding": "utf8",
-            "content": String::from_utf8_lossy(raw),
-            "sha256": sha,
-        })
-    };
-    let body = serde_json::json!({"id": 1, "name": "Rex", "tag": "happy"}).to_string();
-    let header = serde_json::json!({
-        "format": "suspect-cassette",
-        "version": 1,
-        "recorded_at_ms": 0,
-        "source": "platform-smoke",
-    });
-    let entry = serde_json::json!({
-        "id": 1,
-        "method": "GET",
-        "url": format!("{base}/pets/1"),
-        "status": 200,
-        "request_headers": [],
-        "request_body": body_obj(b""),
-        "response_headers": [["content-type", "application/json"]],
-        "response_body": body_obj(body.as_bytes()),
-        "duration_ms": 1.0,
-    });
-    format!("{header}\n{entry}\n")
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -958,19 +939,29 @@ mod tests {
         }
     }
     #[test]
-    fn smoke_cassette_is_two_json_lines_with_matching_digest() {
-        use sha2::{Digest, Sha256};
-        let text = smoke_cassette("http://127.0.0.1:1");
-        let lines = text.lines().collect::<Vec<_>>();
-        assert_eq!(lines.len(), 2);
-        let entry: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
-        assert_eq!(entry["url"], "http://127.0.0.1:1/pets/1");
-        let content = entry["response_body"]["content"].as_str().unwrap();
-        let sha: String = Sha256::digest(content.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        assert_eq!(entry["response_body"]["sha256"], sha.as_str());
+    fn the_smoke_inputs_are_the_bundled_example() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        for file in [SMOKE_SPEC, SMOKE_SUITE] {
+            assert!(root.join(file).is_file(), "{file} exists");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_run_must_pass_steps_and_fail_none() {
+        use std::os::unix::process::ExitStatusExt;
+        let output = |stdout: &str, code: i32| std::process::Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: Vec::new(),
+        };
+        let done = |passed: u32, failed: u32| {
+            format!("{{\"event\":\"run_done\",\"passed\":{passed},\"failed\":{failed}}}\n")
+        };
+        assert!(check_run_done("ok", &output(&done(6, 0), 0)).is_ok());
+        assert!(check_run_done("failed step", &output(&done(5, 1), 1)).is_err());
+        assert!(check_run_done("nothing ran", &output(&done(0, 0), 0)).is_err());
+        assert!(check_run_done("no event", &output("", 0)).is_err());
     }
 }
 

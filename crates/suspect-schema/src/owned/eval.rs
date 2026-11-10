@@ -741,13 +741,18 @@ instructions! {
             unique_items: Kind::UniqueItems => {
                 let mut ok = true;
                 if let Some(array) = instance.as_array() {
+                    let items: Vec<&Value> = array.iter().collect();
+                    let mut scan = state
+                        .equality
+                        .unique_scan(&items)
+                        .map_err(|e| finding(at, path, &e))?;
                     'items: for (index, value) in array.iter().enumerate() {
                         state.step(at, path)?;
-                        for previous in &array[..index] {
+                        for previous in scan.earlier(index) {
                             state.step(at, path)?;
                             if state
                                 .equality
-                                .compare(value, previous)
+                                .compare(value, &array[previous])
                                 .map_err(|e| finding(at, path, &e))?
                             {
                                 state.emit(at, path, "array contains equal items");
@@ -755,6 +760,7 @@ instructions! {
                                 break 'items;
                             }
                         }
+                        scan.visited(index);
                     }
                 }
                 ok

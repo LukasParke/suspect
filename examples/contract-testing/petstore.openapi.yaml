@@ -1,0 +1,168 @@
+openapi: 3.1.0
+info:
+  title: Petstore (contract-testing example)
+  version: "1.0"
+  description: >
+    A small API for the contract-testing example. It uses the shapes a
+    contract test has to get right: a response schema written inline, a
+    shared error response behind a `$ref`, a structured JSON media type
+    (`application/problem+json`), a `default` response and a nullable
+    property.
+  contact:
+    name: suspect
+    url: https://github.com/LukasParke/suspect
+  license:
+    name: MIT
+    url: https://opensource.org/license/mit
+tags:
+  - name: pets
+    description: Everything about pets
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      summary: List pets
+      description: Returns one page of pets.
+      tags: [pets]
+      parameters:
+        - name: limit
+          in: query
+          description: Largest number of pets to return.
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: A page of pets.
+          content:
+            application/json:
+              # Declared inline on purpose: an inline schema is held to the
+              # same standard as a component.
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Pet" }
+        "400": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    post:
+      operationId: createPet
+      summary: Create a pet
+      description: Stores a new pet and returns it with its id.
+      tags: [pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewPet" }
+      responses:
+        "201":
+          description: The stored pet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+        "422": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+  /pets/{petId}:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        description: The pet's id.
+        schema: { type: string }
+    get:
+      operationId: showPet
+      summary: Show one pet
+      description: Returns the pet with this id.
+      tags: [pets]
+      responses:
+        "200":
+          description: The pet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    put:
+      operationId: replacePet
+      summary: Replace a pet
+      description: Replaces the stored pet and returns the new version.
+      tags: [pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Pet" }
+      responses:
+        "200":
+          description: The replaced pet.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pet" }
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+    delete:
+      operationId: deletePet
+      summary: Delete a pet
+      description: Removes the pet with this id.
+      tags: [pets]
+      responses:
+        "204":
+          description: The pet is gone.
+        "404": { $ref: "#/components/responses/Problem" }
+        default: { $ref: "#/components/responses/Problem" }
+components:
+  responses:
+    Problem:
+      description: What went wrong, as an RFC 9457 problem document.
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+  schemas:
+    NewPet:
+      type: object
+      description: What a client sends to create a pet.
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: What the pet answers to.
+          example: Rex
+        tag:
+          type: [string, "null"]
+          description: A free-form label; `null` when the pet has none.
+          example: happy
+    Pet:
+      type: object
+      description: A stored pet.
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          description: Assigned by the server.
+          example: pet_42
+        name:
+          type: string
+          description: What the pet answers to.
+          example: Rex
+        tag:
+          type: [string, "null"]
+          description: A free-form label; `null` when the pet has none.
+          example: happy
+    Problem:
+      type: object
+      description: An RFC 9457 problem document.
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: A short summary of the problem.
+          example: Not found
+        status:
+          type: integer
+          description: The HTTP status code.
+          example: 404
+        detail:
+          type: string
+          description: What happened, for a person.
+          example: No pet has this id.

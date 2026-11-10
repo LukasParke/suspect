@@ -132,6 +132,111 @@ fn enum_and_const_use_exact_numeric_equality_in_nested_values() {
     }
 }
 
+fn array_of(items: &[String]) -> String {
+    format!("[{}]", items.join(","))
+}
+
+/// A list of ordinary length is decided inside the default limits: the
+/// work `uniqueItems` does grows with the array, not with its square.
+#[test]
+fn unique_items_decides_long_arrays_within_the_default_limits() {
+    let numbers: Vec<String> = (0..3000).map(|i| i.to_string()).collect();
+    assert!(accepts(r#"{"uniqueItems":true}"#, &array_of(&numbers)));
+    let records: Vec<String> = (0..3000)
+        .map(|i| format!(r#"{{"id":{i},"name":"n{i}","tags":["a","b"]}}"#))
+        .collect();
+    assert!(accepts(r#"{"uniqueItems":true}"#, &array_of(&records)));
+}
+
+#[test]
+fn unique_items_finds_equal_items_in_a_long_array_however_they_are_spelt() {
+    let around = |first: &str, last: &str| {
+        let mut items: Vec<String> = (0..200).map(|i| format!(r#""filler {i}""#)).collect();
+        items.insert(0, first.to_owned());
+        items.push(last.to_owned());
+        array_of(&items)
+    };
+    for (first, last) in [
+        ("1", "1.0"),
+        ("1", "10e-1"),
+        ("0", "-0.0"),
+        ("1e400", "10e399"),
+        ("null", "null"),
+        ("true", "true"),
+        (r#""a""#, r#""\u0061""#),
+        ("[1,[2]]", "[1.0,[2.0]]"),
+        (r#"{"a":1,"b":[1,2]}"#, r#"{"b":[1.0,2],"\u0061":1e0}"#),
+    ] {
+        let schema = doc(r#"{"uniqueItems":true}"#, Format::Json);
+        let instance = doc(&around(first, last), Format::Json);
+        let compiled = Compiler::new(Config::default())
+            .compile(schema.root())
+            .unwrap();
+        let errors = compiled.validate(instance.root());
+        assert_eq!(errors.len(), 1, "{first} and {last}: {errors:?}");
+        assert!(
+            errors[0]
+                .message
+                .contains("array items 0 and 201 are equal"),
+            "{first} and {last}: {}",
+            errors[0].message
+        );
+    }
+    for (first, last) in [
+        ("1", "1.5"),
+        ("9007199254740992", "9007199254740993"),
+        ("0", "1e-400"),
+        ("1", r#""1""#),
+        ("0", "false"),
+        ("0", "null"),
+        ("[]", "{}"),
+        ("[1,2]", "[2,1]"),
+        ("[1,[2]]", "[1,[3]]"),
+        (r#"{"a":1}"#, r#"{"a":2}"#),
+        (r#"{"a":1}"#, r#"{"b":1}"#),
+        (r#"{"a":{"b":1}}"#, r#"{"a":{"b":2}}"#),
+    ] {
+        assert!(
+            accepts(r#"{"uniqueItems":true}"#, &around(first, last)),
+            "{first} and {last} are different values"
+        );
+    }
+}
+
+/// Whatever cannot be decided is a failure to evaluate, in a long array as
+/// in a short one: never "unique".
+#[test]
+fn unique_items_keeps_resource_failures_in_long_arrays() {
+    let mut items: Vec<String> = (0..200).map(|i| i.to_string()).collect();
+    for (config, extra) in [
+        (
+            Config {
+                max_number_bytes: 8,
+                ..Config::default()
+            },
+            Some("12345678901234567890"),
+        ),
+        (
+            Config {
+                max_equality_steps: 50,
+                ..Config::default()
+            },
+            None,
+        ),
+    ] {
+        if let Some(extra) = extra {
+            items.push(extra.to_owned());
+        }
+        let schema = doc(r#"{"uniqueItems":true}"#, Format::Json);
+        let instance = doc(&array_of(&items), Format::Json);
+        let compiled = Compiler::new(config).compile(schema.root()).unwrap();
+        let first = compiled
+            .validate_first(instance.root())
+            .expect("evaluation must fail");
+        assert_eq!(first.kind, SchemaErrorKind::Evaluation);
+    }
+}
+
 #[test]
 fn unique_items_shares_the_exact_value_equality_rules() {
     for (instance, expected) in [

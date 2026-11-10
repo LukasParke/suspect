@@ -483,6 +483,15 @@ impl ParameterView<'_> {
     }
 }
 
+impl<'d> CriterionView<'d> {
+    /// Views `node` as a Criterion Object: an entry of `successCriteria`,
+    /// or of an action's `criteria` reached through a reusable action.
+    #[must_use]
+    pub fn of(node: NodeRef<'d>) -> Self {
+        Self { node }
+    }
+}
+
 impl CriterionView<'_> {
     #[must_use]
     /// The raw criterion node.
@@ -494,6 +503,26 @@ impl CriterionView<'_> {
     /// The criterion's `condition` (a runtime expression).
     pub fn condition(&self) -> Option<&str> {
         self.node.get("condition").and_then(|n| n.as_str())
+    }
+
+    /// The criterion's `condition` as its author wrote it: the scalar with
+    /// its YAML or JSON quoting decoded, so a `''` inside a single-quoted
+    /// scalar is the one quote it stands for and a folded block scalar is
+    /// one line. [`CriterionView::condition`] is the undecoded text.
+    #[must_use]
+    pub fn condition_text(&self) -> Option<String> {
+        let node = self.node.get("condition")?;
+        if matches!(
+            node.kind(),
+            suspect_low::ValueKind::Object | suspect_low::ValueKind::Array
+        ) {
+            return None;
+        }
+        Some(
+            String::from_utf8_lossy(&node.decoded_scalar())
+                .trim()
+                .to_owned(),
+        )
     }
 
     #[must_use]

@@ -25,6 +25,7 @@ fn op(method: Method, path: &str, queries: &[&str]) -> IrOperation {
         parameters: queries.iter().map(|q| query_param(q)).collect(),
         body_schema: None,
         responses: Vec::new(),
+        unresolved: Vec::new(),
     }
 }
 

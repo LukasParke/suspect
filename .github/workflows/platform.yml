@@ -14,7 +14,8 @@ env:
 # before it only install tools. The toolchain version is the one in
 # rust-toolchain.toml.
 jobs:
-  # Gateway mock + Arazzo suite, live and then offline against a cassette.
+  # The bundled contract-testing example against the mock gateway: live,
+  # recorded through a second gateway, then offline from that cassette.
   platform-smoke:
     runs-on: ubuntu-latest
     steps:

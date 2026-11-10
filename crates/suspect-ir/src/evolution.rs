@@ -288,7 +288,9 @@ mod tests {
                     status: Some(200),
                     description: None,
                     schema: Some("Pets".to_owned()),
+                    ..Default::default()
                 }],
+                unresolved: Vec::new(),
             }],
             schemas: vec![crate::IrSchema {
                 name: "Pets".to_owned(),

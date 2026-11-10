@@ -244,6 +244,8 @@ pub struct TestSettings {
     pub credentials: Option<PathBuf>,
     /// `suspect test` event stream format (`text`, `ndjson`).
     pub report: String,
+    /// Response conformance level (`strict`, `schema`, `off`).
+    pub conformance: String,
 }
 
 /// The base URL when nothing sets one.
@@ -255,6 +257,7 @@ impl Default for TestSettings {
             base_url: DEFAULT_BASE_URL.to_owned(),
             credentials: None,
             report: "text".to_owned(),
+            conformance: "strict".to_owned(),
         }
     }
 }

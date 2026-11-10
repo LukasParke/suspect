@@ -485,6 +485,7 @@ fn run_bench(rt: &tokio::runtime::Runtime) -> anyhow::Result<()> {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let mock_app = rt
         .block_on(suspect_gateway::build_router(
@@ -579,6 +580,7 @@ fn run_bench(rt: &tokio::runtime::Runtime) -> anyhow::Result<()> {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let replay_app = rt
         .block_on(suspect_gateway::build_router(

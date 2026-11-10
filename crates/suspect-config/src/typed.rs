@@ -98,6 +98,9 @@ pub(crate) fn build(
     if let Some(report) = string("test.report") {
         s.test.report = report;
     }
+    if let Some(level) = string("test.conformance") {
+        s.test.conformance = level;
+    }
 
     if let Some(port) = int("gateway.port") {
         s.gateway.port = u16::try_from(port).unwrap_or(s.gateway.port);

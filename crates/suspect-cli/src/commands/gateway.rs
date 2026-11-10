@@ -146,6 +146,9 @@ pub fn gateway(
         },
         redact_headers: redact_headers.to_vec(),
         redact_json_keys: redact_json_keys.to_vec(),
+        // `--enforce` in mock mode: the mock holds its consumers to the
+        // contract. In validate mode it is part of `Mode::Validate`.
+        enforce_mock: enforce && mode == "mock",
     };
 
     let rt = tokio::runtime::Runtime::new()?;

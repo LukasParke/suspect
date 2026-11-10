@@ -367,7 +367,9 @@ mod tests {
                         status: Some(201),
                         description: None,
                         schema: Some("User".to_owned()),
+                        ..Default::default()
                     }],
+                    unresolved: Vec::new(),
                 },
                 IrOperation {
                     id: Some("createPost".to_owned()),
@@ -383,7 +385,9 @@ mod tests {
                         status: Some(201),
                         description: None,
                         schema: Some("Post".to_owned()),
+                        ..Default::default()
                     }],
+                    unresolved: Vec::new(),
                 },
                 IrOperation {
                     id: Some("deletePost".to_owned()),
@@ -399,7 +403,9 @@ mod tests {
                         status: Some(204),
                         description: None,
                         schema: None,
+                        ..Default::default()
                     }],
+                    unresolved: Vec::new(),
                 },
             ],
             schemas: vec![
@@ -500,6 +506,133 @@ mod tests {
         );
     }
 
+    /// A description whose `createWidget` answers `201` with a `Widget`.
+    const WIDGETS: &str = r##"
+openapi: 3.1.0
+info: { title: Widgets, version: "1" }
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Widget' }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+  /widgets/{widgetId}:
+    delete:
+      operationId: deleteWidget
+      parameters:
+        - { name: widgetId, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: gone }
+components:
+  schemas:
+    Widget:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+"##;
+
+    /// Answers `POST` with `created` and everything else with `204`.
+    struct WidgetServer {
+        created: (u16, &'static str),
+    }
+
+    #[async_trait::async_trait]
+    impl crate::exec::HttpClient for WidgetServer {
+        async fn execute(
+            &self,
+            req: crate::exec::HttpRequest,
+        ) -> Result<crate::exec::HttpResponse, crate::exec::TransportError> {
+            let (status, body) = match req.method.as_str() {
+                "POST" => self.created,
+                _ => (204, ""),
+            };
+            Ok(crate::exec::HttpResponse {
+                status,
+                headers: vec![("content-type".to_owned(), "application/json".to_owned())],
+                body: bytes::Bytes::from(body),
+            })
+        }
+    }
+
+    fn run_widgets(
+        created: (u16, &'static str),
+        level: suspect_runtime::Conformance,
+    ) -> SequenceResult {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("widgets.yaml");
+        std::fs::write(&path, WIDGETS).expect("write");
+        let spec = IrSpec::from_file(&path).expect("spec");
+        let schemas = suspect_runtime::Schemas::from_spec(&spec);
+        let sequence = generate_sequences(&spec)
+            .into_iter()
+            .find(|seq| seq.target.id.as_deref() == Some("createWidget"))
+            .expect("createWidget sequence");
+        let server = WidgetServer { created };
+        tokio::runtime::Runtime::new()
+            .expect("runtime")
+            .block_on(run_sequence_checked(
+                &sequence,
+                "http://api.test",
+                &server,
+                SequenceContract {
+                    spec: &spec,
+                    schemas: &schemas,
+                    level,
+                },
+            ))
+    }
+
+    #[test]
+    fn a_conforming_sequence_passes_the_contract_check() {
+        let outcome = run_widgets(
+            (201, r#"{"id": "w1"}"#),
+            suspect_runtime::Conformance::Strict,
+        );
+        assert!(outcome.passed, "{outcome:?}");
+    }
+
+    #[test]
+    fn a_step_whose_body_breaks_its_schema_fails_the_sequence() {
+        let outcome = run_widgets((201, r#"{"id": 7}"#), suspect_runtime::Conformance::Strict);
+        assert!(!outcome.passed, "{outcome:?}");
+        let message = outcome.message.expect("a diagnosis");
+        assert!(
+            message.contains("createWidget") || message.contains("POST /widgets"),
+            "{message}"
+        );
+        assert!(
+            message.contains("/id"),
+            "the violation is located: {message}"
+        );
+    }
+
+    #[test]
+    fn a_step_with_an_undeclared_success_status_fails_when_strict() {
+        let strict = run_widgets(
+            (200, r#"{"id": "w1"}"#),
+            suspect_runtime::Conformance::Strict,
+        );
+        assert!(!strict.passed, "{strict:?}");
+        assert!(
+            strict.message.as_deref().is_some_and(|m| m.contains("200")),
+            "{strict:?}"
+        );
+        let lenient = run_widgets(
+            (200, r#"{"id": "w1"}"#),
+            suspect_runtime::Conformance::Schema,
+        );
+        assert!(lenient.passed, "{lenient:?}");
+    }
+
     #[test]
     fn singularize_variants() {
         assert_eq!(singularize("users"), "user");
@@ -521,9 +654,21 @@ pub struct SequenceResult {
     pub message: Option<String>,
 }
 
+/// The contract every reply of a sequence is held to.
+#[derive(Clone, Copy)]
+pub struct SequenceContract<'a> {
+    /// The description the sequence was generated from.
+    pub spec: &'a IrSpec,
+    /// Its schema table.
+    pub schemas: &'a suspect_runtime::Schemas,
+    /// How much of each declared response applies.
+    pub level: suspect_runtime::Conformance,
+}
+
 /// Runs one sequence: setup → exercise → teardown, threading each step's
 /// response body into later steps' `$steps.<id>.response.body#/ptr`
-/// parameter sources.
+/// parameter sources. Only the status class is judged; see
+/// [`run_sequence_checked`] for the contract.
 ///
 /// # Errors
 /// Never: transport failures are reported as a failed [`SequenceResult`],
@@ -532,6 +677,30 @@ pub async fn run_sequence(
     seq: &TestSequence,
     base: &str,
     http: &dyn crate::exec::HttpClient,
+) -> SequenceResult {
+    run_sequence_in(seq, base, http, None).await
+}
+
+/// [`run_sequence`], with every 2xx reply also held to the response its
+/// operation declares: a step whose status, content type or body breaks
+/// the contract fails the sequence with the violations.
+///
+/// # Errors
+/// Never: transport failures are reported as a failed [`SequenceResult`].
+pub async fn run_sequence_checked(
+    seq: &TestSequence,
+    base: &str,
+    http: &dyn crate::exec::HttpClient,
+    contract: SequenceContract<'_>,
+) -> SequenceResult {
+    run_sequence_in(seq, base, http, Some(contract)).await
+}
+
+async fn run_sequence_in(
+    seq: &TestSequence,
+    base: &str,
+    http: &dyn crate::exec::HttpClient,
+    contract: Option<SequenceContract<'_>>,
 ) -> SequenceResult {
     let target = seq
         .target
@@ -595,6 +764,17 @@ pub async fn run_sequence(
                         ),
                     );
                 }
+                if let Some(violations) =
+                    contract.and_then(|contract| contract_violations(contract, step, &response))
+                {
+                    return fail(
+                        index,
+                        format!(
+                            "step `{}`: {} {} returned {} but breaks its contract: {violations}",
+                            step.id, step.op.method, step.op.path, response.status
+                        ),
+                    );
+                }
                 let body: serde_json::Value =
                     serde_json::from_slice(&response.body).unwrap_or(serde_json::Value::Null);
                 context.insert(step.id.clone(), body);
@@ -616,6 +796,38 @@ pub async fn run_sequence(
         passed: true,
         message: None,
     }
+}
+
+/// The violations of one step's reply against the response its operation
+/// declares, joined for a message; `None` when it conforms.
+fn contract_violations(
+    contract: SequenceContract<'_>,
+    step: &TestStep,
+    response: &crate::exec::HttpResponse,
+) -> Option<String> {
+    let method = Method::from_key(&step.op.method.to_ascii_lowercase())?;
+    let operation = contract
+        .spec
+        .operation(suspect_ir::OpSelector::MethodPath(method, &step.op.path))?;
+    let check = suspect_runtime::check_response(
+        &operation.responses,
+        contract.schemas,
+        suspect_runtime::Reply {
+            method: method.as_str(),
+            status: response.status,
+            headers: &response.headers,
+            body: &response.body,
+        },
+        contract.level,
+    );
+    (!check.conforms()).then(|| {
+        check
+            .violations
+            .iter()
+            .map(suspect_runtime::Violation::located)
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
 }
 
 /// Resolves one `$steps.<id>.response.body#/pointer` reference against the

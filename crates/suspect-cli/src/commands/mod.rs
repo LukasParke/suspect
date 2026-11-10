@@ -106,3 +106,41 @@ pub fn sink(journal: Option<&std::path::Path>) -> anyhow::Result<Box<dyn suspect
         None => Ok(Box::new(suspect_journal::StdoutSink)),
     }
 }
+
+/// A journal sink that keeps nothing.
+struct DiscardSink;
+
+impl suspect_journal::Sink for DiscardSink {
+    fn write_line(&mut self, _line: &str) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The journal sink of a test run: the `--journal <file>` when given;
+/// otherwise stdout when the command's own output is a machine-readable
+/// stream the record belongs in, and nowhere when it is text for a person.
+///
+/// # Errors
+/// Propagates open failures for the journal file.
+pub fn run_sink(
+    journal: Option<&std::path::Path>,
+    machine_stream: bool,
+) -> anyhow::Result<Box<dyn suspect_journal::Sink>> {
+    match journal {
+        Some(_) => sink(journal),
+        None if machine_stream => Ok(Box::new(suspect_journal::StdoutSink)),
+        None => Ok(Box::new(DiscardSink)),
+    }
+}
+
+/// The conformance level a settings value names; unknown spellings were
+/// rejected when the settings were read, so the strict default covers only
+/// a value this build does not know.
+#[must_use]
+pub fn conformance(level: &str) -> suspect_test::Conformance {
+    suspect_test::Conformance::parse(level).unwrap_or_default()
+}

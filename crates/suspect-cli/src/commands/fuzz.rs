@@ -5,10 +5,12 @@
 //! reduced to scalar fields ([`suspect_test::fuzz::scalar_fields`]); a
 //! deterministic run counter cycles pathological values through those fields
 //! ([`suspect_test::fuzz::generate_mutants`]). Mutants execute concurrently,
-//! at most `IN_FLIGHT` requests in flight. A mutant **survives** when the
-//! server answers 4xx or any ok-style response; a **crash** is a 5xx or a
+//! at most `IN_FLIGHT` requests in flight. A **crash** is a 5xx or a
 //! transport failure/timeout (the client times out at `TIMEOUT`). Any
-//! crash exits 1.
+//! other reply is held to the response the operation declares, at the
+//! run's conformance level: one that breaks it is a contract
+//! **violation**; one that conforms **survives**. Any crash or violation
+//! exits 1.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -19,7 +21,8 @@ use suspect_ir::{IrOperation, IrSpec, ParamIn};
 use suspect_journal::Journal;
 use suspect_source::Uri;
 use suspect_test::fuzz::{self, Mutant, ScalarField};
-use suspect_test::{HttpClient, HttpRequest, HttpResponse, TransportError};
+use suspect_test::reporters::{Case, Failure, Outcome};
+use suspect_test::{Conformance, HttpClient, HttpRequest, HttpResponse, Schemas, TransportError};
 use tokio::task::JoinSet;
 
 use super::http::LiveTransport;
@@ -60,15 +63,87 @@ struct OpPlan {
     targets: Vec<Target>,
     /// Body payload fields (empty when the operation takes no JSON body).
     body_fields: Vec<ScalarField>,
+    /// The responses the operation declares; every reply is held to them.
+    responses: Vec<suspect_ir::IrResponse>,
 }
 
 /// Outcome of one executed mutant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Verdict {
-    /// Server rejected or tolerated the input without dying.
+    /// Server rejected or tolerated the input without dying, with a reply
+    /// the operation declares.
     Survived,
     /// 5xx, timeout, or transport failure.
     Crash(String),
+    /// A reply that is not one the operation declares.
+    Violation(String),
+}
+
+/// What every reply of a run is held to.
+#[derive(Clone, Copy)]
+struct Judge<'a> {
+    schemas: &'a Schemas,
+    level: Conformance,
+}
+
+/// Crash and violation counts of one operation, with the first of each.
+#[derive(Debug, Default)]
+struct Tally {
+    sent: u32,
+    crashes: u32,
+    violations: u32,
+    first_crash: Option<String>,
+    first_violation: Option<String>,
+}
+
+impl Tally {
+    fn record(&mut self, verdict: Verdict) {
+        self.sent += 1;
+        match verdict {
+            Verdict::Survived => {}
+            Verdict::Crash(line) => {
+                self.crashes += 1;
+                self.first_crash.get_or_insert(line);
+            }
+            Verdict::Violation(line) => {
+                self.violations += 1;
+                self.first_violation.get_or_insert(line);
+            }
+        }
+    }
+
+    /// The operation as one reported case.
+    fn case(&self, label: &str) -> Case {
+        let mut failures = Vec::new();
+        if let Some(line) = &self.first_crash {
+            failures.push(Failure {
+                check: "crash".to_owned(),
+                expected: "no 5xx or transport failure".to_owned(),
+                actual: format!(
+                    "{} of {} requests crashed, first: {line}",
+                    self.crashes, self.sent
+                ),
+            });
+        }
+        if let Some(line) = &self.first_violation {
+            failures.push(Failure {
+                check: "contract".to_owned(),
+                expected: "every reply to be one the operation declares".to_owned(),
+                actual: format!(
+                    "{} of {} replies broke the contract, first: {line}",
+                    self.violations, self.sent
+                ),
+            });
+        }
+        Case {
+            outcome: if failures.is_empty() {
+                Outcome::Passed
+            } else {
+                Outcome::Failed { failures }
+            },
+            ..Case::passed("fuzz", label)
+        }
+    }
 }
 
 /// Runs `suspect test fuzz` against one OpenAPI document.
@@ -86,6 +161,7 @@ pub fn fuzz(
     evolved: bool,
     rounds: u32,
     per_round: u32,
+    conformance: Conformance,
     report_files: &crate::ReportFiles,
 ) -> anyhow::Result<i32> {
     let ws = super::workspace_for_entry(spec)?;
@@ -113,10 +189,12 @@ pub fn fuzz(
     let started = Instant::now();
     let http = Arc::new(LiveTransport::new(TIMEOUT)?);
     let rt = tokio::runtime::Runtime::new()?;
-
-    let mut total_sent: u32 = 0;
-    let mut survivors: u32 = 0;
-    let mut total_crashes: u32 = 0;
+    let schemas = Schemas::from_spec(&ir);
+    let judge = Judge {
+        schemas: &schemas,
+        level: conformance,
+    };
+    let mut tallies: Vec<(String, Tally)> = Vec::with_capacity(plans.len());
 
     // Grammar-evolved, coverage-guided fuzzing: payloads that produce
     // novel response shapes become seeds; the campaign exploits them.
@@ -124,44 +202,46 @@ pub fn fuzz(
         let handle = rt.handle();
         for plan in &plans {
             let fields: Vec<ScalarField> = plan.targets.iter().map(|t| t.field.clone()).collect();
-            let label = plan.label.clone();
             let http = Arc::clone(&http);
+            let mut tally = Tally::default();
             let stats = suspect_test::evolved_fuzz::run_campaign(
                 fields,
                 rounds,
                 per_round,
                 &mut |payload| {
                     let request = build_evolved_request(base_url, plan, payload);
-                    match handle.block_on(http.execute(request)) {
-                        Ok(resp) => suspect_test::evolved_fuzz::RequestOutcome {
-                            status: resp.status,
-                            body: serde_json::from_slice(&resp.body).ok(),
-                            crash: resp.status >= 500,
-                        },
-                        Err(_) => suspect_test::evolved_fuzz::RequestOutcome {
-                            status: 0,
-                            body: None,
-                            crash: true,
-                        },
+                    let outcome = handle.block_on(http.execute(request));
+                    let (status, body) = match &outcome {
+                        Ok(resp) => (resp.status, serde_json::from_slice(&resp.body).ok()),
+                        Err(_) => (0, None),
+                    };
+                    let verdict = classify(outcome, plan, judge);
+                    let crash = matches!(verdict, Verdict::Crash(_));
+                    tally.record(verdict);
+                    suspect_test::evolved_fuzz::RequestOutcome {
+                        status,
+                        body,
+                        crash,
                     }
                 },
             );
-            total_sent += stats.requests;
-            total_crashes += stats.crashes;
-            survivors += stats.requests - stats.crashes;
             println!(
-                "{label:<44} corpus: {:<4} shapes: {:<4} crashes: {}",
-                stats.corpus_size, stats.shapes, stats.crashes
+                "{:<44} corpus: {:<4} shapes: {:<4} crashes: {:<4} violations: {}",
+                plan.label, stats.corpus_size, stats.shapes, tally.crashes, tally.violations
             );
+            print_examples(&tally);
+            tallies.push((plan.label.clone(), tally));
         }
-        println!();
-        println!("evolved fuzz complete: {total_sent} requests, {total_crashes} crashes");
-        let elapsed_ms = started.elapsed().as_millis() as f64;
-        let mut journal = Journal::new(super::sink(journal)?);
-        journal.run_summary("evolved-fuzz", survivors, total_crashes, 0, elapsed_ms);
-        journal.flush()?;
-        report_files.write_counts("fuzz", survivors as usize, total_crashes as usize, started)?;
-        return Ok(i32::from(total_crashes > 0));
+        return finish(
+            "evolved-fuzz",
+            "evolved fuzz complete",
+            "requests",
+            spec,
+            &tallies,
+            journal,
+            report_files,
+            started,
+        );
     }
 
     rt.block_on(async {
@@ -171,15 +251,13 @@ pub fn fuzz(
             let requests: Vec<HttpRequest> = mutants
                 .iter()
                 .enumerate()
-                .map(|(i, m)| {
+                .filter_map(|(i, m)| {
                     let place = plan.targets[i % plan.targets.len()].place;
-                    build_request(base_url, plan, m, place)
+                    (!leaves_the_route(m, place)).then(|| build_request(base_url, plan, m, place))
                 })
                 .collect();
 
-            let mut sent: u32 = 0;
-            let mut crashes: u32 = 0;
-            let mut example_crash: Option<String> = None;
+            let mut tally = Tally::default();
             for chunk in requests.chunks(IN_FLIGHT) {
                 let mut set = JoinSet::new();
                 for req in chunk {
@@ -188,35 +266,76 @@ pub fn fuzz(
                     set.spawn(async move { http.execute(req).await });
                 }
                 while let Some(joined) = set.join_next().await {
-                    sent += 1;
                     let outcome = joined
                         .unwrap_or_else(|e| Err(TransportError(format!("task panicked: {e}"))));
-                    if let Verdict::Crash(line) = classify(outcome) {
-                        crashes += 1;
-                        if example_crash.is_none() {
-                            example_crash = Some(line);
-                        }
-                    }
+                    tally.record(classify(outcome, plan, judge));
                 }
             }
-            survivors += sent - crashes;
-            total_sent += sent;
-            total_crashes += crashes;
-            println!("{:<44} mutants: {sent:<5} crashes: {crashes}", plan.label);
-            if let Some(line) = example_crash {
-                println!("    crash: {line}");
-            }
+            println!(
+                "{:<44} mutants: {:<5} crashes: {:<4} violations: {}",
+                plan.label, tally.sent, tally.crashes, tally.violations
+            );
+            print_examples(&tally);
+            tallies.push((plan.label.clone(), tally));
         }
     });
 
+    finish(
+        "fuzz",
+        "fuzz complete",
+        "mutants",
+        spec,
+        &tallies,
+        journal,
+        report_files,
+        started,
+    )
+}
+
+/// Prints the first crash and the first violation of an operation.
+fn print_examples(tally: &Tally) {
+    if let Some(line) = &tally.first_crash {
+        println!("    crash: {line}");
+    }
+    if let Some(line) = &tally.first_violation {
+        println!("    violation: {line}");
+    }
+}
+
+/// Prints the totals, writes the journal record and the report files, and
+/// returns the exit code: `1` when anything crashed or broke the contract.
+#[allow(clippy::too_many_arguments)]
+fn finish(
+    kind: &str,
+    headline: &str,
+    unit: &str,
+    spec: &Path,
+    tallies: &[(String, Tally)],
+    journal: Option<&Path>,
+    report_files: &crate::ReportFiles,
+    started: Instant,
+) -> anyhow::Result<i32> {
+    let sent: u32 = tallies.iter().map(|(_, tally)| tally.sent).sum();
+    let crashes: u32 = tallies.iter().map(|(_, tally)| tally.crashes).sum();
+    let violations: u32 = tallies.iter().map(|(_, tally)| tally.violations).sum();
     println!();
-    println!("fuzz complete: {total_sent} mutants, {total_crashes} crashes");
-    let elapsed_ms = started.elapsed().as_millis() as f64;
-    let mut journal = Journal::new(super::sink(journal)?);
-    journal.run_summary("fuzz", survivors, total_crashes, 0, elapsed_ms);
+    println!("{headline}: {sent} {unit}, {crashes} crashes, {violations} contract violations");
+    let failed = crashes + violations;
+    let mut journal = Journal::new(super::run_sink(journal, false)?);
+    journal.run_summary(
+        kind,
+        sent - failed,
+        failed,
+        0,
+        started.elapsed().as_millis() as f64,
+    );
     journal.flush()?;
-    report_files.write_counts("fuzz", survivors as usize, total_crashes as usize, started)?;
-    Ok(i32::from(total_crashes > 0))
+    let cases: Vec<Case> = tallies
+        .iter()
+        .map(|(label, tally)| tally.case(label))
+        .collect();
+    report_files.write_cases("fuzz", &spec.display().to_string(), &cases, started)?;
+    Ok(i32::from(failed > 0))
 }
 
 /// Reduces one IR operation into its fuzzable targets.
@@ -263,6 +382,7 @@ fn plan_operation(ir: &IrSpec, op: &IrOperation) -> OpPlan {
         path: op.path.clone(),
         targets,
         body_fields,
+        responses: op.responses.clone(),
     }
 }
 
@@ -340,6 +460,14 @@ fn build_request(base_url: &str, plan: &OpPlan, m: &Mutant, place: Place) -> Htt
         headers,
         body: body.into(),
     }
+}
+
+/// Whether a mutant would address another operation instead of this one:
+/// an empty path segment turns `/pets/{petId}` into `/pets/`, the
+/// collection. Whatever answers there says nothing about this operation,
+/// so the mutant is not sent.
+fn leaves_the_route(m: &Mutant, place: Place) -> bool {
+    place == Place::Path && render_scalar(&m.value).is_empty()
 }
 
 /// Renders a JSON scalar into its wire string form.
@@ -431,14 +559,45 @@ fn build_evolved_request(base_url: &str, plan: &OpPlan, payload: &Value) -> Http
     }
 }
 
-/// Classifies one executed mutant: any response below 500 survives; 5xx and
-/// transport failures (including the 10s timeout) crash.
-fn classify(outcome: Result<HttpResponse, TransportError>) -> Verdict {
-    match outcome {
-        Ok(resp) if resp.status >= 500 => Verdict::Crash(format!("status {}", resp.status)),
-        Ok(_) => Verdict::Survived,
-        Err(e) => Verdict::Crash(e.to_string()),
+/// Classifies one executed mutant: a 5xx or a transport failure (including
+/// the 10s timeout) is a crash; any other reply either is one the
+/// operation declares, and survives, or breaks the contract.
+fn classify(
+    outcome: Result<HttpResponse, TransportError>,
+    plan: &OpPlan,
+    judge: Judge<'_>,
+) -> Verdict {
+    let response = match outcome {
+        Ok(response) if response.status >= 500 => {
+            return Verdict::Crash(format!("status {}", response.status));
+        }
+        Ok(response) => response,
+        Err(e) => return Verdict::Crash(e.to_string()),
+    };
+    let check = suspect_runtime::check_response(
+        &plan.responses,
+        judge.schemas,
+        suspect_runtime::Reply {
+            method: &plan.method,
+            status: response.status,
+            headers: &response.headers,
+            body: &response.body,
+        },
+        judge.level,
+    );
+    if check.conforms() {
+        return Verdict::Survived;
     }
+    Verdict::Violation(format!(
+        "status {}: {}",
+        response.status,
+        check
+            .violations
+            .iter()
+            .map(suspect_runtime::Violation::located)
+            .collect::<Vec<_>>()
+            .join("; ")
+    ))
 }
 
 #[cfg(test)]
@@ -463,30 +622,124 @@ mod tests {
         assert_eq!(encode_component("ok-_.~1"), "ok-_.~1");
     }
 
+    /// An operation declaring `200` with a JSON object that requires `id`.
+    fn judged_plan() -> (OpPlan, Schemas) {
+        let schemas: std::collections::BTreeMap<String, Value> = [(
+            "Pet".to_owned(),
+            serde_json::json!({"type": "object", "required": ["id"]}),
+        )]
+        .into();
+        let plan = OpPlan {
+            label: "showPet".into(),
+            method: "GET".into(),
+            path: "/pets/{petId}".into(),
+            targets: Vec::new(),
+            body_fields: Vec::new(),
+            responses: vec![suspect_ir::IrResponse {
+                status: Some(200),
+                schema: Some("Pet".to_owned()),
+                content: vec![suspect_ir::IrMedia {
+                    media_type: "application/json".to_owned(),
+                    schema: Some("Pet".to_owned()),
+                    unresolved: None,
+                }],
+                ..Default::default()
+            }],
+        };
+        (plan, Schemas::from_any_map(schemas.iter()))
+    }
+
+    fn reply(status: u16, body: &'static str) -> Result<HttpResponse, TransportError> {
+        Ok(HttpResponse {
+            status,
+            headers: Vec::new(),
+            body: Bytes::from_static(body.as_bytes()),
+        })
+    }
+
     #[test]
-    fn classifies_status_bands() {
-        let ok = Ok(HttpResponse {
-            status: 400,
-            headers: Vec::new(),
-            body: Bytes::new(),
-        });
-        assert_eq!(classify(ok), Verdict::Survived);
-        let ok2 = Ok(HttpResponse {
-            status: 200,
-            headers: Vec::new(),
-            body: Bytes::new(),
-        });
-        assert_eq!(classify(ok2), Verdict::Survived);
-        let boom = Ok(HttpResponse {
-            status: 503,
-            headers: Vec::new(),
-            body: Bytes::new(),
-        });
-        assert!(matches!(classify(boom), Verdict::Crash(_)));
+    fn an_empty_path_segment_is_not_a_mutant_of_this_operation() {
+        let empty = Mutant {
+            field: "petId".into(),
+            kind: fuzz::MutantKind::Empty,
+            value: Value::String(String::new()),
+        };
+        assert!(leaves_the_route(&empty, Place::Path));
+        // The same value in the query or the body still addresses the
+        // operation.
+        assert!(!leaves_the_route(&empty, Place::Query));
+        assert!(!leaves_the_route(&empty, Place::Body));
+        let null = Mutant {
+            field: "petId".into(),
+            kind: fuzz::MutantKind::NullRequired,
+            value: Value::Null,
+        };
+        assert!(!leaves_the_route(&null, Place::Path), "`null` is a segment");
+    }
+
+    #[test]
+    fn classifies_crashes_before_anything_else() {
+        let (plan, schemas) = judged_plan();
+        let judge = Judge {
+            schemas: &schemas,
+            level: Conformance::Strict,
+        };
         assert!(matches!(
-            classify(Err(TransportError("timed out".into()))),
+            classify(reply(503, ""), &plan, judge),
             Verdict::Crash(_)
         ));
+        assert!(matches!(
+            classify(Err(TransportError("timed out".into())), &plan, judge),
+            Verdict::Crash(_)
+        ));
+    }
+
+    #[test]
+    fn a_declared_conforming_reply_survives() {
+        let (plan, schemas) = judged_plan();
+        let judge = Judge {
+            schemas: &schemas,
+            level: Conformance::Strict,
+        };
+        assert_eq!(
+            classify(reply(200, r#"{"id": "p1"}"#), &plan, judge),
+            Verdict::Survived
+        );
+    }
+
+    #[test]
+    fn a_reply_that_breaks_the_contract_is_a_violation() {
+        let (plan, schemas) = judged_plan();
+        let strict = Judge {
+            schemas: &schemas,
+            level: Conformance::Strict,
+        };
+        // A body that is not the declared schema.
+        let Verdict::Violation(line) = classify(reply(200, "{}"), &plan, strict) else {
+            panic!("a missing required property is a violation");
+        };
+        assert!(line.contains("status 200") && line.contains("id"), "{line}");
+        // A rejection the description does not declare.
+        assert!(matches!(
+            classify(reply(400, "{}"), &plan, strict),
+            Verdict::Violation(_)
+        ));
+
+        // Below strict, an undeclared rejection survives...
+        let schema_only = Judge {
+            schemas: &schemas,
+            level: Conformance::Schema,
+        };
+        assert_eq!(
+            classify(reply(400, "{}"), &plan, schema_only),
+            Verdict::Survived
+        );
+        // ...and with conformance off only crashes count.
+        let off = Judge {
+            schemas: &schemas,
+            level: Conformance::Off,
+        };
+        assert_eq!(classify(reply(200, "{}"), &plan, off), Verdict::Survived);
     }
 
     #[test]
@@ -511,6 +764,7 @@ mod tests {
                     required: false,
                 },
             ],
+            responses: Vec::new(),
         };
         // A query-targeted oversize mutant: path/body stay defaulted.
         let m = Mutant {
@@ -551,6 +805,7 @@ mod tests {
             path: "/pets".into(),
             targets: vec![str_target("limit", Place::Query)],
             body_fields: Vec::new(),
+            responses: Vec::new(),
         };
         let m = Mutant {
             field: "limit".into(),

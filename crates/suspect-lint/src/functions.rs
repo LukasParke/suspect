@@ -934,15 +934,19 @@ fn check_server_urls<'d>(
     let Some(url) = resolved.as_str() else {
         return;
     };
-    let trimmed = url.trim_end_matches('/');
-    if trimmed == url
-        && !url.contains("localhost")
-        && !url.contains("127.0.0.1")
-        && !url.contains("example.com")
-    {
-        return;
+    let trailing_slash = url.trim_end_matches('/') != url;
+    let example_host =
+        url.contains("localhost") || url.contains("127.0.0.1") || url.contains("example.com");
+    // Two builtin rules share this function; each reports the one thing
+    // its code names. A custom rule gets both checks.
+    let fires = match &*rule.code {
+        "server-trailing-slash" => trailing_slash,
+        "server-host-not-example" => example_host,
+        _ => trailing_slash || example_host,
+    };
+    if fires {
+        push(out, rule, node, ptrs);
     }
-    push(out, rule, node, ptrs);
 }
 
 /// A component (schemas/parameters/responses/headers/examples/
@@ -1223,17 +1227,20 @@ fn check_delete_requires_id<'d>(
     ptrs: &super::fast::PtrMap,
     out: &mut Vec<Finding<'d>>,
 ) {
-    let has_id_var = match ptrs.own_key(node) {
-        Some(k) => {
-            let key = String::from_utf8_lossy(k).into_owned();
-            key.split('/')
+    // The node is the operation (`paths.<path>.delete`); the path template
+    // is the key of the path item that holds it.
+    let pointer = ptrs
+        .pointer_for(node)
+        .unwrap_or_else(|| node.path_from_root());
+    let tokens = pointer.tokens();
+    let has_id_var = tokens
+        .len()
+        .checked_sub(2)
+        .and_then(|index| tokens.get(index))
+        .is_some_and(|path| {
+            path.split('/')
                 .any(|segment| segment.starts_with('{') && segment.ends_with('}'))
-        }
-        None => node.path_from_root().tokens().last().is_some_and(|k| {
-            k.split('/')
-                .any(|segment| segment.starts_with('{') && segment.ends_with('}'))
-        }),
-    };
+        });
     if !has_id_var {
         push(out, rule, node, ptrs);
     }

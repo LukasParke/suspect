@@ -56,6 +56,7 @@ pub const SEVERITIES: &[&str] = &["error", "warning", "info", "hint"];
 pub const POLICY_SEVERITIES: &[&str] = &["error", "warning", "info", "hint", "off"];
 const DOC_STYLES: &[&str] = &["html", "markdown", "sveltekit"];
 const REPORTS: &[&str] = &["text", "ndjson"];
+const CONFORMANCE: &[&str] = &["strict", "schema", "off"];
 /// `suspect gen sdk --compatibility-profile` names, kept in step with
 /// `suspect_codegen`'s `CompatibilityProfile::ALL` by
 /// `crates/suspect-lsp/tests/codegen_settings.rs`.
@@ -392,6 +393,19 @@ pub static SETTINGS: &[Setting] = &[
     )
     .default("text")
     .flags(&["test run --format"]),
+    row(
+        "test.conformance",
+        Kind::Enum(CONFORMANCE),
+        "How much of the declared response contract each reply is held to: `strict` \
+         (status, content type, required headers and body schema), `schema` (the body \
+         schema of declared responses only) or `off` (success criteria only).",
+    )
+    .default("strict")
+    .flags(&[
+        "test run --conformance",
+        "test stateful --conformance",
+        "test fuzz --conformance",
+    ]),
     section("gateway", "The mock/proxy gateway."),
     row("gateway.port", Kind::Port, "Port the gateway listens on.")
         .default("8080")

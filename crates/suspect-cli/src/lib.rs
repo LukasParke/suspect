@@ -25,8 +25,8 @@ pub mod watch;
 use std::path::PathBuf;
 
 pub use args::{
-    Check, DocOut, Findings, FindingsFormat, Report, ReportFiles, ReportFormat, Stream,
-    StreamFormat,
+    Check, ConformanceLevel, DocOut, Findings, FindingsFormat, Report, ReportFiles, ReportFormat,
+    Stream, StreamFormat,
 };
 use clap::{Parser, Subcommand, ValueEnum};
 pub use exit::Exit;
@@ -334,10 +334,14 @@ pub enum GenCmd {
 /// `suspect test`: exercise a live (or recorded) server.
 #[derive(Debug, Subcommand)]
 pub enum TestCmd {
-    /// Compile an Arazzo document into an executable suite and run it.
+    /// Compile Arazzo documents into executable suites and run them,
+    /// holding every reply to the contract its operation declares.
     Run {
-        /// Arazzo document describing the workflows.
-        arazzo: PathBuf,
+        /// Arazzo documents describing the workflows. A directory runs
+        /// every `*.arazzo.yaml`, `*.arazzo.yml` and `*.arazzo.json` under
+        /// it. Several documents run as one gate.
+        #[arg(required = true, value_name = "ARAZZO")]
+        arazzo: Vec<PathBuf>,
         /// Base URL prepended to operation paths (default: `test.base_url`
         /// from `.suspect.yaml`, `SUSPECT_BASE_URL`, else
         /// `http://localhost:8080`).
@@ -369,13 +373,19 @@ pub enum TestCmd {
         /// `SUSPECT_CREDENTIALS` override it.
         #[arg(long, value_name = "FILE")]
         credentials: Option<PathBuf>,
-        /// Write the journal to this file (append) instead of stdout.
+        /// Append the run summary to this journal file. Without it the
+        /// summary is the last line of an `ndjson` stream and absent from
+        /// text output.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
         /// JSON or YAML object file of workflow inputs, applied before `--input`
         /// pairs (which override it).
         #[arg(long = "inputs-file", value_name = "FILE")]
         inputs_file: Option<PathBuf>,
+        /// How much of the declared response contract each reply is held
+        /// to (default: `test.conformance`, else `strict`).
+        #[arg(long, value_enum, value_name = "LEVEL")]
+        conformance: Option<ConformanceLevel>,
         /// JSON and JUnit report files.
         #[command(flatten)]
         report_files: ReportFiles,
@@ -396,6 +406,10 @@ pub enum TestCmd {
         /// Print the generated sequences as JSON instead of running them.
         #[arg(long)]
         emit: bool,
+        /// How much of the declared response contract each reply is held
+        /// to (default: `test.conformance`, else `strict`).
+        #[arg(long, value_enum, value_name = "LEVEL")]
+        conformance: Option<ConformanceLevel>,
         /// JSON and JUnit report files.
         #[command(flatten)]
         report_files: ReportFiles,
@@ -415,7 +429,7 @@ pub enum TestCmd {
         /// Run only operations whose operationId contains this substring.
         #[arg(long)]
         filter: Option<String>,
-        /// Write the journal to this file (append) instead of stdout.
+        /// Append the run summary to this journal file.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
         /// Grammar-evolved, coverage-guided fuzzing: novel response shapes
@@ -428,6 +442,10 @@ pub enum TestCmd {
         /// Evolved fuzzing: requests per round.
         #[arg(long, default_value_t = 12)]
         per_round: u32,
+        /// How much of the declared response contract each reply is held
+        /// to (default: `test.conformance`, else `strict`).
+        #[arg(long, value_enum, value_name = "LEVEL")]
+        conformance: Option<ConformanceLevel>,
         /// JSON and JUnit report files.
         #[command(flatten)]
         report_files: ReportFiles,
@@ -445,7 +463,7 @@ pub enum TestCmd {
         /// Print unified diffs of drifted UTF-8 response bodies.
         #[arg(long)]
         diff: bool,
-        /// Write the journal to this file (append) instead of stdout.
+        /// Append the run summary to this journal file.
         #[arg(long, value_name = "FILE")]
         journal: Option<PathBuf>,
         /// JSON and JUnit report files.
@@ -481,8 +499,10 @@ pub enum TrafficCmd {
         /// Cassette path for record output.
         #[arg(long)]
         cassette: Option<PathBuf>,
-        /// Validate mode only: reject invalid requests with 400 instead of
-        /// forwarding them.
+        /// Reject a request that breaks the contract instead of serving it:
+        /// in `validate` mode with `400` before it reaches the upstream, in
+        /// `mock` mode with the rejection the operation declares (`400`
+        /// when it declares none).
         #[arg(long)]
         enforce: bool,
         /// Fault injection: delay in milliseconds.
@@ -861,19 +881,26 @@ fn test_cmd(cmd: TestCmd) -> anyhow::Result<i32> {
             credentials,
             journal,
             inputs_file,
+            conformance,
             report_files,
         } => {
-            let test = test_settings(&arazzo, base_url, credentials, format)?;
-            commands::test::test_with_reports(
+            // Settings resolve from the first document's directory: one
+            // invocation is one gate with one configuration.
+            let anchor = arazzo.first().cloned().unwrap_or_default();
+            let test = test_settings(&anchor, base_url, credentials, format, conformance)?;
+            commands::test::run(
                 &arazzo,
-                &test.base_url,
-                filter.as_deref(),
-                &commands::inputs::parse_inputs(inputs_file.as_deref(), &inputs)?,
-                cassette.as_deref(),
-                test.report == "ndjson",
-                message_broker.as_deref(),
-                test.credentials.as_deref(),
-                journal.as_deref(),
+                &commands::test::Suite {
+                    base_url: &test.base_url,
+                    filter: filter.as_deref(),
+                    inputs: &commands::inputs::parse_inputs(inputs_file.as_deref(), &inputs)?,
+                    cassette: cassette.as_deref(),
+                    ndjson: test.report == "ndjson",
+                    message_broker: message_broker.as_deref(),
+                    credentials: test.credentials.as_deref(),
+                    journal: journal.as_deref(),
+                    conformance: commands::conformance(&test.conformance),
+                },
                 &report_files,
             )
         }
@@ -882,14 +909,19 @@ fn test_cmd(cmd: TestCmd) -> anyhow::Result<i32> {
             base_url,
             filter,
             emit,
+            conformance,
             report_files,
-        } => commands::stateful::stateful(
-            &spec,
-            &test_settings(&spec, base_url, None, None)?.base_url,
-            filter.as_deref(),
-            emit,
-            &report_files,
-        ),
+        } => {
+            let test = test_settings(&spec, base_url, None, None, conformance)?;
+            commands::stateful::stateful(
+                &spec,
+                &test.base_url,
+                filter.as_deref(),
+                emit,
+                commands::conformance(&test.conformance),
+                &report_files,
+            )
+        }
         TestCmd::Fuzz {
             spec,
             base_url,
@@ -899,18 +931,23 @@ fn test_cmd(cmd: TestCmd) -> anyhow::Result<i32> {
             evolved,
             rounds,
             per_round,
+            conformance,
             report_files,
-        } => commands::fuzz::fuzz(
-            &spec,
-            &test_settings(&spec, base_url, None, None)?.base_url,
-            runs,
-            filter.as_deref(),
-            journal.as_deref(),
-            evolved,
-            rounds,
-            per_round,
-            &report_files,
-        ),
+        } => {
+            let test = test_settings(&spec, base_url, None, None, conformance)?;
+            commands::fuzz::fuzz(
+                &spec,
+                &test.base_url,
+                runs,
+                filter.as_deref(),
+                journal.as_deref(),
+                evolved,
+                rounds,
+                per_round,
+                commands::conformance(&test.conformance),
+                &report_files,
+            )
+        }
         TestCmd::Load(args) => commands::load::load(*args),
         TestCmd::Replay {
             cassette,
@@ -994,8 +1031,10 @@ fn test_settings(
     base_url: Option<String>,
     credentials: Option<PathBuf>,
     format: Option<StreamFormat>,
+    conformance: Option<ConformanceLevel>,
 ) -> anyhow::Result<suspect_config::TestSettings> {
     let format = format.map(|f| Raw::Str(f.name().to_owned()));
+    let conformance = conformance.map(|level| Raw::Str(level.name().to_owned()));
     let flags = Layer::flags()
         .set("test.base_url", base_url.map(Raw::Str), "--base-url")
         .set(
@@ -1003,7 +1042,8 @@ fn test_settings(
             credentials.map(Raw::Path),
             "--credentials",
         )
-        .set("test.report", format, "--format");
+        .set("test.report", format, "--format")
+        .set("test.conformance", conformance, "--conformance");
     Ok(settings::resolve_one(input, flags)?.settings.test)
 }
 

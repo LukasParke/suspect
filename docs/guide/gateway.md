@@ -18,12 +18,26 @@ $ suspect traffic gateway api.yaml -p 9002 --mode scenario --scenario steps.json
 
 | Mode | What it does |
 |---|---|
-| `mock` | answers from the spec's examples and schemas |
+| `mock` | answers from the spec's examples and schemas, with the status and media type each operation declares; `--enforce` rejects a request that breaks the contract the way the operation declares its rejections (`400` when it declares none) |
 | `proxy` | forwards to `--upstream` and journals each exchange |
-| `validate` | forwards and checks requests and responses against the spec; `--enforce` rejects an invalid request with 400 instead of forwarding it |
+| `validate` | forwards and checks requests and responses against the spec, with the checks `suspect test run` applies; `--enforce` rejects an invalid request with 400 instead of forwarding it |
 | `record` | forwards and writes each exchange to `--cassette` |
 | `replay` | answers from a recorded cassette; the spec argument is ignored |
 | `scenario` | answers a scripted sequence of steps (`{"steps": [{"method", "path_suffix", "status", "body"}]}`) |
+
+A mock reply satisfies the schema it is built from: an `example`,
+`default` or `const` is used as written, and otherwise numbers respect
+their bounds, strings their `format`, length and (for simple patterns)
+`pattern`, arrays their `minItems`, and a recursive schema ends in an empty
+list rather than a `null`. An `allOf` is the merge of its members, and a
+`oneOf` or `anyOf` beside `properties` adds its first branch to the
+object. A reply past a few thousand values is finished with only what its
+schema requires. Declared response headers are sent with example values,
+except those that describe the message itself (`Content-Length`,
+`Content-Encoding`, `Transfer-Encoding`, `Connection`), which the server
+sets to match what it sends. So a suite run against the mock under
+`strict` conformance fails only where the description contradicts itself,
+such as an `example` that does not match its schema.
 
 The gateway binds `127.0.0.1`. `-p 0` picks a free port, and the bound
 address is printed on stderr once the gateway can serve. Ctrl-C stops it
@@ -61,6 +75,13 @@ $ suspect traffic har rec.scj -o rec.har                    # HTTP Archive 1.2
 $ suspect diff impact old.yaml new.yaml rec.scj             # recorded traffic a revision would break
 $ suspect test replay rec.scj --upstream http://staging:80  # re-issue traffic and report drift
 ```
+
+Offline, `test run --cassette` answers each request with the recording of
+that request (method, path and query; not scheme or host), so the order
+workflows happen to run in does not matter; see
+[contract testing](contract-testing.md#recording-and-offline-runs). The
+gateway's own `replay` mode is stateless: the latest recording of a request
+always answers it.
 
 `traffic drift` reads a cassette or a journal and reports endpoints and query
 parameters the traffic used that the spec does not declare, and declared

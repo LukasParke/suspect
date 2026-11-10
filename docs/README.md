@@ -20,6 +20,7 @@ Each directory holds one kind of page:
 
 - [Checking and linting](guide/linting.md): `check`, rule settings, suppression comments, baselines, custom rules
 - [Editors](guide/editors.md): VS Code, Zed and other LSP clients
+- [Contract testing and Arazzo workflows](guide/contract-testing.md): `test run`, conformance levels, criteria and actions, recordings, reports, CI
 - [Gateway, recording and replay](guide/gateway.md)
 - [Documentation generation](guide/docs-generation.md): `gen docs` and custom templates
 - [Golden SDK defaults — user guide](guide/sdk-generation.md)

@@ -68,6 +68,34 @@ impl StreamFormat {
     }
 }
 
+/// `--conformance`: how much of the declared response contract a test
+/// command holds each reply to.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum ConformanceLevel {
+    /// The whole contract: the status and content type must be declared,
+    /// required headers present, and a JSON body must satisfy its schema.
+    #[default]
+    Strict,
+    /// Only the body schema of a declared response; statuses and content
+    /// types the description omits are not findings.
+    Schema,
+    /// Nothing: only the suite's own success criteria judge a reply.
+    Off,
+}
+
+impl ConformanceLevel {
+    /// The value's name, as config files spell it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Schema => "schema",
+            Self::Off => "off",
+        }
+    }
+}
+
 /// `--format text|json|sarif|junit`.
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct Findings {
@@ -124,49 +152,69 @@ pub struct ReportFiles {
 }
 
 impl ReportFiles {
-    /// Writes the requested files for a run of `command` with this
-    /// outcome: the JSON report (`version`, `command`, counts and
-    /// duration) and JUnit through `suspect_test::reporters::junit`.
+    /// Whether any report file was asked for.
+    #[must_use]
+    pub fn wanted(&self) -> bool {
+        self.report_file.is_some() || self.junit.is_some()
+    }
+
+    /// Writes the requested files for a run of `command` named `name`
+    /// (the suite document, or the description under test): the JSON
+    /// report (`version`, `command`, counts, duration and one entry per
+    /// case) and JUnit XML with one test case per case.
     ///
     /// # Errors
     /// Filesystem IO.
-    pub fn write(&self, command: &str, summary: &suspect_test::RunSummary) -> anyhow::Result<()> {
+    pub fn write(
+        &self,
+        command: &str,
+        name: &str,
+        summary: &suspect_test::RunSummary,
+        cases: &[suspect_test::reporters::Case],
+    ) -> anyhow::Result<()> {
         if let Some(path) = &self.report_file {
             let report = serde_json::json!({
                 "version": 1,
                 "command": command,
+                "name": name,
                 "passed": summary.passed,
                 "failed": summary.failed,
                 "skipped": summary.skipped,
                 "duration_ms": summary.duration_ms,
+                "cases": cases,
             });
             write_report(path, &(serde_json::to_string_pretty(&report)? + "\n"))?;
         }
         if let Some(path) = &self.junit {
-            write_report(path, &suspect_test::reporters::junit(summary))?;
+            write_report(
+                path,
+                &suspect_test::reporters::junit(name, cases, summary.duration_ms),
+            )?;
         }
         Ok(())
     }
 
-    /// [`ReportFiles::write`] for a run that counts passes and failures
-    /// and started at `started`.
+    /// [`ReportFiles::write`] for a run whose counts are its cases: passed
+    /// and failed cases, timed from `started`.
     ///
     /// # Errors
     /// Filesystem IO.
-    pub fn write_counts(
+    pub fn write_cases(
         &self,
         command: &str,
-        passed: usize,
-        failed: usize,
+        name: &str,
+        cases: &[suspect_test::reporters::Case],
         started: std::time::Instant,
     ) -> anyhow::Result<()> {
+        let failed = cases.iter().filter(|case| case.is_failed()).count();
+        let skipped = cases.iter().filter(|case| case.is_skipped()).count();
         let summary = suspect_test::RunSummary {
-            passed,
+            passed: cases.len() - failed - skipped,
             failed,
-            skipped: 0,
+            skipped,
             duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         };
-        self.write(command, &summary)
+        self.write(command, name, &summary, cases)
     }
 }
 
@@ -200,17 +248,33 @@ mod tests {
             skipped: 0,
             duration_ms: 42,
         };
-        files.write("replay", &summary).unwrap();
+        let cases = [
+            suspect_test::reporters::Case::passed("replay", "GET /pets"),
+            suspect_test::reporters::Case::failed(
+                "replay",
+                "GET /pets/1",
+                "drift",
+                "the recorded response",
+                "status 500",
+            ),
+        ];
+        files.write("replay", "rec.scj", &summary, &cases).unwrap();
         let json: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(dir.path().join("out/run.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(json["command"], "replay");
+        assert_eq!(json["name"], "rec.scj");
         assert_eq!(json["passed"], 3);
         assert_eq!(json["failed"], 1);
+        assert_eq!(json["cases"][1]["status"], "failed");
+        assert_eq!(json["cases"][1]["failures"][0]["check"], "drift");
         let xml = std::fs::read_to_string(dir.path().join("out/run.xml")).unwrap();
-        assert!(xml.contains("failures=\"1\""), "{xml}");
+        assert!(xml.contains("tests=\"2\" failures=\"1\""), "{xml}");
+        assert!(xml.contains("<testcase name=\"GET /pets/1\""), "{xml}");
         // Nothing requested, nothing written.
-        ReportFiles::default().write("replay", &summary).unwrap();
+        ReportFiles::default()
+            .write("replay", "rec.scj", &summary, &cases)
+            .unwrap();
     }
 }

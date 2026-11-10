@@ -1,8 +1,15 @@
-# Exercises .github/actions/suspect against a pinned release on each runner
-# OS. Manual only until the first release (v0.1.0) is published: before
-# that the download has nothing to fetch and this workflow fails. After the
-# first release, add `release: types: [published]` (and a schedule if
-# wanted) and move the pinned default forward with each release.
+# Exercises .github/actions/suspect on each runner OS, two ways.
+#
+# `action-smoke` installs a pinned release. Manual only until the first
+# release (v0.1.0) is published: before that the download has nothing to
+# fetch and the job fails. After the first release, add `release: types:
+# [published]` (and a schedule if wanted) and move the pinned default
+# forward with each release.
+#
+# `action-source` builds the CLI from this revision through the action
+# (`version: source`) and runs the bundled contract-testing example with
+# it. It needs no release, so it runs whenever the action or this workflow
+# changes.
 name: action-smoke
 
 on:
@@ -12,12 +19,67 @@ on:
         description: 'suspect release to install (e.g. 0.1.0 or latest)'
         required: true
         default: '0.1.0'
+  pull_request:
+    paths:
+      - .github/actions/suspect/**
+      - .github/workflows/action-smoke.yml
 
 permissions:
   contents: read
 
 jobs:
+  action-source:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, macos-15, windows-2022]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # The build is the slow part; the toolchain is the one pinned in
+      # rust-toolchain.toml, which rustup installs on first use.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # Install only: `suspect` is on PATH for later steps.
+      - id: install
+        uses: ./.github/actions/suspect
+        with:
+          version: source
+      - name: Start the mock gateway
+        shell: bash
+        run: |
+          suspect --version
+          suspect traffic gateway examples/contract-testing/petstore.openapi.yaml \
+            --port 8095 --mode mock --enforce > gateway.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8095/pets; then exit 0; fi
+            sleep 1
+          done
+          cat gateway.log
+          exit 1
+      # The suite directory, as one gate, with both report files.
+      - id: test
+        uses: ./.github/actions/suspect
+        with:
+          version: source
+          command: test
+          arazzo: examples/contract-testing
+          base-url: http://127.0.0.1:8095
+          junit: out/contract.xml
+          report-file: out/contract.json
+      - name: Reports
+        shell: bash
+        env:
+          RC: ${{ steps.test.outputs.exit-code }}
+        run: |
+          echo "suspect test run exited $RC"
+          [ "$RC" = 0 ]
+          grep -q 'tests="6" failures="0"' out/contract.xml
+          grep -q '"failed": 0' out/contract.json
+
   action-smoke:
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

@@ -281,7 +281,7 @@ async fn run_vu_inner(
             vu,
             seed: shared.seed,
             auth: Arc::clone(&shared.auth),
-            validate_responses: shared.validate_responses,
+            conformance: super::conformance_for(shared.validate_responses),
         };
         let outcome = run_workflow(
             &shared.plan,

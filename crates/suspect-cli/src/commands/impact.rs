@@ -104,6 +104,8 @@ pub fn impact(args: &ImpactArgs) -> anyhow::Result<i32> {
 pub fn analyze(old: &Path, new: &Path, cassette: &Path) -> anyhow::Result<ImpactReport> {
     let old_spec = load_ir(old)?;
     let new_spec = load_ir(new)?;
+    let old_schemas = suspect_runtime::Schemas::from_spec(&old_spec);
+    let new_schemas = suspect_runtime::Schemas::from_spec(&new_spec);
     let file = std::fs::File::open(cassette)?;
     let (_header, entries) = suspect_journal::read_cassette(file)?;
 
@@ -114,7 +116,7 @@ pub fn analyze(old: &Path, new: &Path, cassette: &Path) -> anyhow::Result<Impact
         // Only evaluate exchanges the candidate contract still serves.
         let (passes_old, reason_old) = match match_op(&old_spec, &entry.method, &path) {
             Some(op) => {
-                let verdict = validate_response(&old_spec, op, entry.status, &entry.response_body);
+                let verdict = validate_response(&old_schemas, op, entry);
                 match verdict {
                     None => (true, String::new()),
                     Some(reason) => (false, reason),
@@ -124,7 +126,7 @@ pub fn analyze(old: &Path, new: &Path, cassette: &Path) -> anyhow::Result<Impact
         };
         let (passes_new, reason) = match match_op(&new_spec, &entry.method, &path) {
             Some(op) => {
-                let verdict = validate_response(&new_spec, op, entry.status, &entry.response_body);
+                let verdict = validate_response(&new_schemas, op, entry);
                 match verdict {
                     None => (true, String::new()),
                     Some(reason) => (false, reason),
@@ -220,83 +222,32 @@ fn match_op<'s>(spec: &'s IrSpec, method: &str, path: &str) -> Option<&'s suspec
     })
 }
 
-/// Validates a recorded response body against the operation's declared
-/// response schema (status-exact, then `default`).
+/// Why a recorded reply breaks the operation's contract, or `None` when it
+/// conforms. The shared contract runtime decides, at the level the test
+/// runner applies by default, so "this revision breaks that consumer" here
+/// means exactly what a failing contract test means.
 fn validate_response(
-    spec: &IrSpec,
+    schemas: &suspect_runtime::Schemas,
     op: &suspect_ir::IrOperation,
-    status: u16,
-    body: &suspect_journal::Body,
+    entry: &suspect_journal::CassetteEntry,
 ) -> Option<String> {
-    let schema_name = op
-        .responses
-        .iter()
-        .find(|r| r.status == Some(status))
-        .or_else(|| op.responses.iter().find(|r| r.status.is_none()))
-        .and_then(|r| r.schema.as_deref());
-    let Some(name) = schema_name else {
-        return None; // no declared schema: nothing to violate
-    };
-    let schema_json = spec.schemas.iter().find(|s| s.name == name)?;
-    let bytes = body_bytes(body);
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return None; // binary bodies are not JSON-schema checkable here
-    };
-    let Ok(instance) = serde_json::from_str::<serde_json::Value>(text) else {
-        return Some("recorded body is not valid JSON against the declared schema".to_owned());
-    };
-    let wrapper = serde_json::json!({"schema": schema_json.json, "instance": instance});
-    let Ok(uri) = suspect_source::Uri::parse("mem://impact-check.json") else {
-        return None;
-    };
-    let doc = suspect_low::LowDoc::parse(
-        uri,
-        suspect_source::Source::from_vec(wrapper.to_string().into_bytes()),
+    let check = suspect_runtime::check_response(
+        &op.responses,
+        schemas,
+        suspect_runtime::Reply {
+            method: &entry.method,
+            status: entry.status,
+            headers: &entry.response_headers,
+            body: &entry.response_body.bytes(),
+        },
+        suspect_runtime::Conformance::Strict,
     );
-    let (Some(schema_node), Some(instance_node)) =
-        (doc.root().get("schema"), doc.root().get("instance"))
-    else {
-        return None;
-    };
-    let Ok(compiled) =
-        suspect_schema::Compiler::new(suspect_schema::Config::default()).compile(schema_node)
-    else {
-        return None;
-    };
-    compiled
-        .validate(instance_node)
-        .first()
-        .map(|e| e.message.clone())
-}
-
-fn body_bytes(body: &suspect_journal::Body) -> Vec<u8> {
-    match body.encoding {
-        suspect_journal::BodyEncoding::Utf8 => body.content.clone().into_bytes(),
-        suspect_journal::BodyEncoding::Base64 => {
-            // The journal base64-decodes via the same helper used at write
-            // time; decode here with a minimal standard-alphabet decoder.
-            base64_decode(&body.content)
-        }
-    }
-}
-
-/// Minimal standard-alphabet base64 decoder.
-fn base64_decode(text: &str) -> Vec<u8> {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::new();
-    let mut buffer = 0u32;
-    let mut bits = 0u32;
-    for c in text.bytes() {
-        let Some(v) = TABLE.iter().position(|t| *t == c) else {
-            continue;
-        };
-        let v = v as u32;
-        buffer = (buffer << 6) | v;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(((buffer >> bits) & 0xFF) as u8);
-        }
-    }
-    out
+    (!check.conforms()).then(|| {
+        check
+            .violations
+            .iter()
+            .map(suspect_runtime::Violation::located)
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
 }

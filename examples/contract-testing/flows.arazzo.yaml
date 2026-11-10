@@ -1,0 +1,111 @@
+arazzo: 1.0.1
+info:
+  title: Petstore journeys
+  version: "1.0"
+  description: >
+    The contract suite of the contract-testing example. Every reply of
+    every step is held to the response `petstore.openapi.yaml` declares for
+    it; the success criteria below add what only this journey knows.
+sourceDescriptions:
+  - name: petstore
+    url: petstore.openapi.yaml
+    type: openapi
+
+workflows:
+  - workflowId: browse
+    summary: List pets, then open the first one.
+    description: A read-only visit.
+    inputs:
+      type: object
+      properties:
+        pageSize: { type: integer, default: 20 }
+    steps:
+      - stepId: list
+        description: Ask for one page.
+        operationId: listPets
+        parameters:
+          - name: limit
+            in: query
+            value: $inputs.pageSize
+        successCriteria:
+          - condition: $statusCode == 200
+          # A JSONPath criterion: at least one item carries an id.
+          - context: $response.body
+            condition: $.items[?@.id]
+            type: jsonpath
+        outputs:
+          firstId: $response.body#/items/0/id
+      - stepId: open
+        description: Open the first pet of the page.
+        operationId: showPet
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.list.outputs.firstId
+        successCriteria:
+          - condition: $statusCode == 200 && $response.body#/id == $steps.list.outputs.firstId
+
+  - workflowId: lifecycle
+    summary: Create a pet, read it back, rename it, delete it.
+    description: The whole life of one pet.
+    inputs:
+      type: object
+      properties:
+        petName: { type: string, default: Rex }
+    steps:
+      - stepId: create
+        description: Store a new pet.
+        operationId: createPet
+        requestBody:
+          contentType: application/json
+          payload:
+            name: $inputs.petName
+            tag: example
+        successCriteria:
+          - condition: $statusCode == 201
+          - condition: $response.body#/id != null
+        outputs:
+          petId: $response.body#/id
+      - stepId: read-back
+        description: The stored pet can be read at once, or shortly after.
+        operationId: showPet
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.create.outputs.petId
+        successCriteria:
+          - condition: $statusCode == 200
+          - condition: $response.body#/name != null
+        # A store that is only eventually consistent gets three more tries.
+        onFailure:
+          - name: not-there-yet
+            type: retry
+            retryAfter: 0.2
+            retryLimit: 3
+            criteria:
+              - condition: $statusCode == 404
+      - stepId: rename
+        description: Replace the pet under a new name.
+        operationId: replacePet
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.create.outputs.petId
+        requestBody:
+          contentType: application/json
+          payload:
+            id: $steps.create.outputs.petId
+            name: Rexy
+            tag: null
+        successCriteria:
+          - condition: $statusCode == 200
+          - condition: $response.body#/name == 'Rexy'
+      - stepId: remove
+        description: Delete the pet.
+        operationId: deletePet
+        parameters:
+          - name: petId
+            in: path
+            value: $steps.create.outputs.petId
+        successCriteria:
+          - condition: $statusCode == 204

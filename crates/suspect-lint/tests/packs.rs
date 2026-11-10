@@ -254,7 +254,7 @@ fn cases() -> Vec<Case> {
         Case {
             code: "security-no-delete-without-id",
             firing: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets:\n    delete:\n      operationId: deleteAllPets\n      responses: {}\n",
-            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets/{petId}\n    delete:\n      operationId: deletePet\n      responses: {}\n  /pets:\n    delete:\n      operationId: deletePets\n      responses: {}\n",
+            clean: "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets/{petId}:\n    delete:\n      operationId: deletePet\n      responses: {}\n",
         },
         Case {
             code: "overlay-info-description",
@@ -408,4 +408,44 @@ fn petstore_corpus_lints_cleanly_with_real_ranges() {
             f.path.to_path()
         );
     }
+}
+
+/// The two server-URL rules share one function; each reports only the
+/// thing its own code names.
+#[test]
+fn server_url_rules_each_check_one_thing() {
+    let linter = Linter::spectral_default();
+    let fired = |url: &str| -> Vec<String> {
+        let document = doc(&format!(
+            "openapi: \"3.0.0\"\ninfo: {{title: t, version: \"1\"}}\nservers: [{{url: '{url}'}}]\npaths: {{}}\n"
+        ));
+        run(&linter, &document)
+            .iter()
+            .map(|finding| finding.code.to_string())
+            .filter(|code| code.starts_with("server-"))
+            .collect()
+    };
+    assert_eq!(fired("https://localhost:8080"), ["server-host-not-example"]);
+    assert_eq!(fired("https://api.acme.org/v1/"), ["server-trailing-slash"]);
+    assert_eq!(fired("https://api.acme.org/v1"), Vec::<String>::new());
+    let mut both = fired("https://example.com/");
+    both.sort();
+    assert_eq!(both, ["server-host-not-example", "server-trailing-slash"]);
+}
+
+/// A `DELETE` on a path with a path parameter targets one resource; only a
+/// parameterless path is collection-wide.
+#[test]
+fn delete_on_a_parameterized_path_is_not_collection_wide() {
+    let linter = Linter::spectral_default();
+    let document = doc(
+        "openapi: \"3.0.0\"\ninfo: {title: t, version: \"1\"}\npaths:\n  /pets/{petId}:\n    delete:\n      operationId: deletePet\n      responses: {}\n  /pets:\n    delete:\n      operationId: deleteAllPets\n      responses: {}\n",
+    );
+    let findings = run(&linter, &document);
+    let flagged: Vec<String> = findings
+        .iter()
+        .filter(|finding| finding.code.as_ref() == "security-no-delete-without-id")
+        .map(|finding| finding.path.to_path())
+        .collect();
+    assert_eq!(flagged, ["/paths/~1pets/delete"]);
 }
