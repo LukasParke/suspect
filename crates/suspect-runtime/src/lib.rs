@@ -441,6 +441,7 @@ mod tests {
                     description: Some("ok".to_owned()),
                     ..json_response(200, "Pet")
                 }],
+                unresolved: Vec::new(),
             }],
             schemas: vec![suspect_ir::IrSchema {
                 name: "Pet".to_owned(),
@@ -622,6 +623,28 @@ mod tests {
         let violations = schemas.validate(&schema, &serde_json::Value::Array(bad));
         assert_eq!(violations.len(), 1, "{violations:?}");
         assert_eq!(violations[0].pointer, "/19999/name");
+    }
+
+    /// A list of ids declared `uniqueItems` is decided whatever its length.
+    #[test]
+    fn a_long_unique_list_is_validated_to_the_end() {
+        let schemas = Schemas::default();
+        let schema = serde_json::json!({
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "integer"}
+        });
+        let unique = serde_json::Value::Array((0..20_000).map(serde_json::Value::from).collect());
+        assert!(schemas.validate(&schema, &unique).is_empty());
+        let mut repeated: Vec<serde_json::Value> =
+            (0..20_000).map(serde_json::Value::from).collect();
+        repeated[19_999] = serde_json::Value::from(0);
+        assert_eq!(
+            schemas
+                .validate(&schema, &serde_json::Value::Array(repeated))
+                .len(),
+            1
+        );
     }
 
     #[test]

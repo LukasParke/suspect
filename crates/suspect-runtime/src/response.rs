@@ -137,6 +137,22 @@ pub fn check_response(
             coverage: Coverage::Undeclared,
         };
     };
+    // The response, or a header of it, is declared by a reference nothing
+    // could follow: what it requires is unknown, and an unknown contract
+    // is not a met one.
+    if let Some(reference) = &declared.unresolved {
+        return ResponseCheck {
+            violations: vec![Violation::new(
+                format!(
+                    "status {} is declared with `{reference}`, a reference that could not \
+                     be followed, so the reply cannot be checked against it",
+                    declared.key()
+                ),
+                "",
+            )],
+            coverage: Coverage::Declared,
+        };
+    }
     let mut violations = Vec::new();
     if strict {
         check_headers(declared, schemas, reply.headers, &mut violations);
@@ -241,9 +257,9 @@ fn check_body(
     let actual = header(reply.headers, "content-type")
         .map(media_essence)
         .filter(|essence| !essence.is_empty());
-    // Without a content type to go by — no header, or (below strict) a
-    // type the response does not declare — the body is read as JSON and
-    // held to the JSON media type, the one a JSON API means.
+    // Without a declared content type to go by — no header, or (below
+    // strict) a JSON type the response does not list — the body is read as
+    // JSON and held to the JSON media type, the one a JSON API means.
     let (media, assumed_json) = match actual
         .as_deref()
         .map(|essence| (essence, declared_media(&declared.content, essence)))
@@ -268,6 +284,9 @@ fn check_body(
             );
             return Coverage::Declared;
         }
+        // Below strict an undeclared type is not a finding, and a body
+        // that is not JSON has no JSON schema to meet.
+        Some((essence, None)) if !is_json_media_type(essence) => return Coverage::Declared,
         Some((_, None)) | None => match json_media(&declared.content) {
             Some(media) => (media, true),
             None => return Coverage::Declared,
@@ -291,7 +310,20 @@ fn check_body(
     if !json {
         return Coverage::Declared;
     }
-    match parse_json(reply.body) {
+    // No body is not the JSON value `null`: a schema that admits `null`
+    // (or declares no type) still describes a document that was not sent.
+    if reply.body.is_empty() {
+        out.push(Violation::new(
+            format!(
+                "the response has no body, but status {} declares `{}` content with a schema",
+                declared.key(),
+                media.media_type
+            ),
+            "",
+        ));
+        return Coverage::Declared;
+    }
+    match serde_json::from_slice::<serde_json::Value>(reply.body).ok() {
         None => out.push(Violation::new("the response body is not valid JSON", "")),
         Some(instance) => match schemas.get(name) {
             // The name is not in the component map: the body cannot be
@@ -306,17 +338,6 @@ fn check_body(
         },
     }
     Coverage::Schema
-}
-
-/// Parses a body as JSON; `None` when it is not.
-///
-/// An empty body is JSON `null`, matching the convention the rest of the
-/// toolchain uses for an absent payload.
-fn parse_json(body: &[u8]) -> Option<serde_json::Value> {
-    if body.is_empty() {
-        return Some(serde_json::Value::Null);
-    }
-    serde_json::from_slice(body).ok()
 }
 
 #[cfg(test)]
@@ -392,6 +413,24 @@ paths:
       operationId: silent
       responses:
         '204': { description: gone }
+  /dangling:
+    get:
+      operationId: dangling
+      responses:
+        '200':
+          $ref: '#/components/responses/Missing'
+  /loose:
+    get:
+      operationId: loose
+      responses:
+        '200':
+          description: a schema that would accept null
+          content:
+            application/json:
+              schema:
+                required: [id]
+                properties:
+                  id: { type: string }
   /undocumented:
     get:
       operationId: undocumented
@@ -592,7 +631,8 @@ components:
             strict.violations[0].message
         );
 
-        // Below strict the body is still held to the JSON schema.
+        // Below strict a content type the response does not declare is
+        // not a finding, and a body that is not JSON has no schema to meet.
         let schema_only = fixture.check(
             "listPets",
             200,
@@ -600,14 +640,52 @@ components:
             "<html></html>",
             Conformance::Schema,
         );
-        assert!(
-            schema_only
-                .violations
-                .iter()
-                .any(|v| v.message.contains("not valid JSON")),
-            "{:?}",
-            schema_only.violations
+        assert!(schema_only.conforms(), "{:?}", schema_only.violations);
+        assert_eq!(schema_only.coverage, Coverage::Declared);
+
+        // An undeclared type that is JSON is still held to the JSON schema.
+        let other_json = fixture.check(
+            "listPets",
+            200,
+            Some("application/vnd.api+json"),
+            "{}",
+            Conformance::Schema,
         );
+        assert_eq!(other_json.coverage, Coverage::Schema);
+        assert!(!other_json.conforms(), "the body lacks `items`");
+    }
+
+    #[test]
+    fn a_response_reference_that_leads_nowhere_is_a_finding() {
+        for level in [Conformance::Strict, Conformance::Schema] {
+            let check = fixture().check("dangling", 200, JSON, "{}", level);
+            assert_eq!(check.violations.len(), 1, "{level}: {:?}", check.violations);
+            assert!(
+                check.violations[0]
+                    .message
+                    .contains("#/components/responses/Missing"),
+                "{}",
+                check.violations[0].message
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_body_is_not_a_null_body() {
+        let fixture = fixture();
+        // The schema has no `type`, so the JSON value `null` would satisfy
+        // it; a reply with no body at all still has not sent the document.
+        for level in [Conformance::Strict, Conformance::Schema] {
+            let check = fixture.check("loose", 200, JSON, "", level);
+            assert_eq!(check.violations.len(), 1, "{level}: {:?}", check.violations);
+            assert!(
+                check.violations[0].message.contains("no body"),
+                "{}",
+                check.violations[0].message
+            );
+        }
+        let present = fixture.check("loose", 200, JSON, r#"{"id": "a"}"#, Conformance::Strict);
+        assert!(present.conforms(), "{:?}", present.violations);
     }
 
     #[test]

@@ -15,7 +15,7 @@
 //! records the reference as unresolved and conformance checks report it;
 //! nothing is guessed.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use suspect_low::Pointer;
 use suspect_ref::{ParsedRef, Workspace, parse_ref};
@@ -52,6 +52,16 @@ impl Section {
 /// them is part of an example, not a reference.
 const DATA_KEYWORDS: [&str; 5] = ["const", "default", "enum", "example", "examples"];
 
+/// Schema keywords whose value maps names to schemas. The names are the
+/// description author's, not keywords: a property may be called `default`.
+const SCHEMA_MAPS: [&str; 5] = [
+    "$defs",
+    "definitions",
+    "dependentSchemas",
+    "patternProperties",
+    "properties",
+];
+
 /// HTTP method keys of a Path Item.
 const METHODS: [&str; 8] = [
     "get", "put", "post", "delete", "options", "head", "patch", "trace",
@@ -82,6 +92,7 @@ pub(crate) fn internalize(ws: &Workspace, entry: &Uri, root: &mut FastValue) {
         entry,
         names: HashMap::new(),
         taken: HashMap::new(),
+        next_suffix: HashMap::new(),
         pending: Vec::new(),
         added: Vec::new(),
     };
@@ -116,7 +127,11 @@ struct State<'a> {
     names: HashMap<(Uri, String, Section), String>,
     /// Names in use per section: the entry's own components and every
     /// generated name.
-    taken: HashMap<Section, Vec<String>>,
+    taken: HashMap<Section, HashSet<String>>,
+    /// The next numeric suffix to try for a stem already in use, so many
+    /// targets that share a stem (`schema.yaml` in every directory) are
+    /// named without retrying every earlier suffix.
+    next_suffix: HashMap<(Section, String), usize>,
     pending: Vec<Target>,
     added: Vec<(Section, String, FastValue)>,
 }
@@ -181,11 +196,15 @@ impl State<'_> {
     /// Rewrites the references of one value that sits in a `section`
     /// position of the document at `base`.
     fn position(&mut self, value: &mut FastValue, section: Section, base: &Uri) {
+        if section == Section::Schemas {
+            self.schema_position(value, base);
+            return;
+        }
         if self.reference(value, section, base) {
             return;
         }
         match section {
-            Section::Schemas => self.schema(value, base),
+            Section::Schemas => {}
             Section::PathItems => {
                 self.each(value, "parameters", Section::Parameters, base);
                 for method in METHODS {
@@ -242,8 +261,16 @@ impl State<'_> {
         }
     }
 
-    /// Every reference nested anywhere inside a schema is a schema
-    /// reference; data keywords are skipped.
+    /// One schema: its own reference is rewritten, and so is everything
+    /// beside and below it. A schema reference may carry sibling keywords
+    /// (`{$ref: ..., properties: {...}}`), and those are schema too.
+    fn schema_position(&mut self, value: &mut FastValue, base: &Uri) {
+        self.reference(value, Section::Schemas, base);
+        self.schema(value, base);
+    }
+
+    /// The schemas nested in a schema. Data keywords are skipped, and the
+    /// members of a name-to-schema map are schemas whatever their names.
     fn schema(&mut self, value: &mut FastValue, base: &Uri) {
         match value {
             FastValue::Object(entries) => {
@@ -251,16 +278,18 @@ impl State<'_> {
                     if DATA_KEYWORDS.contains(&key.as_str()) {
                         continue;
                     }
-                    if !self.reference(child, Section::Schemas, base) {
-                        self.schema(child, base);
+                    if SCHEMA_MAPS.contains(&key.as_str()) {
+                        for (_, member) in entries_mut(child) {
+                            self.schema_position(member, base);
+                        }
+                        continue;
                     }
+                    self.schema_position(child, base);
                 }
             }
             FastValue::Array(items) => {
                 for item in items {
-                    if !self.reference(item, Section::Schemas, base) {
-                        self.schema(item, base);
-                    }
+                    self.schema_position(item, base);
                 }
             }
             FastValue::Scalar { .. } => {}
@@ -348,12 +377,12 @@ impl State<'_> {
         }
         let taken = self.taken.entry(section).or_default();
         let mut name = base.clone();
-        let mut suffix = 2usize;
+        let suffix = self.next_suffix.entry((section, base.clone())).or_insert(2);
         while taken.contains(&name) {
             name = format!("{base}_{suffix}");
-            suffix += 1;
+            *suffix += 1;
         }
-        taken.push(name.clone());
+        taken.insert(name.clone());
         name
     }
 }
@@ -389,26 +418,33 @@ fn merge(root: &mut FastValue, mut added: Vec<(Section, String, FastValue)>) {
     let FastValue::Object(top) = root else {
         return;
     };
-    if !top.iter().any(|(key, _)| key == "components") {
-        top.push(("components".to_owned(), FastValue::Object(Vec::new())));
-    }
-    let Some(FastValue::Object(components)) = top
-        .iter_mut()
-        .find(|(key, _)| key == "components")
-        .map(|(_, value)| value)
-    else {
-        return;
-    };
+    // `components:` and its sections may be absent, or present and empty
+    // (`schemas:` with nothing under it is a null): either way they become
+    // objects, since references already point into them.
+    let components = object_entry(top, "components");
     for (section, name, value) in added {
-        if !components.iter().any(|(key, _)| key == section.key()) {
-            components.push((section.key().to_owned(), FastValue::Object(Vec::new())));
+        object_entry(components, section.key()).push((name, value));
+    }
+}
+
+/// The entries of the mapping stored under `key`, created (or made a
+/// mapping) when it is absent or holds anything else.
+fn object_entry<'v>(
+    entries: &'v mut Vec<(String, FastValue)>,
+    key: &str,
+) -> &'v mut Vec<(String, FastValue)> {
+    let index = match entries.iter().position(|(name, _)| name == key) {
+        Some(index) => index,
+        None => {
+            entries.push((key.to_owned(), FastValue::Object(Vec::new())));
+            entries.len() - 1
         }
-        if let Some(FastValue::Object(entries)) = components
-            .iter_mut()
-            .find(|(key, _)| key == section.key())
-            .map(|(_, value)| value)
-        {
-            entries.push((name, value));
-        }
+    };
+    if !matches!(entries[index].1, FastValue::Object(_)) {
+        entries[index].1 = FastValue::Object(Vec::new());
+    }
+    match &mut entries[index].1 {
+        FastValue::Object(members) => members,
+        _ => unreachable!("made a mapping above"),
     }
 }

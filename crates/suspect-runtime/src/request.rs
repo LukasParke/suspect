@@ -31,6 +31,17 @@ pub fn validate_request(
     exchange: Exchange<'_>,
 ) -> Vec<Violation> {
     let mut out = Vec::new();
+    // A parameter or body declared by a reference nothing could follow
+    // cannot be checked: say so, instead of passing what was not read.
+    for reference in &operation.unresolved {
+        out.push(Violation::new(
+            format!(
+                "the operation declares `{reference}`, a reference that could not be \
+                 followed, so the request cannot be checked against it"
+            ),
+            "",
+        ));
+    }
     for parameter in &operation.parameters {
         let Some(schema) = parameter.schema.as_ref() else {
             continue;
@@ -179,9 +190,15 @@ pub fn segment_for(template: &str, path: &str, name: &str) -> Option<String> {
         .map(|(_, got)| percent_decode(got))
 }
 
-/// Coerces a raw string to the JSON type its schema declares, then
-/// validates it. A value that will not coerce is reported as a type
-/// violation against the same schema, which is the honest reading.
+/// Checks the text of a parameter or header against its schema.
+///
+/// Text on the wire has no JSON type of its own: `10` is the number ten
+/// for an `integer` schema and the string `"10"` for a `string` one. The
+/// text is read as each type the schema declares, and it conforms when one
+/// reading does. A schema that declares no type (an `enum`, a composition
+/// the type cannot be read from) is tried with every reading the text
+/// allows. Text that cannot be read as a declared type is checked as a
+/// string, which reports the honest type violation.
 ///
 /// An `array` or `object` schema is not checked: how such a value is
 /// serialized into one string depends on the parameter's `style` and
@@ -195,56 +212,126 @@ pub(crate) fn check_scalar(
     direction: Direction,
     out: &mut Vec<Violation>,
 ) {
-    let value = match declared_type(schema, schemas).as_deref() {
-        Some("array" | "object") => return,
-        Some("integer") => raw.parse::<i64>().map_or_else(
-            |_| serde_json::Value::String(raw.to_owned()),
-            |number| serde_json::json!(number),
-        ),
-        Some("number") => raw.parse::<f64>().map_or_else(
-            |_| serde_json::Value::String(raw.to_owned()),
-            |number| serde_json::json!(number),
-        ),
-        Some("boolean") => match raw {
-            "true" => serde_json::Value::Bool(true),
-            "false" => serde_json::Value::Bool(false),
-            _ => serde_json::Value::String(raw.to_owned()),
-        },
-        _ => serde_json::Value::String(raw.to_owned()),
+    let mut types = Vec::new();
+    declared_types(schema, schemas, 0, &mut types);
+    if types.iter().any(|name| name == "array" || name == "object") {
+        return;
+    }
+    let text = || serde_json::Value::String(raw.to_owned());
+    let mut readings: Vec<serde_json::Value> = Vec::new();
+    let mut read = |value: Option<serde_json::Value>| {
+        if let Some(value) = value
+            && !readings.contains(&value)
+        {
+            readings.push(value);
+        }
     };
-    for violation in schemas.validate_as(schema, &value, direction) {
-        out.push(Violation {
-            pointer: pointer.to_owned(),
-            ..violation
-        });
+    if types.is_empty() {
+        read(number(raw));
+        read(boolean(raw));
+        read(Some(text()));
+    }
+    for name in &types {
+        match name.as_str() {
+            "integer" | "number" => read(number(raw)),
+            "boolean" => read(boolean(raw)),
+            "string" => read(Some(text())),
+            _ => {}
+        }
+    }
+    if readings.is_empty() {
+        readings.push(text());
+    }
+    let mut reported: Option<Vec<Violation>> = None;
+    for value in &readings {
+        let violations = schemas.validate_as(schema, value, direction);
+        if violations.is_empty() {
+            return;
+        }
+        reported.get_or_insert(violations);
+    }
+    out.extend(
+        reported
+            .unwrap_or_default()
+            .into_iter()
+            .map(|violation| Violation {
+                pointer: pointer.to_owned(),
+                ..violation
+            }),
+    );
+}
+
+/// The number `raw` spells, when it spells a finite one. `NaN`, `inf` and
+/// a magnitude no JSON number holds (`1e999`) are not numbers here.
+fn number(raw: &str) -> Option<serde_json::Value> {
+    if let Ok(integer) = raw.parse::<i64>() {
+        return Some(serde_json::Value::from(integer));
+    }
+    if let Ok(integer) = raw.parse::<u64>() {
+        return Some(serde_json::Value::from(integer));
+    }
+    let float = raw.parse::<f64>().ok().filter(|float| float.is_finite())?;
+    serde_json::Number::from_f64(float).map(serde_json::Value::Number)
+}
+
+/// The boolean `raw` spells.
+fn boolean(raw: &str) -> Option<serde_json::Value> {
+    match raw {
+        "true" => Some(serde_json::Value::Bool(true)),
+        "false" => Some(serde_json::Value::Bool(false)),
+        _ => None,
     }
 }
 
-/// The JSON type a schema declares for coercion: its `type` (the first
-/// non-null member of a type array), found through component references
-/// with a hop bound so a self-referential schema cannot loop.
-fn declared_type(schema: &serde_json::Value, schemas: &Schemas) -> Option<String> {
-    const MAX_HOPS: usize = 8;
-    let mut current = schema;
-    for _ in 0..MAX_HOPS {
-        match current.get("type") {
-            Some(serde_json::Value::String(name)) => return Some(name.clone()),
-            Some(serde_json::Value::Array(names)) => {
-                return names
+/// Collects the JSON types a schema declares (`null` aside): its `type`,
+/// else what its `$ref` target or the members of its `allOf` declare. The
+/// depth bound ends a self-referential schema.
+fn declared_types(
+    schema: &serde_json::Value,
+    schemas: &Schemas,
+    depth: usize,
+    out: &mut Vec<String>,
+) {
+    const MAX_DEPTH: usize = 8;
+    match schema.get("type") {
+        Some(serde_json::Value::String(name)) => {
+            if name != "null" {
+                out.push(name.clone());
+            }
+            return;
+        }
+        Some(serde_json::Value::Array(names)) => {
+            out.extend(
+                names
                     .iter()
                     .filter_map(serde_json::Value::as_str)
-                    .find(|name| *name != "null")
-                    .map(str::to_owned);
-            }
-            _ => {}
+                    .filter(|name| *name != "null")
+                    .map(str::to_owned),
+            );
+            return;
         }
-        current = current
-            .get("$ref")
-            .and_then(serde_json::Value::as_str)
-            .and_then(crate::dialect::component_name)
-            .and_then(|name| schemas.get(&name))?;
+        _ => {}
     }
-    None
+    if depth >= MAX_DEPTH {
+        return;
+    }
+    if let Some(target) = schema
+        .get("$ref")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|reference| crate::dialect::follow(reference, &|name| schemas.get(name)))
+    {
+        declared_types(target, schemas, depth + 1, out);
+    }
+    if out.is_empty()
+        && let Some(serde_json::Value::Array(members)) = schema.get("allOf")
+    {
+        for member in members {
+            declared_types(member, schemas, depth + 1, out);
+            if !out.is_empty() {
+                break;
+            }
+        }
+    }
 }
 
 /// Percent-decoding for a URI component (path segment, header): `+` is a
@@ -302,6 +389,7 @@ mod tests {
             parameters,
             body_schema: body_schema.map(str::to_owned),
             responses: Vec::new(),
+            unresolved: Vec::new(),
         }
     }
 
@@ -352,6 +440,71 @@ mod tests {
         let over = violations(&operation, &schemas, "limit=99", "");
         assert_eq!(over.len(), 1, "{over:?}");
         assert_eq!(over[0].pointer, "/limit");
+    }
+
+    /// A parameter or body declared by a reference nothing could follow
+    /// cannot be checked, and that is a finding, not a pass.
+    #[test]
+    fn a_request_part_that_cannot_be_read_is_a_finding() {
+        let mut operation = operation(Vec::new(), None);
+        operation.unresolved = vec!["#/components/parameters/NoSuchParameter".to_owned()];
+        let found = violations(&operation, &schemas(serde_json::json!({})), "", "");
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(
+            found[0]
+                .message
+                .contains("#/components/parameters/NoSuchParameter"),
+            "{}",
+            found[0].message
+        );
+    }
+
+    /// A parameter's type may sit behind a composition or be implied by
+    /// its values; the text on the wire is read as whatever the schema can
+    /// accept.
+    #[test]
+    fn a_scalar_is_read_as_the_type_its_schema_accepts() {
+        let schemas = schemas(serde_json::json!({
+            "Limit": {"type": "integer", "maximum": 50},
+            "Filters": {"type": "object", "properties": {"limit": {"type": "integer"}}}
+        }));
+        let operation = operation(
+            vec![
+                query(
+                    "composed",
+                    serde_json::json!({"allOf": [{"$ref": "#/components/schemas/Limit"}]}),
+                ),
+                query("implied", serde_json::json!({"enum": [1, 2]})),
+                query("flag", serde_json::json!({"enum": [true]})),
+                query(
+                    "nested",
+                    serde_json::json!({"$ref": "#/components/schemas/Filters/properties/limit"}),
+                ),
+                query("ratio", serde_json::json!({"type": ["number", "null"]})),
+                query("text", serde_json::json!({"type": "string"})),
+            ],
+            None,
+        );
+        assert!(
+            violations(
+                &operation,
+                &schemas,
+                "composed=10&implied=2&flag=true&nested=3&ratio=0.5&text=10",
+                ""
+            )
+            .is_empty()
+        );
+        let wrong = violations(
+            &operation,
+            &schemas,
+            "composed=99&implied=3&flag=false&nested=abc&ratio=NaN&text=10",
+            "",
+        );
+        let pointers: Vec<&str> = wrong.iter().map(|v| v.pointer.as_str()).collect();
+        for name in ["/composed", "/implied", "/flag", "/nested", "/ratio"] {
+            assert!(pointers.contains(&name), "{name} is a violation: {wrong:?}");
+        }
+        assert!(!pointers.contains(&"/text"), "{wrong:?}");
     }
 
     #[test]

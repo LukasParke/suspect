@@ -901,3 +901,297 @@ fn a_multi_file_description_is_the_same_through_both_paths() {
         serde_json::to_value(&via_ws).unwrap()
     );
 }
+
+// ---------------------------------------------------------------------
+// Review findings: what a `responses` key and a `$ref` may be.
+
+fn ir_of(yaml: &str) -> IrSpec {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spec.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    IrSpec::from_file(&path).expect("oas spec")
+}
+
+/// Only `default` is the default response. An extension or a misspelt key
+/// under `responses` declares nothing, and must not stand in for it.
+#[test]
+fn only_default_is_the_default_response() {
+    let spec = ir_of(
+        r#"
+openapi: 3.1.0
+info: {title: t, version: "1"}
+paths:
+  /a:
+    get:
+      operationId: a
+      responses:
+        x-internal: {note: not a response}
+        '200': {description: ok}
+        20X: {description: a typo}
+  /b:
+    get:
+      operationId: b
+      responses:
+        x-internal: {note: not a response}
+        default: {description: the real default}
+"#,
+    );
+    let a = spec.operation(OpSelector::Id("a")).unwrap();
+    let keys: Vec<String> = a.responses.iter().map(crate::IrResponse::key).collect();
+    assert_eq!(keys, ["200"]);
+    assert!(a.response_for(500).is_none(), "500 is undeclared");
+    let b = spec.operation(OpSelector::Id("b")).unwrap();
+    assert_eq!(
+        b.response_for(500).and_then(|r| r.description.as_deref()),
+        Some("the real default")
+    );
+}
+
+/// A response reference that leads nowhere is recorded as such, not as a
+/// response that declares nothing.
+#[test]
+fn a_response_reference_that_cannot_be_followed_is_recorded() {
+    let spec = ir_of(
+        r##"
+openapi: 3.1.0
+info: {title: t, version: "1"}
+paths:
+  /a:
+    get:
+      operationId: a
+      responses:
+        '200': {description: ok}
+        '404': {$ref: '#/components/responses/Missing'}
+        '410': {$ref: '#/paths/~1a/get/responses/200'}
+"##,
+    );
+    let a = spec.operation(OpSelector::Id("a")).unwrap();
+    assert_eq!(a.response_for(200).unwrap().unresolved, None);
+    assert_eq!(
+        a.response_for(404).unwrap().unresolved.as_deref(),
+        Some("#/components/responses/Missing")
+    );
+    // A local pointer that is not a component is followed all the same.
+    let via_pointer = a.response_for(410).unwrap();
+    assert_eq!(via_pointer.unresolved, None);
+    assert_eq!(via_pointer.description.as_deref(), Some("ok"));
+}
+
+/// Whatever an operation declares by a reference that leads nowhere is
+/// recorded, on both sides of the exchange: a header of a response, a
+/// parameter, a request body or its schema.
+#[test]
+fn parts_declared_by_a_reference_that_cannot_be_followed_are_recorded() {
+    let spec = ir_of(
+        r##"
+openapi: 3.1.0
+info: {title: t, version: "1"}
+paths:
+  /a:
+    parameters:
+      - {$ref: '#/components/parameters/NoSuchParameter'}
+    post:
+      operationId: a
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+      requestBody: {$ref: '#/components/requestBodies/NoSuchBody'}
+      responses:
+        '200':
+          description: ok
+          headers:
+            X-Trace: {$ref: '#/components/headers/NoSuchHeader'}
+            X-Total: {$ref: '#/components/headers/Total'}
+  /b:
+    post:
+      operationId: b
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: './missing.yaml#/Pet'}
+      responses:
+        '200': {description: ok}
+components:
+  parameters:
+    Limit: {name: limit, in: query, schema: {type: integer}}
+  headers:
+    Total: {schema: {type: integer}}
+"##,
+    );
+    let a = spec.operation(OpSelector::Id("a")).unwrap();
+    assert_eq!(
+        a.unresolved,
+        [
+            "#/components/parameters/NoSuchParameter",
+            "#/components/requestBodies/NoSuchBody"
+        ]
+    );
+    assert_eq!(a.parameters.len(), 1, "the parameter that resolves is kept");
+    let ok = a.response_for(200).unwrap();
+    assert_eq!(
+        ok.unresolved.as_deref(),
+        Some("#/components/headers/NoSuchHeader")
+    );
+    let b = spec.operation(OpSelector::Id("b")).unwrap();
+    assert_eq!(b.unresolved, ["./missing.yaml#/Pet"]);
+}
+
+/// A schema reference may point anywhere in the document, and may carry
+/// sibling keywords; either way the schema is addressable and complete.
+#[test]
+fn schema_references_beyond_a_bare_component_are_addressable() {
+    let spec = ir_of(
+        r##"
+openapi: 3.1.0
+info: {title: t, version: "1"}
+paths:
+  /nested:
+    get:
+      operationId: nested
+      responses:
+        '200':
+          description: a pointer into a component
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Page/properties/items'}
+  /sibling:
+    get:
+      operationId: sibling
+      responses:
+        '200':
+          description: a reference with a sibling keyword
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+                required: [owner]
+  /annotated:
+    get:
+      operationId: annotated
+      responses:
+        '200':
+          description: a reference with an annotation only
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+                description: just words
+components:
+  schemas:
+    Pet:
+      type: object
+      properties: {owner: {type: string}}
+    Page:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/Pet'}}
+"##,
+    );
+    let schema_of = |id: &str| {
+        let media = &spec.operation(OpSelector::Id(id)).unwrap().responses[0].content[0];
+        assert_eq!(media.unresolved, None, "{id}");
+        let name = media
+            .schema
+            .clone()
+            .unwrap_or_else(|| panic!("{id} has a schema name"));
+        (name.clone(), spec.schema(&name).unwrap().json.clone())
+    };
+    let (_, nested) = schema_of("nested");
+    assert_eq!(nested["type"], "array", "{nested}");
+    let (name, sibling) = schema_of("sibling");
+    assert_ne!(name, "Pet", "the siblings are part of the schema");
+    assert_eq!(sibling["required"], serde_json::json!(["owner"]));
+    assert_eq!(sibling["$ref"], "#/components/schemas/Pet");
+    let (name, _) = schema_of("annotated");
+    assert_eq!(name, "Pet", "an annotation does not make a new schema");
+}
+
+/// A property may be named like a keyword. References under it are
+/// references, and a file that needs `components` gets them even when the
+/// entry document spells the section as empty.
+#[test]
+fn external_references_under_keyword_named_properties_are_internalized() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("api.yaml"),
+        r#"
+openapi: 3.1.0
+info: {title: t, version: "1"}
+paths:
+  /a:
+    get:
+      operationId: a
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  default: {$ref: './leaf.yaml'}
+                  example: {$ref: './leaf.yaml'}
+                  wrapped:
+                    $ref: './leaf.yaml'
+                    properties:
+                      inner: {$ref: './other.yaml'}
+components:
+  schemas:
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("leaf.yaml"),
+        "type: object\nproperties:\n  n: {type: integer}\n",
+    )
+    .unwrap();
+    std::fs::write(dir.path().join("other.yaml"), "type: string\n").unwrap();
+    let spec = IrSpec::from_file(&dir.path().join("api.yaml")).expect("oas spec");
+    let media = &spec.operation(OpSelector::Id("a")).unwrap().responses[0].content[0];
+    let schema = &spec.schema(media.schema.as_deref().unwrap()).unwrap().json;
+    for property in ["default", "example", "wrapped"] {
+        let name = schema_ref_name(&schema["properties"][property]);
+        assert_eq!(
+            spec.schema(name).unwrap().json["properties"]["n"]["type"],
+            "integer",
+            "{property} points at the copied leaf"
+        );
+    }
+    let inner = schema_ref_name(&schema["properties"]["wrapped"]["properties"]["inner"]);
+    assert_eq!(spec.schema(inner).unwrap().json["type"], "string");
+}
+
+/// Many targets with one file stem get distinct names without the naming
+/// itself becoming the slow part.
+#[test]
+fn many_external_targets_with_one_stem_are_named_quickly() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut api = String::from(
+        "openapi: 3.1.0\ninfo: {title: t, version: '1'}\npaths:\n  /a:\n    get:\n      operationId: a\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n",
+    );
+    for index in 0..1500 {
+        std::fs::create_dir_all(dir.path().join(format!("d{index}"))).unwrap();
+        std::fs::write(
+            dir.path().join(format!("d{index}/schema.yaml")),
+            format!("type: object\nproperties:\n  n{index}: {{type: integer}}\n"),
+        )
+        .unwrap();
+        api.push_str(&format!(
+            "                  p{index}: {{$ref: './d{index}/schema.yaml'}}\n"
+        ));
+    }
+    std::fs::write(dir.path().join("api.yaml"), api).unwrap();
+    let started = std::time::Instant::now();
+    let spec = IrSpec::from_file(&dir.path().join("api.yaml")).expect("oas spec");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "took {:?}",
+        started.elapsed()
+    );
+    let names: std::collections::BTreeSet<&str> = spec
+        .schemas
+        .iter()
+        .map(|schema| schema.name.as_str())
+        .filter(|name| name.starts_with("schema"))
+        .collect();
+    assert_eq!(names.len(), 1500, "every target has its own name");
+}

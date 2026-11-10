@@ -394,6 +394,7 @@ mod tests {
                 parameters: Vec::new(),
                 body_schema: None,
                 responses: Vec::new(),
+                unresolved: Vec::new(),
             }],
             ..suspect_ir::IrSpec::default()
         };
@@ -425,6 +426,7 @@ mod tests {
                 parameters: Vec::new(),
                 body_schema: None,
                 responses: Vec::new(),
+                unresolved: Vec::new(),
             }],
             ..suspect_ir::IrSpec::default()
         }

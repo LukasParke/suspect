@@ -369,6 +369,7 @@ mod tests {
                         schema: Some("User".to_owned()),
                         ..Default::default()
                     }],
+                    unresolved: Vec::new(),
                 },
                 IrOperation {
                     id: Some("createPost".to_owned()),
@@ -386,6 +387,7 @@ mod tests {
                         schema: Some("Post".to_owned()),
                         ..Default::default()
                     }],
+                    unresolved: Vec::new(),
                 },
                 IrOperation {
                     id: Some("deletePost".to_owned()),
@@ -403,6 +405,7 @@ mod tests {
                         schema: None,
                         ..Default::default()
                     }],
+                    unresolved: Vec::new(),
                 },
             ],
             schemas: vec![

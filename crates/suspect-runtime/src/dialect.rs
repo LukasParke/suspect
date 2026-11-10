@@ -13,6 +13,8 @@
 //! response may omit a `writeOnly` property and a request may omit a
 //! `readOnly` one. Nothing else about the property changes (ADR 0024).
 
+use std::collections::BTreeSet;
+
 use serde_json::{Map, Value};
 
 /// The schema dialect of a contract.
@@ -103,38 +105,86 @@ pub fn normalize<'a>(
     direction: Option<Direction>,
     component: &dyn Fn(&str) -> Option<&'a Value>,
 ) -> Value {
+    rewrite(schema, dialect, direction, component, &BTreeSet::new())
+}
+
+/// [`normalize`] for one schema. `inherited` names the properties the
+/// enclosing `allOf` already knows the direction never carries.
+fn rewrite<'a>(
+    schema: &Value,
+    dialect: Dialect,
+    direction: Option<Direction>,
+    component: &dyn Fn(&str) -> Option<&'a Value>,
+    inherited: &BTreeSet<String>,
+) -> Value {
     let Value::Object(object) = schema else {
         return schema.clone();
     };
+    // A requirement and the property it names are often declared apart:
+    // the properties in one `allOf` member (usually a reference) and
+    // `required` in another, or beside the `allOf`. The properties of the
+    // whole composition decide what a `required` anywhere in it may demand.
+    let excused = match direction {
+        Some(direction) if object.contains_key("required") || object.contains_key("allOf") => {
+            let mut names = inherited.clone();
+            excused_properties(
+                schema,
+                direction.excusing_annotation(),
+                component,
+                &mut BTreeSet::new(),
+                &mut names,
+            );
+            names
+        }
+        _ => BTreeSet::new(),
+    };
+    let nothing = BTreeSet::new();
     let mut out = Map::with_capacity(object.len());
     for (key, value) in object {
         let rewritten = match value {
             Value::Object(_) if SCHEMA_KEYWORDS.contains(&key.as_str()) => {
-                normalize(value, dialect, direction, component)
+                rewrite(value, dialect, direction, component, &nothing)
             }
-            Value::Array(items) if SCHEMA_ARRAY_KEYWORDS.contains(&key.as_str()) => Value::Array(
-                items
-                    .iter()
-                    .map(|item| normalize(item, dialect, direction, component))
-                    .collect(),
-            ),
+            Value::Array(items) if SCHEMA_ARRAY_KEYWORDS.contains(&key.as_str()) => {
+                let passed = if key == "allOf" { &excused } else { &nothing };
+                Value::Array(
+                    items
+                        .iter()
+                        .map(|item| rewrite(item, dialect, direction, component, passed))
+                        .collect(),
+                )
+            }
             Value::Object(entries) if SCHEMA_MAP_KEYWORDS.contains(&key.as_str()) => Value::Object(
                 entries
                     .iter()
                     .map(|(name, entry)| {
                         (
                             name.clone(),
-                            normalize(entry, dialect, direction, component),
+                            rewrite(entry, dialect, direction, component, &nothing),
                         )
                     })
                     .collect(),
             ),
+            // The wrapping of a typeless nullable schema (see `nullable`)
+            // moves what it holds; a reference into it moves with it.
+            Value::String(reference) if key == "$ref" && dialect == Dialect::Oas30 => {
+                relocated(reference, component).map_or_else(|| value.clone(), Value::String)
+            }
             other => other.clone(),
         };
         out.insert(key.clone(), rewritten);
     }
-    if let Some(direction) = direction {
-        relax_required(&mut out, object, direction, component);
+    if let Some(Value::Array(required)) = object.get("required")
+        && !excused.is_empty()
+    {
+        let kept: Vec<Value> = required
+            .iter()
+            .filter(|name| name.as_str().is_none_or(|name| !excused.contains(name)))
+            .cloned()
+            .collect();
+        if kept.len() != required.len() {
+            out.insert("required".to_owned(), Value::Array(kept));
+        }
     }
     if dialect == Dialect::Oas30 {
         exclusive_bound(&mut out, "exclusiveMinimum", "minimum");
@@ -144,30 +194,34 @@ pub fn normalize<'a>(
     Value::Object(out)
 }
 
-/// Drops from `required` every property the direction never carries.
-fn relax_required<'a>(
-    out: &mut Map<String, Value>,
-    original: &Map<String, Value>,
-    direction: Direction,
+/// Collects into `names` every property of `schema` that carries
+/// `annotation: true`: its own `properties`, those of its `$ref` target and
+/// those of each `allOf` member. `seen` holds the references already
+/// followed, so a recursive composition is walked once.
+fn excused_properties<'a>(
+    schema: &Value,
+    annotation: &str,
     component: &dyn Fn(&str) -> Option<&'a Value>,
+    seen: &mut BTreeSet<String>,
+    names: &mut BTreeSet<String>,
 ) {
-    let (Some(Value::Array(required)), Some(Value::Object(properties))) =
-        (original.get("required"), original.get("properties"))
-    else {
-        return;
-    };
-    let annotation = direction.excusing_annotation();
-    let kept: Vec<Value> = required
-        .iter()
-        .filter(|name| {
-            name.as_str()
-                .and_then(|name| properties.get(name))
-                .is_none_or(|property| !annotated(property, annotation, component, 0))
-        })
-        .cloned()
-        .collect();
-    if kept.len() != required.len() {
-        out.insert("required".to_owned(), Value::Array(kept));
+    if let Some(Value::Object(properties)) = schema.get("properties") {
+        for (name, property) in properties {
+            if annotated(property, annotation, component, 0) {
+                names.insert(name.clone());
+            }
+        }
+    }
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str)
+        && seen.insert(reference.to_owned())
+        && let Some(target) = follow(reference, component)
+    {
+        excused_properties(target, annotation, component, seen, names);
+    }
+    if let Some(Value::Array(members)) = schema.get("allOf") {
+        for member in members {
+            excused_properties(member, annotation, component, seen, names);
+        }
     }
 }
 
@@ -188,8 +242,7 @@ fn annotated<'a>(
     if let Some(target) = schema
         .get("$ref")
         .and_then(Value::as_str)
-        .and_then(component_name)
-        .and_then(|name| component(&name))
+        .and_then(|reference| follow(reference, component))
         && annotated(target, annotation, component, hops + 1)
     {
         return true;
@@ -204,6 +257,58 @@ fn annotated<'a>(
         })
 }
 
+/// The schema a `#/components/schemas/<name>[/<pointer>]` reference
+/// addresses: the component, then the rest of the pointer inside it.
+pub(crate) fn follow<'a>(
+    reference: &str,
+    component: &dyn Fn(&str) -> Option<&'a Value>,
+) -> Option<&'a Value> {
+    let mut tokens = reference
+        .strip_prefix("#/components/schemas/")?
+        .split('/')
+        .map(pointer_token);
+    let mut current = component(&tokens.next().filter(|name| !name.is_empty())?)?;
+    for token in tokens {
+        current = match current {
+            Value::Object(entries) => entries.get(&token)?,
+            Value::Array(items) => items.get(token.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
+/// Where a reference into a component leads once the component is
+/// normalized for OpenAPI 3.0: every typeless `nullable` schema on the way
+/// is wrapped in an `anyOf` whose second branch holds it. `None` when the
+/// reference passes through no such schema and stays as written.
+fn relocated<'a>(reference: &str, component: &dyn Fn(&str) -> Option<&'a Value>) -> Option<String> {
+    let mut tokens = reference.strip_prefix("#/components/schemas/")?.split('/');
+    let name = tokens.next()?;
+    let mut current = component(&pointer_token(name))?;
+    let mut path = format!("#/components/schemas/{name}");
+    let mut moved = false;
+    for token in tokens {
+        if current.get("nullable") == Some(&Value::Bool(true)) && current.get("type").is_none() {
+            path.push_str("/anyOf/1");
+            moved = true;
+        }
+        current = match current {
+            Value::Object(entries) => entries.get(&pointer_token(token))?,
+            Value::Array(items) => items.get(token.parse::<usize>().ok()?)?,
+            _ => return None,
+        };
+        path.push('/');
+        path.push_str(token);
+    }
+    moved.then_some(path)
+}
+
+/// One pointer token of a URI fragment, unescaped.
+fn pointer_token(token: &str) -> String {
+    percent_decode(token).replace("~1", "/").replace("~0", "~")
+}
+
 /// The component a `#/components/schemas/<name>` reference names (the
 /// first pointer token after the prefix, unescaped).
 #[must_use]
@@ -215,8 +320,7 @@ pub fn component_name(reference: &str) -> Option<String> {
     if token.is_empty() {
         return None;
     }
-    let decoded = percent_decode(token);
-    Some(decoded.replace("~1", "/").replace("~0", "~"))
+    Some(pointer_token(token))
 }
 
 /// Decodes `%XX` escapes of a URI fragment; malformed escapes stay as
@@ -366,6 +470,53 @@ mod tests {
         assert!(accepts(&schemas, Direction::Response, &schema, json!(null)));
     }
 
+    /// Wrapping a typeless nullable schema moves what it holds one level
+    /// down; a reference that points into it has to follow.
+    #[test]
+    fn a_reference_into_a_wrapped_nullable_schema_still_resolves() {
+        let schemas = schemas(
+            Dialect::Oas30,
+            json!({
+                "Owner": {
+                    "nullable": true,
+                    "allOf": [{"type": "object", "required": ["id"]}]
+                },
+                "Pet": {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "nullable": true,
+                            "allOf": [{"type": "object", "required": ["name"]}]
+                        }
+                    }
+                }
+            }),
+        );
+        let direct = json!({"$ref": "#/components/schemas/Owner/allOf/0"});
+        assert!(accepts(
+            &schemas,
+            Direction::Response,
+            &direct,
+            json!({"id": 1})
+        ));
+        assert!(!accepts(&schemas, Direction::Response, &direct, json!({})));
+        assert!(
+            !accepts(&schemas, Direction::Response, &direct, json!(null)),
+            "the member is not nullable, only the schema around it"
+        );
+        let nested = json!({"$ref": "#/components/schemas/Pet/properties/owner/allOf/0"});
+        assert!(accepts(
+            &schemas,
+            Direction::Response,
+            &nested,
+            json!({"name": "rex"})
+        ));
+        assert!(!accepts(&schemas, Direction::Response, &nested, json!({})));
+        let whole = json!({"$ref": "#/components/schemas/Pet/properties/owner"});
+        assert!(accepts(&schemas, Direction::Response, &whole, json!(null)));
+        assert!(!accepts(&schemas, Direction::Response, &whole, json!({})));
+    }
+
     #[test]
     fn nullable_is_not_a_2020_12_keyword() {
         let schemas = schemas(Dialect::Json2020, json!({}));
@@ -447,6 +598,104 @@ mod tests {
             without_id.clone()
         ));
         assert!(!accepts(&schemas, Direction::Response, &schema, without_id));
+    }
+
+    /// The usual composition: the properties come from one `allOf` member
+    /// and the requirement from another.
+    #[test]
+    fn a_requirement_declared_beside_the_properties_it_names_is_relaxed() {
+        let schemas = schemas(
+            Dialect::Json2020,
+            json!({
+                "UserFields": {
+                    "type": "object",
+                    "properties": {
+                        "email": {"type": "string"},
+                        "password": {"type": "string", "writeOnly": true},
+                        "id": {"type": "string", "readOnly": true}
+                    }
+                }
+            }),
+        );
+        let schema = json!({
+            "allOf": [
+                {"$ref": "#/components/schemas/UserFields"},
+                {"required": ["email", "password", "id"]}
+            ]
+        });
+        // A response carries `id` but never the write-only password.
+        assert!(accepts(
+            &schemas,
+            Direction::Response,
+            &schema,
+            json!({"email": "a@b.c", "id": "u1"})
+        ));
+        // A request carries the password but not the read-only id.
+        assert!(accepts(
+            &schemas,
+            Direction::Request,
+            &schema,
+            json!({"email": "a@b.c", "password": "s3cret"})
+        ));
+        // What the direction does carry is still required.
+        assert!(!accepts(
+            &schemas,
+            Direction::Response,
+            &schema,
+            json!({"email": "a@b.c"})
+        ));
+        assert!(!accepts(
+            &schemas,
+            Direction::Request,
+            &schema,
+            json!({"email": "a@b.c"})
+        ));
+    }
+
+    #[test]
+    fn a_reference_into_a_component_is_followed_to_its_end() {
+        let components = json!({
+            "User": {
+                "type": "object",
+                "properties": {"secret": {"type": "string", "writeOnly": true}},
+                "oneOf": [{"title": "a/b"}]
+            }
+        });
+        let component = |name: &str| components.get(name);
+        assert_eq!(
+            follow("#/components/schemas/User/properties/secret", &component),
+            Some(&json!({"type": "string", "writeOnly": true}))
+        );
+        assert_eq!(
+            follow("#/components/schemas/User/oneOf/0/title", &component),
+            Some(&json!("a/b"))
+        );
+        assert_eq!(
+            follow("#/components/schemas/User", &component),
+            components.get("User")
+        );
+        assert_eq!(
+            follow("#/components/schemas/User/properties/none", &component),
+            None
+        );
+        assert_eq!(follow("#/components/schemas/Other", &component), None);
+        assert_eq!(
+            follow("other.yaml#/components/schemas/User", &component),
+            None
+        );
+
+        // A property declared by such a reference takes its annotation from
+        // the property it points at, not from the component around it.
+        let schemas = schemas(Dialect::Json2020, components.clone());
+        let schema = json!({
+            "type": "object",
+            "required": ["secret"],
+            "properties": {
+                "secret": {"$ref": "#/components/schemas/User/properties/secret"}
+            }
+        });
+        assert!(accepts(&schemas, Direction::Response, &schema, json!({})));
+        assert!(!accepts(&schemas, Direction::Request, &schema, json!({})));
     }
 
     #[test]

@@ -9,9 +9,7 @@
 
 use rayon::prelude::*;
 
-use crate::common::{
-    collect_local_refs, local_component_ref, local_schema_ref, method_key, scalar_json,
-};
+use crate::common::{collect_local_refs, local_pointer, local_schema_ref, method_key, scalar_json};
 use crate::{
     IrHeader, IrMedia, IrOperation, IrParameter, IrResponse, IrSchema, IrSpec, Method, ParamIn,
     json_media,
@@ -27,28 +25,38 @@ const PAR_PATH_THRESHOLD: usize = 32;
 /// node is left as written; bounds reference cycles.
 const MAX_REF_HOPS: usize = 8;
 
-/// The document's `components` object, through which local references to
-/// reusable responses, parameters, request bodies, headers and path items
-/// resolve. Schema references are not followed here: schemas stay
-/// addressable by name.
+/// The document root, through which same-document references to reusable
+/// responses, parameters, request bodies, headers and path items resolve,
+/// wherever in the document they point. Schema references to a component
+/// are not followed: those schemas stay addressable by name.
 #[derive(Clone, Copy)]
-struct Components<'v>(Option<&'v FastValue>);
+struct Components<'v>(&'v FastValue);
 
 impl<'v> Components<'v> {
-    /// The node a `#/components/<section>/<name>` reference chain leads
-    /// to. A node without `$ref` is returned as is, and so is one whose
-    /// reference is not local to `section` or names nothing.
-    fn deref(self, node: &'v FastValue, section: &str) -> &'v FastValue {
+    /// The value a same-document reference (`#/components/responses/X`,
+    /// `#/paths/~1a/get/responses/200`) points at.
+    fn pointer(self, reference: &str) -> Option<&'v FastValue> {
+        let mut current = self.0;
+        for token in local_pointer(reference)? {
+            current = match current {
+                FastValue::Object(_) => get(current, &token)?,
+                FastValue::Array(items) => items.get(token.parse::<usize>().ok()?)?,
+                FastValue::Scalar { .. } => return None,
+            };
+        }
+        Some(current)
+    }
+
+    /// The node a same-document `$ref` chain leads to. A node without
+    /// `$ref` is returned as is; so is one whose reference leaves the
+    /// document or points at nothing, which the caller can tell by the
+    /// `$ref` it still carries.
+    fn deref(self, node: &'v FastValue) -> &'v FastValue {
         let mut current = node;
         for _ in 0..MAX_REF_HOPS {
             let target = get(current, "$ref")
                 .and_then(as_str)
-                .and_then(|reference| local_component_ref(reference, section))
-                .and_then(|name| {
-                    self.0
-                        .and_then(|components| get(components, section))
-                        .and_then(|entries| get(entries, &name))
-                });
+                .and_then(|reference| self.pointer(reference));
             match target {
                 Some(next) => current = next,
                 None => break,
@@ -135,7 +143,7 @@ pub fn ir_from_fast(value: &FastValue) -> IrSpec {
     // exactly like component schemas — the gateway mock and contract
     // tooling synthesize from them without a `$ref` in sight.
     if let Some(paths) = get(value, "paths") {
-        let components = Components(get(value, "components"));
+        let components = Components(value);
         let entries = paths.entries();
         let per_path: Vec<PathContribution> = if entries.len() > PAR_PATH_THRESHOLD {
             entries
@@ -178,7 +186,7 @@ type PathContribution = (Vec<IrOperation>, Vec<(IrSchema, Vec<String>)>);
 fn path_operations(path: &str, item: &FastValue, components: Components<'_>) -> PathContribution {
     let mut out = Vec::new();
     let mut inlines: Vec<(IrSchema, Vec<String>)> = Vec::new();
-    let item = components.deref(item, "pathItems");
+    let item = components.deref(item);
     if !matches!(item, FastValue::Object(_)) {
         return (out, inlines);
     }
@@ -189,10 +197,23 @@ fn path_operations(path: &str, item: &FastValue, components: Components<'_>) -> 
         };
         let mut params = item_params.clone();
         params.extend(parameters_of(op, components));
-        let request_content = get(op, "requestBody")
-            .map(|body| components.deref(body, "requestBodies"))
-            .map(|body| content_of(body, &mut inlines, path, method, "request"))
+        let request_body = get(op, "requestBody").map(|body| components.deref(body));
+        let request_content = request_body
+            .map(|body| content_of(body, &mut inlines, path, method, "request", components))
             .unwrap_or_default();
+        // What the request side declares by a reference that leads nowhere.
+        let unresolved: Vec<String> = [item, op]
+            .into_iter()
+            .flat_map(|node| {
+                get(node, "parameters")
+                    .map(FastValue::items)
+                    .unwrap_or_default()
+            })
+            .map(|parameter| components.deref(parameter))
+            .chain(request_body)
+            .filter_map(dangling)
+            .chain(json_media(&request_content).and_then(|media| media.unresolved.clone()))
+            .collect();
         out.push(IrOperation {
             id: get(op, "operationId").and_then(as_str).map(str::to_owned),
             method,
@@ -212,6 +233,7 @@ fn path_operations(path: &str, item: &FastValue, components: Components<'_>) -> 
             parameters: params,
             body_schema: json_media(&request_content).and_then(|media| media.schema.clone()),
             responses: responses_of(op, path, method, &mut inlines, components),
+            unresolved,
         });
     }
     (out, inlines)
@@ -230,6 +252,7 @@ fn content_of(
     path: &str,
     method: Method,
     slot: &str,
+    document: Components<'_>,
 ) -> Vec<IrMedia> {
     let Some(content) = get(body, "content") else {
         return Vec::new();
@@ -248,7 +271,7 @@ fn content_of(
                 } else {
                     format!("{slot}~~{}", escape_path(media_type))
                 };
-                entry.schema = named_schema(node, inlines, path, method, &media_slot);
+                entry.schema = named_schema(node, inlines, path, method, &media_slot, document);
                 if entry.schema.is_none() {
                     entry.unresolved = get(node, "$ref").and_then(as_str).map(str::to_owned);
                 }
@@ -258,21 +281,64 @@ fn content_of(
         .collect()
 }
 
-/// The addressable name for one schema node: a `$ref` keeps its target
-/// name; an inline schema is materialized and registered under a
-/// deterministic generated name unique to its operation and slot.
+/// Keywords that describe a schema without constraining it: beside a
+/// `$ref` they do not make a different schema.
+const ANNOTATIONS: [&str; 7] = [
+    "$ref",
+    "deprecated",
+    "description",
+    "example",
+    "examples",
+    "summary",
+    "title",
+];
+
+/// The addressable name for one schema node.
+///
+/// - A bare `$ref` to a component keeps the component's name.
+/// - A `$ref` to anywhere else in the document (a property of a
+///   component, another operation's schema) names the schema it leads to.
+/// - A `$ref` with sibling keywords that constrain (`required`,
+///   `nullable`, `properties`...) is a schema of its own: reference and
+///   siblings are registered together under a generated name.
+/// - An inline schema is registered under a generated name unique to its
+///   operation and slot.
+///
+/// `None` for a reference that leaves the document or points at nothing.
 fn named_schema(
     node: &FastValue,
     inlines: &mut Vec<(IrSchema, Vec<String>)>,
     path: &str,
     method: Method,
     slot: &str,
+    document: Components<'_>,
 ) -> Option<String> {
-    // A `$ref` — local or external — is never inline material: locals keep
-    // their component name; externals stay opaque (None), matching the
-    // "external refs stay unresolved" policy of the fast reader.
-    if get(node, "$ref").is_some() {
-        return ref_name(node);
+    let mut node = node;
+    for _ in 0..MAX_REF_HOPS {
+        let Some(reference) = get(node, "$ref").and_then(as_str) else {
+            break;
+        };
+        let constrained = node
+            .entries()
+            .iter()
+            .any(|(key, _)| !ANNOTATIONS.contains(&key.as_str()) && !key.starts_with("x-"));
+        if constrained {
+            // The siblings apply with the reference; it has to be one the
+            // validator can follow from the snapshot.
+            if !reference.starts_with('#') {
+                return None;
+            }
+            break;
+        }
+        if let Some(name) = local_schema_ref(reference) {
+            return Some(name);
+        }
+        node = document.pointer(reference)?;
+    }
+    if get(node, "$ref").is_some_and(|reference| {
+        as_str(reference).is_none_or(|reference| !reference.starts_with('#'))
+    }) {
+        return None;
     }
     let name = format!(
         "~~inline~~{}~~{}~~{slot}",
@@ -333,13 +399,6 @@ fn as_bool(value: &FastValue) -> Option<bool> {
     }
 }
 
-/// Resolves a schema node's `$ref` to a local component name.
-fn ref_name(node: &FastValue) -> Option<String> {
-    get(node, "$ref")
-        .and_then(as_str)
-        .and_then(local_schema_ref)
-}
-
 /// Materializes any fast value into owned JSON (`None` → JSON null).
 pub(crate) fn json(value: Option<&FastValue>) -> serde_json::Value {
     let Some(value) = value else {
@@ -385,22 +444,30 @@ fn parameters_of(node: &FastValue, components: Components<'_>) -> Vec<IrParamete
         .map(|p| {
             p.items()
                 .iter()
-                .filter_map(|item| parameter(components.deref(item, "parameters")))
+                .filter_map(|item| parameter(components.deref(item)))
                 .collect()
         })
         .unwrap_or_default()
 }
 
+/// The `$ref` text of a node that is still a reference after
+/// [`Components::deref`]: one that could not be followed.
+fn dangling(node: &FastValue) -> Option<String> {
+    get(node, "$ref").and_then(as_str).map(str::to_owned)
+}
+
 /// A `responses` key as `(exact status, range hundreds digit)`: `"404"` is
-/// `(Some(404), None)`, `"4XX"` is `(None, Some(4))`, and `default` (or any
-/// other key) is `(None, None)`.
-fn status_key(key: &str) -> (Option<u16>, Option<u8>) {
+/// `(Some(404), None)`, `"4XX"` is `(None, Some(4))` and `default` is
+/// `(None, None)`. Any other key (an `x-` extension, a misspelt status)
+/// declares no response: `None`.
+fn status_key(key: &str) -> Option<(Option<u16>, Option<u8>)> {
     if let Ok(status) = key.parse::<u16>() {
-        return (Some(status), None);
+        return Some((Some(status), None));
     }
     match key.as_bytes() {
-        [class @ b'1'..=b'5', b'X' | b'x', b'X' | b'x'] => (None, Some(class - b'0')),
-        _ => (None, None),
+        [class @ b'1'..=b'5', b'X' | b'x', b'X' | b'x'] => Some((None, Some(class - b'0'))),
+        b"default" => Some((None, None)),
+        _ => None,
     }
 }
 
@@ -414,7 +481,7 @@ fn headers_of(response: &FastValue, components: Components<'_>) -> Vec<IrHeader>
         .entries()
         .iter()
         .map(|(name, header)| {
-            let header = components.deref(header, "headers");
+            let header = components.deref(header);
             IrHeader {
                 name: name.clone(),
                 required: get(header, "required").and_then(as_bool).unwrap_or(false),
@@ -440,11 +507,18 @@ fn responses_of(
     let mut entries: Vec<IrResponse> = responses
         .entries()
         .iter()
-        .map(|(key, value)| {
-            let value = components.deref(value, "responses");
-            let (status, range) = status_key(key);
-            let content = content_of(value, inlines, path, method, &format!("response{key}"));
-            IrResponse {
+        .filter_map(|(key, value)| {
+            let (status, range) = status_key(key)?;
+            let value = components.deref(value);
+            let content = content_of(
+                value,
+                inlines,
+                path,
+                method,
+                &format!("response{key}"),
+                components,
+            );
+            Some(IrResponse {
                 status,
                 range,
                 description: get(value, "description")
@@ -453,7 +527,15 @@ fn responses_of(
                 schema: json_media(&content).and_then(|media| media.schema.clone()),
                 content,
                 headers: headers_of(value, components),
-            }
+                // Still a reference after following what could be followed:
+                // the response itself, else the first such header.
+                unresolved: dangling(value).or_else(|| {
+                    get(value, "headers")?
+                        .entries()
+                        .iter()
+                        .find_map(|(_, header)| dangling(components.deref(header)))
+                }),
+            })
         })
         .collect();
     entries.sort_by_key(|response| match (response.status, response.range) {

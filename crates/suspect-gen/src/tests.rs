@@ -682,6 +682,7 @@ fn petstore_spec() -> IrSpec {
                 ..Default::default()
             },
         ],
+        unresolved: Vec::new(),
     });
     spec.operations.push(IrOperation {
         id: Some("createPet".into()),
@@ -699,6 +700,7 @@ fn petstore_spec() -> IrSpec {
             schema: None,
             ..Default::default()
         }],
+        unresolved: Vec::new(),
     });
     spec.operations.push(IrOperation {
         id: Some("showPetById".into()),
@@ -721,6 +723,7 @@ fn petstore_spec() -> IrSpec {
             schema: Some("Pet".into()),
             ..Default::default()
         }],
+        unresolved: Vec::new(),
     });
     spec.schemas.push(IrSchema {
         name: "Pet".into(),
@@ -901,6 +904,7 @@ fn synthetic_spec(ops: usize) -> IrSpec {
                     ..Default::default()
                 },
             ],
+            unresolved: Vec::new(),
         });
     }
     spec

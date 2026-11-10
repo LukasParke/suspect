@@ -58,6 +58,34 @@ pub(crate) fn local_component_ref(reference: &str, section: &str) -> Option<Stri
     Some(name)
 }
 
+/// The tokens of a same-document reference (`#/a/b~1c`), decoded: the URI
+/// fragment first, then each JSON Pointer token. `None` for a reference
+/// into another document, a plain-name fragment, or a malformed pointer.
+/// `#` alone is the document root: no tokens.
+pub(crate) fn local_pointer(reference: &str) -> Option<Vec<String>> {
+    let fragment = percent_decode(reference.strip_prefix('#')?)?;
+    if fragment.is_empty() {
+        return Some(Vec::new());
+    }
+    let mut tokens = Vec::new();
+    for token in fragment.strip_prefix('/')?.split('/') {
+        let mut decoded = String::with_capacity(token.len());
+        let mut chars = token.chars();
+        while let Some(ch) = chars.next() {
+            decoded.push(match ch {
+                '~' => match chars.next()? {
+                    '0' => '~',
+                    '1' => '/',
+                    _ => return None,
+                },
+                ch => ch,
+            });
+        }
+        tokens.push(decoded);
+    }
+    Some(tokens)
+}
+
 /// Decodes URI-fragment `%XX` bytes without corrupting UTF-8 or replacing
 /// invalid sequences. JSON Pointer escapes are handled by the caller.
 fn percent_decode(text: &str) -> Option<String> {

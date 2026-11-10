@@ -186,6 +186,12 @@ pub struct IrResponse {
     /// Declared response headers, in document order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub headers: Vec<IrHeader>,
+    /// The `$ref` text of the response, or of one of its headers, when it
+    /// could not be followed (a missing component or file). The response
+    /// then declares less than can be read, and conformance checks report
+    /// it instead of treating the status as declared without constraints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unresolved: Option<String>,
 }
 
 impl IrResponse {
@@ -276,6 +282,13 @@ pub struct IrOperation {
     /// Declared responses: exact statuses ascending, then status ranges,
     /// then `default`.
     pub responses: Vec<IrResponse>,
+    /// The `$ref` text of every parameter, request body and request-body
+    /// schema that could not be followed (a missing component or file).
+    /// The request side of the operation then declares less than its
+    /// description means, and request checks report it instead of passing
+    /// what they could not read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unresolved: Vec<String>,
 }
 
 impl IrOperation {

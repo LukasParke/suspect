@@ -490,6 +490,7 @@ mod tests {
                     ..Default::default()
                 })
                 .collect(),
+            unresolved: Vec::new(),
         }
     }
 
