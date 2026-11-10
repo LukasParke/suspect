@@ -3,7 +3,7 @@
 //! Grammar (Arazzo 1.0 §4.3):
 //! - `$method`, `$url`, `$statusCode`
 //! - `$request.<part>`, `$response.<part>` where part is
-//!   `header.#`, `query.#`, `path.#` (token) or `body` optionally followed
+//!   `header.<token>`, `query.<token>`, `path.<token>` or `body` optionally followed
 //!   by a JSON-pointer fragment (`#/a/b`)
 //! - `$outputs.<name>`, `$inputs.<name>`
 //! - `$workflows.<wf>.steps.<step>.outputs.<name>`
@@ -18,7 +18,7 @@ use suspect_low::Pointer;
 /// One HTTP-message part reference.
 #[derive(Debug, Clone, PartialEq)]
 pub enum HttpPart {
-    /// `header.#` — a header value; the string is the header name (token).
+    /// `header.<token>` — a header value; the string is the header name.
     Header(String),
     /// `query.#` — a query parameter value; the string is the parameter name.
     Query(String),
@@ -354,7 +354,11 @@ impl Parser<'_> {
         match kind.as_str() {
             "header" | "query" | "path" => {
                 self.eat(b'.')?;
-                self.eat(b'#')?;
+                // `header.<token>` is the specified form; a `#` before the
+                // name is also accepted.
+                if self.peek() == Some(b'#') {
+                    self.pos += 1;
+                }
                 let name = self.segment()?;
                 Ok(match kind.as_str() {
                     "header" => HttpPart::Header(name),

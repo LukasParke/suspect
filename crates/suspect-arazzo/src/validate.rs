@@ -199,9 +199,9 @@ fn validate_step<'d>(
         }
     }
     for c in step.success_criteria() {
-        match c.condition() {
+        match c.condition_text() {
             Some(cond) => {
-                if let Some(problem) = condition_problem(cond) {
+                if let Some(problem) = criterion_problem(&c, &cond) {
                     out.push(diag(
                         c.node().byte_range(),
                         "arazzo-invalid-condition",
@@ -274,6 +274,11 @@ fn validate_actions<'d>(
     out: &mut Vec<ArazzoDiagnostic>,
 ) {
     for action in actions {
+        // A Reusable Object names its action under `components`; the
+        // fields checked below belong to that action, not to the reference.
+        if action.node().get("reference").is_some() {
+            continue;
+        }
         match action.action_type() {
             Some("goto") => {
                 let wf_ref = action.workflow_id();
@@ -711,21 +716,85 @@ fn validate_sequential_outputs(wf: &crate::WorkflowView<'_>, out: &mut Vec<Arazz
 /// Diagnoses an invalid condition: names what the parser expected, where
 /// the expression stops parsing, and — for the mistakes users actually
 /// make — the corrected spelling. Returns `None` when the condition is
-/// valid in any of the forms [`condition_is_valid`] accepts.
-fn condition_problem(cond: &str) -> Option<String> {
-    if condition_is_valid(cond) {
-        return None;
+/// valid in any of the forms [`clause_is_valid`] accepts.
+fn criterion_problem(criterion: &crate::CriterionView<'_>, cond: &str) -> Option<String> {
+    // A typed criterion's condition is written in the language its `type`
+    // names and applied to its `context`; only a `simple` condition is
+    // made of runtime expressions.
+    match (criterion.criterion_type(), criterion.context()) {
+        (Some("jsonpath"), Some(_)) => suspect_jsonpath::Path::parse(cond)
+            .err()
+            .map(|error| format!("invalid JSONPath query {cond:?}: {error}")),
+        (Some("regex" | "xpath"), Some(_)) => None,
+        _ => condition_problem(cond),
     }
+}
+
+/// [`criterion_problem`] for a `simple` condition: the first of its
+/// comparisons that is not one.
+fn condition_problem(cond: &str) -> Option<String> {
+    let clauses = clauses(cond);
+    let bad = clauses.iter().find(|clause| !clause_is_valid(clause))?;
     // The parser already knows where and why it stopped: report that,
     // then add the fix for the common shapes.
-    let what = match crate::expr::parse(cond) {
-        Ok(_) => unreachable!("condition_is_valid accepted what parse rejects"),
+    let what = match crate::expr::parse(bad) {
+        Ok(_) => "it is not a comparison of runtime expressions and literals".to_owned(),
         Err(error) => format!("at byte {}, {error}", error.offset),
     };
-    let fix = dotted_body_fix(cond)
+    let fix = dotted_body_fix(bad)
         .map(|corrected| format!(" — did you mean `{corrected}`?"))
         .unwrap_or_default();
-    Some(format!("invalid runtime expression {cond:?}: {what}{fix}"))
+    Some(format!("invalid runtime expression {bad:?}: {what}{fix}"))
+}
+
+/// The comparisons of a `simple` condition: its text split at `&&` and
+/// `||`, each part without the `!` and parentheses around it. Operators
+/// inside a quoted string or inside the pointer text after a `#` are part
+/// of that text.
+fn clauses(cond: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut in_pointer = false;
+    let mut chars = cond.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match quote {
+            Some(open) => {
+                if ch == open {
+                    quote = None;
+                }
+                current.push(ch);
+                continue;
+            }
+            None if ch == '\'' || ch == '"' => {
+                quote = Some(ch);
+                current.push(ch);
+                continue;
+            }
+            None => {}
+        }
+        if ch.is_whitespace() {
+            in_pointer = false;
+        } else if ch == '#' {
+            in_pointer = true;
+        }
+        if !in_pointer && (ch == '&' || ch == '|') && chars.peek() == Some(&ch) {
+            chars.next();
+            parts.push(std::mem::take(&mut current));
+            continue;
+        }
+        current.push(ch);
+    }
+    parts.push(current);
+    parts
+        .into_iter()
+        .map(|part| {
+            part.trim()
+                .trim_start_matches(['!', '(', ' '])
+                .trim_end_matches([')', ' '])
+                .to_owned()
+        })
+        .collect()
 }
 
 /// The fix for the most common mistake: dotted-path navigation into the
@@ -767,7 +836,7 @@ fn dotted_body_fix(cond: &str) -> Option<String> {
     None
 }
 
-fn condition_is_valid(cond: &str) -> bool {
+fn clause_is_valid(cond: &str) -> bool {
     if crate::expr::parse(cond).is_ok() {
         return true;
     }
