@@ -49,7 +49,8 @@ pub struct Config {
     pub max_number_bytes: usize,
 
     /// Maximum node pairs compared across `enum`, `const`, and `uniqueItems`
-    /// in a validation call. Equality uses an explicit stack bounded by this
+    /// in a validation call, counting the nodes `uniqueItems` reads to group
+    /// the items of a long array. Equality uses an explicit stack bounded by this
     /// work limit and [`Self::max_depth`]. Exceeding either limit produces an
     /// evaluation failure, including inside logical schema branches.
     ///

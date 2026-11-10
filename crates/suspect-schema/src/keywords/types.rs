@@ -100,15 +100,22 @@ pub(crate) fn check_unique_items<'a, 'd>(
         return true;
     }
     let items = instance.items();
+    let mut scan = match ctx.equality.unique_scan(&items) {
+        Ok(scan) => scan,
+        Err(message) => {
+            ctx.fail_evaluation(st, at, message);
+            return false;
+        }
+    };
     for (index, item) in items.iter().enumerate() {
         if !ctx.step(st, at) {
             return false;
         }
-        for (previous_index, previous) in items[..index].iter().enumerate() {
+        for previous_index in scan.earlier(index) {
             if !ctx.step(st, at) {
                 return false;
             }
-            match ctx.equality.compare(*item, *previous) {
+            match ctx.equality.compare(*item, items[previous_index]) {
                 Ok(false) => {}
                 Ok(true) => {
                     ctx.emit(
@@ -126,6 +133,7 @@ pub(crate) fn check_unique_items<'a, 'd>(
                 }
             }
         }
+        scan.visited(index);
     }
     true
 }

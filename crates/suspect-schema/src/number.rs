@@ -149,6 +149,16 @@ impl ExactNumber {
         })
     }
 
+    /// Feeds the value into `hasher`. The representation is normalized, so
+    /// numbers that compare equal ([`Self::cmp`]) hash alike however they
+    /// were written.
+    pub(crate) fn hash_value(&self, hasher: &mut impl std::hash::Hasher) {
+        use std::hash::Hash;
+        self.negative.hash(hasher);
+        self.digits.hash(hasher);
+        self.exponent.hash(hasher);
+    }
+
     pub(crate) fn cmp(&self, other: &Self) -> Ordering {
         if self.negative != other.negative {
             return if self.negative {
