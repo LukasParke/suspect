@@ -1,15 +1,18 @@
 name: 'suspect'
 description: >
-  Install a released suspect CLI (checksum-verified, no Rust toolchain) and
-  optionally run one of its subcommands (check | test | gen; `test` runs
-  `suspect test run`, `gen` runs `suspect gen template`).
+  Install a released suspect CLI (checksum-verified, no Rust toolchain), or
+  build it from the action's own source, and optionally run one of its
+  subcommands (check | test | gen; `test` runs `suspect test run`, `gen`
+  runs `suspect gen template`).
 inputs:
   version:
     description: >
       Release to install: `0.2.0`, `v0.2.0` or `latest`. Defaults to the tag
       the action is used at (`LukasParke/suspect/.github/actions/suspect@v0.2.0`
       installs 0.2.0); required when the action is referenced by branch,
-      commit or local path.
+      commit or local path. `source` builds the CLI with cargo from the
+      revision the action itself is used at: no release needed, a Rust
+      toolchain and a few minutes of build time are.
     required: false
     default: ''
   command:
@@ -28,7 +31,10 @@ inputs:
     required: false
     default: 'true'
   arazzo:
-    description: 'test: path to the Arazzo suite document.'
+    description: >
+      test: the Arazzo suite documents (space/newline separated). A
+      directory runs every `*.arazzo.yaml`, `*.arazzo.yml` and
+      `*.arazzo.json` under it.
     required: false
     default: ''
   base-url:
@@ -45,6 +51,21 @@ inputs:
     default: 'text'
   filter:
     description: 'test: only run workflows whose id contains this substring.'
+    required: false
+    default: ''
+  conformance:
+    description: >
+      test: how much of the declared response contract each reply is held
+      to: strict | schema | off. Empty: `test.conformance` of `.suspect.yaml`,
+      else strict.
+    required: false
+    default: ''
+  junit:
+    description: 'test: write a JUnit XML report (one test case per workflow step) to this path.'
+    required: false
+    default: ''
+  report-file:
+    description: 'test: write the JSON run report to this path.'
     required: false
     default: ''
   preset:
@@ -89,6 +110,7 @@ runs:
       env:
         INPUT_VERSION: ${{ inputs.version }}
         ACTION_REF: ${{ github.action_ref }}
+        ACTION_PATH: ${{ github.action_path }}
         REPO: LukasParke/suspect
       run: |
         set -euo pipefail
@@ -97,10 +119,50 @@ runs:
           case "$ACTION_REF" in
             v[0-9]*) version="$ACTION_REF" ;;
             *)
-              echo "::error::set the 'version' input: the action is used at '${ACTION_REF:-a local path}', not a release tag" >&2
+              echo "::error::set the 'version' input: the action is used at '${ACTION_REF:-a local path}', not a release tag (a release such as 0.2.0, 'latest', or 'source' to build this revision)" >&2
               exit 2
               ;;
           esac
+        fi
+        # Puts an installed binary on PATH and reports it.
+        publish() {
+          bin="$1"
+          chmod +x "$bin"
+          installed=$("$bin" --version | awk '{print $2}')
+          echo "installed suspect $installed ($2)"
+          bindir=$(cd "$(dirname "$bin")" && pwd)
+          path="$bindir/$(basename "$bin")"
+          # Git Bash spells the directory /d/a/...; later steps (and PATH
+          # itself on Windows) need the native spelling.
+          if command -v cygpath >/dev/null; then
+            bindir=$(cygpath -w "$bindir")
+            path=$(cygpath -w "$path")
+          fi
+          echo "$bindir" >> "$GITHUB_PATH"
+          echo "version=$installed" >> "$GITHUB_OUTPUT"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+        }
+        if [ "$version" = source ]; then
+          # The action lives at .github/actions/suspect of the repository
+          # checkout it was fetched with; its root holds the workspace and
+          # the pinned toolchain (rust-toolchain.toml).
+          root=$(cd "$ACTION_PATH/../../.." && pwd)
+          if ! command -v cargo >/dev/null; then
+            echo "::error::version 'source' builds with cargo, which is not on PATH; install a Rust toolchain first" >&2
+            exit 2
+          fi
+          dest="$RUNNER_TEMP/suspect-source"
+          bin="$dest/bin/suspect"
+          # RUNNER_TEMP is emptied for every job, so a binary found here was
+          # built from this revision by an earlier step of this job; it may
+          # also be running (a gateway), which Windows would not let cargo
+          # replace.
+          if [ ! -f "$bin" ] && [ ! -f "$bin.exe" ]; then
+            (cd "$root" && cargo install --locked --path crates/suspect-cli --root "$dest")
+          fi
+          if [ -f "$bin.exe" ]; then bin="$bin.exe"; fi
+          publish "$bin" "built from $root"
+          exit 0
         fi
         case "$RUNNER_OS/$RUNNER_ARCH" in
           Linux/X64) triple=x86_64-unknown-linux-musl; ext=tar.gz ;;
@@ -145,13 +207,7 @@ runs:
           echo "::error::$asset has no suspect executable at depth 1 or 2" >&2
           exit 1
         fi
-        chmod +x "$bin"
-        installed=$("$bin" --version | awk '{print $2}')
-        echo "installed suspect $installed ($asset)"
-        bindir=$(cd "$(dirname "$bin")" && pwd)
-        echo "$bindir" >> "$GITHUB_PATH"
-        echo "version=$installed" >> "$GITHUB_OUTPUT"
-        echo "path=$bindir/$(basename "$bin")" >> "$GITHUB_OUTPUT"
+        publish "$bin" "$asset"
 
     - name: Run suspect ${{ inputs.command }}
       id: run
@@ -167,6 +223,9 @@ runs:
         INPUT_CASSETTE: ${{ inputs.cassette }}
         INPUT_REPORT: ${{ inputs.report }}
         INPUT_FILTER: ${{ inputs.filter }}
+        INPUT_CONFORMANCE: ${{ inputs.conformance }}
+        INPUT_JUNIT: ${{ inputs.junit }}
+        INPUT_REPORT_FILE: ${{ inputs.report-file }}
         INPUT_PRESET: ${{ inputs.preset }}
         INPUT_MANIFEST: ${{ inputs.manifest }}
         INPUT_OUT_DIR: ${{ inputs.out-dir }}
@@ -192,10 +251,15 @@ runs:
               echo "input 'arazzo' is required for the test command" >&2
               exit 2
             fi
-            ARGS=(test run "$INPUT_ARAZZO" --base-url "$INPUT_BASE_URL" --format "$INPUT_REPORT")
+            SUITES=$(echo "$INPUT_ARAZZO" | tr '\n' ' ')
+            ARGS=(--base-url "$INPUT_BASE_URL" --format "$INPUT_REPORT")
             if [ -n "$INPUT_FILTER" ]; then ARGS+=(--filter "$INPUT_FILTER"); fi
             if [ -n "$INPUT_CASSETTE" ]; then ARGS+=(--cassette "$INPUT_CASSETTE"); fi
-            "$BIN" "${ARGS[@]}" "${EXTRA[@]}" || rc=$?
+            if [ -n "$INPUT_CONFORMANCE" ]; then ARGS+=(--conformance "$INPUT_CONFORMANCE"); fi
+            if [ -n "$INPUT_JUNIT" ]; then ARGS+=(--junit "$INPUT_JUNIT"); fi
+            if [ -n "$INPUT_REPORT_FILE" ]; then ARGS+=(--report-file "$INPUT_REPORT_FILE"); fi
+            # shellcheck disable=SC2086
+            "$BIN" test run $SUITES "${ARGS[@]}" "${EXTRA[@]}" || rc=$?
             ;;
           gen)
             if [ -z "$INPUT_PRESET" ] && [ -z "$INPUT_MANIFEST" ]; then
