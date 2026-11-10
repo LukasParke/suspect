@@ -288,13 +288,17 @@ struct Gateway {
 
 impl Gateway {
     fn spawn(root: &Path, spec: &str, args: &[&str]) -> Self {
+        // One journal per gateway. The name is a number: the arguments
+        // hold URLs and paths, which no file name can carry on Windows.
+        static SPAWNED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let journal = format!(
+            "gateway-{}.jsonl",
+            SPAWNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
         let mut child = suspect()
             .current_dir(root)
             .args(["traffic", "gateway", spec, "--port", "0", "--journal"])
-            .arg(root.join(format!(
-                "gateway-{}.jsonl",
-                args.join("-").replace('/', "_")
-            )))
+            .arg(root.join(journal))
             .args(args)
             .stdout(Stdio::null())
             .stderr(Stdio::piped())

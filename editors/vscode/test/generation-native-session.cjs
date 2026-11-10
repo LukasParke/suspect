@@ -90,7 +90,11 @@ test('real CLI session preview/check/watch preserves disk, reuses planning, repo
 		source.paths['/credits'].get.security = [{ missing: [] }];
 		const invalidSource = JSON.stringify(source, null, 2);
 		await fs.writeFile(spec, invalidSource);
-		const failed = await waitFor((value) => value.status === 'planning-error');
+		// The watch may read the file while it is being rewritten and report
+		// that half-written state first: wait for the error of the finished
+		// document.
+		const failed = await waitFor((value) => value.status === 'planning-error'
+			&& value.diagnostics.some((diagnostic) => diagnostic.code === 'http-security-scheme-unresolved'));
 		const diagnostic = failed.diagnostics.find((value) => value.code === 'http-security-scheme-unresolved');
 		assert.ok(diagnostic, JSON.stringify(failed.diagnostics));
 		assert.deepEqual(diagnostic.source, { document: pathToFileURL(spec).href, pointer: '/paths/~1credits/get/security/0/missing' });
