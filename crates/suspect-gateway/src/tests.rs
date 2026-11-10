@@ -1869,3 +1869,307 @@ async fn mock_examples_satisfy_the_schemas_they_come_from() {
     let (status, headers, body) = request(&base, "GET", &format!("/shapes/{id}")).await;
     conforms("showShape", status, &headers, &body);
 }
+
+// ------------------------------------------------ review findings, pinned
+
+/// An example for `schema`, held to that schema by the contract runtime.
+fn conforming_example(
+    schema: serde_json::Value,
+    components: serde_json::Value,
+) -> serde_json::Value {
+    use crate::mock::{SchemaRefs, synth_example};
+    let refs: SchemaRefs = serde_json::from_value(components).expect("components");
+    let example = synth_example(&schema, &refs, 0);
+    let violations =
+        suspect_runtime::Schemas::from_any_map(refs.iter()).validate(&schema, &example);
+    assert!(
+        violations.is_empty(),
+        "{example} does not satisfy {schema}: {violations:?}"
+    );
+    example
+}
+
+#[test]
+fn an_all_of_member_that_only_annotates_or_constrains_keeps_the_value() {
+    use serde_json::json;
+    let pet = json!({
+        "Pet": {
+            "type": "object",
+            "required": ["id"],
+            "properties": {"id": {"type": "integer"}, "name": {"type": "string"}}
+        }
+    });
+    for members in [
+        json!([{"$ref": "#/components/schemas/Pet"}, {"description": "a pet, described"}]),
+        json!([{"description": "a pet, described"}, {"$ref": "#/components/schemas/Pet"}]),
+    ] {
+        let example = conforming_example(json!({"allOf": members}), pet.clone());
+        assert!(example["id"].is_number(), "{example}");
+    }
+
+    let example = conforming_example(
+        json!({"allOf": [{"type": "string"}, {"minLength": 3}]}),
+        json!({}),
+    );
+    assert!(
+        example.as_str().is_some_and(|text| text.len() >= 3),
+        "{example}"
+    );
+    let example = conforming_example(
+        json!({"allOf": [{"type": "integer", "minimum": 5}, {"maximum": 9}, {"minimum": 7}]}),
+        json!({}),
+    );
+    assert!(
+        example.as_i64().is_some_and(|n| (7..=9).contains(&n)),
+        "{example}"
+    );
+    // Members that each say something about one scalar are intersected.
+    conforming_example(
+        json!({"allOf": [
+            {"type": "string", "minLength": 2},
+            {"type": "string", "maxLength": 4, "pattern": "^[a-z]+$"}
+        ]}),
+        json!({}),
+    );
+    conforming_example(
+        json!({"allOf": [{"type": "array", "items": {"type": "integer"}}, {"minItems": 2}]}),
+        json!({}),
+    );
+    conforming_example(
+        json!({"allOf": [{"$ref": "#/components/schemas/Code"}, {"enum": ["b", "c"]}]}),
+        json!({"Code": {"type": "string", "enum": ["a", "b", "c"]}}),
+    );
+}
+
+#[test]
+fn a_union_beside_properties_is_part_of_the_object() {
+    use serde_json::json;
+    // "At least one of": the union only adds requirements.
+    let example = conforming_example(
+        json!({
+            "type": "object",
+            "required": ["id"],
+            "properties": {
+                "id": {"type": "integer"},
+                "email": {"type": "string", "format": "email"},
+                "phone": {"type": "string"}
+            },
+            "anyOf": [{"required": ["email"]}, {"required": ["phone"]}]
+        }),
+        json!({}),
+    );
+    assert!(
+        example["id"].is_number() && example["email"].is_string(),
+        "{example}"
+    );
+    // "Exactly one of": what another branch requires is left out.
+    let example = conforming_example(
+        json!({
+            "type": "object",
+            "properties": {"email": {"type": "string"}, "phone": {"type": "string"}},
+            "oneOf": [{"required": ["email"]}, {"required": ["phone"]}]
+        }),
+        json!({}),
+    );
+    assert_eq!(example, json!({"email": ""}));
+    // A branch with properties of its own.
+    let example = conforming_example(
+        json!({
+            "required": ["kind"],
+            "properties": {"kind": {"type": "string"}},
+            "oneOf": [
+                {
+                    "required": ["circle"],
+                    "properties": {"circle": {
+                        "type": "object",
+                        "required": ["radius"],
+                        "properties": {"radius": {"type": "number"}}
+                    }}
+                },
+                {"required": ["square"], "properties": {"square": {"type": "object"}}}
+            ]
+        }),
+        json!({}),
+    );
+    assert!(
+        example["kind"].is_string() && example["circle"]["radius"].is_number(),
+        "{example}"
+    );
+}
+
+#[test]
+fn a_recursive_union_ends_in_the_branch_that_ends() {
+    use serde_json::json;
+    let example = conforming_example(
+        json!({"$ref": "#/components/schemas/Expr"}),
+        json!({
+            "Expr": {"oneOf": [
+                {"$ref": "#/components/schemas/Binary"},
+                {"$ref": "#/components/schemas/Literal"}
+            ]},
+            "Binary": {
+                "type": "object",
+                "required": ["left", "right"],
+                "properties": {
+                    "left": {"$ref": "#/components/schemas/Expr"},
+                    "right": {"$ref": "#/components/schemas/Expr"}
+                }
+            },
+            "Literal": {
+                "type": "object",
+                "required": ["value"],
+                "properties": {"value": {"type": "number"}}
+            }
+        }),
+    );
+    assert!(example["left"]["value"].is_number(), "{example}");
+}
+
+/// The number of values in `value`, itself included.
+fn value_count(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(items) => 1 + items.iter().map(value_count).sum::<usize>(),
+        serde_json::Value::Object(members) => 1 + members.values().map(value_count).sum::<usize>(),
+        _ => 1,
+    }
+}
+
+/// A schema that requires itself without end has no finite example; what
+/// is built for it stays small.
+#[test]
+fn an_example_for_a_schema_that_requires_itself_stays_small() {
+    use crate::mock::{SchemaRefs, synth_example};
+    use serde_json::json;
+    let node = json!({"$ref": "#/components/schemas/Node"});
+    let tree = json!({"$ref": "#/components/schemas/Tree"});
+    let refs: SchemaRefs = serde_json::from_value(json!({
+        "Node": {
+            "type": "object",
+            "required": ["a", "b", "c", "d"],
+            "properties": {"a": node, "b": node, "c": node, "d": node}
+        },
+        "Tree": {
+            "type": "object",
+            "required": ["children"],
+            "properties": {
+                "children": {"type": "array", "minItems": 16, "items": tree}
+            }
+        }
+    }))
+    .expect("components");
+    for schema in [&node, &tree] {
+        let example = synth_example(schema, &refs, 0);
+        assert!(
+            value_count(&example) <= 50_000,
+            "{schema}: {} values",
+            value_count(&example)
+        );
+    }
+}
+
+/// A large description still gets a valid example: past a size, only what
+/// the schema requires is added.
+#[test]
+fn a_wide_and_deep_example_is_finished_with_what_is_required() {
+    use serde_json::json;
+    // Five levels of forty optional properties each: far too much to
+    // build in full, and nothing of it is required.
+    let mut components = serde_json::Map::new();
+    for level in 0..5 {
+        let mut properties = serde_json::Map::new();
+        properties.insert("id".to_owned(), json!({"type": "integer"}));
+        for index in 0..40 {
+            properties.insert(
+                format!("p{index}"),
+                if level == 4 {
+                    json!({"type": "string"})
+                } else {
+                    json!({"$ref": format!("#/components/schemas/L{}", level + 1)})
+                },
+            );
+        }
+        components.insert(
+            format!("L{level}"),
+            json!({"type": "object", "required": ["id"], "properties": properties}),
+        );
+    }
+    let example = conforming_example(
+        json!({"$ref": "#/components/schemas/L0"}),
+        serde_json::Value::Object(components),
+    );
+    let count = value_count(&example);
+    assert!((1_000..=50_000).contains(&count), "{count} values");
+}
+
+#[tokio::test]
+async fn mock_leaves_message_framing_to_the_server() {
+    const FRAMED: &str = r##"
+openapi: 3.1.0
+info: { title: Framed, version: "1" }
+paths:
+  /report:
+    get:
+      operationId: report
+      responses:
+        '200':
+          description: a report
+          headers:
+            Content-Length:
+              required: true
+              schema: { type: integer }
+            Content-Encoding:
+              schema: { type: string, enum: [gzip] }
+            Transfer-Encoding:
+              schema: { type: string, enum: [chunked] }
+            Connection:
+              schema: { type: string, enum: [close] }
+            X-Report-Id:
+              required: true
+              schema: { type: string, example: r-1 }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows: { type: integer }
+"##;
+    let (base, _sink, _dir) = gateway_over(FRAMED, Mode::Mock).await;
+    let (status, headers, body) = request(&base, "GET", "/report").await;
+    assert_eq!(status, 200);
+    assert_eq!(header(&headers, "x-report-id"), Some("r-1"));
+    // The body arrives whole and as it is, so nothing may claim otherwise.
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).expect("a JSON body"),
+        serde_json::json!({"rows": 0})
+    );
+    assert_eq!(header(&headers, "content-encoding"), None);
+    assert_eq!(header(&headers, "transfer-encoding"), None);
+    assert_eq!(header(&headers, "connection"), None);
+    if let Some(length) = header(&headers, "content-length") {
+        assert_eq!(length, body.len().to_string());
+    }
+}
+
+/// A union that admits `null` ends a recursion in `null`, whatever is
+/// declared beside it: an object with none of its branches' requirements
+/// would satisfy no branch.
+#[test]
+fn a_nullable_union_beside_properties_ends_a_recursion_in_null() {
+    use serde_json::json;
+    let example = conforming_example(
+        json!({"$ref": "#/components/schemas/Node"}),
+        json!({
+            "Node": {
+                "type": "object",
+                "required": ["child"],
+                "properties": {"child": {"$ref": "#/components/schemas/Link"}}
+            },
+            "Link": {
+                "properties": {"node": {"$ref": "#/components/schemas/Node"}},
+                "anyOf": [{"type": "null"}, {"required": ["node"]}]
+            }
+        }),
+    );
+    assert_eq!(example["child"]["node"]["child"], json!(null), "{example}");
+}

@@ -29,10 +29,15 @@ A mock reply satisfies the schema it is built from: an `example`,
 `default` or `const` is used as written, and otherwise numbers respect
 their bounds, strings their `format`, length and (for simple patterns)
 `pattern`, arrays their `minItems`, and a recursive schema ends in an empty
-list rather than a `null`. Declared response headers are sent with example
-values. So a suite run against the mock under `strict` conformance fails
-only where the description contradicts itself, such as an `example` that
-does not match its schema.
+list rather than a `null`. An `allOf` is the merge of its members, and a
+`oneOf` or `anyOf` beside `properties` adds its first branch to the
+object. A reply past a few thousand values is finished with only what its
+schema requires. Declared response headers are sent with example values,
+except those that describe the message itself (`Content-Length`,
+`Content-Encoding`, `Transfer-Encoding`, `Connection`), which the server
+sets to match what it sends. So a suite run against the mock under
+`strict` conformance fails only where the description contradicts itself,
+such as an `example` that does not match its schema.
 
 The gateway binds `127.0.0.1`. `-p 0` picks a free port, and the bound
 address is printed on stderr once the gateway can serve. Ctrl-C stops it

@@ -12,8 +12,10 @@
 //! schema it is built from, so the mock's own replies pass the contract
 //! check: numbers respect their bounds, strings their length and `format`,
 //! arrays their `minItems`, `oneOf`/`anyOf` take their first non-null
-//! branch, `allOf` compositions union-merge their members, and `$ref`s
-//! resolve through the spec's component-schema lookup map.
+//! branch (merged with the properties declared beside the union), `allOf`
+//! compositions union-merge their members — or, for a scalar or a list
+//! described piecewise, intersect them — and `$ref`s resolve through the
+//! spec's component-schema lookup map.
 //!
 //! Objects include every declared property and arrays one element, until
 //! the schema turns back on itself or nesting passes [`DEPTH_CAP`]. From
@@ -47,6 +49,28 @@ const HARD_CAP: u8 = 4 * DEPTH_CAP;
 
 /// Largest number of elements built for an array's `minItems`.
 const MAX_ITEMS: u64 = 16;
+
+/// Number of values past which an example is finished with only what its
+/// schema requires, whatever the depth: a mock reply is read by people.
+const FULL_VALUES: usize = 5_000;
+
+/// Most values one example holds. Like [`HARD_CAP`], only a schema that
+/// requires itself without end gets here; what is built for it ends in
+/// `null` instead of growing with every level.
+const MAX_VALUES: usize = 20_000;
+
+/// Headers that say how a message is framed or what its connection does.
+/// The server sets them to match what it sends; an example value from the
+/// description would contradict the body that follows.
+const FRAMING_HEADERS: [&str; 7] = [
+    "connection",
+    "content-encoding",
+    "content-length",
+    "keep-alive",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
 
 /// One precompiled mock response: status (`None` for `default`), body and
 /// the media type the body is served as.
@@ -122,13 +146,29 @@ fn schema_type(schema: &Value) -> Option<String> {
 /// which is what makes recorded gateway traffic diffable in git.
 #[must_use]
 pub fn synth_example(schema: &Value, refs: &SchemaRefs, depth: u8) -> Value {
-    synth(schema, refs, depth, &mut Vec::new(), false)
+    synth(schema, refs, depth, &mut Walk::default(), false)
+}
+
+/// The state of one synthesis.
+#[derive(Default)]
+struct Walk {
+    /// The components being expanded, outermost first.
+    stack: Vec<String>,
+    /// How many values have been built.
+    values: usize,
 }
 
 /// The component a `$ref` names: its last path segment.
 fn ref_name(schema: &Value) -> Option<&str> {
     let target = schema.get("$ref").and_then(Value::as_str)?;
     Some(target.rsplit('/').next().unwrap_or(target))
+}
+
+/// `schema`, or the component it refers to.
+fn resolved<'v>(schema: &'v Value, refs: &'v SchemaRefs) -> &'v Value {
+    ref_name(schema)
+        .and_then(|name| refs.get(name))
+        .unwrap_or(schema)
 }
 
 /// Whether `schema` is, or is a list of, a component already being
@@ -139,28 +179,33 @@ fn recurses(schema: &Value, stack: &[String]) -> bool {
     on_stack(schema) || schema.get("items").is_some_and(on_stack)
 }
 
-/// [`synth_example`] with the components being expanded (`stack`) and
-/// whether only required parts are built (`minimal`).
-fn synth(
-    schema: &Value,
-    refs: &SchemaRefs,
-    depth: u8,
-    stack: &mut Vec<String>,
-    minimal: bool,
-) -> Value {
-    if depth > HARD_CAP {
+/// The property names a schema requires.
+fn required_of(schema: &Value) -> impl Iterator<Item = &str> {
+    schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
+/// [`synth_example`] with the state of the walk and whether only required
+/// parts are built (`minimal`).
+fn synth(schema: &Value, refs: &SchemaRefs, depth: u8, walk: &mut Walk, minimal: bool) -> Value {
+    walk.values += 1;
+    if depth > HARD_CAP || walk.values > MAX_VALUES {
         return Value::Null;
     }
-    let minimal = minimal || depth > DEPTH_CAP;
+    let minimal = minimal || depth > DEPTH_CAP || walk.values > FULL_VALUES;
     if let Some(name) = ref_name(schema) {
         let Some(component) = refs.get(name) else {
             return Value::Null;
         };
         // A schema that turns back on itself is built minimally from here.
-        let minimal = minimal || stack.iter().any(|s| s == name);
-        stack.push(name.to_owned());
-        let value = synth(component, refs, depth + 1, stack, minimal);
-        stack.pop();
+        let minimal = minimal || walk.stack.iter().any(|s| s == name);
+        walk.stack.push(name.to_owned());
+        let value = synth(component, refs, depth + 1, walk, minimal);
+        walk.stack.pop();
         return value;
     }
     for keyword in ["example", "default", "const"] {
@@ -173,73 +218,99 @@ fn synth(
     {
         return first.clone();
     }
-    // `allOf`: synthesize every member and union-merge the results, so
-    // composed schemas (the spec-heavy pattern) mock as the merge the
-    // wire actually carries. Objects merge recursively; for any other
-    // collision the later member wins.
     if let Some(Value::Array(members)) = schema.get("allOf")
         && !members.is_empty()
     {
-        let mut merged = synth(&members[0], refs, depth + 1, stack, minimal);
-        for member in &members[1..] {
-            merged = merge_example(merged, synth(member, refs, depth + 1, stack, minimal));
+        // A scalar or a list described piecewise (`[{type: string},
+        // {minLength: 3}]`) is one schema: its pieces are intersected.
+        if let Some(whole) = intersected(schema, refs) {
+            return synth(&whole, refs, depth + 1, walk, minimal);
+        }
+        // Anything else is an object: every member is synthesized and the
+        // results union-merged, so composed schemas (the spec-heavy
+        // pattern) mock as the merge the wire actually carries. A member
+        // that says nothing about the value leaves it as it is.
+        let mut merged = Value::Null;
+        for member in members {
+            merged = merge_example(merged, synth(member, refs, depth + 1, walk, minimal));
         }
         // Properties declared beside `allOf` are part of the value too.
         if schema.get("properties").is_some() {
-            merged = merge_example(merged, object(schema, refs, depth, stack, minimal));
+            merged = merge_example(merged, object(schema, refs, depth, walk, minimal));
         }
-        // One member may require what another declares: a property left
-        // out as optional where it is declared is put back when any
-        // member requires it.
         if let Value::Object(map) = &mut merged {
             let parts: Vec<&Value> = std::iter::once(schema)
                 .chain(members.iter())
-                .map(|member| {
-                    ref_name(member)
-                        .and_then(|name| refs.get(name))
-                        .unwrap_or(member)
-                })
+                .map(|member| resolved(member, refs))
                 .collect();
-            let required = parts
-                .iter()
-                .filter_map(|part| part.get("required").and_then(Value::as_array))
-                .flatten()
-                .filter_map(Value::as_str);
-            for key in required {
-                // A member that only requires the key contributed a
-                // placeholder; the member that declares it has the value.
-                if map.get(key).is_some_and(|value| !value.is_null()) {
-                    continue;
-                }
-                if let Some(property) = parts
-                    .iter()
-                    .find_map(|part| part.get("properties").and_then(|props| props.get(key)))
-                {
-                    map.insert(
-                        key.to_owned(),
-                        synth(property, refs, depth + 1, stack, minimal),
-                    );
-                }
-            }
+            fill_required(map, &parts, refs, depth, walk, minimal);
         }
         return merged;
     }
-    // A union is satisfied by any one branch: the first that says more
-    // than "null", or `null` itself once only the minimum is being built.
+    // A union is satisfied by any one branch: `null` itself once only the
+    // minimum is being built, else the first that says more than "null"
+    // and does not lead straight back into a component being expanded.
     for keyword in ["oneOf", "anyOf"] {
         if let Some(Value::Array(branches)) = schema.get(keyword)
             && !branches.is_empty()
         {
             let is_null =
                 |branch: &&Value| branch.get("type").and_then(Value::as_str) == Some("null");
-            let chosen = if minimal {
-                branches.iter().find(is_null)
-            } else {
-                None
+            let chosen = {
+                let returns = |branch: &&Value| {
+                    ref_name(branch).is_some_and(|name| walk.stack.iter().any(|s| s == name))
+                };
+                // `null` is only an answer where the schema's own `type`
+                // does not rule it out.
+                let may_be_null = match schema.get("type") {
+                    None => true,
+                    Some(Value::Array(types)) => types.iter().any(|kind| kind == "null"),
+                    Some(kind) => kind == "null",
+                };
+                if minimal && may_be_null {
+                    branches.iter().find(is_null)
+                } else {
+                    None
+                }
+                .or_else(|| {
+                    branches
+                        .iter()
+                        .find(|branch| !is_null(branch) && !returns(branch))
+                })
+                .or_else(|| branches.iter().find(|branch| !is_null(branch)))
+                .unwrap_or(&branches[0])
+            };
+            let value = synth(chosen, refs, depth + 1, walk, minimal);
+            if is_null(&chosen)
+                || (schema.get("properties").is_none() && schema.get("required").is_none())
+            {
+                return value;
             }
-            .or_else(|| branches.iter().find(|branch| !is_null(branch)))
-            .unwrap_or(&branches[0]);
-            return synth(chosen, refs, depth + 1, stack, minimal);
+            // Properties and requirements declared beside the union hold
+            // whichever branch is taken: the branch adds to the object.
+            let mut merged = merge_example(object(schema, refs, depth, walk, minimal), value);
+            if let Value::Object(map) = &mut merged {
+                let parts = [schema, resolved(chosen, refs)];
+                if keyword == "oneOf" {
+                    // Exactly one branch may hold: an optional property
+                    // that another branch requires would satisfy that
+                    // branch too.
+                    let needed: Vec<&str> =
+                        parts.iter().flat_map(|part| required_of(part)).collect();
+                    for other in branches
+                        .iter()
+                        .filter(|other| !std::ptr::eq(*other, chosen))
+                    {
+                        for key in required_of(resolved(other, refs)) {
+                            if !needed.contains(&key) {
+                                map.remove(key);
+                            }
+                        }
+                    }
+                }
+                fill_required(map, &parts, refs, depth, walk, minimal);
+            }
+            return merged;
         }
     }
     let inferred = schema_type(schema).or_else(|| {
@@ -252,11 +323,11 @@ fn synth(
         }
     });
     match inferred.as_deref() {
-        Some("object") => object(schema, refs, depth, stack, minimal),
+        Some("object") => object(schema, refs, depth, walk, minimal),
         Some("array") => {
             let items = schema.get("items").unwrap_or(&Value::Null);
             let least = schema.get("minItems").and_then(Value::as_u64).unwrap_or(0);
-            let count = if minimal || recurses(schema, stack) {
+            let count = if minimal || recurses(schema, &walk.stack) {
                 least
             } else {
                 least.max(1)
@@ -264,7 +335,7 @@ fn synth(
             .min(MAX_ITEMS);
             Value::Array(
                 (0..count)
-                    .map(|_| synth(items, refs, depth + 1, stack, minimal))
+                    .map(|_| synth(items, refs, depth + 1, walk, minimal))
                     .collect(),
             )
         }
@@ -275,29 +346,126 @@ fn synth(
     }
 }
 
+/// Puts into `map` what the schemas of a composition (`parts`) require
+/// between them. One part may require what another declares: a property
+/// left out as optional where it is declared, or held only as a
+/// placeholder by the part that requires it, gets the value its
+/// declaration describes.
+fn fill_required(
+    map: &mut serde_json::Map<String, Value>,
+    parts: &[&Value],
+    refs: &SchemaRefs,
+    depth: u8,
+    walk: &mut Walk,
+    minimal: bool,
+) {
+    for key in parts.iter().flat_map(|part| required_of(part)) {
+        if map.get(key).is_some_and(|value| !value.is_null()) {
+            continue;
+        }
+        if let Some(property) = parts
+            .iter()
+            .find_map(|part| part.get("properties").and_then(|props| props.get(key)))
+        {
+            map.insert(
+                key.to_owned(),
+                synth(property, refs, depth + 1, walk, minimal),
+            );
+        }
+    }
+}
+
+/// Keywords of which the largest value binds when schemas are intersected.
+const LOWER_BOUNDS: [&str; 4] = ["exclusiveMinimum", "minItems", "minLength", "minimum"];
+
+/// Keywords of which the smallest value binds when schemas are intersected.
+const UPPER_BOUNDS: [&str; 4] = ["exclusiveMaximum", "maxItems", "maxLength", "maximum"];
+
+/// The one schema an `allOf` over a scalar or a list amounts to: the type
+/// its members agree on, the tightest of their bounds, the values every
+/// `enum` among them allows, and otherwise the first member to use a
+/// keyword. `None` when the composition is an object, a union, or has no
+/// type to go by; those are merged value by value instead.
+fn intersected(schema: &Value, refs: &SchemaRefs) -> Option<Value> {
+    let mut parts: Vec<&Value> = Vec::new();
+    let mut seen: Vec<&str> = Vec::new();
+    let mut queue: Vec<&Value> = vec![schema];
+    while let Some(part) = queue.pop() {
+        let part = match ref_name(part) {
+            Some(name) if seen.contains(&name) => continue,
+            Some(name) => {
+                seen.push(name);
+                refs.get(name)?
+            }
+            None => part,
+        };
+        if ["anyOf", "oneOf", "not", "properties", "required"]
+            .iter()
+            .any(|keyword| part.get(keyword).is_some())
+        {
+            return None;
+        }
+        if let Some(Value::Array(members)) = part.get("allOf") {
+            // Reversed, so members are visited in the order written.
+            queue.extend(members.iter().rev());
+        }
+        parts.push(part);
+    }
+    let kind = parts.iter().find_map(|part| schema_type(part))?;
+    if kind == "object"
+        || parts
+            .iter()
+            .filter_map(|part| schema_type(part))
+            .any(|other| other != kind)
+    {
+        return None;
+    }
+    let mut whole = serde_json::Map::new();
+    for part in parts {
+        let Value::Object(keywords) = part else {
+            continue;
+        };
+        for (keyword, value) in keywords {
+            if keyword == "allOf" {
+                continue;
+            }
+            let Some(held) = whole.get_mut(keyword) else {
+                whole.insert(keyword.clone(), value.clone());
+                continue;
+            };
+            let tighter = |wanted: std::cmp::Ordering| {
+                held.as_f64()
+                    .zip(value.as_f64())
+                    .is_some_and(|(held, new)| new.partial_cmp(&held) == Some(wanted))
+            };
+            if (LOWER_BOUNDS.contains(&keyword.as_str()) && tighter(std::cmp::Ordering::Greater))
+                || (UPPER_BOUNDS.contains(&keyword.as_str()) && tighter(std::cmp::Ordering::Less))
+            {
+                *held = value.clone();
+            } else if keyword == "enum"
+                && let (Value::Array(held), Value::Array(allowed)) = (held, value)
+                && held.iter().any(|option| allowed.contains(option))
+            {
+                held.retain(|option| allowed.contains(option));
+            }
+        }
+    }
+    Some(Value::Object(whole))
+}
+
 /// An object example: every declared property, or only the required ones
 /// when `minimal`. An optional property that would re-enter a component
 /// being expanded is left out.
-fn object(
-    schema: &Value,
-    refs: &SchemaRefs,
-    depth: u8,
-    stack: &mut Vec<String>,
-    minimal: bool,
-) -> Value {
-    let required: Vec<&str> = schema
-        .get("required")
-        .and_then(Value::as_array)
-        .map(|names| names.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
+fn object(schema: &Value, refs: &SchemaRefs, depth: u8, walk: &mut Walk, minimal: bool) -> Value {
+    let required: Vec<&str> = required_of(schema).collect();
     let mut out = serde_json::Map::new();
     if let Some(Value::Object(props)) = schema.get("properties") {
         for (key, prop) in props {
             let needed = required.contains(&key.as_str());
-            if !needed && (minimal || recurses(prop, stack)) {
+            if !needed && (minimal || walk.values > FULL_VALUES || recurses(prop, &walk.stack)) {
                 continue;
             }
-            out.insert(key.clone(), synth(prop, refs, depth + 1, stack, minimal));
+            out.insert(key.clone(), synth(prop, refs, depth + 1, walk, minimal));
         }
     }
     // A property that is required but declared nowhere is constrained only
@@ -650,9 +818,12 @@ fn class(chars: &[char], position: &mut usize) -> Option<char> {
 
 /// Recursive union of two synthesized examples: object members merge
 /// key-wise, and any other pair resolves to the overlay (later member
-/// wins) — matching what an `allOf` composition means on the wire.
+/// wins) — matching what an `allOf` composition means on the wire. A
+/// `null` overlay is a schema that had nothing to say about the value (an
+/// annotation, a bare `required`), so it replaces nothing.
 fn merge_example(base: Value, overlay: Value) -> Value {
     match (base, overlay) {
+        (base, Value::Null) => base,
         (Value::Object(mut base), Value::Object(overlay)) => {
             for (key, value) in overlay {
                 let merged = match base.remove(&key) {
@@ -703,11 +874,15 @@ fn compile_response(
         .or_else(|| resp.range.map(|class| u16::from(class) * 100));
     // Every declared header is sent with an example of its schema, so a
     // consumer sees the response's shape and a required header is present.
-    // `Content-Type` is the content map's business.
+    // `Content-Type` is the content map's business, and the framing of the
+    // message the server's.
     let headers: Vec<(String, String)> = resp
         .headers
         .iter()
-        .filter(|header| !header.name.eq_ignore_ascii_case("content-type"))
+        .filter(|header| {
+            let name = header.name.to_ascii_lowercase();
+            name != "content-type" && !FRAMING_HEADERS.contains(&name.as_str())
+        })
         .map(|header| {
             let example = header
                 .schema
