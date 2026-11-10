@@ -142,6 +142,8 @@ pub fn collection_base(template: &str) -> String {
 
 /// Rewrites a resource body's id field to the synthetic id so stored and
 /// returned bodies agree. Recognizes `id`, `<collection>Id`-style keys.
+/// The id keeps the JSON type the example gave it: a resource whose schema
+/// declares an integer id gets the id as a number.
 #[must_use]
 pub fn with_synthesized_id(body: &Bytes, id: &str) -> Bytes {
     let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
@@ -151,7 +153,13 @@ pub fn with_synthesized_id(body: &Bytes, id: &str) -> Bytes {
         match map.keys().find(|k| k.eq_ignore_ascii_case("id")) {
             Some(key) => {
                 let key = key.clone();
-                map.insert(key, serde_json::Value::String(id.to_owned()));
+                let typed = match (map.get(&key), id.parse::<u64>()) {
+                    (Some(serde_json::Value::Number(_)), Ok(number)) => {
+                        serde_json::Value::from(number)
+                    }
+                    _ => serde_json::Value::String(id.to_owned()),
+                };
+                map.insert(key, typed);
             }
             None => {
                 map.insert("id".to_owned(), serde_json::Value::String(id.to_owned()));

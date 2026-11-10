@@ -26,8 +26,8 @@ mod record;
 #[cfg(test)]
 mod tests;
 pub use cassette::{
-    Body, BodyEncoding, CASSETTE_FORMAT, CASSETTE_VERSION, CassetteEntry, CassetteHeader,
-    read_cassette, write_cassette, write_entry,
+    Body, BodyEncoding, CASSETTE_FORMAT, CASSETTE_VERSION, CassetteEntry, CassetteHeader, key_path,
+    read_cassette, request_key, write_cassette, write_entry,
 };
 
 /// Severity of a [`LogRecord`].

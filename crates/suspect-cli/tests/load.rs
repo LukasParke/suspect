@@ -26,6 +26,7 @@ async fn spawn_gateway(faults: FaultConfig) -> u16 {
         faults,
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(Box::new(
         VecSink::default(),

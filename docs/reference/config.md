@@ -98,6 +98,7 @@ Contract tests, fuzzing and load runs.
 | `test.base_url` | URL | `http://localhost:8080` | Base URL requests are sent to. | `SUSPECT_BASE_URL` | `suspect.test.baseUrl` | `suspect test run --base-url`, `suspect test fuzz --base-url`, `suspect test stateful --base-url`, `suspect test load --base-url` |
 | `test.credentials` | path |  | Credentials file for the security schemes tests exercise. Default: `.suspect/credentials.json` discovered upward. | `SUSPECT_CREDENTIALS` |  | `suspect test run --credentials`, `suspect auth check --credentials` |
 | `test.report` | string: `text`, `ndjson` | `text` | Event stream format for `suspect test`. |  |  | `suspect test run --format` |
+| `test.conformance` | string: `strict`, `schema`, `off` | `strict` | How much of the declared response contract each reply is held to: `strict` (status, content type, required headers and body schema), `schema` (the body schema of declared responses only) or `off` (success criteria only). |  |  | `suspect test run --conformance`, `suspect test stateful --conformance`, `suspect test fuzz --conformance` |
 
 ### `gateway`
 

@@ -316,7 +316,9 @@ fn finish(
             println!("junit report: {}", path.display());
         }
     }
-    let mut journal = Journal::new(Box::new(suspect_journal::StdoutSink));
+    // The run summary record belongs in a machine stream; text output is
+    // for a person and already ends with the report.
+    let mut journal = Journal::new(super::run_sink(None, ndjson)?);
     let checks = &summary.ensure.checks;
     journal.run_summary(
         "load",

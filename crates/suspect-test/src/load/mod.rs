@@ -97,6 +97,16 @@ pub struct LoadConfig {
     pub validate_responses: bool,
 }
 
+/// The conformance level a load run applies: the whole contract when
+/// response validation was asked for, else nothing but the criteria.
+pub(crate) fn conformance_for(validate_responses: bool) -> suspect_runtime::Conformance {
+    if validate_responses {
+        suspect_runtime::Conformance::Strict
+    } else {
+        suspect_runtime::Conformance::Off
+    }
+}
+
 /// Receives progress during a run.
 pub trait LoadSink: Send + Sync {
     /// A phase began.
@@ -306,7 +316,7 @@ pub async fn run_load(
             workflows_outputs: Arc::new(workflows_outputs.clone()),
             seed: cfg.seed,
             auth: Arc::clone(&cfg.auth),
-            validate_responses: cfg.validate_responses,
+            conformance: conformance_for(cfg.validate_responses),
             ..RunOpts::default()
         };
         let outcome = run_workflow(&plan, idx, &opts, cfg.http.as_ref(), &NullObserver).await;
@@ -526,7 +536,7 @@ pub async fn run_load(
             workflows_outputs: Arc::clone(&shared.workflows_outputs),
             seed: cfg.seed,
             auth: Arc::clone(&cfg.auth),
-            validate_responses: cfg.validate_responses,
+            conformance: conformance_for(cfg.validate_responses),
             ..RunOpts::default()
         };
         let outcome = run_workflow(&plan, idx, &opts, cfg.http.as_ref(), &NullObserver).await;

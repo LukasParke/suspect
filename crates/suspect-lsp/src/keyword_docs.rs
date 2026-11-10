@@ -1769,9 +1769,9 @@ const SCHEMA_KEYWORDS: &[(&str, KeywordDoc)] = &[
             "Arazzo",
             "Arazzo 1.0",
             "Array of Success Action Objects",
-            "Actions taken when the step's success criteria pass: `goto` another workflow/step, `end`, or a custom named action.",
-            "`goto` requires `workflowId` or `stepId`; unknown targets surface as `arazzo-goto-unknown-workflow`.",
-            "onSuccess:\n  - type: goto\n    workflowId: next-workflow"
+            "Actions taken when the step's success criteria pass: `goto` another workflow/step, or `end`. The first action whose `criteria` hold applies.",
+            "`goto` requires `workflowId` or `stepId`; unknown targets surface as `arazzo-goto-unknown-workflow`. `suspect test run` follows a `stepId` target; it does not run a `workflowId` target.",
+            "onSuccess:\n  - name: skip-ahead\n    type: goto\n    stepId: cleanup"
         ),
     ),
     (
@@ -1781,9 +1781,9 @@ const SCHEMA_KEYWORDS: &[(&str, KeywordDoc)] = &[
             "Arazzo",
             "Arazzo 1.0",
             "Array of Failure Action Objects",
-            "Actions taken when the step fails: retry with `retryAfter`/`retryLimit`, `goto`, or `end`.",
-            "Same target rules as `onSuccess`; retries are the test runner's re-execution policy.",
-            "onFailure:\n  - type: retry\n    retryAfter: 500\n    retryLimit: 3"
+            "Actions taken when the step fails: `retry` with `retryAfter` (seconds) and `retryLimit` (one retry when omitted), `goto`, or `end`. The first action whose `criteria` hold applies; an exhausted retry is passed over.",
+            "Same target rules as `onSuccess`. `suspect test run` re-runs a retried step and judges it by its last attempt; a `Retry-After` response header in seconds overrides `retryAfter`.",
+            "onFailure:\n  - name: wait\n    type: retry\n    retryAfter: 0.5\n    retryLimit: 3"
         ),
     ),
     (

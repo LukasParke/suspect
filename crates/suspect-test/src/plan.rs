@@ -7,7 +7,6 @@
 //! pragmatic [`CriterionPlan`] model. Steps without explicit success
 //! criteria default to `StatusInRange(2, 2)` per the Arazzo recommendation.
 
-use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
@@ -48,9 +47,12 @@ pub struct OpKey {
 pub struct Plan {
     /// Compiled workflows, in document order.
     pub workflows: Vec<WfPlan>,
-    /// Component schemas per source document name, for `$ref` resolution
-    /// during response validation (merged across sources).
-    pub components: BTreeMap<String, serde_json::Value>,
+    /// The schema table of each OpenAPI source description, in
+    /// `sourceDescriptions` order; a step's [`StepPlan::contract`] indexes
+    /// it. Each table holds one document's component and inline schemas in
+    /// that document's own dialect, so two sources may reuse a schema name
+    /// and an OpenAPI 3.0 source may sit beside a 3.1 one.
+    pub contracts: Vec<Arc<suspect_runtime::Schemas>>,
 }
 
 /// One compiled workflow.
@@ -150,8 +152,14 @@ pub struct StepPlan {
     /// Response-body JSON pointers referenced by this step's criteria, so
     /// executors know which parts of parsed bodies are relevant.
     pub body_pointers: Vec<String>,
-    /// Step ID to jump to when this step fails (`onFailure` goto action).
-    pub failure_goto: Option<String>,
+    /// `onFailure` actions, in document order. When the step fails, the
+    /// first one whose criteria hold applies; a `retry` that has used up
+    /// its limit is passed over. With none, the workflow ends failed.
+    pub on_failure: Vec<ActionPlan>,
+    /// `onSuccess` actions, in document order. When the step passes, the
+    /// first one whose criteria hold applies. With none, the next step
+    /// runs.
+    pub on_success: Vec<ActionPlan>,
     /// Arazzo 1.1 `timeout` in milliseconds: the step fails when the HTTP
     /// exchange exceeds it.
     pub timeout_ms: Option<u64>,
@@ -160,10 +168,18 @@ pub struct StepPlan {
     /// (alternatives ORed, schemes within one alternative ANDed). Empty
     /// when the operation declares no security.
     pub security: Vec<Vec<String>>,
-    /// Declared response schemas: `(status or None for default, schema
-    /// JSON)` used by executors to validate responses against the
-    /// contract.
-    pub response_schemas: Vec<(Option<u16>, serde_json::Value)>,
+    /// The responses the target operation declares, as the shared
+    /// contract runtime reads them; empty when the operation declares none
+    /// or is not part of any source description.
+    pub responses: Vec<suspect_ir::IrResponse>,
+    /// Index into [`Plan::contracts`] of the source description that
+    /// declares the target operation. `None` for a message step, and for
+    /// an HTTP step whose `operationPath` names an operation no source
+    /// description declares.
+    pub contract: Option<usize>,
+    /// The `Accept` header sent when the step sets none: the media types
+    /// the operation's responses declare, JSON first.
+    pub accept: String,
     /// Arazzo 1.1 AsyncAPI message step; `None` for ordinary HTTP steps.
     pub message: Option<MessageStep>,
     /// Step ids of the same workflow that must complete before this one
@@ -180,6 +196,39 @@ pub struct StepPlan {
     pub workflow_depends_on: Vec<WorkflowStepRef>,
     /// Pause after this step from the `x-suspect-think` extension.
     pub think: Option<ThinkSpec>,
+}
+
+/// One compiled `onSuccess`/`onFailure` action.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ActionPlan {
+    /// The action's `name`.
+    pub name: String,
+    /// What the action does.
+    pub kind: ActionKind,
+    /// The action applies only when every criterion holds for the step's
+    /// exchange; an action without criteria always applies.
+    pub criteria: Vec<CriterionPlan>,
+}
+
+/// What an action does to the workflow.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ActionKind {
+    /// `type: end`: the workflow ends here.
+    End,
+    /// `type: goto` with a `stepId`: the workflow continues at that step.
+    Goto(
+        /// The target step id (a step of the same workflow).
+        String,
+    ),
+    /// `type: retry` (`onFailure` only): the step runs again.
+    Retry {
+        /// `retryAfter`: the pause before each new attempt. A `Retry-After`
+        /// response header counted in seconds overrides it.
+        after: std::time::Duration,
+        /// `retryLimit`: how many times the step may be retried; `1` when
+        /// the action declares none.
+        limit: u32,
+    },
 }
 
 /// Arazzo 1.1 AsyncAPI message step: `action: send` or `action: receive`
@@ -285,9 +334,39 @@ pub enum CriterionKind {
         /// Raw fragment as written after `#/`.
         expr: String,
     },
-    /// Criterion that always passes (e.g. `$inputs.x != null` when the
-    /// executor doesn't track optional input presence).
+    /// Criterion that always passes.
     AlwaysTrue,
+    /// A `simple` condition in the full Arazzo grammar: comparisons of
+    /// runtime expressions and literals combined with `&&`, `||`, `!` and
+    /// parentheses. Every condition the shapes above do not cover compiles
+    /// to this.
+    Condition {
+        /// The condition as written.
+        text: String,
+        /// The parsed condition.
+        cond: crate::condition::Cond,
+    },
+    /// `type: regex`: the pattern is applied to the text its `context`
+    /// expression resolves to.
+    ContextRegex {
+        /// The `context` runtime expression.
+        context: Rex,
+        /// The `context` as written.
+        context_text: String,
+        /// Regular-expression source (validated at compile time).
+        pattern: String,
+    },
+    /// `type: jsonpath`: an RFC 9535 query applied to the JSON value its
+    /// `context` expression resolves to. Holds when the query selects at
+    /// least one node.
+    ContextJsonPath {
+        /// The `context` runtime expression.
+        context: Rex,
+        /// The `context` as written.
+        context_text: String,
+        /// The JSONPath query (validated at compile time).
+        query: String,
+    },
 }
 
 /// The right-hand side of an equality criterion: a literal parsed from
@@ -380,6 +459,17 @@ impl CriterionKind {
             } => format!("body{pointer} {} {bound}", comparison.sign()),
             Self::JsonPathTrue { expr } => format!("body#/{expr} exists"),
             Self::AlwaysTrue => "always passes".to_owned(),
+            Self::Condition { text, .. } => text.clone(),
+            Self::ContextRegex {
+                context_text,
+                pattern,
+                ..
+            } => format!("{context_text} =~ /{pattern}/"),
+            Self::ContextJsonPath {
+                context_text,
+                query,
+                ..
+            } => format!("{context_text} | {query}"),
         }
     }
 
@@ -411,7 +501,6 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
     let sources = SourceIndex::load(&doc, arazzo.uri(), ws)?;
 
     let mut workflows = Vec::with_capacity(doc.workflows().len());
-    let mut components: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     for wf in doc.workflows() {
         if wf.workflow_id.is_empty() {
             return Err(CompileError("workflow missing workflowId".to_owned()));
@@ -419,8 +508,9 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
         let inputs = workflow_inputs(wf);
         let mut steps = Vec::with_capacity(wf.steps().len());
         let mut implied_workflows: Vec<String> = Vec::new();
+        let components = arazzo.root().get("components");
         for step in wf.steps() {
-            let mut compiled = compile_step(step, &sources)?;
+            let mut compiled = compile_step(step, &sources, components)?;
             let (local, foreign) = step_dependencies(&doc, wf, step)?;
             compiled.depends_on = local;
             for dependency in &foreign {
@@ -431,21 +521,47 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
             compiled.workflow_depends_on = foreign;
             steps.push(compiled);
         }
-        for (_, _, uri) in &sources.specs {
-            if let Some(handle) = sources.ws.get(uri)
-                && let Some(schemas) = handle
-                    .doc()
-                    .root()
-                    .get("components")
-                    .and_then(|c| c.get("schemas"))
-            {
-                for entry in schemas.entries() {
-                    if let Some(schema) = entry.value {
-                        let serialized = suspect_overlay::Value::from_node(schema).to_json();
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&serialized) {
-                            components.entry(entry.key.to_owned()).or_insert(json);
-                        }
-                    }
+        // The workflow's own actions apply to every step, after the
+        // step's; a step's action of the same name replaces the
+        // workflow's.
+        let owner = format!("workflow '{}'", wf.workflow_id);
+        let wf_failure = compile_actions(
+            &owner,
+            wf.failure_actions(),
+            "failureActions",
+            true,
+            components,
+        )?;
+        let wf_success = compile_actions(
+            &owner,
+            wf.success_actions(),
+            "successActions",
+            false,
+            components,
+        )?;
+        for step in &mut steps {
+            let inherit = |own: &mut Vec<ActionPlan>, shared: &[ActionPlan]| {
+                let inherited: Vec<ActionPlan> = shared
+                    .iter()
+                    .filter(|action| !own.iter().any(|mine| mine.name == action.name))
+                    .cloned()
+                    .collect();
+                own.extend(inherited);
+            };
+            inherit(&mut step.on_failure, &wf_failure);
+            inherit(&mut step.on_success, &wf_success);
+        }
+        // A `goto` names a step of this workflow; one that names nothing
+        // could never be followed.
+        for step in &steps {
+            for action in step.on_failure.iter().chain(&step.on_success) {
+                if let ActionKind::Goto(target) = &action.kind
+                    && !steps.iter().any(|candidate| &candidate.step_id == target)
+                {
+                    return Err(CompileError(format!(
+                        "workflow '{}', step '{}': action '{}' goes to '{target}', which matches no step of the workflow",
+                        wf.workflow_id, step.step_id, action.name
+                    )));
                 }
             }
         }
@@ -499,9 +615,14 @@ pub fn compile_plan(arazzo: &LowDoc, ws: &Arc<Workspace>) -> Result<Plan, Compil
         });
     }
     check_dependencies(&workflows)?;
+    let contracts = sources
+        .specs
+        .iter()
+        .map(|(_, ir, _)| Arc::new(suspect_runtime::Schemas::from_spec(ir)))
+        .collect();
     Ok(Plan {
         workflows,
-        components,
+        contracts,
     })
 }
 
@@ -619,38 +740,42 @@ impl SourceIndex {
         self.asyncapi.get(name)
     }
 
-    /// The source document containing `key`, walking `paths` operations.
-    fn doc_for_opkey(&self, key: &OpKey) -> Option<Uri> {
-        for (_, ir, uri) in &self.specs {
-            if let Some(op) = ir.operation(OpSelector::MethodPath(
-                match key.method.as_str() {
-                    "GET" => Method::Get,
-                    "POST" => Method::Post,
-                    "PUT" => Method::Put,
-                    "PATCH" => Method::Patch,
-                    "DELETE" => Method::Delete,
-                    "HEAD" => Method::Head,
-                    "OPTIONS" => Method::Options,
-                    "TRACE" => Method::Trace,
-                    _ => Method::Get,
-                },
-                &key.path,
-            )) {
-                let _ = op;
-                return Some(uri.clone());
-            }
-        }
-        None
+    /// Index of the OpenAPI source description named `name`.
+    fn index_of(&self, name: &str) -> Option<usize> {
+        self.specs.iter().position(|(key, _, _)| key == name)
     }
 
-    /// Security requirement alternatives for `key`: operation-level
-    /// `security` overrides path-item, which overrides root. Each
-    /// alternative is the list of scheme names in that requirement object.
-    fn security_for(&self, key: &OpKey) -> Vec<Vec<String>> {
-        let Some(uri) = self.doc_for_opkey(key) else {
+    /// The operation `selector` names, with the index of the source
+    /// description that declares it: only `source` when one is named, else
+    /// the first source description that declares it.
+    fn find(
+        &self,
+        source: Option<usize>,
+        selector: OpSelector<'_>,
+    ) -> Option<(usize, &suspect_ir::IrOperation)> {
+        match source {
+            Some(index) => self
+                .specs
+                .get(index)
+                .and_then(|(_, ir, _)| ir.operation(selector))
+                .map(|op| (index, op)),
+            None => self
+                .specs
+                .iter()
+                .enumerate()
+                .find_map(|(index, (_, ir, _))| ir.operation(selector).map(|op| (index, op))),
+        }
+    }
+
+    /// Security requirement alternatives for `key` in source description
+    /// `source`: operation-level `security` overrides path-item, which
+    /// overrides root. Each alternative is the list of scheme names in
+    /// that requirement object.
+    fn security_for(&self, key: &OpKey, source: Option<usize>) -> Vec<Vec<String>> {
+        let Some((_, _, uri)) = source.and_then(|index| self.specs.get(index)) else {
             return Vec::new();
         };
-        let Some(handle) = self.ws.get(&uri) else {
+        let Some(handle) = self.ws.get(uri) else {
             return Vec::new();
         };
         let root = handle.doc().root();
@@ -688,76 +813,34 @@ impl SourceIndex {
         }
         read_alternatives(root)
     }
+}
 
-    /// Response schemas for `key`: `(status or None for default, schema
-    /// JSON)` in declaration order. The JSON is the raw response schema;
-    /// nested `$ref`s resolve at validation time through the components
-    /// tree carried separately.
-    fn response_schemas_for(&self, key: &OpKey) -> Vec<(Option<u16>, serde_json::Value)> {
-        let Some(uri) = self.doc_for_opkey(key) else {
-            return Vec::new();
-        };
-        let Some(handle) = self.ws.get(&uri) else {
-            return Vec::new();
-        };
-        let root = handle.doc().root();
-        let Some(paths) = root.get("paths") else {
-            return Vec::new();
-        };
-        let Some(path_item) = paths.get(&key.path) else {
-            return Vec::new();
-        };
-        let Some(op) = path_item.get(&key.method.as_str().to_ascii_lowercase()) else {
-            return Vec::new();
-        };
-        let Some(responses) = op.get("responses") else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        for entry in responses.entries() {
-            let Some(resp) = entry.value else {
-                continue;
-            };
-            // Follow one $ref to a components response, then read content.
-            let resp = if let Some(text) = resp.get("$ref").and_then(|n| n.as_str())
-                && let Some(name) = text.strip_prefix("#/components/responses/")
-                && let Some(resolved) = root
-                    .get("components")
-                    .and_then(|c| c.get("responses"))
-                    .and_then(|r| r.get(name))
-            {
-                resolved
-            } else {
-                resp
-            };
-            let status = match entry.key {
-                "default" => None,
-                code => code.parse::<u16>().ok(),
-            };
-            if let Some(content) = resp.get("content")
-                && let Some(json) = content.get("application/json")
-                && let Some(schema) = json.get("schema")
-            {
-                let serialized = suspect_overlay::Value::from_node(schema).to_json();
-                let Ok(schema_json) = serde_json::from_str::<serde_json::Value>(&serialized) else {
-                    continue;
-                };
-                out.push((status, schema_json));
-            }
+/// The `Accept` header for an operation: every media type its responses
+/// declare, JSON-compatible types first and the rest at a lower weight, so
+/// a server that negotiates answers in a form body criteria can read.
+/// Wildcard ranges say nothing a server could act on and are left out; an
+/// operation that declares no concrete type asks for `application/json`.
+fn accept_header(responses: &[suspect_ir::IrResponse]) -> String {
+    let mut json: Vec<String> = Vec::new();
+    let mut other: Vec<String> = Vec::new();
+    for media in responses.iter().flat_map(|response| &response.content) {
+        let essence = suspect_ir::media_essence(&media.media_type);
+        if essence.contains('*') || json.contains(&essence) || other.contains(&essence) {
+            continue;
         }
-        out
-    }
-
-    fn spec_for(&self, name: Option<&str>) -> Option<&IrSpec> {
-        match name {
-            Some(n) => self
-                .specs
-                .iter()
-                .find(|(key, _, _)| key == n)
-                .map(|(_, ir, _)| ir),
-            None => self.specs.first().map(|(_, ir, _)| ir),
+        if suspect_ir::is_json_media_type(&essence) {
+            json.push(essence);
+        } else {
+            other.push(essence);
         }
     }
+    if json.is_empty() && other.is_empty() {
+        return "application/json".to_owned();
+    }
+    json.into_iter()
+        .chain(other.into_iter().map(|essence| format!("{essence};q=0.5")))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Binds one `sourceDescriptions` url to a loaded workspace document.
@@ -1002,22 +1085,37 @@ fn message_step(step: &StepView<'_>, sources: &SourceIndex) -> Option<MessageSte
     })
 }
 
-fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, CompileError> {
+fn compile_step(
+    step: &StepView<'_>,
+    sources: &SourceIndex,
+    components: Option<NodeRef<'_>>,
+) -> Result<StepPlan, CompileError> {
     if step.step_id.is_empty() {
         return Err(CompileError("step missing stepId".to_owned()));
     }
     let step_id = step.step_id.to_owned();
     let message = message_step(step, sources);
-    let operation = match &message {
+    let (operation, contract) = match &message {
         // A message step addresses a channel, not an HTTP operation.
-        Some(_) => OpKey {
-            method: Method::Post,
-            path: step.channel_path().unwrap_or_default().to_owned(),
-        },
+        Some(_) => (
+            OpKey {
+                method: Method::Post,
+                path: step.channel_path().unwrap_or_default().to_owned(),
+            },
+            None,
+        ),
         None => resolve_operation(step, sources)?,
     };
-    let security = sources.security_for(&operation);
-    let response_schemas = sources.response_schemas_for(&operation);
+    let security = sources.security_for(&operation, contract);
+    let responses = sources
+        .find(
+            contract,
+            OpSelector::MethodPath(operation.method, &operation.path),
+        )
+        .filter(|_| contract.is_some())
+        .map(|(_, op)| op.responses.clone())
+        .unwrap_or_default();
+    let accept = accept_header(&responses);
     let mut parameters = Vec::new();
     for p in step.parameters() {
         parameters.push(compile_param(&step_id, p)?);
@@ -1037,7 +1135,15 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
                     .entries()
                     .iter()
                     .all(|e| matches!(e.key, "contentType" | "payload" | "replacements"));
+            let replacements = node
+                .get("replacements")
+                .filter(|_| is_wrapper)
+                .map(|list| list.items())
+                .unwrap_or_default();
             let body = match (is_wrapper, payload) {
+                (true, Some(p)) if !replacements.is_empty() => {
+                    Some(patched_payload(&step_id, p, &replacements)?)
+                }
                 (true, Some(p)) => Some(rex_of_node(p)?),
                 (true, None) => None,
                 (false, _) => Some(rex_of_node(node)?),
@@ -1049,21 +1155,11 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
 
     let mut success = Vec::new();
     let mut body_pointers = Vec::new();
+    let owner = format!("step '{step_id}'");
     for c in step.success_criteria() {
-        let cond = c.condition().ok_or_else(|| {
-            CompileError(format!("step '{step_id}': criterion missing condition"))
-        })?;
-        let cond_range = c
-            .node()
-            .get("condition")
-            .map(|n| n.byte_range())
-            .unwrap_or_else(|| c.node().byte_range());
-        let crit = parse_condition(cond)?;
-        crit.note_pointer(&mut body_pointers);
-        success.push(CriterionPlan {
-            kind: crit,
-            range: cond_range,
-        });
+        let criterion = compile_criterion(&owner, &c)?;
+        criterion.kind.note_pointer(&mut body_pointers);
+        success.push(criterion);
     }
     if success.is_empty() {
         // Spec-recommended default: accept any 2xx. Anchored on the step
@@ -1079,21 +1175,8 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         outputs.push((name.to_owned(), rex_of_node(node)?));
     }
 
-    // Extract onFailure goto target (first goto action only).
-    let failure_goto = step
-        .node()
-        .get("onFailure")
-        .and_then(|n| n.items().into_iter().next())
-        .and_then(|action| {
-            if action.get("type").and_then(|t| t.as_str()) == Some("goto") {
-                action
-                    .get("stepId")
-                    .and_then(|s| s.as_str())
-                    .map(str::to_owned)
-            } else {
-                None
-            }
-        });
+    let on_failure = compile_actions(&owner, step.on_failure(), "onFailure", true, components)?;
+    let on_success = compile_actions(&owner, step.on_success(), "onSuccess", false, components)?;
 
     let think = match step.node().get("x-suspect-think") {
         None => None,
@@ -1123,11 +1206,270 @@ fn compile_step(step: &StepView<'_>, sources: &SourceIndex) -> Result<StepPlan, 
         success,
         outputs,
         body_pointers,
-        failure_goto,
+        on_failure,
+        on_success,
         security,
-        response_schemas,
+        responses,
+        contract,
+        accept,
         think,
     })
+}
+
+/// A request payload with its `replacements` applied: each one sets the
+/// value at a JSON Pointer `target` inside the payload. A replacement
+/// value may be a runtime expression; like any string leaf of the body it
+/// is resolved when the request is built.
+fn patched_payload(
+    step_id: &str,
+    payload: NodeRef<'_>,
+    replacements: &[NodeRef<'_>],
+) -> Result<Rex, CompileError> {
+    let located =
+        |message: String| CompileError(format!("step '{step_id}', requestBody: {message}"));
+    if !matches!(payload.kind(), ValueKind::Object | ValueKind::Array) {
+        return Err(located(
+            "replacements apply to a JSON payload written as an object or array".to_owned(),
+        ));
+    }
+    let mut body = materialize_json(payload);
+    for replacement in replacements {
+        let target = replacement
+            .get("target")
+            .and_then(|n| n.as_str())
+            .ok_or_else(|| located("a replacement needs a `target`".to_owned()))?;
+        let value = replacement
+            .get("value")
+            .map(materialize_json)
+            .ok_or_else(|| located(format!("replacement `{target}` needs a `value`")))?;
+        let tokens: Vec<String> = match target.strip_prefix('/') {
+            Some(rest) if !rest.split('/').any(str::is_empty) => rest
+                .split('/')
+                .map(|token| token.replace("~1", "/").replace("~0", "~"))
+                .collect(),
+            _ => {
+                return Err(located(format!(
+                    "replacement target `{target}` is not a JSON Pointer into the payload"
+                )));
+            }
+        };
+        let (last, parents) = tokens.split_last().expect("a pointer has a token");
+        let mut parent = &mut body;
+        for token in parents {
+            parent = match parent {
+                serde_json::Value::Object(map) => map.get_mut(token),
+                serde_json::Value::Array(items) => {
+                    token.parse::<usize>().ok().and_then(|i| items.get_mut(i))
+                }
+                _ => None,
+            }
+            .ok_or_else(|| {
+                located(format!(
+                    "replacement target `{target}` does not exist in the payload"
+                ))
+            })?;
+        }
+        match parent {
+            serde_json::Value::Object(map) => {
+                map.insert(last.clone(), value);
+            }
+            serde_json::Value::Array(items) => match last.parse::<usize>() {
+                Ok(index) if index < items.len() => items[index] = value,
+                _ if last == "-" => items.push(value),
+                _ => {
+                    return Err(located(format!(
+                        "replacement target `{target}` does not exist in the payload"
+                    )));
+                }
+            },
+            _ => {
+                return Err(located(format!(
+                    "replacement target `{target}` does not exist in the payload"
+                )));
+            }
+        }
+    }
+    Ok(Rex::Text(body.to_string()))
+}
+
+/// Compiles one Criterion Object owned by `owner` (`step 's'`, `workflow
+/// 'w'`): a `regex` or `jsonpath` criterion with its `context`, or a
+/// `simple` condition.
+fn compile_criterion(
+    owner: &str,
+    criterion: &suspect_arazzo::CriterionView<'_>,
+) -> Result<CriterionPlan, CompileError> {
+    let located = |message: String| CompileError(format!("{owner}: {message}"));
+    let condition = criterion
+        .condition_text()
+        .ok_or_else(|| located("criterion missing condition".to_owned()))?;
+    let condition = condition.as_str();
+    let range = criterion
+        .node()
+        .get("condition")
+        .map(|n| n.byte_range())
+        .unwrap_or_else(|| criterion.node().byte_range());
+    let context = |kind: &str| -> Result<(Rex, String), CompileError> {
+        let text = criterion
+            .context()
+            .ok_or_else(|| located(format!("a `type: {kind}` criterion needs a `context`")))?;
+        // `{$expr}` and `$expr` name the same expression.
+        let bare = text
+            .trim()
+            .strip_prefix('{')
+            .and_then(|inner| inner.strip_suffix('}'))
+            .unwrap_or(text.trim());
+        let rex =
+            parse_rex(bare).map_err(|e| located(format!("criterion context `{text}`: {e}")))?;
+        Ok((rex, bare.to_owned()))
+    };
+    let kind = match (criterion.criterion_type(), criterion.context()) {
+        (Some("regex"), Some(_)) => {
+            let (context, context_text) = context("regex")?;
+            regex::Regex::new(condition).map_err(|e| {
+                located(format!(
+                    "criterion `{condition}` is not a valid regular expression: {e}"
+                ))
+            })?;
+            CriterionKind::ContextRegex {
+                context,
+                context_text,
+                pattern: condition.to_owned(),
+            }
+        }
+        (Some("jsonpath"), Some(_)) => {
+            let (context, context_text) = context("jsonpath")?;
+            suspect_jsonpath::Path::parse(condition).map_err(|e| {
+                located(format!(
+                    "criterion `{condition}` is not a valid JSONPath query: {e}"
+                ))
+            })?;
+            CriterionKind::ContextJsonPath {
+                context,
+                context_text,
+                query: condition.to_owned(),
+            }
+        }
+        (Some("xpath"), _) => {
+            return Err(located(format!(
+                "criterion `{condition}` is `type: xpath`, which this runner does not evaluate"
+            )));
+        }
+        // A typed criterion without a context, like an untyped one, is a
+        // condition over runtime expressions.
+        (None | Some("simple" | "regex" | "jsonpath"), _) => {
+            parse_condition(condition).map_err(|CompileError(message)| located(message))?
+        }
+        (Some(other), _) => {
+            return Err(located(format!(
+                "criterion `{condition}` has unknown type `{other}` (simple, regex, jsonpath)"
+            )));
+        }
+    };
+    Ok(CriterionPlan { kind, range })
+}
+
+/// Compiles an action list of `owner` (`step 's'`, `workflow 'w'`):
+/// `onSuccess`/`onFailure` of a step, `successActions`/`failureActions`
+/// of a workflow. `retries` says whether the list may hold a `retry`. A
+/// Reusable Object (`reference: $components.<kind>.<name>`) is replaced by
+/// the action it names.
+fn compile_actions(
+    owner: &str,
+    actions: Vec<suspect_arazzo::ActionView<'_>>,
+    list: &str,
+    retries: bool,
+    components: Option<NodeRef<'_>>,
+) -> Result<Vec<ActionPlan>, CompileError> {
+    let located = |message: String| CompileError(format!("{owner}, {list}: {message}"));
+    let mut out = Vec::with_capacity(actions.len());
+    for action in actions {
+        let node = match action.node().get("reference").and_then(|n| n.as_str()) {
+            None => action.node(),
+            Some(reference) => {
+                let target = reference
+                    .strip_prefix("$components.")
+                    .and_then(|rest| rest.split_once('.'))
+                    .and_then(|(kind, name)| components?.get(kind)?.get(name));
+                target.ok_or_else(|| {
+                    located(format!("reference `{reference}` names no reusable action"))
+                })?
+            }
+        };
+        let text = |key: &str| node.get(key).and_then(|n| n.as_str());
+        let name = text("name").unwrap_or("(unnamed)").to_owned();
+        let kind = match text("type") {
+            Some("end") => ActionKind::End,
+            Some("goto") => match (text("stepId"), text("workflowId")) {
+                (Some(step), _) => ActionKind::Goto(step.to_owned()),
+                (None, Some(workflow)) => {
+                    return Err(located(format!(
+                        "action '{name}' goes to workflowId '{workflow}'; only a `stepId` of \
+                         the same workflow can be a goto target (order workflows with `dependsOn`)"
+                    )));
+                }
+                (None, None) => {
+                    return Err(located(format!(
+                        "action '{name}' is a goto without a `stepId`"
+                    )));
+                }
+            },
+            Some("retry") if retries => {
+                let number = |key: &str| {
+                    node.get(key).and_then(|n| {
+                        n.as_f64()
+                            .or_else(|| n.as_i64().map(|value| value as f64))
+                            .or_else(|| n.as_str().and_then(|text| text.parse().ok()))
+                    })
+                };
+                let after = number("retryAfter").unwrap_or(0.0);
+                if !after.is_finite() || after < 0.0 {
+                    return Err(located(format!(
+                        "action '{name}': retryAfter must be a non-negative number of seconds"
+                    )));
+                }
+                let limit = match number("retryLimit") {
+                    None => 1,
+                    Some(limit) if limit >= 0.0 && limit.fract() == 0.0 => limit as u32,
+                    Some(_) => {
+                        return Err(located(format!(
+                            "action '{name}': retryLimit must be a non-negative integer"
+                        )));
+                    }
+                };
+                ActionKind::Retry {
+                    after: std::time::Duration::from_secs_f64(after),
+                    limit,
+                }
+            }
+            Some("retry") => {
+                return Err(located(format!(
+                    "action '{name}' is a retry, which only a failure can ask for"
+                )));
+            }
+            Some(other) => {
+                return Err(located(format!(
+                    "action '{name}' has unknown type `{other}` (end, goto, retry)"
+                )));
+            }
+            None => return Err(located(format!("action '{name}' has no `type`"))),
+        };
+        let mut criteria = Vec::new();
+        if let Some(list) = node.get("criteria") {
+            for item in list.items() {
+                criteria.push(compile_criterion(
+                    owner,
+                    &suspect_arazzo::CriterionView::of(item),
+                )?);
+            }
+        }
+        out.push(ActionPlan {
+            name,
+            kind,
+            criteria,
+        });
+    }
+    Ok(out)
 }
 
 fn compile_param(step_id: &str, p: ParameterView<'_>) -> Result<StepParam, CompileError> {
@@ -1159,31 +1501,49 @@ fn compile_param(step_id: &str, p: ParameterView<'_>) -> Result<StepParam, Compi
     })
 }
 
-/// Resolves a step's target to a canonical [`OpKey`].
+/// Resolves a step's target to a canonical [`OpKey`] and the index of the
+/// source description that declares it.
 ///
 /// Preference order mirrors `operationId` first, then `operationPath`
 /// (`$sourceDescriptions.<name>#/paths/~1pets/get`, `<name>#/users/{userId}/delete`,
-/// or a literal `GET /pets`).
-fn resolve_operation(step: &StepView<'_>, sources: &SourceIndex) -> Result<OpKey, CompileError> {
+/// or a literal `GET /pets`). A reference that names its source
+/// description resolves in that description; one that does not resolves in
+/// the first description that declares the operation. An `operationPath`
+/// no description declares still compiles, with no source: the request can
+/// be sent, but there is no contract to hold its response to.
+fn resolve_operation(
+    step: &StepView<'_>,
+    sources: &SourceIndex,
+) -> Result<(OpKey, Option<usize>), CompileError> {
+    let key_of = |(index, op): (usize, &suspect_ir::IrOperation)| {
+        (
+            OpKey {
+                method: op.method,
+                path: op.path.clone(),
+            },
+            Some(index),
+        )
+    };
     if let Some(id) = step.operation_id() {
-        // Strip `$sourceDescriptions.<name>.` prefix (Arazzo spec §4.2.4):
-        // the remainder is the plain operationId within that document.
-        let effective_id = id
+        // `$sourceDescriptions.<name>.<operationId>` (Arazzo spec §4.2.4)
+        // addresses the operation within that document.
+        let qualified = id
             .strip_prefix("$sourceDescriptions.")
-            .and_then(|rest| rest.split_once('.').map(|(_source_name, op_id)| op_id));
-        let lookup_ids: Vec<&str> = match effective_id {
-            Some(op_id) => vec![op_id, id],
-            None => vec![id],
-        };
-        for lookup_id in &lookup_ids {
-            for (_, ir, _) in &sources.specs {
-                if let Some(op) = ir.operation(OpSelector::Id(lookup_id)) {
-                    return Ok(OpKey {
-                        method: op.method,
-                        path: op.path.clone(),
-                    });
-                }
+            .and_then(|rest| rest.split_once('.'));
+        if let Some((source, op_id)) = qualified {
+            if let Some(found) = sources
+                .index_of(source)
+                .and_then(|index| sources.find(Some(index), OpSelector::Id(op_id)))
+            {
+                return Ok(key_of(found));
             }
+            // An unknown source name: fall back to the bare id anywhere.
+            if let Some(found) = sources.find(None, OpSelector::Id(op_id)) {
+                return Ok(key_of(found));
+            }
+        }
+        if let Some(found) = sources.find(None, OpSelector::Id(id)) {
+            return Ok(key_of(found));
         }
         return Err(CompileError(format!(
             "step '{}': operationId '{}' not found in any source description",
@@ -1191,6 +1551,14 @@ fn resolve_operation(step: &StepView<'_>, sources: &SourceIndex) -> Result<OpKey
         )));
     }
     let Some(path_expr) = step.operation_path() else {
+        if let Some(workflow) = step.node().get("workflowId").and_then(|n| n.as_str()) {
+            return Err(CompileError(format!(
+                "step '{}' runs workflow '{workflow}', which this runner does not do; make \
+                 that workflow a prerequisite with `dependsOn` and read its outputs through \
+                 `$workflows.{workflow}.outputs`",
+                step.step_id
+            )));
+        }
         return Err(CompileError(format!(
             "step '{}': needs operationId or operationPath",
             step.step_id
@@ -1205,14 +1573,26 @@ fn resolve_operation(step: &StepView<'_>, sources: &SourceIndex) -> Result<OpKey
 
     // Canonicalize against the referenced spec's IR when possible so the key
     // uses the exact path template from the OpenAPI document.
-    let canonical = sources
-        .spec_for(name)
-        .and_then(|ir| ir.operation(OpSelector::MethodPath(method, &raw_path)))
-        .map(|op| op.path.clone());
-    Ok(OpKey {
-        method,
-        path: canonical.unwrap_or(raw_path),
-    })
+    let source = name.and_then(|name| sources.index_of(name));
+    let selector = OpSelector::MethodPath(method, &raw_path);
+    let found = match (name, source) {
+        // A named source that is not an OpenAPI description declares
+        // nothing to resolve against.
+        (Some(_), None) => None,
+        _ => sources.find(source, selector),
+    };
+    Ok(found.map_or_else(
+        || {
+            (
+                OpKey {
+                    method,
+                    path: raw_path.clone(),
+                },
+                None,
+            )
+        },
+        key_of,
+    ))
 }
 
 /// Parses an `operationPath` spelling into
@@ -1311,6 +1691,7 @@ fn materialize_json(node: NodeRef<'_>) -> serde_json::Value {
 }
 
 /// Comparison operator found in a criterion condition.
+#[derive(Clone, Copy)]
 enum Op {
     /// `==`
     Eq,
@@ -1334,102 +1715,118 @@ enum Target {
     Status,
     /// `$response.body#/<pointer>`
     Body(String),
-    /// `$inputs.<key>` — workflow input existence/value check.
-    Input(String),
 }
 
-/// Compiles one success-criterion condition string.
+/// Compiles one `simple` condition string.
 ///
-/// Supported shapes:
+/// Conditions of a few common shapes compile to dedicated criteria, whose
+/// failures read as a named check:
+///
 /// - `'{$statusCode} == 200'` — status equality.
 /// - `'{$statusCode} /= /^2../'` — class match when the pattern has the
-///   `^N..` shape, otherwise a regex criterion.
+///   `^N..` shape, otherwise a regex criterion (`/=` is this runner's
+///   regex-match operator).
 /// - `'$response.body#/x == literal'` — body-pointer equality (JSON literal
-///   or quoted/plain string).
+///   or quoted/plain string), also against `$steps.<id>.outputs.<name>` or
+///   `$inputs.<name>`.
 /// - `'$response.body#/x != null'` — not-null existence check.
+/// - `'$response.body#/x > 3'` — ordered comparison with a literal.
 /// - `'$response.body#/x'` without any operator — existence check via
 ///   [`CriterionKind::JsonPathTrue`], keeping the raw fragment after `#/`.
 ///
-/// A declared `type: jsonpath` does not change the comparison shapes: with
-/// an operator present the criterion compares; only operator-less body
-/// conditions become [`CriterionKind::JsonPathTrue`].
+/// Every other condition — anything with `&&`, `||`, `!` or parentheses,
+/// a comparison of the status other than equality, a header, an input,
+/// two runtime expressions — is parsed by the full grammar of
+/// [`crate::condition`] into [`CriterionKind::Condition`].
 pub(crate) fn parse_condition(condition: &str) -> Result<CriterionKind, CompileError> {
     let trimmed = condition.trim();
+    if !crate::condition::is_compound(trimmed)
+        && let Some(kind) = condition_shape(trimmed)
+    {
+        return Ok(kind);
+    }
+    let unsupported = |reason: String| {
+        CompileError(format!(
+            "unsupported success criterion: '{condition}' ({reason})"
+        ))
+    };
+    let cond = crate::condition::parse(trimmed).map_err(unsupported)?;
+    // A lone literal, status or method is always "true": a criterion that
+    // can never fail is a mistake, not a check.
+    if let crate::condition::Cond::Truthy(operand) = &cond
+        && matches!(
+            operand,
+            crate::condition::Operand::Literal(_)
+                | crate::condition::Operand::Expr {
+                    rex: Rex::StatusCode | Rex::Method,
+                    ..
+                }
+        )
+    {
+        return Err(unsupported(
+            "it compares nothing, so it could never fail".to_owned(),
+        ));
+    }
+    Ok(CriterionKind::Condition {
+        text: trimmed.to_owned(),
+        cond,
+    })
+}
+
+/// The dedicated criterion for a condition of one of the common shapes;
+/// `None` when the condition needs the full grammar.
+fn condition_shape(trimmed: &str) -> Option<CriterionKind> {
     let Some((lhs, op, rhs)) = split_op(trimmed) else {
-        // Operator-less conditions exist only as body-existence checks.
+        // Operator-less conditions of this shape are body-existence checks.
         return match classify_target(trimmed) {
-            Some(Target::Body(_)) => Ok(CriterionKind::JsonPathTrue {
+            Some(Target::Body(_)) => Some(CriterionKind::JsonPathTrue {
                 expr: fragment_after_hash(trimmed).unwrap_or_default(),
             }),
-            _ => Err(CompileError(format!(
-                "unsupported success criterion: '{condition}'"
-            ))),
+            _ => None,
         };
     };
-
-    let target = classify_target(lhs).ok_or_else(|| {
-        CompileError(format!(
-            "unsupported success criterion target: '{condition}'"
-        ))
-    })?;
-
-    match (target, op) {
-        // `$inputs.x != null` — always true at compile time; the executor
-        // evaluates against actual inputs. Treat as a no-op pass.
-        (Target::Input(_), Op::Ne) if rhs.trim() == "null" => Ok(CriterionKind::AlwaysTrue),
-        (Target::Input(_), Op::Eq) => Ok(CriterionKind::AlwaysTrue),
-        (Target::Input(key), Op::Re) => {
-            let _ = key;
-            Ok(CriterionKind::AlwaysTrue)
-        }
-        (Target::Input(_), _) => Err(CompileError(format!(
-            "unsupported input criterion: '{condition}'"
-        ))),
-        (Target::Status, Op::Eq) => Ok(CriterionKind::Equals {
+    // The dedicated shapes compare one target with a literal, a step
+    // output or an input; any other runtime expression on the right needs
+    // the full grammar.
+    let expression_rhs = rhs.trim_start().starts_with(['$', '{'])
+        && matches!(expected_value(rhs), Expected::Literal(_));
+    Some(match (classify_target(lhs)?, op) {
+        (Target::Status | Target::Body(_), Op::Eq) if expression_rhs => return None,
+        (Target::Status, Op::Eq) => CriterionKind::Equals {
             pointer: None,
             expected: expected_value(rhs),
-        }),
-        (Target::Status, Op::Re) => Ok(status_range_or_regex(regex_pattern(rhs))),
-        (Target::Status, Op::Ne) => Err(CompileError(format!(
-            "unsupported success criterion: '{condition}'"
-        ))),
-        (Target::Status, Op::Ge | Op::Le | Op::Gt | Op::Lt) => Err(CompileError(format!(
-            "unsupported success criterion: '{condition}' (ordered comparisons address body fields)"
-        ))),
-        (Target::Body(pointer), Op::Eq) => Ok(CriterionKind::Equals {
+        },
+        (Target::Status, Op::Re) => status_range_or_regex(regex_pattern(rhs)),
+        (Target::Body(pointer), Op::Eq) => CriterionKind::Equals {
             pointer: Some(pointer),
             expected: expected_value(rhs),
-        }),
+        },
         (Target::Body(pointer), Op::Ne) if rhs.trim() == "null" => {
-            Ok(CriterionKind::NotNull { pointer })
+            CriterionKind::NotNull { pointer }
         }
-        (Target::Body(_), Op::Ne) => Err(CompileError(format!(
-            "unsupported success criterion: '{condition}'"
-        ))),
-        (Target::Body(_), Op::Re) => Ok(CriterionKind::Regex {
+        (Target::Body(_), Op::Re) => CriterionKind::Regex {
             pattern: regex_pattern(rhs),
-        }),
-        (Target::Body(pointer), Op::Gt) => Ok(CriterionKind::Compare {
-            pointer,
-            comparison: Comparison::Greater,
-            bound: literal_value(rhs),
-        }),
-        (Target::Body(pointer), Op::Ge) => Ok(CriterionKind::Compare {
-            pointer,
-            comparison: Comparison::GreaterOrEqual,
-            bound: literal_value(rhs),
-        }),
-        (Target::Body(pointer), Op::Lt) => Ok(CriterionKind::Compare {
-            pointer,
-            comparison: Comparison::Less,
-            bound: literal_value(rhs),
-        }),
-        (Target::Body(pointer), Op::Le) => Ok(CriterionKind::Compare {
-            pointer,
-            comparison: Comparison::LessOrEqual,
-            bound: literal_value(rhs),
-        }),
-    }
+        },
+        (Target::Body(pointer), Op::Gt | Op::Ge | Op::Lt | Op::Le) => {
+            // A bound that is itself a runtime expression is not a literal.
+            if rhs.trim_start().starts_with(['$', '{']) {
+                return None;
+            }
+            CriterionKind::Compare {
+                pointer,
+                comparison: match op {
+                    Op::Gt => Comparison::Greater,
+                    Op::Ge => Comparison::GreaterOrEqual,
+                    Op::Lt => Comparison::Less,
+                    _ => Comparison::LessOrEqual,
+                },
+                bound: literal_value(rhs),
+            }
+        }
+        // Inputs, headers, status inequalities and orderings, body
+        // inequalities: the full grammar evaluates them.
+        _ => return None,
+    })
 }
 
 /// Splits `lhs op rhs` at the earliest operator occurrence that lies outside
@@ -1484,10 +1881,6 @@ fn classify_target(lhs: &str) -> Option<Target> {
     if lhs.contains("$response.body") || lhs.contains("$message.payload") {
         let frag = fragment_after_hash(lhs).unwrap_or_default();
         return Some(Target::Body(fragment_to_pointer(&frag)));
-    }
-    if let Some(key) = lhs.strip_prefix("$inputs.") {
-        let key = key.trim().trim_end_matches('#').to_owned();
-        return Some(Target::Input(key));
     }
     None
 }
@@ -1593,25 +1986,6 @@ fn expected_value(rhs: &str) -> Expected {
         return Expected::Input(name.trim().to_owned());
     }
     Expected::Literal(literal_value(rhs))
-}
-
-impl StepPlan {
-    /// Declared responses as the shared contract runtime consumes them:
-    /// status plus the component name each response's schema resolves to.
-    #[must_use]
-    pub fn declared_responses(&self) -> Vec<suspect_ir::IrResponse> {
-        self.response_schemas
-            .iter()
-            .map(|(status, schema)| suspect_ir::IrResponse {
-                status: *status,
-                description: None,
-                schema: schema
-                    .get("$ref")
-                    .and_then(|r| r.as_str())
-                    .map(|r| r.rsplit('/').next().unwrap_or(r).to_owned()),
-            })
-            .collect()
-    }
 }
 
 #[cfg(test)]

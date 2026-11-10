@@ -409,6 +409,14 @@ export function registerTesting(context: vscode.ExtensionContext, binaryOf: () =
 					run.appendOutput(`${ev.wf}/${ev.step}: ${ev.status} in ${ev.duration_ms} ms\r\n`, undefined, step);
 					return;
 				}
+				case 'step_retried': {
+					// The attempt that failed is being replaced: only the
+					// step's last attempt decides it.
+					const step = stepItems.get(`${ev.wf}/${ev.step}`);
+					if (step) failed.delete(step);
+					run.appendOutput(`${ev.wf}/${ev.step}: retry ${ev.attempt} of ${ev.limit} after ${ev.delay_ms} ms\r\n`, undefined, step);
+					return;
+				}
 				case 'criterion_fail': {
 					const step = stepItems.get(`${ev.wf}/${ev.step}`);
 					if (step) {

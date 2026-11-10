@@ -141,13 +141,18 @@ pub(crate) fn failure_range(wf: &WfPlan, failure: &CriterionFailure) -> Range<us
 #[cfg_attr(not(feature = "live-run"), allow(dead_code))]
 pub(crate) async fn run_workflow_core(
     wf: &WfPlan,
+    contracts: &[std::sync::Arc<suspect_test::Schemas>],
+    conformance: suspect_test::Conformance,
     base_url: &str,
     transport: &dyn HttpClient,
     mirror: Option<&tokio::sync::mpsc::Sender<TestEvent>>,
 ) -> (RunSummary, Vec<CriterionFailure>) {
+    // The workflow's steps index the plan's schema tables, so the tables
+    // travel with it: a response is held to its contract in the editor
+    // exactly as on the command line.
     let plan = Plan {
         workflows: vec![wf.clone()],
-        components: Default::default(),
+        contracts: contracts.to_vec(),
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TestEvent>(256);
     let collector = async {
@@ -162,29 +167,38 @@ pub(crate) async fn run_workflow_core(
         }
         events
     };
+    let opts = suspect_test::RunOpts {
+        conformance,
+        ..suspect_test::RunOpts::new(base_url)
+    };
     let (summary, events) = tokio::join!(
-        suspect_test::run_plan(&plan, base_url, transport, tx),
+        suspect_test::run_plan_with(&plan, &opts, transport, tx),
         collector
     );
 
-    let failures = events
-        .iter()
-        .filter_map(|ev| match ev {
+    let mut failures: Vec<CriterionFailure> = Vec::new();
+    for ev in &events {
+        match ev {
             TestEvent::CriterionFail {
                 step,
                 crit,
                 expected,
                 actual,
                 ..
-            } => Some(CriterionFailure {
+            } => failures.push(CriterionFailure {
                 step_id: step.clone(),
                 crit: crit.clone(),
                 expected: expected.clone(),
                 actual: actual.clone(),
             }),
-            _ => None,
-        })
-        .collect();
+            // A retried attempt is replaced, its failures with it: only
+            // the last attempt of a step is reported.
+            TestEvent::StepRetried { step, .. } => {
+                failures.retain(|failure| &failure.step_id != step);
+            }
+            _ => {}
+        }
+    }
     (summary, failures)
 }
 
@@ -396,6 +410,13 @@ pub(crate) fn describe_event(ev: &TestEvent) -> String {
             expected,
             actual,
         } => format!("[{wf}/{step}] FAIL {crit}: expected {expected}, got {actual}"),
+        TestEvent::StepRetried {
+            wf,
+            step,
+            attempt,
+            limit,
+            delay_ms,
+        } => format!("[{wf}/{step}] retry {attempt} of {limit} after {delay_ms} ms"),
         TestEvent::OutputSet { wf, key, value } => format!("[{wf}] output {key} = {value}"),
         TestEvent::WfDone { wf, passed } => {
             format!(

@@ -63,6 +63,12 @@ fn one_run_lens_per_workflow_with_command_and_args() {
     assert!(run_lenses(&oas).is_empty());
 }
 
+/// The schema table of a description with no schemas, for a plan built by
+/// hand.
+fn contracts() -> Vec<std::sync::Arc<suspect_test::Schemas>> {
+    vec![std::sync::Arc::new(suspect_test::Schemas::default())]
+}
+
 /// A single-step workflow whose criterion range points at the fixture's
 /// condition string (`condition: '{$statusCode} == 201'`).
 fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
@@ -87,13 +93,18 @@ fn failing_plan(range: std::ops::Range<usize>) -> WfPlan {
                 range,
             }],
             outputs: Vec::new(),
-            failure_goto: None,
+            on_failure: Vec::new(),
+            on_success: Vec::new(),
             timeout_ms: None,
             message: None,
             depends_on: Vec::new(),
             workflow_depends_on: Vec::new(),
             security: Vec::new(),
-            response_schemas: Vec::new(),
+            // An operation of the (empty) description below that declares
+            // no responses: only the criterion decides.
+            responses: Vec::new(),
+            contract: Some(0),
+            accept: "application/json".to_owned(),
             body_pointers: Vec::new(),
             think: None,
         }],
@@ -118,7 +129,15 @@ async fn core_reports_failure_anchored_at_recorded_range() {
         },
     );
 
-    let (summary, failures) = run_workflow_core(&wf, "http://api.test", &http, None).await;
+    let (summary, failures) = run_workflow_core(
+        &wf,
+        &contracts(),
+        suspect_test::Conformance::Strict,
+        "http://api.test",
+        &http,
+        None,
+    )
+    .await;
     assert_eq!(summary.passed, 0);
     assert_eq!(summary.failed, 1);
     assert_eq!(failures.len(), 1);
@@ -170,7 +189,15 @@ async fn core_passing_run_yields_no_diagnostics() {
         }
         seen
     });
-    let (summary, failures) = run_workflow_core(&wf, "http://api.test", &http, Some(&mirror)).await;
+    let (summary, failures) = run_workflow_core(
+        &wf,
+        &contracts(),
+        suspect_test::Conformance::Strict,
+        "http://api.test",
+        &http,
+        Some(&mirror),
+    )
+    .await;
     drop(mirror);
     let mirrored = drainer.await.unwrap();
 

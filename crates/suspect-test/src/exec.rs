@@ -24,7 +24,7 @@
 //! `tokio::spawn`, which is how load generation runs thousands of virtual
 //! users over one shared [`Plan`].
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -37,11 +37,14 @@ use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use suspect_arazzo::rex::{RexCtx, eval_rex};
 use suspect_ir::ParamIn;
+use suspect_runtime::{Conformance, Coverage, Reply, Schemas, ViolationKind};
 use tokio::sync::mpsc;
 
 use crate::auth::{AuthConfig, AuthState};
 use crate::messaging::MessageTransport;
-use crate::plan::{CriterionKind, CriterionPlan, OpKey, Plan, StepPlan, ThinkSpec, WfPlan};
+use crate::plan::{
+    ActionKind, ActionPlan, CriterionKind, CriterionPlan, OpKey, Plan, StepPlan, ThinkSpec, WfPlan,
+};
 
 /// An outbound HTTP request built by the executor.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -230,7 +233,9 @@ pub enum TestEvent {
         /// Exchange duration in milliseconds.
         duration_ms: u64,
     },
-    /// The response body matched the schema declared for its status.
+    /// The response body was validated against the schema declared for its
+    /// status and content type, and satisfied it. Not emitted when there
+    /// was no schema to compare the body with.
     ResponseValidated {
         /// Workflow id.
         wf: String,
@@ -260,6 +265,21 @@ pub enum TestEvent {
         expected: String,
         /// Actual value rendering.
         actual: String,
+    },
+    /// A failed step is about to run again (an `onFailure` retry). The
+    /// failures reported for the step so far belong to an attempt that is
+    /// being replaced: only the last attempt decides the step.
+    StepRetried {
+        /// Workflow id.
+        wf: String,
+        /// Step id.
+        step: String,
+        /// Which retry this is, counting from 1.
+        attempt: u32,
+        /// How many retries the action allows.
+        limit: u32,
+        /// The pause before the new attempt, in milliseconds.
+        delay_ms: u64,
     },
     /// A step output was captured.
     OutputSet {
@@ -406,7 +426,8 @@ pub trait ExecObserver: Send + Sync {
     async fn on_request(&self, _cx: &StepCx<'_>, _req: &HttpRequest) {}
     /// A response arrived (before criteria evaluation).
     async fn on_response(&self, _cx: &StepCx<'_>, _status: u16, _latency: Duration) {}
-    /// The response body conformed to the schema declared for its status.
+    /// The response body was validated against the schema declared for its
+    /// status and content type, and satisfied it.
     async fn on_response_validated(&self, _cx: &StepCx<'_>, _status: u16) {}
     /// The transport failed to produce a response.
     async fn on_transport_error(
@@ -417,9 +438,11 @@ pub trait ExecObserver: Send + Sync {
     ) {
     }
     /// A built-in check that is not a declared success criterion failed:
-    /// credential acquisition (`auth:<scheme>`), response-schema
-    /// conformance (`response-schema`), message transport/payload checks,
-    /// or an unsatisfiable step order (`depends-on`).
+    /// credential acquisition (`auth:<scheme>`), response conformance
+    /// (`response-status`, `response-content-type`, `response-header`,
+    /// `response-schema`), an operation no source description declares
+    /// (`operation`), message transport/payload checks, or an
+    /// unsatisfiable step order (`depends-on`).
     async fn on_check_failed(
         &self,
         _cx: &StepCx<'_>,
@@ -437,6 +460,9 @@ pub trait ExecObserver: Send + Sync {
         _failure: Option<(&str, &str)>,
     ) {
     }
+    /// A failed step is about to run again after `delay`: retry `attempt`
+    /// of `limit`.
+    async fn on_step_retry(&self, _cx: &StepCx<'_>, _attempt: u32, _limit: u32, _delay: Duration) {}
     /// A step output was captured.
     async fn on_output(&self, _cx: &StepCx<'_>, _key: &str, _value: &serde_json::Value) {}
     /// A step finished with its final verdict and measurements.
@@ -560,6 +586,17 @@ impl ExecObserver for EventObserver {
         self.send(ev).await;
     }
 
+    async fn on_step_retry(&self, cx: &StepCx<'_>, attempt: u32, limit: u32, delay: Duration) {
+        self.send(TestEvent::StepRetried {
+            wf: cx.workflow.to_owned(),
+            step: cx.step.to_owned(),
+            attempt,
+            limit,
+            delay_ms: u64::try_from(delay.as_millis()).unwrap_or(u64::MAX),
+        })
+        .await;
+    }
+
     async fn on_output(&self, cx: &StepCx<'_>, key: &str, value: &serde_json::Value) {
         self.send(TestEvent::OutputSet {
             wf: cx.workflow.to_owned(),
@@ -646,11 +683,11 @@ pub struct RunOpts {
     pub seed: u64,
     /// Credentials injected per the operations' security requirements.
     pub auth: Arc<RunAuth>,
-    /// Validate each response body against the schema the operation
-    /// declares for its status (contract conformance). On by default; load
-    /// generation turns it off unless asked, since it costs a schema
-    /// compile per response on the generator.
-    pub validate_responses: bool,
+    /// How much of the declared response contract each reply is held to.
+    /// [`Conformance::Strict`] by default; load generation turns it off
+    /// unless asked, since it costs a schema compile per response on the
+    /// generator.
+    pub conformance: Conformance,
 }
 
 impl Default for RunOpts {
@@ -663,7 +700,7 @@ impl Default for RunOpts {
             vu: VuId(0),
             seed: 0,
             auth: Arc::new(RunAuth::default()),
-            validate_responses: true,
+            conformance: Conformance::Strict,
         }
     }
 }
@@ -687,7 +724,8 @@ struct Env<'a> {
     auth_state: &'a AuthState,
     auth_config: &'a AuthConfig,
     messages: Option<&'a dyn MessageTransport>,
-    components: &'a BTreeMap<String, serde_json::Value>,
+    /// The plan's schema tables, indexed by [`StepPlan::contract`].
+    contracts: &'a [Arc<Schemas>],
 }
 
 impl<'a> Env<'a> {
@@ -705,14 +743,15 @@ impl<'a> Env<'a> {
             auth_state: &opts.auth.state,
             auth_config: &opts.auth.config,
             messages: None,
-            components: &plan.components,
+            contracts: &plan.contracts,
         }
     }
 }
 
-/// Upper bound on `onFailure` goto jumps within one workflow run. A goto
-/// re-enters the workflow at its target, so a target that keeps failing
-/// back into the same goto would otherwise re-send requests forever.
+/// Upper bound on `goto` jumps (`onFailure` and `onSuccess`) within one
+/// workflow run. A goto re-enters the workflow at its target, so a target
+/// that keeps leading back into the same goto would otherwise re-send
+/// requests forever.
 pub const MAX_GOTO_JUMPS: usize = 16;
 
 /// Runs a compiled [`Plan`] once against `http`, emitting the classic
@@ -828,7 +867,7 @@ pub async fn run_plan_full(
         auth_state,
         auth_config,
         messages,
-        components: &plan.components,
+        contracts: &plan.contracts,
     };
     let summary = run_plan_in(plan, &opts, env).await;
     let _ = events
@@ -852,6 +891,32 @@ pub async fn run_plan_with(
 ) -> RunSummary {
     let observer = EventObserver(events.clone());
     let summary = run_plan_observed(plan, opts, http, &observer).await;
+    let _ = events
+        .send(TestEvent::RunDone {
+            passed: summary.passed,
+            failed: summary.failed,
+        })
+        .await;
+    summary
+}
+
+/// [`run_plan_with`] plus a message transport for Arazzo 1.1 AsyncAPI
+/// send/receive steps: every option of the run (inputs, credentials,
+/// conformance level) comes from `opts`.
+#[must_use]
+pub async fn run_plan_with_broker(
+    plan: &Plan,
+    opts: &RunOpts,
+    http: &dyn HttpClient,
+    messages: Option<&dyn MessageTransport>,
+    events: mpsc::Sender<TestEvent>,
+) -> RunSummary {
+    let observer = EventObserver(events.clone());
+    let env = Env {
+        messages,
+        ..Env::from_opts(plan, opts, http, &observer)
+    };
+    let summary = run_plan_in(plan, opts, env).await;
     let _ = events
         .send(TestEvent::RunDone {
             passed: summary.passed,
@@ -1099,62 +1164,141 @@ async fn run_workflow_in(plan: &Plan, wf_index: usize, opts: &RunOpts, env: Env<
         remaining.retain(|candidate| *candidate != index);
         let step = &wf.steps[index];
         let cx = step_cx(index);
-        observer.on_step_started(&cx).await;
-        let result = run_step(&cx, step, opts, env, &effective_inputs, &steps_outputs).await;
-        observer.on_step_done(&cx, &result.sample).await;
+        // Retries used so far, per `onFailure` action of this step.
+        let mut retries = vec![0u32; step.on_failure.len()];
+        // Runs the step until it passes or no retry is left; `action` is
+        // the `onFailure` action that then applies, if any.
+        let (result, failure_action) = loop {
+            observer.on_step_started(&cx).await;
+            let result = run_step(&cx, step, opts, env, &effective_inputs, &steps_outputs).await;
+            observer.on_step_done(&cx, &result.sample).await;
+            if result.sample.ok() {
+                break (result, None);
+            }
+            let state = RunState {
+                inputs: &effective_inputs,
+                steps_outputs: &steps_outputs,
+                workflows_outputs: &opts.workflows_outputs,
+            };
+            let chosen = step
+                .on_failure
+                .iter()
+                .enumerate()
+                .find(|(position, action)| {
+                    let exhausted = matches!(
+                        action.kind,
+                        ActionKind::Retry { limit, .. } if retries[*position] >= limit
+                    );
+                    !exhausted && action_applies(action, result.exchange.as_ref(), &state)
+                });
+            match chosen {
+                Some((position, action)) => {
+                    let ActionKind::Retry { after, limit } = action.kind else {
+                        break (result, Some(action));
+                    };
+                    retries[position] += 1;
+                    let delay = retry_delay(
+                        after,
+                        result
+                            .exchange
+                            .as_ref()
+                            .map_or(&[][..], |exchange| exchange.headers.as_slice()),
+                    );
+                    observer
+                        .on_step_retry(&cx, retries[position], limit, delay)
+                        .await;
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
+                }
+                None => break (result, None),
+            }
+        };
+        // Where an `onSuccess`/`onFailure` goto sends the workflow.
+        let mut goto: Option<(&str, &str)> = None;
         if result.sample.ok() {
+            let success_action = {
+                let state = RunState {
+                    inputs: &effective_inputs,
+                    steps_outputs: &steps_outputs,
+                    workflows_outputs: &opts.workflows_outputs,
+                };
+                step.on_success
+                    .iter()
+                    .find(|action| action_applies(action, result.exchange.as_ref(), &state))
+            };
             steps_outputs.insert(
                 step.step_id.clone(),
                 serde_json::Value::Object(result.outputs),
             );
             completed.insert(step.step_id.clone());
             outcome.passed += 1;
-            if !remaining.is_empty()
-                && let Some(pause) = think_after(step, opts.think, &mut rng, opts)
-            {
-                tokio::time::sleep(pause).await;
+            match success_action.map(|action| &action.kind) {
+                // The workflow ends here, passed: what remains is not run.
+                Some(ActionKind::End) => {
+                    outcome.skipped += remaining.len();
+                    remaining.clear();
+                }
+                Some(ActionKind::Goto(target)) => goto = Some((target, "on-success-goto")),
+                _ => {
+                    if !remaining.is_empty()
+                        && let Some(pause) = think_after(step, opts.think, &mut rng, opts)
+                    {
+                        tokio::time::sleep(pause).await;
+                    }
+                }
             }
         } else {
             outcome.failed += 1;
             outcome.ok = false;
-            // Follow an `onFailure` goto when the target step exists:
-            // execution jumps to the target and continues from there in
-            // document order, so the target and every later step (the
-            // failed one included) run again against the fresh state.
-            if let Some(target) = &step.failure_goto
-                && let Some(next) = wf.steps.iter().position(|s| &s.step_id == target)
-            {
-                goto_jumps += 1;
-                if goto_jumps > MAX_GOTO_JUMPS {
-                    observer
-                        .on_check_failed(
-                            &cx,
-                            "on-failure-goto",
-                            &format!("at most {MAX_GOTO_JUMPS} onFailure goto jumps"),
-                            &format!("goto '{target}' did not recover the workflow"),
-                        )
-                        .await;
+            match failure_action.map(|action| &action.kind) {
+                Some(ActionKind::Goto(target)) => goto = Some((target, "on-failure-goto")),
+                // `end`, or no action that applies: the rest of the
+                // workflow cannot run.
+                _ => {
                     outcome.skipped += remaining.len();
                     remaining.clear();
-                    continue;
                 }
-                for rerun in next..wf.steps.len() {
-                    let step_id = &wf.steps[rerun].step_id;
-                    steps_outputs.remove(step_id);
-                    if completed.remove(step_id) {
-                        // Its re-run is counted afresh.
-                        outcome.passed -= 1;
-                    }
-                    if !remaining.contains(&rerun) {
-                        remaining.push(rerun);
-                    }
+            }
+        }
+        // A goto is a one-way transfer: execution continues at the target
+        // and runs from there in document order, so the target and every
+        // later step run (again) against the fresh state, and a step the
+        // jump passes over is not run.
+        if let Some((target, check)) = goto
+            && let Some(next) = wf.steps.iter().position(|s| s.step_id == target)
+        {
+            goto_jumps += 1;
+            if goto_jumps > MAX_GOTO_JUMPS {
+                observer
+                    .on_check_failed(
+                        &cx,
+                        check,
+                        &format!("at most {MAX_GOTO_JUMPS} goto jumps"),
+                        &format!("goto '{target}' did not let the workflow finish"),
+                    )
+                    .await;
+                if outcome.ok {
+                    // A loop of successes is still a workflow that never
+                    // ended: the step that jumped last carries the failure.
+                    outcome.ok = false;
+                    outcome.failed += 1;
+                    outcome.passed -= 1;
                 }
-                remaining.sort_unstable();
+                outcome.skipped += remaining.len();
+                remaining.clear();
                 continue;
             }
-            // No recovery path: the rest of the workflow cannot run.
-            outcome.skipped += remaining.len();
             remaining.clear();
+            for rerun in next..wf.steps.len() {
+                let step_id = &wf.steps[rerun].step_id;
+                steps_outputs.remove(step_id);
+                if completed.remove(step_id) {
+                    // Its re-run is counted afresh.
+                    outcome.passed -= 1;
+                }
+                remaining.push(rerun);
+            }
         }
     }
     if outcome.skipped == 0 {
@@ -1210,6 +1354,9 @@ struct StepResult {
     sample: StepSample,
     /// Captured outputs; empty unless the step passed.
     outputs: InputMap,
+    /// The reply the step got, for the criteria of the actions that
+    /// follow it; `None` when no response arrived.
+    exchange: Option<Exchange>,
 }
 
 impl StepResult {
@@ -1217,8 +1364,167 @@ impl StepResult {
         Self {
             sample,
             outputs: InputMap::new(),
+            exchange: None,
         }
     }
+}
+
+/// A finished exchange, owned: what action criteria are evaluated on.
+struct Exchange {
+    method: String,
+    status: u16,
+    headers: Vec<(String, String)>,
+    body: String,
+}
+
+/// Everything a criterion can read about one finished exchange.
+struct Seen<'a> {
+    method: &'a str,
+    status: u16,
+    headers: &'a [(String, String)],
+    body_text: &'a str,
+    body_json: Option<&'a serde_json::Value>,
+}
+
+/// The run state criteria and expressions resolve against.
+#[derive(Clone, Copy)]
+struct RunState<'a> {
+    inputs: &'a InputMap,
+    steps_outputs: &'a InputMap,
+    workflows_outputs: &'a InputMap,
+}
+
+/// Whether an action applies to the exchange a step ended with: it has no
+/// criteria, or a response arrived and every criterion holds for it.
+fn action_applies(action: &ActionPlan, exchange: Option<&Exchange>, state: &RunState<'_>) -> bool {
+    if action.criteria.is_empty() {
+        return true;
+    }
+    let Some(exchange) = exchange else {
+        return false;
+    };
+    let body_json: Option<serde_json::Value> = serde_json::from_str(&exchange.body).ok();
+    let seen = Seen {
+        method: &exchange.method,
+        status: exchange.status,
+        headers: &exchange.headers,
+        body_text: &exchange.body,
+        body_json: body_json.as_ref(),
+    };
+    action
+        .criteria
+        .iter()
+        .all(|criterion| check_criterion(&criterion.kind, &seen, state).is_ok())
+}
+
+/// The pause before a retry: the action's `retryAfter`, unless the reply
+/// carried a `Retry-After` header counted in seconds, which the server
+/// knows better.
+pub(crate) fn retry_delay(declared: Duration, headers: &[(String, String)]) -> Duration {
+    headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("retry-after"))
+        .and_then(|(_, value)| value.trim().parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds >= 0.0)
+        .map_or(declared, Duration::from_secs_f64)
+}
+
+/// Evaluates one criterion against a finished exchange.
+///
+/// Returns `Err((expected, actual))` renderings when it does not hold.
+fn check_criterion(
+    kind: &CriterionKind,
+    seen: &Seen<'_>,
+    state: &RunState<'_>,
+) -> Result<(), (String, String)> {
+    let ctx = || {
+        RexCtx::default()
+            .method(seen.method)
+            .status(seen.status)
+            .request_headers(&[])
+            .response_headers(seen.headers)
+            .request_body("")
+            .response_body(seen.body_text)
+            .inputs(state.inputs)
+            .steps_outputs(state.steps_outputs)
+            .workflows_outputs(state.workflows_outputs)
+    };
+    let rendered = |value: Option<&serde_json::Value>| {
+        value.map_or_else(|| "<missing>".to_owned(), ToString::to_string)
+    };
+    match kind {
+        CriterionKind::Condition { text, cond } => {
+            let ctx = ctx();
+            if cond.holds(&ctx) {
+                Ok(())
+            } else {
+                Err((text.clone(), cond.observed(&ctx)))
+            }
+        }
+        CriterionKind::ContextRegex {
+            context,
+            context_text,
+            pattern,
+        } => {
+            let value = eval_rex(context, &ctx());
+            let text = match &value {
+                Some(serde_json::Value::String(text)) => text.clone(),
+                Some(other) => other.to_string(),
+                None => String::new(),
+            };
+            let expected = format!("{context_text} to match /{pattern}/");
+            match regex::Regex::new(pattern) {
+                Ok(re) if re.is_match(&text) => Ok(()),
+                Ok(_) => Err((
+                    expected,
+                    format!("{context_text} = {}", rendered(value.as_ref())),
+                )),
+                Err(e) => Err((expected, e.to_string())),
+            }
+        }
+        CriterionKind::ContextJsonPath {
+            context,
+            context_text,
+            query,
+        } => {
+            let expected = format!("{query} to select a node of {context_text}");
+            match eval_rex(context, &ctx()) {
+                None => Err((expected, format!("{context_text} is missing"))),
+                Some(value) if json_path_selects(query, &value) => Ok(()),
+                Some(_) => Err((expected, "no node selected".to_owned())),
+            }
+        }
+        other => {
+            // Runtime-expectation criteria resolve their right-hand side
+            // against the run state first (`$steps.<id>.outputs.<name>`,
+            // `$inputs.<name>`), then evaluate as ordinary equality.
+            let resolved = resolve_criterion(other, state.inputs, state.steps_outputs);
+            eval_criterion(&resolved, seen.status, seen.body_json, seen.body_text)
+        }
+    }
+}
+
+/// Whether an RFC 9535 query selects at least one node of `value`.
+///
+/// A query that is one filter on the root (`$[?count(@.pets) > 0]`, the
+/// Arazzo specification's own example) is also tried with the value as the
+/// filter's current node: RFC 9535 applies such a filter to the root's
+/// children, so against an object it could never see the object itself.
+fn json_path_selects(query: &str, value: &serde_json::Value) -> bool {
+    let Ok(path) = suspect_jsonpath::Path::parse(query) else {
+        return false;
+    };
+    let selects = |document: String| {
+        suspect_source::Uri::parse("mem://criterion-context.json").is_ok_and(|uri| {
+            let doc = suspect_low::LowDoc::parse(
+                uri,
+                suspect_source::Source::from_vec(document.into_bytes()),
+            );
+            !path.query(doc.root()).is_empty()
+        })
+    };
+    selects(value.to_string())
+        || (query.trim_start().starts_with("$[?") && selects(format!("[{value}]")))
 }
 
 /// Runs one Arazzo 1.1 AsyncAPI step: `send` publishes the evaluated
@@ -1430,14 +1736,22 @@ async fn evaluate_response(
     let observer = env.observer;
     let body_text = String::from_utf8_lossy(&response.body).into_owned();
     let body_json: Option<serde_json::Value> = serde_json::from_str(&body_text).ok();
+    let seen = Seen {
+        method,
+        status: response.status,
+        headers: &response.headers,
+        body_text: &body_text,
+        body_json: body_json.as_ref(),
+    };
+    let state = RunState {
+        inputs,
+        steps_outputs,
+        workflows_outputs: &opts.workflows_outputs,
+    };
 
     let mut failures = pre_failures;
     for crit in &step.success {
-        // Runtime-expectation criteria resolve their right-hand side
-        // against the run state first (`$steps.<id>.outputs.<name>`,
-        // `$inputs.<name>`), then evaluate as ordinary equality.
-        let resolved = resolve_criterion(&crit.kind, inputs, steps_outputs);
-        match eval_criterion(&resolved, response.status, body_json.as_ref(), &body_text) {
+        match check_criterion(&crit.kind, &seen, &state) {
             Ok(()) => observer.on_criterion(cx, crit, None).await,
             Err((expected, actual)) => {
                 failures += 1;
@@ -1447,9 +1761,18 @@ async fn evaluate_response(
             }
         }
     }
+    let exchange = || Exchange {
+        method: method.to_owned(),
+        status: response.status,
+        headers: response.headers.clone(),
+        body: body_text.clone(),
+    };
     if failures > 0 {
         sample.verdict = StepVerdict::CriteriaFailed(failures);
-        return StepResult::failed(sample);
+        return StepResult {
+            exchange: Some(exchange()),
+            ..StepResult::failed(sample)
+        };
     }
 
     // Capture outputs with the full exchange context available to rex.
@@ -1473,6 +1796,7 @@ async fn evaluate_response(
     StepResult {
         sample,
         outputs: captured,
+        exchange: Some(exchange()),
     }
 }
 
@@ -1710,13 +2034,14 @@ async fn run_step(
                 .unwrap_or_else(|| "application/json".to_owned()),
         ));
     }
-    // Ask for JSON responses so JSONPath criteria work against APIs that
-    // support content negotiation (Plex returns XML by default).
+    // Ask for the media types the operation declares, JSON first, so
+    // JSONPath criteria work against APIs that negotiate content (Plex
+    // returns XML by default).
     if !request_headers
         .iter()
         .any(|(k, _)| k.eq_ignore_ascii_case("accept"))
     {
-        request_headers.push(("Accept".to_owned(), "application/json".to_owned()));
+        request_headers.push(("Accept".to_owned(), step.accept.clone()));
     }
 
     // Security injection: for every configured scheme named by the
@@ -1793,33 +2118,7 @@ async fn run_step(
     // Contract validation: the shared contract runtime owns the decision,
     // so the runner and the gateway cannot disagree about whether a
     // response conforms. It runs whether or not the step wrote criteria.
-    let mut pre_failures = 0usize;
-    if opts.validate_responses && declares_response(step, response.status) {
-        let schemas = suspect_runtime::Schemas::from_any_map(env.components.iter());
-        let violations = suspect_runtime::validate_response(
-            &step.declared_responses(),
-            &schemas,
-            response.status,
-            &response.body,
-        );
-        if violations.is_empty() {
-            observer.on_response_validated(cx, response.status).await;
-        } else {
-            let actual: Vec<String> = violations
-                .iter()
-                .map(|violation| violation.message.clone())
-                .collect();
-            observer
-                .on_check_failed(
-                    cx,
-                    "response-schema",
-                    "response matching the declared schema",
-                    &actual.join("; "),
-                )
-                .await;
-            pre_failures += 1;
-        }
-    }
+    let pre_failures = check_contract(cx, step, method, &response, opts, env).await;
 
     let sample = StepSample {
         status: Some(response.status),
@@ -1844,12 +2143,125 @@ async fn run_step(
     .await
 }
 
-/// Whether the step declares any response for this status (exact or
-/// `default`), which is the condition for a conformance check at all.
-fn declares_response(step: &StepPlan, status: u16) -> bool {
-    step.response_schemas
-        .iter()
-        .any(|(declared, _)| *declared == Some(status) || declared.is_none())
+/// Holds a reply to the contract of the step's operation and reports the
+/// outcome: one failed check per kind of violation, or — when a body was
+/// actually compared with its schema and satisfied it — a validated
+/// response. Returns the number of failed checks.
+async fn check_contract(
+    cx: &StepCx<'_>,
+    step: &StepPlan,
+    method: &str,
+    response: &HttpResponse,
+    opts: &RunOpts,
+    env: Env<'_>,
+) -> usize {
+    let observer = env.observer;
+    if opts.conformance == Conformance::Off {
+        return 0;
+    }
+    let Some(schemas) = step.contract.and_then(|index| env.contracts.get(index)) else {
+        // No source description declares the operation, so there is no
+        // contract to compare with. Under the strict level that is itself
+        // the finding: the request reached something undocumented.
+        if opts.conformance == Conformance::Strict {
+            observer
+                .on_check_failed(
+                    cx,
+                    "operation",
+                    "an operation a source description declares",
+                    &format!(
+                        "{method} {} is not declared by any source description",
+                        step.operation.path
+                    ),
+                )
+                .await;
+            return 1;
+        }
+        return 0;
+    };
+    let check = suspect_runtime::check_response(
+        &step.responses,
+        schemas,
+        Reply {
+            method,
+            status: response.status,
+            headers: &response.headers,
+            body: &response.body,
+        },
+        opts.conformance,
+    );
+    if check.conforms() {
+        if check.coverage == Coverage::Schema {
+            observer.on_response_validated(cx, response.status).await;
+        }
+        return 0;
+    }
+    // One failed check per kind, each worded as what was wanted and what
+    // arrived, so a report line reads without the surrounding context.
+    let declared = suspect_ir::response_for(&step.responses, response.status);
+    let mut failed = 0usize;
+    for kind in [
+        ViolationKind::Status,
+        ViolationKind::ContentType,
+        ViolationKind::Header,
+        ViolationKind::Schema,
+    ] {
+        let found: Vec<String> = check
+            .violations
+            .iter()
+            .filter(|violation| violation.kind == kind)
+            .map(suspect_runtime::Violation::located)
+            .collect();
+        if found.is_empty() {
+            continue;
+        }
+        let (expected, actual) = match kind {
+            ViolationKind::Status => (
+                format!(
+                    "a declared status ({})",
+                    step.responses
+                        .iter()
+                        .map(suspect_ir::IrResponse::key)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                response.status.to_string(),
+            ),
+            ViolationKind::ContentType => (
+                format!(
+                    "a declared content type ({})",
+                    declared
+                        .map(|response| {
+                            response
+                                .content
+                                .iter()
+                                .map(|media| media.media_type.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_default()
+                ),
+                response
+                    .headers
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                    .map_or_else(String::new, |(_, value)| value.clone()),
+            ),
+            ViolationKind::Header => (
+                "the response headers the description declares".to_owned(),
+                found.join("; "),
+            ),
+            ViolationKind::Schema => (
+                "a body matching the declared schema".to_owned(),
+                found.join("; "),
+            ),
+        };
+        observer
+            .on_check_failed(cx, kind.response_check(), &expected, &actual)
+            .await;
+        failed += 1;
+    }
+    failed
 }
 
 /// Renders embedded runtime expressions inside text. Both the Arazzo
@@ -1971,7 +2383,7 @@ fn eval_criterion(
                 None if expected.as_u64() == Some(u64::from(status)) => Ok(()),
                 None => Err((expected.to_string(), status.to_string())),
                 Some(pointer) => match resolve_pointer(body_json, pointer) {
-                    Some(actual) if actual == expected => Ok(()),
+                    Some(actual) if crate::condition::values_equal(actual, expected) => Ok(()),
                     Some(actual) => Err((
                         format!("{pointer} == {expected}"),
                         format!("{pointer} == {actual}"),
@@ -2047,6 +2459,14 @@ fn eval_criterion(
             }
         }
         CriterionKind::AlwaysTrue => Ok(()),
+        // These read the whole exchange and are evaluated by
+        // `check_criterion`, which never passes them on to here.
+        CriterionKind::Condition { .. }
+        | CriterionKind::ContextRegex { .. }
+        | CriterionKind::ContextJsonPath { .. } => Err((
+            crit.describe(),
+            "a criterion that needs the whole exchange".to_owned(),
+        )),
     }
 }
 

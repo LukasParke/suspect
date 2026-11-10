@@ -152,6 +152,10 @@ pub struct GatewayConfig {
     /// JSON body keys to redact beyond the default denylist (matched
     /// case-insensitively).
     pub redact_json_keys: Vec<String>,
+    /// Mock mode: reject a request that breaks its operation's contract
+    /// (a missing or ill-typed parameter, a body that fails its schema)
+    /// instead of answering it. Off, the mock answers every request.
+    pub enforce_mock: bool,
 }
 
 /// Shared per-server state handed to every handler.
@@ -162,6 +166,8 @@ struct GatewayState {
     /// into the runtime's `Schemas` — per request).
     schemas: Arc<suspect_runtime::Schemas>,
     mode: Mode,
+    /// Mock mode rejects requests that break the contract.
+    enforce_mock: bool,
     faults: FaultConfig,
     seq: AtomicU64,
     journal: Arc<tokio::sync::Mutex<Journal>>,
@@ -322,8 +328,7 @@ pub async fn build_router(
     for key in &cfg.redact_json_keys {
         redactor.deny_json_key(key);
     }
-    let schema_refs = mock::schema_refs(&spec);
-    let schemas = Arc::new(suspect_runtime::Schemas::from_any_map(schema_refs.iter()));
+    let schemas = Arc::new(suspect_runtime::Schemas::from_spec(&spec));
     let redactor = Arc::new(redactor);
     *journal.lock().await.redactor_mut() = (*redactor).clone();
     journal.lock().await.emit(Journal::meta(
@@ -349,6 +354,7 @@ pub async fn build_router(
         spec: Arc::new(spec),
         schemas,
         mode: cfg.mode.clone(),
+        enforce_mock: cfg.enforce_mock,
         faults,
         seq: AtomicU64::new(0),
         journal,
@@ -659,10 +665,37 @@ async fn process(
     }
 
     let (response, verdict) = match &state.mode {
-        Mode::Mock => {
+        Mode::Mock => 'mock: {
             let ir_method = Method::from_key(method.to_ascii_lowercase().as_str());
             let compiled =
                 template.and_then(|t| ir_method.and_then(|m| state.mocks.get(&(m, t.to_owned()))));
+
+            // An enforcing mock holds the consumer to the contract: a
+            // request the operation does not allow is rejected the way the
+            // operation declares its rejections, and journaled as invalid.
+            if state.enforce_mock
+                && let Some(op) = template.and_then(|t| {
+                    ir_method.and_then(|m| {
+                        state
+                            .spec
+                            .operation(suspect_ir::OpSelector::MethodPath(m, t))
+                    })
+                })
+            {
+                let violations = proxy::runtime_violations(
+                    op,
+                    state.schemas.as_ref(),
+                    &target,
+                    &req_headers,
+                    &body,
+                );
+                if !violations.is_empty() {
+                    break 'mock (
+                        mock::reject(compiled.map(Vec::as_slice), &violations),
+                        verdict_of(violations),
+                    );
+                }
+            }
 
             // Stateful CRUD: POST on a collection synthesizes + stores a
             // resource; id-addressed requests read/update/remove it. When
@@ -686,47 +719,33 @@ async fn process(
             // and answers with the DECLARED success status (REST-create
             // conventions vary; the spec's own status wins) plus the
             // stored body.
-            let t_for_post = template.unwrap_or_default().to_owned();
-            let post_creates: Option<(String, Bytes, Option<u16>)> = template
+            let created: Option<(&str, &Vec<mock::CompiledResponse>)> = template
                 .filter(|t| method == "POST" && !t.contains('{'))
-                .and_then(|t| ir_method.and_then(|m| state.mocks.get(&(m, t.to_owned()))))
-                .and_then(|compiled| {
-                    mock::best(compiled).map(|c| (t_for_post.to_owned(), c.body.clone(), c.status))
+                .and_then(|t| {
+                    ir_method
+                        .and_then(|m| state.mocks.get(&(m, t.to_owned())))
+                        .map(|compiled| (t, compiled))
                 });
-            if let Some((collection_raw, example_body, declared_status)) = post_creates {
-                let collection = stateful_mock::collection_base(&collection_raw);
+            if let Some((collection_raw, compiled)) = created
+                && let Some(example) = mock::best(compiled)
+            {
+                let collection = stateful_mock::collection_base(collection_raw);
                 let id = state.resources.next_id(&collection);
-                let body = stateful_mock::with_synthesized_id(&example_body, &id);
+                let body = stateful_mock::with_synthesized_id(&example.body, &id);
                 state.resources.insert(&collection, &id, body.clone());
-                return (
-                    StatusCode::from_u16(declared_status.unwrap_or(201))
-                        .unwrap_or(StatusCode::CREATED),
-                    [("content-type", "application/json")],
-                    body,
-                )
-                    .into_response();
+                break 'mock (
+                    mock::respond_with(Some(compiled), StatusCode::CREATED, body),
+                    Verdict::Pass,
+                );
             }
 
+            let declared = compiled.map(Vec::as_slice);
             let stateful_response = if let Some((collection, id)) = stateful {
                 Some(match method.as_str() {
-                    "POST" => {
-                        let id = state.resources.next_id(&collection);
-                        let body = stateful_mock::with_synthesized_id(&body, &id);
-                        state.resources.insert(&collection, &id, body.clone());
-                        (
-                            StatusCode::CREATED,
-                            [("content-type", "application/json")],
-                            body,
-                        )
-                            .into_response()
-                    }
                     "GET" => match state.resources.get(&collection, &id) {
-                        Some(resource) => (
-                            StatusCode::OK,
-                            [("content-type", "application/json")],
-                            resource.body,
-                        )
-                            .into_response(),
+                        Some(resource) => {
+                            mock::respond_with(declared, StatusCode::OK, resource.body)
+                        }
                         // Unknown ids fall back to the synthesized
                         // example: mocks stay "always answer" for
                         // consumers probing ids before creating.
@@ -742,7 +761,13 @@ async fn process(
                         ),
                     },
                     "DELETE" => match state.resources.remove(&collection, &id) {
-                        Some(_) => StatusCode::NO_CONTENT.into_response(),
+                        // The removed resource is the body, for the
+                        // descriptions that declare one; `respond_with`
+                        // sends none when the declared response has no
+                        // content (the usual `204`).
+                        Some(removed) => {
+                            mock::respond_with(declared, StatusCode::NO_CONTENT, removed.body)
+                        }
                         None => problem(
                             StatusCode::NOT_FOUND,
                             "Resource not found",
@@ -756,7 +781,7 @@ async fn process(
                         } else {
                             StatusCode::CREATED
                         };
-                        (status, [("content-type", "application/json")], body).into_response()
+                        mock::respond_with(declared, status, body)
                     }
                 })
             } else {

@@ -180,6 +180,7 @@ async fn mock_gateway(faults: FaultConfig) -> (String, tempfile::TempDir) {
         faults,
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
     // Hold the tempdir alive for the duration of the test.
@@ -258,6 +259,7 @@ async fn record_mode_writes_readable_cassette() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
 
@@ -317,6 +319,7 @@ async fn replay_serves_recorded_entry_binary_safe() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
 
@@ -364,6 +367,7 @@ async fn replay_miss_returns_404_problem_json() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
 
@@ -453,6 +457,7 @@ async fn validate_observe_journals_invalid_without_altering_response() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let (journal_handle, sink) = journal();
     let app = build_router(&cfg, journal_handle).await.expect("router");
@@ -501,6 +506,7 @@ async fn validate_enforce_rejects_invalid_request_before_upstream() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
 
@@ -593,6 +599,7 @@ async fn proxied_requests_carry_upstream_host_header() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
 
@@ -619,6 +626,7 @@ async fn oversized_request_body_is_rejected_with_413() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
 
@@ -664,6 +672,7 @@ async fn record_mode_redacts_credentials_in_cassette() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let base = serve_gateway(&cfg).await;
 
@@ -715,6 +724,7 @@ async fn non_utf8_header_values_are_preserved_lossily() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let (journal_handle, sink) = journal();
     let router = build_router(&cfg, journal_handle).await.expect("router");
@@ -763,6 +773,7 @@ async fn validate_treats_plus_as_literal_in_path_segments() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let (journal_handle, sink) = journal();
     let app = build_router(&cfg, journal_handle).await.expect("router");
@@ -832,6 +843,7 @@ async fn undeclared_method_returns_journaled_405() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let (journal_handle, sink) = journal();
     let app = build_router(&cfg, journal_handle).await.expect("router");
@@ -898,6 +910,7 @@ async fn mock_startup_over_500_ops_stays_under_budget() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let start = std::time::Instant::now();
     let (journal, _sink) = journal();
@@ -961,6 +974,7 @@ async fn gateway_serves_its_own_contract_at_openapi_json() {
         faults: FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let journal = Arc::new(tokio::sync::Mutex::new(Journal::new(Box::new(
         suspect_journal::StdoutSink,
@@ -1045,4 +1059,813 @@ fn synth_example_merges_allof_members() {
         container.get("Directory").is_some(),
         "the inline member's properties merge in: {container}"
     );
+}
+
+// ------------------------------------------------ contract conformance
+
+/// Media types, status ranges, shared responses and bodiless replies.
+const MEDIA_SPEC: &str = r##"
+openapi: 3.1.0
+info: { title: Media, version: "1" }
+paths:
+  /reports/{reportId}:
+    get:
+      operationId: showReport
+      parameters:
+        - { name: reportId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: a JSON:API document
+          content:
+            application/vnd.api+json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /summary:
+    get:
+      operationId: summary
+      responses:
+        2XX:
+          description: some success
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204': { description: pong }
+  /problems:
+    get:
+      operationId: problems
+      responses:
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  responses:
+    NotFound:
+      description: nothing there
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Report:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string, example: r1 }
+    Problem:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, example: Not found }
+"##;
+
+/// A gateway over `spec` in `mode`, with its journal sink.
+async fn gateway_over(spec: &str, mode: Mode) -> (String, VecSink, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("spec.yaml"), spec).expect("write spec");
+    let cfg = GatewayConfig {
+        mode,
+        spec: dir.path().join("spec.yaml"),
+        port: 0,
+        faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
+        enforce_mock: false,
+    };
+    let (journal_handle, sink) = journal();
+    let app = build_router(&cfg, journal_handle).await.expect("router");
+    (spawn_app(app).await, sink, dir)
+}
+
+/// An upstream answering every path with one status, content type and body.
+async fn typed_upstream(status: u16, content_type: &'static str, body: &'static str) -> String {
+    let app = Router::new().fallback(move || async move {
+        (
+            StatusCode::from_u16(status).unwrap(),
+            [("content-type", content_type)],
+            body,
+        )
+    });
+    spawn_app(app).await
+}
+
+/// The violation messages of the single journaled exchange.
+fn journaled_violations(sink: &VecSink) -> Vec<String> {
+    let verdicts: Vec<Verdict> = sink
+        .records()
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Traffic(traffic) => Some(traffic.verdict),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(verdicts.len(), 1, "{verdicts:?}");
+    match verdicts.into_iter().next().unwrap() {
+        Verdict::Invalid(violations) => violations.into_iter().map(|v| v.message).collect(),
+        Verdict::Pass => Vec::new(),
+        other => panic!("unexpected verdict {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn mock_answers_in_the_declared_media_type() {
+    let (base, _sink, _dir) = gateway_over(MEDIA_SPEC, Mode::Mock).await;
+    let (status, headers, body) = request(&base, "GET", "/reports/7").await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        header(&headers, "content-type"),
+        Some("application/vnd.api+json")
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed, serde_json::json!({"id": "r1"}));
+}
+
+#[tokio::test]
+async fn mock_serves_a_shared_component_response() {
+    let (base, _sink, _dir) = gateway_over(MEDIA_SPEC, Mode::Mock).await;
+    let (status, headers, body) = request(&base, "GET", "/problems").await;
+    assert_eq!(status, 404);
+    assert_eq!(
+        header(&headers, "content-type"),
+        Some("application/problem+json")
+    );
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed, serde_json::json!({"title": "Not found"}));
+}
+
+#[tokio::test]
+async fn mock_answers_a_status_range_with_a_status_in_it() {
+    let (base, _sink, _dir) = gateway_over(MEDIA_SPEC, Mode::Mock).await;
+    let (status, _, body) = request(&base, "GET", "/summary").await;
+    assert_eq!(status, 200);
+    let parsed: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(parsed, serde_json::json!({"id": "r1"}));
+}
+
+#[tokio::test]
+async fn mock_sends_no_body_for_a_response_that_declares_none() {
+    let (base, _sink, _dir) = gateway_over(MEDIA_SPEC, Mode::Mock).await;
+    let (status, headers, body) = request(&base, "GET", "/ping").await;
+    assert_eq!(status, 204);
+    assert!(body.is_empty(), "{body:?}");
+    assert_eq!(header(&headers, "content-type"), None);
+}
+
+/// The mock and the conformance check read one description: whatever the
+/// mock answers, the check accepts.
+#[tokio::test]
+async fn the_mock_conforms_to_the_description_it_serves() {
+    for spec_text in [SPEC, MEDIA_SPEC] {
+        let (base, _sink, dir) = gateway_over(spec_text, Mode::Mock).await;
+        let spec = suspect_ir::IrSpec::from_file(&dir.path().join("spec.yaml")).expect("spec");
+        let schemas = suspect_runtime::Schemas::from_spec(&spec);
+        for op in &spec.operations {
+            // Any value serves for a path parameter except where the
+            // fixture constrains it.
+            let path = op
+                .path
+                .replace("{name}", "rex+a")
+                .replace("{petId}", "1")
+                .replace("{reportId}", "1");
+            let (status, headers, body) = request(&base, op.method.as_str(), &path).await;
+            let check = suspect_runtime::check_response(
+                &op.responses,
+                &schemas,
+                suspect_runtime::Reply {
+                    method: op.method.as_str(),
+                    status,
+                    headers: &headers,
+                    body: &body,
+                },
+                suspect_runtime::Conformance::Strict,
+            );
+            assert!(
+                check.conforms(),
+                "{} {} answered {status}: {:?}",
+                op.method,
+                op.path,
+                check.violations
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn validate_journals_an_undeclared_status() {
+    let upstream = typed_upstream(418, "application/json", "{}").await;
+    let (base, sink, _dir) = gateway_over(
+        MEDIA_SPEC,
+        Mode::Validate {
+            upstream,
+            enforce: false,
+        },
+    )
+    .await;
+    let (status, _, _) = request(&base, "GET", "/reports/7").await;
+    assert_eq!(status, 418, "the upstream reply is passed through");
+    let violations = journaled_violations(&sink);
+    assert!(
+        violations
+            .iter()
+            .any(|message| message.contains("status 418 is not declared")),
+        "{violations:?}"
+    );
+}
+
+#[tokio::test]
+async fn validate_journals_an_undeclared_content_type() {
+    let upstream = typed_upstream(200, "application/json", r#"{"id": "r1"}"#).await;
+    let (base, sink, _dir) = gateway_over(
+        MEDIA_SPEC,
+        Mode::Validate {
+            upstream,
+            enforce: false,
+        },
+    )
+    .await;
+    let _ = request(&base, "GET", "/reports/7").await;
+    let violations = journaled_violations(&sink);
+    assert!(
+        violations
+            .iter()
+            .any(|message| message.contains("`application/json` is not declared")),
+        "{violations:?}"
+    );
+}
+
+#[tokio::test]
+async fn validate_checks_a_structured_json_body_and_locates_the_violation() {
+    let upstream = typed_upstream(200, "application/vnd.api+json", r#"{"id": 7}"#).await;
+    let (base, sink, _dir) = gateway_over(
+        MEDIA_SPEC,
+        Mode::Validate {
+            upstream,
+            enforce: false,
+        },
+    )
+    .await;
+    let _ = request(&base, "GET", "/reports/7").await;
+    let records = sink.records();
+    let pointers: Vec<String> = records
+        .into_iter()
+        .filter_map(|record| match record {
+            Record::Traffic(traffic) => match traffic.verdict {
+                Verdict::Invalid(violations) => Some(violations),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flatten()
+        .map(|violation| violation.pointer)
+        .collect();
+    assert_eq!(pointers, ["/id"]);
+}
+
+/// A CRUD resource whose description departs from the mock's defaults: a
+/// vendor JSON media type everywhere and a `DELETE` that answers `200`
+/// with the removed resource.
+const CRUD_SPEC: &str = r##"
+openapi: 3.1.0
+info: { title: Widgets, version: "1" }
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        content:
+          application/vnd.api+json:
+            schema: { $ref: '#/components/schemas/Widget' }
+      responses:
+        '201':
+          description: created
+          content:
+            application/vnd.api+json:
+              schema: { $ref: '#/components/schemas/Widget' }
+  /widgets/{widgetId}:
+    parameters:
+      - { name: widgetId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: showWidget
+      responses:
+        '200':
+          description: one widget
+          content:
+            application/vnd.api+json:
+              schema: { $ref: '#/components/schemas/Widget' }
+    put:
+      operationId: replaceWidget
+      responses:
+        '200':
+          description: replaced
+          content:
+            application/vnd.api+json:
+              schema: { $ref: '#/components/schemas/Widget' }
+    delete:
+      operationId: deleteWidget
+      responses:
+        '200':
+          description: the removed widget
+          content:
+            application/vnd.api+json:
+              schema: { $ref: '#/components/schemas/Widget' }
+components:
+  schemas:
+    Widget:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, example: w1 }
+        name: { type: string, example: gear }
+"##;
+
+/// One request with a JSON body through the crate's hyper transport.
+async fn send(
+    base: &str,
+    method: &str,
+    path: &str,
+    body: &'static str,
+) -> (u16, Vec<(String, String)>, Bytes) {
+    let headers = [("content-type".to_owned(), "application/json".to_owned())];
+    let reply = crate::proxy::fetch_upstream(
+        base,
+        method,
+        path,
+        &headers,
+        Bytes::from_static(body.as_bytes()),
+    )
+    .await
+    .expect("request");
+    (reply.status, reply.headers, reply.body)
+}
+
+/// The stateful mock creates, reads, replaces and removes resources; each
+/// of those replies is still the one the description declares.
+#[tokio::test]
+async fn the_stateful_mock_conforms_through_a_resource_lifecycle() {
+    let (base, _sink, dir) = gateway_over(CRUD_SPEC, Mode::Mock).await;
+    let spec = suspect_ir::IrSpec::from_file(&dir.path().join("spec.yaml")).expect("spec");
+    let schemas = suspect_runtime::Schemas::from_spec(&spec);
+    let conforms = |id: &str, status: u16, headers: &[(String, String)], body: &[u8]| {
+        let op = spec
+            .operation(suspect_ir::OpSelector::Id(id))
+            .expect("operation");
+        let check = suspect_runtime::check_response(
+            &op.responses,
+            &schemas,
+            suspect_runtime::Reply {
+                method: op.method.as_str(),
+                status,
+                headers,
+                body,
+            },
+            suspect_runtime::Conformance::Strict,
+        );
+        assert!(
+            check.conforms(),
+            "{id} answered {status} {:?}: {:?}",
+            String::from_utf8_lossy(body),
+            check.violations
+        );
+    };
+
+    let (status, headers, body) = send(&base, "POST", "/widgets", r#"{"name": "cog"}"#).await;
+    conforms("createWidget", status, &headers, &body);
+    let created: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    let id = created["id"].as_str().expect("a synthesized id").to_owned();
+    let path = format!("/widgets/{id}");
+
+    let (status, headers, body) = request(&base, "GET", &path).await;
+    conforms("showWidget", status, &headers, &body);
+
+    let (status, headers, body) =
+        send(&base, "PUT", &path, r#"{"id": "w9", "name": "sprocket"}"#).await;
+    conforms("replaceWidget", status, &headers, &body);
+
+    let (status, headers, body) = request(&base, "DELETE", &path).await;
+    conforms("deleteWidget", status, &headers, &body);
+}
+
+// ------------------------------------------------------ enforcing mock
+
+/// A mock gateway over `spec` that rejects requests breaking the contract.
+async fn enforcing_mock(spec: &str) -> (String, VecSink, tempfile::TempDir) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("spec.yaml"), spec).expect("write spec");
+    let cfg = GatewayConfig {
+        mode: Mode::Mock,
+        spec: dir.path().join("spec.yaml"),
+        port: 0,
+        faults: FaultConfig::default(),
+        redact_headers: Vec::new(),
+        redact_json_keys: Vec::new(),
+        enforce_mock: true,
+    };
+    let (journal_handle, sink) = journal();
+    let app = build_router(&cfg, journal_handle).await.expect("router");
+    (spawn_app(app).await, sink, dir)
+}
+
+/// A consumer that sends what the contract forbids is told so, instead of
+/// being answered as if the request were fine.
+#[tokio::test]
+async fn an_enforcing_mock_rejects_a_request_that_breaks_the_contract() {
+    let (base, sink, _dir) = enforcing_mock(SPEC).await;
+    // `listPets` requires an integer `limit`.
+    let (status, headers, body) = request(&base, "GET", "/pets").await;
+    assert_eq!(status, 400);
+    assert_eq!(
+        header(&headers, "content-type"),
+        Some("application/problem+json")
+    );
+    let problem: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(problem["title"], "Request failed validation");
+    assert!(
+        problem["violations"]
+            .as_array()
+            .is_some_and(|violations| violations
+                .iter()
+                .any(|v| v["message"].as_str().unwrap_or("").contains("limit"))),
+        "{problem}"
+    );
+    assert!(
+        journaled_violations(&sink)
+            .iter()
+            .any(|message| message.contains("limit")),
+        "the rejection is journaled as invalid"
+    );
+
+    // A request the contract allows is answered as before.
+    let (status, _, _) = request(&base, "GET", "/pets?limit=5").await;
+    assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn a_mock_answers_every_request_unless_told_to_enforce() {
+    let (base, _dir) = mock_gateway(FaultConfig::default()).await;
+    let (status, _, _) = request(&base, "GET", "/pets").await;
+    assert_eq!(status, 200, "the plain mock always answers");
+}
+
+/// When the description declares how it rejects a request, the enforcing
+/// mock rejects that way, so its reply is still one the contract declares.
+#[tokio::test]
+async fn an_enforcing_mock_rejects_with_the_declared_response() {
+    const SPEC_WITH_REJECTION: &str = r##"
+openapi: 3.1.0
+info: { title: Widgets, version: "1" }
+paths:
+  /widgets:
+    post:
+      operationId: createWidget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Widget' }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Widget' }
+        '422':
+          description: not a widget
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  schemas:
+    Widget:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, example: gear }
+    Problem:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, example: Unprocessable }
+"##;
+    let (base, _sink, dir) = enforcing_mock(SPEC_WITH_REJECTION).await;
+    let (status, headers, body) = send(&base, "POST", "/widgets", r#"{"name": 7}"#).await;
+    assert_eq!(status, 422);
+    assert_eq!(
+        header(&headers, "content-type"),
+        Some("application/problem+json")
+    );
+    // The rejection is itself a reply the description declares.
+    let spec = suspect_ir::IrSpec::from_file(&dir.path().join("spec.yaml")).expect("spec");
+    let op = spec
+        .operation(suspect_ir::OpSelector::Id("createWidget"))
+        .expect("operation");
+    let check = suspect_runtime::check_response(
+        &op.responses,
+        &suspect_runtime::Schemas::from_spec(&spec),
+        suspect_runtime::Reply {
+            method: "POST",
+            status,
+            headers: &headers,
+            body: &body,
+        },
+        suspect_runtime::Conformance::Strict,
+    );
+    assert!(check.conforms(), "{:?}", check.violations);
+
+    let (status, _, _) = send(&base, "POST", "/widgets", r#"{"name": "cog"}"#).await;
+    assert_eq!(status, 201);
+}
+
+/// A response that declares headers is mocked with them, so a consumer
+/// sees the shape and the reply still satisfies a strict contract check.
+#[tokio::test]
+async fn mock_sends_the_headers_a_response_declares() {
+    const TICKETS: &str = r##"
+openapi: 3.1.0
+info: { title: Tickets, version: "1" }
+paths:
+  /status:
+    get:
+      operationId: status
+      responses:
+        '200':
+          description: current status
+          headers:
+            X-Rate-Limit-Remaining:
+              required: true
+              schema: { type: integer }
+            X-Region:
+              schema: { type: string, example: eu-west }
+            X-Trace:
+              $ref: '#/components/headers/Trace'
+          content:
+            application/json:
+              schema: { type: object }
+components:
+  headers:
+    Trace:
+      required: true
+      schema: { type: string, example: trace-1 }
+"##;
+    let (base, _sink, dir) = gateway_over(TICKETS, Mode::Mock).await;
+    let (status, headers, body) = request(&base, "GET", "/status").await;
+    assert_eq!(status, 200);
+    assert_eq!(header(&headers, "x-rate-limit-remaining"), Some("0"));
+    assert_eq!(header(&headers, "x-region"), Some("eu-west"));
+    assert_eq!(header(&headers, "x-trace"), Some("trace-1"));
+
+    let spec = suspect_ir::IrSpec::from_file(&dir.path().join("spec.yaml")).expect("spec");
+    let op = spec
+        .operation(suspect_ir::OpSelector::Id("status"))
+        .expect("operation");
+    let check = suspect_runtime::check_response(
+        &op.responses,
+        &suspect_runtime::Schemas::from_spec(&spec),
+        suspect_runtime::Reply {
+            method: "GET",
+            status,
+            headers: &headers,
+            body: &body,
+        },
+        suspect_runtime::Conformance::Strict,
+    );
+    assert!(check.conforms(), "{:?}", check.violations);
+}
+
+// ------------------------------------------- real-world descriptions
+
+/// How the mock fares against real-world descriptions: for every operation
+/// of every corpus document, the response the mock would serve is held to
+/// the strict contract check.
+///
+/// An explicit gate (`cargo xtask fetch-corpus`, then `cargo test -p
+/// suspect-gateway -- --ignored --nocapture corpus_mock`): it reads tens
+/// of megabytes of descriptions. What still fails is a description whose
+/// own `example` contradicts its schema, or a `oneOf` whose branches
+/// overlap; the bound keeps the mock from sliding back to replies its own
+/// description forbids.
+#[test]
+#[ignore = "reads the fetched corpus; run explicitly"]
+fn corpus_mock_responses_conform() {
+    /// Largest share of a document's operations whose mock reply may break
+    /// the contract.
+    const TOLERATED: f64 = 0.05;
+    let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../corpus");
+    let entries = std::fs::read_dir(&corpus)
+        .unwrap_or_else(|_| panic!("no corpus/: run `cargo xtask fetch-corpus` first"));
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "yaml"))
+        .collect();
+    paths.sort();
+    let mut failing_documents = Vec::new();
+    for path in paths {
+        let Ok(spec) = suspect_ir::IrSpec::from_file(&path) else {
+            continue; // not OpenAPI 3.x
+        };
+        let schemas = suspect_runtime::Schemas::from_spec(&spec);
+        let mocks = crate::mock::compile_all(&spec);
+        let mut broken = 0usize;
+        let mut reasons: std::collections::BTreeMap<String, usize> = Default::default();
+        for op in &spec.operations {
+            let Some(reply) = mocks
+                .get(&(op.method, op.path.clone()))
+                .and_then(|compiled| crate::mock::best(compiled))
+            else {
+                continue;
+            };
+            let headers: Vec<(String, String)> = reply
+                .content_type
+                .iter()
+                .map(|value| ("content-type".to_owned(), value.clone()))
+                .chain(reply.headers.iter().cloned())
+                .collect();
+            let check = suspect_runtime::check_response(
+                &op.responses,
+                &schemas,
+                suspect_runtime::Reply {
+                    method: op.method.as_str(),
+                    status: reply.status.unwrap_or(200),
+                    headers: &headers,
+                    body: &reply.body,
+                },
+                suspect_runtime::Conformance::Strict,
+            );
+            if !check.conforms() {
+                broken += 1;
+                // Group by the message with its location's indices erased.
+                let first = &check.violations[0];
+                let shape: String = first
+                    .message
+                    .chars()
+                    .map(|c| if c.is_ascii_digit() { '#' } else { c })
+                    .take(90)
+                    .collect();
+                *reasons.entry(shape).or_default() += 1;
+            }
+        }
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        eprintln!(
+            "{name:<28} operations: {:<5} mock replies that break the contract: {broken}",
+            spec.operations.len()
+        );
+        let mut top: Vec<_> = reasons.into_iter().collect();
+        top.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        for (reason, count) in top.iter().take(6) {
+            eprintln!("    {count:>5}  {reason}");
+        }
+        if broken as f64 > TOLERATED * spec.operations.len() as f64 {
+            failing_documents.push(format!("{name}: {broken} of {}", spec.operations.len()));
+        }
+    }
+    assert!(
+        failing_documents.is_empty(),
+        "more than {TOLERATED} of the mock's own replies break the contract in: {failing_documents:?}"
+    );
+}
+
+/// Schema shapes real descriptions use that an example has to satisfy:
+/// unions, constants, bounds, formats, recursion, untyped objects and an
+/// integer id on a created resource.
+const SHAPES_SPEC: &str = r##"
+openapi: 3.1.0
+info: { title: Shapes, version: "1" }
+paths:
+  /shapes:
+    get:
+      operationId: listShapes
+      responses:
+        '200':
+          description: every shape
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Shapes' }
+    post:
+      operationId: createShape
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Counter' }
+  /shapes/{shapeId}:
+    get:
+      operationId: showShape
+      parameters:
+        - { name: shapeId, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: one
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Counter' }
+components:
+  schemas:
+    Counter:
+      type: object
+      required: [id, count]
+      additionalProperties: false
+      properties:
+        id: { type: integer, minimum: 1 }
+        count: { type: integer, minimum: 3, maximum: 9 }
+    Shapes:
+      type: object
+      required: [union, nullable_first, constant, bounded, exclusive, when, day, key, mail, link, several, untyped, tree, open, either, code, version, archived]
+      properties:
+        union:
+          oneOf:
+            - { $ref: '#/components/schemas/Counter' }
+            - { type: string }
+        nullable_first:
+          anyOf:
+            - { type: "null" }
+            - { type: string, minLength: 2 }
+        constant: { const: fixed }
+        bounded: { type: number, minimum: 5, maximum: 6 }
+        exclusive: { type: integer, exclusiveMinimum: 10 }
+        when: { type: string, format: date-time }
+        day: { type: string, format: date }
+        key: { type: string, format: uuid }
+        mail: { type: string, format: email }
+        link: { type: string, format: uri }
+        several: { type: array, minItems: 2, items: { type: integer } }
+        untyped:
+          # `ghost` is required but never declared: any value satisfies it.
+          required: [inner, ghost]
+          properties:
+            inner: { type: boolean }
+        tree: { $ref: '#/components/schemas/Node' }
+        open: { type: object, additionalProperties: { type: string } }
+        either: { type: [integer, "null"] }
+        code: { type: string, pattern: '^[A-Z]{3}$' }
+        version: { type: string, pattern: '^[0-9]+\.[0-9]+$' }
+        archived:
+          allOf:
+            - { $ref: '#/components/schemas/Node' }
+            - { required: [parent] }
+    Node:
+      type: object
+      required: [name, children]
+      properties:
+        name: { type: string }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/Node' }
+        parent: { $ref: '#/components/schemas/Node' }
+"##;
+
+/// Whatever the mock answers for the shapes fixture satisfies the schema
+/// it was synthesized from, through the same check contract tests apply.
+#[tokio::test]
+async fn mock_examples_satisfy_the_schemas_they_come_from() {
+    let (base, _sink, dir) = gateway_over(SHAPES_SPEC, Mode::Mock).await;
+    let spec = suspect_ir::IrSpec::from_file(&dir.path().join("spec.yaml")).expect("spec");
+    let schemas = suspect_runtime::Schemas::from_spec(&spec);
+    let conforms = |id: &str, status: u16, headers: &[(String, String)], body: &[u8]| {
+        let op = spec
+            .operation(suspect_ir::OpSelector::Id(id))
+            .expect("operation");
+        let check = suspect_runtime::check_response(
+            &op.responses,
+            &schemas,
+            suspect_runtime::Reply {
+                method: op.method.as_str(),
+                status,
+                headers,
+                body,
+            },
+            suspect_runtime::Conformance::Strict,
+        );
+        assert!(
+            check.conforms(),
+            "{id} answered {status} {}: {:?}",
+            String::from_utf8_lossy(body),
+            check.violations
+        );
+    };
+
+    let (status, headers, body) = request(&base, "GET", "/shapes").await;
+    conforms("listShapes", status, &headers, &body);
+    let shapes: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(shapes["constant"], "fixed");
+    assert_eq!(shapes["several"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        shapes["tree"]["children"],
+        serde_json::json!([]),
+        "a recursive schema ends in an empty list, not in `null`"
+    );
+    assert!(
+        shapes["tree"].get("parent").is_none(),
+        "an optional recursive property is left out rather than nulled"
+    );
+
+    // A created resource keeps the id type its schema declares.
+    let (status, headers, body) = send(&base, "POST", "/shapes", "{}").await;
+    conforms("createShape", status, &headers, &body);
+    let created: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    let id = created["id"].as_u64().expect("an integer id");
+    let (status, headers, body) = request(&base, "GET", &format!("/shapes/{id}")).await;
+    conforms("showShape", status, &headers, &body);
 }

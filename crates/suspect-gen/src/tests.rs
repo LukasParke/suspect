@@ -673,11 +673,13 @@ fn petstore_spec() -> IrSpec {
                 status: Some(200),
                 description: Some("page of pets".into()),
                 schema: Some("PetList".into()),
+                ..Default::default()
             },
             IrResponse {
                 status: None,
                 description: Some("error".into()),
                 schema: None,
+                ..Default::default()
             },
         ],
     });
@@ -695,6 +697,7 @@ fn petstore_spec() -> IrSpec {
             status: Some(201),
             description: Some("created".into()),
             schema: None,
+            ..Default::default()
         }],
     });
     spec.operations.push(IrOperation {
@@ -716,6 +719,7 @@ fn petstore_spec() -> IrSpec {
             status: Some(200),
             description: Some("one pet".into()),
             schema: Some("Pet".into()),
+            ..Default::default()
         }],
     });
     spec.schemas.push(IrSchema {
@@ -882,16 +886,19 @@ fn synthetic_spec(ops: usize) -> IrSpec {
                     status: Some(200),
                     description: Some("ok".into()),
                     schema: Some(schema_name),
+                    ..Default::default()
                 },
                 IrResponse {
                     status: Some(400),
                     description: Some("bad request".into()),
                     schema: None,
+                    ..Default::default()
                 },
                 IrResponse {
                     status: None,
                     description: Some("error".into()),
                     schema: None,
+                    ..Default::default()
                 },
             ],
         });

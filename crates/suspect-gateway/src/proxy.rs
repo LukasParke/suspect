@@ -285,7 +285,7 @@ pub(crate) struct ForwardCtx<'a> {
 /// carrying a `violations` array. Response violations are always journaled
 /// but never alter the upstream response.
 /// Validates a request through the shared contract runtime.
-fn runtime_violations(
+pub(crate) fn runtime_violations(
     op: &IrOperation,
     schemas: &suspect_runtime::Schemas,
     target: &str,
@@ -314,20 +314,32 @@ fn runtime_violations(
     .collect()
 }
 
-/// Validates a response through the shared contract runtime.
+/// Validates a response through the shared contract runtime, at the level
+/// the contract-test runner applies by default.
 fn runtime_response_violations(
     op: &IrOperation,
     schemas: &suspect_runtime::Schemas,
-    status: u16,
-    body: &[u8],
+    method: &str,
+    reply: &UpstreamReply,
 ) -> Vec<Violation> {
-    suspect_runtime::validate_response(&op.responses, schemas, status, body)
-        .into_iter()
-        .map(|violation| Violation {
-            message: violation.message,
-            pointer: violation.pointer,
-        })
-        .collect()
+    suspect_runtime::check_response(
+        &op.responses,
+        schemas,
+        suspect_runtime::Reply {
+            method,
+            status: reply.status,
+            headers: &reply.headers,
+            body: &reply.body,
+        },
+        suspect_runtime::Conformance::Strict,
+    )
+    .violations
+    .into_iter()
+    .map(|violation| Violation {
+        message: violation.message,
+        pointer: violation.pointer,
+    })
+    .collect()
 }
 
 pub(crate) async fn validate_forward(
@@ -384,8 +396,8 @@ pub(crate) async fn validate_forward(
     violations.extend(runtime_response_violations(
         op,
         schemas.as_ref(),
-        reply.status,
-        &reply.body,
+        ctx.method,
+        &reply,
     ));
 
     (reply_to_response(&reply), violations)

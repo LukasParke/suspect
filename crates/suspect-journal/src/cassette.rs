@@ -115,6 +115,56 @@ pub struct CassetteEntry {
     pub duration_ms: f64,
 }
 
+/// The part of a URL a recording is matched on: its path and query, with
+/// scheme and authority dropped (a recording made through one host replays
+/// against another), the fragment dropped, and the hex digits of every
+/// `%XX` escape uppercased so `/a%2fb` and `/a%2Fb` compare equal. A bare
+/// path passes through.
+#[must_use]
+pub fn request_key(url: &str) -> String {
+    let rest = match url.find("://") {
+        Some(idx) => {
+            let after = &url[idx + 3..];
+            after.find('/').map_or("/", |s| &after[s..])
+        }
+        None => url,
+    };
+    let stripped = match rest.split_once('#') {
+        Some((path, _)) => path,
+        None => rest,
+    };
+    normalize_escapes(stripped)
+}
+
+/// The path of a [`request_key`], without its query.
+#[must_use]
+pub fn key_path(key: &str) -> &str {
+    key.split(['?', '#']).next().unwrap_or(key)
+}
+
+/// Uppercases the hex digits of every `%XX` percent-escape.
+fn normalize_escapes(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut idx = 0;
+    while idx < bytes.len() {
+        if bytes[idx] == b'%'
+            && idx + 2 < bytes.len()
+            && bytes[idx + 1].is_ascii_hexdigit()
+            && bytes[idx + 2].is_ascii_hexdigit()
+        {
+            out.push(b'%');
+            out.push(bytes[idx + 1].to_ascii_uppercase());
+            out.push(bytes[idx + 2].to_ascii_uppercase());
+            idx += 3;
+        } else {
+            out.push(bytes[idx]);
+            idx += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Writes a complete cassette: header line, then one line per entry.
 ///
 /// # Errors

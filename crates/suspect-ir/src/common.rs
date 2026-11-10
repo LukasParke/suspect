@@ -28,8 +28,18 @@ pub(crate) fn method_key(method: Method) -> &'static str {
 /// to an immediate component schema resolves to a name; malformed fragments
 /// and references to nested schema locations stay unresolved.
 pub(crate) fn local_schema_ref(reference: &str) -> Option<String> {
+    local_component_ref(reference, "schemas")
+}
+
+/// Resolves a `$ref` value to the name of a local component in `section`
+/// (`schemas`, `responses`, `parameters`, `requestBodies`, `headers`,
+/// `pathItems`), under the same decoding rules as [`local_schema_ref`].
+pub(crate) fn local_component_ref(reference: &str, section: &str) -> Option<String> {
     let fragment = percent_decode(reference.strip_prefix('#')?)?;
-    let token = fragment.strip_prefix("/components/schemas/")?;
+    let token = fragment
+        .strip_prefix("/components/")?
+        .strip_prefix(section)?
+        .strip_prefix('/')?;
     if token.is_empty() || token.contains('/') {
         return None;
     }

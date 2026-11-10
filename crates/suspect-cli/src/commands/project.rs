@@ -801,6 +801,7 @@ fn build(project: &ProjectManifest, skip_tests: bool) -> anyhow::Result<i32> {
                 tests.message_broker.as_deref(),
                 credentials.as_deref(),
                 None,
+                super::conformance(&config.settings.test.conformance),
             )?;
             if exit != 0 {
                 failures += 1;

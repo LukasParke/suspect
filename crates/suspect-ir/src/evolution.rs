@@ -288,6 +288,7 @@ mod tests {
                     status: Some(200),
                     description: None,
                     schema: Some("Pets".to_owned()),
+                    ..Default::default()
                 }],
             }],
             schemas: vec![crate::IrSchema {

@@ -68,6 +68,7 @@ fn bench_mock_get(c: &mut Criterion) {
         faults: suspect_gateway::FaultConfig::default(),
         redact_headers: Vec::new(),
         redact_json_keys: Vec::new(),
+        enforce_mock: false,
     };
     let router = rt
         .block_on(suspect_gateway::build_router(

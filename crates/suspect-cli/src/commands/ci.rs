@@ -667,6 +667,16 @@ fn test_stage(manifest: &Path) -> StageResult {
         .get("base_url")
         .and_then(|v| v.as_str())
         .unwrap_or("http://127.0.0.1:8080");
+    // `test.conformance` of the project's `.suspect.yaml`, as `suspect
+    // test run` reads it; a settings file with problems still yields its
+    // readable values, and those problems are reported by the check stage.
+    let conformance = match suspect_config::resolve(dir) {
+        Ok(resolved) => resolved,
+        Err(error) => *error.resolved,
+    }
+    .settings
+    .test
+    .conformance;
     // Declared workflow inputs: name → value, supplied to every suite.
     let inputs: serde_json::Map<String, serde_json::Value> = tests
         .get("inputs")
@@ -701,6 +711,7 @@ fn test_stage(manifest: &Path) -> StageResult {
             broker.as_deref(),
             credentials.as_deref(),
             None,
+            super::conformance(&conformance),
         )
         .unwrap_or(1);
         if exit != 0 {

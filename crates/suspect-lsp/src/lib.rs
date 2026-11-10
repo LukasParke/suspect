@@ -3362,7 +3362,7 @@ impl Backend {
             // `test.base_url` for this document: the editor's
             // `suspect.test.baseUrl`, `SUSPECT_BASE_URL`,
             // the manifest, then `.suspect.yaml` — what `suspect test` uses.
-            let base = self
+            let test = self
                 .state
                 .read()
                 .await
@@ -3370,8 +3370,11 @@ impl Backend {
                 .for_uri(&uri)
                 .settings
                 .test
-                .base_url
                 .clone();
+            let base = test.base_url;
+            // `test.conformance`, read the way `suspect test run` reads it.
+            let conformance =
+                suspect_test::Conformance::parse(&test.conformance).unwrap_or_default();
             let transport = run_lenses::ReqwestTransport::new();
 
             self.progress_begin(
@@ -3392,8 +3395,15 @@ impl Backend {
                 }
             });
 
-            let (summary, failures) =
-                run_lenses::run_workflow_core(wf, &base, &transport, Some(&mirror_tx)).await;
+            let (summary, failures) = run_lenses::run_workflow_core(
+                wf,
+                &plan.contracts,
+                conformance,
+                &base,
+                &transport,
+                Some(&mirror_tx),
+            )
+            .await;
             drop(mirror_tx);
             let _ = logger.await;
 

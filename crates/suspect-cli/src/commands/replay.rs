@@ -13,6 +13,7 @@ use std::sync::Arc;
 use suspect_gateway::replay::body_matches;
 use suspect_gen::orchestrate::unified_diff;
 use suspect_journal::Journal;
+use suspect_test::reporters::Case;
 use suspect_test::{HttpClient, HttpRequest};
 
 use super::http::LiveTransport;
@@ -50,8 +51,11 @@ pub fn replay(
 
     let mut matched: u32 = 0;
     let mut drifted: u32 = 0;
+    let mut cases: Vec<Case> = Vec::with_capacity(entries.len());
     rt.block_on(async {
         for entry in &entries {
+            // One reported case per recorded exchange, told apart by id.
+            let name = format!("#{} {} {}", entry.id, entry.method, entry.url);
             let url = retarget(&entry.url, upstream);
             let req = HttpRequest {
                 method: entry.method.clone(),
@@ -70,6 +74,13 @@ pub fn replay(
                 Err(e) => {
                     println!("DRIFT DRIFT {} ({e})", entry.url);
                     drifted += 1;
+                    cases.push(Case::failed(
+                        "replay",
+                        name,
+                        "transport",
+                        "an HTTP response",
+                        e.to_string(),
+                    ));
                     continue;
                 }
             };
@@ -77,8 +88,20 @@ pub fn replay(
             let body_ok = body_matches(&entry.response_body, &outcome.1);
             if status_ok && body_ok {
                 matched += 1;
+                cases.push(Case::passed("replay", name));
             } else {
                 drifted += 1;
+                cases.push(Case::failed(
+                    "replay",
+                    name,
+                    "drift",
+                    format!("status {} and the recorded body", entry.status),
+                    match (status_ok, body_ok) {
+                        (false, true) => format!("status {}", outcome.0),
+                        (false, false) => format!("status {} and a different body", outcome.0),
+                        _ => "a different body".to_owned(),
+                    },
+                ));
             }
             println!("{} {} {}", mark(status_ok), mark(body_ok), entry.url);
             if diff && !body_ok {
@@ -93,10 +116,10 @@ pub fn replay(
         header.source,
     );
     let elapsed_ms = started.elapsed().as_millis() as f64;
-    let mut journal = Journal::new(super::sink(journal_file)?);
+    let mut journal = Journal::new(super::run_sink(journal_file, false)?);
     journal.run_summary("replay", matched, drifted, 0, elapsed_ms);
     journal.flush()?;
-    report_files.write_counts("replay", matched as usize, drifted as usize, started)?;
+    report_files.write_cases("replay", &cassette.display().to_string(), &cases, started)?;
     Ok(i32::from(drifted > 0))
 }
 

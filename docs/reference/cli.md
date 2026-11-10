@@ -655,7 +655,7 @@ Run workflows, stateful sequences, fuzzing, load, or replay against a server
 Usage: suspect test <COMMAND>
 
 Commands:
-  run       Compile an Arazzo document into an executable suite and run it
+  run       Compile Arazzo documents into executable suites and run them, holding every reply to the contract its operation declares
   stateful  Generate and run stateful dependency-graph test sequences against a live server
   fuzz      Fuzz operations with schema-mutating requests against a live server
   load      Run Arazzo workflows as weighted virtual-user scenarios under a phased load profile, with latency/throughput metrics and SLO gates
@@ -669,12 +669,12 @@ Options:
 ## `suspect test run`
 
 ```text
-Compile an Arazzo document into an executable suite and run it
+Compile Arazzo documents into executable suites and run them, holding every reply to the contract its operation declares
 
-Usage: suspect test run [OPTIONS] <ARAZZO>
+Usage: suspect test run [OPTIONS] <ARAZZO>...
 
 Arguments:
-  <ARAZZO>  Arazzo document describing the workflows
+  <ARAZZO>...  Arazzo documents describing the workflows. A directory runs every `*.arazzo.yaml`, `*.arazzo.yml` and `*.arazzo.json` under it. Several documents run as one gate
 
 Options:
       --base-url <BASE_URL>   Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
@@ -684,8 +684,9 @@ Options:
       --format <FORMAT>       Event stream format: human text or one-JSON-per-line ndjson (default: `test.report`, else `text`) [possible values: text, ndjson]
       --message-broker <DIR>  Message broker directory for Arazzo 1.1 AsyncAPI steps: `inbox.jsonl` supplies pre-recorded messages and `outbox.jsonl` collects what the workflow published
       --credentials <FILE>    Credentials file for the security schemes the workflows exercise. Default: `.suspect/credentials.json` discovered by walking up from the Arazzo document; `test.credentials` and `SUSPECT_CREDENTIALS` override it
-      --journal <FILE>        Write the journal to this file (append) instead of stdout
+      --journal <FILE>        Append the run summary to this journal file. Without it the summary is the last line of an `ndjson` stream and absent from text output
       --inputs-file <FILE>    JSON or YAML object file of workflow inputs, applied before `--input` pairs (which override it)
+      --conformance <LEVEL>   How much of the declared response contract each reply is held to (default: `test.conformance`, else `strict`) [possible values: strict, schema, off]
       --report-file <FILE>    Write the JSON run report here
       --junit <FILE>          Write a JUnit XML report here
   -h, --help                  Print help (see more with '--help')
@@ -705,9 +706,10 @@ Options:
       --base-url <BASE_URL>  Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
       --filter <FILTER>      Run only sequences whose target operationId contains this
       --emit                 Print the generated sequences as JSON instead of running them
+      --conformance <LEVEL>  How much of the declared response contract each reply is held to (default: `test.conformance`, else `strict`) [possible values: strict, schema, off]
       --report-file <FILE>   Write the JSON run report here
       --junit <FILE>         Write a JUnit XML report here
-  -h, --help                 Print help
+  -h, --help                 Print help (see more with '--help')
 ```
 
 ## `suspect test fuzz`
@@ -724,13 +726,14 @@ Options:
       --base-url <BASE_URL>    Base URL prepended to operation paths (default: `test.base_url` from `.suspect.yaml`, `SUSPECT_BASE_URL`, else `http://localhost:8080`)
       --runs <RUNS>            Mutant requests generated per operation [default: 25]
       --filter <FILTER>        Run only operations whose operationId contains this substring
-      --journal <FILE>         Write the journal to this file (append) instead of stdout
+      --journal <FILE>         Append the run summary to this journal file
       --evolved                Grammar-evolved, coverage-guided fuzzing: novel response shapes become seeds the campaign exploits
       --rounds <ROUNDS>        Evolved fuzzing: rounds per operation [default: 8]
       --per-round <PER_ROUND>  Evolved fuzzing: requests per round [default: 12]
+      --conformance <LEVEL>    How much of the declared response contract each reply is held to (default: `test.conformance`, else `strict`) [possible values: strict, schema, off]
       --report-file <FILE>     Write the JSON run report here
       --junit <FILE>           Write a JUnit XML report here
-  -h, --help                   Print help
+  -h, --help                   Print help (see more with '--help')
 ```
 
 ## `suspect test load`
@@ -784,7 +787,7 @@ Arguments:
 Options:
       --upstream <UPSTREAM>  Upstream base URL the recorded traffic is re-issued against
       --diff                 Print unified diffs of drifted UTF-8 response bodies
-      --journal <FILE>       Write the journal to this file (append) instead of stdout
+      --journal <FILE>       Append the run summary to this journal file
       --report-file <FILE>   Write the JSON run report here
       --junit <FILE>         Write a JUnit XML report here
   -h, --help                 Print help
@@ -823,7 +826,7 @@ Options:
       --scenario <FILE>              Scenario mode: JSON file of scripted steps (`{"steps": [{"method", "path_suffix", "status", "body"}]}`)
       --upstream <URL>               Upstream base URL for proxy/validate/record modes (default: `gateway.upstream`)
       --cassette <CASSETTE>          Cassette path for record output
-      --enforce                      Validate mode only: reject invalid requests with 400 instead of forwarding them
+      --enforce                      Reject a request that breaks the contract instead of serving it: in `validate` mode with `400` before it reaches the upstream, in `mock` mode with the rejection the operation declares (`400` when it declares none)
       --delay-ms <DELAY_MS>          Fault injection: delay in milliseconds [default: 0]
       --delay-pct <DELAY_PCT>        Fault injection: percent of requests delayed [default: 0]
       --error-status <ERROR_STATUS>  Fault injection: status returned by faulted requests

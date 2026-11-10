@@ -8,9 +8,12 @@
 //! consumers never touch document lifetimes again — they query the index.
 //!
 //! Resolution policy: local `#/components/schemas/{name}` references are
-//! resolved to the bare component name; references into other files stay
-//! unresolved (`None`) in v1 — presets treat those schemas as opaque
-//! objects. Cross-file resolution is a planned upgrade behind the same API.
+//! resolved to the bare component name. A reference into another file is
+//! loaded through the workspace and its target becomes a component of the
+//! snapshot under a generated name, so a description split across files
+//! reads like a bundled one. A reference that cannot be loaded (a missing
+//! file, a remote URL with no provider) stays unresolved (`None`), and
+//! [`IrMedia::unresolved`] keeps its text for whoever has to report it.
 //!
 //! [`contract`] is the lossless counterpart: a source-addressed view over
 //! every loaded document, used where exact provenance and OpenAPI 3.1/3.2
@@ -31,6 +34,7 @@ pub mod contract;
 pub mod evolution;
 pub mod faker;
 pub mod fast;
+mod internalize;
 
 pub use fast::ir_from_fast;
 
@@ -134,15 +138,118 @@ pub struct IrParameter {
     pub schema: Option<serde_json::Value>,
 }
 
+/// One media type a response or request body declares.
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrMedia {
+    /// The media type key as written (`application/json`, `text/*`, `*/*`).
+    pub media_type: String,
+    /// The media type's schema as an addressable name: a local component
+    /// keeps its name, an inline schema gets a generated one. `None` when
+    /// no schema is declared or the reference is not local.
+    pub schema: Option<String>,
+    /// The schema's `$ref` text when it could not be resolved to a name
+    /// (another document, or a pointer that is not a component schema).
+    /// Conformance checks report it instead of treating the body as
+    /// unconstrained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unresolved: Option<String>,
+}
+
+/// One header a response declares.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct IrHeader {
+    /// Header name as written.
+    pub name: String,
+    /// Whether the response must carry it.
+    pub required: bool,
+    /// Materialized schema JSON, when declared.
+    pub schema: Option<serde_json::Value>,
+}
+
 /// One response definition.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct IrResponse {
-    /// Status code; `None` for `default`.
+    /// Exact status code; `None` for `default` and for a status range
+    /// (see [`IrResponse::range`]).
     pub status: Option<u16>,
     /// Response description.
     pub description: Option<String>,
-    /// `application/json` schema reference resolved to a component name.
+    /// Schema of the JSON-compatible media type, as an addressable name:
+    /// `application/json` when declared, else the first `+json` media type.
     pub schema: Option<String>,
+    /// Hundreds digit of a status range key: `4` for `4XX`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub range: Option<u8>,
+    /// Every declared media type, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<IrMedia>,
+    /// Declared response headers, in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<IrHeader>,
+}
+
+impl IrResponse {
+    /// Whether this is the `default` response: neither an exact status nor
+    /// a status range.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        self.status.is_none() && self.range.is_none()
+    }
+
+    /// The `responses` key this entry was declared under: `200`, `4XX` or
+    /// `default`.
+    #[must_use]
+    pub fn key(&self) -> String {
+        match (self.status, self.range) {
+            (Some(status), _) => status.to_string(),
+            (None, Some(range)) => format!("{range}XX"),
+            (None, None) => "default".to_owned(),
+        }
+    }
+
+    /// The media type whose schema [`IrResponse::schema`] names.
+    #[must_use]
+    pub fn json_media(&self) -> Option<&IrMedia> {
+        json_media(&self.content)
+    }
+}
+
+/// The JSON-compatible entry of a content map: `application/json` when
+/// declared, else the first media type [`is_json_media_type`] accepts.
+#[must_use]
+pub fn json_media(content: &[IrMedia]) -> Option<&IrMedia> {
+    content
+        .iter()
+        .find(|media| media_essence(&media.media_type) == "application/json")
+        .or_else(|| {
+            content
+                .iter()
+                .find(|media| is_json_media_type(&media.media_type))
+        })
+}
+
+/// A media type without its parameters, lowercased: `Application/JSON;
+/// charset=utf-8` is `application/json`.
+#[must_use]
+pub fn media_essence(media_type: &str) -> String {
+    media_type
+        .split(';')
+        .next()
+        .unwrap_or(media_type)
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// Whether a media type carries JSON: a `json` subtype or a `+json`
+/// structured-syntax suffix (RFC 6839). Parameters and case are ignored;
+/// wildcards are not JSON.
+#[must_use]
+pub fn is_json_media_type(media_type: &str) -> bool {
+    let essence = media_essence(media_type);
+    let Some((_, subtype)) = essence.split_once('/') else {
+        return false;
+    };
+    subtype == "json" || subtype.ends_with("+json")
 }
 
 /// One operation.
@@ -166,8 +273,35 @@ pub struct IrOperation {
     pub parameters: Vec<IrParameter>,
     /// `application/json` request body schema component name.
     pub body_schema: Option<String>,
-    /// Declared responses.
+    /// Declared responses: exact statuses ascending, then status ranges,
+    /// then `default`.
     pub responses: Vec<IrResponse>,
+}
+
+impl IrOperation {
+    /// The declared response that governs `status`, by the OpenAPI
+    /// selection rule: the exact code, else its range (`4XX`), else
+    /// `default`. `None` when the operation declares none of them — the
+    /// status is undocumented.
+    #[must_use]
+    pub fn response_for(&self, status: u16) -> Option<&IrResponse> {
+        response_for(&self.responses, status)
+    }
+}
+
+/// [`IrOperation::response_for`] over a bare response list.
+#[must_use]
+pub fn response_for(responses: &[IrResponse], status: u16) -> Option<&IrResponse> {
+    let class = u8::try_from(status / 100).ok();
+    responses
+        .iter()
+        .find(|response| response.status == Some(status))
+        .or_else(|| {
+            responses.iter().find(|response| {
+                response.status.is_none() && response.range.is_some() && response.range == class
+            })
+        })
+        .or_else(|| responses.iter().find(|response| response.is_default()))
 }
 
 /// One component schema, materialized to plain JSON.
@@ -195,6 +329,11 @@ pub struct IrSpec {
     pub title: String,
     /// `info.version`.
     pub version: String,
+    /// The document's `openapi` version string (`3.0.3`, `3.1.0`); empty
+    /// when the snapshot was not built from a document. It selects the
+    /// schema dialect conformance checks apply.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub openapi: String,
     /// Server URLs.
     pub servers: Vec<String>,
     /// All operations, document order.
@@ -252,18 +391,23 @@ impl IrSpec {
         // Convert the resolved CST into the shared value tree and run the
         // same walk the fast path uses — one set of construction rules for
         // both pipelines.
-        let root_value = fast::value_from_node(low.root())?;
+        let mut root_value = fast::value_from_node(low.root())?;
+        // A description split across files addresses its parts by URI;
+        // the snapshot addresses them by component name.
+        internalize::internalize(ws, entry_uri, &mut root_value);
         Ok(ir_from_fast(&root_value))
     }
 
     /// Builds the IR directly from one spec file.
     ///
     /// Tries the allocation-lean YAML-subset reader first; documents using
-    /// features outside that subset fall back to a workspace load of the
-    /// entry file, so exotic YAML still produces identical output. Neither
-    /// path implicitly loads unrelated neighboring documents. This reporting IR
-    /// retains reference values without expanding external schemas; native SDK
-    /// planning uses [`contract::Contract`]'s source-addressed semantic graph.
+    /// features outside that subset, or referencing other documents, fall
+    /// back to a workspace load of the entry file, so exotic YAML still
+    /// produces identical output. Neither path implicitly loads unrelated
+    /// neighboring documents: only the documents the entry references are
+    /// read, and what they declare becomes components of the snapshot.
+    /// Native SDK planning uses [`contract::Contract`]'s source-addressed
+    /// semantic graph instead.
     ///
     /// # Errors
     /// `"not an OpenAPI 3.x document"` when the family sniff fails, or an
@@ -278,11 +422,14 @@ impl IrSpec {
         }
         let bytes = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
         if let Some(root) = suspect_syntax::try_parse_fast(&bytes) {
-            return if fast::is_oas3(&root) {
-                Ok(ir_from_fast(&root))
-            } else {
-                Err("not an OpenAPI 3.x document".to_owned())
-            };
+            if !fast::is_oas3(&root) {
+                return Err("not an OpenAPI 3.x document".to_owned());
+            }
+            // References into other documents need the workspace to load
+            // them; a self-contained document never pays for one.
+            if !internalize::has_external_refs(&root) {
+                return Ok(ir_from_fast(&root));
+            }
         }
         Self::from_file_via_workspace(path)
     }
